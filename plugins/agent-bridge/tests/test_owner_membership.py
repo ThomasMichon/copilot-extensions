@@ -6,6 +6,8 @@ import asyncio
 import io
 import json
 import sqlite3
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -433,6 +435,192 @@ def test_wire_rejects_protected_dto_fields_and_wrong_positions(owner):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("heartbeat", [False, True])
+async def test_real_stream_splices_after_unrelated_owner_changes(owner, monkeypatch, heartbeat):
+    from agent_bridge.routes import owner_membership as route
+
+    manager, db, source = owner
+    other_owner = "fixture-host/demo/other-owner"
+    create(db, sid="other-child", owner=other_owner)
+    membership.source_for(manager, other_owner)
+    clock = [0.0]
+    monkeypatch.setattr(route, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    waits = []
+
+    async def advance(_owner, after):
+        waits.append(after)
+        if len(waits) == 1:
+            db.update_session_status("other-child", "idle", 2.0)
+        elif len(waits) == 2 and heartbeat:
+            clock[0] = 6.0
+        else:
+            db.update_session_status("child", "idle", 3.0)
+
+    monkeypatch.setattr(source, "wait", advance)
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(session_manager=manager)),
+        is_disconnected=AsyncMock(return_value=False),
+    )
+    frames = stream(request, OwnerRead(OWNER, True))
+    try:
+        initial = decode((await anext(frames)).split(b"data: ", 1)[1].strip())
+        latest = initial
+        following = decode((await anext(frames)).split(b"data: ", 1)[1].strip())
+        if heartbeat:
+            assert following["kind"] == "heartbeat"
+            assert following["position"] != initial["position"]
+            latest = following
+            following = decode((await anext(frames)).split(b"data: ", 1)[1].strip())
+        assert following["kind"] == "delta"
+        assert following["base_position"] == latest["position"]
+        assert [change["member"]["bridge_session_id"] for change in following["changes"]] == [
+            "child"
+        ]
+        assert waits[1] != initial["position"], "wait on scanned, not delivered, progress"
+        resumed = stream(request, OwnerRead(OWNER, after=latest["position"]))
+        try:
+            replay = decode((await anext(resumed)).split(b"data: ", 1)[1].strip())
+            assert replay["base_position"] == latest["position"]
+            assert replay["changes"] == following["changes"]
+        finally:
+            await resumed.aclose()
+    finally:
+        await frames.aclose()
+    assert source._scopes[OWNER].readers == 0
+
+
+@pytest.mark.asyncio
+async def test_completed_readers_reclaim_inactive_scopes_and_old_resume_gaps(
+    session_manager, tmp_db,
+):
+    owners = [f"fixture-host/demo/sequential-{index}" for index in range(20)]
+    for index, selected in enumerate(owners):
+        create(tmp_db, sid=f"sequential-child-{index}", owner=selected)
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(session_manager=session_manager)),
+        is_disconnected=AsyncMock(return_value=False),
+    )
+    original = None
+    for selected in owners:
+        frames = stream(request, OwnerRead(selected))
+        try:
+            body = decode((await anext(frames)).split(b"data: ", 1)[1].strip())
+            assert body["kind"] == "snapshot"
+            if original is None:
+                original = body["position"]
+            with pytest.raises(StopAsyncIteration):
+                await anext(frames)
+        finally:
+            await frames.aclose()
+    source = tmp_db._owner_membership_source
+    assert len(source._scopes) == membership.MAX_OWNERS
+    assert not source._events, "admission barriers must not mint membership changes"
+    assert all(scope.readers == 0 and not scope.waiters for scope in source._scopes.values())
+    assert not source.has_owner(owners[0])
+    resumed = stream(request, OwnerRead(owners[0], after=original))
+    try:
+        body = decode((await anext(resumed)).split(b"data: ", 1)[1].strip())
+        assert body["kind"] == "gap" and body["code"] == "retention-gap"
+        assert body["reconcile"] == "new-snapshot"
+    finally:
+        await resumed.aclose()
+    assert all(scope.readers == 0 for scope in source._scopes.values())
+    fresh = source.frame(owners[0], None)
+    assert fresh["position"] != original
+    assert fresh["retained"]["floor"] > 1 and fresh["completeness"] == "partial"
+    assert not fresh["changes"] and not source._events
+
+
+def test_source_binding_acquisition_race_reclaims_without_losing_reader(session_manager, tmp_db):
+    owners = [OWNER] + [f"fixture-host/demo/raced-{index}" for index in range(16)]
+    for index, selected in enumerate(owners):
+        create(tmp_db, sid=f"raced-child-{index}", owner=selected)
+    source = membership.source_for(session_manager, OWNER)
+    original = source.frame(OWNER, None)["position"]
+    for selected in owners[1:16]:
+        membership.source_for(session_manager, selected)
+    inspected, resume = threading.Event(), threading.Event()
+    original_has_owner = source.has_owner
+
+    def held_selection(selected):
+        result = original_has_owner(selected)
+        if selected == OWNER:
+            inspected.set()
+            assert resume.wait(5), "binding race was not released"
+        return result
+
+    source.has_owner = held_selection
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            acquiring = executor.submit(membership.source_for, session_manager, OWNER, acquire=True)
+            try:
+                assert inspected.wait(5)
+                membership.source_for(session_manager, owners[16])
+                assert not original_has_owner(OWNER)
+            finally:
+                resume.set()
+            assert acquiring.result(timeout=5) is source
+        assert source._scopes[OWNER].readers == 1
+        with pytest.raises(ObservationError) as gap:
+            source.frame(OWNER, original)
+        assert gap.value.code == "retention-gap"
+        assert source.frame(OWNER, None)["members"]
+        assert len(source._scopes) == membership.MAX_OWNERS and not source._events
+    finally:
+        resume.set()
+        source.has_owner = original_has_owner
+        scope = source._scopes.get(OWNER)
+        if scope is not None and scope.readers:
+            source.release(OWNER)
+    assert all(scope.readers == 0 and not scope.waiters for scope in source._scopes.values())
+
+
+@pytest.mark.asyncio
+async def test_active_scope_limit_and_shared_reader_cancellation_isolation(session_manager, tmp_db):
+    owners = [f"fixture-host/demo/active-{index}" for index in range(17)]
+    for index, selected in enumerate(owners):
+        create(tmp_db, sid=f"active-child-{index}", owner=selected)
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(session_manager=session_manager)),
+        is_disconnected=AsyncMock(return_value=False),
+    )
+    readers = []
+    positions = {}
+    try:
+        for selected in owners[:16]:
+            frames = stream(request, OwnerRead(selected, True))
+            readers.append(frames)
+            body = decode((await anext(frames)).split(b"data: ", 1)[1].strip())
+            assert body["kind"] == "snapshot"
+            positions[selected] = body["position"]
+        source = tmp_db._owner_membership_source
+        shared = stream(request, OwnerRead(owners[0], True))
+        readers.append(shared)
+        await anext(shared)
+        assert source._scopes[owners[0]].readers == 2
+        await shared.aclose()
+        assert source._scopes[owners[0]].readers == 1
+        refused = stream(request, OwnerRead(owners[16], True))
+        readers.append(refused)
+        assert b'"code":"membership-overflow"' in await anext(refused)
+        await refused.aclose()
+        assert all(scope.readers == 1 for scope in source._scopes.values())
+        await readers[0].aclose()
+        admitted = stream(request, OwnerRead(owners[16], True))
+        readers.append(admitted)
+        assert b'"kind":"snapshot"' in await anext(admitted)
+        assert not source.has_owner(owners[0])
+        assert len(source._scopes) == membership.MAX_OWNERS
+        retained = source.frame(owners[1], positions[owners[1]])
+        assert retained["kind"] == "delta" and retained["changes"] == []
+        assert retained["position"] != positions[owners[1]] and not retained["has_more"]
+    finally:
+        for frames in readers:
+            await frames.aclose()
+    assert all(scope.readers == 0 and not scope.waiters for scope in source._scopes.values())
+
+
+@pytest.mark.asyncio
 async def test_two_membership_observers_do_not_pin_or_stop_actors(owner):
     manager, db, source = owner
     request = SimpleNamespace(
@@ -445,6 +633,7 @@ async def test_two_membership_observers_do_not_pin_or_stop_actors(owner):
     )
     await anext(first)
     await anext(second)
+    assert source._scopes[OWNER].readers == 2
     pending = asyncio.create_task(anext(first))
     other = asyncio.create_task(anext(second))
     try:
@@ -457,6 +646,7 @@ async def test_two_membership_observers_do_not_pin_or_stop_actors(owner):
         with pytest.raises(asyncio.CancelledError):
             await pending
         assert len(source._scopes[OWNER].waiters) == 1
+        assert source._scopes[OWNER].readers == 1
         db.update_session_status("child", "idle", 2.0)
         delivered = decode((await asyncio.wait_for(other, 1)).split(b"data: ", 1)[1].strip())
         assert delivered["kind"] == "delta"
@@ -472,6 +662,7 @@ async def test_two_membership_observers_do_not_pin_or_stop_actors(owner):
         await first.aclose()
         await second.aclose()
     assert source._scopes[OWNER].waiters == []
+    assert source._scopes[OWNER].readers == 0
     manager.start_session.assert_not_called()
 
 

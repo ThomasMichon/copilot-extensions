@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import json
 import sqlite3
 from pathlib import Path
@@ -215,6 +216,77 @@ def test_large_unrelated_event_commit_and_usage_do_not_dirty_or_capture(owner, m
     db.delete_events("event-parent")
     assert db._membership_signal.revision == revision
     assert source.frame(OWNER, None)["members"][0]["state"] == "starting"
+
+
+@pytest.mark.asyncio
+async def test_actual_registration_heartbeats_do_not_dirty_scan_or_wake(owner, monkeypatch):
+    from test_owner_membership import register
+
+    _manager, db, source = owner
+    assert register(db) == "live"
+    before = source.frame(OWNER, None)["position"]
+    revision = db._membership_signal.revision
+    original = reader.snapshot
+    reads = []
+
+    def counted(*args, **kwargs):
+        reads.append(True)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(reader, "snapshot", counted)
+    waiting = asyncio.create_task(source.wait(OWNER, before, timeout=60))
+    try:
+        for _ in range(50):
+            if db._membership_signal._waiters:
+                break
+            await asyncio.sleep(0)
+        assert db._membership_signal._waiters
+        assert register(db, now=32.0) == "live"
+        assert db.register_live_session(
+            "represented", machine=None, cwd=None, worktree_id=None, repo=None,
+            branch=None, pid=None, role=None, now=62.0,
+        ) == "live"
+        assert db.get_live_session("represented")["updated_at"] == 62.0
+        await asyncio.sleep(0)
+        assert db._membership_signal.revision == revision
+        assert not db._membership_signal._scheduled and not waiting.done()
+        assert source.frame(OWNER, before)["changes"] == [] and reads == []
+        assert db.register_live_session(
+            "represented", machine=None, cwd=None, worktree_id="updated-child",
+            repo=None, branch=None, pid=123, role=None, now=63.0,
+            process_started_at=1.0,
+        ) == "live"
+        assert db._membership_signal.revision == revision + 1
+        await asyncio.wait_for(waiting, 1)
+        changed = source.frame(OWNER, before)["changes"]
+        assert reads == [True]
+        assert changed[-1]["member"]["worktree_id"] == "updated-child"
+    finally:
+        if not waiting.done():
+            waiting.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await waiting
+    assert not db._membership_signal._waiters and not source._scopes[OWNER].waiters
+
+
+def test_registration_reservation_inheritance_signals_membership_changes(owner):
+    from test_owner_membership import register
+
+    _manager, db, source = owner
+    assert register(db) == "live"
+    before = source.frame(OWNER, None)["position"]
+    revision = db._membership_signal.revision
+    assert db.create_cli_mode_reservation(
+        "interactive-child", now=3.0,
+        venue=json.dumps({"supervisor_ref": "fixture-host/demo/new-supervisor"}),
+    )
+    assert db._membership_signal.revision == revision
+    assert register(db, now=4.0) == "live"
+    assert db._membership_signal.revision == revision + 1
+    changes = source.frame(OWNER, before)["changes"]
+    assert changes[-1]["kind"] == "registration-disappeared"
+    assert changes[-1]["operation"] == "tombstone"
+    assert changes[-1]["grants_claim_release"] is False
 
 
 def test_multiple_readers_share_one_coalesced_capture(owner, monkeypatch):

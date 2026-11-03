@@ -57,63 +57,70 @@ async def stream(request: Request, read: OwnerRead) -> AsyncIterator[bytes]:
     position = read.after
     first = True
     last_sent = time.monotonic()
-    while True:
-        state = request.app.state
-        server = getattr(state, "uvicorn_server", None)
-        if server is not None and server.should_exit or source is not None and source.closed:
-            yield sse(
-                {
-                    "schema": CAPABILITY,
-                    "version": 1,
-                    "kind": "going-away",
-                    "source": {"provider": "bridge", "owner_ref": read.owner},
-                    "reason": "hosting-generation-stopping",
-                }
-            )
-            return
-        if await request.is_disconnected():
-            return
-        try:
-            manager = getattr(state, "session_manager", None)
-            if manager is None:
-                raise ObservationError("source-unavailable", "membership owner is not ready")
-            current = source_for(manager, read.owner)
-            if source is not None and current is not source:
-                raise ObservationError("source-changed", "membership hosting generation changed")
-            source = current
-            body = source.frame(read.owner, position)
-            if first or body["changes"]:
-                yield sse(body)
-                last_sent = time.monotonic()
-            elif time.monotonic() - last_sent >= 5:
+    try:
+        while True:
+            state = request.app.state
+            server = getattr(state, "uvicorn_server", None)
+            if server is not None and server.should_exit or source is not None and source.closed:
                 yield sse(
                     {
                         "schema": CAPABILITY,
                         "version": 1,
-                        "kind": "heartbeat",
-                        "source": body["source"],
-                        "position": body["position"],
+                        "kind": "going-away",
+                        "source": {"provider": "bridge", "owner_ref": read.owner},
+                        "reason": "hosting-generation-stopping",
                     }
                 )
-                last_sent = time.monotonic()
-            first = False
-            position = body["position"]
-            if not read.follow:
                 return
-            if not body["has_more"]:
-                await source.wait(read.owner, position)
-        except ObservationError as exc:
-            yield sse(_failure(read, exc, source))
-            return
-        except (sqlite3.Error, OSError):
-            yield sse(
-                _failure(
-                    read,
-                    ObservationError("source-unavailable", "membership source cannot be read"),
-                    source,
+            if await request.is_disconnected():
+                return
+            try:
+                manager = getattr(state, "session_manager", None)
+                if manager is None:
+                    raise ObservationError("source-unavailable", "membership owner is not ready")
+                if source is None:
+                    source = source_for(manager, read.owner, acquire=True)
+                elif source_for(manager, read.owner) is not source:
+                    raise ObservationError("source-changed", "membership hosting generation changed")
+                body = source.frame(read.owner, position)
+                if first or body["changes"]:
+                    yield sse(body)
+                    position = body["position"]
+                    last_sent = time.monotonic()
+                elif time.monotonic() - last_sent >= 5:
+                    yield sse(
+                        {
+                            "schema": CAPABILITY,
+                            "version": 1,
+                            "kind": "heartbeat",
+                            "source": body["source"],
+                            "position": body["position"],
+                        }
+                    )
+                    position = body["position"]
+                    last_sent = time.monotonic()
+                first = False
+                if not read.follow:
+                    return
+                if not body["has_more"]:
+                    # The scanned cursor avoids spinning on other owners, but
+                    # the next delta must splice from the last delivered cursor.
+                    await source.wait(read.owner, body["position"])
+            except ObservationError as exc:
+                yield sse(_failure(read, exc, source))
+                return
+            except (sqlite3.Error, OSError):
+                yield sse(
+                    _failure(
+                        read,
+                        ObservationError("source-unavailable", "membership source cannot be read"),
+                        source,
+                    )
                 )
-            )
-            return
+                return
+    finally:
+        if source is not None:
+            source.release(read.owner)
 
 
 @router.get("/owner-observations")

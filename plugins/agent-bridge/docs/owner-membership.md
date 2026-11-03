@@ -62,6 +62,10 @@ most one coalesced callback per bounded observer loop. Event-log batches/rebuild
 cursor, usage, prompt and control-only writes do not dirty membership. Ordinary
 internal `execute_write` calls default to no membership notification; producers
 changing projected membership fields explicitly opt in.
+Registration refreshes compare the metadata already read for canonical
+incarnation admission. An unchanged full or ID-only heartbeat updates its lease
+without dirtying membership or waking readers; registration, metadata/status
+changes, reservation inheritance and predecessor folding still mark dirty.
 
 Initial and dirty records are captured using a separate existing-only
 `mode=ro`, `query_only` SQLite connection, never the canonical connection. One
@@ -99,6 +103,14 @@ Discovery does not increment session subscriber counts or postpone idle reaping.
 Canceling one reader removes only its membership waiter. Other membership and
 session observers, actors, claims and hosting transports remain owned by their
 existing custodians. Closing/replacing the serving generation ends its feed.
+Each stream also holds one scope reader reference through completion/cancellation.
+At the 16-owner bound, admission reclaims only an inactive cached scope; an owner
+with any active reader cannot be reclaimed. Re-admission establishes a new
+retained-floor barrier, so a cursor from its reclaimed scope requires a fresh
+partial snapshot, even if no canonical records changed while it was absent.
+That barrier advances only the projection position: it does not mint a membership
+change or imply any canonical milestone. Other admitted scopes keep their replay
+coverage until actual ring eviction.
 
 ## Frames and bounds
 
@@ -119,6 +131,9 @@ and actual hosting generation/journal incarnation.
 The generated membership sequence is a projection position, not a session event
 ID or canonical claim admission number. Restart requires reconciliation.
 Publication timestamps are local observation labels, not cross-host causal order.
+Unrelated-owner changes can advance the private scan cursor without emitting a
+delta. The delivered cursor advances only with an emitted frame; subsequent
+deltas splice from that exact delivered position, including after a heartbeat.
 
 The source retains at most 16 observed owners, 64 canonical records per owner,
 256 change entries and 1 MiB of ring bytes. Sequence exhaustion at the signed

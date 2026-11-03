@@ -60,7 +60,10 @@ captured head and unknown actor; sampled changes do not acquire those semantics.
 An owner entry can fit its wire bound while exceeding a display field. The
 projection then shows an explicit detail omission with the original canonical
 entry hash/byte count and retained source/event/cursor identity, without changing
-owner history or enlarging display limits. Actual payload references remain
+owner history or enlarging display limits. Its compact native mutation kind
+and saved-record fence remain in that envelope. A fence or source reference
+that cannot fit retains an explicit field-specific omission with its original
+hash and encoded byte count. Actual payload references remain
 unchanged; no raw-detail endpoint is inferred when the owner supplied none.
 
 Live and backward-page cursors remain independent. Browsing retains its anchor

@@ -149,6 +149,8 @@ def test_large_native_wire_has_bounded_visible_detail_without_changing_owner_evi
     assert detail["encoded_bytes"] == len(original_bytes)
     assert detail["sha256"] == sha256(original_bytes).hexdigest()
     assert detail["captured_head_session_id"] == item["head_session_id"]
+    assert detail["native_kind"] == item["native_kind"]
+    assert detail["record_fence"] == item["record_fence"]
     assert event.source == selected.identity and event.source.head_session_id == "head-a"
     assert event.position.cursor == item["cursor"] and event.event_id == item["event_id"]
     assert event.kind is TimelineKind.CLAIM_ADDED
@@ -161,6 +163,30 @@ def test_large_native_wire_has_bounded_visible_detail_without_changing_owner_evi
         assert "source_ref" not in detail
     else:
         assert detail["source_ref"] == item["source_ref"]
+
+
+def test_large_saved_fence_is_explicitly_omitted_without_losing_compact_evidence() -> None:
+    value = _large_native_wire()
+    item = value["entries"][0]
+    item["record_fence"].update(extra_a="λ" * 1500, extra_b="界" * 1000)
+    original = deepcopy(value)
+    reader = codec()
+    decoded = reader.decode(raw(value))
+    selected = reader.token(decoded, 1)
+    event, = reader.snapshot(decoded, selected).events
+    detail = json.loads(event.data_json)
+    fence_bytes = json.dumps(
+        item["record_fence"], sort_keys=True, ensure_ascii=False,
+        allow_nan=False, separators=(",", ":"),
+    ).encode()
+    assert len(event.data_json.encode()) <= 4096
+    assert detail["native_kind"] == item["native_kind"]
+    assert detail["source_ref"] == item["source_ref"]
+    assert detail["captured_head_session_id"] == item["head_session_id"]
+    assert "record_fence" not in detail and detail["record_fence_omitted"] is True
+    assert detail["record_fence_sha256"] == sha256(fence_bytes).hexdigest()
+    assert detail["record_fence_encoded_bytes"] == len(fence_bytes)
+    assert value == original and decoded == original
 
 
 def test_omitted_native_detail_still_detects_conflicting_immutable_content() -> None:

@@ -34,6 +34,7 @@ log = logging.getLogger("agent-bridge")
 class _Scope:
     states: dict[str, bytes]
     admitted_at: int
+    readers: int = 0
     failure: str | None = None
     waiters: list[tuple[asyncio.AbstractEventLoop, asyncio.Event]] = field(default_factory=list)
 
@@ -56,6 +57,7 @@ class MembershipSource:
         self._scopes: dict[str, _Scope] = {}
         self._sequence = 0
         self._events: deque[tuple[int, str, bytes]] = deque()
+        self._retained_floor = 1
         self._bytes = 0
         self.closed = False
         self.publication_failed = False
@@ -77,12 +79,15 @@ class MembershipSource:
         with self._lock:
             return owner in self._scopes
 
-    def seed(self, owner: str) -> None:
+    def seed(self, owner: str, *, acquire: bool = False) -> None:
         """Bounded private read; never acquire the canonical write lock."""
         with self._lock:
             if owner in self._scopes:
+                self._scopes[owner].readers += int(acquire)
                 return
-            if len(self._scopes) >= MAX_OWNERS:
+            if len(self._scopes) >= MAX_OWNERS and all(
+                scope.readers for scope in self._scopes.values()
+            ):
                 raise ObservationError(
                     "membership-overflow", "membership observer scope limit reached"
                 )
@@ -107,16 +112,35 @@ class MembershipSource:
                         "capture-raced", "membership source changed during capture"
                     )
                 if owner in self._scopes:
+                    self._scopes[owner].readers += int(acquire)
                     return
                 if len(self._scopes) >= MAX_OWNERS:
-                    raise ObservationError(
-                        "membership-overflow", "membership observer scope limit reached"
+                    inactive = next(
+                        (key for key, scope in self._scopes.items() if not scope.readers),
+                        None,
                     )
+                    if inactive is None:
+                        raise ObservationError(
+                            "membership-overflow", "membership observer scope limit reached"
+                        )
+                    if self._sequence == MAX_SEQUENCE:
+                        raise ObservationError(
+                            "sequence-exhausted", "membership sequence is exhausted"
+                        )
+                    # A reclaimed admission cannot resume an older cached cursor,
+                    # even when no canonical membership change occurred.
+                    self._sequence += 1
+                    del self._scopes[inactive]
                 if not self._scopes:
                     self._last_revision = revision
-                self._scopes[owner] = _Scope(states, self._sequence)
+                self._scopes[owner] = _Scope(states, self._sequence, int(acquire))
         finally:
             self._capture_lock.release()
+
+    def release(self, owner: str) -> None:
+        """Release only this reader; inactive scopes remain bounded replay caches."""
+        with self._lock:
+            self._scopes[owner].readers -= 1
 
     @staticmethod
     def _wake(scope: _Scope) -> None:
@@ -146,13 +170,15 @@ class MembershipSource:
                 return
             if self._last_revision == self._signal.revision:
                 return
-            owners = tuple(owner for owner, scope in self._scopes.items() if scope.failure is None)
         if not self._capture_lock.acquire(timeout=0.05):
             raise ObservationError("capture-busy", "membership capture is already in progress")
         try:
             with self._lock:
                 if self._last_revision == self._signal.revision:
                     return
+                owners = tuple(
+                    owner for owner, scope in self._scopes.items() if scope.failure is None
+                )
             revision = self._signal.revision
             captured = reader.snapshot(
                 self._db.db_path,
@@ -238,7 +264,9 @@ class MembershipSource:
                 self._events.append((self._sequence, owner, raw))
                 self._bytes += len(raw)
                 while len(self._events) > MAX_EVENTS or self._bytes > MAX_RING_BYTES:
-                    self._bytes -= len(self._events.popleft()[2])
+                    evicted, _owner, payload = self._events.popleft()
+                    self._bytes -= len(payload)
+                    self._retained_floor = evicted + 1
             scope.states = captured
             if changes:
                 self._wake(scope)
@@ -263,7 +291,7 @@ class MembershipSource:
             cursor = read_position(after, source) if after is not None else None
             floor = max(
                 scope.admitted_at + 1,
-                self._events[0][0] if self._events else self._sequence + 1,
+                self._retained_floor,
             )
             if cursor is not None and not floor - 1 <= cursor <= self._sequence:
                 raise ObservationError(
@@ -331,6 +359,8 @@ class MembershipSource:
                     end = sequence
                     if len(body["changes"]) == 64:
                         break
+                else:
+                    end = self._sequence
                 body["position"] = position(source, end)
                 body["has_more"] = end < self._sequence
             encode(body)
@@ -367,7 +397,7 @@ class MembershipSource:
         self._signal.changed()
 
 
-def source_for(manager: Any, owner: str) -> MembershipSource:
+def source_for(manager: Any, owner: str, *, acquire: bool = False) -> MembershipSource:
     """Bind to an existing serving manager/DB without resolving or starting actors."""
     db = getattr(manager, "db", None)
     generation = getattr(manager, "_generation_id", None)
@@ -381,6 +411,7 @@ def source_for(manager: Any, owner: str) -> MembershipSource:
     if existing is not None and existing.generation == generation and existing.has_owner(selected):
         if getattr(db, "_owner_membership_failure", False) or existing.publication_failed:
             raise ObservationError("publication-failed", "membership publication is unavailable")
+        existing.seed(selected, acquire=acquire)
         return existing
     if not db._membership_bind_lock.acquire(timeout=0.05):
         raise ObservationError("capture-busy", "membership source binding is busy")
@@ -406,7 +437,7 @@ def source_for(manager: Any, owner: str) -> MembershipSource:
             db._owner_membership_failure = False
         if getattr(db, "_owner_membership_failure", False):
             raise ObservationError("publication-failed", "membership publication is unavailable")
-        source.seed(selected)
+        source.seed(selected, acquire=acquire)
         return source
     finally:
         db._membership_bind_lock.release()

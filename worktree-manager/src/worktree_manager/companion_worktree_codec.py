@@ -102,12 +102,24 @@ def display_event_detail(item: dict[str, Any]) -> tuple[str, str]:
         "version": 1,
         "encoded_bytes": len(raw),
         "sha256": digest,
-        "source_ref": item["source_ref"],
+        "native_kind": item["native_kind"],
         "captured_head_session_id": item["head_session_id"],
     }
-    if len(encoded(omission).encode("utf-8")) > MAX_FIELD_BYTES:
-        original_ref = encoded(omission.pop("source_ref")).encode("utf-8")
-        omission.update(source_ref_omitted=True, source_ref_sha256=sha256(original_ref).hexdigest())
+    fields = ("record_fence", "source_ref")
+    for name in fields:
+        original = encoded(item[name]).encode("utf-8")
+        omission.update({
+            name + "_omitted": True,
+            name + "_sha256": sha256(original).hexdigest(),
+            name + "_encoded_bytes": len(original),
+        })
+    for name in fields:
+        candidate = {key: value for key, value in omission.items() if key not in {
+            name + "_omitted", name + "_sha256", name + "_encoded_bytes",
+        }}
+        candidate[name] = item[name]
+        if len(encoded(candidate).encode("utf-8")) <= MAX_FIELD_BYTES:
+            omission = candidate
     data = encoded(omission)
     if len(data.encode("utf-8")) > MAX_FIELD_BYTES:
         raise TimelineContractError("owner detail omission exceeds its display bound")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 from dataclasses import replace
 
@@ -114,6 +115,47 @@ def test_qualified_disposition_is_native_not_a_sampled_proxy(native):
     assert entry["kind"] == "source-event" and entry["native_kind"] == "disposition-saved"
     assert entry["payload"]["after"]["summary"] == "real saved summary"
     assert entry["evidence_kind"] == "persisted-mutation"
+
+
+def test_queued_native_claim_preserves_sampled_direct_summary_change(native):
+    owner, path, _home = native
+    before = owner.observation_read(selection())
+    assert compute(owner, path)["ok"]
+    receipt = owner.native_observations._queue[0].receipt
+    assert receipt.saved_sha256 == hashlib.sha256(path.read_bytes()).hexdigest()
+
+    record = tracking.load_record(path)
+    record.summary = "direct writer after the queued claim"
+    tracking.save_record(record, path)
+    assert owner.native_observations.counts()["native-receipt-queued"] == 1
+    assert receipt.saved_sha256 != hashlib.sha256(path.read_bytes()).hexdigest()
+
+    current = publish(owner, path)
+    entries = page(owner)["entries"]
+    sampled = [entry for entry in entries if entry["kind"] == "observed-change"]
+    assert len(sampled) == 1
+    assert sampled[0]["payload"]["before_sha256"] == hashlib.sha256(
+        c.utf8(c.encode(before["facts"], c.BODY_BYTES))
+    ).hexdigest()
+    assert sampled[0]["payload"]["after_sha256"] == hashlib.sha256(
+        c.utf8(c.encode(current["facts"], c.BODY_BYTES))
+    ).hexdigest()
+    assert current["facts"]["row"]["summary"] == record.summary
+    assert current["facts"]["row"]["claims_assets"]["held_count"] == 1
+    persisted = native_entries(owner)
+    assert len(persisted) == 1 and persisted[0]["kind"] == "claim-added"
+    assert persisted[0]["record_fence"] == {
+        "saved_sha256": receipt.saved_sha256,
+        "incarnation": receipt.after.identity.incarnation,
+    }
+    materialized, _cursor, _journal = owner.observations.runtime.history.last_record(
+        c.Selection("native-test", "native-one", "head")
+    )
+    assert materialized.facts == current["facts"]
+    assert materialized.record_fence == sampled[0]["record_fence"]
+    assert materialized.record_fence != persisted[0]["record_fence"]
+    publish(owner, path)
+    assert page(owner)["entries"] == entries
 
 
 @pytest.mark.parametrize("invalid", ["partial", "degraded", "producer", "incarnation"])

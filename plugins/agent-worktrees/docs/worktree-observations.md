@@ -108,6 +108,10 @@ record heads are not performer identity. The frame still carries the latest
 selected snapshot head/facts; each native entry retains its own captured head
 and canonical-save fence. A delayed A receipt cannot reinstall A's facts over B.
 Index positions order admitted evidence, not a total canonical commit order.
+Before appending native evidence, the owner materializes any sampled difference
+from the accepted roster. A queued receipt therefore cannot hide an unrelated
+direct write in the same sample; that observed change retains current-view
+integrity references while the native entry keeps its captured save fence.
 
 The native-specific dual-fence path validates current-view facts separately
 from saved-record evidence. Ordinary post-save publication retains its original

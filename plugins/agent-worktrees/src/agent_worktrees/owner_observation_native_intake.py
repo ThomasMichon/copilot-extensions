@@ -267,18 +267,9 @@ class NativeIntake:
                             adapter._pending.add(key)
                         adapter._capture.value = current
                         try:
-                            selected = c.Selection(*key, current.record.head_session_id)
-                            try:
-                                old, _, journal = runtime.history.last_record(selected)
-                            except c.ObservationError as error:
-                                if error.code != "unready":
-                                    raise
-                                runtime.initialize(current.record)
-                            else:
-                                if old.source != current.record.source:
-                                    runtime.initialize(
-                                        current.record, expected_source_generation=journal
-                                    )
+                            # Native append replaces current facts; retain the sampled
+                            # difference before that replacement can hide direct writes.
+                            adapter._materialize(current)
                             proof = NativeProof(
                                 receipt,
                                 envelope.context.verb,
