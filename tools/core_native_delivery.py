@@ -361,7 +361,7 @@ def _build_from_snapshot(
         max_closure_bytes=max_bytes, max_temporary_bytes=2 * max_bytes,
     )
     verification_limits = None
-    with native.dependencies._temporary_inputs(destination.parent) as temporary:
+    with native.dependencies._temporary_inputs(destination.parent) as temporary, ExitStack() as held_inputs:
         work = Path(source_owner.native_retained_path(
             native.dependencies._private_retained_root(Path(temporary)).resolve(),
         ))
@@ -369,7 +369,8 @@ def _build_from_snapshot(
         requirement_file.write_text("\n".join(requirements) + "\n", encoding="utf-8")
         lock_file = work / "pylock.toml"
         candidate = work / "delivery.zip"
-        with _held(held_paths, held_files, deadline), retain_wheel_inputs(
+        held_inputs.enter_context(_held(held_paths, held_files, deadline))
+        with retain_wheel_inputs(
             first_paths, first_digests, max_wheels=256,
             max_archive_bytes=limits.max_archive_bytes, max_total_bytes=max_bytes,
             max_snapshot_bytes=4 * max_bytes, deadline=deadline,
@@ -553,6 +554,7 @@ def _build_from_snapshot(
                     roots, requirements,
                 ):
                     raise ProfileError("core source projection changed during guarded verification")
+            held_inputs.close()
             _unchanged(candidate, before, retained, opened=opened)
             _check_deadline(deadline)
             os.link(candidate, destination)

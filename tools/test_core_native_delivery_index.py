@@ -8,10 +8,12 @@ import shutil
 import subprocess
 import sys
 import zipfile
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 from runtime_profile import validate_profile
+from test_core_guarded_feed import _resolve
 from test_core_native_delivery import (
     _configure_native_tls,
     _fixture_git,
@@ -106,6 +108,65 @@ def test_native_delivery_retains_the_source_index_until_publication(delivery, mo
     with pytest.raises((ValueError, OSError)):
         producer._build_from_snapshot(**arguments)
     assert not arguments["destination"].exists()
+
+
+@pytest.mark.parametrize("kind", ["index", "release-state"])
+def test_guarded_delivery_retains_index_inputs_during_final_verification(
+    tmp_path, monkeypatch, tls_source, kind,  # noqa: F811
+):
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("native uv is required")
+    producer, wheels, manifest, state, _wheel, _digest = tls_source
+    index, _ = _selected_index({"source": tmp_path, "manifest_data": json.dumps(manifest)})
+    path = index if kind == "index" else tmp_path / ".github" / "release-pipeline-state.json"
+    original = producer.verify_guarded_projects
+    attempts = []
+
+    def mutate(*args, **kwargs):
+        original(*args, **kwargs)
+        attempts.append(True)
+        path.write_text("changed", encoding="utf-8")
+
+    monkeypatch.setattr(producer, "verify_guarded_projects", mutate)
+    _configure_native_tls(tmp_path, monkeypatch, state)
+    with pytest.raises((ValueError, OSError)):
+        _resolve(tmp_path, producer, wheels, manifest, uv=uv, artifact_index=index)
+    assert attempts
+    assert not (tmp_path / "guarded-delivery.zip").exists()
+
+
+def test_guarded_delivery_finishes_custody_checks_before_publication(
+    tmp_path, monkeypatch, tls_source,  # noqa: F811
+):
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("native uv is required")
+    producer, wheels, manifest, state, _wheel, _digest = tls_source
+    index, _ = _selected_index({"source": tmp_path, "manifest_data": json.dumps(manifest)})
+    original_held = producer._held
+    original_verify = producer.verify_guarded_projects
+    verified = []
+
+    @contextmanager
+    def fail_on_exit(paths, files, deadline):
+        with original_held(paths, files, deadline) as held:
+            yield held
+        if "artifact-index" in paths:
+            raise RuntimeError("final custody check failed")
+
+    def verify(*args, **kwargs):
+        result = original_verify(*args, **kwargs)
+        verified.append(True)
+        return result
+
+    monkeypatch.setattr(producer, "_held", fail_on_exit)
+    monkeypatch.setattr(producer, "verify_guarded_projects", verify)
+    _configure_native_tls(tmp_path, monkeypatch, state)
+    with pytest.raises(RuntimeError, match="final custody check failed"):
+        _resolve(tmp_path, producer, wheels, manifest, uv=uv, artifact_index=index)
+    assert verified
+    assert not (tmp_path / "guarded-delivery.zip").exists()
 
 
 def test_actual_command_emits_index_for_the_delivered_profile(tmp_path, monkeypatch, tls_source):  # noqa: F811

@@ -3461,8 +3461,9 @@ then uses the same guarded feed. They exercise the actual pool CLI, altered and
 malformed pool refusal, retained local file identity, first-party exclusions
 and an explicitly restricted redirect that must not be contacted.
 `tools/test_core_native_delivery_index.py` also checks the optional combined
-delivery/index handoff, exact release-state binding, retained inputs and actual
-CLI. It does not authenticate the input index or approve the changed subject.
+delivery/index handoff, exact release-state binding, input mutation during
+final guarded verification and the actual CLI. It does not authenticate the
+input index or approve the changed subject.
 `tools/test_core_native_pool_index.py` injects an unlisted wheel during the
 real offline resolver call and verifies it cannot change the selection; it
 also checks deep Windows pool inputs and bounded, private failure diagnostics.

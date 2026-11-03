@@ -4201,8 +4201,9 @@ qualified by the Windows path.
 An optional `--artifact-index <index>` composes the delivered profile into an
 unsigned index candidate in the same retained-input transaction. The index's
 Dev identity must match the selected Main source's recorded last promotion;
-the original index and release-state bytes remain held and rechecked. The
-result includes `candidate_index`, its `candidate_index_sha256`, and the
+the original index and release-state bytes remain held through final guarded
+feed verification and are rechecked before delivery publication. The result
+includes `candidate_index`, its `candidate_index_sha256`, and the
 `source_index_sha256`. The index digest uses sorted, compact ASCII JSON. The
 caller must independently authenticate the original source index and establish
 its release association; the Dev identity check does not authenticate it.

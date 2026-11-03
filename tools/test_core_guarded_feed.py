@@ -29,14 +29,17 @@ from test_installer_wheel_acquisition import CERTIFICATE, FILENAME, listed, proj
 from test_promotion_python_artifacts import _wheel_bytes
 
 
-def _resolve(tmp_path, producer, wheels, manifest, *, uv, download_origins=(), name="guarded-delivery.zip"):
+def _resolve(
+    tmp_path, producer, wheels, manifest, *, uv, download_origins=(),
+    name="guarded-delivery.zip", artifact_index=None,
+):
     deadline = time.monotonic() + 180
     destination = tmp_path / name
     result = producer._build_from_snapshot(
         tmp_path, {"source_commit": "a" * 40, "source_tree": "b" * 40, "main_head": "c" * 40},
         json.dumps(manifest).encode(), wheels, _offline_target(producer, deadline),
         uv=uv, download_origins=download_origins, materials={}, material_paths={}, destination=destination,
-        deadline=deadline, max_bytes=4 << 20, guarded_feed=True,
+        deadline=deadline, max_bytes=4 << 20, guarded_feed=True, artifact_index=artifact_index,
     )
     return result, destination
 
