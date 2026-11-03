@@ -214,7 +214,7 @@ def _set_project_override(project: str | None) -> None:
 
 _PROJECT_CONSUMING_VERBS = frozenset({
     "agents", "agent-show", "create", "machines", "send",
-    "observe-session", "session-observation-history",
+    "observe-session", "session-observation-history", "observe-owner",
 })
 
 
@@ -525,9 +525,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Scope project-addressed verbs to REPO instead of the caller's cwd project. For send/create the remote worktree resolve targets REPO; for agents/machines the displayed catalog is filtered to REPO. Injected by the `<repo> <slug>` router.",
     )
     sub = parser.add_subparsers(dest="command")
-    from . import attention_cli, session_observation_cli
+    from . import attention_cli, owner_membership_cli, session_observation_cli
     attention_cli.register_attention_commands(sub)
     session_observation_cli.register_commands(sub)
+    owner_membership_cli.register_commands(sub)
     register_service_start_commands(sub)
     register_config_commands(sub)
     register_venue_commands(sub)

@@ -198,7 +198,7 @@ def run(
         if resolved_mock or picker_review.active() or finished.is_set():
             return
         if not load_config().maintenance.automatic:
-            return "Automatic maintenance disabled by maintenance.automatic = false"
+            return
         from ..launch_retention import maintain
 
         retention_warning = maintain()

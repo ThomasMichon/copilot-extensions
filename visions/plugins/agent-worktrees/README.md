@@ -5,7 +5,7 @@
   obligations, disposition, and source-control completion.
 - **Scope:** branch (worktree-lifetime authority; child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-29
+- **Last revised:** 2026-11-02
 - **Reality docs:** the agent-worktrees plugin `docs/`
 - **Supersedes / superseded by:** none
 
@@ -144,6 +144,13 @@ session: current focus, asserted disposition, participants, session/controller
 relationships, succession lineage, claims, obligations, and completion state.
 The worktree is not itself a process. It is the durable vessel to which one or
 more execution legs may bind over time.
+
+### Durable worktree data
+
+The [worktree data](worktree-data/README.md) child governs discoverable,
+checkout-independent homes for domain-owned worktree state and its archival
+lifetime. The agency record retains identity and locators, not an unbounded
+agenda, transcript or history warehouse.
 
 ### Title and naming
 
@@ -948,6 +955,7 @@ manager, or session-host implementation.
 - Child vision: [Pull requests](pull-requests/README.md) - provider-neutral publication and review capability.
 - Child vision: [Status-monitor singleton](status-monitor-singleton/README.md) - lifecycle exclusivity and bounded serving coverage.
 - Child vision: [Continuous reclamation](continuous-reclamation/README.md) - safe cross-repository collection without accumulating manual recovery work.
+- Child vision: [Worktree data](worktree-data/README.md) - predictable discovery and data retention independent of checkout disposal.
 - Parent vision: [agent-fabric](../../agent-fabric/README.md)
 - Cross-cutting sibling:
   [session-hosting](../../session-hosting/README.md) — pluggable ownership of

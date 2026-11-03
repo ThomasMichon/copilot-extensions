@@ -153,7 +153,7 @@ def test_runner_still_binds_and_returns_browsing_result(policy, monkeypatch, bod
             with pytest.raises(manager_config.ManagerConfigError):
                 after_first_refresh()
         else:
-            assert "Automatic maintenance disabled" in after_first_refresh()
+            assert after_first_refresh() is None
         return {"action": "cancel"}
 
     monkeypatch.setattr(runner, "run_tui_picker", picker)

@@ -133,7 +133,7 @@ def source_identity() -> dict[str, object]:
     from .self_install import default_root, manager_ref, manager_repo
     from .source_config import absolute_local_source
 
-    root = default_root().resolve()
+    root = default_root().expanduser().resolve()
     repo = absolute_local_source(manager_repo(root))
     url = urlsplit(repo) if "://" in repo else None
     if url is not None and (
@@ -157,22 +157,42 @@ def request_context() -> dict[str, str]:
         accepted = inherited_engine_command()
         if accepted is not None:
             context[ENGINE_ARGV_ENV] = json.dumps(accepted)
+    from .source_config import default_root
+
+    context["WORKTREE_MANAGER_ROOT"] = str(default_root().expanduser().resolve())
     return context
 
 
 @contextmanager
-def _request_environment(context):
+def _request_environment(context, *, killswitch_path: str | None = None, cwd: str | None = None):
     values = dict(context)
     if values.keys() - set(_CONTEXT_KEYS):
         raise ValueError("update request contains unsupported execution context")
-    previous = {key: os.environ[key] for key in _CONTEXT_KEYS if key in os.environ}
+    if cwd is not None and values.get("WORKTREE_MANAGER_ROOT"):
+        try:
+            root = Path(values["WORKTREE_MANAGER_ROOT"]).expanduser()
+        except RuntimeError as error:
+            raise ValueError(f"Manager root cannot be expanded: {error}") from error
+        if not root.is_absolute():
+            if not cwd or not Path(cwd).is_absolute():
+                raise ValueError("relative Manager root requires an absolute request cwd")
+            root = Path(cwd) / root
+            if not root.is_absolute():
+                raise ValueError("Manager root cannot resolve against request cwd")
+        values["WORKTREE_MANAGER_ROOT"] = str(root)
+    keys = _CONTEXT_KEYS
+    if killswitch_path is not None:
+        keys = (*keys, "BOOTSTRAP_KILLSWITCH_STATE_FILE")
+        if killswitch_path:
+            values["BOOTSTRAP_KILLSWITCH_STATE_FILE"] = killswitch_path
+    previous = {key: os.environ[key] for key in keys if key in os.environ}
     try:
-        for key in _CONTEXT_KEYS:
+        for key in keys:
             os.environ.pop(key, None)
         os.environ.update(values)
         yield
     finally:
-        for key in _CONTEXT_KEYS:
+        for key in keys:
             os.environ.pop(key, None)
         os.environ.update(previous)
 
@@ -236,7 +256,7 @@ def self_install_request(operation: Callable[[], int]) -> int:
             return operation()
         argv, environment = driver.runtime_command("worktree_manager", ["self-install", "--apply"])
         workspace = running_application_slot() or running_payload_dir()
-        root = str(default_root().resolve())
+        root = str(default_root().expanduser().resolve())
         context = {**request_context(), "WORKTREE_MANAGER_ROOT": root}
         request = driver.enqueue(
             driver.RequestSpec(
@@ -306,7 +326,10 @@ def cmd_update_request(rest: list[str]) -> int:
                 request = driver.status(custody.request_id, root=custody.root)
                 if request.state != "running" or request.spec.backend not in {"manager", "engine"}:
                     raise driver.StateError("Manager does not own the active update request")
-                with _request_environment(request.spec.context), _acquisition_environment(
+                with _request_environment(
+                    request.spec.context, killswitch_path=request.spec.killswitch_path,
+                    cwd=request.spec.cwd,
+                ), _acquisition_environment(
                     options.engine_acquisition_timeout,
                 ):
                     _update_context_directory(os.environ)
@@ -327,10 +350,11 @@ def cmd_update_request(rest: list[str]) -> int:
                 for name in ("detach", "wait", "supervised_debug", "json")
                 if getattr(options, name)
             ]
-            return engine_client.run_engine_passthrough(
-                project, ["update", "--no-manager", *arguments, *observer],
-                **({"headless": True} if options.detach else {}),
-            )
+            with _request_environment(request_context()):
+                return engine_client.run_engine_passthrough(
+                    project, ["update", "--no-manager", *arguments, *observer],
+                    **({"headless": True} if options.detach else {}),
+                )
         project, _args = extract_project(forwarded)
         context = request_context()
         _update_context_directory(context)

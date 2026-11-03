@@ -13,7 +13,9 @@ REFERENCE = "plugins/agent-bridge/docs/delegation-contract.md"
 DEFERRED = "agent-bridge.delegation-control"
 
 
-def declaration_plan(root: Path, commit: str, snapshot: codec.Snapshot) -> dict[str, bytes]:
+def declaration_plan(
+    root: Path, commit: str, snapshot: codec.Snapshot, *, evidence=evidence,
+) -> dict[str, bytes]:
     """Bind the explicit semantic owners to genuine committed source bytes."""
     updated = copy.deepcopy(snapshot.materialized)
     http = evidence.contract(updated)
@@ -61,11 +63,11 @@ def declaration_plan(root: Path, commit: str, snapshot: codec.Snapshot) -> dict[
     return outputs
 
 
-def prepare(root: Path, commit: str) -> dict[str, bytes]:
+def prepare(root: Path, commit: str, *, evidence=evidence) -> dict[str, bytes]:
     """Publish declarations only; a subsequent committed checkpoint must capture."""
     evidence.baseline(root, commit)
     snapshot = codec.load(root)
-    outputs = declaration_plan(root, commit, snapshot)
+    outputs = declaration_plan(root, commit, snapshot, evidence=evidence)
     inputs = {path: codec.digest(data) for path, data in snapshot.inputs.items()}
     for owner in snapshot.materialized["contracts"]:
         for row in owner["source_paths"]:
@@ -95,7 +97,7 @@ def prepare(root: Path, commit: str) -> dict[str, bytes]:
             ).materialized,
         ):
             raise ValueError("HTTP-51 declarations changed during preparation")
-        if declaration_plan(root, commit, snapshot) != outputs:
+        if declaration_plan(root, commit, snapshot, evidence=evidence) != outputs:
             raise ValueError("HTTP-51 declaration source changed during preparation")
 
     publish(root, commit, outputs, validate=validate, input_hashes=inputs)

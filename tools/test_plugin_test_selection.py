@@ -233,6 +233,44 @@ def test_selected_node_cannot_be_silently_deselected_by_ambient_options(selectio
     ) == 0
 
 
+@pytest.mark.parametrize("outcome", ["passed", "skipped", "failed"])
+def test_exact_selection_retains_real_case_reports_without_ambient_options(
+    selection_fixture, monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
+    import xml.etree.ElementTree as ET
+
+    root, path = selection_fixture
+    reports = root / "reports"
+    if outcome != "passed":
+        body = "pytest.skip('declared skip')" if outcome == "skipped" else "assert False"
+        (root / "tests/test_changed.py").write_text(
+            f"import pytest\ndef test_new(): {body}\n", encoding="utf-8",
+        )
+    (root / "pytest.ini").write_text("[pytest]\naddopts=-k test_guard\n", encoding="utf-8")
+    monkeypatch.setenv("PYTEST_ADDOPTS", f"-k test_guard --junitxml={root / 'ambient.xml'}")
+    assert runner.run_plugin(
+        "fixture", "unused", reinstall=False, kexpr=None, limits=runner.Limits(),
+        plugin_timeout=60, test_timeout=10, max_files_per_subsuite=25,
+        selection_file=path, junit_dir=reports,
+    ) == (1 if outcome == "failed" else 0)
+    files = list((reports / "fixture").glob("*.xml"))
+    assert [file.name for file in files] == ["group-001.xml"]
+    cases = ET.parse(files[0]).findall(".//testcase")
+    assert {case.attrib["name"] for case in cases} == {"test_selected[2]", "test_guard", "test_new"}
+    changed = next(case for case in cases if case.attrib["name"] == "test_new")
+    assert (changed.find("skipped") is not None) is (outcome == "skipped")
+    assert (changed.find("failure") is not None) is (outcome == "failed")
+    assert not (root / "ambient.xml").exists()
+    assert not list(reports.rglob("selection.json"))
+    monkeypatch.setattr(runner, "_ensure_venv", lambda *_a, **_k: pytest.fail("overwrote a prior run"))
+    with pytest.raises(FileExistsError):
+        runner.run_plugin(
+            "fixture", "unused", reinstall=False, kexpr=None, limits=runner.Limits(),
+            plugin_timeout=60, test_timeout=10, max_files_per_subsuite=25,
+            selection_file=path, junit_dir=reports,
+        )
+
+
 def test_empty_selected_file_is_not_silently_ignored(selection_fixture, capfd):
     root, path = selection_fixture
     (root / "tests/test_changed.py").write_text("# no tests\n", encoding="utf-8")

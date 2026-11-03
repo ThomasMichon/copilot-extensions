@@ -76,6 +76,14 @@ creation, not an implicit permission migration or a read-only status side effect
   when needed. It participates in identity; a detached or already-running
   worker never substitutes its own override. The empty default is omitted
   from ordinary records, and legacy records continue to use canonical paths.
+  Hold readers normalize the selected parent directory consistently with the
+  controllers. A relative `WORKTREE_MANAGER_ROOT` in saved context is resolved
+  against the retained absolute request cwd, never the worker directory.
+  Automatic work with a relative Manager root but no absolute request cwd is
+  visibly refused; explicit updates do not consult that automation policy.
+  Borrowed Manager execution freezes that root against the same caller cwd
+  before restoring its scoped environment, so its execution-time policy and
+  configuration reads agree with queue admission rather than the worker cwd.
 - `TrustedRunner(argv, cwd, timeout=7200, env=(), context_keys=())` stores a complete internally
   constructed pinned invocation. Only Python import mapping (`PYTHONPATH`,
   `__PYVENV_LAUNCHER__`) can be persisted as environment metadata. Authentication
@@ -155,6 +163,7 @@ creation, not an implicit permission migration or a read-only status side effect
 ### Automatic-update KillSwitch and explicit/manual admission
 
 Before each pending request becomes running, the existing owner re-reads the
+addressed Manager's existing `[maintenance] automatic` preference and the
 shared bootstrap KillSwitch, including its legacy-path fallback and existing
 `BOOTSTRAP_KILLSWITCH_STATE_FILE` selection. An active switch completes automatic
 jobs with exit 3 and error `automatic-update KillSwitch active; nothing ran`.
@@ -162,6 +171,17 @@ Their start time stays absent, no product runner or installer starts, and the
 pending position is released. Status and wait retain this non-success outcome;
 the worker continues to later jobs. Clearing the switch permits new automatic
 requests, but does not replay jobs already retired.
+
+The Manager preference is evaluated only for an explicitly automatic update.
+An explicit `WORKTREE_MANAGER_ROOT` uses that request's addressed installation;
+unrelated cells without a Manager binding do not inherit a default Manager's
+veto. Manager adapters retain that existing context key when submitting or
+forwarding a request. Missing preferences preserve the existing enabled default.
+Invalid/unreadable maintenance policy refuses automatic work with its actual
+diagnostic; it cannot block a manual update. Python 3.11+ uses `tomllib`;
+an older interpreter can use its already-available `tomli`, otherwise configured
+automatic policy reports unsupported rather than being silently ignored.
+No parser is downloaded at admission.
 
 Explicit/manual `repair=True` requests bypass only this automatic-update inhibition,
 under the operator authority of the submitting driver. They retain the same
@@ -181,6 +201,10 @@ their installer argv is identical, and therefore cannot coalesce.
 No database migration, direct queue edit, new scheduler or flag removal is
 needed. Older pending jobs are handled by the next capable worker; updating
 source alone does not upgrade a selected or already-running worker.
+The Manager's [Installation & Updates controls](../../worktree-manager/docs/configuration.md#automatic-update-controls)
+expose the existing switches, not a new policy store or recurring-controller
+enrollment. A retained old worker must be upgraded before claiming enforcement
+of a newly supported Manager-policy veto.
 
 ## Execution and borrowed custody
 

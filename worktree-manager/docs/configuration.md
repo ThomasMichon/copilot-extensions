@@ -17,6 +17,65 @@ machine scope. Browsing and refreshing are read-only and run off the UI thread:
 they do not install prerequisites, start services/workers, request credentials
 or enroll automatic maintenance.
 
+### Automatic update controls
+
+The same workspace has two independently confirmed local controls:
+
+| Row | Existing policy and scope |
+|-----|---------------------------|
+| **Automatic software updates** | The shared default-installation bootstrap KillSwitch. Allowing updates clears its named central/legacy switch files through the canonical controller; an explicit state-file override remains isolated. The confirmation shows affected paths. This control is not applicable to an independent installation cell. |
+| **Launch-time maintenance** | Manager's existing `[maintenance] automatic` boolean, default `true`. This also permits automatic housekeeping, repair and monitor startup, so it remains separate from the software-update switch. Changes preserve unrelated TOML and refuse stale views. |
+
+```toml
+[maintenance]
+automatic = false
+```
+
+Enabled means permission from that control, not a running worker. Details show
+effective automatic-update admission and independent blockers. Allowing one
+control never clears the other, starts an update, enrolls recurring maintenance
+or stops work already admitted. Missing/unreadable/invalid controller state is
+visible; an invalid legacy switch retains its documented fail-open reader
+semantics rather than being presented as a reliable pause.
+
+Confirmations compare the exact viewed bytes inside a bounded writer lock.
+The switch's canonical Bash, PowerShell and optional Machines CLI writers
+share the same retained sibling lock file. Manager probes the selected
+controller's read-only conditional-mutation capability before sending an
+expected revision; an older controller refuses this UI operation rather than
+receiving an unconditional clear. Upgrade all switch writers before relying
+on concurrent edits; an older installed writer does not participate in this
+serialization. A new audit hold is never equivalent to the previously
+confirmed hold merely because both have `active = true`.
+
+The maintenance control and both source-selection commands share a separate
+bounded per-configuration lock from read through atomic publication. A stale
+maintenance confirmation refuses after waiting; source edits preserve a
+maintenance change published before they acquire the lock. The retained
+`.config.toml.lock` is synchronization state, not another preference or a
+stale PID lease; it is not removed after each write.
+
+Automatic software updates after Manager startup and before worktree
+creation/resume use the canonical `<repo> update --auto` path. Normal launches
+submit without blocking first paint; explicit blocking mode waits on the same
+owner. `--no-update` and non-update reconciliation retain their separate
+meaning. There is no competing stage/apply installer.
+
+Plain user or agent `<repo> update` calls, including explicit component updates,
+do not consult these automation vetoes and need no force flag. They retain
+normal installation/re-entrancy, source, privilege and interruption checks.
+The execution owner re-reads applicable automatic policy before a pending
+automatic request starts: a veto retains a durable exit-3 result with no product
+runner, not a successful skip. Queued work is not replayed merely by enabling
+the setting. Queued automatic `--no-update` reconciliation still rechecks the
+broader maintenance veto, but does not consult the software-only hold.
+Borrowed Manager execution restores the originating request's exact switch
+selection, including the default selection, rather than inheriting another
+request's worker override. See the [execution contract](../../libs/update-driver/README.md#automatic-update-killswitch-and-explicitmanual-admission)
+for worker/version-skew and installation-scope behavior.
+
+### Maintained components and explicit updates
+
 The table distinguishes delivered **Payload**, **Selected runtime**, **Observed
 running**, enablement and durable update activity. A deployment marker is not
 running-service proof. Manager's running version describes the querying process,

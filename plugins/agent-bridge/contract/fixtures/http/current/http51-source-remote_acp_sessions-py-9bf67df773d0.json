@@ -1,20 +1,16 @@
 {
-  "evidence_family": "http51-unchanged-source-link-v1",
-  "preserved_from": {
-    "path": "plugins/agent-bridge/contract/fixtures/http/current/http50-source-remote_acp_sessions-py-9bf67df773d0.json",
-    "sha256": "d7767dd1601ff7e75cd645250b8250da632d05c8ef0011a3cc0fd7399bc11813"
-  },
-  "advertisement_evidence": {
+  "evidence_family": "http51-shared-asgi-v1",
+  "shared_operation_evidence": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/http51-standard-native-send.json",
-    "sha256": "2454517118c9bf6aa7d11594d3ead07e2e40d3af8881e2c96f4b7edcbeaa4038"
+    "sha256": "b7554622ed7fdc54bb259ade664578b115c5356f4f24ec3c17c7490c215d5fe7"
   },
-  "scope": "unchanged source and immutable prior operation; no new runtime observation",
+  "scope": "shared named ASGI portfolio, not an independent capture",
   "captured_from": {
-    "commit": "5699534c62bd8d473f6f9f79b61a6a6b1b842aa4",
+    "commit": "a314233f5229c31bca47d252458994f2f148f8a0",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 51,
     "source_path": "plugins/agent-bridge/src/agent_bridge/remote_acp_sessions.py",
-    "source_git_blob": "0425fcff2907612477d1a1f715aaae7bfd1cd76a",
-    "source_sha256": "8e46f2713647ff7fc626e1db28c0402d1d236017581709df949c2fe450169ecf"
+    "source_git_blob": "7cfbc7a37370c27ac478c1d59a68ca1583912bf9",
+    "source_sha256": "ecdf99b99f12f13498e574699cfcf295632086c17f791841d5b7aef6ba6c8f38"
   }
 }

@@ -94,7 +94,10 @@ def test_native_resume_does_not_reuse_the_published_receipt_generation() -> None
     assert bridge_protocol.RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION == 49
     assert bridge_protocol.RETAINED_INBOX_RECOVERY_PROTOCOL_VERSION == 50
     assert bridge_protocol.NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION == 51
-    assert bridge_protocol.HTTP_PROTOCOL_VERSION == 51
+    assert (
+        bridge_protocol.HTTP_PROTOCOL_VERSION
+        >= bridge_protocol.NATIVE_SEND_IDEMPOTENCY_PROTOCOL_VERSION
+    )
     assert bridge_protocol.HTTP_PROTOCOL_MIN_SUPPORTED == 1
 
 
@@ -585,10 +588,13 @@ def test_health_fixture_matches_route_serialization(tmp_path, monkeypatch) -> No
         health_route.HOSTING_CAPABILITY: health_route.HOSTING_CAPABILITY_VERSION,
         bridge_protocol.NATIVE_SEND_RECEIPT_CAPABILITY:
             bridge_protocol.NATIVE_SEND_RECEIPT_CAPABILITY_VERSION,
+        bridge_protocol.NATIVE_SEND_NO_RESUME_CAPABILITY:
+            bridge_protocol.NATIVE_SEND_NO_RESUME_CAPABILITY_VERSION,
         health_route.LIVE_KEYED_RECEIPT_CAPABILITY: 1,
         health_route.LIVE_EXACT_NOTIFY_CAPABILITY: 1,
         health_route.OBSERVATIONS: 1,
         health_route.HISTORY: 1,
+        health_route.OWNER_MEMBERSHIP: 1,
     }
     expected["protocol_version"] = bridge_protocol.HTTP_PROTOCOL_VERSION
     expected["drain_contract"] = _fixture("inputs/http47/negotiated-drain.json")["advertised"]["drain_contract"]

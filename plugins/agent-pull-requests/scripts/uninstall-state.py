@@ -16,6 +16,7 @@ ENTRIES = (
     "payload-dir", "stamped-version", "deploy-manifest.json",
 )
 HELPERS = (
+    "killswitch_mutation.py",
     "resolve-runtime.ps1", "resolve-runtime.sh", "bootstrap-check.ps1", "bootstrap-check.sh",
     "bootstrap-killswitch-guard.ps1", "bootstrap-killswitch-guard.sh",
 )

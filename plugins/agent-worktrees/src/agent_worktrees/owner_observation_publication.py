@@ -44,15 +44,19 @@ def admit(owner, conn, record, entries, batch_id, expected_cursor, digest=None):
     return row, novel
 
 
-def publish(owner, record, entries, digest, batch_id, expected_cursor, delivery_failure):
+def publish(owner, record, entries, digest, batch_id, expected_cursor, delivery_failure, *, native=None):
     selected = c.Selection(*record.key, record.head_session_id)
     token = None
     staged = None
     with owner._lock:
         try:
+            if native is not None:
+                native.check()
             with closing(owner._connect(write=True)) as conn, conn:
                 conn.execute("BEGIN IMMEDIATE")
                 owner._fence(conn)
+                if native is not None:
+                    native.check()
                 row, novel = admit(owner, conn, record, entries, batch_id, expected_cursor, digest)
                 duplicate = conn.execute(
                     "SELECT 1 FROM owner_observation_batch WHERE generation=? AND id=?",
@@ -72,8 +76,15 @@ def publish(owner, record, entries, digest, batch_id, expected_cursor, delivery_
                 with closing(owner._connect(write=True)) as conn, conn:
                     conn.execute("BEGIN IMMEDIATE")
                     row = intents.verify(owner, conn, token, record)
+                    if native is not None:
+                        native.check()
                     admit(owner, conn, record, entries, batch_id, expected_cursor, digest)
-                    materialized = append(owner, conn, row, record, entries, batch_id, digest)
+                    materialized = append(
+                        owner, conn, row, record, entries, batch_id, digest,
+                        captured_head=None if native is None else native.captured_head,
+                    )
+                    if native is not None:
+                        native.check()
                     intents.resolve(owner, conn, token)
                 if materialized:
                     owner._clear_failure(record.key, token.generation, record.source)
@@ -81,6 +92,8 @@ def publish(owner, record, entries, digest, batch_id, expected_cursor, delivery_
             raise intents.fail(owner, record, token, error) from error
         except c.ObservationError as error:
             if token is not None and error.code in {"oversized", "cursor-unavailable"}:
+                if native is not None:
+                    native.check()
                 delivery_failure(
                     owner,
                     selected,
@@ -90,6 +103,7 @@ def publish(owner, record, entries, digest, batch_id, expected_cursor, delivery_
                     batch_id=batch_id,
                     entries=entries,
                     admission=token,
+                    **({"native": native} if native is not None else {}),
                 )
                 raise c.ObservationError(
                     "admitted owner publication requires reconciliation", "cursor-unavailable"

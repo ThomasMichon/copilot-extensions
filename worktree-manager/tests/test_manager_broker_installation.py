@@ -327,7 +327,7 @@ def test_bootstrap_precheck_is_scoped_to_explicit_automatic_update(
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.setattr(installation.adapter, "_execution_driver", lambda payload: core)
     assert installation.adapter._automatic_bootstrap_inhibited(
-        SimpleNamespace(command=command, payload=installation.root),
+        SimpleNamespace(command=command, payload=installation.root, root=installation.root),
     ) is inhibited
 
 
@@ -386,6 +386,41 @@ def test_native_bootstrap_hold_preserves_interrupted_fence(installation, monkeyp
     with pytest.raises(core.InterruptedError, match="queue fenced"):
         core.enqueue(core.RequestSpec("still-fenced", repair=True), runner=runner)
     assert json.loads(hold.read_text()) == {"active": True}
+
+
+def test_automatic_bootstrap_reads_addressed_root_not_caller_default(
+    installation, monkeypatch, tmp_path,
+):
+    state = installation
+    other = tmp_path / "other-manager"
+    other.mkdir()
+    (other / "config.toml").write_text("[maintenance]\nautomatic = true\n")
+    (state.root / "config.toml").write_text("[maintenance]\nautomatic = false\n")
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(other))
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(state.adapter, "_execution_driver", lambda payload: core)
+    args = SimpleNamespace(payload=state.root, root=state.root, command=["update", "--auto"])
+    reason = state.adapter._automatic_bootstrap_refusal(args)
+    assert "maintenance.automatic is false" in reason
+    assert state.adapter._automatic_bootstrap_inhibited(args)
+
+
+def test_automatic_bootstrap_legacy_reader_keeps_manager_veto_and_manual_bypass(
+    installation, monkeypatch,
+):
+    state = installation
+    config = state.root / "config.toml"
+    config.write_text("[maintenance]\nautomatic = false\n")
+    older = SimpleNamespace(RequestSpec=core.RequestSpec, _automatic_update_inhibited=lambda spec: False)
+    monkeypatch.setattr(state.adapter, "_execution_driver", lambda payload: older)
+    args = SimpleNamespace(payload=state.root, root=state.root, command=["update", "--auto"])
+    assert "maintenance.automatic is false" in state.adapter._automatic_bootstrap_refusal(args)
+    args.command = ["update"]
+    monkeypatch.setattr(
+        state.adapter, "_execution_driver",
+        lambda payload: pytest.fail("manual bootstrap consulted automatic policy"),
+    )
+    assert state.adapter._automatic_bootstrap_refusal(args) is None
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows removal execution ownership")

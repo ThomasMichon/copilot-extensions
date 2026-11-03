@@ -36,13 +36,16 @@ def _restore_engine_context(pointer):
 
 
 def _engine_rows(payload):
+    from .maintenance_policy import CONTROL_ID
+    from .bootstrap_policy import CONTROL_ID as BOOTSTRAP_CONTROL_ID
+
     fields = {"id", "title", "kind", "enabled", "installed", "payload", "selected", "running", "source", "updatable", "limitation"}
     if not isinstance(payload, dict) or type(payload.get("contract")) is not int or payload["contract"] != 1:
         raise ValueError("Selected engine lacks the targeted-update inventory contract; update the suite first")
     rows = payload.get("entries")
     if not isinstance(rows, list):
         raise ValueError("Selected engine returned malformed installation inventory; update its owner and refresh")
-    seen = {"worktree-manager"}
+    seen = {"worktree-manager", CONTROL_ID, BOOTSTRAP_CONTROL_ID}
     for row in rows:
         if (
             not isinstance(row, dict) or not fields.issubset(row)
@@ -236,6 +239,10 @@ def inventory():
             detail.append("Update unavailable: " + row["limitation"])
         detail.append("Refresh reads actual state. Dismissal does not cancel durable installation. Background maintenance is not enabled by this page.")
         row["card"] = {"title": row["title"], "status": row["activity"], "body": redact("\n\n".join(detail))}
+    from .maintenance_policy import configuration_row
+    from .bootstrap_policy import configuration_row as bootstrap_configuration_row
+
+    rows[1:1] = [bootstrap_configuration_row(), configuration_row()]
     warnings = [redact(finding) for finding in findings]
     return {"entries": rows, "summary": {
         "errors": warnings, "banner_text": "\n".join(warnings), "banner_level": "warn",
@@ -268,8 +275,9 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--engine-argv", help=argparse.SUPPRESS)
     parser.add_argument("--engine-context", help=argparse.SUPPRESS)
-    parser.add_argument("command", choices=("list", "update"))
+    parser.add_argument("command", choices=("list", "update", "maintenance", "automatic-updates"))
     parser.add_argument("target", nargs="?")
+    parser.add_argument("--expected-policy")
     args = parser.parse_args(argv)
     if args.engine_argv:
         os.environ[engine_client.ENGINE_ARGV_ENV] = args.engine_argv
@@ -281,6 +289,27 @@ def main(argv=None):
             _restore_engine_context(args.engine_context)
         except ValueError as error:
             parser.error(str(error))
+    if args.command in {"maintenance", "automatic-updates"}:
+        from .maintenance_policy import set_enabled
+        from .bootstrap_policy import set_enabled as set_bootstrap_enabled
+        from .manager_config import ManagerConfigError
+
+        if args.target not in {"on", "off"} or not args.expected_policy:
+            parser.error(f"{args.command} requires on|off and --expected-policy from the current view")
+        try:
+            operation = set_enabled if args.command == "maintenance" else set_bootstrap_enabled
+            result = operation(args.target == "on", expected=args.expected_policy)
+        except (ManagerConfigError, OSError, ValueError) as error:
+            print(f"Automatic setting not saved: {error}", file=sys.stderr)
+            return 1
+        print(json.dumps({
+            "ok": True, "automatic": result.enabled, "path": str(result.path),
+            "message": "Setting saved. No update or recurring worker was started; refresh to observe admission.",
+            "detail": getattr(result, "detail", ""),
+        }))
+        return 0
+    if args.expected_policy:
+        parser.error("--expected-policy requires maintenance or automatic-updates")
     if args.command == "list":
         if args.target:
             parser.error("list does not accept a target")
@@ -292,6 +321,8 @@ def main(argv=None):
 
 
 def configuration_pivot():
+    from .maintenance_policy import CONTROL_ID
+    from .bootstrap_policy import CONTROL_ID as BOOTSTRAP_CONTROL_ID
     from .production_picker.picker_tui.pivots import parse_manifest
 
     command = [sys.executable, "-B", "-m", "worktree_manager.installation_updates"]
@@ -314,6 +345,18 @@ def configuration_pivot():
         ],
         "actions": [
             {"key": "details", "label": "Installation details / limitations", "kind": "card"},
+            {"key": "bootstrap-on", "label": "Allow automatic software updates on this machine",
+             "confirm": True, "run": [*command, "automatic-updates", "on", "--expected-policy", "{policy_revision}"],
+             "when": {"id": BOOTSTRAP_CONTROL_ID, "bootstrap_control": True, "bootstrap_enabled": False}},
+            {"key": "bootstrap-off", "label": "Block automatic software updates on this machine",
+             "confirm": True, "run": [*command, "automatic-updates", "off", "--expected-policy", "{policy_revision}"],
+             "when": {"id": BOOTSTRAP_CONTROL_ID, "bootstrap_control": True, "bootstrap_enabled": True}},
+            {"key": "maintenance-on", "label": "Enable launch-time maintenance on this machine",
+             "confirm": True, "run": [*command, "maintenance", "on", "--expected-policy", "{policy_revision}"],
+             "when": {"id": CONTROL_ID, "maintenance_control": True, "maintenance_enabled": False}},
+            {"key": "maintenance-off", "label": "Disable launch-time maintenance on this machine",
+             "confirm": True, "run": [*command, "maintenance", "off", "--expected-policy", "{policy_revision}"],
+             "when": {"id": CONTROL_ID, "maintenance_control": True, "maintenance_enabled": True}},
             {"key": "update", "label": "Update selected component only", "confirm": True,
              "run": [*command, "update", "{id}"], "when": {"updatable": True}},
         ],

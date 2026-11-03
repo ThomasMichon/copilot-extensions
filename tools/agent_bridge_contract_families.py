@@ -24,3 +24,6 @@ def validate_http_families(
     if current >= 51:
         from bridge_http51_evidence import validate_http51
         validate_http51(root, {"contracts": [contract]}, loaded, errors)
+    if current >= 52:
+        from bridge_http52_evidence import validate_http52
+        validate_http52(root, {"contracts": [contract]}, loaded, errors)

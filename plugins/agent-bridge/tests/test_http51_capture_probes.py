@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 import pytest
 from fastapi.testclient import TestClient
 
-import bridge_http51_evidence as evidence
+import bridge_http52_evidence as evidence
 from bridge_http_retained_probes import capture_request, record_observations
 from http51_receipt_probes import observe as observe_receipt
 from http51_live_cli_probes import observe as observe_live_cli
@@ -45,6 +45,10 @@ from test_session_observations import (
 from test_session_observation_transport import (
     endpoint as endpoint,
     test_observer_cli_http_eof as test_observer_cli_http_eof,
+)
+from test_owner_membership import (
+    test_adopted_writable_connection_preserves_membership_commits
+    as test_adopted_writable_connection_preserves_membership_commits,
 )
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -140,6 +144,10 @@ def test_http51_capture_actual_observations(
     )
     observed["observations"] = observe_sessions(
         api, manager, db, vector, monkeypatch, capsys,
+        client_factory=receipt_client_factory,
+    )
+    observed["owner_membership"] = observe_owner_membership(
+        app, api, manager, db, vector, monkeypatch, capsys,
         client_factory=receipt_client_factory,
     )
     api.headers.pop("Authorization")
@@ -343,3 +351,141 @@ def test_http51_observer_payload_abbreviations(tmp_path, mode):
         test_passive_observer_attributed_payload_never_provisions(
             tmp_path / str(index), shell, mode, argv,
         )
+
+
+def test_http51_owner_membership_observations(serving, native_send, monkeypatch, capsys):
+    """Canonical SQLite producer -> generation journal -> authenticated HTTP/root CLI."""
+    app, api, db, _ = serving
+    manager, _session, _request = native_send
+    app.state.session_manager = manager
+    vector = json.loads(evidence.safe(ROOT, evidence.INPUT).read_bytes())
+    assert observe_owner_membership(
+        app, api, manager, db, vector, monkeypatch, capsys,
+        client_factory=core._get_client,
+    ) == vector["expected"]["owner_membership"]
+
+
+def observe_owner_membership(app, api, manager, db, vector, monkeypatch, capsys, *, client_factory):
+    """Produce the independently expected membership section of the shared report."""
+    from agent_bridge.owner_membership import CAPABILITY
+    from agent_bridge.session_observation_contract import decode
+
+    assert client_factory.__module__ == core.__name__ and client_factory.__name__ == "_get_client"
+    spec = vector["requests"]["owner_membership"]
+    private = "fixture-protected-token"
+    target = {
+        "caller_owner_ref": spec["owner_ref"], "project": "demo", "worktree_id": "fixture-child",
+        "cwd": "/private/fixture", "env": {"TOKEN": private},
+    }
+
+    def create_member(sid):
+        db.create_session(
+            sid, "fixture", None, "/private/fixture", "local", "starting", 1.0,
+            target_json=json.dumps(target),
+        )
+
+    create_member(spec["session_id"])
+    query = {"owner_ref": spec["owner_ref"], "contract_version": "1"}
+    path = "/api/v1/owner-observations"
+
+    def body(**changes):
+        response = api.get(path, params={**query, **changes})
+        assert response.status_code == 200
+        return decode(response.content.split(b"data: ", 1)[1].strip())
+
+    snapshot = body()
+    observed = {"capability": api.get("/health").json()["capabilities"][CAPABILITY]}
+    observed["snapshot"] = {
+        "kind": snapshot["kind"], "completeness": snapshot["completeness"],
+        **{key: snapshot["members"][0][key] for key in (
+            "registry", "link_qualification", "head_session_id", "current_answerability",
+        )},
+    }
+    db.update_session_status(spec["session_id"], "idle", 2.0)
+    delta = body(after=snapshot["position"])
+    observed["delta"] = {
+        "kind": delta["kind"], "state": delta["changes"][0]["member"]["state"],
+        "evidence_kind": delta["changes"][0]["evidence_kind"],
+    }
+    reads = []
+    old = [False]
+    class Response(io.BytesIO):
+        def __init__(self, response):
+            payload = response.content
+            if old[0] and response.request.url.path == "/health":
+                value = response.json()
+                value["capabilities"].pop(CAPABILITY)
+                payload = json.dumps(value).encode()
+            super().__init__(payload)
+            self.status, self.headers = response.status_code, response.headers
+
+    def transport(request, **_kwargs):
+        selected = urlsplit(request.full_url)
+        assert selected.netloc == "testserver" and request.get_method() == "GET"
+        if selected.path != "/health":
+            reads.append(selected.path)
+        return Response(api.get(
+            selected.path + ("?" + selected.query if selected.query else ""),
+            headers=dict(request.header_items()),
+        ))
+
+    with monkeypatch.context() as patch:
+        factory = Mock(wraps=client_factory)
+        ensure = Mock(side_effect=AssertionError("membership ensured a daemon"))
+        start = Mock(side_effect=AssertionError("membership started a daemon"))
+        actor = AsyncMock(side_effect=AssertionError("membership started an actor"))
+        patch.setattr(core, "_get_client", factory)
+        patch.setattr(core, "_ensure_daemon", ensure)
+        patch.setattr(core, "_launch_bridge_daemon", start)
+        patch.setattr(manager, "start_session", actor)
+        patch.setattr(BridgeClient, "from_config", classmethod(
+            lambda _cls: BridgeClient(
+                "http://testserver", api.headers["Authorization"].split(" ", 1)[1], connect_grace=0,
+            ),
+        ))
+        patch.setattr("urllib.request.urlopen", transport)
+
+        def command():
+            capsys.readouterr()
+            try:
+                core.main(list(spec["command"]))
+                status = 0
+            except SystemExit as exc:
+                status = exc.code
+            return status, json.loads(capsys.readouterr().out)
+
+        try:
+            status, point = command()
+            observed["cli"] = {
+                "exit": status, "kind": point["kind"], "ensure": factory.call_args.kwargs["ensure"],
+            }
+            reads.clear()
+            old[0] = True
+            status, refused = command()
+            observed["old_capability"] = {
+                "exit": status, "code": refused["code"], "source_reads": len(reads),
+            }
+            ensure.assert_not_called()
+            start.assert_not_called()
+            actor.assert_not_called()
+            observed["no_ensure"] = ensure.call_count == start.call_count == 0
+            observed["no_actor_start"] = actor.call_count == 0
+        finally:
+            core._set_project_override(None)
+    unknown = body(owner_ref="fixture-host/demo/unadmitted")
+    observed["unknown"] = {key: unknown[key] for key in ("kind", "code")}
+    create_member(spec["session_id"] + "-second")
+    before_retire = body()["position"]
+    db.update_session_status(spec["session_id"] + "-second", "ended", 3.0)
+    retired = body(after=before_retire)["changes"][-1]
+    observed["retired"] = {key: retired[key] for key in ("kind", "grants_claim_release")}
+    before_gone = body()["position"]
+    db.delete_session(spec["session_id"])
+    gone = body(after=before_gone)["changes"][-1]
+    observed["gone"] = {key: gone[key] for key in ("kind", "grants_claim_release")}
+    exposed = json.dumps([snapshot, delta, retired, gone, point])
+    observed["token_exclusion"] = private not in exposed and "/private/" not in exposed
+    observed["no_idle_pinning"] = all(item.subscriber_count == 0 for item in manager._sessions.values())
+    observed["unauthenticated"] = api.get(path, params=query, headers={"Authorization": ""}).status_code
+    assert observed == vector["expected"]["owner_membership"]
+    return observed

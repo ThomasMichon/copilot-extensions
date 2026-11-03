@@ -566,13 +566,9 @@ _STAGE_PID=""
 _UPDATE_APPLIED=""
 
 # ── Optional maintenance: submit by default, join only in blocking mode ─────
-# The Picker runs from the installed runtime venv, so marketplace download
-# starts only after target admission and Picker exit, then the apply
-# (installer -> runtime, pre-launch, reconcile) runs at the JOIN only with
-# WORKTREE_BLOCKING_INSTALL; ordinary launches submit one driver request.
-# The blocking join follows Picker exit and precedes handoff. The launcher script is
-# applied via the installer but NOT re-exec'd mid-flight: a launcher change
-# takes effect on the NEXT launch (stage-next).
+# After target admission and Picker exit, submit canonical update --auto.
+# Blocking mode observes that same owner before handoff; ordinary launches
+# return after submission. The installed launcher changes on the next launch.
 
 automatic_maintenance_enabled() {
     local diagnostic
@@ -588,16 +584,8 @@ automatic_maintenance_enabled() {
 }
 
 start_update_stage() {
-    # Spawn the background stage (marketplace download + fingerprint + plan).
-    # Output is discarded so it never writes to the Picker's terminal.
-    [[ "$_NO_UPDATE" == "1" ]] && return 0
-    [[ -z "${WORKTREE_BLOCKING_INSTALL:-}" ]] && return 0
-    [[ "$_LAUNCH_ADMITTED" == 1 ]] || return 3
-    admit_launch_target "$_LAUNCH_POLICY_PATH" maintenance || return 3
-    automatic_maintenance_enabled || return 0
-    setup_log INFO 'Starting background update stage (stage-update)'
-    ( "$PYTHON" -m agent_worktrees stage-update --auto >/dev/null 2>&1 ) &
-    _STAGE_PID=$!
+    # Acquisition and application belong to the same canonical update request.
+    return 0
 }
 
 invoke_update_apply() {
@@ -612,117 +600,32 @@ invoke_update_apply() {
     _UPDATE_APPLIED=1
     automatic_maintenance_enabled || return 0
     local _SETUP_PROGRESS_DIR="" _SETUP_PROGRESS_PID="" _SETUP_PROGRESS_JOB="" _SETUP_PROGRESS_SEQUENCE=0 _SETUP_PROGRESS_FAILED=0
-    if [[ -z "${WORKTREE_BLOCKING_INSTALL:-}" ]]; then
-        local _automatic_args=(-m agent_worktrees)
-        [[ -n "$LAUNCH_PROJECT" ]] && _automatic_args+=(--project "$LAUNCH_PROJECT")
-        _automatic_args+=(launch-update automatic --auto --detach)
-        local _include_reconcile=""
-        [[ "$with_reconcile" == "1" && "${WORKTREE_NO_RECONCILE:-}" != "1" ]] && _include_reconcile=1
-        if [[ "$_NO_UPDATE" == "1" ]]; then
-            [[ -z "$_include_reconcile" ]] && return 0
-            _automatic_args+=(--no-update)
+    local _automatic_args=(-m agent_worktrees)
+    [[ -n "$LAUNCH_PROJECT" ]] && _automatic_args+=(--project "$LAUNCH_PROJECT")
+    local _include_reconcile=""
+    [[ "$with_reconcile" == "1" && "${WORKTREE_NO_RECONCILE:-}" != "1" ]] && _include_reconcile=1
+    if [[ "$_NO_UPDATE" == "1" ]]; then
+        [[ -z "$_include_reconcile" ]] && return 0
+        _automatic_args+=(launch-update automatic --auto --no-update --with-reconcile)
+        [[ -z "${WORKTREE_BLOCKING_INSTALL:-}" ]] && _automatic_args+=(--detach)
+    else
+        _automatic_args+=(update --auto)
+        if [[ -n "${WORKTREE_BLOCKING_INSTALL:-}" ]]; then
+            _automatic_args+=(--wait)
+        else
+            _automatic_args+=(--detach)
         fi
-        [[ -n "$_include_reconcile" ]] && _automatic_args+=(--with-reconcile)
-        _start_setup_progress
-        _run_launch_request maintenance 'Automatic maintenance submission' \
-            "$PYTHON" "${_automatic_args[@]}"
-        _stop_setup_progress
-        return
+        [[ -z "$_include_reconcile" ]] && _automatic_args+=(--skip-modules)
     fi
     _start_setup_progress
-
-    local status_file="$HOME/.agent-worktrees/updater-status.json"
-    local stage_done="" plugin_changed="" skipped="" plugin_dir="" runtime_root="" runtime_apply_blocked="" stage_snapshot=""
-
-    _parse_stage_status() {
-        [[ -f "$status_file" ]] || return 0
-        local _stage_key
-        for _stage_key in stage_done plugin_changed skipped plugin_dir runtime_root runtime_apply_blocked stage_snapshot; do
-            if ! IFS= read -r -d '' "$_stage_key"; then
-                stage_done=""
-                setup_log WARN 'Plugin-update stage metadata could not be decoded'
-                return 0
-            fi
-        done < <(
-            "$PYTHON" -c "
-import sys, json
-try:
-    d = json.load(open(sys.argv[1], encoding='utf-8'))
-except Exception:
-    d = {}
-for value in [
-    str(d.get('stage_done', False)),
-    str(d.get('plugin_changed', False)),
-    str(d.get('skipped', '')),
-    str(d.get('plugin_dir', '')),
-    str(d.get('runtime_root', '')),
-    str(d.get('runtime_apply_blocked', '')),
-    json.dumps(d),
-]:
-    sys.stdout.write(value + '\0')
-" "$status_file" 2>/dev/null
-        )
-    }
-
-    if [[ "$_NO_UPDATE" != "1" ]]; then
-        setup_status INFO 'Finalizing launch: applying any pending plugin and runtime updates...'
-        # Join the background stage. This is the step most likely to make the
-        # launch look "stuck": the marketplace download staged while the Picker
-        # was open is joined here, up to the stage's own timeout.
-        if [[ -n "$_STAGE_PID" ]]; then
-            setup_status INFO 'Waiting for the background plugin-update download to finish...'
-            wait "$_STAGE_PID" 2>/dev/null || true
-        fi
-        _parse_stage_status
-        # No usable staged result (stage failed, or a peer launch held the
-        # lock): stage inline so the marketplace pull still happens.
-        if [[ "$stage_done" != "True" || "$skipped" == "locked" ]]; then
-            automatic_maintenance_enabled || { _stop_setup_progress; return 0; }
-            setup_status INFO 'Background download unavailable; downloading the plugin update now...'
-            "$PYTHON" -m agent_worktrees stage-update --auto >/dev/null 2>&1 || true
-            _parse_stage_status
-        fi
-        if [[ -n "$runtime_apply_blocked" ]]; then
-            setup_log WARN "Plugin runtime apply blocked: $runtime_apply_blocked"
-        fi
-
-        # (1) Defer self-installation until foreground maintenance is finished.
-        local _project_args=()
-        [[ -n "$LAUNCH_PROJECT" ]] && _project_args=(--project "$LAUNCH_PROJECT")
-        local _bootstrap_args=(launch-update bootstrap --auto)
-        [[ "$plugin_changed" == "True" && -z "$runtime_apply_blocked" ]] && _bootstrap_args+=(--defer-worktrees)
-
-        # (2) The executor re-derives the bootstrap plan under driver custody.
-        setup_status INFO 'Checking bootstrap services for pending updates...'
-        _run_launch_request bootstrap 'Bootstrap update' \
-            "$PYTHON" -m agent_worktrees ${_project_args[@]+"${_project_args[@]}"} "${_bootstrap_args[@]}"
-        if _refreshed_python="$(resolve_runtime_python)" && [[ -n "$_refreshed_python" && -x "$_refreshed_python" ]]; then
-            PYTHON="$_refreshed_python"
-        fi
-    else
-        setup_status INFO 'Skipping plugin update check (--no-update).'
-    fi
-
-    # (3) Plugin reconciliation (repo-configured payloads + gated runtimes).
-    #     Independent of WORKTREE_NO_UPDATE; opt out with WORKTREE_NO_RECONCILE=1.
-    #     The canonical executor retains the payload/runtime two-pass plan.
-    if [[ "$with_reconcile" == "1" && "${WORKTREE_NO_RECONCILE:-}" != "1" ]]; then
-        local _reconcile_project=()
-        [[ -n "$LAUNCH_PROJECT" ]] && _reconcile_project=(--project "$LAUNCH_PROJECT")
-        _run_launch_request reconcile 'Plugin reconcile' \
-            "$PYTHON" -m agent_worktrees ${_reconcile_project[@]+"${_reconcile_project[@]}"} launch-update reconcile --auto
-        if _refreshed_python="$(resolve_runtime_python)" && [[ -n "$_refreshed_python" && -x "$_refreshed_python" ]]; then
-            PYTHON="$_refreshed_python"
-        fi
-    fi
-    # Submit last so foreground maintenance never joins our detached install.
-    if [[ "$_NO_UPDATE" != "1" && "$plugin_changed" == "True" && -z "$runtime_apply_blocked" ]]; then
-        local _request_args=(launch-update staged --auto --status "$status_file")
-        [[ -z "${WORKTREE_BLOCKING_INSTALL:-}" ]] && _request_args+=(--detach)
-        _run_launch_request installer 'Staged runtime request (applies on the next launch)' \
-            "$PYTHON" -m agent_worktrees ${_project_args[@]+"${_project_args[@]}"} "${_request_args[@]}"
-    fi
+    _run_launch_request maintenance 'Automatic update submission' "$PYTHON" "${_automatic_args[@]}"
     _stop_setup_progress
+    if [[ -n "${WORKTREE_BLOCKING_INSTALL:-}" ]] &&
+        _refreshed_python="$(resolve_runtime_python)" &&
+        [[ -n "$_refreshed_python" && -x "$_refreshed_python" ]]; then
+        PYTHON="$_refreshed_python"
+    fi
+    return 0
 }
 
 _run_launch_request() {

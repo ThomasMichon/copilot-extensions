@@ -22,7 +22,7 @@ for ARGUMENT in "$@"; do
         --p|--pr|--pro|--proj|--proje|--projec|--project|-p) SKIP_PROJECT=1 ;;
         --p=*|--pr=*|--pro=*|--proj=*|--proje=*|--projec=*|--project=*|-p?*) ;;
         --j|--js|--jso|--json) ;;
-        observe-session|session-observation-history)
+        observe-session|session-observation-history|observe-owner)
             PASSIVE_OBSERVATION=1
             break
             ;;

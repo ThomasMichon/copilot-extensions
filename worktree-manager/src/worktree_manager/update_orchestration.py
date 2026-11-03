@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from .update_events import UpdateRun
@@ -37,6 +38,51 @@ def extract_project(rest: list[str]) -> tuple[str | None, list[str]]:
         out.append(rest[i])
         i += 1
     return project, out
+
+
+def execute_update(rest: list[str], steps: Callable[..., int]) -> int:
+    """Admit a Manager update and preserve its targeted or suite transaction."""
+    from .maintenance_policy import admit_update
+
+    if not admit_update(rest):
+        return 3
+    if any(arg == "--target" or arg.startswith("--target=") for arg in rest):
+        from .installation_updates import run_targeted_update
+
+        return run_targeted_update(rest)
+    from .runtime_source import SourceAcquisitionError
+    from .runtime_source_update import repair_selection
+    from .update_bootstrap import prepare_update
+    from .update_events import UpdateRun
+
+    if not preflight_runtime_source(suite=True):
+        return 1
+    run = None
+    try:
+        with repair_selection(rest) as runtime_source:
+            source_arguments = (
+                {"runtime_source": runtime_source} if runtime_source is not None else {}
+            )
+            prepared = prepare_update(rest, **source_arguments)
+            if prepared.exit_code:
+                return prepared.exit_code
+            run = UpdateRun()
+            rc = steps(
+                prepared.arguments, run, fresh_manager=prepared.fresh_manager,
+                environment=prepared.environment, **source_arguments,
+            )
+        return run.finish(rc)
+    except (OSError, ValueError, SourceAcquisitionError) as error:
+        if run is None:
+            print(f"Runtime source: {error}", file=sys.stderr)
+            return 1
+        run.say(f"Runtime source: {error}", state="failed")
+        run.record_engine_error(str(error), missing=False)
+        return run.finish(1)
+    except BaseException as error:
+        if run is not None:
+            run.abort(error)
+        raise
 
 
 def run_update_steps(

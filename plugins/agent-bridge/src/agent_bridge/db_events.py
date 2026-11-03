@@ -9,6 +9,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from .runtime_custody import RuntimeAdmission, admission_document
+from .owner_membership_signal import commit as commit_membership
 
 if TYPE_CHECKING:
     from .native_keyed_admission import KeyedNativePrompt
@@ -33,7 +34,7 @@ class _EventsMixin:
         with self._write_lock:
             conn = self._get_conn()
             conn.execute("DELETE FROM events WHERE session_id=?", (session_id,))
-            conn.commit()
+            commit_membership(conn, membership=False)
 
     def begin_event_rebuild(
         self,
@@ -81,7 +82,7 @@ class _EventsMixin:
                 conn.execute(
                     "DELETE FROM events WHERE session_id=?", (session_id,)
                 )
-                conn.commit()
+                commit_membership(conn, membership=False)
             except BaseException:
                 conn.rollback()
                 raise
@@ -423,12 +424,12 @@ class _EventsMixin:
                                         session_id,
                                     ),
                                 )
-                            conn.commit()
+                            commit_membership(conn, membership=False)
                         except BaseException:
                             conn.rollback()
                             raise
                     continue
-                conn.commit()
+                commit_membership(conn, membership=False)
             except BaseException:
                 conn.rollback()
                 raise
@@ -558,7 +559,7 @@ class _EventsMixin:
                         "AND current_continuity_id=?",
                         (caller_id, session_id, continuity_id),
                     )
-                conn.commit()
+                commit_membership(conn, membership=False)
                 return {
                     "accepted": True,
                     "last_acked_id": effective,
@@ -613,7 +614,7 @@ class _EventsMixin:
                 "WHERE caller_id=? AND session_id=?",
                 (caller_id, session_id),
             )
-            conn.commit()
+            commit_membership(conn, membership=False)
             return new_val
 
     def reset_delivery_cursors(
@@ -667,7 +668,7 @@ class _EventsMixin:
             conn.execute(
                 "DELETE FROM delivery_cursors WHERE session_id=?", (session_id,)
             )
-            conn.commit()
+            commit_membership(conn, membership=False)
 
     def update_delivery_cursor_invalidation_continuity(
         self,
@@ -689,4 +690,4 @@ class _EventsMixin:
                     session_id,
                 ),
             )
-            conn.commit()
+            commit_membership(conn, membership=False)

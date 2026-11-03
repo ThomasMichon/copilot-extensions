@@ -3185,6 +3185,44 @@ and PR-deadline owners are substituted. Their existing closed source/import
 cohort and production coverage targets are positively admitted; no Git, child,
 workspace mutation, tool staging or native launch is represented by these units.
 Those effectful counterparts remain in the bounded Worktrees development packet.
+
+The units in `tools/promotion_unit_tests/test_automatic_update_policy.py`
+exercise the actual shared automatic-policy function bodies without importing
+the native execution owner. Their source AST, strict automatic/manual identity,
+queued-policy predicate, optional legacy parser dispatch, independent-cell scope
+and actual read-only Manager controls are source-bound in the same packet.
+The early bootstrap control binds its explicit addressed root rather than an
+ambient default and preserves the mandatory veto with an older policy reader.
+Controller discovery is inert in these units; no worker, shell, installer or
+desktop actor starts. The separate Manager
+`test_installation_maintenance_control.py`,
+`test_installation_automatic_updates.py` and production Configuration tests
+exercise real TOML persistence, canonical switch-controller effects, payload
+delivery, confirmation/cancellation and refresh in private fixtures. The existing
+`test_launch_update_requests.py` matrix executes each available native shell
+against a synthetic engine, retaining `--auto`, strict unsupported-flag refusal,
+single submission and separate no-update behavior. Platform skips are not native
+qualification, and the consoleless desktop observer remains a separate opt-in.
+Queued launch controls also distinguish the maintenance veto from a software
+hold during intentional `--no-update` reconciliation, while borrowed Manager
+execution retains each request's selected override, including an empty default.
+Real config-writer subprocess interleavings cover source/runtime-source edits
+and stale maintenance confirmations under one bounded native lock.
+`libs/bootstrap-killswitch/tests/test_mutation_process.py` checks actual
+Bash/PowerShell/Python writer lock contention, release and recovery, plus exact
+audit-byte conditional mutations. Available Linux PowerShell evidence is not
+Windows PowerShell or Windows byte-lock qualification; run the same selected
+native controller controls through each supported Windows host separately.
+The controller and Manager packets also cover `missing/../hold.json` with an
+absent intermediate directory, path-bound confirmation and linked-leaf refusal.
+The actor-free automatic-policy controls bind a relative Manager root to the
+retained caller cwd, refuse missing/relative cwd for automatic admission, and
+keep explicit requests exempt. The durable queue counterpart changes policy
+after enqueue and drains from a different directory before synthetic effects.
+Borrowed Manager/engine controls retain the caller directory through the second
+policy check, including absolute, relative and current-user-home roots, while
+restoring the worker's original policy/hold selection afterward. Direct Manager
+checks retain their own invocation directory.
 The retained lifecycle deadline and guardian-pair units substitute their native
 Windows path-owner/file-open boundaries, retaining actual cleanup/deadline and
 byte-reader logic. Native ownership and file-sharing custody are not unit evidence.
@@ -3272,10 +3310,28 @@ inputs: independently owned Main workflows need not match a Dev proposal.
 The separate `tools/test_complete_source_native.py` witness is opt-in:
 set `COPILOT_EXTENSIONS_SOURCE_ARCHIVE_INTEGRATION=1` and run that file through
 bounded development validation. It creates a fresh temporary Git repository
-with export attributes, executable and symlink blobs, then verifies the
-actual object's complete reconstruction. It is not enrolled in required CI
+with export attributes, executable and symlink blobs, and actual CRLF PowerShell
+and LF shell checkouts, then verifies both source profiles reconstruct the
+original Git bytes without rewriting those checkouts. It is not enrolled in required CI
 or the unit-only promotion packet, and does not prove live release publication
 or Main activation.
+
+For commit-bound qualification, use the pinned raw-object reader in
+`tools/promotion_source_archive.py` and its complete-source archive verifier.
+`.gitattributes` intentionally gives `.ps1` files CRLF checkout bytes and `.sh`
+files LF, including in a WSL checkout; Git's normalized blobs are a different
+representation. Compare a snapshot's complete inventory, modes and bytes with
+the selected Git objects, not raw working-tree files. Do not normalize a
+checkout, change Git settings or weaken byte verification to reconcile them.
+Working-tree cleanliness is a separate admission question. An ordinary
+`git archive` may also apply export attributes, so it is not a substitute for
+the existing complete-source reader when every tracked blob is required.
+Run Git-object acquisition on the source-owning OS. A consumer on another OS
+receives the canonical archive and inventory and verifies them against the
+pinned tree with `verify_tree_archive`; it need not open the producer's Git
+directory over UNC or add a `safe.directory` exception. Byte verification does
+not transfer execution authority: source preparation and a native test attempt
+retain their separate resource owners and admission limits.
 
 The three retained-input cardinality/remapping controls live in
 `tools/promotion_unit_tests/test_installer_retention.py` and are shared with
@@ -6869,6 +6925,20 @@ Ordinary unselected runs are unchanged. The hardened
 `run_tests_in_devcontainer.py` wrapper accepts the same flag: it transfers only
 validated manifest data into the disposable container, strips the selection
 from dependency-only preparation, then executes it with networking removed.
+
+For retained per-case results from the local contained runner, add
+`--junit-dir <new-report-root>` to `run-plugin-tests.py`, including exact-selection
+runs. Each plugin gets a fresh `<new-report-root>/<plugin>/` directory and one
+`group-001.xml` (then `group-002.xml`, etc.) per attempted group. Existing plugin
+report directories are refused before dependency preparation, so a retry must
+name a distinct destination and cannot overwrite earlier evidence. The explicit
+report option survives neutralized `PYTEST_ADDOPTS` and project `addopts` without
+changing selected nodes, isolation, item deadlines or group/resource limits.
+Reports survive owned sandbox cleanup and distinguish failures and declared
+skips; an absent requested report cannot accompany a successful group result.
+Partial reports do not establish group success or cleanup. Reporting is not
+available for dependency-only preparation or listing and does not add a
+devcontainer artifact-export mechanism.
 
 The `dispatch-selection` artifact records exact nodes, changed test files,
 baseline generation, debt, fallback reasons, predicted smoke cost and attributed
