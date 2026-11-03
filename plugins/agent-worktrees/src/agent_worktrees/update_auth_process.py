@@ -34,7 +34,7 @@ def run(
     *,
     env: Mapping[str, str],
     cwd: Path | None = None,
-    timeout: float = 5,
+    timeout: float = 30,
     input: str = "",
 ) -> Result:
     """Capture at most 1 MiB per stream, draining excess bytes without retaining them.

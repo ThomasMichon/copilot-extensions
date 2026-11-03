@@ -9,6 +9,7 @@ import hashlib
 import importlib
 import json
 import os
+import py_compile
 import sys
 import tempfile
 import threading
@@ -18,7 +19,7 @@ from unittest.mock import patch
 
 from promotion_unit_contract import (
     PROFILE, UnitEvidenceError, admit_manifest, decode_json, manifest_digest, source_sha,
-    verify_observations, verify_sources,
+    verify_observations, verify_sources, windows_native_manifest,
 )
 from promotion_unit_effects import UnitRun
 from promotion_unit_packet import verify_packet
@@ -33,7 +34,17 @@ def prepare_framework_io() -> None:
         importlib.import_module("colorama")
 
 
-def write_line_coverage(cov, path: Path, version: str) -> None:
+def prepare_source_bytecode(root: Path, sources: dict, temporary: Path) -> None:
+    with patch.object(sys, "pycache_prefix", str(temporary)):
+        for name in sources:
+            if name.endswith(".py"):
+                py_compile.compile(
+                    str(root / name), doraise=True,
+                    invalidation_mode=py_compile.PycInvalidationMode.CHECKED_HASH,
+                )
+
+
+def write_line_coverage(cov, path: Path, version: str, *, profile: str = PROFILE) -> None:
     data = cov.get_data()
     files = {}
     totals = dict(covered_lines=0, num_statements=0, missing_lines=0, excluded_lines=0)
@@ -57,7 +68,7 @@ def write_line_coverage(cov, path: Path, version: str) -> None:
         }
     report = {
         "meta": {
-            "profile": PROFILE, "collector": "coverage.py", "version": version,
+            "profile": profile, "collector": "coverage.py", "version": version,
             "scope": "file-line-contexts; function/class expansions intentionally omitted",
             "show_contexts": True, "branch_coverage": False,
         },
@@ -73,6 +84,10 @@ def main() -> int:
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--development-root", type=Path)
     parser.add_argument("--candidate-tree", type=source_sha)
+    parser.add_argument(
+        "--windows-native", action="store_true",
+        help="Windows-only, ten-minute local qualification; not promotion or PR-CI evidence",
+    )
     args = parser.parse_args()
     started = time.monotonic()
     manifest = admit_manifest(decode_json(args.manifest.read_text(encoding="utf-8")))
@@ -88,6 +103,8 @@ def main() -> int:
         )
     verify_sources(ROOT, manifest["sources"])
     verify_helper_contract(ROOT, manifest, development_root=args.development_root)
+    if args.windows_native:
+        manifest = windows_native_manifest(manifest, platform=sys.platform)
     args.output_dir.mkdir(parents=True, exist_ok=False)
     os.environ["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
     os.environ.pop("PYTEST_ADDOPTS", None)
@@ -99,6 +116,7 @@ def main() -> int:
     # Pytest's Windows capture adapter loads native console support before collection.
     prepare_framework_io()
     with tempfile.TemporaryDirectory(prefix="promotion-units-") as temporary:
+        prepare_source_bytecode(ROOT, manifest["sources"], Path(temporary))
         run = UnitRun(None, ROOT, manifest["sources"], Path(temporary), nodes=manifest["nodes"])
         cov = coverage.Coverage(
             data_file=None, config_file=False,
@@ -125,9 +143,7 @@ def main() -> int:
                     "--log-file", str(Path(temporary) / "pytest.log"),
                     "--rootdir", str(ROOT), "--confcutdir", str(ROOT),
                     "--basetemp", str(Path(temporary) / "pytest"),
-                    *[str(ROOT / name) for name in dict.fromkeys(
-                        node.partition("::")[0] for node in manifest["nodes"]
-                    )],
+                    str(ROOT / "tools/promotion_unit_tests"),
                 ], plugins=[run])
             finally:
                 run.active = False
@@ -152,7 +168,7 @@ def main() -> int:
     verify_sources(ROOT, manifest["sources"])
     cov.save()
     coverage_path = args.output_dir / "coverage.json"
-    write_line_coverage(cov, coverage_path, coverage.__version__)
+    write_line_coverage(cov, coverage_path, coverage.__version__, profile=manifest["profile"])
     if args.development_root is not None:
         from promotion_development_map import build_mapping, project_coverage
 
@@ -204,10 +220,12 @@ def main() -> int:
     verify_packet(
         args.output_dir, expected_source_sha=args.source_sha,
         expected_manifest=manifest, source_root=ROOT, development_root=args.development_root,
+        allow_windows_native=args.windows_native,
     )
     if time.monotonic() - started >= manifest["max_seconds"]:
         raise UnitEvidenceError("unit packet verification exceeded the whole-execution budget")
-    print(f"Unit packet complete: {len(run.collected)} passed in {elapsed:.3f}s; coverage recorded once.")
+    print(f"Unit packet complete [{manifest['profile']}]: "
+          f"{len(run.collected)} passed in {elapsed:.3f}s; coverage recorded once.")
     return 0
 
 

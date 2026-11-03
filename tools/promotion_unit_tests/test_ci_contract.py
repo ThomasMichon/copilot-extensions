@@ -114,8 +114,9 @@ def declarations():
 
 def validate(tmp_path, routing, ci):
     path = tmp_path / "trusted-ci.yml"
-    path.write_text(yaml.safe_dump(routing), encoding="utf-8")
-    (tmp_path / "ci.yml").write_text(yaml.safe_dump(ci), encoding="utf-8")
+    # JSON is a YAML subset; scalar and malformed-YAML controls remain below.
+    path.write_text(json.dumps(routing), encoding="utf-8")
+    (tmp_path / "ci.yml").write_text(json.dumps(ci), encoding="utf-8")
     return GUARD.validate_workflow(path)
 
 

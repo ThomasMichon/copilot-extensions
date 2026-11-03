@@ -24,7 +24,7 @@ def test_native_cleanup_boundary(monkeypatch, text, expected):
     monkeypatch.setattr(scope.sys, "platform", "linux")
     monkeypatch.setattr(
         scope.Path, "read_text",
-        lambda path, **k: text if str(path) == "/proc/self/cgroup" else "0::/\n1:name=systemd:/\n",
+        lambda path, **k: text if path.as_posix() == "/proc/self/cgroup" else "0::/\n1:name=systemd:/\n",
     )
     assert scope.caller_unit() == expected
 
@@ -41,7 +41,7 @@ def test_host_visible_container_boundary(monkeypatch, hierarchy, local):
     monkeypatch.setattr(
         scope.Path, "read_text",
         lambda path, **k: hierarchy + ":" + boundary + (
-            local if str(path) == "/proc/self/cgroup" else ""
+            local if path.as_posix() == "/proc/self/cgroup" else ""
         ) + "\n",
     )
     expected = "caller.service" if local.endswith(".service") else "caller.scope" if local else None
@@ -63,7 +63,7 @@ def test_unrelated_pid_one_scope_does_not_hide_local_unit(monkeypatch):
     monkeypatch.setattr(
         scope.Path, "read_text",
         lambda path, **k: "0::/system.slice/" + (
-            "caller.service" if str(path) == "/proc/self/cgroup" else "init.scope"
+            "caller.service" if path.as_posix() == "/proc/self/cgroup" else "init.scope"
         ) + "\n",
     )
     monkeypatch.setattr(scope.shutil, "which", lambda *a, **k: None)
@@ -164,8 +164,8 @@ def test_relative_runner_search_uses_daemon_cwd_for_probe_and_launch(tmp_path, m
     probe = Mock(return_value=subprocess.CompletedProcess([], 0, b"systemd 255\n"))
     monkeypatch.setattr(scope.subprocess, "run", probe)
     result = scope.scope_command(["/runtime/python"], "a" * 32, {"PATH": "bin"}, cwd=str(target))
-    assert result[0] == str(runner)
-    assert probe.call_args.args[0] == [str(runner), "--version"]
+    assert Path(result[0]) == runner
+    assert probe.call_args.args[0] == [result[0], "--version"]
     assert probe.call_args.kwargs["cwd"] == str(target)
 
 

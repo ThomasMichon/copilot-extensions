@@ -3549,13 +3549,19 @@ The packet lives in `tools/promotion_unit_tests/`, independent of mixed
 integration test modules and their conftests. The manifest binds source and
 test bytes, the expected parameter nodes, production coverage targets and a
 whole-packet budget. Any missing, duplicate, unexpected, failed or skipped node
-or phase rejects the result. Each admitted file is collected once; an exact
-node whitelist deselects other cases before execution and restores manifest
+or phase rejects the result. One pytest directory collector visits only admitted
+files, once each in manifest order, without repeated sibling-directory scans.
+An exact node whitelist deselects other cases before execution and restores manifest
 order. Missing or duplicate admitted nodes reject collection before execution.
 The runner selects pytest's `parametrize_long_str_id_strategy=legacy` to
 preserve the manifest's full-value parameter IDs across pytest 9.1 and 9.2.
 This keeps exact node admission; it does not truncate, rename or omit long
 parameter cases when the framework's default changes.
+Admitted Python sources are precompiled once into the private packet directory
+using Python's hash-checked bytecode format. Imports still validate source bytes;
+per-case modules and globals remain fresh, and source verification before and
+after execution is unchanged. Bytecode preparation and cleanup share the same
+whole-packet budget.
 Its actor-free PowerShell SDK controls compare Windows physical-path spellings
 through a synthetic resolver boundary, including DOS/UNC aliases and unrelated
 roots. Native path reads and concurrent first publication remain separate
@@ -3633,6 +3639,16 @@ Use the bounded test supervisor around:
 ```text
 python tools/run-promotion-unit-tests.py --source-sha <full-source-commit> --output-dir <new-evidence-directory>
 ```
+
+For explicitly selected native Windows qualification, add `--windows-native`
+and give the bounded supervisor an eleven-minute outer deadline. This selects
+the distinct `copilot-extensions.windows-native-units/v1` profile with a
+ten-minute whole-packet budget, including preparation, coverage and verification.
+It preserves the exact development inventory, coverage and effect restrictions.
+It refuses non-Windows and composed-candidate execution. The ordinary command,
+required PR CI and promotion remain limited to five minutes; their packet
+consumers reject the native profile. Portable native-packet inspection requires
+an explicit `verify_packet(..., allow_windows_native=True)` opt-in.
 
 The command requires the existing `pytest`, `coverage>=7.7`, `packaging` and
 `PyYAML` test dependencies, matching the source CI/promotion jobs.
