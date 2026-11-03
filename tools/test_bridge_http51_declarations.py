@@ -138,3 +138,12 @@ def test_semantic_portfolio_requires_receipt_sources_and_probe():
     assert evidence.previous.PREFIX + "live_exact_notify.py" in evidence.AFFECTED
     assert evidence.previous.PREFIX + "live_keyed_receipt.py" in evidence.AFFECTED
     assert "plugins/agent-bridge/tests/http51_live_cli_probes.py" in evidence.EXTRA_PATHS
+    for name in (
+        "__main__.py", "app_routes.py", "events.py", "compaction_evidence.py",
+        "session_observation_contract.py", "session_observations.py",
+        "session_observation_cli.py", "routes/session_observations.py",
+    ):
+        assert evidence.previous.PREFIX + name in evidence.AFFECTED
+    assert evidence.PROBES["test_http51_observation_boundaries"] == 2
+    assert evidence.PROBES["test_observation_http_resource_boundary"] == 3
+    assert evidence.PROBES["test_observation_cancellation_preserves_other_subscription"] == 1

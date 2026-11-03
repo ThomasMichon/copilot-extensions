@@ -295,6 +295,13 @@ def frames(
     if on_contract is not None:
         on_contract(version)
     argv = feed_argv(project, worktree, session, engine_command=base, contract_version=version)
+    yield from command_frames(argv, cancelled=cancelled, cwd=cwd)
+
+
+def command_frames(argv: list[str], *, cancelled: Event, cwd: str):
+    """Bounded JSONL for an already admitted owned command; no discovery or bootstrap."""
+    if cancelled.is_set():
+        return
     queue: Queue = Queue(maxsize=2)
     stopped = Event()
     errors = bytearray()

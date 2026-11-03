@@ -52,7 +52,8 @@ from . import companion_attention as ca
 from .companion_topology import topology_view
 from . import handoff_client as hc
 from .companion_agenda import agenda_text, subscribe
-from .companion_timeline_widget import CompanionTimelinePanel
+from .companion_timeline_widget import CompanionTimelinePanel, SubwayTimeline
+from .companion_timeline_attachment import TimelineAttachment
 
 #: Blocker code (from the closure descriptor's ``blockers`` list) -> a short,
 #: plain-language reason. Mirrors the vocabulary in
@@ -422,6 +423,9 @@ class MuxCompanionApp(App):
         self._observer_pane = os.environ.get("TMUX_PANE")
         self._action_message: Text | None = None
         self._timeline_panel = CompanionTimelinePanel(id="timeline")
+        self._timeline_attachment = TimelineAttachment(
+            self._timeline_panel, cwd=self._cwd or os.getcwd(),
+        )
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -486,14 +490,16 @@ class MuxCompanionApp(App):
         finally:
             self._checking_cli = False
 
-    def on_unmount(self) -> None:
+    async def on_unmount(self) -> None:
         self._cancel_owned_reads()
+        await self._timeline_attachment.close()
 
     def action_quit(self) -> None:
         self._cancel_owned_reads()
         self.exit()
 
     def _cancel_owned_reads(self) -> None:
+        self._timeline_attachment.begin_close()
         self._read_cancel.set()
         self._navigation_cancel.set()
         self._observation_cancel.set()
@@ -505,6 +511,7 @@ class MuxCompanionApp(App):
 
     @work(exclusive=True)
     async def _reload(self) -> None:
+        await self._timeline_attachment.set_selection(None)
         self._read_cancel.set()
         self._agenda_cancel.set()
         self._agenda_generation += 1
@@ -544,6 +551,8 @@ class MuxCompanionApp(App):
         self.query_one("#refresh-btn", Button).disabled = False
         self._poll_attention(force=True)
         self._start_agenda()
+        if self.query_one("#views", TabbedContent).active == "timeline-tab":
+            self._sync_timeline()
         if self.query_one("#views", TabbedContent).active == "topology-tab":
             self._load_observations()
 
@@ -602,11 +611,52 @@ class MuxCompanionApp(App):
         )
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
-        if self._timeline_panel.is_mounted:
+        if (
+            not self._timeline_attachment.closed and self._timeline_panel.is_attached
+            and self._timeline_panel.query(SubwayTimeline)
+        ):
             self._timeline_panel.set_demand_visible(event.pane.id == "timeline-tab")
         if event.pane.id == "topology-tab" and not self._loading:
             if self._observation_owner is not self._data:
                 self._load_observations()
+
+    def on_subway_timeline_history_requested(self, message: SubwayTimeline.HistoryRequested) -> None:
+        self._timeline_attachment.history(message)
+
+    def on_subway_timeline_demand_changed(self, message: SubwayTimeline.DemandChanged) -> None:
+        if not self._loading:
+            self._sync_timeline()
+
+    def on_subway_timeline_reconciliation_requested(
+        self, message: SubwayTimeline.ReconciliationRequested,
+    ) -> None:
+        self._timeline_attachment.unavailable(
+            "Explicit owner reconciliation requires Refresh; integrity evidence was retained.",
+        )
+
+    @work(group="timeline-selection")
+    async def _sync_timeline(self) -> None:
+        if self._timeline_attachment.closed or not self._timeline_panel.query(SubwayTimeline):
+            return
+        data = self._data
+        selection = None
+        if self._timeline_panel.query_one(SubwayTimeline).demand_visible and not self._loading:
+            heads = [row.get("id") for row in data.sessions if row.get("is_head") is True
+                     and isinstance(row.get("id"), str) and row["id"]]
+            worktree, project = data.worktree.get("id"), data.worktree.get("repo")
+            if not isinstance(project, str) or not project:
+                selected_project, selected_worktree, _ = self._observer_identity
+                project = selected_project if selected_worktree == worktree else None
+            if (
+                not data.error and not data.sessions_error and len(heads) == 1
+                and isinstance(worktree, str) and worktree and isinstance(project, str) and project
+            ):
+                selection = (project, worktree, heads[0])
+            else:
+                self._timeline_attachment.unavailable(
+                    "Selected project/worktree and exactly one canonical head are required.",
+                )
+        await self._timeline_attachment.set_selection(selection)
 
     @work(exclusive=True, group="session-observations")
     async def _load_observations(self) -> None:

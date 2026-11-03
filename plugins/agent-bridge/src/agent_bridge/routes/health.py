@@ -18,6 +18,7 @@ from ..hosting_admission_cli import HOSTING_CAPABILITY, HOSTING_CAPABILITY_VERSI
 from ..self_retire import slot_descriptor
 from ..live_keyed_receipt import CAPABILITY as LIVE_KEYED_RECEIPT_CAPABILITY
 from ..live_exact_notify import CAPABILITY as LIVE_EXACT_NOTIFY_CAPABILITY
+from ..session_observation_contract import HISTORY, OBSERVATIONS
 
 router = APIRouter()
 
@@ -49,6 +50,8 @@ async def health(request: Request) -> dict:
             NATIVE_SEND_RECEIPT_CAPABILITY: NATIVE_SEND_RECEIPT_CAPABILITY_VERSION,
             LIVE_KEYED_RECEIPT_CAPABILITY: 1,
             LIVE_EXACT_NOTIFY_CAPABILITY: 1,
+            OBSERVATIONS: 1,
+            HISTORY: 1,
         },
         "drain_contract": {"minimum": DRAIN_CONTRACT_VERSION, "maximum": DRAIN_CONTRACT_VERSION},
         "ssh_carriers": get_default_manager().carrier_diagnostics(),

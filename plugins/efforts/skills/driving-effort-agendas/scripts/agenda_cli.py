@@ -14,8 +14,13 @@ from agenda_store import history, mutate, read, safe_path
 
 
 def main(argv: list[str] | None = None) -> int:
+    args_list = sys.argv[1:] if argv is None else argv
+    if args_list and args_list[0] in ("reader-info", "history-page"):
+        from agenda_history_cli import main as history_main
+        return history_main(args_list)
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("read", "next", "check", "history", "init", "update", "publish"))
+    parser.add_argument("command", choices=("read", "next", "check", "history", "init", "update", "publish",
+                                            "reader-info", "history-page"))
     parser.add_argument("--state-home", type=Path, required=True)
     parser.add_argument("--request", type=Path, help="strict mutation JSON; otherwise read bounded stdin")
     parser.add_argument("--import-home", type=Path, help="explicit read-only legacy home, init only")

@@ -35,28 +35,26 @@ so this benefit reaches every reader, not only the fleet-wide one.
 from __future__ import annotations
 
 import copy
+import logging
 import threading
+from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
+
+from . import tracking_save_capture as save_capture
+from . import tracking_save_notifications as notifications
 
 if TYPE_CHECKING:
     from .tracking import WorktreeRecord
 
 _cache_lock = threading.Lock()
-_cache: dict[str, tuple[int, int, "WorktreeRecord"]] = {}
-_write_observers: set[Callable] = set()
+_cache: dict[str, tuple[int, int, WorktreeRecord]] = {}
+logger = logging.getLogger(__name__)
 
 
 def observe_writes(callback: Callable) -> Callable:
-    """Observe committed records in this process; observers cannot rewrite them."""
-    with _cache_lock:
-        _write_observers.add(callback)
-
-    def unsubscribe():
-        with _cache_lock:
-            _write_observers.discard(callback)
-
-    return unsubscribe
+    """Observe detached committed snapshots after all record/pair holds release."""
+    return notifications.observe_writes(callback)
 
 
 _TRANSIENT_PROJECTION_ATTRS = (
@@ -68,10 +66,10 @@ _TRANSIENT_PROJECTION_ATTRS = (
 
 def cached_load(
     path: Path,
-    loader: Callable[[Path], "WorktreeRecord"],
+    loader: Callable[[Path], WorktreeRecord],
     *,
     copy_result: bool = True,
-) -> "WorktreeRecord":
+) -> WorktreeRecord:
     """``loader(path)``, memoized on the file's own ``(mtime_ns, size)``.
 
     Returns an independent copy each time -- ``WorktreeRecord`` is a plain
@@ -116,66 +114,73 @@ def cached_load(
     return rec if not copy_result else copy.deepcopy(rec)
 
 
-def store(path: Path, record: "WorktreeRecord") -> None:
-    """Seed/refresh the cache with ``record``, a value THIS process just
-    wrote to ``path`` (``agent-worktrees-authoritative-daemon`` effort:
-    "whenever a write is posted, ensure subsequent readers see that result
-    without another direct read").
-
-    Stamped on ``path``'s CURRENT ``(mtime_ns, size)`` -- call this only
-    once the write is durably on disk (e.g. from ``tracking.save_record``,
-    still inside its own record lock, right after the atomic write
-    completes), so the stamp really reflects what ``record`` contains and
-    a concurrent writer can't sneak a stamp mismatch in between. Stores an
-    independent ``copy.deepcopy`` (mirrors :func:`cached_load`'s own
-    contract): the caller's own ``record`` object is very often mutated
-    further after this call returns (e.g. ``record._loaded_from =
-    path`` in ``save_record`` itself), and the cache must never be a
-    shared-mutable-state hazard.
-
-    The stored copy's own ``_loaded_from`` is stamped to ``path`` here,
-    not left as whatever the caller's in-memory ``record`` happened to
-    carry: ``tracking.save_record`` calls this BEFORE it sets that
-    attribute on its own ``record`` (still inside the lock, to avoid a
-    write/stat race -- see the docstring above), so a bare passthrough of
-    ``record`` would cache a copy with a stale/absent ``_loaded_from``. A
-    later ``load_record`` cache hit handing that copy back to a caller
-    that then does ``tracking.save_record(record)`` with no explicit
-    ``path`` -- resolving one via ``record.yaml_path`` -- would silently
-    resolve to the WRONG file (or raise), not merely carry a cosmetic
-    staleness.
-
-    Best-effort: if ``path`` can't be stat'd (the file vanished between the
-    write and this call -- exceedingly unlikely under the same lock),
-    silently no-ops rather than raising -- a write that already succeeded
-    must never be reported as failed merely because this accelerator
-    couldn't warm itself afterward; the next :func:`cached_load` call
-    simply misses and re-reads, exactly as if this function didn't exist.
-
-    Also strips the transient, never-serialized session/controller
-    projection-dirty markers (``_session_projection_dirty`` and friends)
-    from the cached copy: ``_save_record_unlocked`` can populate these
-    while serializing, and they're cleared on the caller's OWN object only
-    AFTER this cache write returns (``_flush_session_projections``, once
-    the lock is released) -- so a bare passthrough would cache a copy that
-    still looks dirty, and a later cache-hit ``load_record()`` would hand
-    that stale dirty state back out, unlike a fresh uncached parse (which
-    never carries these attributes at all).
-    """
+def _saved_content(path: Path, content: str | None) -> str | None:
     try:
-        st = path.stat()
-    except OSError:
-        return
-    cached_record = copy.deepcopy(record)
+        if content is None:
+            with path.open("rb") as handle:
+                raw = handle.read(save_capture.MAX_CONTENT_BYTES + 1)
+            if len(raw) > save_capture.MAX_CONTENT_BYTES:
+                raise save_capture.CaptureOmitted("saved-record-byte-bound")
+            content = raw.decode("utf-8")
+        save_capture.content_bytes(content)
+        return content
+    except save_capture.CaptureOmitted as error:
+        logger.warning("Committed record cache/snapshot omitted: %s", error)
+    except Exception:
+        # Optional snapshot acquisition only: canonical persistence is outside this boundary.
+        logger.exception("Committed record snapshot unavailable after successful persistence")
+    return None
+
+
+def _warm(path: Path, snapshot: save_capture.FrozenValue) -> None:
+    stamp = path.stat()
+    cached_record = save_capture.thaw_legacy(snapshot)
     cached_record._loaded_from = path
     for attr in _TRANSIENT_PROJECTION_ATTRS:
         if hasattr(cached_record, attr):
             delattr(cached_record, attr)
     with _cache_lock:
-        _cache[str(path)] = (st.st_mtime_ns, st.st_size, cached_record)
-        observers = tuple(_write_observers)
-    for observer in observers:
-        observer(path, cached_record)
+        _cache[str(path)] = (stamp.st_mtime_ns, stamp.st_size, cached_record)
+
+
+def store(
+    path: Path,
+    record: WorktreeRecord,
+    *,
+    content: str | None = None,
+    capture_before: notifications.Prepared | None = None,
+) -> None:
+    """Warm a bounded committed snapshot; cache failure never decides observer delivery.
+
+    The writer supplies exact persisted text for receipt evidence. A bounded
+    immutable freeze retains exact committed caller values for cache and legacy
+    compatibility, without YAML normalization or an unbounded deepcopy.
+    Legacy notifications keep their signature and thaw independent records
+    after the last record/pair notification hold is released.
+    """
+    saved = _saved_content(path, content)
+    snapshot = None
+    size = 0
+    try:
+        snapshot, size = save_capture.freeze_legacy(record, path=path)
+    except Exception:
+        logger.exception("Bounded committed record snapshot unavailable")
+    try:
+        if snapshot is None:
+            raise save_capture.CaptureOmitted("bounded-cache-snapshot-unavailable")
+        _warm(path, snapshot)
+    except Exception:
+        # Only the optional accelerator is quarantined, never a canonical write.
+        logger.exception("Record cache warming failed after canonical persistence")
+        with _cache_lock:
+            _cache.pop(str(path), None)
+    notifications.committed(
+        path,
+        saved,
+        capture_before,
+        legacy_snapshot=snapshot,
+        legacy_bytes=size,
+    )
 
 
 def clear() -> None:

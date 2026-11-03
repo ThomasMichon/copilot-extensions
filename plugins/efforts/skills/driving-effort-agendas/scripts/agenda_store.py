@@ -167,7 +167,9 @@ def _schema(db: sqlite3.Connection) -> None:
 
 @contextmanager
 def transaction(home: Path, *, create: bool = False, write: bool = False,
-                store_version: int | None = None) -> Iterator[sqlite3.Connection]:
+                store_version: int | None = None, readonly: bool = False) -> Iterator[sqlite3.Connection]:
+    if readonly and (create or write):
+        raise AgendaError("read-only agenda transactions cannot create or write")
     home = safe_path(home, directory=True)
     if not home.is_dir():
         raise AgendaError("explicit state home must already exist")
@@ -178,7 +180,8 @@ def transaction(home: Path, *, create: bool = False, write: bool = False,
         raise AgendaError("managed store does not exist; explicitly init/import first")
     before = home.stat()
     try:
-        db = sqlite3.connect(path.as_uri() + ("?mode=rwc" if create else "?mode=rw"),
+        mode = "ro" if readonly else "rwc" if create else "rw"
+        db = sqlite3.connect(path.as_uri() + "?mode=" + mode,
                              uri=True, timeout=5, isolation_level=None)
         try:
             after = home.stat()

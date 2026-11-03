@@ -1,0 +1,9 @@
+{
+  "comment": "Attach selected worktree owner facts and history to the live Sidecar timeline without losing browsing anchors",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

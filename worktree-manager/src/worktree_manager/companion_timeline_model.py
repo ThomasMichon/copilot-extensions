@@ -12,7 +12,7 @@ import json
 from .companion_timeline_contract import (
     Availability, Completeness, EventRef, HistoryPage, LiveDelta, MAX_EXPANDED_GROUPS,
     MAX_LANES, MAX_WINDOW_BYTES, MAX_WINDOW_EVENTS, Provider, RelationKind,
-    SourcePosition, SourceToken, TimelineEvent, TimelineSnapshot,
+    SourcePosition, SourceToken, TimelineEvent, TimelineGap, TimelineSnapshot,
 )
 
 MAX_EVENT_PROOFS = MAX_WINDOW_EVENTS * 4
@@ -78,6 +78,7 @@ class TimelineWindow:
         self._head: str | None = None
         self._anchor: EventRef | None = None
         self.reconciliation_required: frozenset[str] = frozenset()
+        self.source_gaps: dict[str, TimelineGap] = {}
 
     def _result(
         self, applied: bool, code: ResultCode, reason: str, *, evicted: int = 0,
@@ -119,6 +120,7 @@ class TimelineWindow:
             self._cursors.clear()
             self._lanes.clear()
             self.reconciliation_required = frozenset()
+            self.source_gaps.clear()
             old = None
         self._scope = scope
         if head is not None:
@@ -134,6 +136,7 @@ class TimelineWindow:
             self._cursors.pop(key, None)
             self._lanes = {actor: lane for actor, lane in self._lanes.items() if actor[0] != key}
             self.reconciliation_required -= {key}
+            self.source_gaps.pop(key, None)
             old = None
         self.sources[key] = replace(old, token=token, requested_before=None) if old else SourceState(token)
         self._by_ref = {event.ref: event for event in self.events}
@@ -311,7 +314,6 @@ class TimelineWindow:
         if snapshot.position != state.position and snapshot.position in self._cursors.get(snapshot.token.identity.source_key, set()):
             return self._result(False, ResultCode.CURSOR_MISMATCH, "Snapshot returned an older known live position.")
         digest = sha256(json.dumps({
-            "events": [event.content() for event in snapshot.events],
             "purpose": snapshot.purpose, "effort": snapshot.effort_ref,
             "creation": snapshot.creation_context, "facts": snapshot.facts_json,
         }, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).digest()
@@ -331,6 +333,33 @@ class TimelineWindow:
             availability=snapshot.availability, completeness=snapshot.completeness,
             snapshot=replace(snapshot, events=()), snapshot_position=snapshot.position, snapshot_digest=digest,
         ), replace_source=True)
+
+    def apply_gap(self, gap: TimelineGap) -> WindowResult:
+        state = self._source(gap.token)
+        if state is None or gap.before is not None and gap.before != state.requested_before:
+            return self._result(False, ResultCode.STALE_TOKEN, "Gap belongs to an old source or page request.")
+        if gap.availability is Availability.HEAD_CHANGED:
+            self.apply_snapshot(TimelineSnapshot(
+                gap.token, gap.position, Availability.HEAD_CHANGED, gap.completeness,
+            ))
+            state = self.sources[gap.token.identity.source_key]
+        self.source_gaps[gap.token.identity.source_key] = gap
+        self.sources[gap.token.identity.source_key] = replace(
+            state, completeness=gap.completeness,
+            requested_before=None if gap.before is not None else state.requested_before,
+        )
+        self.revision += 1
+        return self._result(False, ResultCode.SOURCE_ERROR, f"History gap: {gap.reason}: {gap.details}")
+
+    def source_error(self, token: SourceToken, message: str) -> WindowResult:
+        state = self._source(token)
+        if state is None:
+            return self._result(False, ResultCode.STALE_TOKEN, "Error belongs to a retired source.")
+        self.sources[token.identity.source_key] = replace(
+            state, availability=Availability.UNAVAILABLE, requested_before=None,
+        )
+        self.revision += 1
+        return self._result(False, ResultCode.SOURCE_ERROR, message)
 
     def apply_delta(self, delta: LiveDelta) -> WindowResult:
         state = self._source(delta.token)

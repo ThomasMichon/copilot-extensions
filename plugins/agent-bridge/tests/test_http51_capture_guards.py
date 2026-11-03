@@ -49,6 +49,9 @@ def test_http51_uses_the_existing_capture_owner_and_keeps_prior_floors():
     }
     assert set(evidence.AFFECTED) == {
         previous.PREFIX + name for name in (
+            "__main__.py", "app_routes.py", "events.py", "compaction_evidence.py",
+            "session_observation_contract.py", "session_observations.py",
+            "session_observation_cli.py", "routes/session_observations.py",
             "protocol.py", "native_send_admission.py", "native_bound_prompt.py",
             "native_keyed_admission.py", "routes/prompts.py", "send_outcome.py",
             "session_prompts.py", "session_targeting_cli.py",
@@ -62,6 +65,25 @@ def test_http51_uses_the_existing_capture_owner_and_keeps_prior_floors():
         "plugins/agent-bridge/extensions/agent-bridge/delivery.mjs",
         "plugins/agent-bridge/extensions/agent-bridge/extension.mjs",
     }
+
+
+def test_http51_observation_expansion_retains_the_original_probe_counts():
+    original = {
+        "test_http51_capture_actual_observations": 2,
+        "test_concurrent_stopped_retries_reconcile_after_actual_resume_state_race": 1,
+        "test_failed_resume_without_a_matching_receipt_remains_a_failure": 1,
+        "test_interrupted_pre30_upgrade_reopens_every_legacy_guard_checkpoint": 20,
+    }
+    assert {key: evidence.PROBES[key] for key in original} == original
+    assert evidence.PROBES["test_http51_observation_boundaries"] == 2
+    assert evidence.PROBES["test_observation_http_resource_boundary"] == 3
+    assert evidence.PROBES["test_observation_cancellation_preserves_other_subscription"] == 1
+    assert sum(evidence.PROBES.values()) == 30
+    assert evidence.GENERATION == 51
+    assert evidence.FAMILY == "http51-standard-native-send-asgi-v1"
+    assert evidence.CAPABILITY_VERSIONS["bridge-session-observations-v1"] == 1
+    assert evidence.CAPABILITY_VERSIONS["bridge-session-observation-history-v1"] == 1
+    assert "tools/bridge_http51_declarations.py" in evidence.EXTRA_PATHS
 
 
 @pytest.mark.parametrize("fault", [None, "bytes", "code"])

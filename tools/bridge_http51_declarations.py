@@ -1,4 +1,4 @@
-"""Prepare HTTP-51 receipt-capability declarations, never capture provenance."""
+"""Prepare HTTP-51 receipt/observation declarations, never capture provenance."""
 
 from __future__ import annotations
 

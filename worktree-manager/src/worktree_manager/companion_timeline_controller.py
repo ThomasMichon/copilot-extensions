@@ -9,10 +9,10 @@ from typing import Protocol
 
 from .companion_timeline_contract import (
     HistoryPage, LiveDelta, Provider, SourcePosition, SourceToken,
-    TimelineContractError, TimelineSnapshot,
+    TimelineContractError, TimelineGap, TimelineSnapshot,
 )
 
-Observation = TimelineSnapshot | LiveDelta
+Observation = TimelineSnapshot | LiveDelta | TimelineGap
 
 
 class TimelineSourceError(RuntimeError):
@@ -28,7 +28,7 @@ class TimelineSource(Protocol):
 
     async def history(
         self, token: SourceToken, before: SourcePosition, *, stop: asyncio.Event,
-    ) -> HistoryPage: ...
+    ) -> HistoryPage | TimelineGap: ...
 
 
 class TimelineController:
@@ -46,6 +46,7 @@ class TimelineController:
         observation: Callable[[Observation], None],
         page: Callable[[HistoryPage], None],
         error: Callable[[SourceToken, str], None],
+        gap: Callable[[TimelineGap], None] | None = None,
     ) -> None:
         if any(not isinstance(provider, Provider) for provider in sources):
             raise TimelineContractError("timeline adapters require exact provider keys")
@@ -53,6 +54,7 @@ class TimelineController:
         self._observation = observation
         self._page = page
         self._error = error
+        self._gap = gap
         self._selected: dict[Provider, SourceToken] = {}
         self._readers: dict[Provider, asyncio.Task[None]] = {}
         self._pages: dict[Provider, asyncio.Task[None]] = {}
@@ -130,9 +132,12 @@ class TimelineController:
             async for value in stream:
                 if not self._current(token, revision):
                     return
-                if not isinstance(value, (TimelineSnapshot, LiveDelta)) or value.token != token:
+                if not isinstance(value, (TimelineSnapshot, LiveDelta, TimelineGap)) or value.token != token:
                     raise TimelineContractError("source returned a wrong-selection observation")
-                self._observation(value)
+                if isinstance(value, TimelineGap):
+                    self._deliver_gap(value)
+                else:
+                    self._observation(value)
             if self._current(token, revision):
                 self._error(token, "Unavailable: timeline source ended; explicit reconciliation required.")
         except (TimelineSourceError, TimelineContractError, OSError, TimeoutError) as exc:
@@ -172,6 +177,12 @@ class TimelineController:
         )
         return True
 
+    def _deliver_gap(self, value: TimelineGap) -> None:
+        if self._gap is None:
+            self._error(value.token, f"History gap: {value.reason}: {value.details}")
+        else:
+            self._gap(value)
+
     async def _history(
         self, source: TimelineSource, token: SourceToken,
         before: SourcePosition, revision: int, stop: asyncio.Event,
@@ -180,9 +191,12 @@ class TimelineController:
             value = await source.history(token, before, stop=stop)
             if not self._current(token, revision):
                 return
-            if not isinstance(value, HistoryPage) or value.token != token or value.before != before:
+            if not isinstance(value, (HistoryPage, TimelineGap)) or value.token != token or value.before != before:
                 raise TimelineContractError("history result does not match the requested source boundary")
-            self._page(value)
+            if isinstance(value, TimelineGap):
+                self._deliver_gap(value)
+            else:
+                self._page(value)
         except (TimelineSourceError, TimelineContractError, OSError, TimeoutError) as exc:
             if self._current(token, revision):
                 self._error(token, f"Timeline history error: {exc}")

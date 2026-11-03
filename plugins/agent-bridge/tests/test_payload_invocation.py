@@ -22,6 +22,144 @@ from agent_bridge.session_host import launcher
 PLUGIN = Path(__file__).resolve().parents[1]
 
 
+@pytest.mark.parametrize("shell", ["bash", "pwsh"])
+@pytest.mark.parametrize("mode", ["legacy", "namespaced"])
+@pytest.mark.parametrize("argv", [
+    ["observe-session", "fixture"],
+    ["--json", "session-observation-history", "fixture"],
+    ["--project", "demo", "observe-session", "fixture"],
+    ["-p", "demo", "session-observation-history", "fixture"],
+    ["--project=demo", "--json", "observe-session", "fixture"],
+    ["-pdemo", "observe-session", "fixture"],
+    ["-p=demo", "observe-session", "fixture"],
+    ["agent-bridge", "--project", "demo", "observe-session", "fixture"],
+    ["--project", "observe-session", "create", "fixture"],
+    ["--project=session-observation-history", "create", "fixture"],
+])
+def test_passive_observer_attributed_payload_never_provisions(tmp_path, shell, mode, argv):
+    """Run the shipped dispatcher with inert context/publication/installer spies."""
+    host = shutil.which(shell)
+    if host is None:
+        pytest.skip(f"{shell} is unavailable")
+    suffix = "sh" if shell == "bash" else "ps1"
+    payload = tmp_path / "payload"
+    scripts = payload / "scripts"
+    context_scripts = scripts / "installation-context"
+    context_scripts.mkdir(parents=True)
+    (payload / "bin").mkdir()
+    (payload / "plugin.json").write_text('{"name":"agent-bridge"}', encoding="utf-8")
+    for relative in (
+        "bin/agent-bridge" if shell == "bash" else "bin/agent-bridge.ps1",
+        f"scripts/runtime-gate.{suffix}",
+        "scripts/installation-context/json-query.awk",
+    ):
+        shutil.copyfile(PLUGIN / relative, payload / relative)
+    shutil.copyfile(
+        PLUGIN / f"scripts/resolve-runtime.{suffix}",
+        scripts / f"resolve-runtime-original.{suffix}",
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+    runtime = home / (".agent-bridge" if mode == "legacy" else "namespaced-runtime")
+    context = home / "contexts" / "market" / "agent-bridge" / "receipt" / "context.json"
+    status = {
+        "status": "ready", "reason": "legacy" if mode == "legacy" else "namespaced-active",
+        "actualMode": mode, "desiredMode": mode, "installGeneration": "fixture-generation",
+        "runtimeRoot": str(runtime), "context": str(context), "marketplaceId": "fixture-market",
+        "legacy": {"root": str(home / ".agent-bridge")},
+    }
+    status_file = tmp_path / "status.json"
+    status_file.write_text(json.dumps(status), encoding="utf-8")
+    validated = tmp_path / "validated.json"
+    validated.write_text(json.dumps({
+        "generation": "fixture-generation", "pluginRoot": str(runtime),
+    }), encoding="utf-8")
+    calls = tmp_path / "calls"
+    installer_marker = tmp_path / "installer-called"
+    if shell == "bash":
+        (context_scripts / "installation-context.sh").write_text(
+            'printf "%s\\n" "$1" >> "$PROBE_CALLS"\n'
+            'case "$1" in\n'
+            'status) cat "$PROBE_STATUS" ;;\n'
+            'validate) cat "$PROBE_VALIDATED" ;;\n'
+            '*) printf "PUBLICATION_SPY\\n" >&2; exit 53 ;;\nesac\n',
+            encoding="utf-8",
+        )
+        (scripts / "resolve-runtime.sh").write_text(
+            '# Trace contract: normal/read-only/ready-v1\n'
+            'printf "resolver:%s:%s\\n" "$AGENT_RT_RESOLVE_TRACE_MODE" '
+            '"${AGENT_BRIDGE_NO_SELFPROVISION:-unset}" >> "$PROBE_CALLS"\n'
+            '. "$AGENT_BRIDGE_PAYLOAD_ROOT/scripts/resolve-runtime-original.sh"\n',
+            encoding="utf-8",
+        )
+        (scripts / "install.sh").write_text(
+            'touch "$PROBE_INSTALLER"; exit 91\n', encoding="utf-8",
+        )
+        command = [host, str(payload / "bin/agent-bridge"), *argv]
+    else:
+        (context_scripts / "installation-context.ps1").write_text(
+            "param($Action,$PayloadRoot,$PluginId,$LegacyRoot,$Context,$DurableHome,"
+            "$ExpectedPluginId,$ExpectedPayloadRoot)\n"
+            "[IO.File]::AppendAllText($env:PROBE_CALLS, $Action + \"`n\")\n"
+            "switch -CaseSensitive ($Action) {\n"
+            "'status' { Get-Content -Raw -LiteralPath $env:PROBE_STATUS }\n"
+            "'validate' { Get-Content -Raw -LiteralPath $env:PROBE_VALIDATED }\n"
+            "default { [Console]::Error.WriteLine('PUBLICATION_SPY'); exit 53 }\n"
+            "}\n$global:LASTEXITCODE=0\n", encoding="utf-8",
+        )
+        (scripts / "resolve-runtime.ps1").write_text(
+            "# Trace contract: normal/read-only/ready-v1\nparam($TraceMode)\n"
+            "$value = if ($env:AGENT_BRIDGE_NO_SELFPROVISION) { "
+            "$env:AGENT_BRIDGE_NO_SELFPROVISION } else { 'unset' }\n"
+            "[IO.File]::AppendAllText($env:PROBE_CALLS, "
+            "'resolver:' + $TraceMode + ':' + $value + \"`n\")\n"
+            ". (Join-Path $PSScriptRoot 'resolve-runtime-original.ps1') -TraceMode $TraceMode\n",
+            encoding="utf-8",
+        )
+        (scripts / "install.ps1").write_text(
+            "[IO.File]::WriteAllText($env:PROBE_INSTALLER,'called'); exit 91\n",
+            encoding="utf-8",
+        )
+        command = [
+            host, "-NoProfile", "-NonInteractive", "-File",
+            str(payload / "bin/agent-bridge.ps1"), *argv,
+        ]
+    env = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith(("AGENT_BRIDGE_", "AGENT_RT_", "COPILOT_EXTENSIONS_", "UPDATE_DRIVER_"))
+        and key not in {"PYTHONPATH", "PYTHONHOME", "COPILOT_PLUGIN_ROOT"}
+    }
+    env.update(
+        HOME=str(home), USERPROFILE=str(home), COPILOT_HOME=str(home / ".copilot"),
+        PROBE_CALLS=str(calls), PROBE_STATUS=str(status_file), PROBE_VALIDATED=str(validated),
+        PROBE_INSTALLER=str(installer_marker),
+    )
+    before = {path.relative_to(home): path.read_bytes()
+              for path in home.rglob("*") if path.is_file()}
+    result = subprocess.run(
+        command, cwd=tmp_path, env=env, capture_output=True, text=True,
+        encoding="utf-8", timeout=15, **no_window_kwargs(),
+    )
+    passive = argv[-2] != "create"
+    recorded = calls.read_text(encoding="utf-8").splitlines()
+    if passive:
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "passive observation; no self-provision" in result.stderr
+        assert recorded == [
+            "status", *(["validate"] if mode == "namespaced" else []),
+            "resolver:read-only:unset",
+        ]
+    else:
+        assert result.returncode in {3, 53}, result.stdout + result.stderr
+        assert "PUBLICATION_SPY" in result.stderr
+        assert "resolver:ready:unset" in recorded
+        assert "probe-plugin-publication" in recorded
+    assert not installer_marker.exists()
+    assert not runtime.exists()
+    assert {path.relative_to(home): path.read_bytes()
+            for path in home.rglob("*") if path.is_file()} == before
+
+
 @pytest.fixture(scope="module")
 def windows_payload_runtime(tmp_path_factory):
     """Stage the real payload gate and a completed, selected probe runtime."""

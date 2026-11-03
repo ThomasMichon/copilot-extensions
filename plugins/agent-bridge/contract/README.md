@@ -183,6 +183,14 @@ its unavailable-error exit rather than inventing JSON success or no-effect
 evidence. Configuration and transport are fixture-bound, not live discovery.
 It does not qualify an installed daemon, SDK or native conversation.
 
+The captured source commit must remain fetchable by CI. When a managed
+publisher squashes local commits, publish a native draft PR to establish the
+public source checkpoint, then capture against that published head. Push the
+resulting evidence as an incremental update that retains the checkpoint in
+the PR history, and move the PR to ready only after capture verification and
+the contract guard pass. A local recovery ref does not make an unpublished
+commit available to remote validation.
+
 Before a new capture, prepare the explicit semantic-owner declarations against
 the full real commit containing the provider implementation:
 
@@ -223,6 +231,62 @@ remain untouched. These are local source-bound observations, not installed
 CLI, SDK or native-conversation qualification. Declaration preparation binds
 the affected inbox, schema, targeting and distinct route owners before capture
 without changing historical packets or inventing provenance.
+
+### HTTP-51 known-session observation capabilities
+
+The same capture owner additionally admits the additive
+`bridge-session-observations-v1` and
+`bridge-session-observation-history-v1` capabilities, each version 1.
+HTTP generation 51, the existing evidence family and all prior protocol floors
+remain unchanged. The original 24 required cases retain their counts; two
+installation-mode observation boundary cases and four transport/lifetime cases
+expand the required portfolio to 30. The original operation report gains
+independently expected observation
+results without replacing its native-send, receipt or live-CLI observations.
+
+The independent commands and expectations remain in
+`inputs/http51/standard-native-send.json`. The production root parser,
+`--project` guard, client factory, authenticated GET transport and bounded
+semantic frame parser execute against the actual in-process ASGI application
+and private SQLite/EventLog state. HTTP transport is explicitly fixture-bound:
+no socket is opened to an installed service. Unknown, ACP-alias and DB-only
+unadmitted sources refuse without actor start/resume/handoff or daemon
+ensure/start. The probes check both advertised capabilities, finite history,
+selection failures, old-capability refusal, authentication and unchanged
+session/event/turn/inbox state. Compaction start evidence remains unqualified
+for active pre-window capacity; these reads grant no answer or head authority.
+
+The required transport cases use a real stdlib `HTTPResponse` over a guarded,
+incrementally generated non-terminating source. An unterminated frame must fail
+within the 35 KiB frame budget plus one detection byte and bounded stdlib read
+ahead, without invoking the raw SSE iterator or allocating the whole line.
+Injected socket timeout and caller interruption close only that response; the
+owning client must supply its existing 15-second I/O silence timeout.
+A separate concurrent-EventLog case cancels one captured observer and verifies
+the second subscriber still receives actual appended evidence. These are source
+resource-boundary tests, not timed installed-network or native qualification.
+
+Preparation includes `__main__.py`, `app_routes.py`, the bounded EventLog read
+owner, compaction evidence and the four observation source modules as explicit
+semantic owners. Changed owners are not classified as implementation-only to
+avoid capture. The existing declaration unit tests and focused capture guards
+retain unchanged fixtures/provenance and reject dirty or unrelated sources.
+
+Commit the provider source, policy, probe, independent input, tests and this
+documentation before the existing `capture_bridge_http51.py --prepare`
+invocation above. Commit its declaration output as a second checkpoint, then
+use that second full commit for `--write` and no-write verification.
+All declared closure members must genuinely exist at that checkpoint and match
+the on-disk bytes. No command in this flow turns an uncommitted source tree into
+captured provenance.
+
+The shared probe driver retains its 240-second POSIX / 600-second Windows child
+deadline, 4 MiB stdout and 1 MiB stderr bounds, exact no-skip portfolio check and
+observer-only interpreter receipts. ACP clients remain mocked, and installation
+layouts are temporary fixtures. This does not start/attach an SDK/native actor,
+run installers or touch installed services. Publication remains the existing
+locked, content-addressed transaction; historical packets and provenance stay
+under their existing immutable ownership.
 
 Run all capture/test commands under the invoking harness's bounded test
 supervisor and its isolated source runner where applicable. A prepared registry
