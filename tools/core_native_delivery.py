@@ -24,6 +24,7 @@ import bundle_lock
 import installer_native_feed as feed_owner
 import local_install_profile as native
 import local_install_source as source_owner
+from artifact_attestation import INDEX_LIMIT
 from core_native_feed_resolution import (
     compile_guarded,
     hold_compile_inputs,
@@ -31,7 +32,14 @@ from core_native_feed_resolution import (
     verify_guarded_projects,
     verify_lock_witness,
 )
-from core_runtime_profile import _core_manifest, _read, build_core_profile, core_roots
+from core_runtime_profile import (
+    _core_manifest,
+    _read,
+    build_core_profile,
+    compose_core_profile_index,
+    core_roots,
+    validate_core_source_index,
+)
 from installer_engine_process import ChildLaunchError, ChildTimeoutExpired, run_owned
 from installer_wheel_acquisition import (
     AcquisitionLimits,
@@ -53,6 +61,7 @@ from runtime_profile_delivery import (
     _unique,
     build_profile_delivery,
 )
+from runtime_profile_release import _unique_object
 from runtime_source_lock import _wheel_pins
 from runtime_wheel_inspection import inspect_wheel as inspect_pool_wheel
 from standalone_python_artifacts import COMPONENTS
@@ -102,18 +111,22 @@ def project_core_inputs(
     return core_roots(manifest, versions), groups["core"]
 
 
-def _read_lock(path: Path, deadline: float) -> bytes:
+def _read_document(path: Path, deadline: float, *, limit: int, label: str) -> bytes:
     before = _ordinary(path)
-    if before.st_size > 4 << 20:
-        raise ProfileError("native core lock exceeds its document budget")
+    if before.st_size > limit:
+        raise ProfileError(f"{label} exceeds its document budget")
     with _open(path) as stream:
         opened = _unchanged(path, before, stream)
-        content = stream.read((4 << 20) + 1)
-        if len(content) > 4 << 20:
-            raise ProfileError("native core lock exceeds its document budget")
+        content = stream.read(limit + 1)
+        if len(content) > limit:
+            raise ProfileError(f"{label} exceeds its document budget")
         _unchanged(path, before, stream, opened=opened)
     _check_deadline(deadline)
     return content
+
+
+def _read_lock(path: Path, deadline: float) -> bytes:
+    return _read_document(path, deadline, limit=4 << 20, label="native core lock")
 
 
 def _producer_procutil():
@@ -259,7 +272,7 @@ def _build_from_snapshot(
     target: dict, *, uv: str, download_origins: tuple[str, ...], materials: dict,
     material_paths: dict, destination: Path, deadline: float, max_bytes: int,
     native_lock: Path | None = None, offline_wheel_pool: Path | None = None,
-    guarded_feed: bool = False,
+    guarded_feed: bool = False, artifact_index: Path | None = None,
 ) -> dict:
     """Keep selected lock, wheel and material custody until candidate publication."""
     if type(max_bytes) is not int or max_bytes <= 0:
@@ -298,6 +311,22 @@ def _build_from_snapshot(
     first_exclusions = tuple(sorted(first_names))
     held_paths = {"material:" + name: path for name, path in material_paths.items()}
     held_files = {"material:" + name: item for name, item in material_files.items()}
+    index = None
+    if artifact_index is not None:
+        index_path = Path(artifact_index)
+        index_data = _read_document(index_path, deadline, limit=INDEX_LIMIT, label="artifact index")
+        index = json.loads(index_data, object_pairs_hook=_unique_object)
+        state_path = source / ".github" / "release-pipeline-state.json"
+        state_data = _read_document(state_path, deadline, limit=INDEX_LIMIT, label="release state")
+        state = json.loads(state_data, object_pairs_hook=_unique_object)
+        validate_core_source_index(index, state)
+        for name, path, data in (
+            ("artifact-index", index_path, index_data), ("release-state", state_path, state_data),
+        ):
+            held_paths[name] = path
+            held_files[name] = {
+                "sha256": "sha256:" + hashlib.sha256(data).hexdigest(), "size": len(data),
+            }
     pool_paths, pool_digests = None, None
     if native_lock is not None:
         selected_lock = _read_lock(Path(native_lock), deadline)
@@ -473,6 +502,8 @@ def _build_from_snapshot(
                             max_total_bytes=max_bytes, max_snapshot_bytes=4 * max_bytes,
                             max_unpacked_bytes=limits.max_expanded_bytes, deadline=deadline,
                         )
+                        if index is not None:
+                            candidate_index = compose_core_profile_index(index, manifest_data, profile)
                         transport = work / "wheels.zip"
                         wheel_result = build_profile_bundle(
                             profile.record(), selected_paths, transport, limits=limits,
@@ -529,6 +560,11 @@ def _build_from_snapshot(
         "source_commit": identity.source_commit, "approval": "unattested",
         **({"selection": "offline-wheel-pool"} if offline_wheel_pool is not None else {}),
         **({"selection": "guarded-native-feed"} if guarded_feed else {}),
+        **({
+            "candidate_index": candidate_index,
+            "candidate_index_sha256": "sha256:" + hashlib.sha256(_json(candidate_index)).hexdigest(),
+            "source_index_sha256": "sha256:" + hashlib.sha256(index_data).hexdigest(),
+        } if index is not None else {}),
     }
 
 
@@ -537,7 +573,7 @@ def prepare_core_delivery(
     materials: dict, material_paths: dict, destination: Path, *, uv: str,
     download_origins: tuple[str, ...], deadline: float, max_bytes: int,
     native_lock: Path | None = None, offline_wheel_pool: Path | None = None,
-    guarded_feed: bool = False,
+    guarded_feed: bool = False, artifact_index: Path | None = None,
 ) -> dict:
     """Compose the selected Main source and prepare one inert native candidate."""
     _check_deadline(deadline)
@@ -568,7 +604,7 @@ def prepare_core_delivery(
             snapshot / "source", record, manifest_data, wheel_dir, target, uv=uv,
             download_origins=download_origins, materials=materials, material_paths=material_paths,
             destination=destination, deadline=deadline, max_bytes=max_bytes, native_lock=native_lock,
-            offline_wheel_pool=offline_wheel_pool, guarded_feed=guarded_feed,
+            offline_wheel_pool=offline_wheel_pool, guarded_feed=guarded_feed, artifact_index=artifact_index,
         )
 
 
@@ -581,6 +617,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--wheel-dir", type=Path, required=True)
     parser.add_argument("--materials", type=Path, required=True)
     parser.add_argument("--material-dir", type=Path, required=True)
+    parser.add_argument(
+        "--artifact-index", type=Path,
+        help="compose an unsigned index candidate from this independently authenticated source index",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--uv", required=True)
     selection = parser.add_mutually_exclusive_group(required=True)
@@ -602,6 +642,7 @@ def main(argv: list[str] | None = None) -> int:
             args.output, uv=args.uv, download_origins=tuple(args.download_origin),
             deadline=deadline, max_bytes=args.max_bytes, native_lock=args.native_lock,
             offline_wheel_pool=args.offline_wheel_pool, guarded_feed=args.guarded_feed,
+            artifact_index=args.artifact_index,
         )
         print(json.dumps(result, sort_keys=True))
         return 0

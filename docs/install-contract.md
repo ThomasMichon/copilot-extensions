@@ -4165,6 +4165,10 @@ existing acquisition owner fetches candidates with its origin, redirect,
 seasoning and resource guards; each requested wheel is inspected from
 immutable bytes and direct dependency URLs are refused before UV sees it.
 Withdrawn files are not advertised as candidates.
+Configured HTTPS feed redirects use that same owner's metadata and artifact
+delivery policy, including public-index refusal and cross-origin credential
+isolation. Explicit nonempty download-origin restrictions still constrain
+artifact destinations.
 Native non-index selection settings and first-party exclusions remain in
 force. The observed project indexes are rechecked after selected-wheel
 acquisition and source validation while the delivery is held; source is
@@ -4184,8 +4188,8 @@ wheels through the same governed feed and origin guard. The source-derived roots
 complete inspected closure still have to agree, and unused or first-party
 registry entries refuse. The existing feed
 owner requires an affirmatively trusted non-public HTTPS index and uses
-system certificates; separately authorized download origins can be supplied with
-`--download-origin` for guarded selection and acquisition.
+system certificates; `--download-origin` supplies an optional exact HTTPS
+artifact-destination restriction for guarded selection and acquisition.
 The selected external wheels, first-party wheels and caller-selected
 source/notice materials are retained and checked through candidate creation.
 An active third-party local source mapping is refused before resolution;
@@ -4193,6 +4197,19 @@ the producer never silently substitutes a registry origin. This includes the
 current Linux Manager `dbus-next` wheel workaround, whose removal requires the
 separate affected-feed qualification in #7606. Linux core generation is not
 qualified by the Windows path.
+
+An optional `--artifact-index <index>` composes the delivered profile into an
+unsigned index candidate in the same retained-input transaction. The index's
+Dev identity must match the selected Main source's recorded last promotion;
+the original index and release-state bytes remain held and rechecked. The
+result includes `candidate_index`, its `candidate_index_sha256`, and the
+`source_index_sha256`. The index digest uses sorted, compact ASCII JSON. The
+caller must independently authenticate the original source index and establish
+its release association; the Dev identity check does not authenticate it.
+Existing artifact/profile data is preserved, and the changed subject requires
+the release owner's full validation and fresh attestation. This index does not
+bind the outer delivery digest or select its distribution channel.
+
 The output is an inert delivery envelope; its reported `approval` is
 `unattested`. Its selected Main commit establishes ancestry only, not
 authentication. Feed qualification, material clearance, source/release

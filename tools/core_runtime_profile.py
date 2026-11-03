@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import time
 from pathlib import Path
 
@@ -218,6 +219,32 @@ def build_core_profile(
     return profile
 
 
+def validate_core_source_index(index: object, state: object) -> None:
+    """Require the index to name the Dev release recorded by the selected source."""
+    if (
+        not isinstance(index, dict) or not isinstance(state, dict)
+        or not isinstance(state.get("last_promotion"), dict)
+        or not isinstance(index.get("dev_head"), str)
+        or re.fullmatch(r"[0-9a-f]{40}", index["dev_head"]) is None
+        or index.get("dev_head") != state["last_promotion"].get("dev_head")
+    ):
+        raise ProfileError("artifact index differs from the selected source release")
+
+
+def compose_core_profile_index(index: dict, manifest_data: bytes, profile: RuntimeProfile) -> dict:
+    """Compose an unsigned index candidate using the exact core manifest bytes."""
+    manifest = _core_manifest(manifest_data)
+    return with_release_profiles(
+        index,
+        [profile.record()],
+        {
+            manifest["artifact_id"]: (
+                manifest, "sha256:" + hashlib.sha256(manifest_data).hexdigest(),
+            )
+        },
+    )
+
+
 def _read(path: Path) -> bytes:
     before = _ordinary(path)
     with _open(path) as source:
@@ -290,17 +317,12 @@ def main(argv: list[str] | None = None) -> int:
         data = profile.canonical
         result = {"profile_sha256": profile.lock_id}
         if args.artifact_index is not None:
-            index = with_release_profiles(
+            index = compose_core_profile_index(
                 json.loads(
                     _read(args.artifact_index), object_pairs_hook=_unique_object
                 ),
-                [profile.record()],
-                {
-                    manifest["artifact_id"]: (
-                        manifest,
-                        profile.record()["artifact"]["manifest_sha256"],
-                    )
-                },
+                manifest_data,
+                profile,
             )
             data = json.dumps(
                 index,
