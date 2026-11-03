@@ -613,6 +613,8 @@ protected connectivity, edited foreign artifacts, configuration or durable data.
 Failed or unconfirmed cleanup stays explicit and retryable through its existing
 resource owner. This is not a new resident reaper or periodic sweep, and neither
 running it nor proving historical cleanup is required for an ordinary update.
+The [historical cleanup pattern](../../docs/patterns/historical-installation-cleanup.md)
+keeps detector support, current resource authority and observed outcomes separate.
 
 ### single-installation-execution-owner
 An installation has one background execution owner for its complete update

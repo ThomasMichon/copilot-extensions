@@ -11,6 +11,18 @@ sibling plugin to use local worktree isolation. Those sibling plugins compose
 gracefully when installed (extra picker pivots, cross-machine delegation,
 CodeSpace/container resolvers), but their absence only disables those features.
 
+For optional on-demand retirement of an authenticated displaced control-v1
+monitor, use `status-monitor-cleanup capabilities|inspect|apply --json`.
+Inspection never creates a token, starts a resident or provisions a runtime.
+Apply requires an explicit selected finding (`--request FILE`, or `--request -`
+for a bounded stdin batch of at most 16). Current serving generations, ambiguous
+publication/recovery, other retention owners and unsettled accepted work remain
+protected. Native process pins plus positive exit, not an RPC ACK, settle each
+retirement. Windows/Linux expose the native effect; other platforms preserve.
+This operation is independent of normal updates. The
+[historical cleanup contract](../../docs/patterns/historical-installation-cleanup.md)
+explains the finite archive and Manager composition.
+
 For optional committed current-head agenda reads, publication and held updates,
 see [the agenda projection contract](docs/worktree-agendas.md). It uses the
 existing resident owner without importing planning or UI packages.

@@ -19,6 +19,66 @@ plugins. It is the one piece that must work *before* the plugins do.
 > [#1165](https://github.com/ThomasMichon/copilot-extensions/issues/1165) and
 > [#1174](https://github.com/ThomasMichon/copilot-extensions/issues/1174).
 
+## Optional historical cleanup
+
+`worktree-manager cleanup capabilities --json` describes the optional cleanup
+contract of that exact executable runtime. A newer marketplace payload does not
+establish support in an older selected Manager. This command is not part of
+normal update, startup or discovery.
+
+The retained detector archive is finite and owner-scoped:
+
+| Component | Supported historical family | Effect boundary |
+|---|---|---|
+| `manager` | Two pre-rename prototype commands; sealed payload/application runtime slots | Current command publication custody or canonical runtime construction/retention/publication custody, with pinned native files |
+| `agent-worktrees` | Authenticated displaced status-monitor control-v1 peer | Selected installed Worktrees runtime, current route/cutover custody, accepted-work drain, native process pins and positive exit |
+| `agent-index` | Explicitly adopted legacy `agent-index` / `agent-index-engine` Windows tasks | Selected namespaced cell with retained-inert legacy disposition, Index transaction mutex, current-user registration ownership and full native revalidation |
+
+Unknown layouts, other daemons, unattributed registrations, systemd/launchd
+services and unrelated residue remain unsupported. File retirement is qualified
+only on platforms advertised by its native owner; unsupported platforms preserve
+findings rather than use a pathname-delete fallback. Inspection reports incomplete
+coverage and exits 1 instead of claiming that a host is clean. Broader coverage
+remains tracked by [#10180](https://github.com/ThomasMichon/copilot-extensions/issues/10180).
+
+```console
+worktree-manager cleanup inspect --component manager --json > cleanup-report.json
+worktree-manager cleanup apply --component manager --report cleanup-report.json --select FINDING_ID --json
+worktree-manager cleanup inspect --component agent-worktrees --json
+worktree-manager cleanup inspect --component agent-index --root ABSOLUTE_LEGACY_ROOT --selection CURRENT_CELL_SELECTION.json --json
+```
+
+Inspection does not remove anything. Apply accepts only explicitly selected
+candidate IDs from a report for the same component/current scope and delegates
+revalidation to the owning adapter. The report's hashes establish consistency,
+not permission. Changed, protected, foreign, unsupported or unconfirmed resources
+remain preserved, pending or failed. Repeated `--select` chooses multiple candidates;
+there is no apply-all or force fallback. `--root ABSOLUTE_PATH` selects a Manager
+root while commands stay in the current user's `.local/bin`. Worktrees resolves
+its own root and accepts no override, PATH fallback or self-provisioning command.
+A Worktrees family selection is sent in one bounded native request, not one
+process per PID.
+
+Index requires the adopted legacy root and a current caller-supplied selection
+file on both inspect and apply. The file names `payload_root`, `context`,
+`durable_home`, `marketplace_id`, `namespace_generation`, `install_generation`
+and `activation_generation`; an optional `maintenance_token` remains in that
+private input and is never copied into reports. The native installation-context
+owner validates this selection, explicit adoption and retained-inert disposition;
+paths or task names alone do not qualify. A report never chooses executable
+payload code.
+
+A busy or ambiguous daemon drain retains the exact original native identity and
+a durable code reference. A later explicit inspection can select settlement of
+that reference only after positive original-process exit; a missing census entry
+or RPC ACK is insufficient. Neither the front door nor an update silently retries
+an unknown retirement, releases another owner's hold or starts a cleanup service.
+
+Exit 0 means the capability query succeeded or every selected apply outcome is
+confirmed. Exit 1 means incomplete coverage or an unsettled selected outcome;
+inspect JSON remains available. Exit 2 means invalid syntax, report or scope, or
+a pre-effect refusal. See the [historical cleanup pattern](../docs/patterns/historical-installation-cleanup.md).
+
 ## In-session Mux Companion
 
 The resident mux runtime retains its daemon-instance admission until its

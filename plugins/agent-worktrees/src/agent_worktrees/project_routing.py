@@ -31,6 +31,7 @@ _NO_PROJECT_COMMANDS = {
     "reap-shells",
     "status-updater",
     "status-monitor",
+    "status-monitor-cleanup",
     "reconcile-sessions",
     "status-monitor-restart",
     "restart",

@@ -512,3 +512,147 @@ def retire_legacy_compatibility(
             "retiredItems": retired_items,
             "operative": False,
         }
+
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import TypedDict
+
+
+class _HistoricalRegistrationCustody(TypedDict):
+    assert_current: Callable[[], None]
+    sha256: str
+
+
+@contextmanager
+def historical_registration_retirement_custody(
+    *,
+    context: str | os.PathLike[str],
+    expected_marketplace_id: str,
+    expected_plugin_id: str,
+    expected_namespace_generation: int,
+    expected_install_generation: int,
+    expected_activation_generation: int,
+    legacy_root: str | os.PathLike[str],
+    required_paths: Sequence[str | os.PathLike[str]],
+    durable_home: str | os.PathLike[str],
+    payload_root: str | os.PathLike[str],
+    maintenance_token: str | None = None,
+    environment: Mapping[str, str] | None = None,
+    os_profile: str | os.PathLike[str] | None = None,
+    platform: str | None = None,
+    wsl_distro: str | None = None,
+) -> Iterator[_HistoricalRegistrationCustody]:
+    """Native owner must already hold its legacy transaction lock.
+
+    This grants only retirement of native registrations rooted in explicitly
+    adopted, retained-inert legacy state. It never interprets native commands.
+    """
+    for value in (expected_namespace_generation, expected_install_generation,
+                  expected_activation_generation):
+        if type(value) is not int or value < 0:
+            _fail("Historical registration generation must be a non-negative integer.")
+    _validate_marketplace_id(expected_marketplace_id)
+    _assert_plugin_id(expected_plugin_id)
+    current_environment, profile = _current_environment(
+        environment=environment if environment is not None else os.environ,
+        os_profile=os_profile, platform=platform, wsl_distro=wsl_distro,
+    )
+    durable = Path(durable_home)
+    legacy = Path(legacy_root)
+    if not _path_is_fully_qualified(legacy):
+        _fail("Historical registration legacy root must be absolute.")
+    paths = tuple(Path(value) for value in required_paths)
+    if not paths or any(not p.is_relative_to(legacy) or p == legacy for p in paths):
+        _fail("Historical registration launchers must be inside the selected legacy root.")
+    for path in (legacy, *paths):
+        for part in (path, *path.parents):
+            if _is_link_or_junction(part):
+                _fail("Historical registration paths may not traverse reparse points.")
+    def validate() -> dict[str, Any]:
+        receipt = validate_context_receipt(
+            context, durable, expected_marketplace_id=expected_marketplace_id,
+            expected_plugin_id=expected_plugin_id,
+            expected_payload_root=payload_root, environment={},
+        )
+        if (receipt["namespaceGeneration"] != expected_namespace_generation
+                or receipt["generation"] != expected_install_generation):
+            _fail("Historical registration selected generation changed.")
+        return receipt
+    receipt = validate()
+    cell = Path(receipt["cellRoot"])
+    plugin = Path(receipt["pluginRoot"])
+    activation_path = plugin / "installation-activation.json"
+    tombstone_path = legacy / ".installation-ownership.json"
+    genesis = _DirectoryLock(
+        durable / "marketplaces" / ".locks" / f"{expected_marketplace_id}.genesis",
+        kind="genesis", marketplace_id=expected_marketplace_id,
+    )
+    install = _DirectoryLock(
+        cell / ".locks" / f"{expected_plugin_id}.install.lock", kind="install",
+        marketplace_id=expected_marketplace_id, plugin_id=expected_plugin_id,
+    )
+    with genesis, install:
+        _require_management_authorization(
+            profile=profile, plugin_root=plugin, maintenance_token=maintenance_token,
+            current_time=datetime.now(timezone.utc), host=socket.gethostname(),
+            pid_is_live=_pid_is_live,
+        )
+        receipt = validate()
+        activation = _activation_result(
+            plugin_root=plugin, durable_home=durable,
+            marketplace_id=expected_marketplace_id, plugin_id=expected_plugin_id,
+            current_environment=current_environment, legacy_root=legacy,
+        )
+        document = read_json(activation_path)
+        if (activation["state"] != "valid" or activation["actualMode"] != "namespaced"
+                or activation["activationGeneration"] != expected_activation_generation
+                or document.get("legacy", {}).get("disposition") != "retained-inert"):
+            _fail("Historical registration is still current or its disposition is unproven.")
+        tombstone = _load_owned_tombstone(
+            tombstone_path=tombstone_path, install_path=Path(receipt["installReceipt"]),
+            plugin_root=plugin, marketplace_id=expected_marketplace_id,
+            plugin_id=expected_plugin_id, current_environment=current_environment,
+            expected_activation_generation=expected_activation_generation,
+        )
+        if tombstone is None:
+            _fail("Historical registration requires explicit legacy adoption.")
+        attribution = tombstone.get("attribution") or {}
+        adoption_root = attribution.get("legacyRoot")
+        if (attribution.get("kind") != "explicit-legacy-attribution"
+                or not isinstance(adoption_root, str)
+                or not _path_is_fully_qualified(adoption_root)
+                or not paths_equal(adoption_root, legacy)):
+            _fail("Historical registration adoption root is unproven.")
+        attribution_items = attribution.get("items")
+        if not isinstance(attribution_items, list):
+            _fail("Historical registration attribution items must be a JSON array.")
+        adopted = {str(item["path"]) for item in
+                   _validate_legacy_attribution_items(attribution_items)}
+        if any(str(path) not in adopted for path in paths):
+            _fail("Historical registration launcher was not explicitly adopted.")
+        proof_paths = (Path(context), Path(receipt["namespaceReceipt"]),
+                       activation_path, tombstone_path, *paths)
+        def evidence() -> tuple[tuple[str, tuple[int, int], str], ...]:
+            result: list[tuple[str, tuple[int, int], str]] = []
+            for path in proof_paths:
+                for part in (path, *path.parents):
+                    if _is_link_or_junction(part):
+                        _fail("Historical registration evidence traverses a reparse point.")
+                content, info = _read_regular_file(
+                    path, label="Historical registration evidence", require_stable_identity=True,
+                )
+                result.append((str(path), _stat_identity(info),
+                               hashlib.sha256(content).hexdigest()))
+            return tuple(result)
+        pinned = evidence()
+        def assert_current() -> None:
+            genesis.assert_owned()
+            install.assert_owned()
+            validate()
+            if evidence() != pinned:
+                _fail("Historical registration selection or ownership evidence changed.")
+        assert_current()
+        yield {
+            "assert_current": assert_current,
+            "sha256": hashlib.sha256(json.dumps(pinned, sort_keys=True).encode()).hexdigest(),
+        }
