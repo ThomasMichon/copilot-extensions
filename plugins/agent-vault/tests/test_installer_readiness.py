@@ -10,6 +10,12 @@ from agent_vault.installer_readiness import emit, evaluate
 from agent_vault.service import VaultService
 
 
+@pytest.fixture(autouse=True)
+def configured_runtime(monkeypatch):
+    """Existing service-readiness controls run after explicit runtime opt-in."""
+    monkeypatch.setattr("agent_vault.configuration.runtime_enabled", lambda: True)
+
+
 def _context(kpdb: str | None) -> ResolvedVault:
     return ResolvedVault(
         vault_name="example" if kpdb else None,
@@ -175,6 +181,18 @@ def test_payload_command_rejects_invalid_endpoint_and_port(
     assert result["state"] == "failed"
     assert "malformed endpoint" in result["detail"]
     assert "service probe failed" in result["detail"]
+
+
+def test_inactive_readiness_never_resolves_database_or_contacts_backend(monkeypatch, capsys):
+    monkeypatch.setattr("agent_vault.configuration.runtime_enabled", lambda: False)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("inactive readiness must not inspect a database or service")
+
+    monkeypatch.setattr(cli.config, "resolve_context", forbidden)
+    monkeypatch.setattr(cli, "send_command", forbidden)
+    assert cli.main(["installer-readiness"]) == 0
+    assert json.loads(capsys.readouterr().out)["state"] == "configuration-empty"
 
 
 def test_strict_context_rejects_invalid_environment_port(monkeypatch):

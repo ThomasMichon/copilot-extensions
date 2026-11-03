@@ -22,7 +22,7 @@ INSTALLER = PLUGIN / "scripts" / "install.ps1"
 
 pytestmark = pytest.mark.guard
 
-_LOOP_START = "    foreach ($lib in @('zdd', 'agent-procutil', 'single-instance-lease')) {"
+_LOOP_START = "    foreach ($lib in @('configuration-layers', 'zdd', 'agent-procutil', 'single-instance-lease')) {"
 _LOOP_END = "\n    if (Get-Command uv -ErrorAction SilentlyContinue) {"
 
 
@@ -107,7 +107,7 @@ def _installed_paths(marker: Path) -> list[str]:
 
 
 def _make_libs(root: Path) -> None:
-    for lib in ("zdd", "agent-procutil", "single-instance-lease"):
+    for lib in ("configuration-layers", "zdd", "agent-procutil", "single-instance-lease"):
         lib_dir = root / lib
         lib_dir.mkdir(parents=True)
         (lib_dir / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
@@ -131,7 +131,7 @@ def test_preinstall_loop_resolves_plugin_local_copy(have_uv: bool, tmp_path: Pat
         assert "--python Invoke-StubVenvPython" in marker.read_text()
 
     installs = _installed_paths(marker)
-    assert len(installs) == 3
+    assert len(installs) == 4
     for resolved in installs:
         assert os.path.realpath(resolved).startswith(os.path.realpath(str(plugin_dir / "libs")))
 
@@ -158,6 +158,6 @@ def test_preinstall_loop_falls_back_to_repo_root_canonical_when_absent(
         assert "--python Invoke-StubVenvPython" in marker.read_text()
 
     installs = _installed_paths(marker)
-    assert len(installs) == 3
+    assert len(installs) == 4
     for resolved in installs:
         assert os.path.realpath(resolved).startswith(os.path.realpath(str(canonical)))

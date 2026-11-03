@@ -17,7 +17,7 @@ def vendor_pairs():
             REPO / "plugins" / plugin / "scripts" / "configuration-layers"
             / "src" / package / filename,
         )
-        for plugin in ("agent-conduct-guidance", "agent-index")
+        for plugin in ("agent-conduct-guidance", "agent-index", "agent-vault")
         for package in ("configuration_layers", "configuration_context")
         for filename in (("__init__.py", "runtime.py") if package == "configuration_context" else ("__init__.py",))
     ]

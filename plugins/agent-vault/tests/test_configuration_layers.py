@@ -39,6 +39,40 @@ def write(root, values):
     (root / ".agent-vault.json").write_text(json.dumps(values), encoding="utf-8")
 
 
+def test_runtime_activation_uses_existing_qualified_layers(tmp_path, monkeypatch):
+    base, knowledge, local, global_path, report = setup(tmp_path, monkeypatch)
+    assert configuration.runtime_enabled(str(base)) is False
+    write(knowledge, {"enabled": True})
+    assert configuration.runtime_enabled(str(base)) is True
+    data = json.loads(global_path.read_text())
+    data["enabled"] = False
+    global_path.write_text(json.dumps(data))
+    assert configuration.runtime_enabled(str(base)) is False
+    write(local, {"enabled": True})
+    assert configuration.runtime_enabled(str(base)) is True
+    report["context"]["binding"] = "unresolved"
+    with pytest.raises(ConfigurationError, match="unresolved"):
+        configuration.runtime_enabled(str(base))
+
+
+@pytest.mark.parametrize("value", [None, "true", 1, {}, []])
+def test_runtime_activation_rejects_nonboolean_opt_in(tmp_path, monkeypatch, value):
+    base, knowledge, local, global_path, report = setup(tmp_path, monkeypatch)
+    write(knowledge, {"enabled": value})
+    with pytest.raises(RuntimeError, match="enabled must be a boolean"):
+        configuration.runtime_enabled(str(base))
+
+
+def test_standalone_activation_needs_no_worktrees_or_backend(tmp_path, monkeypatch):
+    monkeypatch.setattr(configuration, "owner_report", lambda root: None)
+    monkeypatch.setenv("AGENT_VAULT_CONFIG", str(tmp_path / "absent-global.json"))
+    assert configuration.runtime_enabled(str(tmp_path)) is False
+    write(tmp_path, {"enabled": True})
+    assert configuration.runtime_enabled(str(tmp_path)) is True
+    write(tmp_path, {"enabled": False})
+    assert configuration.runtime_enabled(str(tmp_path)) is False
+
+
 def test_native_vault_selector_all_tiers_without_opening_database(tmp_path, monkeypatch):
     base, knowledge, local, global_path, report = setup(tmp_path, monkeypatch)
     write(base, {"vault": "base", "group": "base-group"})

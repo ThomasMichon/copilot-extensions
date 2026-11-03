@@ -19,6 +19,46 @@ _step() { printf '  ...    %s\n' "$1"; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+_parse_arguments() {
+    ACTION="${1:-status}"
+    shift || true
+    NO_SERVICE=0
+    PURGE=0
+    DRY_RUN=0
+    INSTALL_DIR=""
+    FORCE="${AGENT_VAULT_ALLOW_DOWNGRADE:-0}"
+    [[ "$FORCE" == "1" ]] && FORCE=1 || FORCE=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --no-service) NO_SERVICE=1; shift ;;
+            --purge) PURGE=1; shift ;;
+            --force) FORCE=1; shift ;;
+            --dry-run) DRY_RUN=1; shift ;;
+            --install-dir) INSTALL_DIR="${2:?--install-dir requires a directory}"; shift 2 ;;
+            *) _fail "Unknown option: $1"; exit 2 ;;
+        esac
+    done
+}
+_parse_arguments "$@"
+
+case "$ACTION" in
+    install|update|stamp|provision|start)
+        . "$SCRIPT_DIR/runtime-activation.sh"
+        activation_code=0
+        activation_project="${COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT:-$PWD}"
+        activation="$(vault_runtime_activation "$activation_project")" || activation_code=$?
+        if [[ "$activation_code" == 2 ]]; then
+            printf '[SKIP] %s\n' "$activation"
+            exit 0
+        fi
+        if [[ "$activation_code" != 0 ]]; then
+            printf '[agent-vault] activation configuration could not be resolved.\n' >&2
+            exit 3
+        fi
+        export COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT="$activation_project"
+        ;;
+esac
+
 # shellcheck source=/dev/null
 . "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"
 
@@ -200,26 +240,6 @@ fi
 if [[ -z "${UV_HTTP_TIMEOUT:-}" ]]; then export UV_HTTP_TIMEOUT=60; fi
 
 PKG_SRC_DIR="$PLUGIN_DIR/src/agent_vault"
-
-ACTION="${1:-status}"
-shift || true
-
-NO_SERVICE=0
-PURGE=0
-DRY_RUN=0
-INSTALL_DIR=""
-FORCE="${AGENT_VAULT_ALLOW_DOWNGRADE:-0}"
-[[ "$FORCE" == "1" ]] && FORCE=1 || FORCE=0
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --no-service) NO_SERVICE=1; shift ;;
-        --purge) PURGE=1; shift ;;
-        --force) FORCE=1; shift ;;
-        --dry-run) DRY_RUN=1; shift ;;
-        --install-dir) INSTALL_DIR="${2:?--install-dir requires a directory}"; shift 2 ;;
-        *) _fail "Unknown option: $1"; exit 2 ;;
-    esac
-done
 
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.agent-vault}"
 if [[ "$INSTALL_DIR" != /* ]]; then
@@ -689,7 +709,7 @@ _ensure_runtime() {
     # directly, but the non-uv (bare `pip install`) fallback below ignores
     # that table entirely and would otherwise try (and fail) to resolve
     # each as an ordinary index package.
-    for _lib in zdd agent-procutil single-instance-lease; do
+    for _lib in configuration-layers zdd agent-procutil single-instance-lease; do
         _lib_dir="$PLUGIN_DIR/libs/$_lib"
         if [[ ! -f "$_lib_dir/pyproject.toml" ]]; then
             _lib_dir="$(cd "$PLUGIN_DIR/../.." && pwd)/libs/$_lib"

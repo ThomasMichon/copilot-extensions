@@ -44,6 +44,14 @@ fi
 [[ "$name" == agent-vault ]] || {
   printf '[agent-vault] Runtime publication refused: the owning payload is not Agent Vault.\n' >&2; exit 3;
 }
+. "$ScriptDir/runtime-activation.sh"
+activation_code=0
+vault_runtime_activation >/dev/null || activation_code=$?
+if [[ "$activation_code" == 2 ]]; then exit 0; fi
+if [[ "$activation_code" != 0 ]]; then
+  printf '[agent-vault] Runtime publication refused: activation configuration could not be resolved.\n' >&2
+  exit 3
+fi
 InstallDir="$HOME/.$name"
 Manifest="$InstallDir/deploy-manifest.json"
 installer_action=stamp

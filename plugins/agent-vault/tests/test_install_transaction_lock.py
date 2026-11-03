@@ -70,6 +70,11 @@ def _isolated_env(home: Path) -> dict[str, str]:
         "XDG_CONFIG_HOME": str(home / ".config"),
     })
     env["COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC"] = "1"
+    activation = home / "activation.json"
+    activation.write_text('{"enabled":true}', encoding="utf-8")
+    env["AGENT_VAULT_CONFIG"] = str(activation)
+    env.pop("AGENT_CONFIGURATION_CONTEXT", None)
+    env.pop("COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT", None)
     return env
 
 

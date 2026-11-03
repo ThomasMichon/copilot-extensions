@@ -36,6 +36,7 @@ def write_json(path, value):
 
 
 def prepare_payload(root, mode):
+    write_json(root / ".agent-vault.json", {"enabled": True})
     home = root / "home"
     payload = home / ".copilot" / "installed-plugins" / "example" / "agent-vault"
     for directory in ("bin", "scripts", "src"):

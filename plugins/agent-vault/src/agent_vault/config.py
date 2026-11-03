@@ -183,6 +183,8 @@ def _vault_registry(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def _validate_config_data(data: dict[str, Any], label: str) -> None:
+    if "enabled" in data and type(data["enabled"]) is not bool:
+        raise RuntimeError(f"{label}: enabled must be a boolean")
     for key in ("kpdb", "group", "vault_group", "vault", "default_vault"):
         value = data.get(key)
         if value is not None and (not isinstance(value, str) or not value.strip()):
