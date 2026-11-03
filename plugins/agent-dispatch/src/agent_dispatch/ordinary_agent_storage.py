@@ -36,7 +36,7 @@ def reservation_native_facts(queue: Any, key: str) -> dict:
         try:
             known, retired = native_bindings(conn, row, task)
             reconcile_retirement = inherited_retirement(conn, row, task)
-            error = _admission_error(conn, row, task)
+            error = _admission_error(conn, row, task, now=queue._now(None))
         except TaskError as exc:
             known, retired, reconcile_retirement, error = [], [], False, str(exc)
         redrive, redrive_error = None, None
@@ -58,7 +58,7 @@ def reservation_native_facts(queue: Any, key: str) -> dict:
     }
 
 
-def _admission_error(conn: Any, row: Any, task: Any) -> str | None:
+def _admission_error(conn: Any, row: Any, task: Any, *, now: float) -> str | None:
     from .queue_pool_placement import pool_assignment
     assigned = pool_assignment(conn, task.id)
     placed = assigned is not None
@@ -77,6 +77,12 @@ def _admission_error(conn: Any, row: Any, task: Any) -> str | None:
         or task.source == "ci-repair" or row["exclusive_key"] != task.exclusive_key
     ):
         return "ordinary agent reservation admission fence changed"
+    if placed:
+        from .queue_pool_startup import require_pool_decision
+        try:
+            require_pool_decision(conn, task, now)
+        except TaskError as exc:
+            return str(exc)
     if conn.execute(
         "SELECT 1 FROM spawn_reservations WHERE task_id=? AND attempt>? LIMIT 1",
         (task.id, row["attempt"]),
@@ -111,7 +117,7 @@ def _record_agent(
             raise TaskError("ordinary agent reservation admission fence changed")
         from .queue_spawn_cooling import require_no_cooling
         require_no_cooling(row)
-        if error := _admission_error(conn, row, task):
+        if error := _admission_error(conn, row, task, now=queue._now(None)):
             raise TaskError(error)
         from .queue_pool_placement import pool_assignment, require_pool_workspace
         from .bridge_remote import normalize_host
@@ -122,8 +128,6 @@ def _record_agent(
         ):
             raise TaskError("ordinary startup execution machine cannot change")
         if pool_assignment(conn, task.id) is not None:
-            from .queue_pool_startup import require_pool_decision
-            require_pool_decision(conn, task, queue._now(None))
             if startup_invocation is None:
                 raise TaskError("ordinary pool startup requires its immutable initial invocation")
             if execution_machine is None:

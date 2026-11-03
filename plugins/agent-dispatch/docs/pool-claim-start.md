@@ -95,8 +95,11 @@ The ordinary Bridge create/store/send path can consume an explicitly placed
 `ordinary-bridge` assignment. Reservation read-back includes its actual pool
 assignment and claim generation. The initial caller requires the running
 placement descriptor's `ordinary_initial_start_versions: [1]`, the current
-unowned `CLAIMED` task and its assigned local execution machine before creating
-an agent. It does not choose another pool or forward a local create to a
+unowned `CLAIMED` task, unexpired startup decision and its assigned local
+execution machine before creating or resuming an agent. The existing reservation
+admission read exposes deadline ineligibility; storage rechecks the deadline
+transactionally so an expiry during creation cannot deliver a first prompt.
+It does not choose another pool or forward a local create to a
 different host. Ordinary automatic selection remains disabled until its
 registration/instance ownership and startup retry consumers are integrated.
 

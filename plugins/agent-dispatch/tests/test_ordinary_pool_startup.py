@@ -199,11 +199,14 @@ def test_ordinary_pool_claim_is_retained_not_legacy_recovered(ordinary: SimpleNa
     assert not o.calls
 
 
-def test_assignment_read_and_reopen_preserve_pool_native_facts(ordinary: SimpleNamespace) -> None:
+def test_assignment_read_and_reopen_preserve_pool_native_facts(
+    ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     o = ordinary
     launch(o)
     assert current_task(o.client, o.task)["status"] == Status.CLAIMED
     reopened = type(o.q)(o.q.db_path)
+    monkeypatch.setattr(reopened, "_now", o.q._now)
     facts = reservation_native_facts(reopened, o.placed["reservation"]["key"])
     assert facts["reservation_pool_bound"] is True
     assert facts["reservation_pool_assignment"] == o.placed["assignment"]
@@ -328,3 +331,51 @@ def test_storage_deadline_cannot_deliver_a_late_first_prompt(
     assert len(o.calls) == 1 and retained.agent_info is None
     assert o.q.get(o.task["id"]).status == Status.CLAIMED
     assert o.q.pool_startup(o.task["id"]).startup_attempts == 1
+
+
+@pytest.mark.parametrize("now", [700.0, 701.0])
+def test_initially_expired_claim_runs_no_native_command(
+    ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, now: float,
+) -> None:
+    o = ordinary
+    instant = now
+    monkeypatch.setattr(o.q, "_now", lambda now=None: instant if now is None else now)
+    with pytest.raises(bridge.BridgeCarriedSessionBusy, match="deadline expired"):
+        launch(o)
+    assert not o.calls
+    retained = o.q.get_reservation(o.placed["reservation"]["key"])
+    assert retained.worktree is None and retained.agent_info is None and retained.session_handle is None
+    assert o.q.get(o.task["id"]).status == Status.CLAIMED
+    facts = o.client.get_reservation(retained.key)
+    assert facts["ordinary_assignment_error"] == "pool start decision deadline expired"
+    assert o.q.pool_startup(o.task["id"]).startup_attempts == 1
+
+
+def test_initial_claim_just_before_deadline_still_runs(
+    ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ordinary.q, "_now", lambda now=None: 699.0 if now is None else now)
+    assert launch(ordinary)["native_session_id"] == "native-a"
+    assert [argv[2] for argv, _ in ordinary.calls] == ["create", "send"]
+
+
+def test_expired_retained_claim_observes_receipt_but_never_resumes(
+    ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    o = ordinary
+    launch(o)
+    o.calls.clear()
+    monkeypatch.setattr(o.q, "_now", lambda now=None: 700.0 if now is None else now)
+
+    def missing_receipt(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        o.calls.append((argv, kwargs))
+        assert argv[2] == "send" and "--receipt-only" in argv
+        return subprocess.CompletedProcess(argv, 69, json.dumps({
+            "outcome": "refused_unavailable", "reason": "native_receipt_missing",
+        }), "")
+
+    monkeypatch.setattr(ordinary_bridge.subprocess, "run", missing_receipt)
+    with pytest.raises(bridge.BridgeCarriedSessionBusy, match="deadline expired"):
+        launch(o)
+    assert len(o.calls) == 1 and "--receipt-only" in o.calls[0][0]
+    assert o.q.get_reservation(o.placed["reservation"]["key"]).session_handle == "local-body:bridge-a"

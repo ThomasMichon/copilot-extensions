@@ -56,9 +56,16 @@ def current_task(client, task: dict) -> dict:
         raise BridgeCarriedSessionBusy(f"assigned task cannot be read: {exc}") from exc
     from .ordinary_pool_startup import assignment
     try:
-        placed = assignment(task, client.get_reservation(task["spawn_reservation_key"]))
+        reservation = client.get_reservation(task["spawn_reservation_key"])
+        placed = assignment(task, reservation)
     except (DispatchError, TaskError) as exc:
         raise BridgeCarriedSessionBusy(f"assigned reservation cannot be read: {exc}") from exc
+    if placed is not None and (
+        "ordinary_assignment_error" not in reservation or reservation["ordinary_assignment_error"] is not None
+    ):
+        raise BridgeCarriedSessionBusy(
+            reservation.get("ordinary_assignment_error") or "ordinary pool admission eligibility is unavailable",
+        )
     if (
         not isinstance(current, dict) or current.get("id") != task["id"]
         or current.get("generation") != task["generation"]
