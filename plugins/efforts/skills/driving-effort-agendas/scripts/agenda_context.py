@@ -47,22 +47,33 @@ def nonempty(value: Any) -> bool:
     return True
 
 
-def facts(value: Any, subjects: set[str], *,
-          input_policy: dict[str, bool] | None = None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    if not isinstance(value, list) or not value:
+def validate_context_shape(value: Any) -> None:
+    fields(value, {"facts"})
+    values = value["facts"]
+    if not isinstance(values, list) or not values:
         raise AgendaError("context facts must be a nonempty list")
-    normalized: dict[str, Any] = {}
-    original: list[dict[str, Any]] = []
-    for fact in value:
+    subjects: set[str] = set()
+    for fact in values:
         fields(fact, {"kind", "subject", "value", "evidence_ref"})
         subject = _text(fact["subject"], "context subject")
-        if subject not in subjects:
-            raise AgendaError(f"context subject is outside relevant_subjects: {subject}")
-        if subject in normalized:
+        if subject in subjects:
             raise AgendaError("duplicate context subject")
+        subjects.add(subject)
         if not isinstance(fact["kind"], str) or fact["kind"] not in KINDS:
             raise AgendaError("unsupported context fact kind")
         _text(fact["evidence_ref"], "context evidence reference")
+        semantic(fact["value"], raw_input=True)
+
+
+def facts(value: Any, subjects: set[str], *,
+          input_policy: dict[str, bool] | None = None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    validate_context_shape({"facts": value})
+    normalized: dict[str, Any] = {}
+    original: list[dict[str, Any]] = []
+    for fact in value:
+        subject = _text(fact["subject"], "context subject")
+        if subject not in subjects:
+            raise AgendaError(f"context subject is outside relevant_subjects: {subject}")
         policy = input_policy if input_policy is not None else {}
         raw_input = policy.get(subject, fact["kind"] == "input")
         content = semantic(fact["value"], raw_input=raw_input)
@@ -121,10 +132,7 @@ def knowledge(value: Any, path: tuple[Any, ...] = ()) -> set[tuple[Any, ...]]:
     return {(path, "value", comparison(value))}
 
 
-def qualification(
-    proposed: dict[str, Any], current: dict[str, Any], used: list[dict[str, Any]],
-    subjects: set[str], judgment: Any, *, input_policy: dict[str, bool] | None = None,
-) -> tuple[bool, str, dict[str, list[str]]]:
+def validate_judgment_shape(judgment: Any) -> None:
     fields(judgment, {"qualification", "changed_subjects", "causal_change", "evidence_refs"})
     if judgment["qualification"] != "agent-judgment":
         raise AgendaError("causal relevance requires qualified agent judgment")
@@ -133,12 +141,24 @@ def qualification(
     refs = judgment["evidence_refs"]
     if not isinstance(claimed, list) or not all(isinstance(item, str) for item in claimed):
         raise AgendaError("changed_subjects must be a list of subject names")
-    if len(set(claimed)) != len(claimed) or not set(claimed) <= subjects:
+    if len(set(claimed)) != len(claimed):
         raise AgendaError("changed_subjects are duplicated or outside scope")
+    for subject in claimed:
+        _text(subject, "changed subject")
     if not isinstance(refs, list) or not refs:
         raise AgendaError("judgment requires evidence references")
     for ref in refs:
         _text(ref, "judgment evidence reference")
+
+
+def qualification(
+    proposed: dict[str, Any], current: dict[str, Any], used: list[dict[str, Any]],
+    subjects: set[str], judgment: Any, *, input_policy: dict[str, bool] | None = None,
+) -> tuple[bool, str, dict[str, list[str]]]:
+    validate_judgment_shape(judgment)
+    claimed = judgment["changed_subjects"]
+    if not set(claimed) <= subjects:
+        raise AgendaError("changed_subjects are duplicated or outside scope")
     old = {key: item for key, item in current.items() if key in subjects}
     added = sorted(proposed.keys() - old.keys())
     changed = sorted(key for key in proposed.keys() & old.keys() if not canonical_equal(proposed[key], old[key]))

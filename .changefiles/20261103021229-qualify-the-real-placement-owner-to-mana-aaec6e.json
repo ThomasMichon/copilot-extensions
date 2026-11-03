@@ -1,0 +1,9 @@
+{
+  "comment": "Return canonical state homes for admitted project-root aliases and qualify managed agenda initialization.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
