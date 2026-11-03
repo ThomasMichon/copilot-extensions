@@ -9,7 +9,7 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-11-02
+- **Last revised:** 2026-11-03
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -140,6 +140,84 @@ and fix how it is wired.
 
 ## Features
 
+### authoritative-runtime-replacement
+
+This is the durable completion contract for installation, explicit/manual
+updates and repair. Installer bug fixes, implementation efforts and current
+work evaluate their objectives and acceptance against it; an incremental
+compatibility mechanism must not redefine the goal.
+
+- **Explicit installation is authoritative.** An authorized user or agent's
+  manual update replaces runtime code, old central-daemon generations, stale
+  installer transactions, launchers and applicable service/task registrations
+  within the selected installation. It is not factory reset. Configuration,
+  credentials, repositories, worktrees, sessions and application databases
+  survive.
+- **The incoming installation stands on its own.** Acquire authentic, admitted
+  source, construct fresh immutable runtime generations, start the incoming
+  central services and publish their current-version selections and invocation/
+  service registrations. Reuse, old-runtime/footprint recovery or migration and
+  zero-downtime handoff are best-effort optimizations, not prerequisites.
+  Durable-state compatibility or necessary state-preserving application-data/
+  schema migration is required before admitting incoming mutable serving work
+  and is part of safe readiness; it does not depend on old-runtime permission.
+  Missing old monitor
+  capabilities, unknown legacy layout/custody/provenance, maintenance banners,
+  stale locks, transaction records or queue fences cannot veto this explicit
+  replacement. Preserve prior attempts' real outcomes without requiring their
+  recovery protocol to grant the incoming installation permission.
+- **Success means incoming readiness and complete selection.** Every requested
+  incoming runtime is ready, required central services are actually running
+  that generation, and all applicable current-version pointers, routes,
+  launchers and service/task registrations select it. Accepted/queued work,
+  candidate construction, Manager-only success or a pointer without serving
+  proof is not whole-installation success. Report real acquisition, build,
+  authentication, permission, I/O and incoming-health failures honestly; never
+  activate a failed candidate or call a partial result complete.
+- **Retirement is independent of success.** Outgoing central daemons detect
+  that they are no longer current, close admission, attempt handoff/drain and
+  clean up their own obsolete runtime registrations. Admission closure and
+  transfer/exclusion of conflicting work may precede incoming serving readiness;
+  neither waits for installation completion. An uncooperative predecessor is
+  handled through the incoming owner's bounded transition, not an indefinite
+  old-lease wait. Final predecessor exit and cleanup remain independent.
+  The installer does not
+  wait for or fence success on their drain, exit or cleanup. It may launch
+  one finite asynchronous fallback for the addressed replacement, after a
+  grace period longer than expected cutover, to force-retire remaining
+  outgoing central daemons and obsolete central-service schedules. This is
+  optional, not a periodic resident reaper or another installer.
+- **Retirement is role- and generation-scoped.** Session hosts, session keepers,
+  session-owned Bridge/agent processes, foreground clients and protected
+  connectivity are never fallback targets. A central service's name does not
+  authorize killing its session children. Revalidate native process identity,
+  explicit central-service role, installation scope and the *then-current*
+  generation/registration at the actual mutation boundary. Never kill a
+  reselected generation, a later successor or an unrelated process, nor use a
+  generic interpreter-name sweep. Unprovable cleanup is reported and skipped,
+  not converted into an installation veto or fictitious exit proof.
+- **Only automatic update is suppressible.** KillSwitches and maintenance
+  inhibition govern background scheduled, sessionStart and Manager-launch
+  automatic updates, with classification preserved end to end. They never
+  suppress an explicit/manual update or ordinary use of a healthy installation.
+  Explicit replacement does not clear those automatic preferences.
+
+Incoming source authenticity and the user's authority over the addressed
+installation remain required. These are not provenance tests against the old
+installation. Concrete conflicting writes may be coordinated internally by
+bounded wait/join or replacement so the explicit update proceeds; preserving an
+old serialization protocol is not a goal or admission requirement. Neither a
+recorded nor a running installer may create persistent denial, an indefinite
+queue fence or a separate operator-recovery prerequisite. The incoming installer
+owns that bounded continuation within the addressed scope, without broadly
+terminating unrelated processes. Actual OS I/O/permission failures remain
+truthful failures; an old owner/custody record is not such a failure.
+
+This contract is intent, not a claim that every installer already realizes it.
+The [architecture adoption boundary](../../docs/architecture.md#replacement-lifecycle-target-and-current-adoption)
+and [install contract](../../docs/install-contract.md#authoritative-replacement-and-completion)
+distinguish implemented mechanisms from remaining work.
+
 ### repo-plugin-enablement
 Shows a repository's effective marketplace and plugin enablement, including
 inherited declarations and machine-local overrides. The Configurator adjusts
@@ -237,9 +315,13 @@ configuration/data or unrelated installations.
 
 Stable global command redirects and declared consumer registrations survive
 source staging and plugin removal. A running legacy launcher is not rewritten
-inside its own execution stream. Unknown, inaccessible, foreign or unsettled
-ownership is an explicit blocker, not a reason to unlink locks, kill processes,
-escalate privilege or adopt a different source.
+inside its own execution stream. Unknown incumbent ownership limits reuse and
+cleanup, not explicit runtime replacement under
+[authoritative-runtime-replacement](#authoritative-runtime-replacement).
+An inaccessible destination or unrelated installation remains outside that
+authority; never escalate privilege or adopt a different source to hide the
+failure. A recorded or running old installer instead receives bounded internal
+coordination/replacement, not a persistent refusal or another approval demand.
 
 Raw self-install and rollback remain usable without the old Manager, tool
 commands, updater queue or services being replaced. Core source/toolchain
@@ -270,13 +352,17 @@ maintenance loop or claim activation.
 Repository-derived service selection respects role, locus, provider and
 installation ownership. Missing or incomplete declarations never imply
 automatic uninstall. Automatic inhibition leaves ordinary healthy launch/use
-available, and manual rescue does not settle an unknown queue owner.
+available. Manual replacement preserves an unknown prior attempt's outcome
+without making its settlement a prerequisite for the new installation.
 
 Only an explicitly automatic update request is inhibited by the update switch.
 Manual update without the automatic flag, raw self-install, setup/install-source,
 doctor/list and ordinary launch still reach their normal owner. A launch's
 skipped automatic preparation is not a launch failure. This distinction never
-removes independent source, privilege, active-owner or unsettled-effect guards.
+removes incoming source or privilege requirements. Legacy owner metadata and
+unsettled-effect records do not become manual-update admission policy; concrete
+write coordination must make bounded progress under the authoritative
+replacement contract rather than preserve an incumbent veto.
 The [configuration workbench](configurator/README.md#installation-and-updates)
 makes automatic-update policy visible and adjustable, with a clear distinction
 between allowing an automatic request and enrolling a recurring controller.
@@ -291,13 +377,15 @@ whole-toolset update. Joining preserves the fully resolved target, requested
 scope and options; a different target requires its own execution.
 
 Interrupted attempts retain their original outcome and effects evidence. The
-normal update entry uses the existing owner's supported reconciliation and
-repair authority rather than requiring a separate cleanup command or extra
-recovery flag. Authorization to repair is recorded distinctly from native
-cleanup proof; it does not fabricate settlement, replay uncertain work, retire
-another live owner, or weaken source, integrity, privilege or independent
-foundation ownership. An unavailable recovery boundary remains an explicit
-failure, never a successful no-op or a reason to run a competing installer.
+normal update entry attempts supported reconciliation and recovery but can
+establish fresh incoming execution without cooperation from the broken
+installation. Authorization is distinct from native cleanup proof: retain old
+uncertainty without replaying it or relabeling it successful. An unavailable
+legacy recovery boundary is diagnostic evidence, not a veto on the requested
+replacement. Incoming source, integrity and privilege remain required;
+concrete write coordination does not confer an incumbent veto. Success follows
+[authoritative-runtime-replacement](#authoritative-runtime-replacement), never
+queue release alone.
 
 ### setup-invocation-authorizes-dependencies
 A user or authorized agent directly invoking the trusted harness setup flow
@@ -443,11 +531,16 @@ Construction does not require uninstalling, deleting or unregistering the old
 runtime first. Current binstubs and applicable task registrations select the new
 generation. The incoming owner starts first and attempts handoff with the outgoing
 owner. The predecessor recognizes both that announcement and its independently
-observable staleness. Once the new owner is ready and authoritative, the new
-installation declares completion without waiting for predecessor retirement.
-The predecessor then closes admission and attempts to drain. The new owner's
-existing lifecycle authority gives that drain a bounded grace period, then
-force-terminates only the exact identity-verified predecessor if it remains.
+observable staleness. Close/transfer or exclude conflicting work admission as
+needed before incoming serving readiness; do not make that transfer depend on
+installation completion or indefinite old-lease release. Once all requested
+incoming readiness and current selections are established, declare completion
+without waiting for final predecessor exit or cleanup. Outgoing self-retirement
+and self-cleanup continue independently.
+An optional single finite asynchronous fallback may retire remaining outgoing
+central daemons and obsolete central-service schedules after a longer grace
+period, under [authoritative-runtime-replacement](#authoritative-runtime-replacement).
+Do not introduce a periodic resident retirement reaper.
 Brief overlap is expected, without duplicate exclusive work ownership.
 Missing handoff support or failed drain does not veto the new installation or
 require another force/repair flag; interrupted work and unconfirmed cleanup
@@ -459,10 +552,10 @@ rollback is reserved for failure of the incoming generation itself to start.
 Replacement preserves configuration, durable application data, unrelated
 installations and protected session/connectivity dependencies. Readiness,
 current routing and confirmed predecessor exit are distinct observed facts.
-Cold takeover requires actual owner/identity checks and native exit or equivalent
-write exclusion before exclusive work resumes; unknown ownership is not permission
-to kill. Unsafe activation remains an explicit partial outcome, not a veto on
-independent construction or a claim that the incoming service is healthy.
+Incoming routing/admission prevents duplicate exclusive work without making
+predecessor exit or old custody evidence an activation prerequisite. Unknown
+ownership is not permission to kill. Actual incoming readiness failures remain
+explicit partial outcomes, never claims that an unready service is healthy.
 Explicit uninstall or independently scoped historical reclamation is a separate
 operation, not a prerequisite for updating.
 
@@ -534,8 +627,12 @@ or agent sessions. Lock and owner records identify the live installer process
 and its source. They coordinate cooperation; stale records, an absent source
 or an installer that is no longer running cannot permanently veto a new
 installer. A fresh intact installer can assume control through the supported
-normal or explicitly approved repair path without depending on the broken
-installation to grant permission.
+normal path without depending on the broken installation to grant permission.
+For a directly requested update, a running old installer receives bounded
+wait/join or replacement within the addressed scope, not persistent refusal,
+indefinite queuing or a separate operator-recovery prerequisite. Coordination
+prevents concrete conflicting writes; preserving old serialization is not an
+installation requirement.
 
 The execution owner has a standalone installation foundation available before
 plugin provisioning, including first installation without an existing Python
@@ -556,8 +653,10 @@ callers to cause accidental rollback. Deliberate repair or rollback selection
 remains explicit. Pending, running, interrupted, blocked and completed outcomes
 remain attributable and observable. Recovery does not mistake a failed prior
 execution for success or silently replay it.
-Existing per-slot construction and publication custody remains in force beneath
-the transaction owner.
+Incoming construction and publication coordinate concrete conflicting writes
+internally. Missing, stale or concurrent legacy custody does not become an
+admission prerequisite; the authoritative replacement contract requires
+bounded manual continuation, not a persistent live-writer refusal.
 
 Installation recovery preserves live-cutover expectations. An interrupted
 update does not make a host, operating-system or kernel restart a prerequisite
@@ -597,10 +696,10 @@ prefer start-first/self-retirement, falling back to bounded identity-checked
 cold takeover when the old owner cannot cooperate or settle. No extra repair
 mode is needed solely because graceful cutover is unsupported. An old runtime
 cannot veto construction or activation merely by lacking the new handoff contract.
-An active installation writer remains subject to the existing execution owner;
-competing repair callers do not become concurrent writers or repeatedly kill
-one another. Separately authorized stuck-writer recovery is not the routine
-service-replacement path.
+An active old installer is handled by bounded internal wait/join or replacement
+under the explicit update's authority, not a second operator-recovery ceremony
+or indefinite refusal. Prevent concrete conflicting writes and repeated
+installer kill loops without making the old serializer a prerequisite.
 
 An explicit operator order to repair, clean-install or force-reinstall is
 sufficient authorization for that recovery mode. Historical cleanup proof,
@@ -610,10 +709,13 @@ a separate path, not a mandatory ceremony before repair. Status distinguishes
 operator-authorized recovery from native-confirmed settlement and preserves
 the prior failure without turning it back into installation authority.
 
-A successful replacement leaves old generations inert: no older managed installer
-or daemon remains serving or able to reactivate itself through stale launch,
-routing or maintenance state. Inert rollback artifacts need not be physically
-erased. The repair preserves application data and unrelated installations;
+A successful installation has all requested incoming readiness and current
+selections. Old generations may still be finishing independent retirement;
+their confirmed exit/cleanup is not that success gate. Current launch, routing
+and maintenance selections prevent stale reactivation. Eventual retirement
+leaves only the incoming central generation serving, without targeting protected
+session processes. Inert rollback artifacts need not be physically erased.
+The repair preserves application data and unrelated installations;
 its approval does not authorize an indiscriminate process kill or data wipe.
 Zero downtime is not guaranteed. Failures remain explicit rather than falsely
 claiming that all old code is retired or the new installation is ready.

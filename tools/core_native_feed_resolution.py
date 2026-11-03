@@ -232,7 +232,7 @@ def _fetch_project(feed, name, limits, deadline, context, budget, *, candidate_l
     origin = acquisition._url(location)[1]
     try:
         response, base, chain = client.request(
-            location, feed, {origin}, "application/vnd.pypi.simple.v1+json, text/html",
+            location, feed, None, "application/vnd.pypi.simple.v1+json, text/html", index=True,
         )
     except acquisition.AcquisitionUnavailable:
         return None
@@ -447,7 +447,8 @@ class _GuardedIndex(ThreadingHTTPServer):
             )
             client = acquisition._Client(self.limits, self.deadline, self.context, {}, self.budget)
             response, _location, _chain = client.request(
-                location, self.feed, {project["origin"], *self.origins}, "application/octet-stream",
+                location, self.feed, {project["origin"], *self.origins} if self.origins else None,
+                "application/octet-stream",
             )
             try:
                 output = io.BytesIO()

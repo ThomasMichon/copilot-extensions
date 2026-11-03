@@ -29,14 +29,17 @@ from test_installer_wheel_acquisition import CERTIFICATE, FILENAME, listed, proj
 from test_promotion_python_artifacts import _wheel_bytes
 
 
-def _resolve(tmp_path, producer, wheels, manifest, *, uv, download_origins=(), name="guarded-delivery.zip"):
+def _resolve(
+    tmp_path, producer, wheels, manifest, *, uv, download_origins=(),
+    name="guarded-delivery.zip", artifact_index=None,
+):
     deadline = time.monotonic() + 180
     destination = tmp_path / name
     result = producer._build_from_snapshot(
         tmp_path, {"source_commit": "a" * 40, "source_tree": "b" * 40, "main_head": "c" * 40},
         json.dumps(manifest).encode(), wheels, _offline_target(producer, deadline),
         uv=uv, download_origins=download_origins, materials={}, material_paths={}, destination=destination,
-        deadline=deadline, max_bytes=4 << 20, guarded_feed=True,
+        deadline=deadline, max_bytes=4 << 20, guarded_feed=True, artifact_index=artifact_index,
     )
     return result, destination
 
@@ -153,7 +156,38 @@ def test_guarded_feed_preserves_native_candidate_admission(
 
 
 @pytest.mark.parametrize("stage", ["index", "wheel"])
-def test_guarded_feed_refuses_an_unapproved_redirect(
+def test_guarded_feed_follows_configured_https_redirects(
+    tmp_path, monkeypatch, tls_source, local_tls_feed, stage,  # noqa: F811
+):
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("native uv is required")
+    producer, wheels, manifest, state, wheel, digest = tls_source
+    foreign = local_tls_feed(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
+    if stage == "index":
+        project(foreign, [listed(hashes={"sha256": digest}, size=len(wheel))])
+        foreign["routes"]["/files/" + FILENAME] = (200, {}, wheel)
+        source, target = "/simple/fixture/", foreign["origin"] + "/simple/fixture/"
+    else:
+        foreign["routes"]["/foreign.whl"] = (200, {}, wheel)
+        source, target = "/files/" + FILENAME, foreign["origin"] + "/foreign.whl"
+    state["routes"][source] = (302, {"Location": target}, b"")
+    _configure_native_tls(tmp_path, monkeypatch, state)
+    config = tmp_path / "operator" / "uv.toml"
+    config.write_text(config.read_text().replace('authenticate = "never"', 'authenticate = "always"'))
+    monkeypatch.setenv("UV_INDEX_FIXTURE_USERNAME", "fixture-user")
+    monkeypatch.setenv("UV_INDEX_FIXTURE_PASSWORD", "fixture-password")
+    state["authorize"] = lambda headers: bool(headers.get("Authorization"))
+
+    result, destination = _resolve(tmp_path, producer, wheels, manifest, uv=uv)
+
+    assert result["selection"] == "guarded-native-feed" and destination.exists()
+    assert foreign["requests"]
+    assert all("Authorization" not in headers for _path, headers in foreign["requests"])
+
+
+@pytest.mark.parametrize("stage", ["index", "wheel"])
+def test_guarded_feed_refuses_unsafe_or_restricted_redirects(
     tmp_path, monkeypatch, tls_source, local_tls_feed, stage,  # noqa: F811
 ):
     uv = shutil.which("uv")
@@ -163,13 +197,16 @@ def test_guarded_feed_refuses_an_unapproved_redirect(
     foreign = local_tls_feed(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
     foreign["routes"]["/foreign.whl"] = (200, {}, wheel)
     requested = "/simple/fixture/" if stage == "index" else "/files/" + FILENAME
+    target = foreign["origin"] + "/foreign.whl"
+    if stage == "index":
+        target = target.replace("https://", "http://", 1)
     state["routes"][requested] = (
-        302, {"Location": foreign["origin"] + "/foreign.whl"}, b"",
+        302, {"Location": target}, b"",
     )
     _configure_native_tls(tmp_path, monkeypatch, state)
 
     with pytest.raises((ProfileError, ValueError)) as failure:
-        _resolve(tmp_path, producer, wheels, manifest, uv=uv)
+        _resolve(tmp_path, producer, wheels, manifest, uv=uv, download_origins=(state["origin"],))
 
     assert requested in [path for path, _headers in state["requests"]]
     assert not foreign["requests"]

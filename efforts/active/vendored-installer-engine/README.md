@@ -12,6 +12,14 @@
 
 ## Guiding Intent
 
+The shared engine and every adopting installer must converge on
+[authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement).
+Explicit incoming installation does not depend on old recovery/ZDD, custody/
+provenance, monitor support or stale transactions. Completion is every requested
+incoming readiness/current selection, not outgoing settlement. Preserve user
+state and session keepers; central self-retirement and at most one optional
+finite long-grace fallback are separate from installation success.
+
 Every `agent-*` runtime plugin hand-maintains its own canonical installer
 entrypoint — `scripts/install.ps1`/`scripts/install.sh` where present, else
 `scripts/init.ps1`/`scripts/init.sh` (the repo's fallback canonical entrypoint
@@ -540,6 +548,12 @@ seven-row ledger.
 
 ## Validation Plan
 
+- [ ] Qualify manual replacement through unsupported old recovery/monitor and
+  stale fences without copying those refusals into the canonical engine;
+  automatic holds remain automatic-only. Prove incoming readiness/all selections,
+  honest new-candidate failures, user data/session preservation and independent
+  retirement. Any finite async fallback must protect the then-current generation
+  and exclude session/foreground roles at actual process/schedule mutation.
 - [ ] Resolve every directly retained #2871 Plan/Validation clause above at its original
   finite scope and evidence tier, preserving alternatives, same owners, holds, and
   current portfolio bounds. Administrative intake is not implementation, native

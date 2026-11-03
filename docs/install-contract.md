@@ -12,6 +12,64 @@ it needs. This document is the reference, and
 explicitly while developing; publication validation belongs in CI, not a
 git `pre-push` hook).
 
+## Authoritative replacement and completion
+
+The canonical intent is
+[authoritative runtime replacement](../visions/installer/README.md#authoritative-runtime-replacement).
+This section is its normative installer contract, not a declaration that all
+existing installers comply. Per-component descriptions below record current
+mechanisms; legacy refusal/recovery descriptions do not redefine the target.
+
+An explicit/manual update installs admitted incoming runtime code independently
+of incumbent recovery, graceful/ZDD support, old ownership/custody/provenance,
+maintenance banners and stale installer transactions/queue fences. Such evidence
+may select reuse or limit cleanup, never veto the new installation. KillSwitch
+and maintenance inhibition apply only to automatic requests, including scheduled,
+sessionStart and Manager-launch preparation; explicit update retains those
+preferences without being suppressed by them.
+
+Old-runtime/footprint recovery and migration are optional optimizations, not
+permission to install. Necessary state-preserving application-data/schema
+migrations remain part of safe incoming readiness; failed migration is a real
+incoming readiness failure, not a reason to discard a preserved database.
+
+Success requires every requested incoming runtime ready, all required central
+services running the incoming generation, and every applicable current-version
+pointer, route, launcher and service/task registration selecting it. Do not
+report whole-set success for queued work, staging alone, Manager alone or an
+unhealthy selected candidate. Incoming authenticity/admission, real build,
+authentication, permissions, I/O and health failures remain honest failures.
+The incoming installer coordinates concrete conflicting writes by bounded
+internal wait/join or replacement so explicit update proceeds. A recorded or
+running old writer, missing custody or an old serialization protocol cannot
+create persistent denial, indefinite queuing or a separate operator-recovery
+prerequisite. Actual OS I/O/permission failures remain failures; owner metadata
+alone is not one.
+
+Outgoing central daemons observe supersession, close admission, attempt drain
+and self-clean independently. Transfer or exclude conflicting work admission
+before incoming serving readiness where needed, without waiting for install
+completion, final exit or indefinite old-lease release.
+Neither predecessor drain/exit nor cleanup gates
+success or rolls back a healthy incoming generation. One optional finite
+asynchronous fallback may force-retire remaining outgoing central daemons and
+obsolete central-service schedules after a grace longer than expected cutover.
+Do not require a periodic resident reaper. At each mutation, revalidate native
+identity, installation, explicit central-service role and then-current selection,
+including registrations: delayed cleanup must never kill a future or reselected
+generation. Session hosts/keepers, session-owned Bridge/agent processes,
+foreground clients and protected connectivity are excluded, including children
+of a central service. Unprovable retirement is skipped and reported separately.
+Never sweep by interpreter name.
+
+Runtime code, old daemon generations, stale installer transactions and owned
+launchers/registrations are replaceable; configuration, credentials, repositories,
+worktrees, sessions and databases are not. This is not factory reset. The
+[architecture adoption boundary](architecture.md#replacement-lifecycle-target-and-current-adoption)
+records remaining gaps. Every installer/update effort and bug-fix review must
+cite this contract and state which completion/preservation controls it exercises;
+passing legacy refusal tests alone does not establish conformance.
+
 The independently maintained wheel-first transition has a
 [per-application support and cutover guide](patterns/fast-application-install-and-cutover.md)
 and a [canonical ideal-flow/app-tracking map](../efforts/active/source-managed-runtime-installs/wheel-first-contributors.md).
@@ -4165,6 +4223,10 @@ existing acquisition owner fetches candidates with its origin, redirect,
 seasoning and resource guards; each requested wheel is inspected from
 immutable bytes and direct dependency URLs are refused before UV sees it.
 Withdrawn files are not advertised as candidates.
+Configured HTTPS feed redirects use that same owner's metadata and artifact
+delivery policy, including public-index refusal and cross-origin credential
+isolation. Explicit nonempty download-origin restrictions still constrain
+artifact destinations.
 Native non-index selection settings and first-party exclusions remain in
 force. The observed project indexes are rechecked after selected-wheel
 acquisition and source validation while the delivery is held; source is
@@ -4184,8 +4246,8 @@ wheels through the same governed feed and origin guard. The source-derived roots
 complete inspected closure still have to agree, and unused or first-party
 registry entries refuse. The existing feed
 owner requires an affirmatively trusted non-public HTTPS index and uses
-system certificates; separately authorized download origins can be supplied with
-`--download-origin` for guarded selection and acquisition.
+system certificates; `--download-origin` supplies an optional exact HTTPS
+artifact-destination restriction for guarded selection and acquisition.
 The selected external wheels, first-party wheels and caller-selected
 source/notice materials are retained and checked through candidate creation.
 An active third-party local source mapping is refused before resolution;
@@ -4193,6 +4255,20 @@ the producer never silently substitutes a registry origin. This includes the
 current Linux Manager `dbus-next` wheel workaround, whose removal requires the
 separate affected-feed qualification in #7606. Linux core generation is not
 qualified by the Windows path.
+
+An optional `--artifact-index <index>` composes the delivered profile into an
+unsigned index candidate in the same retained-input transaction. The index's
+Dev identity must match the selected Main source's recorded last promotion;
+the original index and release-state bytes remain held through final guarded
+feed verification and are rechecked before delivery publication. The result
+includes `candidate_index`, its `candidate_index_sha256`, and the
+`source_index_sha256`. The index digest uses sorted, compact ASCII JSON. The
+caller must independently authenticate the original source index and establish
+its release association; the Dev identity check does not authenticate it.
+Existing artifact/profile data is preserved, and the changed subject requires
+the release owner's full validation and fresh attestation. This index does not
+bind the outer delivery digest or select its distribution channel.
+
 The output is an inert delivery envelope; its reported `approval` is
 `unattested`. Its selected Main commit establishes ancestry only, not
 authentication. Feed qualification, material clearance, source/release

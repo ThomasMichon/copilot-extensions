@@ -641,7 +641,7 @@ def test_core_offline_pool_still_rejects_unapproved_feed_redirect(
     with pytest.raises(ValueError):
         producer._build_from_snapshot(
             tmp_path, {"source_commit": "a" * 40, "source_tree": "b" * 40, "main_head": "c" * 40},
-            json.dumps(manifest).encode(), wheels, target, uv=uv, download_origins=(),
+            json.dumps(manifest).encode(), wheels, target, uv=uv, download_origins=(state["origin"],),
             materials={}, material_paths={}, destination=destination, deadline=deadline, max_bytes=4 << 20,
             native_lock=None, offline_wheel_pool=pool,
         )
@@ -819,7 +819,7 @@ def test_core_selected_lock_rejects_unapproved_download_redirect(
     with pytest.raises(ValueError):
         producer._build_from_snapshot(
             tmp_path, {"source_commit": "a" * 40, "source_tree": "b" * 40, "main_head": "c" * 40},
-            json.dumps(manifest).encode(), wheels, target, uv=uv, download_origins=(),
+            json.dumps(manifest).encode(), wheels, target, uv=uv, download_origins=(state["origin"],),
             materials={}, material_paths={}, destination=tmp_path / "rejected.zip",
             deadline=deadline, max_bytes=4 << 20, native_lock=lock,
         )

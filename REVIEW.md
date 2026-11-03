@@ -27,6 +27,16 @@ specifically when reviewing a pull request, not a replacement for them.
 
 ## Directives for the automatic code-review agent
 
+- **Installer fixes and efforts retain the replacement goal.** Apply
+  [authoritative runtime replacement](visions/installer/README.md#authoritative-runtime-replacement)
+  and CONTRIBUTING.md's Contract impact assessment to bug fixes, plans and
+  implementation alike. Incoming readiness plus complete current selection is
+  installation success; old recovery, custody/provenance, capability support,
+  stale fences and predecessor cleanup cannot become manual-update vetoes.
+  Check automatic-only inhibition, preserved state/sessions and mutation-time
+  current-generation/central-role protection for delayed retirement. Distinguish
+  a normative contract amendment from a claim of implemented adoption; do not
+  demand runtime realization in a review-first intent PR.
 - **Flag any PR whose base is `main` directly.** `main` is regenerated
   wholesale by this repo's own CI promotion pipeline
   (`.github/workflows/validate-and-promote.yml`, dev-branch-release-pipeline

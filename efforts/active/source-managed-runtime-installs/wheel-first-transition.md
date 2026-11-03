@@ -156,13 +156,18 @@ not an implicit waiver by this document.
 ## Manual versus automatic work
 
 Automatic update inhibition remains operator-owned and unchanged by a manual
-install. Explicit manual rescue authority applies only to its addressed scope
-and enters normal native transaction/ownership admission. It does not clear a
-global switch, steal another repair, replay an unsettled request or authorize
-all machines.
+install. Explicit manual replacement authority applies only to its addressed
+scope and follows
+[authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement).
+Within that scope, recorded/running or unsettled old installer state receives
+bounded internal wait/join or replacement, not persistent refusal or another
+operator-recovery prerequisite. Foreign installations and unrelated repair work
+remain protected. This does not clear a global switch, replay an unsettled
+request or authorize all machines.
 Inhibition suppresses automatic update work, not ordinary launch/use of an
-already admitted healthy runtime. Manual authority does not clear unsettled
-native queues or become a waiver of future unrelated maintenance.
+already admitted healthy runtime. Preserve original queue outcomes without
+requiring their settlement before a fresh addressed installation; manual
+authority is not a waiver of future unrelated maintenance.
 
 The automatic-update switch blocks only an explicitly classified
 `<repo> update --auto` invocation. Manual `update` without `--auto`, raw
@@ -178,7 +183,8 @@ Actual parser/request propagation must preserve that classification.
 | Active / manual `update` | Manual owner admission; no switch veto |
 | Active / raw self-install or setup/install-source | Normal addressed owner admission |
 | Active / doctor/list/ordinary launch | Read/use proceeds; nested automatic update is skipped |
-| Any / foreign or unsettled native queue ownership | Independent ownership refusal remains; no stealing or clearing |
+| Manual / unsettled native queue in the addressed installation | Bounded internal continuation/replacement; preserve prior uncertainty, no persistent queue veto or separate recovery demand |
+| Any / foreign installation or unrelated repair | Outside addressed authority; no stealing, mutation or clearing |
 
 Background preparation happens after Manager load, with bounded parallelism and
 one admitted maintenance owner. A long cadence, such as approximately hourly,

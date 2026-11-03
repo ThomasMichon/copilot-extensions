@@ -18,6 +18,15 @@ second builder, supervisor, selector or lifecycle protocol to implement a row.
 
 ## End-to-end architecture
 
+The durable goal is
+[authoritative runtime replacement](../../visions/installer/README.md#authoritative-runtime-replacement).
+Explicit incoming installation does not depend on old recovery/ZDD, custody/
+provenance, capability support or stale transaction/fence settlement. Automatic
+holds remain automatic-only. The target success boundary is every requested
+incoming readiness and all current pointers/routes/launchers/registrations,
+independently of outgoing retirement. Per-app current evidence below does not
+establish that complete contract.
+
 ```text
 trusted upstream installer / explicit manual recovery entry
     -> select official Main or configured backing Git commit once
@@ -29,7 +38,8 @@ trusted upstream installer / explicit manual recovery entry
     -> qualify every member required by the chosen activation strategy
     -> activate through preferred graceful cutover or bounded cold takeover
     -> verify real command/service readiness and record installation result
-    -> settle remaining outgoing retirement obligations
+    -> outgoing central owners self-retire independently of install success
+    -> optional one finite long-grace async central-only retirement fallback
     -> retain last-good state, recovery evidence and unfinished obligations
 ```
 
@@ -72,8 +82,8 @@ new command spelling merely to satisfy this document.
 1. **Prepare independently.** An admitted incoming generation is constructed
    independently and preferably starts beside the incumbent on its own endpoint.
    Ordinary update/repair does not depend on old IPC, uninstall or artifact
-   deletion. Bounded cold takeover may retire the exact verified predecessor
-   before incoming readiness; exclusive resources still require old-owner exclusion.
+   deletion. Do not require old recovery or retirement proof before incoming
+   startup; incoming selection/admission still prevents duplicate exclusive work.
 2. **Be non-mutating before ownership.** Candidate hydration cannot mark the
    incumbent's sessions stopped, interrupt open turns, dequeue tasks, claim
    live hosts or start competing jobs. Register read-only/HTTP credential
@@ -87,9 +97,14 @@ new command spelling merely to satisfy this document.
 4. **Prefer outgoing self-retirement.** It observes a ready selected successor,
    closes its own admission, preserves/checkpoints supported in-flight work,
    detaches transferable children and releases only its own claims. Confirm
-   actual predecessor exit before exclusive takeover or cold replay. The
-   install caller may return after admitted startup; retirement remains a
-   recorded owner obligation, not an unobserved background success.
+   native exit before claiming that retirement actually completed. The
+   installer returns after all requested incoming readiness and current
+   selections, without joining retirement. An optional single finite async
+   fallback has a longer-than-cutover grace and rechecks central role, native
+   identity, installation and then-current generation at mutation. It excludes
+   future/reselected generations, session hosts/keepers, session-owned Bridge/
+   agent processes, foreground clients and protected connectivity; no periodic
+   resident reaper is required.
 5. **Keep recovery explicit.** Compatible transfer is preferred, not a
    universal zero-loss guarantee. Incompatible, unavailable and non-settling
    peers follow the existing bounded cold-takeover contract through the same

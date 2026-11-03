@@ -70,6 +70,8 @@ def advance_pool_startup(conn: sqlite3.Connection, key: str, ts: float) -> None:
     ).fetchone()
     if assignment is None:
         return
+    from .queue_pool_decline import require_no_pool_decline
+    require_no_pool_decline(conn, assignment["task_id"])
     if assignment["status"] in {Status.STARTED, Status.SUSPENDED}:
         return
     task_row = conn.execute("SELECT * FROM tasks WHERE id=?", (assignment["task_id"],)).fetchone()
@@ -112,6 +114,8 @@ def reset_pool_startup(conn: sqlite3.Connection, task_id: str) -> None:
 def require_pool_decision(conn: sqlite3.Connection, task: Task, ts: float) -> None:
     if task.status != Status.CLAIMED:
         return
+    from .queue_pool_decline import require_no_pool_decline
+    require_no_pool_decline(conn, task.id)
     assignment = conn.execute(
         "SELECT * FROM task_pool_assignments WHERE task_id=?", (task.id,),
     ).fetchone()
@@ -207,6 +211,8 @@ def _current(
         raise TaskError("pool startup assignment changed, held or requires reconciliation")
     from .queue_execution_handoff import require_execution_admission
     require_execution_admission(conn, task.id)
+    from .queue_pool_decline import require_no_pool_decline
+    require_no_pool_decline(conn, task.id)
     return task, assignment, reservation
 
 
@@ -277,11 +283,14 @@ class PoolStartupMixin:
             task = self._fetch(conn, task_id)
             if reservation is None or task is None or reservation["task_id"] != task_id:
                 raise TaskError("pool startup snapshot requires its retained task and reservation")
+            from .queue_pool_decline import current_pool_decline
+            decline = current_pool_decline(conn, task_id)
             return {
                 "budget": asdict(_observation(row)),
                 "reservation": asdict(SpawnReservation._from_row(reservation)),
                 "task": asdict(task),
                 "native_id": reservation_native_identity(conn, reservation),
+                "worker_decline": asdict(decline) if decline is not None else None,
             }
 
     def pool_startup(self: _QueueOwner, task_id: str) -> PoolStartupObservation | None:

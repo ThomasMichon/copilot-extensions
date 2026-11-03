@@ -47,6 +47,15 @@ inside its consumer's venv. Do not make a service depend on a sibling launcher.
 
 ## Design the contract before adding syntax
 
+Installation and update obey
+[authoritative runtime replacement](../../visions/installer/README.md#authoritative-runtime-replacement)
+and the [completion contract](../install-contract.md#authoritative-replacement-and-completion).
+Old recovery/ZDD is optional; explicit replacement succeeds on incoming readiness
+and complete current selection, not outgoing exit. Preserve user data and
+session keepers; retirement targets central daemons/obsolete central schedules
+only, with current-generation protection at mutation time. Declare any remaining
+adoption gap instead of copying legacy refusal behavior into a new plugin.
+
 A command's verbs, options, defaults, exit codes and JSON exchanges are a
 service contract even without a daemon. Follow
 [service-contract-evolution](service-contract-evolution.md): preserve strict
