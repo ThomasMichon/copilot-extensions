@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import ssl
 import subprocess
 import sys
 import time
@@ -30,6 +31,66 @@ from test_runtime_profile_release import (
 )
 from test_promotion_python_artifacts import _write_index
 from installer_wheel_acquisition import AcquisitionUnavailable, acquire_wheel_inputs
+
+
+@pytest.mark.skipif(sys.platform == "darwin", reason="native certificate provider is unsupported on macOS")
+@pytest.mark.parametrize("projected", [False, True])
+def test_native_tls_captures_selected_ca_without_ambient_trust(monkeypatch, projected):
+    from installer_native_feed import _tls
+
+    selected = ssl.create_default_context(cafile=str(CERTIFICATE)).get_ca_certs(binary_form=True)
+    network = {"allow_insecure_host": "[]", "system_certs": "true"}
+    if projected:
+        network["custom_certificates"] = "Some(Certificates([" + "".join(
+            "CertificateDer(0x" + value.hex() + ")," for value in selected
+        ) + "]))"
+    monkeypatch.setenv("SSL_CERT_FILE", "unselected-ca")
+    context = _tls(
+        network, environment={"SSL_CERT_FILE": str(CERTIFICATE)}, deadline=time.monotonic() + 10,
+    )
+    assert set(selected).issubset(context.get_ca_certs(binary_form=True))
+    assert context.check_hostname and context.verify_mode == ssl.CERT_REQUIRED
+
+
+@pytest.mark.skipif(sys.platform == "darwin", reason="native certificate provider is unsupported on macOS")
+@pytest.mark.parametrize(
+    "content", [b"not a certificate", b"x" * ((1 << 20) + 1)],
+    ids=["invalid-pem", "oversized"],
+)
+def test_native_tls_refuses_invalid_or_oversized_selected_ca(tmp_path, content):
+    from installer_native_feed import NativeFeedError, _tls
+
+    certificate = tmp_path / "selected-ca.pem"
+    certificate.write_bytes(content)
+    with pytest.raises(NativeFeedError, match="selected certificate file"):
+        _tls(
+            {"allow_insecure_host": "[]", "system_certs": "true"},
+            environment={"SSL_CERT_FILE": str(certificate)}, deadline=time.monotonic() + 10,
+        )
+
+
+def test_native_tls_keeps_deadline_failure_distinct_from_invalid_ca():
+    from installer_native_feed import _tls
+    from installer_wheel_inputs import WheelDeadlineError
+
+    with pytest.raises(WheelDeadlineError, match="deadline"):
+        _tls(
+            {"allow_insecure_host": "[]", "system_certs": "true"},
+            environment={"SSL_CERT_FILE": str(CERTIFICATE)}, deadline=time.monotonic() - 1,
+        )
+
+
+@pytest.mark.skipif(sys.platform == "darwin", reason="native certificate provider is unsupported on macOS")
+def test_native_tls_refuses_unprojected_certificate_directory(tmp_path):
+    from installer_native_feed import _tls
+
+    directory = tmp_path / "selected-certificates"
+    directory.mkdir()
+    with pytest.raises(AcquisitionUnavailable, match="certificate directories"):
+        _tls(
+            {"allow_insecure_host": "[]", "system_certs": "true"},
+            environment={"SSL_CERT_DIR": str(directory)}, deadline=time.monotonic() + 10,
+        )
 
 
 @pytest.mark.parametrize("wrapper", ["SafeUrl", "DisplaySafeUrl"])

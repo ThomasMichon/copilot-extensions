@@ -4370,7 +4370,12 @@ source/trust policy. Named environment credentials, retained URL credentials,
 bounded netrc input and native UV credential lookup remain private.
 
 The initial adapter supports Windows/Linux system certificate trust plus
-captured native explicit CA certificates. Unsupported proxy/bypass, keyring,
+captured native explicit CA certificates. If UV omits certificate bytes from
+its settings projection, capture uses only the retained transaction's absolute
+`SSL_CERT_FILE`, with ordinary-file, mutation and 1 MiB size checks. Ambient
+certificate-file settings never replace that selection; unprojected
+`SSL_CERT_DIR` remains explicitly unsupported. Legacy projected DER
+certificates retain their existing handling. Unsupported proxy/bypass, keyring,
 bundled-root/Darwin trust providers, resolver-altering constraints, metadata
 overrides and package-specific index routing defer explicitly before HTTP;
 they are never silently ignored or translated into different settings.

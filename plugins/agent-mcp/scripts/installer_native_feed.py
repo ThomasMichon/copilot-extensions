@@ -262,7 +262,8 @@ def _configured_index(name, location, raw):
     return False
 
 
-def _tls(network):
+def _tls(network, *, environment, deadline):
+    _check_deadline(deadline)
     if network.get("allow_insecure_host") != "[]":
         raise NativeFeedError("insecure native feed trust is not permitted")
     if network.get("system_certs") != "true" or sys.platform == "darwin":
@@ -280,8 +281,30 @@ def _tls(network):
         if cafile is None and capath is None:
             raise AcquisitionUnavailable("native platform certificate roots are unavailable")
         context.load_verify_locations(cafile=cafile, capath=capath)
-    certificates = network.get("custom_certificates", "None")
-    if certificates != "None":
+    certificates = network.get("custom_certificates")
+    if certificates is None:
+        # Newer UV settings omit certificate bytes; use only the held selection.
+        if environment.get("SSL_CERT_DIR"):
+            raise AcquisitionUnavailable("native custom certificate directories are not yet supported")
+        selected = environment.get("SSL_CERT_FILE")
+        if selected:
+            try:
+                path = Path(selected)
+                if not path.is_absolute():
+                    raise ValueError
+                before = _ordinary(path)
+                if before.st_size > 1 << 20:
+                    raise ValueError
+                with _open(path) as stream:
+                    opened = _unchanged(path, before, stream)
+                    content = stream.read((1 << 20) + 1)
+                    _unchanged(path, before, stream, opened=opened)
+                if len(content) > 1 << 20:
+                    raise ValueError
+                context.load_verify_locations(cadata=content.decode("ascii"))
+            except (OSError, ValueError):
+                raise NativeFeedError("native selected certificate file cannot be captured") from None
+    elif certificates != "None":
         body = _body(_body(certificates, "Some", "(", ")").strip(), "Certificates", "(", ")").strip()
         body = _body(body, "", "[", "]")
         pattern = r"\s*CertificateDer\(\s*0x([0-9a-f]+),?\s*\),?"
@@ -294,6 +317,7 @@ def _tls(network):
             except (ValueError, ssl.SSLError):
                 raise NativeFeedError("native custom certificate projection is invalid") from None
             body = body[match.end():]
+    _check_deadline(deadline)
     return context
 
 
@@ -480,7 +504,7 @@ def capture_native_feed_inputs(
             if name in cutoffs:
                 cutoffs[name] = min(cutoffs[name], datetime.fromisoformat(value.replace("Z", "+00:00")))
     origins = tuple(policy["selection"].get("downloadOrigins", ()))
-    context = _tls(network)
+    context = _tls(network, environment=transaction.environment, deadline=deadline)
     transport = _transport_identity(context)
     original_settings = _fields(_body(
         _projection(original, "PipCompileSettings").get("settings", ""), "PipSettings",
