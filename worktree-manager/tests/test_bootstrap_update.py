@@ -23,6 +23,8 @@ def retained_inputs(tmp_path, monkeypatch):
     import bootstrap_inputs
 
     monkeypatch.delenv(TIMEOUT_ENV, raising=False)
+    monkeypatch.delenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", raising=False)
+    monkeypatch.delenv("AGENT_WORKTREES_UPDATE_CONTEXT", raising=False)
     monkeypatch.setattr(bootstrap_inputs, "retain", lambda payload, root, **kwargs: (payload, True))
 
 
@@ -180,9 +182,6 @@ def test_prepared_old_source_is_data_not_the_bootstrap_controller(tmp_path, monk
 @pytest.mark.parametrize("flags,expected", [
     ([], "600.0"),
     (["--engine-acquisition-timeout", "420"], "420"),
-    (["--auth-report"], None),
-    (["--request-status", "existing"], None),
-    (["--recovery-status"], None),
     (["--target", "agent-bridge"], None),
 ])
 def test_bootstrap_retains_effective_budget_only_for_suite_execution(
@@ -200,11 +199,7 @@ def test_bootstrap_retains_effective_budget_only_for_suite_execution(
         default_root=lambda: tmp_path, drain=lambda: None,
         wait=lambda *a, **k: SimpleNamespace(state="completed", exit_code=23),
     )
-    command = ["update", *flags]
-    if not any(flag in flags for flag in ("--auth-report", "--request-status", "--recovery-status")):
-        command.append("--supervised-debug")
-    else:
-        driver.ensure_worker = lambda *a, **k: None
+    command = ["update", *flags, "--supervised-debug"]
     args = SimpleNamespace(
         payload=tmp_path, root=tmp_path / "manager", command=command,
         repair_update=False, install_source=None,
@@ -219,6 +214,44 @@ def test_bootstrap_retains_effective_budget_only_for_suite_execution(
         assert runner.argv[runner.argv.index("--engine-acquisition-timeout") + 1] == expected
 
 
+@pytest.mark.parametrize("flags", [
+    ["--auth-report", "--json"], ["--request-status", "existing", "--json"],
+    ["--recovery-status", "--json"], ["--recover-for-repair", "--json"],
+    ["--recover-after-restart", "--json"],
+])
+def test_request_controls_use_the_current_cli_without_installation(
+    tmp_path, monkeypatch, capsys, flags,
+):
+    adapter = self_install._runtime_installer()
+    import bootstrap_update
+
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path))
+    monkeypatch.setenv(TIMEOUT_ENV, "nan")
+    monkeypatch.setattr(adapter, "_execution_driver", lambda payload: object())
+    monkeypatch.setattr(adapter, "_install", lambda *a: pytest.fail("inspection installed Manager"))
+    monkeypatch.setattr(adapter, "_source_digest", lambda *a: pytest.fail("inspection retained source"))
+    monkeypatch.setattr(bootstrap_update, "execute", lambda *a, **k: pytest.fail("inspection enqueued"))
+
+    def control(arguments):
+        assert arguments == flags
+        print('{"fixture":true}')
+        return 0
+
+    monkeypatch.setattr(update_driver_cli, "cmd_update_request", control)
+    assert adapter.main(["--root", str(tmp_path), "--", "update", *flags]) == 0
+    assert capsys.readouterr().out == '{"fixture":true}\n'
+
+
+@pytest.mark.parametrize("flags", [
+    ["--auth-report"], ["--request-status", "existing"], ["--recovery-status"],
+    ["--recover-for-repair"], ["--recover-after-restart"], ["--request-status", ""],
+])
+def test_request_controls_refuse_installation_submission(flags):
+    execute = runpy.run_path(str(SCRIPT))["execute"]
+    with pytest.raises(ValueError):
+        execute(SimpleNamespace(command=["update", *flags]), object(), source_digest="a" * 64)
+
+
 @pytest.mark.parametrize("value", ["nan", "0", "3601"])
 def test_invalid_bootstrap_budget_refuses_before_retention_or_submission(tmp_path, monkeypatch, value):
     execute = runpy.run_path(str(SCRIPT))["execute"]
@@ -229,6 +262,50 @@ def test_invalid_bootstrap_budget_refuses_before_retention_or_submission(tmp_pat
     args = SimpleNamespace(command=["update"], payload=tmp_path)
     with pytest.raises(ValueError, match=TIMEOUT_ENV):
         execute(args, object(), source_digest="a" * 64)
+
+
+@pytest.mark.parametrize("context", ["relative", "missing"])
+def test_invalid_bootstrap_context_refuses_before_retention(tmp_path, monkeypatch, context):
+    execute = runpy.run_path(str(SCRIPT))["execute"]
+    import bootstrap_inputs
+
+    directory = "relative" if context == "relative" else str(tmp_path / "missing")
+    monkeypatch.setattr(update_driver_cli, "request_context", lambda: {
+        "AGENT_WORKTREES_UPDATE_CONTEXT": directory,
+    })
+    monkeypatch.setattr(bootstrap_inputs, "retain", lambda *a, **k: pytest.fail("invalid inputs retained"))
+    args = SimpleNamespace(command=["update"], root=tmp_path)
+    with pytest.raises(ValueError, match="existing absolute directory"):
+        execute(args, object(), source_digest="a" * 64)
+
+
+def test_bootstrap_source_identity_is_captured_before_retention(tmp_path, monkeypatch):
+    execute = runpy.run_path(str(SCRIPT))["execute"]
+    import bootstrap_inputs
+
+    current = ["original-source"]
+    monkeypatch.setattr(update_driver_cli, "_source_key", lambda: current[0])
+    monkeypatch.setattr(update_driver_cli, "request_context", lambda: {})
+
+    def retain(payload, root):
+        current[0] = "changed-source"
+        return payload, True
+
+    def enqueue(spec, **kwargs):
+        assert spec.source == "original-source"
+        return SimpleNamespace(id="fixture", log_path=tmp_path / "log")
+
+    monkeypatch.setattr(bootstrap_inputs, "retain", retain)
+    driver = SimpleNamespace(
+        RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        enqueue=enqueue, default_root=lambda: tmp_path, drain=lambda: None,
+        wait=lambda *a, **k: SimpleNamespace(state="completed", exit_code=23),
+    )
+    args = SimpleNamespace(
+        command=["update", "--supervised-debug"], root=tmp_path / "manager",
+        payload=tmp_path, install_source=None, repair_update=False,
+    )
+    assert execute(args, driver, source_digest="a" * 64) == 23
 
 
 @pytest.mark.parametrize("automatic", [False, True])
@@ -281,7 +358,10 @@ def test_default_update_uses_supported_manual_repair_without_replaying_failure(
     assert new.state == "completed" and new.exit_code == 23
 
 
-def test_automatic_whole_update_rechecks_its_saved_hold_before_construction(tmp_path, monkeypatch):
+@pytest.mark.parametrize("relative", [False, True])
+def test_automatic_whole_update_rechecks_its_saved_hold_before_construction(
+    tmp_path, monkeypatch, relative,
+):
     execute = runpy.run_path(str(SCRIPT))["execute"]
     monkeypatch.setattr(core, "default_root", lambda: tmp_path / "driver")
     monkeypatch.setattr(update_driver_cli, "_source_key", lambda: "configured-source")
@@ -290,7 +370,13 @@ def test_automatic_whole_update_rechecks_its_saved_hold_before_construction(tmp_
     saved.write_text('{"active": false}', encoding="utf-8")
     other = tmp_path / "worker-hold.json"
     other.write_text('{"active": false}', encoding="utf-8")
-    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(saved))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", saved.name if relative else str(saved))
+    import bootstrap_inputs
+
+    retained = tmp_path / "retained-controller"
+    retained.mkdir()
+    monkeypatch.setattr(bootstrap_inputs, "retain", lambda *a, **k: (retained, True))
     drain = core.drain
 
     def owner():
@@ -326,7 +412,10 @@ def test_outer_update_does_not_dispatch_a_second_suite_after_its_queued_result(t
     assert adapter.main(["--root", str(tmp_path), "--", "update"]) == 23
 
 
-def test_update_participant_retains_custody_through_manager_and_suite(tmp_path, monkeypatch):
+@pytest.mark.parametrize("failure", [None, "source", "context"])
+def test_update_participant_retains_custody_through_manager_and_suite(
+    tmp_path, monkeypatch, failure,
+):
     adapter = self_install._runtime_installer()
     monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path))
     events = []
@@ -344,13 +433,22 @@ def test_update_participant_retains_custody_through_manager_and_suite(tmp_path, 
         def __exit__(self, *_args):
             events.append("released")
 
+    caller = tmp_path / "caller"
+    caller.mkdir()
     spec = core.RequestSpec(
-        "manager", ("--project", "sample"),
-        context=(("WORKTREE_MANAGER_ROOT", str(tmp_path)),), killswitch_path=str(saved),
+        "manager", ("--project", "sample"), source="admitted-source",
+        context=(
+            ("WORKTREE_MANAGER_ROOT", str(tmp_path)),
+            ("AGENT_WORKTREES_UPDATE_CONTEXT", str(caller)),
+        ), killswitch_path=str(saved),
     )
     monkeypatch.setattr(adapter, "_execution_driver", lambda payload: SimpleNamespace(
         status=lambda identifier, **kwargs: SimpleNamespace(spec=spec),
     ))
+    monkeypatch.setattr(
+        update_driver_cli, "_source_key",
+        lambda: "changed-source" if failure == "source" else spec.source,
+    )
 
     def policy(args):
         assert events == ["owned"]
@@ -367,6 +465,17 @@ def test_update_participant_retains_custody_through_manager_and_suite(tmp_path, 
         return 23
 
     monkeypatch.setattr(adapter, "_finish", finish)
+    if failure:
+        if failure == "context":
+            caller.rmdir()
+        error = RuntimeError if failure == "source" else ValueError
+        with pytest.raises(error):
+            adapter.main([
+                "--root", str(tmp_path), "--update-participant", "--source-digest", "a" * 64,
+                "--", "update", "--project", "sample",
+            ])
+        assert events == ["owned", "released"]
+        return
     assert adapter.main([
         "--root", str(tmp_path), "--update-participant", "--source-digest", "a" * 64,
         "--", "update", "--project", "sample",

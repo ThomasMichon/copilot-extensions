@@ -7,25 +7,38 @@ from pathlib import Path
 import sys
 
 
+def _request_control(options, forwarded) -> bool:
+    if options.request_status == "":
+        raise ValueError("Request status requires a nonempty ID")
+    return any((
+        options.request_status is not None, options.recovery_status, options.recover_after_restart,
+        options.recover_for_repair, "--auth-report" in forwarded,
+    ))
+
+
 def execute(args, driver, *, source_digest: str) -> int:
+    from runtime_install import _bootstrap_hold_path
     from worktree_manager.update_driver_cli import (
-        _CONTEXT_KEYS, _report, _source_key, parse_options, request_context,
+        _CONTEXT_KEYS, _report, _source_key, _update_context_directory, parse_options,
+        request_context,
     )
     from worktree_manager.engine_acquisition_budget import TIMEOUT_ENV, acquisition_timeout
 
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     options, forwarded = parse_options(command[1:])
+    if _request_control(options, forwarded):
+        raise ValueError("Request inspection and recovery must run outside installation submission")
     budget = options.engine_acquisition_timeout
-    inspection = any((
-        options.request_status, options.recovery_status, options.recover_after_restart,
-        options.recover_for_repair, "--auth-report" in forwarded,
-    ))
-    if budget is None and options.target is None and not inspection:
+    if budget is None and options.target is None:
         budget = os.environ.get(TIMEOUT_ENV)
     if budget is not None:
         selected_budget = str(acquisition_timeout({TIMEOUT_ENV: budget}))
         if options.engine_acquisition_timeout is None:
             command = [*command, "--engine-acquisition-timeout", selected_budget]
+    context = {**request_context(), "WORKTREE_MANAGER_ROOT": str(args.root.resolve())}
+    _update_context_directory(context)
+    admitted_source = _source_key()
+    hold_path = _bootstrap_hold_path()
     selected_payload = args.payload.resolve()
     from bootstrap_inputs import retain
 
@@ -50,11 +63,9 @@ def execute(args, driver, *, source_digest: str) -> int:
     spec = driver.RequestSpec(
         "manager", tuple(command[1:]),
         project=str(args.root.resolve()), cwd=str(payload),
-        source=_source_key(),
-        context=tuple({
-            **request_context(), "WORKTREE_MANAGER_ROOT": str(args.root.resolve()),
-        }.items()),
+        source=admitted_source, context=tuple(context.items()),
         repair=not options.auto,
+        killswitch_path=hold_path,
     )
     runner = driver.TrustedRunner(
         tuple(arguments), str(payload), context_keys=_CONTEXT_KEYS,

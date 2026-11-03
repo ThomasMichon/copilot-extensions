@@ -23,8 +23,9 @@ native venv. It covers equivalent pending coalescing, separate active arrivals
 and arguments, changed SDK inputs, preserved nonzero whole-operation results and birth-pinned loss of the
 waiting Python caller. A prepared legacy payload without bootstrap scripts
 separately exercises current-controller compatibility and a saved acquisition
-budget. Owned authentication inspection completes without forwarding a witness;
-a POSIX-only non-update entry resolves source dependencies without creating a
+budget. Authentication inspection retains valid caller-stdout JSON without
+installation, and request controls preserve an interrupted fence until explicit
+recovery outside the install transaction. A POSIX-only non-update entry resolves source dependencies without creating a
 queue. Runner-owned containment
 and daemon-instance leases retain cleanup. This is source-boundary evidence,
 not full-graph performance, escape from a caller-owned cleanup Job, actual
