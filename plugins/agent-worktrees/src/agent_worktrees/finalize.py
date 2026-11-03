@@ -37,6 +37,7 @@ deferred concern handled by cleanup once the worktree is idle.
 from __future__ import annotations
 
 from contextlib import ExitStack
+from collections.abc import Callable
 import os
 import shutil
 import time
@@ -1174,6 +1175,7 @@ def validate_and_finalize(
     abandon: bool = False,
     handoff_to: str | None = None,
     force_open_pr: bool = False,
+    record_guard: Callable[[tracking.WorktreeRecord | None], None] | None = None,
 ) -> bool:
     """Validate that worktree content is on upstream, then clean up.
 
@@ -1192,6 +1194,8 @@ def validate_and_finalize(
         handoff_to: Required with ``abandon`` when obligations remain; the
             affirmative recipient or flow recorded on every orphan entry.
         force_open_pr: Sole override for the backup open-PR gate.
+        record_guard: Additional own-worker admission, rechecked under cleanup
+            locks. It cannot waive any normal finalization gate.
 
     Returns:
         True on success, False if content is not yet on upstream.
@@ -1220,6 +1224,12 @@ def validate_and_finalize(
         try:
             require_record_mutation(record, config)
         except ExecutionSpaceError as exc:
+            output.err(f"Cannot finalize {worktree_id}: {exc}")
+            return False
+    if record_guard is not None:
+        try:
+            record_guard(record)
+        except Exception as exc:
             output.err(f"Cannot finalize {worktree_id}: {exc}")
             return False
     branch = _worktree_branch(record, worktree_id)
@@ -1265,7 +1275,7 @@ def validate_and_finalize(
     # session-state before any teardown, so a finalized/pruned worktree never
     # reads as "(untitled)" with no session linkage -- even with a bypassed
     # register/deregister-session hook. Gap-filling + silent.
-    if record is not None:
+    if record is not None and record_guard is None:
         fresh = _authority_fenced_write(yaml_path, config, tracking.seal_worktree_identity)
         record = fresh if fresh is not None else record
     # Settle only the invoking session's claim before the obligation gate
@@ -1275,9 +1285,16 @@ def validate_and_finalize(
     current_session_id = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
     from .execution_spaces import ExecutionSpaceError, require_record_mutation
     try:
-        record, current_session_ref = _settle_current_session_claim(
-            yaml_path, record, current_session_id,
-        )
+        if record_guard is None:
+            record, current_session_ref = _settle_current_session_claim(
+                yaml_path, record, current_session_id,
+            )
+        else:
+            # Own-worker admission already requires canonical registration.
+            # Keep its session claim until the guarded finalization commits.
+            current_session_ref = tracking.format_claim_ref(
+                record.execution_machine, record.repo, worktree_id, session=current_session_id,
+            ) if record is not None else None
     except ExecutionSpaceError as exc:
         output.err(str(exc))
         return False
@@ -1291,9 +1308,12 @@ def validate_and_finalize(
     if record is not None and repo.pr.enabled:
         from . import pr_ops as _pr_ops
 
-        fresh = _authority_fenced_write(
-            yaml_path, config, lambda r: _pr_ops._reconcile_active_pr(r, config, best_effort=True),
-        )
+        def reconcile(fresh: tracking.WorktreeRecord) -> None:
+            if record_guard is not None:
+                record_guard(fresh)
+            _pr_ops._reconcile_active_pr(fresh, config, best_effort=True)
+
+        fresh = _authority_fenced_write(yaml_path, config, reconcile)
         record = fresh if fresh is not None else record
 
     # Obligation gate (resource-obligation-settlement Phase 2). A worktree
@@ -1428,6 +1448,8 @@ def validate_and_finalize(
             with tracking._RecordLock(yaml_path, require_sidecar=True):
                 record = tracking.load_record(yaml_path)
                 require_record_mutation(record, config)
+                if record_guard is not None:
+                    record_guard(record)
                 try:
                     from . import claim_handoffs
                     source_ref = tracking.format_claim_ref(
@@ -1514,6 +1536,8 @@ def validate_and_finalize(
             cleanup_records.enter_context(tracking._RecordLock(yaml_path, require_sidecar=True))
             record = tracking.load_record(yaml_path)
             require_record_mutation(record, config)
+            if record_guard is not None:
+                record_guard(record)
             checkout_managed = record.checkout_managed
             from . import paired_claims
             cleanup_records.enter_context(paired_claims.lifecycle_guard(record))
@@ -1683,6 +1707,8 @@ def validate_and_finalize(
 
         # Update tracking
         if record:
+            if record_guard is not None:
+                record_guard(record)
             record.finalized_checkout = finalized_identity if Path(worktree_path).exists() else None
             # Release settled outbound resources; children keep their prune gates.
             released = tracking.release_all_resources(record, save=False)
