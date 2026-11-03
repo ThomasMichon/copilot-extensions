@@ -916,20 +916,25 @@ def _monitor_pending_handoff_request(
     worktree_id = getattr(record, "worktree_id", None)
     if not worktree_id:
         return None
-    requested = {
-        str(event.get("handoff_id") or "").strip(): event
-        for event in activity.read_events(
-            worktree_id=worktree_id,
-            event="handoff_requested",
-            limit=64,
-        )
-        if str(event.get("handoff_id") or "").strip()
-    }
-    already_attempted = sessions_pane_retire.already_attempted_handoff_tokens(worktree_id)
+    requested = None
+    already_attempted: set[str] = set()
     for handoff in reversed(record.pending_handoffs):
         token = str(getattr(handoff, "token", "") or "").strip()
         confirmed = getattr(handoff, "candidate", None) or getattr(handoff, "successor", None)
-        if not token or confirmed or token in already_attempted or not handoff.live_cutover:
+        if not token or confirmed or not handoff.live_cutover:
+            continue
+        if requested is None:
+            requested = {
+                str(event.get("handoff_id") or "").strip(): event
+                for event in activity.read_events(
+                    worktree_id=worktree_id,
+                    event="handoff_requested",
+                    limit=64,
+                )
+                if str(event.get("handoff_id") or "").strip()
+            }
+            already_attempted = sessions_pane_retire.already_attempted_handoff_tokens(worktree_id)
+        if token in already_attempted:
             continue
         request_event = requested.get(token, {})
         predecessor_session = str(

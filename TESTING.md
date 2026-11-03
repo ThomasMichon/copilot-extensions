@@ -1,5 +1,11 @@
 # Testing copilot-extensions
 
+Worktrees' focused `tests/test_status_monitor.py` pending-request and bounded-retry
+packet checks that idle, unarmed, confirmed and empty-token queues do not read
+handoff history or claims. Armed requests retain the existing pre-spawn retry
+cap, ambiguous-spawn refusal and durable-trace suppression. These are isolated
+source controls, not installed-monitor or live-cutover evidence.
+
 Bridge's `test_wmi_broker_spawn.py`, `test_watchdog.py` and
 `test_service_process_identity.py` packet covers delayed replacement, argument
 filtering and strict daemon recognition. Its Windows native control invokes the

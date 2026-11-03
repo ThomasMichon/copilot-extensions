@@ -1630,6 +1630,40 @@ def _wire_monitor_handoff_session(tmp_path, monkeypatch):
     _capture_set(monkeypatch)
 
 
+@pytest.mark.parametrize(
+    "handoffs",
+    [
+        [],
+        [{"token": "manual", "live_cutover": False}],
+        [{"token": "candidate", "candidate": "session-2"}],
+        [{"token": "successor", "successor": "session-2"}],
+        [{"token": "  "}],
+        [{"token": "manual", "live_cutover": False}, {"token": "done", "successor": "session-2"}],
+    ],
+)
+def test_monitor_pending_handoff_request_idle_skips_history(handoffs, monkeypatch):
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("an idle handoff queue must not read history, request files or claims")
+
+    monkeypatch.setattr(m.activity, "read_events", forbidden)
+    monkeypatch.setattr(m.sessions_pane_retire, "already_attempted_handoff_tokens", forbidden)
+    monkeypatch.setattr(m, "_monitor_read_session_state_handoff", forbidden)
+    monkeypatch.setattr(m, "_monitor_claim_handoff_cutover", forbidden)
+    record = types.SimpleNamespace(
+        worktree_id="a",
+        pending_handoffs=[
+            types.SimpleNamespace(**{
+                "candidate": None, "successor": None, "live_cutover": True, **handoff,
+            })
+            for handoff in handoffs
+        ],
+    )
+
+    assert m._monitor_pending_handoff_request(record) is None
+
+
 def test_monitor_pending_handoff_request_returns_actionable_request(tmp_path, monkeypatch):
     monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
     monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
@@ -1881,6 +1915,7 @@ def test_monitor_pending_handoff_request_tries_only_once_per_token(tmp_path, mon
                 predecessor="session-1",
                 candidate=None,
                 successor=None,
+                live_cutover=True,
             )
         ],
     )
@@ -1943,6 +1978,7 @@ def test_monitor_pending_handoff_request_counts_failed_spawn_as_attempted(
         pending_handoffs=[
             types.SimpleNamespace(
                 token="handoff-1", predecessor="session-1", candidate=None, successor=None,
+                live_cutover=True,
             )
         ],
     )
@@ -2089,6 +2125,7 @@ def test_monitor_pending_handoff_request_honors_durable_trace_after_log_eviction
         pending_handoffs=[
             types.SimpleNamespace(
                 token="handoff-1", predecessor="session-1", candidate=None, successor=None,
+                live_cutover=True,
             )
         ],
     )

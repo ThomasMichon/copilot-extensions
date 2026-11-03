@@ -1,0 +1,9 @@
+{
+  "comment": "Skip handoff history and claim lookup until a durable token is armed and unconfirmed",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
