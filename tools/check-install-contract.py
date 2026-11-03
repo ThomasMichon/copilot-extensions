@@ -51,7 +51,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import installer_engine_ref as ier
 from install_footprint_contract import check as check_footprints
-from update_machine_gate_contract import check_machine_gate, check_receipt_judgment
+from update_machine_gate_contract import (
+    check_machine_gate, check_monitor_outcome, check_receipt_judgment,
+)
 
 from install_contract_guard import (
     PERSISTENT_ENV_END,
@@ -737,6 +739,7 @@ def check() -> int:
     violations.extend(check_footprints(REPO))
     violations.extend(check_machine_gate(PLUGINS_DIR / "agent-worktrees" / "src" / "agent_worktrees"))
     violations.extend(check_receipt_judgment(PLUGINS_DIR / "agent-worktrees" / "src" / "agent_worktrees"))
+    violations.extend(check_monitor_outcome(PLUGINS_DIR / "agent-worktrees" / "src" / "agent_worktrees"))
     violations.extend(_exec_stderr_swallow_violations(PLUGINS_DIR))
     violations.extend(_mark_complete_result_violations(PLUGINS_DIR))
 
