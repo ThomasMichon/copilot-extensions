@@ -59,21 +59,26 @@ def test_installer_functional_profile_reaches_module_and_native_harness(
 ):
     monkeypatch.setenv("CODESPACES_INSTALLER_TEST_PROFILE", profile)
     module = _contract_module(module_name, monkeypatch)
-    assert module.pytestmark.args == (item_seconds,)
+    markers = module.pytestmark
+    if not isinstance(markers, (list, tuple)):
+        markers = [markers]
+    assert next(marker for marker in markers if marker.name == "timeout").args == (item_seconds,)
     observed = []
-    monkeypatch.setattr(
-        module.subprocess, "run",
-        lambda command, **kwargs: observed.append((command, kwargs)) or "completed",
-    )
+    def capture(command, **kwargs):
+        observed.append((command, kwargs))
+        return "completed"
+
     if module_name == "test_installer_engine_adoption":
+        monkeypatch.setattr(module, "run_caller_owned", capture)
         assert module._run("sh", "exit 0", tmp_path, {}) == "completed"
     else:
+        monkeypatch.setattr(module.subprocess, "run", capture)
         monkeypatch.setattr(module, "_fake_uv", lambda *_args: None)
         monkeypatch.setattr(module, "isolate_installer_environment", lambda *_args: None)
         layout = (tmp_path, tmp_path, tmp_path / "engine.ps1", "")
         assert module._native(layout, tmp_path, "exit 0") == "completed"
+        assert observed[0][1]["check"] is False
     assert observed[0][1]["timeout"] == native_seconds
-    assert observed[0][1]["check"] is False
 
 
 def test_missing_library_fixture_populates_all_declared_sources(monkeypatch, tmp_path):

@@ -806,6 +806,9 @@ def test_manager_default_discovery_excludes_only_its_prepared_native_lane():
         "test_manager_engine_source.py", "test_launch_retention_native.py",
         "test_manager_source_update.py", "test_launch_history_sweep_native.py",
         "test_launch_history_cli_native.py", "test_manager_source_install.py",
+        "test_terminal_launch_native.py", "test_terminal_launch_mux_native.py",
+        "test_pane_boundary_native.py", "test_pane_boundary_posix.py",
+        "test_manager_suite_replacement.py",
     }
     default = {path for group in runner._test_file_groups("worktree-manager", 25) for path in group}
     assert default == set((root / "tests").rglob("test_*.py")) - native
@@ -942,7 +945,7 @@ def test_explicit_test_files_reach_contained_pytest_without_unrelated_modules(
 @pytest.fixture
 def codespaces_native_plan(monkeypatch):
     with tempfile.TemporaryDirectory() as temporary:
-        root = Path(temporary)
+        root = Path(temporary).resolve()
         tests = root / "tests"
         tests.mkdir()
         target = tests / "test_installer_engine_adoption.py"
