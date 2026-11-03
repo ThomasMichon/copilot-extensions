@@ -1988,6 +1988,9 @@ its location from the target root. If staging state cannot be resolved, or ackno
 or metadata error, an explicit warning preserves the independent runtime result.
 The existing atomic writer and lease-release rules remain strict; no failed
 acknowledgement is reported as successful or retried automatically.
+Non-object version manifests remain unknown metadata, preserving pending
+availability and the independent installation result rather than raising from
+dictionary-only readers.
 
 ### Version-cutover reap and live-launcher protection
 

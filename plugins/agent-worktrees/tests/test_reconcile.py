@@ -2935,9 +2935,10 @@ def test_launch_adapters_apply_planned_runtime_environment():
         REPO / "worktree-manager" / "bin" / "launch-session.sh"
     ).read_text(encoding="utf-8")
 
-    for phase in ("bootstrap", "reconcile", "staged"):
-        assert f"'launch-update', '{phase}'" in powershell
-        assert f"launch-update {phase}" in posix
+    assert "'launch-update', 'automatic', '--auto', '--no-update', '--with-reconcile'" in powershell
+    assert "launch-update automatic --auto --no-update --with-reconcile" in posix
+    assert "@('update', '--auto')" in powershell
+    assert "_automatic_args+=(update --auto)" in posix
     assert "Push-UpdateEnvironment" not in powershell
     assert "Invoke-SetupAction" not in powershell
     assert "UPDATE_ARGV" not in posix and "_RARGV" not in posix

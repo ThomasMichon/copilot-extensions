@@ -347,6 +347,7 @@ def test_staged_executor_reconstructs_argv_and_environment(tmp_path, monkeypatch
 
 @pytest.mark.parametrize("outcome", [
     "success", "failed", "blocked", "newer-stage", "status-write-failed", "status-lock-failed",
+    "malformed-deployment",
 ])
 def test_staged_apply_reconciles_actual_indicator(tmp_path, monkeypatch, capsys, outcome):
     path, installer, status = _stage(tmp_path, monkeypatch)
@@ -371,7 +372,10 @@ def test_staged_apply_reconciles_actual_indicator(tmp_path, monkeypatch, capsys,
     def install(*args, **kwargs):
         if outcome == "failed":
             return 7
-        (root / "deploy-manifest.json").write_text('{"source":{"version":"2"}}')
+        (root / "deploy-manifest.json").write_text(
+            '[{"source":{"version":"2"}}]' if outcome == "malformed-deployment"
+            else '{"source":{"version":"2"}}',
+        )
         if outcome == "newer-stage":
             path.write_text(json.dumps({**status, "ts": 2}))
         return 0

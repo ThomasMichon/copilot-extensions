@@ -1002,6 +1002,20 @@ def test_same_version_successor_remains_available_after_previous_source_activate
     assert us.indicator_state() == "available"
 
 
+@pytest.mark.parametrize("filename,contents", [
+    ("deploy-manifest.json", '[{"source":{"version":"2"}}]'),
+    ("plugin.json", "true"),
+])
+def test_malformed_version_metadata_preserves_availability_and_status(applied_stage, filename, contents):
+    payload, root, status, lock, prior = applied_stage
+    directory = root if filename == "deploy-manifest.json" else payload
+    (directory / filename).write_text(contents)
+    original = status.read_bytes()
+    us.acknowledge_applied(prior, payload, root, us.fingerprint(payload))
+    assert us.indicator_state() == "available"
+    assert status.read_bytes() == original
+
+
 def test_namespaced_apply_retains_the_original_staging_lease(tmp_path, monkeypatch):
     from agent_worktrees import __main__ as core, reconcile
 
