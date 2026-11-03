@@ -120,6 +120,14 @@ Marketplace refresh, inventory browsing, plugin acquisition and their summary
 therefore do not extend the auth report's phase or human scope. These timing
 boundaries do not change authentication, acquisition or failure semantics.
 
+Read-only update authentication subprocesses allow up to 30 seconds by default,
+including Git's nested credential-helper replay. A working helper that takes
+longer than five seconds is not itself an authentication failure. Explicit
+shorter subprocess deadlines remain supported; `CE_UPDATE_AUTH_HELPER_TIMEOUT_MS`
+can shorten the helper allowance, capped at 30 seconds. The outer probe still
+owns its entire process tree and terminates it on timeout; this is not a retry,
+interactive sign-in, or authentication bypass.
+
 Authentication cleanup consumes the selected repository's existing
 agent-machines `git-config` policy; it supplies no helper, account or host
 defaults. Ordinary updates only offer a preview when authentication needs

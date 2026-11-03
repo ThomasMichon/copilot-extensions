@@ -1,6 +1,7 @@
 """PowerShell argument translation does not change ordinary Python semantics."""
 from __future__ import annotations
 
+import builtins
 import importlib.util
 import json
 import ntpath
@@ -21,13 +22,40 @@ def sdk_code():
 
 
 @pytest.fixture
-def sdk(sdk_code) -> ModuleType:
+def sdk(sdk_code, sdk_fragments, monkeypatch) -> ModuleType:
     spec = importlib.util.spec_from_file_location("powershell_adapter_sdk", ENTRY)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
-    exec(sdk_code, module.__dict__)
+    texts, codes = sdk_fragments
+    read_text, compile_code = Path.read_text, builtins.compile
+
+    def fragment_text(path, *args, **kwargs):
+        if path.parent != ENTRY.parent or not path.name.startswith("_installation_context_"):
+            return read_text(path, *args, **kwargs)
+        assert not args and kwargs == {"encoding": "utf-8"}
+        if path not in texts:
+            texts[path] = read_text(path, *args, **kwargs)
+        return texts[path]
+
+    def fragment_code(source, filename, mode, *args, **kwargs):
+        path = Path(filename)
+        if path not in texts or source != texts[path] or mode != "exec" or args or kwargs:
+            return compile_code(source, filename, mode, *args, **kwargs)
+        if path not in codes:
+            codes[path] = compile_code(source, filename, mode)
+        return codes[path]
+
+    with monkeypatch.context() as loading:
+        loading.setattr(Path, "read_text", fragment_text)
+        loading.setattr(builtins, "compile", fragment_code)
+        exec(sdk_code, module.__dict__)
     return module
+
+
+@pytest.fixture(scope="session")
+def sdk_fragments():
+    return {}, {}
 
 
 @pytest.mark.parametrize(("left", "right", "equivalent"), [

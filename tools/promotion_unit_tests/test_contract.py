@@ -8,7 +8,7 @@ import pytest
 
 from promotion_unit_contract import (
     PROFILE, UnitEvidenceError, admit_manifest, bounded_bytes, changed_paths, ci_requires_code_checks, ci_requires_units, decode_json, manifest_digest, relative_file,
-    requires_units, source_sha, verify_observations, verify_sources,
+    requires_units, source_sha, verify_observations, verify_sources, windows_native_manifest,
 )
 
 NODE = "tools/promotion_unit_tests/test_example.py::test_example"
@@ -34,6 +34,22 @@ def test_positive_unit_manifest_and_complete_observations():
     verify_observations([NODE], [NODE], reports(), [], 1.25, 300)
     assert manifest_digest(data) == manifest_digest(copy.deepcopy(data))
     assert source_sha("a" * 40) == "a" * 40
+    native = windows_native_manifest(data, platform="win32")
+    assert data == manifest()
+    assert native["nodes"] == data["nodes"] and native["sources"] == data["sources"]
+    assert native["coverage_targets"] == data["coverage_targets"]
+    assert admit_manifest(native, allow_windows_native=True) == native
+    with pytest.raises(UnitEvidenceError, match="profile"):
+        admit_manifest(native)
+    for platform in ("linux", "darwin"):
+        with pytest.raises(UnitEvidenceError, match="requires Windows"):
+            windows_native_manifest(data, platform=platform)
+    for maximum in (0, 601, True):
+        with pytest.raises(UnitEvidenceError):
+            admit_manifest({**native, "max_seconds": maximum}, allow_windows_native=True)
+    verify_observations([NODE], [NODE], reports(), [], 599.0, native["max_seconds"])
+    with pytest.raises(UnitEvidenceError, match="budget"):
+        verify_observations([NODE], [NODE], reports(), [], 600.0, native["max_seconds"])
 
 
 def test_duplicate_json_fields_cannot_hide_unit_selection():
