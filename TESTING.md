@@ -7248,6 +7248,10 @@ the unit-only release packet.
 
 ## Lint + contract gates (before a push)
 
+The install-contract guard exercises actual Worktrees receipt-judgment source
+with a fake child boundary. Its focused source-mutation controls verify that
+missing/stale receipts and busy/deadline outcomes cannot become success.
+
 ```bash
 ruff check --select F,E9 <touched .py files>   # fast lint (pyflakes + syntax)
 python tools/check-install-contract.py         # runtime-plugin install contract — zero violations

@@ -11,6 +11,11 @@ from pathlib import Path
 import pytest
 import install_contract_guard
 from bundle_input_cases import TestBundleInputs as TestBundleInputs
+from promotion_unit_tests.test_update_receipt_contract import (
+    test_actual_update_receipt_contract as test_actual_update_receipt_contract,
+    test_receipt_contract_rejects_runner_bypass as test_receipt_contract_rejects_runner_bypass,
+    test_receipt_contract_rejects_source_regressions as test_receipt_contract_rejects_source_regressions,
+)
 
 pytest.register_assert_rewrite("runtime_profile_cases")
 from runtime_profile_cases import TestExactRuntimeProfile as TestExactRuntimeProfile
@@ -88,6 +93,20 @@ def test_install_guard_runs_machine_gate_contract(monkeypatch, capsys) -> None:
     assert "synthetic machine-gate violation" in output.out + output.err
 
 
+def test_install_guard_runs_receipt_contract(monkeypatch, capsys) -> None:
+    called = []
+
+    def fail(source):
+        called.append(source)
+        return ["synthetic receipt violation"]
+
+    monkeypatch.setattr(checker, "check_receipt_judgment", fail)
+    assert checker.check() == 1
+    assert called == [REPO / "plugins" / "agent-worktrees" / "src" / "agent_worktrees"]
+    output = capsys.readouterr()
+    assert "synthetic receipt violation" in output.out + output.err
+
+
 @pytest.mark.parametrize("name,before,after", [
     ("update_gate.py", 'if scope != "machine-gated":', "if True:"),
     ("update_gate.py", "repo_dir = context", "repo_dir = None"),
@@ -115,9 +134,9 @@ def test_machine_gate_contract_rejects_actual_source_regressions(
 
 @pytest.mark.parametrize("function", ["plan_registered", "plan_module"])
 @pytest.mark.parametrize("before,after", [
-    ("if runtime._machine_gate_blocks(name, scope, gate_context):", "if False:"),
-    ("if runtime._machine_gate_blocks(name, scope, gate_context):",
-     "if not force and runtime._machine_gate_blocks(name, scope, gate_context):"),
+    ("if not multi_index and runtime._machine_gate_blocks(name, scope, gate_context):", "if False:"),
+    ("if not multi_index and runtime._machine_gate_blocks(name, scope, gate_context):",
+     "if not force and not multi_index and runtime._machine_gate_blocks(name, scope, gate_context):"),
     ("status=runtime.MACHINE_GATED_SKIP, eligible=False", 'status="SKIPPED (current)"'),
 ])
 def test_machine_gate_contract_rejects_each_planner_bypass(
