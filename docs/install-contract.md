@@ -3637,6 +3637,10 @@ The human-output adapter retains the updater's installer process-tree owner,
 inactivity protection and deployed-version receipt judgment. Streaming output does not turn
 a zero exit with a missing target receipt, an expired deadline or a failed
 cutover into a successful operation.
+`tools/check-install-contract.py` exercises the legacy Worktrees registered/module
+execution seam, human-output adapter, owned runner and receipt judge with a fake child boundary.
+It checks matching, missing and stale receipts plus busy and deadline outcomes;
+it does not replace native process-tree or other installer validation.
 
 Bridge, Dispatch, Vault, Pull Requests, SSH, Budget Guidance, Worktrees and
 Codespaces emit ordinary

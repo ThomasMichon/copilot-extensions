@@ -1,12 +1,19 @@
-"""Exercise update's machine gate without importing an installed runtime."""
+"""Exercise update's machine gate and receipt judgment without an installed runtime."""
 
 from __future__ import annotations
 
 import ast
+import codecs
 import functools
 import importlib.util
+import io
+import math
+import os
+import subprocess
 import sys
 import tempfile
+import time
+from contextlib import ExitStack, nullcontext
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
@@ -39,6 +46,127 @@ def _module(path: Path, name: str) -> ModuleType:
     sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def check_receipt_judgment(source: Path) -> list[str]:
+    """Exercise the actual targeted-update receipt path with a fake child boundary."""
+    try:
+        _check_receipt_judgment(source)
+    except (ContractViolation, OSError, UnicodeError, SyntaxError, TypeError, AttributeError, KeyError,
+            NameError, ValueError) as error:
+        return [f"update receipt contract: {error}"]
+    return []
+
+
+def _check_receipt_judgment(source: Path) -> None:
+    package_name = "_install_receipt_contract"
+    package = ModuleType(package_name)
+    package.__path__ = []
+    reconcile = ModuleType(f"{package_name}.reconcile")
+    update_driver = ModuleType("update_driver")
+    update_driver.participant_environment = dict
+    state = {}
+    root = Path("receipt-contract-runtime")
+
+    def deployed(name, *, root):
+        _expect(name == "agent-example" and root == Path("receipt-contract-runtime"),
+                "receipt callback used the wrong runtime")
+        return state["deployed"]
+
+    reconcile.runtime_deployed_version = deployed
+    reconcile._versions_equal = _function(source / "reconcile.py", "_versions_equal", {})
+    tree = ast.parse((source / "installer_run.py").read_text(encoding="utf-8"))
+    watchdogs = []
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+        else:
+            continue
+        if any(isinstance(target, ast.Name) and target.id == "_WATCHDOG_EXIT" for target in targets):
+            watchdogs.append(node.value)
+    _expect(len(watchdogs) == 1, "installer watchdog exit is missing or ambiguous")
+    watchdog = ast.literal_eval(watchdogs[0])
+    _expect(type(watchdog) is int and watchdog == 124, "installer watchdog exit changed")
+    with patch.dict(sys.modules, {
+        package_name: package, reconcile.__name__: reconcile, update_driver.__name__: update_driver,
+    }):
+        judge = _function(source / "installer_run.py", "_judge", {
+            "__package__": package_name, "_WATCHDOG_EXIT": watchdog,
+        })
+        calls = []
+
+        def spawn(argv, cwd, env, capture, **_kwargs):
+            _expect(argv == ["installer"] and capture, "targeted installer used the wrong child")
+            calls.append(argv)
+            return SimpleNamespace(returncode=state["rc"]), None
+
+        class Capture:
+            def __init__(self, *_args, **_kwargs):
+                pass
+
+            def wait(self, timeout, **_kwargs):
+                if state["expired"]:
+                    raise subprocess.TimeoutExpired("installer", timeout)
+
+            def deliver(self):
+                pass
+
+        def unowned(*_args, **_kwargs):
+            raise ContractViolation("targeted installer bypassed the receipt owner")
+
+        def result(status, rc, version, complete, duration):
+            return SimpleNamespace(
+                status=status, rc=rc, receipt_version=version, receipt_complete=complete, duration_s=duration,
+            )
+
+        runner_namespace = {
+            "__package__": package_name, "codecs": codecs, "io": io, "math": math, "os": os,
+            "subprocess": subprocess, "sys": sys, "tempfile": tempfile, "time": time,
+            "ExitStack": ExitStack, "InstallerRun": result, "_WATCHDOG_EXIT": watchdog,
+            "_spawn": spawn, "SyncProcessOutput": Capture, "_kill_tree": lambda *_args: None,
+            "contained_test_mode": lambda: True, "_judge": judge,
+        }
+        _function(source / "installer_run.py", "_run_installer", runner_namespace)
+        owned = _function(source / "installer_run.py", "run_installer", runner_namespace)
+        process = SimpleNamespace(run=unowned, SubprocessError=subprocess.SubprocessError)
+        output = SimpleNamespace(
+            header=lambda *_args: None, info=lambda *_args: None,
+            current_operation=lambda: None,
+            human_operation=lambda *_args, **_kwargs: nullcontext(None),
+            native_output=lambda: nullcontext(None),
+        )
+        adapter = _function(source / "update_installer_process.py", "_run_human_installer", {
+            "installer_run": SimpleNamespace(run_installer=owned), "subprocess": process,
+            "output": output, "powershell_file_target": lambda _argv: None,
+        })
+        execute = _function(source / "update_runtime.py", "_execute_runtime_step", {
+            "__package__": package_name, "update_runtime_plan": SimpleNamespace(RuntimeUpdateStep=object),
+            "functools": functools, "_run_human_installer": adapter, "output": output,
+            "subprocess": process,
+        })
+        step = SimpleNamespace(
+            status="", name="agent-example", source=None, runtime_root=root, project_root=None,
+            payload=Path("receipt-contract-payload"), source_target=None, artifact=Path("receipt-contract-payload"),
+            environment={}, deadline_s=60, target_version="2", argv=("installer",), fallback_argv=(),
+        )
+        cases = (
+            ("current", 0, False, "2", "2", "OK"),
+            ("normalized", 0, False, "2.0.dev1", "2.0-dev1", "OK"),
+            ("missing", 0, False, None, "2", "runtime not at target"),
+            ("stale", 0, False, "1", "2", "runtime not at target"),
+            ("busy", 75, False, "2", "2", "installer exited 75"),
+            ("watchdog", 124, False, "2", "2", "timed out"),
+            ("deadline", None, True, None, "2", "timed out"),
+        )
+        for label, rc, expired, version, target, expected in cases:
+            state.update(rc=rc, expired=expired, deployed=version)
+            step.target_version = target
+            calls.clear()
+            status = execute(step)
+            _expect(len(calls) == 1 and status.startswith(expected),
+                    f"{label}: targeted installer outcome ignored its receipt or failure")
 
 
 def check_machine_gate(source: Path) -> list[str]:
