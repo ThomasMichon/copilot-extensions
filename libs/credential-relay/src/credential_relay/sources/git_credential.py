@@ -35,7 +35,7 @@ _IS_WSL = (
 )
 
 # Subprocess flags (suppress console windows on Windows)
-_SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+_SUBPROCESS_FLAGS: int = getattr(subprocess, "CREATE_NO_WINDOW") if sys.platform == "win32" else 0
 
 # Non-interactive environment for `git credential fill`. Without this, a host
 # Git Credential Manager with no cached/valid token may block on an interactive
