@@ -143,6 +143,21 @@ Rows marked open mean **not qualified/released by this campaign**, not proof
 that no source or other contributor implementation exists. Existing app-specific
 efforts, open PRs, retained WIP and resource reservations remain authoritative.
 
+**Bounded downstream composition (#10277; source handle `rusty-socket`):**
+the additive `install_source.install_application` repository API joins the
+existing retained Source/profile constructor to the copied application install
+owner. Owned changes are that adapter, canonical generated copies, focused
+tests and contract documentation; existing acquisition, builder, process,
+publication and service owners are unchanged. Six focused native Windows
+controls pass in 149.33 seconds, including a real synthetic-app fresh/repeat
+install, changed-declaration refusal before callbacks, failed-start selector
+rollback, distinct repair with the new declaration and stable command execution.
+Completed slots retain their original declaration. This is source qualification,
+not Main release, downstream source acquisition, resident-service readiness,
+Linux qualification or host rollout. Required review/CI, actual source merge
+and available external/native qualification remain before publication claims.
+The parent Plan and remaining common gates below remain open.
+
 ## Contributing from another agent or operator
 
 Independent app work may proceed in parallel; "serial per-slice PRs" does not

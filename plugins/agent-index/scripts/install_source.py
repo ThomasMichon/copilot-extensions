@@ -5,6 +5,7 @@ from contextlib import contextmanager
 import argparse
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path, PurePosixPath
 import re
 import sys
@@ -19,6 +20,10 @@ import versioned_runtime_source as sources
 
 SCHEMA = "copilot-extensions.install-source"
 MANIFEST = "install-source.json"
+APPLICATION_INSTALL_CONTRACT = {
+    "schema": "copilot-extensions.prepared-application-install",
+    "version": 1,
+}
 
 
 @dataclass(frozen=True)
@@ -260,6 +265,86 @@ def application_inputs(selected: ProjectSource, inputs: engine.WheelInstallInput
             {engine._package_name(package) for package in packages} - set(local),
         ),
     }
+
+
+def install_application(
+    snapshot: Path, component: str, payload: Path, root: Path, *,
+    uv: Path, base_python: Path, health_module: str,
+    expected_version: str, expected_hash: str, arguments: tuple[str, ...] = (),
+    repair: bool = False,
+) -> dict:
+    """Compose existing construction and application owners for a prepared source.
+
+    The caller retains independent source approval through this call. Snapshot
+    consistency and this adapter's contract declaration do not grant that trust.
+    Application callbacks retain service-specific setup, readiness and recovery.
+    """
+    if base_python.resolve(strict=True) != Path(sys.executable).resolve(strict=True):
+        raise ValueError("source construction must use its selected base interpreter")
+    if not root.is_absolute() or not uv.is_absolute():
+        raise ValueError("application installation requires absolute runtime and UV paths")
+    if not re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*", health_module):
+        raise ValueError("source construction requires an ordinary application module")
+    if (
+        not isinstance(arguments, tuple) or len(arguments) > 64
+        or any(not isinstance(value, str) or "\0" in value for value in arguments)
+        or sum(len(value.encode("utf-8")) for value in arguments) > 65536
+    ):
+        raise ValueError("application installation arguments exceed their contract")
+    with project_inputs(snapshot, component) as (selected, inputs):
+        if sources.read_source_identity(
+            payload, selected.identity.package_version, plugin=component,
+        ) != selected.identity:
+            raise ValueError("invocation payload differs from selected installation source")
+        selection = native_selection(selected, inputs)
+        if selection["payload_hash"] != expected_hash or selection["runtime_version"] != expected_version:
+            raise ValueError("application source/profile selection changed before construction")
+        if "application" not in selected.project:
+            raise ValueError("application installation requires a prepared application project")
+        application = _member(snapshot, selected.project["application"])
+        declaration = _read(application / "application.json")
+        if declaration.get("construction") != application_inputs(selected, inputs):
+            raise ValueError("application declaration differs from its retained Source/profile")
+        if declaration.get("name") == "worktree-manager":
+            raise ValueError("Manager installation requires its existing native lifecycle")
+        version = expected_version + (".repair." + uuid.uuid4().hex if repair else "")
+        with engine.numbered_candidate(
+            root, version, plugin=selected.payload, uv=uv, base_python=base_python,
+            health_module=health_module, extras=tuple(selection["extras"]),
+            local_packages=tuple(selection["local_packages"]), wheel_inputs=inputs,
+            application=application, process_retention=True, reuse_generations=False,
+            expected_source_identity=selection["identity"],
+        ) as candidate:
+            if candidate.payload_hash != expected_hash:
+                raise ValueError("application candidate differs from its admitted construction inputs")
+            inputs.verify()
+            if _read(application / "application.json") != declaration:
+                raise ValueError("prepared application declaration changed during construction")
+            if _read(candidate.slot / "application.json") != declaration:
+                raise engine.ContentRepairRequired(
+                    "application declaration differs from its completed slot; "
+                    "select a distinct repair generation"
+                )
+            frozen = engine.FrozenInputs(
+                candidate.frozen_plugin, engine._package_roots(candidate.frozen_plugin),
+                candidate.payload_hash, wheel_inputs=inputs,
+            )
+            python = candidate.slot / ".venv" / (
+                "Scripts/python.exe" if os.name == "nt" else "bin/python"
+            )
+            engine._child(
+                [
+                    str(engine._native_retained_path(python)), "-I", "-X", "utf8", "-B",
+                    str(candidate.slot / "install.py"), "--", *arguments,
+                ],
+                inputs=frozen, descriptor=candidate.descriptor,
+                timeout=180, cwd=candidate.slot, candidate=candidate.slot,
+            )
+            inputs.verify()
+            receipt = _read(candidate.slot / "install-success.json")
+            if receipt != {"state": "installed", "version": candidate.slot.name}:
+                raise RuntimeError("application owner did not publish its installation result")
+            return {"state": "installed", "slot": str(candidate.slot)}
 
 
 def native_session(
