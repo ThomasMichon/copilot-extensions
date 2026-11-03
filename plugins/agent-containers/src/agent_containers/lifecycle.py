@@ -247,9 +247,9 @@ def list_containers(
     containers: list[DockerContainerInfo] = []
     fleets = (getattr(config, "fleets", None) or {}).values()  # tolerate bare inventory configs
     driver_fleets = [f for f in fleets if getattr(f, "driver", None)]
-    loaded = sys.modules.get(f"{__package__}.runtime_drivers")
-    if not driver_fleets and loaded:  # a reload may have retired every driver fleet
-        loaded.reconcile(config)
+    loaded = sys.modules.get(f"{__package__}.runtime_drivers")  # routing exists only once loaded
+    if loaded and getattr(config, "fleets", None) is not None:
+        loaded.reconcile(config)  # before any early exit: a reload may retire drivers
     try:
         res = _docker(args)
         if res.returncode != 0:

@@ -25,6 +25,7 @@ from agent_containers.external_driver import ExternalDriver, find_driver, scan_d
 from agent_containers.runtime_drivers import DockerDriver, DriverError
 
 FAKE = Path(__file__).with_name("fake_runtime_driver.py")
+_REAL_DOCKER = lifecycle._docker
 # Cases that run POSIX shell commands inside the fake "member", rely on
 # shebang/ENOEXEC semantics, or on exec-stream's in-place exec.
 posix_only = pytest.mark.skipif(os.name == "nt", reason="needs POSIX shell/exec semantics")
@@ -1193,6 +1194,33 @@ def test_empty_operator_entry_removes_shipped_driver_routing(
         fleet.reconcile_up(config, "example")
 
 
+def _docker_recorder(monkeypatch):
+    """Real Docker path with an empty runtime; records every docker argv."""
+    issued = []
+
+    def run(argv, **kwargs):
+        issued.append(argv)
+        if argv[1] == "inspect":
+            return subprocess.CompletedProcess(argv, 1, "", f"Error: No such object: {argv[-1]}")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(lifecycle, "_docker", _REAL_DOCKER)
+    monkeypatch.setattr(lifecycle.subprocess, "run", run)
+    return issued
+
+
+def _assert_retired(issued, handles, fake):
+    driver_calls = len(fake.state()["calls"])
+    for handle in handles:
+        assert runtime_drivers.owner_of(handle) is None
+        with pytest.raises(lifecycle.ContainerNotFoundError):
+            lifecycle.inspect_container(handle)
+        assert issued[-1] == ["docker", "inspect", handle]
+        lifecycle._docker(["exec", handle, "true"])
+        assert issued[-1] == ["docker", "exec", handle, "true"]
+    assert len(fake.state()["calls"]) == driver_calls  # the retired driver is never asked
+
+
 def test_configuration_reload_reconciles_driver_routing_without_clearing(
     fake, no_docker, tmp_path, monkeypatch,
 ):
@@ -1202,18 +1230,17 @@ def test_configuration_reload_reconciles_driver_routing_without_clearing(
     lifecycle.list_containers(config)
     old_id = runtime_drivers.owner_of("example-1").driver.inspect("example-1")["Id"]
 
-    # The fleet is removed: its names no longer route to the retired driver.
+    # The fleet is removed: normal inventory after the reload retires its
+    # name, raw id and qualified handle, and later commands reach Docker only.
     path = tmp_path / "containers.yaml"
     path.write_text(yaml.safe_dump({"fleets": {}}))
     reloaded = load_config(strict=True)
     refuse = lifecycle._docker
-    _docker_rows(monkeypatch)  # the reloaded config is Docker-only now
+    issued = _docker_recorder(monkeypatch)
     assert lifecycle.list_containers(reloaded) == []
+    _assert_retired(issued, ["example-1", old_id, f"example-1.{old_id}"], fake)
     monkeypatch.setattr(lifecycle, "_docker", refuse)
-    assert runtime_drivers.owner_of("example-1") is None
-    assert runtime_drivers.owner_of(old_id) is None
-    argv = ["docker", "exec", "example-1", "true"]
-    assert runtime_drivers.stream_routed(argv) is argv  # no retired-driver route
+    monkeypatch.setattr(lifecycle.subprocess, "run", subprocess.run)
 
     # The fleet returns on a replacement driver: names are not ambiguous.
     (fake.drivers / "replacement-driver.json").write_text(json.dumps({
@@ -1345,3 +1372,44 @@ def test_detached_copilot_launch_stays_on_the_validated_incarnation(
     assert "stop after preparation" in capsys.readouterr().out
     assert seen == [state.old]
     assert runtime_drivers.owner_of("example-1").instance_id is None  # unpinned
+
+
+def test_clearing_the_last_shipped_driver_fleet_retires_its_routes_on_inventory(
+    fake, no_docker, shipped_driver_fleet, monkeypatch,
+):
+    config = shipped_driver_fleet("schema_version: 2\nfleets: {}\n")
+    fleet.reconcile_up(config, "example")
+    [member] = lifecycle.list_containers(config)
+    handles = ["example-1", member.container_id, runtime_drivers.route_handle(member)]
+    assert all(runtime_drivers.owner_of(h) is not None for h in handles)
+
+    cleared = shipped_driver_fleet("schema_version: 2\nfleets:\n  example:\n")
+    assert not any(f.driver for f in cleared.fleets.values())
+    issued = _docker_recorder(monkeypatch)
+    assert lifecycle.list_containers(cleared) == []
+    _assert_retired(issued, handles, fake)
+
+
+def test_namespace_resolve_of_absent_driver_member_never_queries_other_fleets(
+    fake, no_docker, tmp_path, monkeypatch,
+):
+    import time
+
+    slow_root = tmp_path / "slow-runtime"
+    config = _two_driver_config(
+        tmp_path, monkeypatch, fake, ["--root", str(slow_root), "--hang", "list"],
+    )
+    fleet.reconcile_up(config, "example")
+    runtime_drivers.clear_bindings()
+
+    def no_full_inventory(*args, **kwargs):
+        raise AssertionError("full inventory consulted after a scoped absence")
+
+    monkeypatch.setattr(resolver, "list_containers", no_full_inventory)
+    monkeypatch.setattr(resolver, "get_container", no_full_inventory)
+    monkeypatch.setattr(lifecycle, "list_containers", no_full_inventory)
+    started = time.monotonic()
+    with pytest.raises(KeyError, match="example-99.*not found in its runtime-driver fleet"):
+        asyncio.run(resolver.ContainerResolver().resolve_spec("example-99"))
+    assert time.monotonic() - started < 15
+    assert not slow_root.exists()  # the unrelated driver was never invoked

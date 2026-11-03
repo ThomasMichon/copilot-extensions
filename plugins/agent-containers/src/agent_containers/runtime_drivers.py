@@ -856,6 +856,7 @@ def scoped_member(
     is never queried. A distinct Docker container with the same name makes
     the name ambiguous, exactly as the full inventory would.
     """
+    reconcile(config)
     fleets = {
         fleet_name: fleet for fleet_name, fleet in config.fleets.items()
         if fleet.driver and name.startswith(fleet.prefix(fleet_name) + "-")
@@ -916,6 +917,7 @@ def discover(
     names can own it -- is queried, so an unrelated hung driver cannot
     consume the caller's deadline or answer for another fleet's handle.
     """
+    reconcile(config)
     selected = _driver_fleets(config, fleet=fleet, member=member)
     if selected:
         _enumerate(config, selected, timeout=timeout)
@@ -936,6 +938,7 @@ def inspect_pinned(name: str, instance_id: str | None) -> dict | None:
 
 def require_ssh_transport(config: ContainersConfig, name: str, operation: str) -> None:
     """Refuse an SSH-only operation on a driver member that lacks SSH."""
+    reconcile(config)
     if not any(f.driver for f in config.fleets.values()):
         return
     from .lifecycle import get_container

@@ -271,9 +271,12 @@ is final: an unavailable or slow driver fails the request instead of falling
 back to the full inventory, and one bounded `docker inspect` of the name
 refuses it as ambiguous when a distinct Docker container shares it (a
 container Docker reports with the member's own id is the same member).
+An absent member is reported as not found from that fleet's answer alone;
+no other fleet is listed to describe it.
 
 Routing is reconciled against the configuration and each successful listing,
-not accumulated for the life of a process. When a configuration reload removes
+not accumulated for the life of a process. Every inventory and targeted lookup reconciles
+first, including when a reload leaves no driver fleet at all. When a configuration reload removes
 a driver fleet or assigns it another driver, the retired driver's routes for
 that fleet are dropped on the next enumeration, so its names neither reach the
 old driver nor become ambiguous with the replacement. A member name the driver

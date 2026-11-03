@@ -602,19 +602,25 @@ def resolve_live_exec_target(
     )
 
 
-def _member(config: ContainersConfig, name: str, inventory):
-    """A driver member from its own fleet first, else the full ``inventory``.
+def _lookup(config: ContainersConfig, name: str, inventory):
+    """``(scoped, member)``: a driver member from its own fleet, else ``inventory``.
 
     Keeps a healthy selected driver fleet independent of unrelated slow
-    drivers that the full inventory would wait for.
+    drivers that the full inventory would wait for. ``scoped`` is true when the
+    owning driver fleet answered, so a ``None`` member is its authoritative
+    absence and callers must not consult the full inventory for it.
     """
     if any(getattr(f, "driver", None) for f in (getattr(config, "fleets", None) or {}).values()):
         from . import runtime_drivers
 
         scoped, info = runtime_drivers.scoped_member(config, name)
         if scoped:
-            return info
-    return inventory(config, name)
+            return True, info
+    return False, inventory(config, name)
+
+
+def _member(config: ContainersConfig, name: str, inventory):
+    return _lookup(config, name, inventory)[1]
 
 
 class ContainerResolver:
@@ -672,7 +678,13 @@ class ContainerResolver:
         if parse(name) is not None:
             return await asyncio.to_thread(resolve, name)
         config = load_config()
-        info = await asyncio.to_thread(_member, config, name, get_container)
+        scoped, info = await asyncio.to_thread(_lookup, config, name, get_container)
+        if info is None and scoped:
+            # The owning driver fleet already established absence; never wait
+            # on unrelated fleets just to describe it.
+            raise KeyError(
+                f"Container '{name}' not found in its runtime-driver fleet"
+            )
         if info is None:
             members = await asyncio.to_thread(list_containers, config)
             raise KeyError(
