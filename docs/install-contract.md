@@ -4002,6 +4002,18 @@ artifact/manifest pair, target, component, roots and capability. Returned
 evidence identifies the attested subject digest and producer; it is not feed
 admission or an installed-generation receipt.
 
+`tools/artifact_release_discovery.py` owns the existing read-only source
+artifact-channel lookup separately from publication tooling. Promotion reuse,
+tag lookup and readiness retain compatibility adapters over this owner, and
+the opt-in admission toolkit includes it. The reader binds the frozen Dev tag,
+content tree, independently acquired trusted Main history, original attestation
+and complete immutable asset set before returning index data. It downloads no
+executable bundle. Only an actual channel 404 returns absence; permission,
+integrity, malformed or conflicting evidence never becomes a fallback trigger.
+This extraction is not an ordinary Worktrees installer connection or enablement:
+the installer still owes actual source/provider selection, admitted tooling,
+profile planning and current-policy custody through publication.
+
 The producer does not yet generate or publish real profile records, and no
 runtime caller uses this adapter. Composition with the resolved adopting-policy
 baseline, independent source authentication/locking, actual governed acquisition,

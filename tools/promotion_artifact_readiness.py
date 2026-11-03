@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import publish_python_artifacts as publisher
+from artifact_release_discovery import read_release
 from promotion_python_artifacts import INDEX_NAME, PromotionArtifactError
 from promotion_release_evidence import EVIDENCE_PREFIXES, MAX_EVIDENCE_ASSETS, supplementary_evidence_asset
 
@@ -18,19 +19,7 @@ def _expected(directory: Path, index: dict) -> dict[str, str]:
 
 
 def _read_release(repository: str, tag: str) -> dict | None:
-    result = publisher._gh(
-        ["api", f"repos/{repository}/releases/tags/{tag}"],
-        verification=True, timeout=120,
-    )
-    if publisher._is_not_found(result):
-        return None
-    release = publisher._release(result, tag)
-    if (
-        release.get("prerelease") is not True
-        or type(release.get("id")) is not int or release["id"] <= 0
-    ):
-        raise PromotionArtifactError(f"{tag}: invalid candidate release")
-    return release
+    return read_release(repository, tag, runner=publisher._gh)
 
 
 def _assets(

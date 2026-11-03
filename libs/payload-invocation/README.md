@@ -104,6 +104,17 @@ The shared index schema and byte limit belong to that reusable attestation
 module. Release-profile readers import them without reaching the repository's
 publication adapter; the publisher retains the same exported index contract.
 
+`artifact_release_discovery` packages the existing read-only frozen-source
+channel reader. It retains the `python-artifacts-<dev-commit>` tag, exact
+source/composition, trusted Main ancestry, subject attestation and complete
+asset-set checks without importing publication tooling. The source acquisition
+owner supplies ancestry against its independently acquired history. Only an
+actual release-channel 404 returns absence; permission, malformed metadata,
+conflicting tags, integrity and provenance failures propagate. Discovery reads
+the bounded index, not executable bundles, and grants neither profile approval
+nor source-fallback authority. Promotion callers retain thin compatibility
+adapters over this same reader. Ordinary installer composition remains separate.
+
 The payload-only native witness authenticates a synthetic Git source, admits
 its synthetic feed closure, builds first-party wheels, constructs and health
 checks an offline runtime, then reuses that same completed generation. It
