@@ -21,6 +21,12 @@ change branch policy or repair another owner's queue.
 
 ## Existing owners
 
+This skill lives in agent-dispatch because it composes task/recipe lifecycle
+guidance with sustained attention, not because Dispatch is mandatory. Native
+Task or Bridge adapters remain valid; a role charter need not live in a recipe.
+Resolve [guidance sources](references/setup-and-adapters.md#resolve-guidance-through-its-owners)
+before binding roles or treating custom guidance as authority.
+
 Use `efforts:planning-efforts` for a substantial setup's canonical plan and
 review gate; `agent-worktrees:working-cross-repo` and
 `agent-worktrees:worktree` for repository policy and resource custody.

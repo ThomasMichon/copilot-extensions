@@ -900,3 +900,237 @@ def test_indicator_locked_skip_without_a_live_owner_is_idle(tmp_path: Path):
     status.write_text(json.dumps({"stage_done": True, "skipped": "locked",
                                   "plugin_changed": False}), encoding="utf-8")
     assert us.indicator_state(status=status, lock=tmp_path / "none.lock") == "idle"
+
+
+@pytest.fixture
+def applied_stage(tmp_path, monkeypatch):
+    from agent_worktrees import reconcile
+
+    payload, root = tmp_path / "payload", tmp_path / "runtime"
+    payload.mkdir()
+    root.mkdir()
+    (payload / "plugin.json").write_text(json.dumps({"name": "agent-worktrees", "version": "2"}))
+    (payload / "pyproject.toml").write_text('[project]\nversion = "2"\n')
+    (root / "deploy-manifest.json").write_text(json.dumps({"source": {"version": "2"}}))
+    status, lock = tmp_path / "status.json", tmp_path / "lock"
+    prior = dict(
+        stage_done=True, plugin_changed=True, venv_drift=True, ts=1,
+        payload_version="1.1", deployed_version="1",
+        plugin_dir=str(payload), runtime_root=str(root), fingerprint="old",
+    )
+    us._write_status(status, prior)
+    monkeypatch.setattr(us, "discover_plugin_dir", lambda: (payload, "marketplace"))
+    monkeypatch.setattr(reconcile, "runtime_installer_environment", lambda *a, **k: ({}, root))
+    monkeypatch.setattr(us, "lock_path", lambda *a: lock)
+    monkeypatch.setattr(us, "status_path", lambda *a: status)
+    monkeypatch.setattr(us.cfg, "install_dir", lambda: root)
+    monkeypatch.setattr(us.cfg, "legacy_install_dir", lambda: root)
+    return payload, root, status, lock, prior
+
+
+def test_applied_stage_publishes_current_without_another_acquisition(applied_stage, monkeypatch):
+    payload, root, status, lock, prior = applied_stage
+    monkeypatch.setattr(us, "_run_copilot_update", lambda: pytest.fail("unexpected acquisition"))
+    monkeypatch.setattr(us.cfg, "install_dir", lambda: pytest.fail("caller root must not replace selected root"))
+    us.acknowledge_applied(prior, payload, root, us.fingerprint(payload))
+    result = us.read_status(status)
+    assert result["plugin_changed"] is False
+    assert result["venv_drift"] is False
+    assert result["payload_version"] == result["deployed_version"] == "2"
+    assert result["applied_ts"] > prior["ts"]
+    assert us.indicator_state(status=status, lock=lock) == "current"
+
+
+@pytest.mark.parametrize("change", ["newer-stage", "newer-payload", "live-stage", "blocked", "failed", "drift"])
+def test_acknowledgement_preserves_unconsumed_or_failed_evidence(applied_stage, change):
+    payload, root, status, lock, prior = applied_stage
+    before_fingerprint = us.fingerprint(payload)
+    if change == "newer-stage":
+        us._write_status(status, {**prior, "ts": 2, "fingerprint": "newer"})
+    elif change == "newer-payload":
+        (payload / "plugin.json").write_text('{"name":"agent-worktrees","version":"3"}')
+    elif change == "live-stage":
+        assert us.acquire_lock(lock)
+    elif change in {"blocked", "failed"}:
+        prior.update({"runtime_apply_blocked": "policy"} if change == "blocked" else {"acquisition_ok": False})
+        us._write_status(status, prior)
+    else:
+        (root / "deploy-manifest.json").write_text('{"source":{"version":"1"}}')
+    original = status.read_bytes()
+    try:
+        us.acknowledge_applied(prior, payload, root, before_fingerprint)
+        assert status.read_bytes() == original
+    finally:
+        if change == "live-stage":
+            us.release_lock(lock)
+
+
+def test_legacy_obsolete_indicator_is_read_only_and_preserves_pending_changes(applied_stage, monkeypatch):
+    from agent_worktrees import reconcile
+
+    payload, root, status, lock, prior = applied_stage
+    monkeypatch.setattr(us, "fingerprint", lambda p: pytest.fail("render must not hash source"))
+    monkeypatch.setattr(us, "_run_copilot_update", lambda: pytest.fail("render must not acquire"))
+    monkeypatch.setattr(
+        reconcile, "runtime_installer_environment",
+        lambda *a, **k: pytest.fail("render must not resolve an installation through a child probe"),
+    )
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("render must not spawn"))
+    before = status.read_bytes()
+    assert us.indicator_state() == "idle"
+    assert status.read_bytes() == before
+    us._write_status(status, {**prior, "payload_version": "2", "deployed_version": "2"})
+    assert us.indicator_state() == "available"  # Same-version source changes are still pending.
+    (root / "deploy-manifest.json").write_text('{"source":{"version":"1"}}')
+    assert us.indicator_state() == "available"
+    assert us.acquire_lock(lock)
+    try:
+        assert us.indicator_state() == "checking"
+        monkeypatch.setenv("WORKTREE_NO_UPDATE", "1")
+        assert us.indicator_state() == "paused"
+    finally:
+        us.release_lock(lock)
+
+
+def test_same_version_successor_remains_available_after_previous_source_activates(applied_stage):
+    payload, root, status, lock, prior = applied_stage
+    prior.update(payload_version="2", deployed_version="1", fingerprint="source-a")
+    successor = {**prior, "ts": 2, "fingerprint": "source-b"}
+    us._write_status(status, successor)
+    us.acknowledge_applied(prior, payload, root, us.fingerprint(payload))
+    assert us.read_status() == successor
+    assert us.indicator_state() == "available"
+
+
+@pytest.mark.parametrize("filename,contents", [
+    ("deploy-manifest.json", '[{"source":{"version":"2"}}]'),
+    ("plugin.json", "true"),
+])
+def test_malformed_version_metadata_preserves_availability_and_status(applied_stage, filename, contents):
+    payload, root, status, lock, prior = applied_stage
+    directory = root if filename == "deploy-manifest.json" else payload
+    (directory / filename).write_text(contents)
+    original = status.read_bytes()
+    us.acknowledge_applied(prior, payload, root, us.fingerprint(payload))
+    assert us.indicator_state() == "available"
+    assert status.read_bytes() == original
+
+
+@pytest.mark.parametrize("has_valid", [False, True])
+def test_direct_discovery_skips_non_object_manifests_without_crashing_indicator(
+    tmp_path, monkeypatch, has_valid,
+):
+    home, root = tmp_path / "home", tmp_path / "runtime"
+    direct = home / ".copilot" / "installed-plugins" / "_direct"
+    invalid, valid = direct / "a-invalid", direct / "z-engine"
+    invalid.mkdir(parents=True)
+    (invalid / "plugin.json").write_text('[{"name":"agent-worktrees"}]')
+    if has_valid:
+        valid.mkdir()
+        (valid / "plugin.json").write_text('{"name":"agent-worktrees","version":"2"}')
+    root.mkdir()
+    (root / "deploy-manifest.json").write_text('{"source":{"version":"2"}}')
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setattr(us.cfg, "install_dir", lambda: root)
+    us._write_status(us.status_path(), dict(
+        stage_done=True, plugin_changed=True, payload_version="1.1", deployed_version="1",
+        plugin_dir=str(valid if has_valid else invalid), runtime_root=str(root),
+    ))
+    original = us.status_path().read_bytes()
+    assert us.discover_plugin_dir() == ((valid, "direct") if has_valid else (None, ""))
+    assert us.indicator_state() == ("idle" if has_valid else "available")
+    assert us.status_path().read_bytes() == original
+
+
+@pytest.mark.parametrize("recorded", [False, True])
+def test_custom_status_without_matching_writer_paths_is_not_acknowledged(tmp_path, monkeypatch, capsys, recorded):
+    root, custom = tmp_path / "runtime", tmp_path / "export.json"
+    monkeypatch.setattr(us.cfg, "install_dir", lambda: root)
+    prior = dict(stage_done=True, plugin_changed=True)
+    if recorded:
+        prior.update(stage_status=str(tmp_path / "original.json"), stage_lock=str(root / "updater.lock"))
+    us._write_status(custom, prior)
+    original = custom.read_bytes()
+    assert us.application_status(custom) == ({}, None, None)
+    assert "Update status acknowledgement unavailable:" in capsys.readouterr().err
+    assert custom.read_bytes() == original
+
+
+def test_namespaced_apply_retains_the_original_staging_lease(tmp_path, monkeypatch):
+    from agent_worktrees import __main__ as core, reconcile
+
+    legacy, cell, payload = tmp_path / "legacy", tmp_path / "cell", tmp_path / "payload"
+    cell.mkdir()
+    payload.mkdir()
+    (payload / "plugin.json").write_text('{"name":"agent-worktrees","version":"2"}')
+    (cell / "deploy-manifest.json").write_text('{"source":{"version":"1"}}')
+    monkeypatch.setattr(us.cfg, "install_dir", lambda: legacy)
+    monkeypatch.setattr(us, "discover_plugin_dir", lambda *a: (payload, "marketplace"))
+    monkeypatch.setattr(us, "_run_copilot_update", lambda: (True, "unchanged"))
+    monkeypatch.setattr(reconcile, "runtime_installer_environment", lambda *a, **k: ({}, cell))
+    monkeypatch.setattr(reconcile, "publication_diagnostic", lambda *a, **k: None)
+    monkeypatch.setattr(core, "plan_pre_launch", lambda: {"action": "continue"})
+    prior = us.stage()
+    assert prior["plugin_changed"] and prior["runtime_root"] == str(cell)
+    original_status, original_lock = us.status_path(), us.lock_path()
+    original = original_status.read_bytes()
+    (cell / "deploy-manifest.json").write_text('{"source":{"version":"2"}}')
+    monkeypatch.setattr(us.cfg, "install_dir", lambda: cell)
+    assert us.acquire_lock(original_lock)
+    try:
+        assert us.indicator_state(status=original_status) == "checking"
+        us.acknowledge_applied(
+            prior, payload, cell, us.fingerprint(payload), status=original_status,
+        )
+        assert original_status.read_bytes() == original
+        assert original_lock.is_file()
+        assert not (cell / "updater.lock.guard").exists()
+    finally:
+        us.release_lock(original_lock)
+    us.acknowledge_applied(prior, payload, cell, us.fingerprint(payload))
+    assert us.read_status(original_status)["plugin_changed"] is False
+
+
+def test_legacy_status_without_runtime_root_uses_only_the_default_installation(applied_stage, monkeypatch):
+    payload, root, status, lock, prior = applied_stage
+    prior.pop("runtime_root")
+    us._write_status(status, prior)
+    assert us.indicator_state() == "idle"
+    other = root / "other-installation"
+    other.mkdir()
+    (other / "deploy-manifest.json").write_text('{"source":{"version":"2"}}')
+    monkeypatch.setattr(us.cfg, "install_dir", lambda: other)
+    assert us.indicator_state() == "available"
+    us.acknowledge_applied(prior, payload, other, us.fingerprint(payload))
+    assert us.read_status() == prior
+    us.acknowledge_applied(prior, payload, root, us.fingerprint(payload))
+    assert us.read_status()["runtime_root"] == str(root)
+    assert us.indicator_state() == "current"
+
+
+def test_native_standalone_manager_reads_acknowledged_engine_status(applied_stage):
+    payload, root, status, lock, prior = applied_stage
+    us.acknowledge_applied(prior, payload, root, us.fingerprint(payload))
+    manager_source = Path(__file__).resolve().parents[3] / "worktree-manager" / "src"
+    engine_program = (
+        f"import sys; sys.path[:]={sys.path!r}; "
+        "from pathlib import Path; from agent_worktrees import config; "
+        f"config.install_dir=lambda:Path({str(root)!r}); "
+        "from agent_worktrees.__main__ import main; raise SystemExit(main())"
+    )
+    manager_program = (
+        f"import sys; sys.path[:]=[{str(manager_source)!r}, *{sys.path!r}]; "
+        "from worktree_manager import engine_client; "
+        "from worktree_manager.production_picker import context, update_stage; "
+        f"engine_client.set_engine_command({[sys.executable, '-I', '-c', engine_program]!r}); "
+        "context.project=lambda: 'example'; print(update_stage.indicator_state())"
+    )
+    # Use the actual standalone consumer, JSON subprocess and engine CLI parser.
+    (root / "updater-status.json").write_bytes(status.read_bytes())
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", manager_program], cwd=root,
+        capture_output=True, text=True, timeout=20,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "current"

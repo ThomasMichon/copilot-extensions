@@ -11,6 +11,41 @@ from pathlib import Path
 from . import installer, output, picker_profiles_cli, update_events
 
 
+def prune_stale_pivots() -> None:
+    """Auto-remove Picker pivot manifests that just went stale from *this*
+    update (a plugin's manifest changed shape/columns and left an old
+    materialized copy shadowing it -- see #3509's investigation).
+
+    Deliberately reuses :func:`prunable_findings`'s existing safe subset
+    (``duplicate``/``identity-mismatch``/``missing-target``/``invalid-entry``,
+    each only once a live correct manifest for the same plugin is already
+    resolvable elsewhere in the registry). A ``legacy-unattributed`` or
+    ``not-enabled`` finding is never touched here either -- both still need a
+    human to reinstall/re-enable the owning plugin. Best-effort: any failure
+    here is a warning, never a reason to fail the update itself."""
+    try:
+        from .picker_support import pivots as pivot_registry
+    except Exception as exc:
+        output.warn(f"Pivot prune skipped (import failed): {exc}")
+        update_events.record("prune", "pivots", f"pivot prune failed: {exc}", required=False)
+        return
+    try:
+        report = pivot_registry.scan_pivot_registry(materialize=False)
+        pruned = pivot_registry.prune_stale_entries(report, apply=True)
+    except Exception as exc:
+        output.warn(f"Pivot prune skipped: {exc}")
+        update_events.record("prune", "pivots", f"pivot prune failed: {exc}", required=False)
+        return
+    removed = [item for item in pruned if item.get("removed")]
+    if removed:
+        output.ok(
+            f"Pruned {len(removed)} stale Picker pivot manifest(s) "
+            "(reopen the Picker to re-materialize from the current "
+            "plugin manifest): "
+            + ", ".join(str(item.get("entry")) for item in removed)
+        )
+
+
 @contextmanager
 def _selected_payload(payload: Path, environment: Mapping[str, str]):
     values = {

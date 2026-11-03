@@ -404,6 +404,24 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
         for step in portfolio:
             output.info(f"Runtime plan: {step.name}: {step.status or 'ready'} (not executed)")
         return 0
+    from . import update_stage
+
+    stage_status, stage_path, stage_lock = (
+        update_stage.application_status() if engine_step is not None else ({}, None, None)
+    )
+    applied_fingerprint = (
+        update_stage.fingerprint(plugin_dir)
+        if stage_status.get("plugin_changed") and engine_step.source is None and not engine_step.status
+        else ""
+    )
+
+    def acknowledge_engine() -> None:
+        if applied_fingerprint:
+            update_stage.acknowledge_applied(
+                stage_status, plugin_dir, engine_step.runtime_root, applied_fingerprint,
+                status=stage_path, lock=stage_lock,
+            )
+
     if engine_step is not None:
         _events.enter("engine_runtime")
         if engine_step.status:
@@ -456,6 +474,8 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
             runtimes_ok = False
 
     if phase == "runtimes":
+        if runtimes_ok:
+            acknowledge_engine()
         return 0 if runtimes_ok else 1
 
     if not getattr(args, "no_anchor_sync", False):
@@ -469,42 +489,15 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
     from .update_integration import finish
 
     integration_ok = finish(plugin_dir, plat, dict(engine_step.environment))
+    if payloads_ok and runtimes_ok and integration_ok:
+        acknowledge_engine()
     return 0 if payloads_ok and runtimes_ok and integration_ok else 1
 
 
 def _prune_stale_pivots_after_update() -> None:
-    """Auto-remove Picker pivot manifests that just went stale from *this*
-    update (a plugin's manifest changed shape/columns and left an old
-    materialized copy shadowing it -- see #3509's investigation).
+    from .update_integration import prune_stale_pivots
 
-    Deliberately reuses :func:`prunable_findings`'s existing safe subset
-    (``duplicate``/``identity-mismatch``/``missing-target``/``invalid-entry``,
-    each only once a live correct manifest for the same plugin is already
-    resolvable elsewhere in the registry). A ``legacy-unattributed`` or
-    ``not-enabled`` finding is never touched here either -- both still need a
-    human to reinstall/re-enable the owning plugin. Best-effort: any failure
-    here is a warning, never a reason to fail the update itself."""
-    try:
-        from .picker_support import pivots as pivot_registry
-    except Exception as exc:
-        output.warn(f"Pivot prune skipped (import failed): {exc}")
-        _events.record("prune", "pivots", f"pivot prune failed: {exc}", required=False)
-        return
-    try:
-        report = pivot_registry.scan_pivot_registry(materialize=False)
-        pruned = pivot_registry.prune_stale_entries(report, apply=True)
-    except Exception as exc:
-        output.warn(f"Pivot prune skipped: {exc}")
-        _events.record("prune", "pivots", f"pivot prune failed: {exc}", required=False)
-        return
-    removed = [item for item in pruned if item.get("removed")]
-    if removed:
-        output.ok(
-            f"Pruned {len(removed)} stale Picker pivot manifest(s) "
-            "(reopen the Picker to re-materialize from the current "
-            "plugin manifest): "
-            + ", ".join(str(item.get("entry")) for item in removed)
-        )
+    prune_stale_pivots()
 
 
 def _refresh_marketplace(marketplace: str, *, cwd: Path | None = None) -> bool:

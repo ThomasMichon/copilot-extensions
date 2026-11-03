@@ -273,7 +273,10 @@ def _stage(tmp_path, monkeypatch):
     installer.write_text("fixture")
     root = tmp_path / "runtime"
     path = tmp_path / "stage.json"
-    status = dict(stage_done=True, plugin_changed=True, plugin_dir=str(payload), runtime_root=str(root))
+    status = dict(
+        stage_done=True, plugin_changed=True, plugin_dir=str(payload), runtime_root=str(root),
+        stage_status=str(path), stage_lock=str(tmp_path / "lock"),
+    )
     path.write_text(json.dumps(status))
     monkeypatch.setattr(launch.update_stage, "discover_plugin_dir", lambda: (payload, "marketplace"))
     monkeypatch.setattr(launch.update_stage, "fingerprint", lambda p: installer.read_text())
@@ -343,6 +346,59 @@ def test_staged_executor_reconstructs_argv_and_environment(tmp_path, monkeypatch
     assert update["argv"][-1] == "demo"
     assert update["environment"] == {"FIXTURE": "canonical"}
     assert json.loads(capsys.readouterr().out)["executed"][0]["returncode"] == 7
+
+
+@pytest.mark.parametrize("outcome", [
+    "success", "failed", "blocked", "newer-stage", "status-write-failed", "status-lock-failed",
+    "malformed-deployment",
+])
+def test_staged_apply_reconciles_actual_indicator(tmp_path, monkeypatch, capsys, outcome):
+    path, installer, status = _stage(tmp_path, monkeypatch)
+    root = launch.Path(status["runtime_root"])
+    root.mkdir()
+    (installer.parent.parent / "plugin.json").write_text('{"name":"agent-worktrees","version":"2"}')
+    monkeypatch.setattr(launch.update_stage, "lock_path", lambda *a: tmp_path / "lock")
+    monkeypatch.setattr(launch, "execution_diagnostic", lambda *a, **k: (
+        {"reason": "policy", "message": "blocked"} if outcome == "blocked" else None
+    ))
+    publish = launch.update_stage._write_status
+
+    def write(target, data):
+        if outcome == "status-write-failed" and target == path:
+            raise OSError("status publication denied")
+        if outcome == "status-lock-failed" and target == tmp_path / "lock":
+            raise ValueError("lock metadata unavailable")
+        publish(target, data)
+
+    monkeypatch.setattr(launch.update_stage, "_write_status", write)
+
+    def install(*args, **kwargs):
+        if outcome == "failed":
+            return 7
+        (root / "deploy-manifest.json").write_text(
+            '[{"source":{"version":"2"}}]' if outcome == "malformed-deployment"
+            else '{"source":{"version":"2"}}',
+        )
+        if outcome == "newer-stage":
+            path.write_text(json.dumps({**status, "ts": 2}))
+        return 0
+
+    monkeypatch.setattr(launch.reconcile, "_run_plan_step", install)
+    digest = launch._staged_snapshot(path)[1]
+    assert launch._execute(_args(phase="staged", status=str(path), snapshot=digest)) == (
+        1 if outcome in {"failed", "blocked"} else 0
+    )
+    assert launch.update_stage.indicator_state(status=path) == (
+        "current" if outcome == "success" else "available"
+    )
+    captured = capsys.readouterr()
+    if outcome.startswith("status-"):
+        assert "Update status acknowledgement unavailable:" in captured.err
+        assert json.loads(captured.out)["executed"][0]["ok"] is True
+        assert launch.update_stage.read_status(path) == status
+        monkeypatch.setattr(launch.update_stage, "_write_status", publish)
+        assert launch.update_stage.acquire_lock()
+        launch.update_stage.release_lock()
 
 
 @pytest.mark.parametrize("denied", [False, True])

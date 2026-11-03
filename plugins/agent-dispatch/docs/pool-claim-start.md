@@ -192,6 +192,13 @@ It does not choose another pool or forward a local create to a
 different host. The managed allocator opt-in remains disabled by default;
 driver-correct startup supervision is described below.
 
+Ordinary initial startup resolves that execution machine through Dispatch's
+durable installed machine binding, then its configured supervisor file. Only
+when both are absent does it use Worktrees project discovery. Unreadable or
+conflicting installed settings refuse before create/send; ambient machine
+values and detected hostnames do not override the binding or equate a physical
+host with a separate guest execution identity.
+
 `ordinary_invocation.startup_seed` selects a distinct allocator-claimed worker
 prompt for this assignment. It retains coordinator routing, the charter and
 lane-aware duplicate checks, but never emits `claim --evaluation` or a second

@@ -4661,6 +4661,38 @@ An explicitly prepared application installs its first-party wheels offline
 without running those first-party backends. Neither path upgrades, stops or
 removes unrelated service installations.
 
+### Prepared downstream application adapter
+
+The explicit repository API `install_source.install_application` composes the
+same retained `project_inputs`, numbered constructor and copied application's
+regular `install.py` owner for a selected downstream component. It requires a
+complete prepared Source/profile/application snapshot, matching invocation
+payload, expected generation/hash, selected base interpreter and absolute UV
+and runtime paths. It refuses missing applications, changed construction inputs
+and the Manager-specific lifecycle before construction. The existing native
+session protocol and ordinary bootstrap callers are unchanged.
+
+Select the API from the exact admitted immutable source, not an installed
+module with the same name. That module's `APPLICATION_INSTALL_CONTRACT` declares
+`copilot-extensions.prepared-application-install` version one. Missing or unknown
+support means this optional adapter is unavailable; never attempt installation
+and then replay through a guessed legacy path. No new CLI syntax is introduced.
+
+The adapter retains wheel and candidate/process custody through setup,
+publication and startup, and requires the application's successful installation
+receipt. The existing application owner handles selector/launcher rollback.
+The selected and completed-slot application declarations must also agree before
+callbacks execute. Changed setup/start/command declarations refuse reuse and
+require an explicitly selected distinct repair generation; completed slots are
+never rewritten to fit new declarations.
+Application callbacks still own service readiness, irreversible effects and
+partial-transition recovery. A thrown exception is not proof of no effects and
+does not authorize replay. This entry neither acquires/authenticates source nor
+builds a downstream project's initial snapshot, grants deployment authority or
+provides a new service supervisor. Its caller retains independent source
+approval and the application's installation ownership throughout consumption.
+It is a supported composition entry, not a complete packaged installer toolkit.
+
 ### Bounded wheel inspection
 
 `libs/installer-engine/installer_wheel_inputs.py` is a stdlib-only input

@@ -247,6 +247,10 @@ live claim token. No new blanket ACK or executor appointment is created.
       suspended recovery, finalize-before-submission and a complete workload's
       same-native continuation. Keep source, simulation and local running
       results separate; no merged sub-slice alone closes this milestone.
+- [ ] Land and qualify the bounded ordinary neutral-service startup follow-up
+      [#10289](https://github.com/ThomasMichon/copilot-extensions/issues/10289).
+      Lane admission and allocator claim now precede its concrete CWD-bound
+      initial-machine refusal; source controls alone do not prove worker start.
 - [x] Land the #9709 vision/current-versus-target architecture and
       [repair amendment](assignment-startup-amendment.md) through normal review,
       without behavioral changes. Merged in
@@ -329,6 +333,13 @@ live claim token. No new blanket ACK or executor appointment is created.
       settings without arbitrary project selection, ambient assertions or
       physical/guest-name collapse; retain unreadable and mismatched refusal.
       Complete cohort, allocator ordering and lifecycle acceptance remain open.
+- [x] Land optional bounded clean-room containers and cross-invocation
+      registration cleanup in
+      [#10278](https://github.com/ThomasMichon/copilot-extensions/pull/10278),
+      after exact-head approval, green CI and actual merge. The 127-control
+      packet covers both host shells, literal names, physical/legacy keys and
+      ownership refusal. Resource bounds and autonomous expiry qualify the
+      existing rig, not ordinary allocation, worker acceptance or ID behavior.
 - [x] Land explicit [ordinary first-prompt admission](journal/2026/11.02-ordinary-first-prompt.md)
       under its actual `ordinary-bridge` driver, allocator claim and execution
       host in [#10123](https://github.com/ThomasMichon/copilot-extensions/pull/10123).
