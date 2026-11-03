@@ -341,6 +341,7 @@
       "r:plugins/efforts/skills/driving-effort-agendas/scripts/agenda_publish.py::_invoke::create_subprocess_exec": 1,
       "wm:agenda_transport.py::_owned_process::Popen": 1,
       "r:plugins/customizing-copilot/scripts/run-skill-selection-spike.mjs::<script>::fork": 1,
+      "r:plugins/customizing-copilot/scripts/skill-selection-host.mjs::<script>::fork": 1,
       "r:plugins/agent-bridge/scripts/daemon_instances.ps1::<script>::Process.Start": 1,
       "r:plugins/agent-codespaces/scripts/daemon_instances.ps1::<script>::Process.Start": 1,
       "r:plugins/agent-containers/scripts/daemon_instances.ps1::<script>::Process.Start": 1,

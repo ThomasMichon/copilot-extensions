@@ -1,0 +1,9 @@
+{
+  "comment": "Add owned SDK selector and independent evaluation hosts with native-name and source-delivery verification.",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}
