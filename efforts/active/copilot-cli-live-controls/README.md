@@ -157,3 +157,9 @@ global version pin. Deliberate cached-version launch is explicit per invocation.
   bounded cases rather than increasing deadlines.
 - Documentation, install-contract, lint and enforced static-type checks passed.
   Review, promotion and authorized installed acceptance remain separate gates.
+
+### 2026-11-03 - Review correction
+
+- Addressed the implementation review's post-write failure finding: configuration
+  read errors now report unknown effects after a native write, leave overrides
+  untouched and do not replay the write. All 33 focused control cases passed.

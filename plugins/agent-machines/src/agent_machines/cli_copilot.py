@@ -256,7 +256,8 @@ def _auto_update(args: argparse.Namespace) -> dict[str, Any]:
     if args.clear_overrides:
         for name in OVERRIDES:
             environment.pop(name, None)
-    if settings.get("autoUpdate") is not desired:
+    write_needed = settings.get("autoUpdate") is not desired
+    if write_needed:
         try:
             _native(executable, ["config", "--help"], environment=environment)
         except CopilotControlError as exc:
@@ -265,7 +266,14 @@ def _auto_update(args: argparse.Namespace) -> dict[str, Any]:
                 f"file fallback was attempted. {exc}"
             ) from exc
         _native(executable, command, environment=environment, effectful=True)
-    if _settings().get("autoUpdate") is not desired:
+    try:
+        verified = _settings()
+    except (PluginStateError, OSError) as exc:
+        raise CopilotControlError(
+            f"Native configuration read-back failed: {exc}. Inspect before retrying.",
+            effects="unknown" if write_needed else "none",
+        ) from exc
+    if verified.get("autoUpdate") is not desired:
         raise CopilotControlError("Native configuration read-back did not match.", effects="unknown")
     result.update(
         applied=True,

@@ -153,6 +153,34 @@ def test_configuration_failure_never_clears_overrides_or_replays(
     assert json.loads(settings.read_text())["autoUpdate"] is False
 
 
+@pytest.mark.parametrize("error", [control.PluginStateError, PermissionError])
+def test_post_write_readback_failure_preserves_overrides_and_reports_unknown(
+    native: tuple, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    error: type[Exception],
+) -> None:
+    settings, _, calls = native
+    original = control._settings
+    monkeypatch.setattr(control, "_user_overrides", lambda: {"COPILOT_AUTO_UPDATE": "false"})
+    monkeypatch.setattr(
+        control, "_clear_user_overrides",
+        lambda expected: pytest.fail("unverified write must not clear user overrides"),
+    )
+
+    def readback() -> dict[str, Any]:
+        if any(arguments[:2] == ["config", "autoUpdate"] for arguments, _ in calls):
+            raise error("settings read unavailable")
+        return original()
+
+    monkeypatch.setattr(control, "_settings", readback)
+    assert cli.main([
+        "copilot-cli", "auto-update", "on", "--apply", "--clear-overrides", "--json",
+    ]) == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result["effects"] == "unknown" and "read-back failed" in result["error"]
+    assert json.loads(settings.read_text())["autoUpdate"] is True
+    assert sum(arguments[:2] == ["config", "autoUpdate"] for arguments, _ in calls) == 1
+
+
 def test_status_reads_jsonc_and_exposes_overrides_without_changing_them(
     native: tuple, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
