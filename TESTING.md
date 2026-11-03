@@ -3463,8 +3463,13 @@ Coverage preserves file/line/context attribution directly from coverage.py.
 Call contexts start at the actual Python test-function frame and end when it
 returns; observer/reporting bookkeeping cannot keep a completed call active.
 Redundant per-function/class expansions are intentionally omitted, not unit
-outcomes or line evidence. Packet verification retains the sixteen-MiB per-file
-bound and requires every admitted unit to contribute production call coverage.
+outcomes or line evidence. Candidate packets also omit the redundant stored
+development projection: qualification reconstructs it from the complete raw
+hits and verified byte-bound mapping. The qualification cases cover both this
+form and legacy expanded packets, including refusal of missing/forged mappings,
+unknown contexts and altered stored projections. Packet verification retains
+the 192-MiB per-file evidence bound and requires every admitted unit to
+contribute production call coverage.
 The runner applies `promotion_unit_packet.py` to its actual three-file output
 before returning success. An in-process adversarial collector fixture proves
 that a passing assertion without production calls is refused by both paths;
