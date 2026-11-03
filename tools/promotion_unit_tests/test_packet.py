@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 import promotion_unit_packet as packet
-from promotion_unit_contract import PROFILE, UnitEvidenceError, manifest_digest
+from promotion_unit_contract import PROFILE, UnitEvidenceError, manifest_digest, windows_native_manifest
 
 SOURCE = "a" * 40
 TEST = "tools/promotion_unit_tests/test_example.py"
@@ -88,6 +88,20 @@ def test_packet_returns_frozen_keys_and_canonical_raw_byte_digests(packet_case):
     }
     assert result["packet_sha256"] == manifest_digest(digests)
     assert all(result[key] == value for key, value in digests.items())
+    native = windows_native_manifest(manifest, platform="win32")
+    proof.update(profile=native["profile"], manifest_sha256=manifest_digest(native), elapsed_seconds=350.0)
+    _write(directory / "unit-manifest.json", native)
+    _write(directory / "unit-proof.json", proof)
+    with pytest.raises(UnitEvidenceError, match="profile"):
+        _verify(packet_case, source_root=root)
+    with pytest.raises(UnitEvidenceError, match="profile"):
+        packet.verify_packet(directory, expected_source_sha=SOURCE, expected_manifest=native)
+    with pytest.raises(UnitEvidenceError, match="trusted canonical manifest"):
+        _verify(packet_case, allow_windows_native=True)
+    assert packet.verify_packet(
+        directory, expected_source_sha=SOURCE, expected_manifest=native,
+        source_root=root, allow_windows_native=True,
+    )["profile"] == native["profile"]
 
 
 def test_packet_manifest_whitespace_changes_raw_binding_not_trusted_identity(packet_case):

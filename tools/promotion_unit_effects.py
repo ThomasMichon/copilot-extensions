@@ -118,6 +118,23 @@ class UnitRun(CoveragePlugin):
                 if relative not in self.sources:
                     self.refuse("unadmitted source read: " + relative)
 
+    def pytest_collect_directory(self, path, parent):
+        if path != self.root / "tools/promotion_unit_tests":
+            return None
+        import pytest
+
+        files = tuple(dict.fromkeys(node.partition("::")[0] for node in self.nodes))
+        root = self.root
+
+        class AdmittedDirectory(pytest.Directory):
+            def collect(directory):
+                for name in files:
+                    yield from directory.ihook.pytest_collect_file(
+                        file_path=root / name, parent=directory,
+                    )
+
+        return AdmittedDirectory.from_parent(parent, path=path)
+
     def pytest_collection_modifyitems(self, session, config, items):
         ranks = {node: rank for rank, node in enumerate(self.nodes)}
         selected = [item for item in items if item.nodeid in ranks]

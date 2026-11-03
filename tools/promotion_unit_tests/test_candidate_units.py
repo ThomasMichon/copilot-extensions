@@ -7,7 +7,7 @@ import hashlib
 import pytest
 
 from promotion_candidate_units import CANDIDATE_PROFILE, candidate_manifest, derive_manifest
-from promotion_unit_contract import PROFILE, UnitEvidenceError, admit_manifest, manifest_digest
+from promotion_unit_contract import PROFILE, UnitEvidenceError, admit_manifest, manifest_digest, windows_native_manifest
 
 DEV, TREE = "a" * 40, "b" * 40
 TEST = "tools/promotion_unit_tests/test_example.py"
@@ -45,6 +45,10 @@ def test_candidate_manifest_admits_actual_stamp_not_raw_source_relabeling():
     assert manifest["composition"]["source_manifest_sha256"] == manifest_digest(template)
     assert manifest["composition"]["development_sources"] == template["sources"]
     assert manifest["composition"]["candidate_tree"] == TREE
+    with pytest.raises(UnitEvidenceError, match="development unit manifest"):
+        windows_native_manifest(manifest, platform="win32")
+    with pytest.raises(UnitEvidenceError, match="profile"):
+        derive(windows_native_manifest(template, platform="win32"), development, candidate, origins)
 
 
 @pytest.mark.parametrize("change", ["dev-bytes", "missing-source", "extra-source", "wrong-origin", "bad-copy"])

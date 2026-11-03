@@ -70,7 +70,7 @@ def test_client_evidence_does_not_claim_release_or_controller_readiness(installe
     assert report["runtime_resource_sha256s"]["_versioned_runtime.py"] == report["runtime_resource_sha256"]
 
 
-def installed_procutil(installed, monkeypatch):
+def installed_procutil(installed, monkeypatch, *, diagnose=True):
     from fleet_manager import client_construction
 
     distribution, package = installed
@@ -84,7 +84,8 @@ def installed_procutil(installed, monkeypatch):
             entry for entry in distribution.files if str(entry) != member
         ] + [Entry(member, content)]
     monkeypatch.setattr(client_construction, "__file__", str(package / "client_construction.py"))
-    return client_construction, package, client_diagnostics.diagnose_client()
+    evidence = client_diagnostics.diagnose_client() if diagnose else None
+    return client_construction, package, evidence
 
 
 def test_construction_uses_retained_package_and_scope_bytes_without_module_leaks(installed, monkeypatch):

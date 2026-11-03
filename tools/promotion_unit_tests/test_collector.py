@@ -3,13 +3,14 @@
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import sys
 from types import SimpleNamespace
 
 import pytest
 
-from promotion_unit_contract import PROFILE, UnitEvidenceError
+from promotion_unit_contract import PROFILE, UnitEvidenceError, windows_native_manifest
 from promotion_unit_effects import UnitRun
 from promotion_unit_packet import verify_packet
 
@@ -73,6 +74,20 @@ def test_no_production_call_is_rejected_by_the_collector_and_packet_verifier(tmp
     tests.mkdir(parents=True)
     business = root / "tools/noop_business.py"
     business.write_text("VALUE = 1\n", encoding="utf-8")
+    bytecode = tmp_path / "bytecode"
+    with monkeypatch.context() as cache:
+        cache.setattr(sys, "pycache_prefix", str(bytecode))
+        cache.setattr(sys, "dont_write_bytecode", True)
+        RUNNER.prepare_source_bytecode(root, {"tools/noop_business.py": "fixture"}, bytecode)
+        assert Path(importlib.util.cache_from_source(str(business))).is_file()
+        original = business.stat()
+        business.write_text("VALUE = 2\n", encoding="utf-8")
+        os.utime(business, ns=(original.st_atime_ns, original.st_mtime_ns))
+        spec = importlib.util.spec_from_file_location("unit_collector_cache_probe", business)
+        assert spec and spec.loader
+        namespace = {}
+        exec(spec.loader.get_code(spec.name), namespace)
+        assert namespace["VALUE"] == 2
     test = tests / "test_collector_noop_case.py"
     test.write_text(
         "import importlib.util\n"
@@ -93,13 +108,25 @@ def test_no_production_call_is_rejected_by_the_collector_and_packet_verifier(tmp
         "    raise AssertionError('unadmitted test executed')\n",
         encoding="utf-8",
     )
+    (tests / "test_unadmitted_file.py").write_text(
+        "raise AssertionError('unadmitted file imported')\n", encoding="utf-8",
+    )
+    first = tests / "test_z_first.py"
+    first.write_text(
+        "import sys\n"
+        "assert 'unit_collector_noop_business' not in sys.modules\n"
+        "def test_first():\n"
+        "    assert True\n",
+        encoding="utf-8",
+    )
     sources = {
         path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
-        for path in (test, business)
+        for path in (test, first, business)
     }
     node = test.relative_to(root).as_posix() + "::test_no_production_call[" + "x" * 120 + "]"
     manifest = {
-        "profile": PROFILE, "nodes": [node, test.relative_to(root).as_posix()
+        "profile": PROFILE, "nodes": [first.relative_to(root).as_posix() + "::test_first",
+                                    node, test.relative_to(root).as_posix()
                                     + "::test_second_no_production_call"], "sources": sources,
         "coverage_targets": [business.relative_to(root).as_posix()], "max_seconds": 300,
     }
@@ -116,13 +143,15 @@ def test_no_production_call_is_rejected_by_the_collector_and_packet_verifier(tmp
     monkeypatch.setattr(sys, "argv", [
         "run-promotion-unit-tests.py", "--source-sha", "a" * 40,
         "--manifest", str(manifest_path), "--output-dir", str(output),
+        *(["--windows-native"] if sys.platform == "win32" else []),
     ])
     real_pytest_main = pytest.main
 
     def scoped_collection(arguments, **kwargs):
         assert Path(arguments[arguments.index("--confcutdir") + 1]) == root
         assert arguments[arguments.index("-o") + 1] == "parametrize_long_str_id_strategy=legacy"
-        assert arguments.count(str(test)) == 1
+        assert arguments.count(str(tests)) == 1
+        assert str(test) not in arguments and str(first) not in arguments
         assert not any("::" in argument for argument in arguments)
         return real_pytest_main(arguments, **kwargs)
 
@@ -131,7 +160,13 @@ def test_no_production_call_is_rejected_by_the_collector_and_packet_verifier(tmp
         RUNNER.main()
     with pytest.raises(UnitEvidenceError, match="production call coverage"):
         verify_packet(
-            output, expected_source_sha="a" * 40, expected_manifest=manifest, source_root=root,
+            output, expected_source_sha="a" * 40,
+            expected_manifest=(
+                windows_native_manifest(manifest, platform=sys.platform)
+                if sys.platform == "win32" else manifest
+            ),
+            source_root=root, allow_windows_native=sys.platform == "win32",
         )
     proof = json.loads((output / "unit-proof.json").read_text(encoding="utf-8"))
+    assert proof["collected"] == manifest["nodes"]
     assert all(report["outcome"] == "passed" for report in proof["reports"])
