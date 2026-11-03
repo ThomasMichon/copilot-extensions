@@ -16,6 +16,7 @@ import pytest
 import agent_procutil
 from update_driver import core
 from worktree_manager import self_install
+from worktree_manager.engine_acquisition_budget import TIMEOUT_ENV
 
 pytestmark = pytest.mark.timeout(90)
 SOURCE = Path(__file__).resolve().parents[3]
@@ -29,18 +30,22 @@ def _fixture_install(args):
     from update_driver import core, participant_environment
     from single_instance_lease.operation import OperationLock, OperationLockedError
 
-    assert participant_environment()
-    try:
-        OperationLock(core.default_root() / "execution.lock").acquire()
-    except OperationLockedError:
-        pass
-    else:
-        raise AssertionError("constructor escaped whole-update custody")
-    assert _source_digest(args.payload) == args.source_digest
-    request, = (row for row in core.status() if row.state == "running")
+    command = args.command[1:] if args.command[:1] == ["--"] else args.command
+    identifier = None
+    if command[:1] == ["update"]:
+        assert participant_environment()
+        try:
+            OperationLock(core.default_root() / "execution.lock").acquire()
+        except OperationLockedError:
+            pass
+        else:
+            raise AssertionError("constructor escaped whole-update custody")
+        assert _source_digest(args.payload) == args.source_digest
+        request, = (row for row in core.status() if row.state == "running")
+        identifier = request.id
     with (args.root / "effects.jsonl").open("a", encoding="utf-8") as stream:
         stream.write(json.dumps({
-            "phase": "manager", "request": request.id, "pid": os.getpid(),
+            "phase": "manager", "request": identifier, "pid": os.getpid(),
             "payload": str(args.payload),
         }) + "\\n")
     (args.root / "fixture-payload").write_text(str(args.payload), encoding="utf-8")
@@ -48,7 +53,7 @@ def _fixture_install(args):
     return args.root / "versions" / "fixture"
 
 _install = _fixture_install
-if __name__ == "__main__" and "--update-participant" not in sys.argv:
+if __name__ == "__main__" and "--update-participant" not in sys.argv and "update" in sys.argv:
     _execution_driver(SCRIPTS.parent)
     from agent_procutil._daemon_instance_identity import birth_identity
 
@@ -80,6 +85,16 @@ sys.path[:0] = [
 from update_driver import participant_environment
 from single_instance_lease.operation import OperationLock, OperationLockedError
 
+if "--auth-report" in sys.argv or sys.argv[3] != "update":
+    assert not participant_environment()
+    with runtime_install._installation_custody() as custody:
+        assert custody is None
+    with (root / "effects.jsonl").open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps({
+            "phase": "inspection", "argv": sys.argv[1:], "witness": False,
+        }) + "\\n")
+    raise SystemExit(0)
+
 with runtime_install._installation_custody() as custody:
     assert custody is not None
     custody.assert_owned()
@@ -95,6 +110,9 @@ with runtime_install._installation_custody() as custody:
             stream.write(json.dumps({
                 "phase": phase, "request": request.id, "pid": os.getpid(),
                 "payload": str(payload), "argv": sys.argv[1:],
+                "acquisition_budget": os.environ.get(
+                    "WORKTREE_MANAGER_ENGINE_ACQUISITION_TIMEOUT_SEC",
+                ),
             }) + "\\n")
     def body(arguments):
         effect("suite-start")
@@ -247,22 +265,28 @@ def bootstrap(tmp_path):
     }
     for key in ("UPDATE_DRIVER_WITNESS", "UPDATE_DRIVER_STARTUP"):
         environment.pop(key, None)
+    environment.pop(TIMEOUT_ENV, None)
     driver = profile / ".copilot-extensions" / "update-driver"
     callers, streams = [], []
 
-    def start(*arguments, install_source=None):
+    def start(
+        *arguments, install_source=None, command_name="update", acquisition_budget=None,
+    ):
         log = tmp_path / f"caller-{len(callers)}.log"
         stream = log.open("wb")
         streams.append(stream)
-        invocation = [*command, "update", *arguments]
+        invocation = [*command, command_name, *arguments]
         if install_source is not None:
             invocation = [
                 python, "-I", "-S", "-B", str(scripts / "runtime_install.py"),
                 "--root", str(root), "--install-source", str(install_source),
-                "--", "update", *arguments,
+                "--", command_name, *arguments,
             ]
+        launch_environment = dict(environment)
+        if acquisition_budget is not None:
+            launch_environment[TIMEOUT_ENV] = acquisition_budget
         process = subprocess.Popen(
-            invocation, cwd=tmp_path, env=environment,
+            invocation, cwd=tmp_path, env=launch_environment,
             stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT,
             **agent_procutil.no_window_kwargs(),
         )
@@ -405,7 +429,7 @@ def test_native_current_controller_runs_a_prepared_source_without_new_bootstrap_
             "payload": "source/worktree-manager", "source": identity.document(),
         }},
     }), encoding="utf-8")
-    caller, log = start("--project", "sample", install_source=snapshot)
+    caller, log = start("--project", "sample", install_source=snapshot, acquisition_budget="600")
     _eventually(
         lambda: any(row["phase"] == "suite-start" for row in effects()), processes=(caller,),
     )
@@ -420,7 +444,27 @@ def test_native_current_controller_runs_a_prepared_source_without_new_bootstrap_
     assert caller.wait(timeout=20) == 23, log.read_text(encoding="utf-8")
     assert core.status(request.id, root=driver).state == "completed"
     assert [row["phase"] for row in effects()] == ["manager", "suite-start", "suite-end"]
+    assert effects()[1]["acquisition_budget"] == "600.0"
     assert not (old / "scripts").exists()
+
+
+def test_native_auth_report_closes_owned_bootstrap_without_forwarding_witness(bootstrap):
+    root, _source, driver, start, effects = bootstrap
+    caller, log = start("--auth-report")
+    assert caller.wait(timeout=20) == 0, log.read_text(encoding="utf-8")
+    request, = core.status(root=driver)
+    assert request.state == "completed" and request.exit_code == 0
+    assert [row["phase"] for row in effects()] == ["manager", "inspection"]
+    assert effects()[1]["witness"] is False
+
+
+@pytest.mark.skipif(os.name == "nt", reason="source-only POSIX non-update entry")
+def test_native_posix_non_update_resolves_driver_without_creating_a_queue(bootstrap):
+    _root, _source, driver, start, effects = bootstrap
+    caller, log = start("--indicator-state", command_name="stage-update")
+    assert caller.wait(timeout=20) == 0, log.read_text(encoding="utf-8")
+    assert core.status(root=driver) == () and not driver.exists()
+    assert [row["phase"] for row in effects()] == ["manager", "inspection"]
 
 
 def test_full_declared_repository_inputs_reach_immutable_retention(

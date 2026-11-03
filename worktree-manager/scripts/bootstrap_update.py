@@ -11,9 +11,21 @@ def execute(args, driver, *, source_digest: str) -> int:
     from worktree_manager.update_driver_cli import (
         _CONTEXT_KEYS, _report, _source_key, parse_options, request_context,
     )
+    from worktree_manager.engine_acquisition_budget import TIMEOUT_ENV, acquisition_timeout
 
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
-    options, _forwarded = parse_options(command[1:])
+    options, forwarded = parse_options(command[1:])
+    budget = options.engine_acquisition_timeout
+    inspection = any((
+        options.request_status, options.recovery_status, options.recover_after_restart,
+        options.recover_for_repair, "--auth-report" in forwarded,
+    ))
+    if budget is None and options.target is None and not inspection:
+        budget = os.environ.get(TIMEOUT_ENV)
+    if budget is not None:
+        selected_budget = str(acquisition_timeout({TIMEOUT_ENV: budget}))
+        if options.engine_acquisition_timeout is None:
+            command = [*command, "--engine-acquisition-timeout", selected_budget]
     selected_payload = args.payload.resolve()
     from bootstrap_inputs import retain
 

@@ -50,6 +50,20 @@ def test_posix_update_participant_waits_until_its_borrowed_manager_exits(monkeyp
     assert "creationflags" not in seen[0]
 
 
+def test_posix_owned_inspection_waits_without_forwarding_a_witness(monkeypatch):
+    installer = self_install._runtime_installer()
+    seen = []
+    monkeypatch.setattr(installer, "os", SimpleNamespace(name="posix", environ={}))
+    monkeypatch.setattr(
+        installer.subprocess, "Popen",
+        lambda command, **kwargs: seen.append(kwargs) or SimpleNamespace(wait=lambda: 0),
+    )
+    assert installer._dispatch_manager(
+        ["/selected/python", "-m", "manager", "update", "--auth-report"], wait_for_exit=True,
+    ) == 0
+    assert "env" not in seen[0] and "creationflags" not in seen[0]
+
+
 @pytest.mark.parametrize("interrupted", [False, True])
 @pytest.mark.parametrize("console_streams", list(product([False, True], repeat=3)))
 def test_windows_bootstrap_waits_for_observer_and_preserves_exit(

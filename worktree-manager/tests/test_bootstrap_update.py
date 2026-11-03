@@ -12,6 +12,7 @@ import pytest
 
 from update_driver import core
 from worktree_manager import self_install, update_driver_cli
+from worktree_manager.engine_acquisition_budget import TIMEOUT_ENV
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "bootstrap_update.py"
 sys.path.insert(0, str(SCRIPT.parent))
@@ -21,6 +22,7 @@ sys.path.insert(0, str(SCRIPT.parent))
 def retained_inputs(tmp_path, monkeypatch):
     import bootstrap_inputs
 
+    monkeypatch.delenv(TIMEOUT_ENV, raising=False)
     monkeypatch.setattr(bootstrap_inputs, "retain", lambda payload, root, **kwargs: (payload, True))
 
 
@@ -173,6 +175,60 @@ def test_prepared_old_source_is_data_not_the_bootstrap_controller(tmp_path, monk
     assert runner.argv[runner.argv.index("--payload") + 1] == str(source)
     assert runner.argv[runner.argv.index("--install-source") + 1] == str(selected)
     assert not list(source.iterdir())
+
+
+@pytest.mark.parametrize("flags,expected", [
+    ([], "600.0"),
+    (["--engine-acquisition-timeout", "420"], "420"),
+    (["--auth-report"], None),
+    (["--request-status", "existing"], None),
+    (["--recovery-status"], None),
+    (["--target", "agent-bridge"], None),
+])
+def test_bootstrap_retains_effective_budget_only_for_suite_execution(
+    tmp_path, monkeypatch, flags, expected,
+):
+    execute = runpy.run_path(str(SCRIPT))["execute"]
+    monkeypatch.setenv(TIMEOUT_ENV, "600")
+    monkeypatch.setattr(update_driver_cli, "_source_key", lambda: "configured-source")
+    monkeypatch.setattr(update_driver_cli, "request_context", lambda: {})
+    captured = []
+    driver = SimpleNamespace(
+        RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        enqueue=lambda spec, **kwargs: captured.append((spec, kwargs["runner"]))
+        or SimpleNamespace(id="fixture", log_path=tmp_path / "log"),
+        default_root=lambda: tmp_path, drain=lambda: None,
+        wait=lambda *a, **k: SimpleNamespace(state="completed", exit_code=23),
+    )
+    command = ["update", *flags]
+    if not any(flag in flags for flag in ("--auth-report", "--request-status", "--recovery-status")):
+        command.append("--supervised-debug")
+    else:
+        driver.ensure_worker = lambda *a, **k: None
+    args = SimpleNamespace(
+        payload=tmp_path, root=tmp_path / "manager", command=command,
+        repair_update=False, install_source=None,
+    )
+    assert execute(args, driver, source_digest="a" * 64) == 23
+    spec, runner = captured[0]
+    if expected is None:
+        assert "--engine-acquisition-timeout" not in spec.argv
+    else:
+        index = spec.argv.index("--engine-acquisition-timeout")
+        assert spec.argv[index + 1] == expected
+        assert runner.argv[runner.argv.index("--engine-acquisition-timeout") + 1] == expected
+
+
+@pytest.mark.parametrize("value", ["nan", "0", "3601"])
+def test_invalid_bootstrap_budget_refuses_before_retention_or_submission(tmp_path, monkeypatch, value):
+    execute = runpy.run_path(str(SCRIPT))["execute"]
+    import bootstrap_inputs
+
+    monkeypatch.setenv(TIMEOUT_ENV, value)
+    monkeypatch.setattr(bootstrap_inputs, "retain", lambda *a, **k: pytest.fail("invalid inputs retained"))
+    args = SimpleNamespace(command=["update"], payload=tmp_path)
+    with pytest.raises(ValueError, match=TIMEOUT_ENV):
+        execute(args, object(), source_digest="a" * 64)
 
 
 @pytest.mark.parametrize("automatic", [False, True])
