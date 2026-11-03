@@ -4115,9 +4115,16 @@ python tools/core_native_delivery.py --source-checkout <repo> --source-commit <c
 It composes the selected Git source, checks it against the exact core
 manifest and first-party wheels, projects the applicable core requirements
 for the running interpreter, and resolves a native wheel lock through the
-retained UV configuration. The existing feed owner requires an affirmatively
-trusted non-public HTTPS index and uses system certificates; separately
-authorized download origins can be supplied with `--download-origin`.
+retained UV configuration. Resolution is offline and requires an already
+populated UV cache: native UV redirects are not constrained by the wheel
+acquisition owner's origin allowlist. Alternatively, `--native-lock` selects a
+bounded existing UV `pylock.toml`; its exact bytes remain held and rechecked.
+The lock supplies candidate filenames and digests, not approval or a download
+origin. The source-derived roots and complete inspected closure still have to
+agree, and unused or first-party registry entries refuse. The existing feed
+owner requires an affirmatively trusted non-public HTTPS index and uses
+system certificates; separately authorized download origins can be supplied with
+`--download-origin` for the subsequent guarded acquisition.
 The selected external wheels, first-party wheels and caller-selected
 source/notice materials are retained and checked through candidate creation.
 An active third-party local source mapping is refused before resolution;
@@ -4127,7 +4134,8 @@ separate affected-feed qualification in #7606. Linux core generation is not
 qualified by the Windows path. Resolver failures include a bounded redacted
 diagnostic without feed URLs.
 The output is an inert delivery envelope; its reported `approval` is
-`unattested`. Its selected Main commit establishes ancestry only, not
+`unattested`, and `lock_source` distinguishes `selected` from `offline-cache`.
+Its selected Main commit establishes ancestry only, not
 authentication. Feed qualification, material clearance, source/release
 admission, attestation, publication and installation remain separate
 responsibilities. The output directory must already exist and support hard

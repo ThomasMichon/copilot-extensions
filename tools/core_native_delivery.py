@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib
 import json
 import os
@@ -110,7 +111,7 @@ def _run_compile(transaction, *, deadline: float) -> None:
     _check_deadline(deadline)
     try:
         result = subprocess.run(
-            list(transaction.argv), cwd=transaction.cwd, env=transaction.environment,
+            [*transaction.argv, "--offline"], cwd=transaction.cwd, env=transaction.environment,
             capture_output=True, timeout=max(0.1, deadline - time.monotonic()), check=False,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
@@ -149,6 +150,7 @@ def _build_from_snapshot(
     source: Path, source_record: dict, manifest_data: bytes, wheel_dir: Path,
     target: dict, *, uv: str, download_origins: tuple[str, ...], materials: dict,
     material_paths: dict, destination: Path, deadline: float, max_bytes: int,
+    native_lock: Path | None = None,
 ) -> dict:
     """Keep actual compiler, wheel and material custody until candidate publication."""
     if type(max_bytes) is not int or max_bytes <= 0:
@@ -180,6 +182,22 @@ def _build_from_snapshot(
     if len(first_paths) != len(manifest["wheels"]):
         raise ProfileError("core first-party wheel filenames collide")
     first_names = {canonicalize_name(row["name"]) for row in manifest["wheels"]}
+    first_exclusions = tuple(sorted(first_names))
+    selected_lock = _read_lock(Path(native_lock), deadline) if native_lock is not None else None
+    selected_files = (
+        _wheel_pins(selected_lock, target, deadline, prefer_target_tags=True)
+        if selected_lock is not None else None
+    )
+    if selected_files is not None and first_names & {item["name"] for item in selected_files}:
+        raise ProfileError("native core lock overlaps its first-party wheel set")
+    held_paths = {"material:" + name: path for name, path in material_paths.items()}
+    held_files = {"material:" + name: item for name, item in material_files.items()}
+    if selected_lock is not None:
+        held_paths["selected-lock"] = Path(native_lock)
+        held_files["selected-lock"] = {
+            "sha256": "sha256:" + hashlib.sha256(selected_lock).hexdigest(),
+            "size": len(selected_lock),
+        }
     limits = native.wheel_limits()
     with native.dependencies._temporary_inputs(destination.parent) as temporary:
         work = native.dependencies._private_retained_root(Path(temporary)).resolve()
@@ -187,7 +205,7 @@ def _build_from_snapshot(
         requirement_file.write_text("\n".join(requirements) + "\n", encoding="utf-8")
         lock_file = work / "pylock.toml"
         candidate = work / "delivery.zip"
-        with _held(material_paths, material_files, deadline), retain_wheel_inputs(
+        with _held(held_paths, held_files, deadline), retain_wheel_inputs(
             first_paths, first_digests, max_wheels=256,
             max_archive_bytes=limits.max_archive_bytes, max_total_bytes=max_bytes,
             max_snapshot_bytes=4 * max_bytes, deadline=deadline,
@@ -201,20 +219,26 @@ def _build_from_snapshot(
                     "--only-binary", ":all:", "--no-python-downloads",
                     "--system-certs", "--format", "pylock.toml", "--output-file", str(lock_file),
                 ], cwd=work, env=dict(os.environ), deadline=deadline, native_target=True,
-                _projection=projections,
+                excluded_local_packages=first_exclusions, _projection=projections,
             ) as transaction:
                 initial_policy, initial_feed = native._profile_feed(
                     selected, transaction, projections, uv=uv,
-                    download_origins=download_origins, wheels=None, deadline=deadline,
+                    download_origins=download_origins, wheels=selected_files or [], deadline=deadline,
+                    excluded_local_packages=first_exclusions,
                 )
-                _run_compile(transaction, deadline=deadline)
-                lock_bytes = _read_lock(lock_file, deadline)
-                files = _wheel_pins(lock_bytes, target, deadline, prefer_target_tags=True)
+                if selected_lock is None:
+                    _run_compile(transaction, deadline=deadline)
+                    lock_bytes = _read_lock(lock_file, deadline)
+                    files = _wheel_pins(lock_bytes, target, deadline, prefer_target_tags=True)
+                else:
+                    lock_bytes = selected_lock
+                    files = selected_files
                 if first_names & {item["name"] for item in files}:
                     raise ProfileError("native core lock overlaps its first-party wheel set")
                 policy, feed = native._profile_feed(
                     selected, transaction, projections, uv=uv,
                     download_origins=download_origins, wheels=files, deadline=deadline,
+                    excluded_local_packages=first_exclusions,
                 )
                 if policy != initial_policy or feed.policy_id != initial_feed.policy_id:
                     raise ProfileError("native core feed identity changed during resolution")
@@ -251,6 +275,8 @@ def _build_from_snapshot(
                             row["filename"]: retained.paths[row["filename"]]
                             for row in native_profile.record()["wheels"]
                         }
+                        if set(selected_paths) != set(paths):
+                            raise ProfileError("native core inputs include unreachable wheels")
                         profile = build_core_profile(
                             manifest_data=manifest_data, native_record=native_profile.record(),
                             archives=selected_paths, limits=limits, max_wheels=256,
@@ -273,7 +299,7 @@ def _build_from_snapshot(
                         retained.verify()
                     if acquired is not None:
                         acquired.snapshot.verify()
-                if _read_lock(lock_file, deadline) != lock_bytes:
+                if selected_lock is None and _read_lock(lock_file, deadline) != lock_bytes:
                     raise ProfileError("native core lock changed during construction")
                 if project_core_inputs(source, manifest_data, target, deadline=deadline) != (
                     roots, requirements,
@@ -288,13 +314,17 @@ def _build_from_snapshot(
             _unchanged(candidate, before, retained, opened=opened)
             _check_deadline(deadline)
             os.link(candidate, destination)
-    return result | {"source_commit": identity.source_commit, "approval": "unattested"}
+    return result | {
+        "source_commit": identity.source_commit, "approval": "unattested",
+        "lock_source": "selected" if selected_lock is not None else "offline-cache",
+    }
 
 
 def prepare_core_delivery(
     repository: Path, commit: str, main_head: str, manifest: Path, wheel_dir: Path,
     materials: dict, material_paths: dict, destination: Path, *, uv: str,
     download_origins: tuple[str, ...], deadline: float, max_bytes: int,
+    native_lock: Path | None = None,
 ) -> dict:
     """Compose the selected Main source and prepare one inert native candidate."""
     _check_deadline(deadline)
@@ -318,7 +348,7 @@ def prepare_core_delivery(
         return _build_from_snapshot(
             snapshot / "source", record, manifest_data, wheel_dir, target, uv=uv,
             download_origins=download_origins, materials=materials, material_paths=material_paths,
-            destination=destination, deadline=deadline, max_bytes=max_bytes,
+            destination=destination, deadline=deadline, max_bytes=max_bytes, native_lock=native_lock,
         )
 
 
@@ -333,6 +363,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--material-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--uv", required=True)
+    parser.add_argument("--native-lock", type=Path)
     parser.add_argument("--download-origin", action="append", default=[])
     parser.add_argument("--timeout", type=float, default=600)
     parser.add_argument("--max-bytes", type=int, default=512 << 20)
@@ -346,7 +377,7 @@ def main(argv: list[str] | None = None) -> int:
             args.source_checkout, args.source_commit, args.main_head, args.core_manifest,
             args.wheel_dir, materials, {name: args.material_dir / name for name in materials},
             args.output, uv=args.uv, download_origins=tuple(args.download_origin),
-            deadline=deadline, max_bytes=args.max_bytes,
+            deadline=deadline, max_bytes=args.max_bytes, native_lock=args.native_lock,
         )
         print(json.dumps(result, sort_keys=True))
         return 0
