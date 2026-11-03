@@ -1,0 +1,9 @@
+{
+  "comment": "Allow bounded slow update authentication probes and credential helper replay without false five-second failures.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
