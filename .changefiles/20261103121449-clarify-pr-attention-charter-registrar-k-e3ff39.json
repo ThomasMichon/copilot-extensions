@@ -1,0 +1,9 @@
+{
+  "comment": "Clarify PR-attention charter, registrar, knowledge-repository and harness guidance resolution through existing owners.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
