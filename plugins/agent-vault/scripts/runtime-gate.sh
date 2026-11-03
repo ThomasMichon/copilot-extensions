@@ -190,6 +190,27 @@ if [[ -z "$CONTEXT" ]]; then
     fi
 fi
 
+if [[ -z "${AGENT_VAULT_PINNED_CONTEXT+x}" ]]; then
+    . "$SCRIPT_DIR/runtime-activation.sh"
+    activation_code=0
+    activation="$(vault_runtime_activation "$PROJECT_ROOT")" || activation_code=$?
+    if [[ "$activation_code" == 2 ]]; then
+        if [[ "${1:-}" == installer-readiness ]]; then
+            printf '%s\n' "$activation"
+            exit 0
+        fi
+        if [[ "${1:-}" == stop || "${1:-}" == lock ]]; then
+            export AGENT_VAULT_NO_SELFPROVISION=1
+        else
+            printf '%s\n' "$activation" >&2
+            exit 2
+        fi
+    elif [[ "$activation_code" != 0 ]]; then
+        printf '[agent-vault] activation configuration could not be resolved; correct its configuration, binding or payload.\n' >&2
+        exit 3
+    fi
+fi
+
 resolve_runtime
 if [[ -n "$AGENT_RT_PY" ]]; then
     run_runtime "$@"

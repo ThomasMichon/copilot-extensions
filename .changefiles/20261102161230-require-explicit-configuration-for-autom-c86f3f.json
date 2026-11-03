@@ -1,0 +1,9 @@
+{
+  "comment": "Require explicit configuration for automatic Vault runtime participation; keep unconfigured bootstrap and readiness independent of a runtime or KeePassXC.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

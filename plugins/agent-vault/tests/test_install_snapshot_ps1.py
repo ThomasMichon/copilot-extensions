@@ -149,6 +149,11 @@ def _isolated_install_env(home: Path) -> dict[str, str]:
     for path in roots.values():
         path.mkdir(parents=True, exist_ok=True)
     env.update({name: str(path) for name, path in roots.items()})
+    activation = home / "activation.json"
+    activation.write_text('{"enabled":true}', encoding="utf-8")
+    env["AGENT_VAULT_CONFIG"] = str(activation)
+    env.pop("AGENT_CONFIGURATION_CONTEXT", None)
+    env.pop("COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT", None)
     env["COPILOT_PLUGIN_INSTALL_STAGED"] = "1"
     for name in ("PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV", "__PYVENV_LAUNCHER__"):
         env.pop(name, None)
@@ -191,6 +196,7 @@ def _stage_payload(tmp_path: Path) -> Path:
     assert project["project"]["name"] == manifest["name"] == "agent-vault"
     assert project["project"]["version"] == manifest["version"]
     assert project["tool"]["uv"]["sources"] == {
+        "agent-configuration-layers": {"path": "libs/configuration-layers"},
         "agent-procutil": {"path": "libs/agent-procutil"},
         "agent-zdd": {"path": "libs/zdd"},
         "agent-single-instance-lease": {"path": "libs/single-instance-lease"},
@@ -741,7 +747,8 @@ def test_stamp_supports_first_use_provision_from_snapshot_only_ps1(provisioned_s
     before_launch = _uv_events(state.env)
     installs = [event for event in before_launch if event["phase"] == "install"]
     assert [event["name"] for event in installs] == [
-        "agent-zdd", "agent-procutil", "agent-single-instance-lease", "agent-vault",
+        "agent-configuration-layers", "agent-zdd", "agent-procutil",
+        "agent-single-instance-lease", "agent-vault",
     ]
     assert sum(event["phase"] == "preflight" for event in before_launch) == 2 * len(installs)
     slot = state.home / ".agent-vault" / "versions" / state.version

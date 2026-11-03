@@ -31,6 +31,7 @@ on:
           - bridge-commands
           - bridge-contracts
           - bridge-binding
+          - vault-activation
           - dispatch-binding
           - dispatch-publication
           - dispatch-maintenance
@@ -128,6 +129,36 @@ jobs:
     timeout-minutes: 125
     env: *codespaces-installer-env
     steps: *codespaces-installer-steps
+  vault-activation:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'vault-activation'
+    name: Vault configuration activation (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Record exact source
+        run: python -c "import os,subprocess; actual=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(); assert actual == os.environ['GITHUB_SHA']; print('source='+actual)"
+      - name: Qualify inactive first touch and configured consumers
+        run: >-
+          python tools/run-plugin-tests.py agent-vault
+          --test-file tests/test_configuration_layers.py
+          --test-file tests/test_installer_readiness.py
+          --test-file tests/test_bootstrap_driver.py
+          --test-file tests/test_bootstrap_check_reconcile_always_on.py
+          --test-file tests/test_runtime_activation.py
   worktrees-git-probes-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'worktrees-git-probes'
     name: Worktrees Git probe packet (Linux)

@@ -3,6 +3,18 @@ $pluginRoot = Split-Path -Parent $PSScriptRoot
 $command = Join-Path $pluginRoot 'bin\agent-vault.cmd'
 $env:AGENT_VAULT_NO_SELFPROVISION = '1'
 
+try {
+    . (Join-Path $PSScriptRoot 'runtime-activation.ps1')
+    $activation = Get-VaultRuntimeActivation
+    if ($activation.state -ceq 'configuration-empty') {
+        $activation | ConvertTo-Json -Compress
+        exit 0
+    }
+} catch {
+    '{"schema":"copilot-extensions.module-readiness","version":1,"module":"agent-vault/runtime","state":"failed","detail":"Agent Vault activation configuration could not be resolved; correct its configuration, binding or payload."}'
+    exit 1
+}
+
 $output = $null
 $exitCode = 1
 if (Test-Path -LiteralPath $command) {

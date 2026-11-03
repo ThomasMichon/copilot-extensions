@@ -735,8 +735,16 @@ def cmd_ping(args):
 def cmd_installer_readiness(args):
     """Report config and service readiness without starting or unlocking."""
     from .installer_readiness import emit, evaluate
+    from .configuration import runtime_enabled
 
     try:
+        if not runtime_enabled():
+            return emit({
+                "schema": "copilot-extensions.module-readiness",
+                "version": 1, "module": "agent-vault/runtime",
+                "state": "configuration-empty",
+                "detail": 'Agent Vault is inactive; opt in with "enabled": true in its owning configuration.',
+            })
         context = config.resolve_context(strict=True)
     except (OSError, RuntimeError, TypeError, ValueError) as exc:
         return emit(evaluate(None, None, [str(exc)]))

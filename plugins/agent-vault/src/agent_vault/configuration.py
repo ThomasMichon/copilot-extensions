@@ -10,7 +10,7 @@ from configuration_layers import ConfigurationError, compose, read_source
 
 from . import _peer_launch
 
-FIELDS = {"vault", "group"}
+FIELDS = {"vault", "group", "enabled"}
 
 
 def _legacy_report(root: Path) -> dict | None:
@@ -24,6 +24,8 @@ def _legacy_report(root: Path) -> dict | None:
     if (peer / ".installation-ownership.json").exists():
         raise _peer_launch.ContextRefused("legacy configuration owner has installation-cell ownership")
     path = own_root / "scripts" / "versioned_runtime.py"
+    if not path.is_file():
+        path = Path(__file__).resolve().parents[2] / "scripts" / "versioned_runtime.py"
     if not path.is_file():
         return None
     resolver = _peer_launch._load_primitive(path, "_vault_configuration_runtime")
@@ -103,7 +105,7 @@ def compose_preferences(cwd, repo_data: dict, global_data: dict, ext_data: dict)
     context = context_from_owner(report)
     layers = [{
         "id": "vault-defaults", "tier": "defaults", "origin": "defaults",
-        "values": {"vault": None, "group": None},
+        "values": {"vault": None, "group": None, "enabled": False},
     }, {
         "id": "vault-native-extension", "tier": "repository", "origin": "base",
         "repository_id": context["repository_id"], "values": _ordinary(ext_data),
@@ -148,3 +150,17 @@ def compose_preferences(cwd, repo_data: dict, global_data: dict, ext_data: dict)
     # Source references remain native selectors; composition never opens a vault.
     _ordinary(result["values"])
     return result
+
+
+def runtime_enabled(cwd: str | None = None) -> bool:
+    """Resolve explicit runtime opt-in without loading extensions or a backend."""
+    from .config import _discover_repo_config, _validate_config_data, load_global_config
+
+    _, repository = _discover_repo_config(cwd, strict=True)
+    machine = load_global_config(strict=True)
+    _validate_config_data(repository, "repository vault configuration")
+    _validate_config_data(machine, "global vault configuration")
+    result = compose_preferences(cwd, repository, machine, {})
+    if result is not None:
+        return result["values"]["enabled"]
+    return machine.get("enabled", repository.get("enabled", False))

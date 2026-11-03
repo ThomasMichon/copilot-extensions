@@ -161,7 +161,8 @@ def test_scheduled_task_launcher_resolves_slot_at_every_run() -> None:
     launcher_body = body[launcher_start : body.index('"@, $utf8NoBom)', launcher_start)]
     assert "resolve-runtime.ps1" in launcher_body
     assert "$_py = $null" in launcher_body.replace("`$", "$")
-    assert "& `$_py -m agent_vault.service --foreground --persistent" in launcher_body
+    assert '& `$_py -X "pycache_prefix=`$_pythonCache"' in launcher_body
+    assert "-m agent_vault.service --foreground --persistent @args" in launcher_body
 
     # The registration-time code path must NOT resolve/bake a concrete slot
     # path itself (that responsibility moved into the launcher body above).

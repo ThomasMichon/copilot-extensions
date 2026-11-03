@@ -21,6 +21,45 @@ Missing files contribute nothing. Strict readers refuse malformed-present JSON,
 non-object documents and invalid known fields rather than using defaults.
 Non-strict legacy reads tolerate malformed configuration as empty.
 
+## Runtime activation
+
+`enabled` is an optional strict boolean, default **false**. Plugin enablement
+loads the capability; only effective `enabled: true` opts this repository into
+runtime bootstrap, installation/update participation and ordinary command
+provisioning. For example, the repository or its qualified bound knowledge
+repository can contain:
+
+```json
+{"enabled": true}
+```
+
+Activation uses the same ordinary composition order as selection: default false
+then repository/base and bound knowledge `.agent-vault.json`, native machine
+configuration, and the qualified repository+machine file. Standalone operation
+without Worktrees uses repository then native machine `enabled`; an unavailable
+optional owner does not become a mandatory dependency. Existing vault records,
+database selectors, environment variables and plugin visibility do not imply
+opt-in. Strings, numbers and null are not booleans. Malformed files, unsafe
+portable overrides, unresolved bindings and wrong-cell reports refuse rather
+than silently returning inactive.
+Activation does not load extension configuration providers or treat invocation
+database/credential environment variables as an opt-in declaration.
+
+The payload reads activation with its bundled configuration SDK before requiring
+a Vault runtime or backend. Inactive readiness is `configuration-empty`, not a
+service-health claim. Configured readiness retains strict database and service
+checks; it does not install, start or unlock anything. The hook's 30-second
+budget accommodates the existing configuration owner's bounded 20-second read.
+Installer re-execution retains the invoking project through the existing
+`COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT` context, not its staging directory.
+
+Removing opt-in or setting `enabled: false` withdraws this scope's automatic
+participation; it does not stop a shared service, delete data, uninstall
+KeePassXC or migrate credentials. Explicit stop/lock operations and validated
+pinned identity-cache requests retain their independent native custody and do
+not gain provisioning authority. Native database/registry/service placement
+remains machine-local; portable activation carries no secrets or database paths.
+
 Native active-vault precedence is `AGENT_VAULT` → repository `vault` →
 extension `vault` → global `default_vault` → the sole registered vault → none.
 Explicit environment selections are invocation selectors, not portable layers.
@@ -31,6 +70,7 @@ database, credential, installation, cache, KEK, or rendezvous custody.
 
 | Field | Type/default and scope |
 |---|---|
+| `enabled` | Optional strict boolean, default false; runtime participation opt-in. Allowed in portable repository/knowledge and native machine configuration. Not inferred from database configuration. |
 | `vaults` | Optional global object keyed by nonempty vault names; each value is an object with required nonempty `kpdb`. Registry records are machine-local custody, not ordinary portable preferences. |
 | `default_vault` | Optional nonempty string naming a member of that file's `vaults`; strict validation refuses a missing registration. |
 | `vault` | Optional nonempty string selecting a registered vault in repository/extension settings; `AGENT_VAULT` wins. |
@@ -77,11 +117,12 @@ validation regardless of ordinary preference composition.
 ### Ordinary selection composition
 
 For an admitted configuration context, the real `resolve_context` consumer
-composes only `vault` and `group`: built-in unset selections → native extension
+composes `vault`, `group` and boolean `enabled`: built-in unset selections and
+inactive runtime default → native extension
 and selected repository data plus base then bound knowledge `.agent-vault.json`
 → existing global `default_vault`/`group` (`vault_group` compatibility alias)
 → `.agent-vault.json` beneath the owner's exact `repository_machine_root`.
-Knowledge and repository+machine files may contain selection fields only;
+Knowledge and repository+machine files may contain selection/activation fields only;
 database, port, registry, cache, endpoint and KEK fields refuse portable override.
 Source documents retain physical-root and JSON-pointer provenance.
 
