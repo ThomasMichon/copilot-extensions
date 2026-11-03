@@ -328,12 +328,19 @@ def test_projects_command(capsys):
     assert "Projects" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("exposed", [False, True])
 def test_projects_json_uses_strict_existing_model_without_writes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    exposed: bool,
 ) -> None:
     home = _make_home(tmp_path)
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
+    registry = home / ".agent-worktrees/projects.yaml"
+    registry.write_text(
+        registry.read_text().replace("expose_agent: true", f"expose_agent: {str(exposed).lower()}"),
+        encoding="utf-8",
+    )
     before = {p.relative_to(home): p.read_bytes() for p in home.rglob("*") if p.is_file()}
     assert main(["projects", "--json"]) == 0
     result = json.loads(capsys.readouterr().out)
@@ -341,8 +348,8 @@ def test_projects_json_uses_strict_existing_model_without_writes(
     assert [p["name"] for p in result["projects"]] == ["dotfiles"]
     project = result["projects"][0]
     assert project["anchor"] == str(home / "src/dotfiles")
-    assert project["expose_agent"] is True and project["knowledge_repo"] == "my-knowledge"
-    assert project["roster"][0]["key"] == "book2"
+    assert project["expose_agent"] is exposed and project["config_dir"] == "~/.dotfiles"
+    assert set(project) == {"name", "anchor", "config_dir", "expose_agent"}
     assert {p.relative_to(home): p.read_bytes() for p in home.rglob("*") if p.is_file()} == before
 
 
@@ -380,6 +387,49 @@ def test_projects_json_refuses_invalid_project_entries(
     assert json.loads(capsys.readouterr().out)["state"] == "unavailable"
 
 
+@pytest.mark.parametrize("entry", [
+    'expose_agent: "false"', "expose_agent: 0", "expose_agent: null",
+    "config_dir: []", "anchor: 7",
+])
+def test_projects_json_never_coerces_invalid_ownership_preferences(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    entry: str,
+) -> None:
+    home = _make_home(tmp_path)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    (home / ".agent-worktrees/projects.yaml").write_text(
+        f"projects:\n  dotfiles: {{{entry}}}\n", encoding="utf-8",
+    )
+    assert main(["projects", "--json"]) == 1
+    assert json.loads(capsys.readouterr().out)["state"] == "unavailable"
+
+
+@pytest.mark.parametrize("relative", [
+    "src/dotfiles/.agent-worktrees/config.yaml",
+    "src/dotfiles/.github/copilot/settings.json",
+    ".dotfiles/config.yaml",
+])
+def test_projects_json_does_not_infer_unrelated_pr_plugin_or_runtime_readiness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    relative: str,
+) -> None:
+    import worktree_manager.harness_state as state
+
+    home = _make_home(tmp_path)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    (home / relative).write_text("malformed: [", encoding="utf-8")
+    monkeypatch.setattr(state, "pr_model", lambda *a, **k: pytest.fail("unrelated PR inspection"))
+    monkeypatch.setattr(state, "repo_plugin_enablement", lambda *a, **k: pytest.fail("plugin inspection"))
+    assert main(["projects", "--json"]) == 0
+    project = json.loads(capsys.readouterr().out)["projects"][0]
+    assert project == {
+        "name": "dotfiles", "anchor": str(home / "src/dotfiles"),
+        "config_dir": "~/.dotfiles", "expose_agent": True,
+    }
+
+
 def test_projects_json_absent_profile_remains_absent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -396,7 +446,7 @@ def test_projects_json_rejects_extra_arguments_before_inspection(
 ) -> None:
     import worktree_manager.__main__ as manager
 
-    monkeypatch.setattr(manager, "build_projects", lambda **_: pytest.fail("invalid inspection"))
+    monkeypatch.setattr(manager, "build_project_ownership", lambda: pytest.fail("invalid inspection"))
     assert main(["projects", "--json", "unexpected"]) == 2
 
 

@@ -48,6 +48,7 @@ from .engine_client import (
     list_worktrees,
 )
 from .harness_state import (
+    build_project_ownership,
     build_projects,
     build_repos,
     user_enabled_plugins,
@@ -252,7 +253,7 @@ def _cmd_projects(rest: list[str]) -> int:
             print("usage: worktree-manager projects --json", file=sys.stderr)
             return 2
         try:
-            projects = build_projects(strict_rosters=True)
+            projects = build_project_ownership()
             print(json.dumps({"version": 1, "projects": [asdict(p) for p in projects]}))
         except (OSError, ValueError, TypeError, AttributeError) as error:
             print(json.dumps({"version": 1, "state": "unavailable", "error": str(error)}))

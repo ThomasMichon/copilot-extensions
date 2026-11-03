@@ -498,6 +498,43 @@ def project_anchor_selection(
     return ProjectAnchorSelection(anchor, paths)
 
 
+@dataclass(frozen=True)
+class ProjectOwnership:
+    """Registry-owned project identity and its agent preference."""
+
+    name: str
+    anchor: str | None
+    config_dir: str | None
+    expose_agent: bool
+
+
+def build_project_ownership(home_dir: Path | None = None) -> list[ProjectOwnership]:
+    """Read only registry-owned identity, not optional PR/plugin/runtime readiness."""
+    paths = {kind: _registry_path(home_dir, kind) for kind in ("projects", "repos")}
+    documents = {
+        paths["projects"]: projects_registry(home_dir, strict=True),
+        paths["repos"]: repos_registry(home_dir, strict=True),
+    }
+    out: list[ProjectOwnership] = []
+    for name, entry in documents[paths["projects"]].get("projects", {}).items():
+        if (
+            not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", name)
+            or not isinstance(entry, dict)
+        ):
+            raise ValueError("Project registry entries require valid names and mappings")
+        if type(entry.get("expose_agent", False)) is not bool:
+            raise ValueError("Project expose_agent must be a Boolean")
+        for key in ("anchor", "config_dir"):
+            value = entry.get(key)
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise ValueError(f"Project {key} must be a nonempty string or null")
+        selected = project_anchor_selection(name, home_dir, reader=documents.__getitem__)
+        out.append(ProjectOwnership(
+            name, selected.anchor, entry.get("config_dir"), entry.get("expose_agent", False),
+        ))
+    return sorted(out, key=lambda project: project.name)
+
+
 def build_repos(
     home_dir: Path | None = None, *, strict: bool = False,
     input_roots: ProfileInputRoots | None = None,
@@ -660,11 +697,6 @@ def build_projects(
     )}
     out: list[ProjectInfo] = []
     for name, entry in (reg.get("projects") or {}).items():
-        if strict_rosters and (
-            not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", name)
-            or not isinstance(entry, dict)
-        ):
-            raise ValueError("Project registry entries require valid names and mappings")
         entry = entry or {}
         project_dir = (input_roots.project_dir(name) if input_roots
                        else (home_dir or home()) / f".{name}")

@@ -2356,15 +2356,18 @@ uv run python -m worktree_manager contracts --project <name> # contributed pivot
 uv run python -m worktree_manager refresh-profiles <name> # Windows: reconcile local profiles + shortcuts
 ```
 
-`projects --json` exposes the existing project read model as
-`{"version":1,"projects":[...]}`, including each selected anchor, configuration
-directory, ownership preferences and roster. It performs strict registry,
-configuration and roster reads without provisioning, registration or repairs.
+`projects --json` exposes registry-owned identity as
+`{"version":1,"projects":[...]}`. Each record contains only `name`, selected
+`anchor`, `config_dir` and Boolean `expose_agent`. It performs strict registry
+reads without provisioning, registration or repairs.
 An absent profile returns an empty list without creating it; malformed or
 unreadable inputs return nonzero with `state: "unavailable"`, never successful
 absence. Human-readable project listings retain their existing tolerant behavior.
 This optional read form is additive; callers of older Manager versions must
 refuse non-JSON/unsupported output before apply, not infer an empty catalogue.
+It deliberately omits PR model, plugin enablement, machine rosters and runtime
+configuration/readiness. Those unrelated inputs are not inspected or silently
+represented by defaults; this ownership view is not a full readiness proof.
 
 `refresh-profiles` is the narrow, JSON-producing local integration command.
 It collects saved project selections once, applies the existing fragment and
