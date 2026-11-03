@@ -149,8 +149,9 @@ order.
 
 ### Coverage-auditability selection amendment
 
-- [ ] Review and merge the [plan-only auditability amendment](coverage-auditability-selection.md)
-      before changing selection behavior.
+- [x] Review and merge the [plan-only auditability amendment](coverage-auditability-selection.md)
+      before changing selection behavior. #10194 merged as
+      `2c7b0c4fc865e5c8959d7ae1068d52d22b8cae16`.
 - [ ] Re-scope #6783 to metadata, conservative eligible-inventory selection
       and focused qualification; preserve its native prototype separately,
       without shipping it or crediting its unearned acceptance.
@@ -629,7 +630,7 @@ risk wedging everything").
       This bounded slice does not activate the unrelated
       [Phase 4 shadow consumer](#phase-4--rollout-replace-agent-worktrees-collect-only-tier)
       or take over standalone Fleet Manager baseline enrollment
-      ([#6783](https://github.com/ThomasMichon/copilot-extensions/pull/6783)).
+      ([#10209](https://github.com/ThomasMichon/copilot-extensions/issues/10209)).
 - [ ] Assess whether other plugins would benefit from diff-scoped selection
       over their current smoke/full split (no plugin besides
       `agent-worktrees` is currently collect-only-gated, so this phase is
@@ -776,6 +777,20 @@ regardless of this effort's local fixes.
 _Pending review of this plan._
 
 ## Journal
+
+### 2026-11-03 - Review the auditability amendment before re-scoping
+
+- #10194 merged as `2c7b0c4fc865e5c8959d7ae1068d52d22b8cae16`
+  after current-head approval, green required CI and resolved scope/transfer
+  findings. Its source worktree was finalized; implementation responsibility
+  transferred to the existing #6783 slice.
+- #10209 retains the prior native baseline prototype and every unearned
+  enrollment, publication, native and performance gate, including the #6617
+  prerequisite. The exact original prototype remains separately preserved at
+  `3a7bf8aa4bd1b3542fe2f99916d82a886f38ef39`. Deferred research does not
+  activate collection or qualify acceptance.
+- The owned implementation workspace starts from the reviewed amendment.
+  This is a bounded selection re-scope, not completion of the wider effort.
 
 ### 2026-10-20 - Land storage accounting and admit verified process teardown
 - C-STORAGE #7371 actually merged as

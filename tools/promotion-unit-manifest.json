@@ -4266,7 +4266,7 @@
         "tools/promotion_unit_tests/test_runtime_wheel_inspection_owner.py": "eb6029b02b7bf12842a24a668334a2d0bd501b8cff69cb464fbb90ff4c9e3a40",
         "tools/promotion_unit_tests/test_sdk_desktop_observer.py": "fb1a5503f6f93bbc318f955f5271eadb1847fa2169c60d140343aae14b733805",
         "tools/promotion_unit_tests/test_sdk_functional.py": "e2122c14e7d099b9b9768b125bc13c270e47f9b8d2c39d9b10706389f0efca99",
-        "tools/promotion_unit_tests/test_selection.py": "cc0c254e2c96dd2594f772e7181e3b2f501b69c09aab6d468b55046b738fe94b",
+        "tools/promotion_unit_tests/test_selection.py": "876bc590beb057366b26d729dc340a72a399143c8e2636dbcd21b6b5bf1ebe61",
         "tools/promotion_unit_tests/test_shell_caller_owned.py": "0723f365986fc1e537f4507ab681a290b22abe99fd4a688eddfd02861df6cb5a",
         "tools/promotion_unit_tests/test_source_objects.py": "5ce3712690ed49ac00d0866aaa6a6cb5a162ba5aedefdad326578907af1eb701",
         "tools/promotion_unit_tests/test_source_profile_derivation.py": "299c7e04925b9f932b5cfd302c47362bee52bfed98ca25c274fa86696991251d",

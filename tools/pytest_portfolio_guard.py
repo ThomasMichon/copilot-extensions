@@ -8,6 +8,11 @@ from pathlib import Path
 import pytest
 
 try:
+    from coverage_guided_selection.auditability import MARKER, declaration
+except ModuleNotFoundError:
+    from tools.coverage_guided_selection.auditability import MARKER, declaration
+
+try:
     from plugin_test_containment import (
         ALLOW_HOST_STATE_ENV,
         ALWAYS_SANDBOX_ENV_NAMES,
@@ -107,6 +112,11 @@ def validate_declaration(tier: str | None, effects: set[str]) -> str | None:
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
+        "coverage_auditability(classification, dependencies=()): auditable or "
+        "unauditable; auditable declares the complete repository-relative dependency closure",
+    )
+    config.addinivalue_line(
+        "markers",
         "portfolio_tier(name): execution tier T0 through T4 for a test family",
     )
     config.addinivalue_line(
@@ -134,6 +144,15 @@ def pytest_collection_modifyitems(
     )
     errors = []
     for item in items:
+        audit_marks = list(item.iter_markers(MARKER))
+        try:
+            if len(audit_marks) > 1:
+                raise ValueError("multiple coverage_auditability markers")
+            if audit_marks:
+                declaration(audit_marks[0].args, audit_marks[0].kwargs)
+        except ValueError as error:
+            errors.append(f"{item.nodeid}: {error}")
+            continue
         tier_marks = list(item.iter_markers("portfolio_tier"))
         if len(tier_marks) > 1:
             errors.append(f"{item.nodeid}: multiple portfolio_tier markers")

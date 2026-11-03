@@ -24,19 +24,21 @@ dependency detectors, containment and failure propagation remain intact.
 
 The prior #6783 native prototype is retained at commit
 `3a7bf8aa4bd1b3542fe2f99916d82a886f38ef39` through a dedicated recovery ref.
+Its deferred enrollment/qualification is tracked in #10209 under #4453.
 It remains unqualified research. This amendment neither ships it behind a
 flag nor claims its original native coverage or timing requirements passed.
 Any future use owes its own reviewed scope and original qualification.
 Independent Windows-wave, collector/publication and shadow-consumer owners
 retain their obligations; this bounded change does not complete the umbrella.
 
-- [ ] Merge this plan-only amendment before implementation.
-- [ ] Before re-scoping #6783, move its still-unearned native baseline
+- [x] Merge this plan-only amendment before implementation. #10194.
+- [x] Before re-scoping #6783, move its still-unearned native baseline
       enrollment/qualification to a tracked successor under #4453. Update
       active references in the parent Phase 5 and `dispatch-pr-selection.md`
       to that successor; retain the original draft and prototype as historical
       provenance, not completion evidence. The successor owns deferred research,
       not permission to resume universal collection or alter required CI.
+      Retained in #10209; active references now point there.
 - [ ] Base the owned #6783 branch on reviewed current `dev`, preserving the
       exact prototype first. Replace that PR's scope and description through
       the managed rewrite flow, retaining its discussion and identity.

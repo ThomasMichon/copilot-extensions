@@ -45,12 +45,10 @@ Design notes:
 from __future__ import annotations
 
 import argparse
-import fnmatch
 import json
 import math
 import os
 import shutil
-import shlex
 import subprocess
 import sys
 import tempfile
@@ -384,21 +382,9 @@ def _test_file_groups(
     else:
         # Explicit file arguments bypass pytest's recursive-discovery filters.
         # Apply its existing directory declaration only to our default expansion.
-        project = root / "pyproject.toml"
-        config = tomllib.loads(project.read_text(encoding="utf-8")) if project.is_file() else {}
-        ignored = config.get("tool", {}).get("pytest", {}).get("ini_options", {}).get("norecursedirs", [])
-        if isinstance(ignored, str):
-            ignored = shlex.split(ignored)
-        if not isinstance(ignored, list) or any(not isinstance(pattern, str) for pattern in ignored):
-            raise ValueError("pytest norecursedirs must be directory patterns")
-        files = sorted(
-            path for path in tests.rglob("test_*.py")
-            if not any(
-                fnmatch.fnmatch(parent.name, pattern) or parent.match(pattern)
-                for parent in path.relative_to(root).parents if parent != Path(".")
-                for pattern in ignored
-            )
-        )
+        from plugin_test_selection import default_collection_files
+
+        files = list(default_collection_files(root))
     if filtered and files:
         return [files]
     independent = {tests / path for path in _INDEPENDENT_SUBSUITE_FILES.get(name, ())}
@@ -528,7 +514,7 @@ def run_plugin(
         if test_files or prepare_only or guards or kexpr or collect_only:
             raise ValueError("--selection-file cannot be combined with other selection modes")
         selection = load_selection(selection_file, name, _plugin_dir(name))
-        if not selection.include_guards:
+        if not selection.include_guards and selection.coverage_profile is None:
             test_files = tuple(
                 str(path.relative_to(_plugin_dir(name)))
                 for path in selection.collection_files(_plugin_dir(name))

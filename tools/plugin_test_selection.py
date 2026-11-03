@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
+import fnmatch
+import shlex
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
@@ -71,12 +74,20 @@ class TestSelection:
     nodes: tuple[str, ...]
     files: tuple[str, ...]
     include_guards: bool
+    coverage_profile: dict | None = None
+    coverage_exclusions: dict | None = None
 
     def as_dict(self) -> dict:
-        return {
+        result = {
             "version": 1, "plugin": self.plugin, "nodes": list(self.nodes),
             "files": list(self.files), "include_guards": self.include_guards,
         }
+        if self.coverage_profile is not None:
+            result.update(
+                version=2, coverage_profile=self.coverage_profile,
+                coverage_exclusions=self.coverage_exclusions,
+            )
+        return result
 
     def collection_files(self, plugin_root: Path) -> tuple[Path, ...]:
         values = set(self.files) | {node.split("::", 1)[0] for node in self.nodes}
@@ -89,12 +100,20 @@ def load_selection(path: Path, plugin: str, plugin_root: Path) -> TestSelection:
 
 
 def selection_from_payload(payload: object, plugin: str, plugin_root: Path) -> TestSelection:
+    fields = {"version", "plugin", "nodes", "files", "include_guards"}
+    coverage_mode = isinstance(payload, dict) and payload.get("version") == 2
+    if coverage_mode:
+        fields |= {"coverage_profile", "coverage_exclusions"}
     if (
         not isinstance(payload, dict)
-        or set(payload) != {"version", "plugin", "nodes", "files", "include_guards"}
-        or type(payload["version"]) is not int or payload["version"] != 1
+        or set(payload) != fields
+        or type(payload["version"]) is not int or payload["version"] not in (1, 2)
         or payload["plugin"] != plugin
         or type(payload["include_guards"]) is not bool
+        or (coverage_mode and (
+            not isinstance(payload["coverage_profile"], dict)
+            or not isinstance(payload["coverage_exclusions"], dict)
+        ))
     ):
         raise ValueError("invalid exact test selection schema, version or plugin")
     for key in ("nodes", "files"):
@@ -112,8 +131,25 @@ def selection_from_payload(payload: object, plugin: str, plugin_root: Path) -> T
             ))
     selection = TestSelection(
         plugin, tuple(payload["nodes"]), tuple(payload["files"]), payload["include_guards"],
+        payload.get("coverage_profile"), payload.get("coverage_exclusions"),
     )
     if not selection.nodes and not selection.files:
         raise ValueError("exact test selection must contain evidence, not only guards")
     selection.collection_files(plugin_root)
     return selection
+def default_collection_files(root: Path) -> tuple[Path, ...]:
+    project = root / "pyproject.toml"
+    config = tomllib.loads(project.read_text(encoding="utf-8")) if project.is_file() else {}
+    ignored = config.get("tool", {}).get("pytest", {}).get("ini_options", {}).get("norecursedirs", [])
+    if isinstance(ignored, str):
+        ignored = shlex.split(ignored)
+    if not isinstance(ignored, list) or any(not isinstance(pattern, str) for pattern in ignored):
+        raise ValueError("pytest norecursedirs must be directory patterns")
+    return tuple(sorted(
+        path for path in (root / "tests").rglob("test_*.py")
+        if not any(
+            fnmatch.fnmatch(parent.name, pattern) or parent.match(pattern)
+            for parent in path.relative_to(root).parents if parent != Path(".")
+            for pattern in ignored
+        )
+    ))

@@ -17,6 +17,7 @@ import pytest
 from tools.coverage_guided_selection import ancestor_resolution as ar
 from tools.coverage_guided_selection import decide as decisions
 from tools.coverage_guided_selection import execution
+from tools.coverage_guided_selection import auditability
 from test_plugin_test_selection import runner as selection_runner
 from test_plugin_test_selection import selection_fixture  # noqa: F401
 
@@ -96,7 +97,9 @@ def test_empty_diff_still_executes_the_measured_cross_cutting_floor(history):
     root, base, _ = history
     payload = _plan(root, base)
     assert payload["mode"] == "selected"
-    assert payload["selection"]["nodes"] == ["tests/test_app.py::test_smoke"]
+    assert payload["selection"]["nodes"] == [
+        "tests/test_app.py::test_implicated", "tests/test_app.py::test_smoke",
+    ]
 
 
 def test_changed_new_test_files_and_out_of_scope_changes_remain_visible(history):
@@ -139,7 +142,9 @@ def test_upstream_parameterization_executes_the_complete_current_selected_module
     _git(root, "commit", "-qm", "candidate change")
     payload = _plan(root, fork)
     assert payload["fork_commit"] == fork
-    assert payload["selection"]["nodes"] == ["tests/test_app.py::test_smoke"]
+    assert payload["selection"]["nodes"] == [
+        "tests/test_app.py::test_implicated", "tests/test_app.py::test_smoke",
+    ]
     assert payload["selection"]["files"] == ["tests/test_app.py"]
     assert payload["changed_test_files"] == ["tests/test_app.py"]
     monkeypatch.setattr(selection_runner, "_plugin_dir", lambda _name: plugin)
@@ -160,7 +165,9 @@ def test_upstream_changes_to_an_unselected_module_do_not_expand_execution(histor
     _git(root, "commit", "-qm", "unselected upstream test")
     fork = _git(root, "rev-parse", "HEAD")
     payload = _plan(root, fork)
-    assert payload["selection"]["nodes"] == ["tests/test_app.py::test_smoke"]
+    assert payload["selection"]["nodes"] == [
+        "tests/test_app.py::test_implicated", "tests/test_app.py::test_smoke",
+    ]
     assert payload["selection"]["files"] == []
 
 
@@ -253,7 +260,9 @@ def test_debt_saturation_is_audited_and_curates_real_smoke(history, debt: str):
     payload = _plan(root, base, **options)
     assert payload["mode"] == "fallback"
     assert payload["debt"]["exceeded"]
-    assert payload["selection"]["nodes"] == ["tests/test_app.py::test_smoke"]
+    assert payload["selection"]["nodes"] == [
+        "tests/test_app.py::test_implicated", "tests/test_app.py::test_smoke",
+    ]
 
 
 @pytest.mark.parametrize("debt", ["age", "commits"])
@@ -635,7 +644,7 @@ def test_runtime_covered_regression_is_selected_and_fails(
     manifest = tmp_path / "selection.json"
     clean = _plan(tmp_path, base, smoke_budget_s=budget)
     assert bool(clean["debt"]["exceeded"]) is stale
-    assert hot not in clean["selection"]["nodes"]  # the smoke budget cannot buy it
+    assert hot in clean["selection"]["nodes"]  # unauditable execution is not budget-pruned
     manifest.write_text(json.dumps(clean["selection"]), encoding="utf-8")
     kwargs = dict(
         reinstall=False, kexpr=None, limits=runner.Limits(),
@@ -654,3 +663,141 @@ def test_runtime_covered_regression_is_selected_and_fails(
     # Restore the value with different byte length to avoid stale .pyc aliases.
     (source / "app.py").write_text("def value():\n    return 2  # fixed\n", encoding="utf-8")
     assert runner.run_plugin("fixture", "uv", **kwargs) == 0
+
+
+@pytest.mark.parametrize("args,kwargs", [
+    ((), {}), (("unknown",), {}), (("auditable",), {}),
+    (("auditable",), {"dependencies": ["../source.py"]}),
+    (("auditable",), {"dependencies": ["source.py", "source.py"]}),
+    (("auditable",), {"dependencies": ["source.py"], "complete": True}),
+])
+def test_auditability_declaration_cannot_grant_ambiguous_exclusion(args, kwargs):
+    with pytest.raises(ValueError):
+        auditability.declaration(args, kwargs)
+
+
+def test_auditability_requires_observed_unchanged_complete_profile(tmp_path):
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "app.py").write_text("def value(): return 2\n", encoding="utf-8")
+    (tmp_path / "test_app.py").write_text("def test_value(): pass\n", encoding="utf-8")
+    (tmp_path / "settings.json").write_text('{"enabled": true}\n', encoding="utf-8")
+    node = "test_app.py::test_value"
+    declared = auditability.declaration(
+        ("auditable",), {"dependencies": ["src/app.py", "settings.json"]},
+    )
+    metadata = {
+        "portfolio_tier": "T0", "effects": [], "auditability": declared,
+        "audit_dependency_digests": {
+            name: auditability.file_digest(tmp_path, name)
+            for name in auditability.dependency_names(tmp_path, node, declared)
+        },
+    }
+    current = auditability.profile("fixture", "src")
+    coverage = {"src/app.py": {"1": [node]}}
+    proof = auditability.evidence(tmp_path, node, metadata, coverage, current)
+    assert proof is not None
+    assert auditability.verified_exclusions(tmp_path, {node: proof}, current) == {node: proof}
+    assert auditability.evidence(tmp_path, node, metadata, {}, current) is None
+    assert auditability.evidence(
+        tmp_path, node, {**metadata, "effects": ["process"]}, coverage, current,
+    ) is None
+    assert auditability.verified_exclusions(
+        tmp_path, {node: proof}, {**current, "platform": "another-platform"},
+    ) == {}
+    incomplete = {**proof, "dependencies": {"src/app.py": proof["dependencies"]["src/app.py"]}}
+    assert auditability.verified_exclusions(tmp_path, {node: incomplete}, current) == {}
+    (tmp_path / "settings.json").write_text('{"enabled": false}\n', encoding="utf-8")
+    assert auditability.verified_exclusions(tmp_path, {node: proof}, current) == {}
+    assert auditability.evidence(tmp_path, node, metadata, coverage, current) is None
+
+
+@pytest.mark.skipif(
+    os.environ.get("CGS_RUN_INTEGRATION_TEST") != "1",
+    reason="opt-in actual coverage metadata and contained selected execution",
+)
+def test_auditable_selection_retains_unknown_inventory_and_fails_its_regression(
+    tmp_path, monkeypatch, request, capfd,
+):
+    from tools.coverage_guided_selection import baseline as baseline_mod
+
+    plugin = tmp_path / "plugins/fixture"
+    source, tests = plugin / "src", plugin / "tests"
+    source.mkdir(parents=True)
+    tests.mkdir()
+    (source / "app.py").write_text("def value():\n    return 2\n", encoding="utf-8")
+    (plugin / "pyproject.toml").write_text(
+        '[tool.pytest.ini_options]\ntestpaths=["tests"]\n', encoding="utf-8",
+    )
+    (tests / "conftest.py").write_text(
+        "import sys\nfrom pathlib import Path\n"
+        "sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))\n",
+        encoding="utf-8",
+    )
+    (tests / "test_auditable.py").write_text(
+        "import pytest\nfrom app import value\n"
+        "pytestmark = [pytest.mark.portfolio_tier('T0'), "
+        "pytest.mark.coverage_auditability('auditable', "
+        "dependencies=['plugins/fixture/src/app.py'])]\n"
+        "def test_first(): assert value() == 2\n"
+        "def test_second(): assert value() == 2\n",
+        encoding="utf-8",
+    )
+    unknown = tests / "test_unknown.py"
+    unknown.write_text("def test_unknown(): assert True\n", encoding="utf-8")
+    (tests / "test_unauditable.py").write_text(
+        "import pytest\npytestmark = pytest.mark.coverage_auditability('unauditable')\n"
+        "def test_unauditable(): assert True\n", encoding="utf-8",
+    )
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "-qm", "auditable fixture")
+    base = _git(tmp_path, "rev-parse", "HEAD")
+    request.getfixturevalue("selection_fixture")
+    python = selection_runner._ensure_venv()
+    monkeypatch.setattr(baseline_mod, "_prepare_project_venv", lambda *_a, **_k: python)
+    baseline = baseline_mod.collect_baseline(
+        cwd=tmp_path, test_path="plugins/fixture/tests", cov_source="plugins/fixture/src",
+        plugin="fixture", measured_commit=base, project_dir=plugin,
+    )
+    auditable = {
+        node for node, info in baseline["tests"].items()
+        if info.get("auditability_evidence") is not None
+    }
+    assert auditable == {
+        "tests/test_auditable.py::test_first", "tests/test_auditable.py::test_second",
+    }
+    monkeypatch.setattr(
+        decisions, "resolve_nearest_baseline",
+        lambda *_a, **_k: ar.ResolvedBaseline(baseline, base),
+    )
+    monkeypatch.setattr(decisions, "fetch_baseline_asset", lambda *_a, **_k: baseline)
+    monkeypatch.setattr(selection_runner, "_plugin_dir", lambda _name: plugin)
+    monkeypatch.setattr(selection_runner, "_has_suite", lambda _name: True)
+    payload = _plan(tmp_path, base, smoke_budget_s=1)
+    selected = set(payload["selection"]["nodes"])
+    assert "tests/test_unknown.py::test_unknown" in selected
+    assert len(selected & auditable) == 1
+    manifest = tmp_path / "coverage-selection.json"
+    manifest.write_text(json.dumps(payload["selection"]), encoding="utf-8")
+    options = dict(
+        reinstall=False, kexpr=None, limits=selection_runner.Limits(),
+        plugin_timeout=60, test_timeout=10, max_files_per_subsuite=25,
+        selection_file=manifest,
+    )
+    assert selection_runner.run_plugin("fixture", "unused", **options) == 0
+    output = capfd.readouterr().out
+    assert "3 passed" in output and "1 deselected" in output
+    # This file is absent from the measured inventory and selection manifest.
+    (tests / "test_added.py").write_text("def test_added(): assert True\n", encoding="utf-8")
+    (tests / "test_manual.py").write_text(
+        "import pytest\n@pytest.mark.portfolio_tier('T3')\n"
+        "def test_manual(): raise AssertionError('manual lane must remain gated')\n",
+        encoding="utf-8",
+    )
+    assert selection_runner.run_plugin("fixture", "unused", **options) == 0
+    output = capfd.readouterr().out
+    assert "4 passed" in output and "1 skipped" in output and "1 deselected" in output
+    unknown.write_text("def test_unknown(): assert False\n", encoding="utf-8")
+    assert selection_runner.run_plugin("fixture", "unused", **options) == 1
+    assert "test_unknown" in capfd.readouterr().out

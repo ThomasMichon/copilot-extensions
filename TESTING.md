@@ -6927,19 +6927,23 @@ $env:SSH_MANAGER_WINDOWS_PROXY_TEST = '1'
 The portable proxy contracts cover binary forwarding, routing identity, and
 timeout/cancellation cleanup and run in the Agent Bridge CI lane.
 
-## Coverage-selected dispatch PRs
+## Coverage-selected plugin execution
 
-Only `agent-dispatch`'s pull-request lane uses coverage selection. Its unchanged
-twelve-minute job runs `tools/run-coverage-selected-tests.py`, which reuses
+Required Source CI currently runs the positively admitted unit packet through
+`ci_pr_unit_reuse.py`; it does not run the historical full-plugin dispatch PR
+pilot. Required promotion remains unit-only. The retained, explicitly invoked
+`tools/run-coverage-selected-tests.py` supports `agent-dispatch` and reuses
 `coverage_guided_selection.decide()` and the trusted main-history pointer /
-Release-asset baseline. Push, manual and promotion portfolios remain full;
-`agent-worktrees`' separate selection consumer remains shadow-only.
-Changes to the dispatch selection, containment, runner or workflow inputs also
-nominate dispatch, so the mechanism's own PRs cannot silently skip its execution.
+Release-asset baseline. `agent-worktrees`' separate consumer remains shadow-only.
+Changing this helper does not restore full-plugin integration to required CI
+or enroll another profile. Independent manual/periodic lane admission remains
+unchanged.
 
-The dispatch lane always unions three sets: exact diff-attributed test nodes,
+Coverage execution always unions exact diff-attributed test nodes,
 the existing weighted-set-cover smoke floor (120 seconds of measured baseline
-test costs, T0-T2/untiered candidates), and structural `guard` tests. Changed or
+test costs in the historical pilot, T0-T2/untiered candidates), structural
+`guard` tests, and every current eligible test without verified auditability
+evidence. Changed or
 new `tests/test_*.py` files run in full too. The smoke budget bounds only that
 floor, never the implicated tests or complete invocation. Current debt limits
 are 200 intervening commits and seven days. Curation uses compact line bitsets
@@ -6949,7 +6953,8 @@ and hard budget as the original algorithm.
 Selected execution requires the baseline's actual measured commit. If a
 selected test module changed between that commit and the candidate, the
 producer adds the whole current module while retaining the originally requested
-node IDs. Upstream changes to unselected modules do not expand the selection.
+node IDs. New or previously unselected unauditable/unclassified tests are
+retained from the current collection, even without baseline entries.
 The collector emits repository-relative source keys with portable separators,
 including when measured on Windows.
 
@@ -6968,7 +6973,7 @@ The pilot CLI also refuses an absent plugin test suite, so full fallback cannot
 become a successful no-suite skip.
 
 `--selection-file PATH` on `run-plugin-tests.py` accepts a versioned JSON
-manifest, for example:
+manifest. Version 1 remains explicit manual exact selection, for example:
 
 ```json
 {
@@ -6979,6 +6984,43 @@ manifest, for example:
   "include_guards": true
 }
 ```
+
+Coverage producers emit version 2, with `coverage_profile` and
+`coverage_exclusions` in addition to those fields. The runner collects its
+whole existing admitted file inventory, then excludes an unrequested node
+only when its current auditability declaration and unchanged dependency
+digests match earned evidence for the actual interpreter/platform profile.
+Missing, legacy, malformed, partial or cross-profile evidence retains tests.
+Existing tier/platform skips and manual opt-ins are not overridden.
+
+Declare auditability independently of tier/effect/contract markers:
+
+```python
+@pytest.mark.coverage_auditability(
+    "auditable", dependencies=["plugins/example/src/example/policy.py", "fixtures/input.json"],
+)
+def test_policy():
+    ...
+```
+
+`dependencies` is a reviewed, complete repository-relative input closure,
+including relevant Python helpers and configuration/data. The collector also
+binds the test file and ancestor conftest/project configuration. Declarations
+must be unique and well-formed; a tag alone is not execution proof.
+`coverage_auditability("unauditable")` needs no closure; missing declarations
+are unclassified and equally conservative.
+
+The ordinary schema-v4 collector qualifies only the bounded T0/T1 in-process
+families with no declared effects beyond filesystem. Every declared production
+Python dependency needs runtime-context attribution; its bytes and all input
+digests must agree before/after collection and at selection/execution. This is
+not a claim of 100% line/branch coverage. A changed dependency file retains the
+test even if line attribution is incomplete. Native/process/network/service
+behavior has no qualification in this collector and remains always retained
+inside its independently admitted lane; no native instrumentation is added.
+The five pure selection-unit cases are the initial declared family. Required
+unit-packet execution remains unchanged; that separate profile is not silently
+enrolled by adding their tags.
 
 Use one named plugin and no other selection mode. Paths must identify existing,
 unlinked plugin-relative test files; node IDs must match collected items
@@ -7010,10 +7052,12 @@ Partial reports do not establish group success or cleanup. Reporting is not
 available for dependency-only preparation or listing and does not add a
 devcontainer artifact-export mechanism.
 
-The `dispatch-selection` artifact records exact nodes, changed test files,
+The producer decision artifact records requested nodes, changed test files,
 baseline generation, debt, fallback reasons, predicted smoke cost and attributed
-line breadth. Console and step summaries contain bounded metadata rather than
-repeating the full node lists. Complete invocation timing includes planning, dependency
+line breadth. The coverage collection hook reports the complete current
+retained/selected/excluded node sets, so inventory-only additions remain
+auditable separately from producer requests and pytest pass/skip outcomes.
+The CLI step summary contains bounded metadata. Complete invocation timing includes planning, dependency
 preparation, execution and cleanup, not just pytest's test timer. Guard and
 additional implicated/changed-file costs are not claimed to fit the predicted
 smoke-floor cost.
@@ -7028,6 +7072,14 @@ proof requires `coverage` and `pytest-json-report` in the test environment.
 Its private fixture reuses those declared dependencies while executing the real
 collector driver and contained runner, rather than resolving packages inside
 each test's deadline.
+
+The existing manual `Installation context full` workflow's `coverage-selection`
+portfolio qualifies these controls on Linux and Windows at the exact dispatch
+SHA, including a strict audited subset, unknown/unauditable retention, a new
+unmeasured test, unchanged T3 admission and a retained-test regression that makes
+the real contained selected command fail. It has no PR/scheduled trigger and
+does not expand required unit CI or qualify the deferred native prototype
+tracked in #10209.
 
 ## Test portfolio invariants
 
