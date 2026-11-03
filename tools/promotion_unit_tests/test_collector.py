@@ -78,12 +78,14 @@ def test_no_production_call_is_rejected_by_the_collector_and_packet_verifier(tmp
         "import importlib.util\n"
         "from pathlib import Path\n"
         "import sys\n"
+        "import pytest\n"
         "spec = importlib.util.spec_from_file_location(\n"
         "    'unit_collector_noop_business', Path(__file__).resolve().parents[1] / 'noop_business.py')\n"
         "business = importlib.util.module_from_spec(spec)\n"
         "sys.modules[spec.name] = business\n"
         "spec.loader.exec_module(business)\n"
-        "def test_no_production_call():\n"
+        "@pytest.mark.parametrize('case', ['x' * 120])\n"
+        "def test_no_production_call(case):\n"
         "    assert True\n"
         "def test_second_no_production_call():\n"
         "    assert True\n"
@@ -95,7 +97,7 @@ def test_no_production_call_is_rejected_by_the_collector_and_packet_verifier(tmp
         path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
         for path in (test, business)
     }
-    node = test.relative_to(root).as_posix() + "::test_no_production_call"
+    node = test.relative_to(root).as_posix() + "::test_no_production_call[" + "x" * 120 + "]"
     manifest = {
         "profile": PROFILE, "nodes": [node, test.relative_to(root).as_posix()
                                     + "::test_second_no_production_call"], "sources": sources,
@@ -119,6 +121,7 @@ def test_no_production_call_is_rejected_by_the_collector_and_packet_verifier(tmp
 
     def scoped_collection(arguments, **kwargs):
         assert Path(arguments[arguments.index("--confcutdir") + 1]) == root
+        assert arguments[arguments.index("-o") + 1] == "parametrize_long_str_id_strategy=legacy"
         assert arguments.count(str(test)) == 1
         assert not any("::" in argument for argument in arguments)
         return real_pytest_main(arguments, **kwargs)

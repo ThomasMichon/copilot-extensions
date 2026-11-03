@@ -16,7 +16,7 @@ import time
 
 
 class ApplicationStartupUncertain(RuntimeError):
-    """Startup was invoked; only its application owner can reconcile its effects."""
+    """Published application work can only be reconciled by its owner."""
 
     def __init__(self, slot: Path):
         self.slot = slot
@@ -345,69 +345,77 @@ def install(
     start = [*record["start"], *arguments] if record["start"] else []
     with _qualified(
         slot, record, verify_on_exit=False,
-    ) as (runtime, unchanged), runtime._publication_lease(root):
+    ) as (runtime, unchanged):
         _run(record, setup, root, slot)
         unchanged()
         if not runtime.is_complete(root, slot.name, expect_hash=record["construction"]["payload_hash"]):
             raise RuntimeError("application publication requires canonical completed construction")
-        selector_before = {path: _read(path) for path in selectors}
         selector_content = (slot.name + "\n").encode("utf-8")
-        written = {}
-        publishing = False
-        startup_attempted = False
+        selector_forms = (selector_content, (slot.name + "\r\n").encode("utf-8"))
+        success_content = json.dumps({
+            "state": "installed", "version": slot.name,
+        }, sort_keys=True).encode("utf-8") + b"\n"
+        with runtime._publication_lease(root):
+            selector_before = {path: _read(path) for path in selectors}
+            written = {}
+            publishing = False
+            try:
+                for path, content in replacements.items():
+                    if _read(path) != previous[path]:
+                        raise RuntimeError(f"application launcher changed before publication: {path}")
+                    if previous[path] != content:
+                        _write(path, content)
+                        written[path] = content
+                publishing = True
+                runtime._runtime_component("versioned_runtime_publication").publish_selectors(
+                    root, slot.name, None, lambda home, version: None,
+                )
+                if not start:
+                    _write(root / "last-known-good", selector_content)
+                    _write(slot / "install-success.json", success_content)
+            except BaseException as error:
+                if publishing and any(
+                    _read(path) not in (selector_before[path], selector_content)
+                    for path in selectors
+                ):
+                    raise RuntimeError("application selector changed during recovery") from error
+                for path, content in written.items():
+                    if _read(path) != content:
+                        raise RuntimeError(f"application publication changed during recovery: {path}")
+                    if previous[path] is None:
+                        path.unlink()
+                    else:
+                        _write(path, previous[path])
+                if publishing:
+                    for path in selectors:
+                        content = _read(path)
+                        if content == selector_before[path]:
+                            continue
+                        if content != selector_content:
+                            raise RuntimeError(f"application selector changed during recovery: {path}")
+                        if selector_before[path] is None:
+                            path.unlink(missing_ok=True)
+                        else:
+                            _write(path, selector_before[path])
+                raise
+        if not start:
+            return {"state": "installed", "slot": str(slot)}
         try:
-            for path, content in replacements.items():
-                if _read(path) != previous[path]:
-                    raise RuntimeError(f"application launcher changed before publication: {path}")
-                if previous[path] != content:
-                    _write(path, content)
-                    written[path] = content
-            publishing = True
-            runtime._runtime_component("versioned_runtime_publication").publish_selectors(
-                root, slot.name, None, lambda home, version: None,
-            )
-            startup_attempted = bool(start)
             _run(record, start, root, slot)
             unchanged()
-            if (
-                _read(selectors[0]) != selector_content
-                or _read(selectors[1]) != selector_before[selectors[1]]
-            ):
-                raise RuntimeError("application selector changed before startup completion")
-            _write(root / "last-known-good", selector_content)
-            _write(slot / "install-success.json", json.dumps({
-                "state": "installed", "version": slot.name,
-            }, sort_keys=True).encode("utf-8") + b"\n")
+            with runtime._publication_lease(root):
+                if (
+                    _read(selectors[0]) not in selector_forms
+                    or _read(selectors[1]) not in (selector_before[selectors[1]], *selector_forms)
+                ):
+                    raise RuntimeError("application selector changed before startup completion")
+                _write(root / "last-known-good", selector_content)
+                _write(slot / "install-success.json", success_content)
         except BaseException as error:
-            if startup_attempted:
-                uncertain = ApplicationStartupUncertain(slot)
-                if isinstance(error, Exception):
-                    raise uncertain from error
-                print(str(uncertain), file=sys.stderr)
-                raise
-            if publishing and any(
-                _read(path) not in (selector_before[path], selector_content)
-                for path in selectors
-            ):
-                raise RuntimeError("application selector changed during recovery") from error
-            for path, content in written.items():
-                if _read(path) != content:
-                    raise RuntimeError(f"application publication changed during recovery: {path}")
-                if previous[path] is None:
-                    path.unlink()
-                else:
-                    _write(path, previous[path])
-            if publishing:
-                for path in selectors:
-                    content = _read(path)
-                    if content == selector_before[path]:
-                        continue
-                    if content != selector_content:
-                        raise RuntimeError(f"application selector changed during recovery: {path}")
-                    if selector_before[path] is None:
-                        path.unlink(missing_ok=True)
-                    else:
-                        _write(path, selector_before[path])
+            uncertain = ApplicationStartupUncertain(slot)
+            if isinstance(error, Exception):
+                raise uncertain from error
+            print(str(uncertain), file=sys.stderr)
             raise
     return {"state": "installed", "slot": str(slot)}
 
