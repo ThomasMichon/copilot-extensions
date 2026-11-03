@@ -523,7 +523,7 @@
         "services/dispatch"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict"
     },
     {
       "name": "service-index",
