@@ -285,9 +285,12 @@ def _restore_selectors(root: Path, version: str, snapshot: dict[str, bytes | Non
 
 def _monitor_identity(root: Path) -> tuple[int, str] | None:
     from agent_worktrees import locks, status_monitor_cutover as cutover
+    from agent_worktrees.runtime_monitor_identity import AsyncRetirementUnsupported
 
     try:
         routed = cutover.routed_monitor_identity(root, require_async_retirement=True)
+    except AsyncRetirementUnsupported:
+        raise
     except (OSError, ValueError, ConnectionError) as error:
         raise InstallationRefused(f"Asynchronous predecessor retirement is unavailable: {error}") from error
     if routed is not None:
@@ -592,6 +595,7 @@ def settle_candidate(
             config as cfg, status_monitor_cutover as cutover, runtime_deployment as deployment,
         )
         from agent_worktrees.runtime_monitor_settlement import PublicationOutcomePending
+        from agent_worktrees.runtime_monitor_identity import AsyncRetirementUnsupported, retire_legacy
 
         identity = _installed_identity(candidate_slot)
         if package_version is not None:
@@ -622,7 +626,12 @@ def settle_candidate(
 
                 with CutoverLock(root / "status-monitor-routing"):
                     recover_abandoned(root)
-            predecessor = _monitor_identity(root) if monitor_scope else None
+            legacy_predecessor = None
+            try:
+                predecessor = _monitor_identity(root) if monitor_scope else None
+            except AsyncRetirementUnsupported as error:
+                legacy_predecessor = error.identity
+                predecessor = legacy_predecessor[:2]
             serving_slot = None
             if predecessor is not None:
                 serving_slot = _monitor_slot(root, predecessor)
@@ -665,7 +674,7 @@ def settle_candidate(
                 {
                     "pid": predecessor[0], "start": predecessor[1], "slot": serving_slot,
                     "release_claim": release_dev_claim if retiring_dev else None,
-                } if predecessor is not None and not already_serving else None
+                } if predecessor is not None and not already_serving and legacy_predecessor is None else None
             )
             try:
                 if retirement_predecessor is not None:
@@ -675,17 +684,25 @@ def settle_candidate(
                 if helpers is not None:
                     helpers.verify()
                 governance.recheck()
+                if legacy_predecessor is not None and not already_serving:
+                    with runtime._publication_lease(root):
+                        if _selector_snapshot(root) != snapshot:
+                            raise InstallationRefused("Runtime selection changed before legacy retirement")
+                        retired = retire_legacy(root, legacy_predecessor, guard=guard)
+                    print(f"Runtime {version}: bounded legacy takeover {retired}", flush=True)
                 runtime.activate(root, version, link_free=True, dev_owner=dev_owner)
                 print(f"Runtime {version}: selection published", flush=True)
                 committed = True
                 if monitor_scope and not already_serving:
                     summary = cutover.activate_after_update(
                         runtime_python=str(runtime.slot_python(root, version)),
-                        monitor_was_live=predecessor is not None, cutover_guard=guard,
+                        monitor_was_live=predecessor is not None and legacy_predecessor is None,
+                        cutover_guard=guard,
                         spawned_handles=handles,
                         transition_custody=custody,
                         asynchronous_retirement=True,
                         retirement_predecessor=retirement_predecessor,
+                        **({"retired_predecessor": predecessor} if legacy_predecessor is not None else {}),
                     )
                     summary["self_retirement"] = True
                     print(

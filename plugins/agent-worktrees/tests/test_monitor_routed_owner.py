@@ -30,14 +30,21 @@ def test_candidate_serving_uses_owned_slot_for_nested_runtime_prefix(tmp_path, m
     prefix = slot / ".venv" if nested else slot
     prefix.mkdir(exist_ok=True)
     pid = os.getpid()
-    endpoint = routing.Endpoint("127.0.0.1", 41001, pid)
+    (tmp_path / "status-monitor-control.token").write_text("fixture-token", encoding="utf-8")
+    endpoint = routing.publish_active(
+        tmp_path / "status-monitor-routing", bind="127.0.0.1", port=41001,
+        pid=pid, process_start_time=identity.locks.process_start_time(pid),
+    )
     monkeypatch.setattr(identity.locks, "read_lock", lambda path: {"pid": pid, "prefix": str(prefix)})
     monkeypatch.setattr(identity.locks, "lock_is_live", lambda record: True)
     monkeypatch.setattr(identity.cutover, "live_endpoint", lambda: endpoint)
-    monkeypatch.setattr(
-        identity.cutover, "ControlClient",
-        lambda url: SimpleNamespace(health=lambda: {"status": "ready", "published": True, "pid": pid}),
-    )
+    def client(url, **options):
+        assert url == endpoint.base_url and options["token"] == "fixture-token"
+        return SimpleNamespace(health=lambda: {
+            "status": "ready", "published": True, "pid": pid,
+            "runtime_prefix": str(prefix), "runtime_slot": "candidate",
+        })
+    monkeypatch.setattr(identity.cutover, "ControlClient", client)
     assert identity.candidate_serving(tmp_path, slot)
     assert identity.monitor_slot(tmp_path, (pid, identity.locks.process_start_time(pid))) == "candidate"
     outside = tmp_path / "outside" / ".venv"
