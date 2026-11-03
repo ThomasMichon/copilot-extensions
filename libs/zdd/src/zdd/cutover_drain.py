@@ -1,4 +1,4 @@
-"""Predecessor drain and post-publication retirement outcomes."""
+"""Cutover health gates, predecessor drain and post-publication retirement."""
 
 from __future__ import annotations
 
@@ -23,10 +23,13 @@ def _drain_old(
             self, old, result, drain_timeout=drain_timeout, force=force,
             conditional=conditional, on_drain=on_drain,
         )
-    except Exception:
+    except Exception as exc:
         if conditional is not None or self.retire_failed_predecessor is None:
             raise
-        _retire_failed_predecessor(self, old, result)
+        result.predecessor_cleanup = {
+            "exit_confirmed": False, "attempted": False, "reason": type(exc).__name__,
+        }
+        result.steps.append("predecessor recovery failed; retirement deferred until successor serves")
 
 
 def _drain(
@@ -111,7 +114,7 @@ def _retire_failed_predecessor(self: CutoverOrchestrator, old: Endpoint, result:
 def shutdown_predecessor(self: CutoverOrchestrator, old: Endpoint, client, result: CutoverResult) -> None:
     from .cutover import CutoverError
 
-    if result.predecessor_cleanup is not None:
+    if not self.drain_predecessor or result.predecessor_cleanup is not None:
         _retire_failed_predecessor(self, old, result)
         return
     try:
@@ -155,3 +158,28 @@ def complete_self_retirement(
     result.ok = True
     result.steps.append("successor ready; predecessor retirement is asynchronous")
     return result
+
+
+def await_health(
+    self: CutoverOrchestrator, port: int, timeout: float, poll: float,
+    check: Callable[[str, int], bool] | None = None,
+) -> bool:
+    from .cutover import CutoverError
+
+    check = check or self.health_check
+    deadline = self.clock() + timeout
+    while self.clock() < deadline:
+        try:
+            if check(self._client_host(), port):
+                return True
+        except CutoverError:
+            raise
+        except Exception:
+            pass
+        self.sleep(poll)
+    try:
+        return bool(check(self._client_host(), port))
+    except CutoverError:
+        raise
+    except Exception:
+        return False

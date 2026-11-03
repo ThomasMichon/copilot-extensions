@@ -258,6 +258,25 @@ def test_native_passive_health_cannot_retire_old_without_serving_promotion(
         assert breadcrumb.read_breadcrumb(root) is None
 
 
+@pytest.mark.parametrize("provider", ["legacy-ready"], indirect=True)
+@pytest.mark.parametrize("mode", ["candidate-refuse", "candidate-unready"])
+def test_native_unnegotiated_predecessor_is_not_drained_when_incoming_fails(
+    provider, tmp_path, monkeypatch, mode,
+):
+    root, data, old, _ = provider
+    installer_fixture(monkeypatch, provider)
+    with native.start_provider(tmp_path / "candidate", mode) as candidate:
+        new_data, _ = candidate_spawn(monkeypatch, root, candidate)
+        result = control.activate_after_update(health_timeout=2, drain_timeout=2)["result"]
+        assert not result["ok"] and not result["committed"] and result["rolled_back"], result
+        assert data["process"].poll() is None and new_data["process"].poll() is not None
+        assert not (root / "drain-requested").exists() and not (root / "shutdown-requested").exists()
+        assert recovery.active_endpoint(root).pid == old.pid
+        health = control.ControlClient(old.base_url, token=data["token"]).health()
+        assert health["status"] == "ready" and health["published"] and health["opened"] == 0
+        assert breadcrumb.read_breadcrumb(root) is None
+
+
 @pytest.mark.parametrize("provider", ["retirement-gate"], indirect=True)
 def test_native_successful_cutover_activates_then_waits_for_exact_owner_exit(
     provider, tmp_path, monkeypatch,

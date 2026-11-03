@@ -139,6 +139,13 @@ serves when the adapter explicitly supplies that fallback; its `predecessor_clea
 separate from incoming readiness. Cleanup failure does not roll back a healthy
 incoming generation. Without that hook, existing cutover behavior is unchanged.
 
+Failed graceful drain records pending cleanup, not native retirement before
+publication. The existing verify-before-retire gate still precedes the cleanup
+attempt. An adopter that cannot negotiate predecessor recovery may set
+`drain_predecessor=False` with its exact-owner retirement hook; the old peer is
+then left undrained until successor serving readiness permits native cleanup.
+Skipping drain without that bounded retirement owner is refused.
+
 Publications for a live PID also record its `process_start_time`, establishing
 the process identity when the route is written rather than sampling a potentially
 reused PID during later adoption. The three publication APIs accept an optional

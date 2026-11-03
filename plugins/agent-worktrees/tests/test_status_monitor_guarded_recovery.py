@@ -490,6 +490,30 @@ def test_real_cutover_rolls_back_when_incoming_fails_to_start(forward_cutover):
     assert routing.read_table(orch.config_dir)["active"] == orch.expected_old.to_dict()
 
 
+@pytest.mark.parametrize("drain", ["refused", "timeout"])
+@pytest.mark.parametrize("failure", ["publication", "promotion"])
+def test_real_cutover_preserves_predecessor_after_failed_drain_and_incoming_failure(
+    forward_cutover, monkeypatch, drain, failure,
+):
+    orch, events, state, handle = forward_cutover
+    state.drain = drain
+
+    def fail(*a, **k):
+        raise routing.ActivePublicationRefused("fixture incoming publication/promotion failed")
+
+    if failure == "publication":
+        monkeypatch.setattr(routing, "publish_active_with_previous_guarded", fail)
+    else:
+        orch.on_published = fail
+    result = orch.run(health_timeout=1, drain_timeout=1)
+    assert not result.ok and not result.committed
+    if failure == "promotion":
+        assert result.rolled_back
+    assert handle.terminated and "cleanup-old" not in events and "shutdown-old" not in events
+    assert routing.read_table(orch.config_dir)["active"]["pid"] == orch.expected_old.pid
+    assert result.predecessor_cleanup["attempted"] is False
+
+
 @pytest.mark.parametrize("cleanup", [False, True, "error"])
 def test_async_cutover_cleanup_failure_cannot_reverse_serving_successor(forward_cutover, cleanup):
     from zdd import lifecycle

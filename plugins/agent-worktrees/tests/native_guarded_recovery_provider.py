@@ -28,7 +28,7 @@ def serve(root: Path, mode: str):
     opened = 0
     health_calls = 0
     candidate = mode.startswith("candidate")
-    draining = not candidate
+    draining = not candidate and mode != "legacy-ready"
     published = not candidate
     shutdown_requested = threading.Event()
     token = "isolated-recovery-fixture"
@@ -62,7 +62,7 @@ def serve(root: Path, mode: str):
                     "worktrees": {"status": "ready" if published else "unready"},
                     "repositories": {"admitting": published and not draining},
                     "capabilities": (
-                        [] if mode in {"old-provider", "candidate-legacy"}
+                        [] if mode in {"old-provider", "legacy-ready", "candidate-legacy"}
                         else [recovery.CAPABILITY, "status-monitor-async-retirement-v1"]
                         if candidate else [recovery.CAPABILITY]
                     ),
@@ -87,6 +87,7 @@ def serve(root: Path, mode: str):
                 shutdown_requested.set()
                 return {"shutdown": True}
             if action == "drain":
+                (root / "drain-requested").touch()
                 draining = True
                 if mode == "drain-timeout":
                     wait_for(root / "release")

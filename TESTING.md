@@ -7388,3 +7388,8 @@ All cases using this disposable provider share its 60-second import and
 provider imports; strict Job cleanup still runs at the item boundary.
 These allowances address fixture import contention, not a production startup
 or performance claim.
+The same packet also selects
+`unnegotiated_predecessor_is_not_drained_when_incoming_fails`: a real legacy
+peer stays serving and receives no drain/shutdown mutation when the incoming
+peer refuses promotion or remains unready. Pure controls pair refused/timed-out
+drain with failed publication/promotion and require zero native retirement.

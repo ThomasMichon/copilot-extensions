@@ -213,7 +213,10 @@ class GuardedPredecessor:
         roster = health.get("worktrees")
         return (
             health.get("pid") == self.receiver.pid
-            and health.get("runtime_generation") == self.receiver.runtime_generation
+            and (
+                not self.receiver.runtime_generation
+                or health.get("runtime_generation") == self.receiver.runtime_generation
+            )
             and health.get("status") in {"ready", "draining", "unavailable"}
             and (not isinstance(roster, dict) or roster.get("status") not in {"shutdown", "closed"})
             and self.refuse_old() is None

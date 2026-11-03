@@ -70,6 +70,11 @@ After publication, only the matching outgoing fallback route is released; no OS
 port held by a foreign process is reclaimed. Unconfirmed cleanup is reported
 without rolling back or indefinitely waiting behind a healthy incoming monitor.
 Existing truly absent-owner and ordinary POSIX branches are unchanged.
+An unnegotiated predecessor receives no drain mutation before the successor
+serves. If incoming promotion fails, its native PID/birth and authenticated
+already-serving health permit route restoration without inventing a guarded
+undrain receipt. A negotiated peer retains graceful prepublication drain and
+typed rollback; failed drain only schedules native cleanup after the serving gate.
 The new control action binds expected PID/native start/runtime generation and
 exact restored route/port. Under the monitor state lock then existing routing
 lock, the receiver verifies both identities before using its existing undrain

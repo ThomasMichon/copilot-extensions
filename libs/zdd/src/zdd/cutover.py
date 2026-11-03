@@ -112,6 +112,7 @@ class CutoverOrchestrator:
         activate_successor: Callable[[Endpoint], None] | None = None,
         serving_health_check: Callable[[str, int], bool] | None = None,
         retire_failed_predecessor: Callable[[Endpoint], dict[str, Any]] | None = None,
+        drain_predecessor: bool = True,
     ) -> None:
         if expected_old is not None and refuse_old is None:
             raise ValueError("an expected predecessor also requires a publication refusal guard")
@@ -142,6 +143,11 @@ class CutoverOrchestrator:
         self.retire_failed_predecessor = retire_failed_predecessor
         if retire_failed_predecessor is not None and expected_old is None:
             raise ValueError("best-effort retirement requires an exact observed predecessor")
+        if type(drain_predecessor) is not bool or (
+            not drain_predecessor and retire_failed_predecessor is None
+        ):
+            raise ValueError("skipping predecessor drain requires bounded native retirement")
+        self.drain_predecessor = drain_predecessor
         # Uniform lifecycle log context. ``service`` defaults to the config-dir
         # convention (``~/.agent-bridge`` -> ``agent-bridge``); ``node`` is the
         # source machine. Both are captured once for every emitted record.
@@ -196,24 +202,9 @@ class CutoverOrchestrator:
         self, port: int, timeout: float, poll: float,
         check: Callable[[str, int], bool] | None = None,
     ) -> bool:
-        check = check or self.health_check
-        deadline = self.clock() + timeout
-        while self.clock() < deadline:
-            try:
-                if check(self._client_host(), port):
-                    return True
-            except CutoverError:
-                raise
-            except Exception:
-                pass
-            self.sleep(poll)
-        # one last probe at the deadline
-        try:
-            return bool(check(self._client_host(), port))
-        except CutoverError:
-            raise
-        except Exception:
-            return False
+        from .cutover_drain import await_health
+
+        return await_health(self, port, timeout, poll, check)
 
     def _await_exit(self, handle: _Handle, timeout: float = 10.0, poll: float = 0.2) -> bool:
         from .cutover_rollback import _await_exit
@@ -558,7 +549,10 @@ class CutoverOrchestrator:
                 detail={"pid": getattr(handle, "pid", None)},
             )
 
-            if self.drain_before_publish and old is not None and old.port != new_port:
+            if (
+                self.drain_before_publish and self.drain_predecessor
+                and old is not None and old.port != new_port
+            ):
                 phase = "draining"
                 write_breadcrumb(
                     state="draining", old=old_dict,
@@ -721,7 +715,7 @@ class CutoverOrchestrator:
                     old_client = make_client(old.base_url)
                 # About to open the old daemon's drain gate -- record it first
                 # so an abort during the (possibly long) drain is traceable.
-                if not self.drain_before_publish:
+                if not self.drain_before_publish and self.drain_predecessor:
                     phase = "draining"
                     write_breadcrumb(
                         state=phase, old=old_dict,
