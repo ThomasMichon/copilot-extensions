@@ -14,11 +14,19 @@ PRIMARY = previous.CURRENT + "http52-owner-membership.json"
 FAMILY = "http52-owner-membership-asgi-v1"
 CAPTURE = "tools/capture_bridge_http52.py"
 REGISTRY = common.REGISTRY
-SCOPE = retained.SCOPE
+SCOPE = (
+    retained.SCOPE + "; membership transcripts use a virtual reader clock; "
+    "separate deadline-expiry and actual SQLite VM-cutoff probes; "
+    "not wall-clock read qualification"
+)
 POLICY = common.POLICY
 AFFECTED = retained.AFFECTED
 EXTRA_PATHS = (*retained.EXTRA_PATHS, INPUT, CAPTURE, "tools/bridge_http52_evidence.py")
-PROBES = retained.PROBES
+PROBES = {
+    **retained.PROBES,
+    "test_private_deadline_exhaustion_is_a_typed_gap_without_wallclock_sleep": 1,
+    "test_unknown_owner_large_history_has_actual_private_vm_cutoff": 1,
+}
 TEST = retained.TEST
 CAPABILITY_VERSIONS = {**retained.CAPABILITY_VERSIONS, "owner_membership": 52}
 SPEC = common.EvidenceSpec(

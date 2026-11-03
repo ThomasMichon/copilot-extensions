@@ -20,6 +20,17 @@ def test_installed_source_slot_advertises_exact_identity(tmp_path: Path, suffix:
     ) == selected
 
 
+@pytest.mark.parametrize("suffix", ["", ".profile." + "0" * 15 + "3" + ".repair." + "a" * 32])
+def test_nested_source_environment_advertises_physical_generation(
+    tmp_path: Path, suffix: str,
+) -> None:
+    selected = SOURCE + suffix
+    prefix = tmp_path / "versions" / selected / ".venv"
+    assert effective_runtime_version(
+        "1.2.3.dev4", prefix=prefix, module_path=prefix / "lib" / "source_build.py",
+    ) == selected
+
+
 @pytest.mark.parametrize("suffix", [".repair.short", ".repair." + "g" * 32])
 def test_malformed_repair_slot_does_not_claim_source_identity(tmp_path: Path, suffix: str) -> None:
     prefix = tmp_path / "versions" / (SOURCE + suffix)

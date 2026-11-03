@@ -13,11 +13,17 @@ retained: generation-aware clients can recognize the endpoint's introduction,
 while passive callers still require its exact named capability. Minimum HTTP
 support and every earlier feature's introduction floor remain unchanged.
 
-The current capture owner is `tools/capture_bridge_http52.py`, using the same
-43 actual parser, authenticated ASGI, canonical producer, transport and payload
-cases with a new independent HTTP-52 vector. Retained test-function names do not
+The current capture owner is `tools/capture_bridge_http52.py`, using 45 actual
+parser, authenticated ASGI, canonical producer, transport and payload cases
+with a new independent HTTP-52 vector. Retained test-function names do not
 select capture identity: the owning generation, source-bound request, protocol
 assertion, vector and evidence family all require 52.
+
+Membership transcript cases use a virtual private-reader clock so host scheduling
+does not replace their expected snapshots with legitimate budget gaps. Separate
+probes exercise deadline expiry and actual SQLite VM exhaustion. The production
+50-ms and 100,000-step limits are unchanged; these captures are not wall-clock
+read qualification.
 
 Commit source and the generation declaration, run the new owner's `--prepare`,
 commit and publish that checkpoint, then run `--write`, no-write verification
@@ -81,6 +87,9 @@ Their Git blob identities and SHA-256 values must match the unchanged HTTP-48
 primary execution closure. The directory disables text conversion to retain
 those bytes on every checkout.
 
+`source-blobs/http51/` likewise retains exact captured daemon-lease and metadata
+preparation source bytes, against the unchanged HTTP-51 closure.
+
 Committing these files makes the original objects available through ordinary
 canonical history. The existing validator can then prove the frozen closure
 without a private object store, deleted PR branch or missing capture commit.
@@ -88,6 +97,27 @@ Neither the historical packets, inputs and provenance nor the validator's
 missing-object and content-hash checks are relaxed. Validate in a fresh
 canonical-history-only clone, not only a long-lived source checkout that may
 still contain orphaned PR objects.
+
+An older capture's source classifications must not come from today's registry.
+When its source commit may disappear after a squash, explicitly retain its
+original registry and provenance inputs:
+
+```text
+python tools/prepare_bridge_contract_evidence.py --retain-metadata <capture-source-commit>
+```
+
+The inert `source-blobs/capture-metadata/` artifacts preserve the original commit
+and tree-object proof plus exact metadata blobs. The reader verifies each typed
+Git object identity from the immutable packet's captured commit through the
+original paths before loading that registry. It never imports objects, fetches,
+rewrites a packet or substitutes a self-declared metadata digest. Corrupt or
+incomplete retained metadata remains a validation error. This preserves the
+capture-time semantic decisions when a later generation changes a source's
+classification; it does not relax current source freshness or historical links.
+CI preparation also accepts this verified local metadata when its exact capture
+commit is unavailable, rather than requiring an orphaned PR object to be fetched.
+The subsequent contract guard still verifies the complete frozen execution
+closure, fixture hashes and source bindings.
 
 ## Updating a contract
 

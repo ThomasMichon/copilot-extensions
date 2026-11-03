@@ -49,6 +49,15 @@ retains the instance admission and singleton lease until upstream/session,
 listener and background-task teardown settles, including repeated caller
 cancellation and partial control-listener startup failure.
 
+Installed ordinary serving rechecks its selected generation under the existing
+MCP cutover transaction before changing the fixed handle and again before
+publishing its control route. That transaction ends after listener publication,
+not after the resident lifetime or drain. Passive candidate startup remains
+independent so the cutover owner can health-check it while holding that same
+transaction. Native data-listener attribution uses Linux `SO_PEERCRED`, macOS
+`SOL_LOCAL`/`LOCAL_PEERPID`, or the Windows TCP owner table; a UID alone is not
+accepted as process identity.
+
 ## Standalone quick start
 
 agent-mcp is the **standalone** MCP-wrapper path: it is launched directly from a

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 from pathlib import Path
+import sys
 
 INSTALL_DIR_ENV = "AGENT_BRIDGE_INSTALL_DIR"
 CONFIG_DIR_ENV = "AGENT_BRIDGE_CONFIG_DIR"
@@ -30,6 +31,17 @@ def install_dir() -> Path:
     override = os.environ.get(INSTALL_DIR_ENV)
     if override:
         return Path(override).expanduser()
+
+    from agent_procutil._daemon_instance_identity import runtime_slot_paths
+    from .source_build import is_source_build_version
+
+    prefix = Path(sys.prefix).resolve()
+    layout = runtime_slot_paths(prefix)
+    if (
+        layout is not None and is_source_build_version(layout[0])
+        and Path(__file__).resolve().is_relative_to(prefix)
+    ):
+        return Path(layout[2])
 
     config_override = os.environ.get(CONFIG_DIR_ENV)
     if config_override:

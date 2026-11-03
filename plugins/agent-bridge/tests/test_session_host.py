@@ -617,6 +617,53 @@ async def test_graceful_detach_keeps_busy_child():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("recoverable", [False, True])
+async def test_frontend_stop_preserves_idle_host_only_for_recovery(
+    tmp_path, monkeypatch, recoverable,
+):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    import agent_bridge.session_manager as sm
+    from agent_bridge.db import Database
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.transport import SpawnTarget
+
+    monkeypatch.setattr(sm, "_cleanup_worktree", AsyncMock())
+    child = _FakeChild()
+    host, port = await _serve_reap(child, .1)
+    db = Database(tmp_path / "bridge.db")
+    manager = sm.SessionManager(db)
+    db.create_session("s1", "s1", None, str(tmp_path), "local", "idle", 1)
+    control = await SessionHostClient.connect(port=port)
+    await control.attach(0)
+    await control.send_status(True)
+    session = sm.Session("s1", "s1", SpawnTarget(type="local", cwd=str(tmp_path)))
+    session.status = SessionStatus.IDLE
+    session.client = SimpleNamespace(
+        session_host_client=control, is_running=True, has_active_background_tasks=False,
+        shutdown=AsyncMock(side_effect=control.close),
+    )
+    manager._sessions["s1"] = session
+    try:
+        await manager.stop_session(
+            "s1", cancel_turn=not recoverable, allow_background_recovery=recoverable,
+        )
+        await asyncio.sleep(.2)
+        assert child.killed is not recoverable
+        if recoverable:
+            successor = await SessionHostClient.connect(port=port)
+            try:
+                assert (await successor.attach(0)).child_pid == child.pid
+            finally:
+                await successor.close()
+    finally:
+        await control.close()
+        await host.close()
+        db.close()
+
+
+@pytest.mark.asyncio
 async def test_unexpected_drop_reaps_idle_child_after_grace():
     """A bare EOF (no DETACH) with last-known reapable reaps after the grace."""
     child = _FakeChild()
@@ -2621,7 +2668,10 @@ async def test_start_session_host_mode_end_to_end(tmp_path, monkeypatch, hosted_
 
 
 @pytest.mark.asyncio
-async def test_reattach_session_hosts_on_restart(tmp_path, monkeypatch, hosted_workspace):
+@pytest.mark.parametrize("late_identity", [False, True])
+async def test_reattach_session_hosts_on_restart(
+    tmp_path, monkeypatch, hosted_workspace, late_identity,
+):
     import os
     import sys
 
@@ -2666,8 +2716,20 @@ async def test_reattach_session_hosts_on_restart(tmp_path, monkeypatch, hosted_w
 
         # --- frontend generation 2: reattach to the surviving host ---
         db2 = Database(dbpath)
+        if late_identity:
+            db2.update_session_acp_id(sid, None)
         mgr2 = SessionManager(db2, session_host_state_dir=statedir)
         assert mgr2.get_session(sid) is not None  # rehydrated (STOPPED)
+        if late_identity:
+            waiting = mgr2.get_session(sid)
+            waiting.subscriber_count = 1
+            event_log = waiting.event_log
+            db2.update_session_acp_id(sid, "host-mode-sess")
+            assert await asyncio.wait_for(mgr2.reattach_session_hosts(), timeout=30) == 0
+            assert osutil_pid_alive(host_pid) and osutil_pid_alive(child_pid)
+            assert mgr2.get_session(sid) is waiting and waiting.event_log is event_log
+            assert waiting.acp_session_id is None
+            waiting.subscriber_count = 0
 
         n = await asyncio.wait_for(mgr2.reattach_session_hosts(), timeout=30)
         assert n == 1

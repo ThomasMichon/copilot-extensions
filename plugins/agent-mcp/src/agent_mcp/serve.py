@@ -39,6 +39,7 @@ import secrets
 import time
 from pathlib import Path
 
+from . import source_serving
 from .client import (
     OneShotSession,
     UpstreamError,
@@ -354,7 +355,7 @@ class Server:
         # future cutover attempt can authenticate to via the token sidecar
         # (see ``_start_control_listener``).
         self._control_token = control_token or secrets.token_hex(16)
-        self._version = version
+        self._runtime_root, self._version = source_serving.installed_generation(version)
 
     @property
     def attached(self) -> int:
@@ -634,51 +635,46 @@ class Server:
         runtime_root=lambda self: self.socket_path.parent,
     )
     async def serve_forever(self) -> None:
+        if not source_serving.generation_selected(self):
+            return
         # Take the single-instance lease before binding so a losing host never
         # touches the winner's socket handle. Standing down is a clean no-op exit.
         if not self._acquire_lease():
             return
         try:
-            self.socket_path.parent.mkdir(parents=True, exist_ok=True)
-            if _HAS_AF_UNIX:
-                # Clear a stale socket from a previous run (safe: we hold the
-                # lease). Path.exists() follows symlinks and returns False for
-                # a BROKEN one -- if this socket path is the fixed cutover
-                # handle and the promoted daemon it pointed at already exited
-                # (idle-evicted, crashed), the symlink itself still exists on
-                # disk but dangles; is_symlink() catches that case too, so a
-                # fresh bind here always starts from a clean path.
-                if self.socket_path.exists() or self.socket_path.is_symlink():
-                    self.socket_path.unlink()
-                self._server = await asyncio.start_unix_server(
-                    self._handle, path=str(self.socket_path))
-                log.info("serving on unix:%s", self.socket_path)
-            else:
-                # No AF_UNIX (Windows): bind loopback TCP and advertise the port +
-                # a fresh auth token in the endpoint sidecar for port-discovery.
-                self._token = secrets.token_hex(16)
-                self._server = await asyncio.start_server(
-                    self._handle, host=_TCP_HOST, port=0)
-                port = self._server.sockets[0].getsockname()[1]
-                self._token_port = port
-                self._write_endpoint(port, self._token)
-                log.info("serving on tcp:%s:%d (handle %s)", _TCP_HOST, port,
-                         self.socket_path)
-            # Once the data-plane server above is bound, EVERYTHING from here
-            # (the control listener, the sweep loop, the wait) is wrapped in
-            # one try/finally that always tears down every resource this
-            # daemon acquired -- including a failure raised by
-            # _start_control_listener() itself, before the sweep loop or the
-            # stop-wait ever start. `_stop_control_listener()` is a safe no-op
-            # if the control listener never finished binding.
-            sweeper = late_lease = None
-            try:
-                await self._start_control_listener()
-                sweeper = asyncio.create_task(self._sweep_loop())
-                late_lease = asyncio.create_task(self._late_lease_loop())
-                await self._stop.wait()
-            finally:
-                await _join_cleanup(asyncio.create_task(self._close(sweeper, late_lease)))
+            with contextlib.ExitStack() as startup:
+                if not startup.enter_context(source_serving.startup_transaction(self)):
+                    return
+                self.socket_path.parent.mkdir(parents=True, exist_ok=True)
+                if _HAS_AF_UNIX:
+                    # The lease and cutover transaction exclude other fixed-handle
+                    # writers, including a committed passive successor.
+                    if self.socket_path.exists() or self.socket_path.is_symlink():
+                        self.socket_path.unlink()
+                    self._server = await asyncio.start_unix_server(
+                        self._handle, path=str(self.socket_path))
+                    log.info("serving on unix:%s", self.socket_path)
+                else:
+                    self._token = secrets.token_hex(16)
+                    self._server = await asyncio.start_server(
+                        self._handle, host=_TCP_HOST, port=0)
+                    port = self._server.sockets[0].getsockname()[1]
+                    self._token_port = port
+                    self._write_endpoint(port, self._token)
+                    log.info("serving on tcp:%s:%d (handle %s)", _TCP_HOST, port,
+                             self.socket_path)
+                sweeper = late_lease = None
+                try:
+                    await self._start_control_listener()
+                    # Only listener admission/publication is serialized, not the
+                    # resident lifetime, readiness callbacks or natural drain.
+                    startup.close()
+                    sweeper = asyncio.create_task(self._sweep_loop())
+                    late_lease = asyncio.create_task(self._late_lease_loop())
+                    await self._stop.wait()
+                finally:
+                    startup.close()
+                    await _join_cleanup(asyncio.create_task(self._close(sweeper, late_lease)))
         finally:
             self._release_lease()
 
@@ -745,12 +741,18 @@ class Server:
             os.chmod(tmp_token_path, 0o600)
         os.replace(tmp_token_path, token_path)
         if not self._passive:
+            if not source_serving.generation_selected(self):
+                from .cutover import ControlError
+
+                raise ControlError("MCP startup slot is not the selected generation")
             try:
-                routing.publish_active(
-                    self._config_dir(), bind=_TCP_HOST, port=control_port,
-                    pid=os.getpid(), version=self._version, demote_existing=True,
-                )
-            except Exception:
+                source_serving.publish_control_route(self, bind=_TCP_HOST, port=control_port)
+            except Exception as error:
+                if (
+                    self._runtime_root is not None
+                    and isinstance(error, routing.ActivePublicationRefused)
+                ):
+                    raise
                 log.warning(
                     "serve: failed to publish control endpoint to the "
                     "routing table; a future `agent-mcp cutover` may not "
@@ -818,7 +820,11 @@ class Server:
         op = req.get("op")
         if op in ("ping", "health"):
             return {"ok": True, "pong": True, "draining": self._draining,
-                    "attached": self._attached, "sessions": self.pool.size}
+                    "attached": self._attached, "sessions": self.pool.size,
+                    "pid": os.getpid(), "version": self._version,
+                    "data_socket": str(self.socket_path),
+                    "ready": self._server is not None and self._server.is_serving()
+                    and not self._closing and not self._draining}
         if op == "drain":
             self._draining = True
             # Only attached (long-lived multiplexer) sessions are "in-flight,
@@ -886,6 +892,9 @@ class Server:
     def stop(self) -> None:
         self._stop.set()
 
+    def _ready_replacement(self) -> bool:
+        return source_serving.ready_replacement(self)
+
     async def _sweep_loop(self) -> None:
         # Check at least twice per idle window (capped at the 30s default) so a
         # small idle_timeout evicts promptly and a large one stays cheap.
@@ -895,6 +904,11 @@ class Server:
         try:
             while True:
                 await asyncio.sleep(interval)
+                if await source_serving.inspect_replacement(self):
+                    log.info("serve: ready replacement published; draining displaced owner")
+                    self._draining = True
+                    self._stop.set()
+                    return
                 await self.pool.sweep_idle()
                 self._maybe_idle_evict()
         except asyncio.CancelledError:
@@ -919,7 +933,8 @@ class Server:
 
 
 def flip_data_handle(new_data_socket_path: str | Path, *,
-                     legacy_path: str | Path | None = None) -> None:
+                     legacy_path: str | Path | None = None,
+                     expected_state: tuple | None = None) -> None:
     """Atomically repoint the **fixed, client-facing** data handle at a newly
     promoted generation's real socket -- the actual "cutover" clients feel.
 
@@ -948,12 +963,25 @@ def flip_data_handle(new_data_socket_path: str | Path, *,
     fixed = Path(legacy_path) if legacy_path is not None else default_socket_path()
     new_path = Path(new_data_socket_path)
     fixed.parent.mkdir(parents=True, exist_ok=True)
+
+    def check_destination():
+        if expected_state is not None:
+            from .cutover import ControlError, source_handle_state
+
+            actual = source_handle_state(fixed)
+            if actual != expected_state and actual[0] != "absent":
+                raise ControlError("MCP data handle changed before source publication")
+
     if _HAS_AF_UNIX:
         tmp_link = fixed.with_name(fixed.name + f".tmp-{os.getpid()}")
         with contextlib.suppress(OSError):
             tmp_link.unlink()
         os.symlink(new_path, tmp_link)
-        os.replace(tmp_link, fixed)
+        try:
+            check_destination()
+            os.replace(tmp_link, fixed)
+        finally:
+            tmp_link.unlink(missing_ok=True)
         return
     new_ep = _endpoint_path(new_path)
     fixed_ep = _endpoint_path(fixed)
@@ -962,4 +990,8 @@ def flip_data_handle(new_data_socket_path: str | Path, *,
     tmp_ep.write_text(data, encoding="utf-8")
     with contextlib.suppress(OSError):
         os.chmod(tmp_ep, 0o600)
-    os.replace(tmp_ep, fixed_ep)
+    try:
+        check_destination()
+        os.replace(tmp_ep, fixed_ep)
+    finally:
+        tmp_ep.unlink(missing_ok=True)

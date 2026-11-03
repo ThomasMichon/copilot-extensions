@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import sys
 import threading
 import time
 from pathlib import Path
@@ -15,8 +14,8 @@ from fastapi import FastAPI
 
 from . import telemetry
 from .app_agent_roster import start_agent_roster_cache, stop_agent_roster_cache
-from .app_lifecycle import lifespan
-from .app_supersession import retire_previous_daemon
+from .app_lifecycle import lifespan, start_credential_relay as _start_credential_relay
+from .app_supersession import release_own_host_claims, retire_previous_daemon, source_self_retire_ready
 from .app_worktree_cache import start_worktree_cache, stop_worktree_cache
 from .config import load_config, load_or_create_auth_token
 from .db import Database
@@ -203,6 +202,7 @@ async def _retire_previous_daemon(
         recover_owned_cold=_recover_owned_cold, run_in_daemon_thread=_run_in_daemon_thread,
         drain_poll=_SUPERSESSION_DRAIN_POLL_S, owns_generation=_owns_generation,
         same_daemon=_same_daemon,
+        self_retire_only=getattr(app.state, "independent_runtime_start", False),
     )
 
 
@@ -260,69 +260,6 @@ async def _recover_owned_cold(
         return 0
 
 
-async def _start_credential_relay(app: FastAPI, *, start_listener: bool = True):
-    """Register sources and optionally start the TCP relay; return it or None.
-
-    Extracted so both lifespan startup and the post-cutover relay-adopt endpoint
-    can (re)bind the shared relay port (9857). Idempotent: if a relay is already
-    running on this app it is returned unchanged.
-    A disabled listener still registers the process-local HTTP source registry.
-    """
-    existing = getattr(app.state, "credential_relay", None)
-    if start_listener and existing is not None and getattr(existing, "running", False):
-        return existing
-    relay_server = None
-    try:
-        from credential_relay import RelayBuilder
-
-        from .agent_registry import register_credential_sources
-        from .http_provider_sources import register_http_credential_sources
-
-        builder = RelayBuilder()
-        register_sources = register_credential_sources if start_listener else register_http_credential_sources
-        await _run_in_daemon_thread(register_sources, builder)  # may retry
-        manager = getattr(app.state, "session_manager", None)
-        if manager is not None and manager._remote_credential_policy is not None:
-            manager._remote_credential_policy.register_sources(builder.http_sources)
-        if not start_listener:
-            return None
-        if builder.empty:
-            log.debug("No credential-relay sources registered -- relay disabled")
-            return None
-        relay_server = builder.build()
-        await relay_server.start()
-        app.state.credential_relay = relay_server
-        from .relay_state import set_live_relay_port
-        set_live_relay_port(relay_server.port)
-        log.info(
-            "Credential relay started on port %d (%d sources)",
-            relay_server.port, len(builder.sources),
-        )
-        return relay_server
-    except ImportError:
-        log.debug("credential-relay lib not installed -- credential relay disabled")
-    except OSError as exc:
-        # #123: a relay bind failure breaks ALL CodeSpace git/ADO auth over the
-        # SSH tunnel, so surface it LOUDLY (error, not a quiet warning) with a
-        # recovery hint. The single-instance guard now refuses duplicate daemons
-        # before they bind, so reaching here is a genuine, unexpected port
-        # conflict (a stray non-daemon occupant) worth an operator's attention.
-        port = getattr(relay_server, "port", None) or "9857"
-        log.error(
-            "Credential relay FAILED to bind (port %s): %s -- CodeSpace git/ADO "
-            "auth over the tunnel will NOT work until this is resolved. Check "
-            "for a stray process holding the relay port and restart the daemon "
-            "(agent-bridge service restart).",
-            port, exc,
-        )
-        print(
-            f"[agent-bridge] ERROR: credential relay failed to bind on port "
-            f"{port}: {exc} -- CodeSpace auth will be broken until resolved.",
-            file=sys.stderr,
-        )
-    return None
-
-
 @contextlib.asynccontextmanager
 async def _lifespan(app: FastAPI):
     """Application lifespan -- initialize DB, topology, and session manager."""
@@ -331,12 +268,14 @@ async def _lifespan(app: FastAPI):
     cfg = app.state.config
 
     lifecycle_start_task = None
+    independent_source = getattr(app.state, "independent_runtime_start", False)
+    source_published = asyncio.Event() if independent_source else None
     # Record the *actually-running* daemon version so the launch-path reconciler
     # can detect a daemon lagging its installed plugin even when the on-disk
     # deploy manifest already matches (dotfiles #533). Only the **primary** daemon
     # writes it: the elevated sub-daemon (enable_credential_relay=False) shares the
     # runtime dir and would otherwise clobber the marker with a non-primary pid.
-    if getattr(cfg, "enable_credential_relay", True):
+    if getattr(cfg, "enable_credential_relay", True) and not independent_source:
         from .runtime_version import write_running_version
 
         write_running_version()
@@ -346,7 +285,11 @@ async def _lifespan(app: FastAPI):
     db.start_writer()
     app.state.db = db
 
-    mgr = session_manager_from_config(db, cfg)
+    if independent_source:
+        (db_path.parent / "hosts").mkdir(parents=True, exist_ok=True)
+        mgr = session_manager_from_config(db, cfg, read_only_rehydrate=True)
+    else:
+        mgr = session_manager_from_config(db, cfg)
     app.state.session_manager = mgr
     # Record/stage this process's real generation_id -- see
     # runtime_version.py's own module docstring for the full rationale (why
@@ -358,7 +301,7 @@ async def _lifespan(app: FastAPI):
     from .runtime_version import record_manager_generation_id, stage_manager_generation_id
     if is_subdaemon():
         pass  # shares the primary's runtime dir, never promoted -- skip.
-    elif getattr(app.state, "passive", False):
+    elif getattr(app.state, "passive", False) or independent_source:
         stage_manager_generation_id(mgr)
     else:
         record_manager_generation_id(mgr)
@@ -382,7 +325,7 @@ async def _lifespan(app: FastAPI):
     # orchestrator owns the health-gated routing flip.
     published_endpoint = None
     previous_endpoint = None
-    if getattr(app.state, "publish_on_ready", False):
+    if getattr(app.state, "publish_on_ready", False) and not independent_source:
         import os as _os
 
         from . import __version__ as _ver
@@ -410,7 +353,7 @@ async def _lifespan(app: FastAPI):
                 "Cannot start agent-bridge without publishing its active endpoint"
             ) from exc
 
-    app.state.cold_recovery_ready = previous_endpoint is None
+    app.state.cold_recovery_ready = previous_endpoint is None and not independent_source
     app.state.cold_predecessor = None
     # Reattach to any Session Hosts that survived a prior frontend restart
     # (goal 3), instead of leaving those sessions STOPPED. Best-effort and, per
@@ -426,8 +369,10 @@ async def _lifespan(app: FastAPI):
         if getattr(app.state, "passive", False):
             return  # passive: ATTACHing would disconnect the old generation
         try:
+            if source_published is not None:
+                await source_published.wait()
             n = await mgr.reattach_session_hosts(
-                recover_cold=previous_endpoint is None,
+                recover_cold=app.state.cold_recovery_ready,
             )
             if n:
                 logging.getLogger("agent-bridge").info(
@@ -472,11 +417,11 @@ async def _lifespan(app: FastAPI):
                 await start_agent_roster_cache(app, resolver, cfg)
                 start_worktree_cache(app, resolver, cfg, governance)
 
-                if not getattr(cfg, "enable_credential_relay", True):
+                if independent_source or not getattr(cfg, "enable_credential_relay", True):
                     await _start_credential_relay(app, start_listener=False)
                     log.info(
-                        "TCP credential relay disabled for this daemon "
-                        "(enable_credential_relay=False) -- reusing the primary daemon's relay"
+                        "TCP credential relay deferred or disabled for this daemon; "
+                        "HTTP credential sources remain available"
                     )
                 else:
                     await _ensure_relay()
@@ -548,6 +493,16 @@ async def _lifespan(app: FastAPI):
 
     app.state.adopt_relay = _adopt_relay
 
+    def _session_maintenance_ready() -> bool:
+        return (
+            (previous_retire_task is None or previous_retire_task.done())
+            and (
+                not independent_source
+                or (lifecycle_start_task is not None and lifecycle_start_task.done())
+            )
+            and app.state.cold_recovery_ready
+        )
+
     # Periodic GC sweep -- prune aged terminal/disconnected sessions and
     # compact the DB while the daemon runs (startup GC already ran in the
     # SessionManager constructor). 0 disables.
@@ -570,6 +525,8 @@ async def _lifespan(app: FastAPI):
                         "pre-mutation:gc",
                         loop_name="periodic GC",
                     ):
+                        continue
+                    if not _session_maintenance_ready():
                         continue
                     await asyncio.to_thread(mgr.gc, reason="sweep")
                 except Exception:
@@ -596,6 +553,18 @@ async def _lifespan(app: FastAPI):
                     continue
                 if await _governance_backoff(
                     governance,
+                    "pre-mutation:recover-disconnected-hosts",
+                    loop_name="heartbeat loop",
+                ):
+                    continue
+                await _recover_owned_cold(app, published_endpoint, automatic=True)
+            except Exception:
+                log.warning("Owned cold recovery failed", exc_info=True)
+            if not _session_maintenance_ready():
+                continue
+            try:
+                if await _governance_backoff(
+                    governance,
                     "pre-mutation:heartbeat",
                     loop_name="heartbeat loop",
                 ):
@@ -615,11 +584,7 @@ async def _lifespan(app: FastAPI):
                     loop_name="heartbeat loop",
                 ):
                     continue
-                await _recover_owned_cold(
-                    app, published_endpoint, automatic=True,
-                )
-                if previous_retire_task is None or previous_retire_task.done():
-                    await mgr.recover_disconnected_hosts()
+                await mgr.recover_disconnected_hosts()
             except Exception:
                 log.warning("Liveness-driven reattach failed", exc_info=True)
             # Reconcile each host-backed session's reapable state to its
@@ -757,6 +722,8 @@ async def _lifespan(app: FastAPI):
                         loop_name="idle reaper",
                     ):
                         continue
+                    if not _session_maintenance_ready():
+                        continue
                     n = await mgr.sweep_idle_sessions()
                     if n:
                         log.info(
@@ -800,6 +767,8 @@ async def _lifespan(app: FastAPI):
                     loop_name="live-session reaper",
                 ):
                     continue
+                if not _session_maintenance_ready():
+                    continue
                 n = await asyncio.to_thread(
                     db.reap_stale_live_sessions, now=time.time()
                 )
@@ -815,7 +784,13 @@ async def _lifespan(app: FastAPI):
 
     # The route was published before slow startup work. Record the durable START
     # event only after uvicorn confirms that it is accepting connections.
-    if getattr(app.state, "publish_on_ready", False):
+    if independent_source:
+        from .source_start import complete_source_start
+
+        lifecycle_start_task = asyncio.create_task(
+            complete_source_start(app, source_published, reattach_task),
+        )
+    elif getattr(app.state, "publish_on_ready", False):
         async def _record_start_when_listening() -> None:
             server = getattr(app.state, "uvicorn_server", None)
             # Lifespan completes before uvicorn marks the server started, so
@@ -912,6 +887,11 @@ async def _lifespan(app: FastAPI):
                         retire_check, config_dir(), my_pid, my_gen,
                         lambda: _count_active_sessions(mgr, db),
                     )
+                    if superseded or getattr(app.state, "source_retire_drain", None):
+                        handoff_ready = await source_self_retire_ready(app, my_gen)
+                        if handoff_ready is not None:
+                            ready = handoff_ready
+                            why = "Ready Source successor; outgoing host-preserving drain"
                     status["superseded"] = superseded
                 except Exception:
                     status.update(superseded=False, confirms=0)
@@ -1060,6 +1040,8 @@ async def _lifespan(app: FastAPI):
                     "Failed to stop session %s on shutdown", session.session_id,
                     exc_info=True,
                 )
+
+    release_own_host_claims(mgr)
 
     # Shutdown: disconnect SSH master connections (after sessions are stopped)
     await shutdown_ssh()

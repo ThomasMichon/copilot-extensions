@@ -2510,12 +2510,15 @@ async def test_startup_reattach_resumes_session_stopped_while_starting(
     tmp_db, tmp_path, monkeypatch,
 ) -> None:
     """A surviving Session Host that was STARTING at daemon restart is re-driven."""
+    tmp_db.create_session(
+        "session-1", "agent", None, str(tmp_path), "local", "starting", 1,
+        acp_session_id="acp-1",
+    )
     manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path))
-    session = Session("session-1", "agent", SpawnTarget(type="local", cwd=str(tmp_path)))
-    session.status = SessionStatus.STOPPED
-    session.acp_session_id = "acp-1"
-    session.restart_status = SessionStatus.STARTING.value
-    manager._sessions[session.session_id] = session
+    session = manager._sessions["session-1"]
+    assert session.status is SessionStatus.STOPPED
+    assert session.restart_status == SessionStatus.STARTING.value
+    assert tmp_db.get_session("session-1")["status"] == "stopped"
     rec = SimpleNamespace(
         session_id=session.session_id,
         protocol_version=1,
