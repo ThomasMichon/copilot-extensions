@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve the captured caller directory for the post-bootstrap suite update; qualify isolated constructor and leased update-worker fixtures.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

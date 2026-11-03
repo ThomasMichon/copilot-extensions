@@ -342,7 +342,6 @@ def test_json_and_passthrough_share_exact_scoped_command_and_environment(
     monkeypatch.setattr(ec, "engine_base_command", lambda: pytest.fail("no stale engine handle"))
     monkeypatch.setattr(ec, "installed_engine_command", lambda env: command)
     monkeypatch.setattr("worktree_manager.update_driver_cli.handoff_environment", lambda args: {})
-    monkeypatch.setattr("worktree_manager.update_driver_cli.handoff_launch_options", lambda env, handoff: {"env": env})
 
     def execute(argv: list[str], **kwargs: object) -> SimpleNamespace:
         assert argv[:2] == command
