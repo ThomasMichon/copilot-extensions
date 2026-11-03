@@ -75,11 +75,10 @@ def _file(record, max_bytes):
         raise WheelError("invalid delivery file identity")
 
 
-def _materials(profile, materials, max_files, max_bytes, deadline):
+def _material_files(materials, max_files, max_bytes, deadline):
     if not isinstance(materials, dict) or len(materials) + 3 > max_files:
         raise WheelError("invalid delivery material count")
-    wheels = {item["sha256"] for item in profile.record()["wheels"]}
-    names = set()
+    names, files = set(), {}
     for name, item in materials.items():
         _check_deadline(deadline)
         if (
@@ -93,10 +92,20 @@ def _materials(profile, materials, max_files, max_bytes, deadline):
         affected = item["wheels"]
         if (
             item["kind"] not in ("source", "notice") or not isinstance(affected, list)
-            or not affected or any(not isinstance(value, str) for value in affected)
-            or len(affected) != len(set(affected)) or not set(affected) <= wheels
+            or not affected or any(
+                not isinstance(value, str) or not _HASH.fullmatch(value) for value in affected
+            ) or len(affected) != len(set(affected))
         ):
             raise WheelError("material must bind selected wheel digests and a source/notice kind")
+        files[name] = {key: item[key] for key in ("sha256", "size")}
+    return files
+
+
+def _materials(profile, materials, max_files, max_bytes, deadline):
+    _material_files(materials, max_files, max_bytes, deadline)
+    wheels = {item["sha256"] for item in profile.record()["wheels"]}
+    if any(not set(item["wheels"]) <= wheels for item in materials.values()):
+        raise WheelError("material must bind selected wheel digests and a source/notice kind")
 
 
 def _manifest(profile, manifest, max_files, max_bytes, deadline):
