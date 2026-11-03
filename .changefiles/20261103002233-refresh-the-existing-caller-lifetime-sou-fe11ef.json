@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh the existing caller-lifetime source archive for the optional native-write observer",
+  "changes": [
+    {
+      "plugin": "wsl-setup",
+      "type": "patch"
+    }
+  ]
+}
