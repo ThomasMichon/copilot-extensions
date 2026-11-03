@@ -705,11 +705,13 @@ def validate_manifest(manifest: dict) -> None:
         raise PromotionArtifactError(f"invalid manifest provenance: {exc}") from exc
 
 
-def validate_source_binding(manifest: dict, root: Path) -> None:
+def validate_source_binding(manifest: dict, root: Path, *, core_hash_workers: int = 1) -> None:
     """Hash the trusted-discovered closure in candidate data, never import its code."""
     import promote_release as promotion
     from build_toolchain_lock import ArtifactBuildError
 
+    if type(core_hash_workers) is not int or not 1 <= core_hash_workers <= 4:
+        raise PromotionArtifactError("core source binding requires between one and four hash workers")
     builder = promotion._load_module(
         Path(__file__).parent / "build_python_artifacts.py", "trusted_artifact_sources",
     )
@@ -770,7 +772,10 @@ def validate_source_binding(manifest: dict, root: Path) -> None:
                 raw_version=project["version"], wheel_version=info["version"],
                 label=wheel["source"],
             )
-        actual = payload_hash(builder, closure) if core else builder.compute_payload_hash([*directories, *resources])
+        actual = (
+            payload_hash(builder, closure, workers=core_hash_workers)
+            if core else builder.compute_payload_hash([*directories, *resources])
+        )
         if manifest["payload_hash"] != actual:
             raise PromotionArtifactError(
                 f"{label}@{manifest['version']}: manifest payload hash differs "

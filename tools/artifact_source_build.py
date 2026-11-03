@@ -18,6 +18,24 @@ class PromotionArtifactError(RuntimeError):
     pass
 
 
+def payload_hash_directories(directories, *, root, directory_hash, hash_fields, workers=1):
+    """Hash the same directory identities with bounded, fully settled workers."""
+    if type(workers) is not int or not 1 <= workers <= 4:
+        raise ValueError("payload hashing requires between one and four workers")
+
+    def item(directory):
+        return directory.resolve().relative_to(root).as_posix(), directory_hash(directory)
+
+    if workers == 1 or len(directories) < 2:
+        pairs = [item(directory) for directory in directories]
+    else:
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=min(workers, len(directories))) as executor:
+            pairs = list(executor.map(item, directories))
+    return "sha256:" + hash_fields(*(field for pair in sorted(pairs) for field in pair))
+
+
 def read_build_system_requires(
     source_dir: Path, *, error_type: type[Exception] = PromotionArtifactError,
 ) -> list[str]:

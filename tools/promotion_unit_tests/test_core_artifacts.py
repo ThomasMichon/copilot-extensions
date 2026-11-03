@@ -100,6 +100,29 @@ def test_core_closure_retains_foreign_target_edges_and_hashes_its_selection(
     )
 
 
+def test_core_parallel_hash_preserves_serial_identity_without_actors(tmp_path, monkeypatch):
+    _source(tmp_path)
+    monkeypatch.setattr(builder, "REPO", tmp_path)
+    closure = core.source_closure(tmp_path, builder)
+    serial = core.payload_hash(builder, closure)
+
+    class InlineExecutor:
+        def __init__(self, *, max_workers):
+            self.max_workers = max_workers
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def map(self, function, items):
+            return map(function, items)
+
+    monkeypatch.setattr("concurrent.futures.ThreadPoolExecutor", InlineExecutor)
+    assert core.payload_hash(builder, closure, workers=4) == serial
+
+
 @pytest.mark.parametrize("fault", ["duplicate", "version", "dynamic", "foreign-source"])
 def test_core_refuses_ambiguous_or_unattributed_source_closure(tmp_path, fault):
     _source(tmp_path)

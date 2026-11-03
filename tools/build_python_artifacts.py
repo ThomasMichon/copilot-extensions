@@ -86,7 +86,7 @@ import tempfile
 import time
 import zipfile
 from pathlib import Path
-from artifact_source_build import PromotionArtifactError, parse_wheel_identity
+from artifact_source_build import PromotionArtifactError, parse_wheel_identity, payload_hash_directories
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import uv_editable_ref as uer  # noqa: E402
@@ -478,7 +478,7 @@ def directory_content_hash(d: Path) -> str:
     return _hash_fields(*flattened)
 
 
-def compute_payload_hash(dirs: list[Path]) -> str:
+def compute_payload_hash(dirs: list[Path], *, workers: int = 1) -> str:
     """A single hash over every directory in ``dirs`` (plugin + vendored
     libs), each identified by its repo-relative path and its own working-
     tree content hash (`directory_content_hash`). Sorted so key order never
@@ -486,12 +486,10 @@ def compute_payload_hash(dirs: list[Path]) -> str:
     lib lives at which path is itself a change (not just the content). Must
     be called BEFORE building any wheel from ``dirs`` -- see
     `directory_content_hash`'s own docstring."""
-    pairs = [
-        (d.resolve().relative_to(REPO).as_posix(), directory_content_hash(d))
-        for d in dirs
-    ]
-    flattened = [field for pair in sorted(pairs) for field in pair]
-    return f"sha256:{_hash_fields(*flattened)}"
+    return payload_hash_directories(
+        dirs, root=REPO, directory_hash=directory_content_hash,
+        hash_fields=_hash_fields, workers=workers,
+    )
 
 
 def parse_wheel_filename(path: Path) -> dict[str, str]:
