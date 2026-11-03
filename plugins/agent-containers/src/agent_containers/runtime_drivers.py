@@ -922,10 +922,11 @@ def require_ssh_transport(config: ContainersConfig, name: str, operation: str) -
     reconcile(config)
     if not any(f.driver for f in config.fleets.values()):
         return
-    from .lifecycle import get_container
-
-    info = get_container(config, name)
-    if info is None or not getattr(info, "driver", None):
+    # Only the fleet whose namespace owns ``name`` is asked: a name outside every
+    # driver namespace is never a driver member, and an unrelated hung driver
+    # must not delay a healthy member's launch.
+    scoped, info = scoped_member(config, name)
+    if not scoped or info is None or not getattr(info, "driver", None):
         return
     route = owner_of(name)
     if route is None or not route.driver.capabilities.ssh_transport:

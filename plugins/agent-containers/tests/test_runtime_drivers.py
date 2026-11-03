@@ -1657,3 +1657,21 @@ def test_session_host_state_reports_an_unavailable_driver_not_a_missing_member(
     captured = capsys.readouterr()
     assert "missing" not in captured.out
     assert "unavailable" in captured.err
+
+
+def test_ssh_precheck_asks_only_the_owning_fleet(fake, no_docker, tmp_path, monkeypatch):
+    import time
+
+    monkeypatch.setenv("FAKE_DRIVER_CAPS", json.dumps({"ssh_transport": True}))
+    slow_root = tmp_path / "slow-runtime"
+    config = _two_driver_config(
+        tmp_path, monkeypatch, fake, ["--root", str(slow_root), "--hang", "list"],
+    )
+    fleet.reconcile_up(config, "example")
+    runtime_drivers.clear_bindings()
+    monkeypatch.setattr(lifecycle, "list_containers", lambda *a, **k: pytest.fail("full inventory"))
+    started = time.monotonic()
+    runtime_drivers.require_ssh_transport(config, "example-1", "The `copilot` verb")
+    runtime_drivers.require_ssh_transport(config, "not-a-driver-member", "The `copilot` verb")
+    assert time.monotonic() - started < 15
+    assert not slow_root.exists()  # the unrelated hung driver was never invoked
