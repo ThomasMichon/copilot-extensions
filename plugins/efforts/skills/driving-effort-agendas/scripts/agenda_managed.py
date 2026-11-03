@@ -13,7 +13,7 @@ from typing import Any
 
 from agenda import AgendaError, _read, _text, decode
 from agenda_publish import _invoke
-from agenda_store import DATABASE, encode, mutate, safe_path
+from agenda_store import DATABASE, _state, encode, mutate, safe_path, transaction
 from agenda_store_v2 import validate_initialization
 
 CAPABILITY = "agenda-managed-placement-v1"
@@ -103,8 +103,15 @@ def initialize(
     home = safe_path(Path(home_value), directory=True)
     if not home.is_dir():
         raise AgendaError("placement owner did not allocate its state home")
-    if not (home / DATABASE).exists() and any(home.iterdir()):
-        raise AgendaError("managed initialization refuses a nonempty uninitialized home")
+    store_files = {DATABASE + suffix for suffix in ("", "-journal", "-wal", "-shm")}
+    if any(path.name not in store_files for path in home.iterdir()):
+        try:
+            with transaction(home, readonly=True, store_version=2) as db:
+                existing = _state(db, home)
+                if existing["store_id"] != store_id or existing["snapshot"]["worktree"] != worktree:
+                    raise AgendaError("existing accepted store does not match the placement")
+        except AgendaError as exc:
+            raise AgendaError("managed initialization refuses a nonempty uninitialized or unqualified home") from exc
     result, accepted = mutate(
         home, request, actor=actor, session=session, initial_store_id=store_id,
     )

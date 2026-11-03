@@ -189,6 +189,14 @@ def transaction(home: Path, *, create: bool = False, write: bool = False,
                 raise AgendaError("state home changed during open")
             safe_path(path)
             db.execute("PRAGMA synchronous=FULL")
+            # SQLite owns journal fsync and commit ordering; sync a newly-created directory entry.
+            if create and os.name == "posix":
+                fd = os.open(home, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                try:
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+            db.execute("BEGIN IMMEDIATE" if write else "BEGIN")
             if db.execute("PRAGMA journal_mode").fetchone()[0] != "delete":
                 raise AgendaError("unsupported agenda journal mode; standalone store requires DELETE")
             version = db.execute("PRAGMA user_version").fetchone()[0]
@@ -202,14 +210,6 @@ def transaction(home: Path, *, create: bool = False, write: bool = False,
             if version == 0 and db.execute(
                     "SELECT 1 FROM sqlite_master WHERE type='table'").fetchone():
                 raise AgendaError("refusing an unrelated SQLite database")
-            # SQLite owns journal fsync and commit ordering; sync a newly-created directory entry.
-            if create and os.name == "posix":
-                fd = os.open(home, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-                try:
-                    os.fsync(fd)
-                finally:
-                    os.close(fd)
-            db.execute("BEGIN IMMEDIATE" if write else "BEGIN")
             if create and version == 0:
                 if store_version == 2:
                     from agenda_store_v2 import schema

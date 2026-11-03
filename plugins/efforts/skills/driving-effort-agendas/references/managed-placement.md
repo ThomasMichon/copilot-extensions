@@ -48,6 +48,11 @@ reinitialize the ledger. An allocation can succeed before agenda initialization
 fails or a reply is lost. Preserve that placement and retry the exact request;
 do not infer rollback, allocate another writable copy or overwrite a partial
 registration. Conflicting or nonempty uninitialized homes refuse visibly.
+An empty or interrupted database file is not proof of accepted initialization.
+Unrelated contents require a readable accepted store with the exact selected
+worktree/store identity; recognized SQLite recovery files retain the owner's
+ordinary transaction checks. Overlapping exact initialization retries recheck
+schema version under the write lock and preserve database bytes.
 
 The result includes the owner-qualified placement, original accepted agenda
 result and whether this invocation accepted a new operation. Actor/session

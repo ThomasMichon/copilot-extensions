@@ -6,12 +6,14 @@ from copy import deepcopy
 import importlib
 import json
 from pathlib import Path
+import subprocess
 import sys
+import time
 from typing import Any
 
 import pytest
 
-from test_agenda_v2_core import CAPS, STORE, board, context, current, proof, v2
+from test_agenda_v2_core import CAPS, SKILL, STORE, board, context, current, proof, v2
 
 MANAGED = importlib.import_module("agenda_managed")
 OWNER_CALL = MANAGED._owner
@@ -67,6 +69,7 @@ def test_selected_placement_and_agenda_share_identity_across_exact_retry(owner: 
     state = STORE.read(home, worktree=WORKTREE)
     assert result["result"]["store_id"] == state["store_id"] == STORE_ID
     assert state["revision"] == 1 and len(state["records"]) > 3
+    (home / "retained.bin").write_bytes(b"accepted domain contents survive retries")
     before = {p.relative_to(owner): p.read_bytes() for p in owner.rglob("*") if p.is_file()}
     retry = initialize()
     assert retry["accepted"] is False and retry["result"] == result["result"]
@@ -136,15 +139,79 @@ def test_request_is_detached_before_the_placement_process_wait(
     assert request["change"]["worktree"] != WORKTREE
 
 
-def test_managed_initialization_refuses_unrelated_contents(owner: Path) -> None:
+@pytest.mark.parametrize("empty_database", [False, True])
+def test_managed_initialization_refuses_unrelated_contents(owner: Path, empty_database: bool) -> None:
     home = owner / "agenda"
     home.mkdir()
     retained = home / "retained.bin"
     retained.write_bytes(b"not an admitted agenda database")
+    if empty_database:
+        (home / STORE.DATABASE).write_bytes(b"")
+    before = {path.name: path.read_bytes() for path in home.iterdir()}
     with pytest.raises(MANAGED.AgendaError, match="nonempty"):
         initialize()
     assert retained.read_bytes() == b"not an admitted agenda database"
-    assert not (home / STORE.DATABASE).exists()
+    assert {path.name: path.read_bytes() for path in home.iterdir()} == before
+
+
+def test_overlapping_exact_initializations_do_not_rewrite_database_bytes(tmp_path: Path) -> None:
+    home = tmp_path / "store"
+    home.mkdir()
+    request_path = tmp_path / "request.json"
+    request_path.write_text(json.dumps(initialization()), encoding="utf-8")
+    child = r'''
+import json,sqlite3,sys,time
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+import agenda_store
+native=sqlite3.connect
+ready,release=map(Path,sys.argv[4:6])
+class Gated(sqlite3.Connection):
+    def execute(self,sql,*args,**kwargs):
+        if sql=="BEGIN IMMEDIATE":
+            ready.write_text("ready")
+            deadline=time.monotonic()+15
+            while not release.exists():
+                if time.monotonic()>=deadline:
+                    raise TimeoutError("fixture initialization gate expired")
+                time.sleep(0.01)
+        return super().execute(sql,*args,**kwargs)
+sqlite3.connect=lambda *args,**kwargs:native(*args,**kwargs,factory=Gated)
+result,accepted=agenda_store.mutate(Path(sys.argv[2]),
+    json.loads(Path(sys.argv[3]).read_text()),initial_store_id="a"*32)
+print(json.dumps({"accepted":accepted,"result":result}))
+'''
+    ready = [tmp_path / f"ready-{index}" for index in range(2)]
+    release = [tmp_path / f"release-{index}" for index in range(2)]
+    children: list[subprocess.Popen[str]] = []
+    try:
+        for index in range(2):
+            children.append(subprocess.Popen(
+                [sys.executable, "-B", "-c", child, str(SKILL / "scripts"), str(home),
+                 str(request_path), str(ready[index]), str(release[index])],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            ))
+        deadline = time.monotonic() + 10
+        while not all(path.exists() for path in ready):
+            assert time.monotonic() < deadline, "both initializers must overlap before the write lock"
+            time.sleep(0.01)
+        release[0].write_text("continue", encoding="utf-8")
+        first, error = children[0].communicate(timeout=20)
+        assert children[0].returncode == 0, error
+        original = (home / STORE.DATABASE).read_bytes()
+        release[1].write_text("continue", encoding="utf-8")
+        second, error = children[1].communicate(timeout=20)
+        assert children[1].returncode == 0, error
+        first_result, second_result = json.loads(first), json.loads(second)
+        assert first_result["accepted"] is True and second_result["accepted"] is False
+        assert first_result["result"] == second_result["result"]
+        assert (home / STORE.DATABASE).read_bytes() == original
+    finally:
+        for path in release:
+            path.touch(exist_ok=True)
+        for process in children:
+            process.communicate(timeout=25)
 
 
 @pytest.mark.parametrize("fault", ["store", "scope", "authority"])
