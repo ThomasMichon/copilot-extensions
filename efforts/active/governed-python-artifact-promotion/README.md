@@ -980,6 +980,18 @@ a changed source refuses before participant execution. The focused native
 Windows case passed with normal containment cleanup. The failed native run
 remains failed; the corrected head still owes a new native qualification.
 
+On the corrected head, both Manager jobs passed and required CI freshly
+qualified the merged candidate's 3,879-unit inventory in 116.279 seconds.
+The native run's remaining Windows profile job reached its six-minute
+deadline: its first 52-case packet passed, but the following constructor
+cohort was interrupted. The copied-toolkit and payload-generation witnesses
+therefore move together into a disjoint `toolkit` matrix row on both
+platforms. Source/profile, refusal, normal-constructor and Manager selections
+are retained; no test, timeout or required-unit bound is removed or widened.
+The workflow-scope regression checks the exact file routing, backend-fixture
+selection and unchanged six-minute limits. The interrupted run remains
+non-passing evidence; the split head needs fresh native qualification.
+
 This closes no ordinary-consumer checkbox. Worktrees still needs its actual
 source/provider selection, admitted tooling, planning and current-policy
 custody through health, publication and rollback. Default enablement remains
