@@ -1,5 +1,24 @@
 # Testing copilot-extensions
 
+The focused `bootstrap-update-native-acceptance.yml` workflow runs on demand
+and for relevant PR paths on Linux and Windows. Its packet is
+`python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_bootstrap_update_native.py --allow-explicit-tiers`.
+The real shell acquisition, canonical freezing, queue, finite worker, runtime
+adapter and borrowed participant remain intact; only constructor and suite
+bodies use finite fixtures with a minimal declared source graph and a real
+native venv. It covers equivalent pending coalescing, separate active arrivals
+and arguments, changed SDK inputs, preserved nonzero whole-operation results and birth-pinned loss of the
+waiting Python caller. A prepared legacy payload without bootstrap scripts
+separately exercises current-controller compatibility. Runner-owned containment
+and daemon-instance leases retain cleanup. This is source-boundary evidence,
+not full-graph performance, escape from a caller-owned cleanup Job, actual
+runtime installation, installed rollout or migration of an existing queue.
+A separate full-repository retention control records real input count, bytes
+and blocking retention time as test properties. It exercises canonical
+freezing/readback against the complete declared Manager/SDK graph, not the
+full acquisition/installation latency of an ordinary update.
+Required unit-only CI does not gain these process controls.
+
 The optional `agent-worktrees --test-file tests/test_update_write_activity_native.py
 --allow-explicit-tiers` packet uses private synthetic Windows writers under the
 real strict Job and finite stream owner. It distinguishes useful silent writes,

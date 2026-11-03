@@ -33,6 +33,23 @@ def test_posix_bootstrap_retains_process_replacement(monkeypatch: pytest.MonkeyP
     assert seen == [(command[0], command)]
 
 
+def test_posix_update_participant_waits_until_its_borrowed_manager_exits(monkeypatch):
+    installer = self_install._runtime_installer()
+    seen = []
+
+    def launch(command, **kwargs):
+        seen.append(kwargs)
+        return SimpleNamespace(wait=lambda: 23)
+
+    monkeypatch.setattr(installer, "os", SimpleNamespace(name="posix", environ={"fixture": "value"}))
+    monkeypatch.setattr(installer.subprocess, "Popen", launch)
+    assert installer._dispatch_manager(
+        ["/selected/python", "-m", "manager"], handoff={"custody": "witness"},
+    ) == 23
+    assert seen[0]["env"] == {"fixture": "value", "custody": "witness"}
+    assert "creationflags" not in seen[0]
+
+
 @pytest.mark.parametrize("interrupted", [False, True])
 @pytest.mark.parametrize("console_streams", list(product([False, True], repeat=3)))
 def test_windows_bootstrap_waits_for_observer_and_preserves_exit(

@@ -408,7 +408,7 @@ Empty/whitespace-only prior selectors have no runtime to retain, but their
 existence and exact bytes remain rollback state. Target and nonblank prior slot
 names still receive canonical validation.
 
-On Windows, explicit bootstrap construction and `self-install --apply` enter
+On Windows, non-update bootstrap construction and `self-install --apply` enter
 the existing installation execution driver. A caller with a live inherited or
 scoped witness joins that owner; a cold explicit caller submits a fixed
 installation recipe and drives the same finite native executor. Neither path
@@ -417,6 +417,29 @@ failed background launch. Application arguments remain outside the bootstrap
 request. Its bounded completion receipt binds the root, source digest and
 actual installed slot; later selection by another request cannot silently
 change which runtime the bootstrap dispatches.
+
+Fresh `update` bootstrap on either platform instead submits one complete
+Manager update request: Manager construction, activation and the
+subsequent suite update remain under the same execution custody and outcome.
+The ordinary caller starts the existing finite worker and waits for that whole
+result; losing the observer does not discard accepted work. `--detach` reports
+acceptance, not completion, and `--supervised-debug` drains the same queue inline.
+No new daemon, mutation lock or foreground fallback is introduced.
+
+Each update acquisition has its own staging directory. Before submission, the
+bootstrap freezes Manager and SDK inputs through the canonical source freezer.
+Equivalent pending callers share a request when its immutable source and
+configured marketplace selection agree; distinct arguments or changed source
+remain separate. An active suite may still discover later marketplace inputs,
+so a new arrival queues a fresh attempt rather than joining it on the strength
+of a Manager/SDK snapshot alone. Unresolved selections do not share even
+pending work.
+Prepared installation sources remain data for the retained current bootstrap
+controller, so an older selected payload need not implement new internal flags.
+Automatic policy is rechecked against the saved request before construction.
+A manual update may use the existing explicit repair authorization to release
+an interrupted queue fence once; the prior failed outcome stays recorded, and
+that authorization does not certify cleanup or permit displacing a live owner.
 
 ### Local promoted installation inputs
 
