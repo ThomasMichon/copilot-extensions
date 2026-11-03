@@ -30,6 +30,18 @@ def _identity_value(value: object, field: str) -> str:
     return value
 
 
+def pool_instance_identity(value: object) -> tuple[str, str, str]:
+    """Read an exact capacity-owner key, never a preferred candidate subset."""
+    names = ("registration_id", "machine", "env")
+    if not isinstance(value, Mapping) or set(value) != set(names):
+        raise PoolDefinitionError("pool instance requires registration_id, machine and env")
+    return (
+        _identity_value(value["registration_id"], "registration_id"),
+        _identity_value(value["machine"], "machine"),
+        _identity_value(value["env"], "env"),
+    )
+
+
 @dataclass(frozen=True)
 class PoolInstanceDefinition:
     """One machine/environment capacity owner, independent of native identity."""

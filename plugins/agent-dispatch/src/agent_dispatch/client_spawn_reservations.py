@@ -94,6 +94,7 @@ class SpawnReservationClientMixin:
         conclusion_state: str | None = None,
         native_release_pending: bool | None = None,
         pool_accountable: bool = False,
+        pool_instance: tuple[str, str, str] | None = None,
         resume_requested: bool | None = None,
         task_status: str | None = None,
         latest_only: bool = False,
@@ -130,6 +131,13 @@ class SpawnReservationClientMixin:
             params["native_release_pending"] = native_release_pending
         if pool_accountable:
             params["pool_accountable"] = True
+        if pool_instance is not None:
+            from .pool_instances import pool_instance_identity
+            instance = dict(zip(("registration_id", "machine", "env"), pool_instance))
+            if len(pool_instance) != 3:
+                raise ValueError("reservation query requires an exact pool instance")
+            pool_instance_identity(instance)
+            params.update({"pool_" + key: value for key, value in instance.items()})
         if resume_requested is not None:
             params["resume_requested"] = resume_requested
         if task_status is not None:
@@ -138,6 +146,9 @@ class SpawnReservationClientMixin:
             params["latest_only"] = latest_only
         response = self._http.get("/spawn-reservations", params=params)
         reservations = self._unwrap(response)
+        if pool_instance is not None and response.headers.get("X-Dispatch-Pool-Instance") != "pool-instance/v1":
+            from .client import DispatchError
+            raise DispatchError(426, "coordinator lacks pool-instance/v1 reservation query")
         if native_release_pending is not None:
             from .client import DispatchError
             if response.headers.get("X-Dispatch-Reservation-Query") != "native-release-pending/v1":

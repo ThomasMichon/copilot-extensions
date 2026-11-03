@@ -62,10 +62,12 @@ def _registration_scope(args: argparse.Namespace) -> tuple[str | None, str]:
     alias and the env is ``AGENT_DISPATCH_ENV`` (default ``"default"``). This is
     the *one supervisor per machine-and-environment* the registration binds to.
     """
-    import os
+    from .supervisor_pool_allocator import launch_scope
 
     from . import remote_dispatch
 
+    if scope := launch_scope(args):
+        return scope
     machine = getattr(args, "machine", None) or remote_dispatch.local_machine()
     env = getattr(args, "env", None) or os.environ.get("AGENT_DISPATCH_ENV") or "default"
     return machine, env
@@ -647,15 +649,7 @@ def _cmd_supervise_override(args: argparse.Namespace) -> int:
 def _cmd_supervise(args: argparse.Namespace) -> int:
     """Run the embody spawn supervisor over the lane (once, or as a loop).
 
-    Turns queued (optionally label-gated) tasks into host embody autopilots,
-    exactly once each, via the atomic spawn reservation. See the ``supervisor``
-    module for the spawn-at-most-once safety model.
-
-    A ``supervise <register|status|list|remove>`` subcommand instead manages
-    durable **registrations** (the *registered-supervision* surface): registering
-    adds a unit and returns its handle rather than becoming this loop. The bare
-    ``supervise`` (no subcommand) remains the transitional foreground loop until
-    the singleton daemon subsumes it.
+    Subcommands manage durable registrations; the bare command runs their lane.
     """
     sub = getattr(args, "supervise_command", None)
     handlers = {
@@ -673,6 +667,12 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
 @daemon_entrypoint("agent-dispatch-lane", source=__file__, purpose="production")
 def _run_supervise(args: argparse.Namespace) -> int:
     configure_file_logging("supervisor")
+    from .supervisor_pool_allocator import allocation_enabled, launch_scope
+    try:
+        managed_scope = launch_scope(args)
+    except ValueError as exc:
+        print(f"agent-dispatch supervise: {exc}", file=sys.stderr)
+        return 2
     from .supervisor import (
         Supervisor,
         make_embody_spawn,
@@ -972,6 +972,8 @@ def _run_supervise(args: argparse.Namespace) -> int:
             reactive=(not bool(getattr(args, "no_reactive", False)) and not bool(args.once)),
             reactive_interval=getattr(args, "reactive_interval", 2.0) or 2.0,
             supervisor_id=getattr(args, "supervisor_id", None),
+            pool_instance=(args.supervisor_id, *managed_scope) if managed_scope else None,
+            pool_allocation_enabled=allocation_enabled(),
             disposable_cli_labels=disposable_cli_labels,
             idle_nudge_exempt_labels=idle_nudge_exempt_labels,
             capacity_gate=capacity_gate,

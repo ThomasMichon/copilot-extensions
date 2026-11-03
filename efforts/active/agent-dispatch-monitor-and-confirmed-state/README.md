@@ -280,11 +280,17 @@ live claim token. No new blanket ACK or executor appointment is created.
       Explicit-definition adoption for remaining legacy direct rows,
       ordinary allocator/initial prompts and mixed-driver adoption
       remain required; the default-off source seam is not that completion gate.
-- [ ] Land explicit [ordinary first-prompt admission](journal/2026/11.02-ordinary-first-prompt.md)
+- [x] Land explicit [ordinary first-prompt admission](journal/2026/11.02-ordinary-first-prompt.md)
       under its actual `ordinary-bridge` driver, allocator claim and execution
-      host. Initial delivery must not reacquire an evaluation lease; automatic
+      host in [#10123](https://github.com/ThomasMichon/copilot-extensions/pull/10123).
+      Initial delivery does not reacquire an evaluation lease; automatic
       allocator-instance selection, ordinary retry/decline and native
       qualification remain separate integration gates.
+- [ ] Land the [managed ordinary allocator instance integration](journal/2026/11.02-managed-pool-allocation.md)
+      through current-head independent review, required CI and actual merge.
+      The default-off source seam must preserve global selection, exact launch
+      ownership and retained reservation custody; it does not qualify ordinary
+      retry/decline, complete mixed-driver adoption or installed/native effects.
 - [x] Land source-owned [obsolete-scope exclusion](journal/2026/11.02-obsolete-pool-scopes.md)
       without erasing publication history, task assignments or accountable
       capacity. Source regressions cover current readiness and remove/re-add;

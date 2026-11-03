@@ -132,12 +132,13 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
 
     def place_pool_task(
         self, task_id: str, *, reserved_by: str, catalog_revision: int, driver: str = "cli",
-        startup_timeout: float = 600,
+        startup_timeout: float = 600, expected_instance: tuple[str, str, str] | None = None,
     ) -> PoolPlacement:
         """Return the reservation and matching assignment captured under one lock."""
         reservation, reserved, assignment = self._reserve_spawn(
             task_id, reserved_by=reserved_by, driver=driver,
             pool_catalog_revision=catalog_revision, pool_startup_timeout=startup_timeout,
+            expected_instance=expected_instance,
         )
         if assignment is None or assignment.reservation_key != reservation.key:
             raise TaskError("pool placement has no matching transactional assignment")
@@ -148,6 +149,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
         allow_suspended_reembodiment: bool = False, driver: str | None = None,
         allocation_revision: int | None = None, pool_catalog_revision: int | None = None,
         pool_startup_timeout: float = 600,
+        expected_instance: tuple[str, str, str] | None = None,
     ) -> tuple[SpawnReservation, bool, PoolAssignment | None]:
         """Atomically reserve the right to spawn an embody worker for ``task_id``.
 
@@ -194,21 +196,15 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
         carry-forward) is unchanged.
         """
         ts = self._now(now)
-        if pool_catalog_revision is not None:
-            from .queue_pool_startup import validate_startup_timeout
-            validate_startup_timeout(pool_startup_timeout)
-        if pool_catalog_revision is not None and (
-            type(pool_catalog_revision) is not int or pool_catalog_revision < 0
-            or not isinstance(reserved_by, str) or not reserved_by.strip()
-            or allow_suspended_reembodiment
-        ):
-            raise TaskError("pool placement requires a catalog revision and explicit allocator")
+        from .queue_pool_placement import require_selected_instance, validate_pool_request
+        validate_pool_request(
+            pool_catalog_revision, reserved_by, allow_suspended_reembodiment,
+            driver, pool_startup_timeout, expected_instance,
+        )
         if allocation_revision is not None and (
             type(allocation_revision) is not int or not 1 <= allocation_revision <= 2**63 - 1
         ):
             raise TaskError("allocation revision must be a positive integer")
-        if pool_catalog_revision is not None and driver not in {"cli", "ordinary-bridge"}:
-            raise TaskError("pool placement requires a qualified startup driver")
         from .ci_repair_spawn import authority_snapshot, reservation_authorized
         admission = None
         with self._connect() as probe:
@@ -245,6 +241,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                     current = next(row for row in rows if row["state"] in SpawnState.ACTIVE)
                     if assigned_pool is None or assigned_pool.reservation_key != current["key"]:
                         raise TaskError("legacy reservation cannot be adopted as a pool claim")
+                    require_selected_instance(expected_instance, assigned_pool)
                     if allocation_revision is not None and allocation_revision != current["allocation_revision"]:
                         raise TaskError("active reservation conflicts with requested allocation revision")
                     return SpawnReservation._from_row(current), False, assigned_pool
@@ -524,6 +521,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                     conn, resolved_task, catalog.definitions,
                     execution_machine=carried_execution_machine,
                 )
+                require_selected_instance(expected_instance, selected_pool)
             conn.execute(
                 "INSERT INTO spawn_reservations "
                 "(key, task_id, exclusive_key, attempt, state, reserved_by, "

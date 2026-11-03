@@ -330,6 +330,8 @@ def test_http_placement_and_affirmative_start_use_real_transactions(q):
         "protocol": "pool_placement/v1", "supported_versions": [1],
         "supported_drivers": ["cli", "ordinary-bridge"],
         "ordinary_initial_start_versions": [1],
+        "instance_bound_placement_versions": [1],
+        "instance_scoped_reservation_versions": [1],
         "atomic_claim_before_spawn": True, "affirmative_worker_start": True,
         "explicit_start_versions": [1],
         "configured_cohort_reservation_fencing_versions": [1],

@@ -1,0 +1,9 @@
+{
+  "comment": "Bind managed ordinary allocation to its selected registration instance before committing a claim, retaining default-off admission and scoped reservation custody.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
