@@ -3459,6 +3459,9 @@ and an unapproved redirect that must not be contacted.
 `tools/test_core_native_pool_index.py` injects an unlisted wheel during the
 real offline resolver call and verifies it cannot change the selection; it
 also checks deep Windows pool inputs and bounded, private failure diagnostics.
+`tools/test_parallel_artifact_hash.py` checks deterministic bounded parallel
+source hashing and settlement after a worker failure; the core producer still
+revalidates source changes before exposing a delivery.
 The fixture excludes inherited Git selectors, and Linux projection refuses
 the active Manager wheel mapping rather than silently changing its origin.
 The fixture feed and source do not qualify a production feed, release or

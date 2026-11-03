@@ -193,10 +193,17 @@ def source_closure(root: Path, builder) -> CoreSources:
         raise PromotionArtifactError(f"invalid core composition: {exc}") from exc
 
 
-def payload_hash(builder, closure: CoreSources, selection: dict | None = None) -> str:
+def payload_hash(builder, closure: CoreSources, selection: dict | None = None, *, workers: int = 1) -> str:
     from build_toolchain_lock import _hash_fields
+
+    if type(workers) is not int or not 1 <= workers <= 4:
+        raise ValueError("core payload hashing requires between one and four workers")
+    directories = [*(path for _role, path in closure.projects), *closure.resources]
+    source_hash = builder.compute_payload_hash(
+        directories, **({"workers": workers} if workers != 1 else {}),
+    )
     return "sha256:" + _hash_fields(
-        builder.compute_payload_hash([*(path for _role, path in closure.projects), *closure.resources]),
+        source_hash,
         closure.version,
         json.dumps(closure.selection if selection is None else selection, sort_keys=True, separators=(",", ":")),
     )

@@ -4114,7 +4114,10 @@ python tools/core_native_delivery.py --source-checkout <repo> --source-commit <c
 
 It composes the selected Git source, checks it against the exact core
 manifest and first-party wheels, and projects the applicable core requirements
-for the running interpreter. `--native-lock` selects a bounded existing UV
+for the running interpreter. Core source binding hashes independent closure
+directories with at most four workers, bounded by available CPUs; it retains
+the same content identity and repeats source validation before publication.
+`--native-lock` selects a bounded existing UV
 `pylock.toml`; its exact bytes remain held and rechecked, and that mode does not
 run dependency resolution. The lock supplies candidate filenames and digests,
 not approval or a download origin.

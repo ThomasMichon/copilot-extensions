@@ -371,7 +371,7 @@ Use the following ordered implementation and acceptance gates:
       Implemented and qualified in #9015. The restricted seed is inert until
       a real consumer supplies its source/policy owner; complete toolkit
       packaging, ordinary enabling and production savings remain open.
-- [ ] Package the existing admission code and its complete first-party imports
+- [x] Package the existing admission code and its complete first-party imports
       as a canonical, self-contained installer toolkit. Retain one source of
       truth and the existing payload-generation/materialization conventions.
       Reuse the actual source acquisition/preparation owners; remove repository
@@ -380,11 +380,12 @@ Use the following ordered implementation and acceptance gates:
       under the admitted tooling interpreter, never via ambient `packaging`.
       Keep public first-party artifacts free of third-party dependency bytes.
       The narrow configuration-root and wheel-inspection owners are separated
-      in #9021; complete first-party packaging remains this unchecked gate.
-      The current candidate adds opt-in SDK packaging with full internal
+      in #9021. #9032 delivers opt-in SDK packaging with full internal
       resources, repository-adapter separation, copied-payload native construction
       and semantic validation under the actually admitted Packaging seed.
-      Required review and both native-platform qualifications remain open.
+      Copied shell/PowerShell adapters retain and execute their sibling assets.
+      Reviewed, qualified and merged; ordinary-consumer integration and enablement
+      remain the separate unchecked gates below.
 - [ ] Connect Worktrees' real installation lifecycle first, preserving its
       `agent-worktrees` owner and runtime root separately from Manager's
       `worktree-manager` component. Carry the actual installed owner through
@@ -647,6 +648,17 @@ verified answer against its actual repository or machine configuration:
 
 ## Validation Plan
 
+- [x] Qualify the self-contained admission toolkit (#9032). All 3,811 admitted
+      units pass within the unchanged 300-second bound, with 520 source bindings,
+      no prohibited effects and independent committed-source verification.
+      All 31 selected hosted native jobs pass on the qualified code head,
+      including admitted-interpreter semantic execution, payload-only source/
+      offline construction and reuse, copied shell/PowerShell adapters, both
+      Manager layouts and the six pinned-real-backend constructor rows.
+      The final docs-only head has identical runtime/test/workflow bytes,
+      current Copilot approval, resolved threads and required green CI.
+      This qualifies delivery and isolated first touch, not ordinary installers,
+      production-feed access, enabled defaults, measured savings or rollout.
 - [x] Qualify the narrow admission import owners (#9021). All 1,836 admitted
       pure units pass under the unchanged effect rules and 300-second bound;
       30 focused native contracts preserve source acquisition, copied-tool
