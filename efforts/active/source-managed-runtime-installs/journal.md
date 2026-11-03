@@ -2,6 +2,7 @@
 
 [Back to the effort](README.md). The Plan and Validation Plan remain the completion gate.
 
+- [2026-11-03 - Manager-first repository registration entry](<journal/2026/11.03 manager-register.md>)
 - [2026-10-31 - Footprint contract evolution reviewed](<journal/2026/10.31 footprint-contract-evolution.md>)
 - [2026-10-31 - Independent replacement review corrections](<journal/2026/10.31 review-corrections.md>)
 - [2026-10-27 - Finite native footprints merged and macOS qualified](<journal/2026/10.27 native-runtime-removal.md>)
