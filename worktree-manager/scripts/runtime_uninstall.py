@@ -8,6 +8,7 @@ import os
 import re
 import stat
 import sys
+from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -72,7 +73,7 @@ def _state(path: Path) -> dict:
             "mode": after.st_mode, "digest": digest}
 
 
-def _tree(slot: Path) -> dict[str, dict]:
+def _tree(slot: Path, *, on_progress: Callable[[], None] | None = None) -> dict[str, dict]:
     result = {}
 
     def walk(directory: Path) -> None:
@@ -81,6 +82,8 @@ def _tree(slot: Path) -> dict[str, dict]:
             if path.parent == slot and path.name in (INVENTORY, runtime.COMPLETE_MARKER):
                 continue
             value = _state(path)
+            if on_progress is not None:
+                on_progress()
             result[path.relative_to(slot).as_posix()] = value
             if value["kind"] == "directory":
                 walk(path)
@@ -119,7 +122,10 @@ def _manager_layout(slot: Path) -> tuple[dict, Path, Path]:
     return project, contract, slot
 
 
-def seal_inventory(slot: Path, *, frontdoors: dict[str, str], provider: dict) -> None:
+def seal_inventory(
+    slot: Path, *, frontdoors: dict[str, str], provider: dict,
+    on_progress: Callable[[], None] | None = None,
+) -> None:
     """Called only by installed Manager preparation, before slot completion."""
     _plain(slot)
     if os.path.lexists(slot / INVENTORY) or os.path.lexists(slot / runtime.COMPLETE_MARKER):
@@ -129,7 +135,7 @@ def seal_inventory(slot: Path, *, frontdoors: dict[str, str], provider: dict) ->
     record = {
         "schema": "worktree-manager.artifact-inventory", "version": 1,
         "generation": slot.name, "slot": _state(slot),
-        "entries": _tree(slot),
+        "entries": _tree(slot, on_progress=on_progress),
         "frontdoors": {name: hashlib.sha256(body.encode("utf-8")).hexdigest()
                       for name, body in frontdoors.items()},
         "provider": provider,
@@ -445,27 +451,47 @@ def validate_frontdoor(root: Path, *, as_json: bool) -> int:
     return 0
 
 
+def _validated_target(root: Path, *, apply: bool) -> Path:
+    root = _plain(root).resolve()
+    _contract(SCRIPTS.parent / "references" / "uninstall-contract.json")
+    if apply and (
+        Path(sys.executable).resolve().is_relative_to(root)
+        or Path(sys.prefix).resolve().is_relative_to(root)
+        or SCRIPTS.resolve().is_relative_to(root)
+    ):
+        raise ValueError(
+            "Uninstall requires a base Python and installer payload outside the target. "
+            f"Base interpreter: {getattr(sys, '_base_executable', sys.executable)}; "
+            f"installer: {SCRIPTS / 'runtime_install.py'}. "
+            "If that installer is inside the target, use an extracted supported release "
+            "outside the target; run its scripts/runtime_install.py with "
+            f"--root {str(root)!r} --uninstall --apply."
+        )
+    return root
+
+
+def report_absent_target(root: Path, *, as_json: bool) -> int | None:
+    """Observe a missing target without entering removal or provisioning custody."""
+    result = _result(root)
+    try:
+        root = _validated_target(root, apply=True)
+        result["root"] = str(root)
+        try:
+            Path(native_retained_path(root)).lstat()
+        except FileNotFoundError:
+            return _report(dict(result, status="absent"), as_json=as_json)
+    except (OSError, ValueError, RuntimeError, KeyError, TypeError) as error:
+        return _report(dict(result, status="refused", reason=str(error)), as_json=as_json)
+    return None
+
+
 def uninstall(root: Path, *, apply: bool, as_json: bool) -> int:
     root = root.absolute()
     result = _result(root)
     removed = result["removed"]
     try:
-        root = _plain(root).resolve()
+        root = _validated_target(root, apply=apply)
         result["root"] = str(root)
-        _contract(SCRIPTS.parent / "references" / "uninstall-contract.json")
-        if apply and (
-            Path(sys.executable).resolve().is_relative_to(root)
-            or Path(sys.prefix).resolve().is_relative_to(root)
-            or SCRIPTS.resolve().is_relative_to(root)
-        ):
-            raise ValueError(
-                "Uninstall requires a base Python and installer payload outside the target. "
-                f"Base interpreter: {getattr(sys, '_base_executable', sys.executable)}; "
-                f"installer: {SCRIPTS / 'runtime_install.py'}. "
-                "If that installer is inside the target, use an extracted supported release "
-                "outside the target; run its scripts/runtime_install.py with "
-                f"--root {str(root)!r} --uninstall --apply."
-            )
         plan = _plan(root)
         if not plan["versions"]:
             result["status"] = "absent"

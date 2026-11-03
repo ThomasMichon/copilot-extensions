@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import shutil
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 
 
@@ -193,9 +194,14 @@ def _find_any_symlink(tree: Path) -> Path | None:
     return None
 
 
-def _copy_payload(payload_dir: Path, slot: Path, *, mark_complete: bool = True) -> None:
+def _copy_payload(
+    payload_dir: Path, slot: Path, *, mark_complete: bool = True,
+    on_progress: Callable[[], None] | None = None,
+) -> None:
     try:
-        _copy_payload_unsafe(payload_dir, slot, mark_complete=mark_complete)
+        _copy_payload_unsafe(
+            payload_dir, slot, mark_complete=mark_complete, on_progress=on_progress,
+        )
     except RuntimeError:
         # Already our one normalized, self_install()-caught boundary type --
         # re-raise as-is (don't re-wrap).
@@ -217,7 +223,10 @@ def _copy_payload(payload_dir: Path, slot: Path, *, mark_complete: bool = True) 
         raise RuntimeError(f"copying payload into {slot} failed: {e}") from e
 
 
-def _copy_payload_unsafe(payload_dir: Path, slot: Path, *, mark_complete: bool = True) -> None:
+def _copy_payload_unsafe(
+    payload_dir: Path, slot: Path, *, mark_complete: bool = True,
+    on_progress: Callable[[], None] | None = None,
+) -> None:
     # Deferred to avoid a module-load-time circular import: self_install.py
     # imports this module for _copy_payload/_copy_payload_unsafe, so these
     # names are only resolvable once self_install.py has finished defining
@@ -270,7 +279,16 @@ def _copy_payload_unsafe(payload_dir: Path, slot: Path, *, mark_complete: bool =
         # symlinks=False would dereference it at this second hop, still
         # smuggling external content into the published slot one step later
         # and defeating _find_any_symlink's downstream rejection.
-        shutil.copytree(payload_dir, staging, ignore=ignore, symlinks=True)
+        def copy(origin, destination):
+            result = shutil.copy2(origin, destination)
+            if on_progress is not None:
+                on_progress()
+            return result
+
+        shutil.copytree(
+            payload_dir, staging, ignore=ignore, symlinks=True,
+            copy_function=copy if on_progress is not None else shutil.copy2,
+        )
         bad = _find_any_symlink(staging)
         if bad is not None:
             raise RuntimeError(
