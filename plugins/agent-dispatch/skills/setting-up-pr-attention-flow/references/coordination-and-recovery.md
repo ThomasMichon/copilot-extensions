@@ -61,6 +61,28 @@ their PR/worktree/task custody.
 
 ## Publication and actual outcomes
 
+The existing assignment owner binds actual scope, author independence and the
+retained reviewer handle before the first authorized write, not through a new
+grant API. Within that mandate, the reviewer owns analysis, supported addressed
+bot-thread reconciliation, direct task/owner-bound verdict posting and official
+readback. A qualifying round does not stop at analysis-ready for coordinator
+blessing, content co-signing or a release handshake; the coordinator neither
+relays reviewer JSON nor rewrites/posts the verdict on its behalf. Return the
+actual verified posted receipt or real blocker asynchronously, then let the
+coordinator independently audit current forge authority after publication.
+
+Genuine candidate changes stay with the same reviewer for owner-bound
+reprepare/delta/full-gate analysis and direct posting. Hold/escalate only actual
+required-input, mutation-fence, ownership, authority or resolution gaps; direct
+publication never waives those gates, self-review checks or author consent.
+A coordinator's full snapshot may supply known fields missing from an adapter's
+read tools, but this is an adapter exception, not a mandatory per-round
+middleman or a substitute for server mutation fences. Preserve original
+operation IDs, complete receipts and unknown outcomes; a native Task completion
+or readback does not transfer custody or authorize transcript/credential sharing.
+
+The reviewer performs the following steps through the selected existing owners:
+
 1. Acquire fresh complete paginated candidate, official reviews, threads/
    replies, applicable checks and decision inputs through the selected owner.
    Preserve unavailable/partial sections and their original uncertainty.
