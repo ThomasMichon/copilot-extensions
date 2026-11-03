@@ -166,6 +166,8 @@ def test_relative_runner_search_uses_daemon_cwd_for_probe_and_launch(tmp_path, m
     result = scope.scope_command(["/runtime/python"], "a" * 32, {"PATH": "bin"}, cwd=str(target))
     assert Path(result[0]) == runner
     assert probe.call_args.args[0] == [result[0], "--version"]
+    assert Path(probe.call_args.args[0][0]) == runner
+    assert probe.call_args.args[0][1:] == ["--version"]
     assert probe.call_args.kwargs["cwd"] == str(target)
 
 
