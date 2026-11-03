@@ -48,8 +48,9 @@ def source_files(root: Path):
                     yield path
 
 
-def _cwd_bindings(statements, inherited, parameters=()):
+def _cwd_bindings(statements, inherited, parameters=(), *, module=None, enclosing=()):
     imports, shadowed = {}, set(parameters)
+    global_names, nonlocal_names = set(), set()
 
     def bind(name, kind):
         if name in imports and imports[name] != kind:
@@ -84,9 +85,10 @@ def _cwd_bindings(statements, inherited, parameters=()):
         visit_GeneratorExp = visit_comprehension_expression
 
         def visit_Global(self, node):
-            shadowed.update(node.names)
+            global_names.update(node.names)
 
-        visit_Nonlocal = visit_Global
+        def visit_Nonlocal(self, node):
+            nonlocal_names.update(node.names)
 
         def visit_ExceptHandler(self, node):
             if node.name:
@@ -97,10 +99,28 @@ def _cwd_bindings(statements, inherited, parameters=()):
             if isinstance(node.ctx, (ast.Store, ast.Del)):
                 shadowed.add(node.id)
 
+        def visit_MatchAs(self, node):
+            if node.name:
+                shadowed.add(node.name)
+            self.generic_visit(node)
+
+        def visit_MatchStar(self, node):
+            if node.name:
+                shadowed.add(node.name)
+
+        def visit_MatchMapping(self, node):
+            if node.rest:
+                shadowed.add(node.rest)
+            self.generic_visit(node)
+
         def visit_Import(self, node):
             for alias in node.names:
-                name = alias.asname or alias.name.split(".")[0]
-                bind(name, alias.name if alias.name in {"os", "pathlib"} else None)
+                top = alias.name.split(".")[0]
+                name = alias.asname or top
+                kind = alias.name if alias.name in {"os", "pathlib"} else (
+                    top if alias.asname is None and top in {"os", "pathlib"} else None
+                )
+                bind(name, kind)
 
         def visit_ImportFrom(self, node):
             for alias in node.names:
@@ -115,11 +135,40 @@ def _cwd_bindings(statements, inherited, parameters=()):
     visitor = Bindings()
     for statement in statements:
         visitor.visit(statement)
+    bound = shadowed | set(imports)
+    global_writes, nonlocal_writes = global_names & bound, nonlocal_names & bound
     if "*" in imports:
-        return {}
-    result = {name: kind for name, kind in inherited.items() if name not in shadowed and name not in imports}
-    result.update({name: kind for name, kind in imports.items() if kind is not None and name not in shadowed})
-    return result
+        return {}, bound, global_writes, nonlocal_writes
+    local_names = bound if module is None else bound - global_names - nonlocal_names
+    result = {name: kind for name, kind in inherited.items() if name not in bound}
+    result.update({
+        name: kind for name, kind in imports.items()
+        if kind is not None and name not in shadowed and name in local_names
+    })
+    if module is not None:
+        # A write in an enclosing scope can change a declared binding before this call.
+        for name in global_names:
+            result.pop(name, None)
+            if (
+                name not in bound and name in module
+                and not any(
+                    name in writes for kind, _bindings, _locals, writes, _nonlocal in enclosing
+                    if kind != "module"
+                )
+            ):
+                result[name] = module[name]
+        for name in nonlocal_names:
+            result.pop(name, None)
+            if name in bound:
+                continue
+            for kind, bindings, enclosing_locals, _global_writes, enclosing_writes in reversed(enclosing):
+                if name in enclosing_writes:
+                    break
+                if kind == "function" and name in enclosing_locals:
+                    if name in bindings:
+                        result[name] = bindings[name]
+                    break
+    return result, local_names, global_writes, nonlocal_writes
 
 
 def _inherited_cwd(expression, bindings):
@@ -156,10 +205,10 @@ def _inherited_cwd(expression, bindings):
     return calls.found
 
 
-def _cwd_exception(text: str, call_line: int, value_line: int) -> bool:
+def _cwd_exception(text: str, call_line: int, keyword_line: int, value_line: int) -> bool:
     lines = text.splitlines()
-    candidates = {call_line, value_line}
-    for line in (call_line - 1, value_line - 1):
+    candidates = {call_line, keyword_line, value_line}
+    for line in (call_line - 1, keyword_line - 1, value_line - 1):
         if 0 < line <= len(lines) and lines[line - 1].lstrip().startswith("#"):
             candidates.add(line)
     marker = "daemon-spawn: allow"
@@ -213,7 +262,10 @@ def python_sites(text: str, filename: str, *, finite: bool = False, cwd_hits: li
     class Visitor(ast.NodeVisitor):
         def __init__(self):
             self.scope = []
-            self.cwd_scopes = [("module", _cwd_bindings(tree.body, {}))] if cwd_hits is not None else []
+            self.cwd_scopes = []
+            if cwd_hits is not None:
+                bindings, local_names, global_writes, nonlocal_writes = _cwd_bindings(tree.body, {})
+                self.cwd_scopes.append(("module", bindings, local_names, global_writes, nonlocal_writes))
 
         def visit_FunctionDef(self, node):
             self.scope.append(node.name)
@@ -224,8 +276,11 @@ def python_sites(text: str, filename: str, *, finite: bool = False, cwd_hits: li
                     arg.arg for arg in (*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs)
                 ]
                 parameters.extend(arg.arg for arg in (arguments.vararg, arguments.kwarg) if arg is not None)
-                inherited = next(bindings for kind, bindings in reversed(self.cwd_scopes) if kind != "class")
-                self.cwd_scopes.append(("function", _cwd_bindings(node.body, inherited, parameters)))
+                inherited = next(bindings for kind, bindings, *_ in reversed(self.cwd_scopes) if kind != "class")
+                bindings, local_names, global_writes, nonlocal_writes = _cwd_bindings(
+                    node.body, inherited, parameters, module=self.cwd_scopes[0][1], enclosing=self.cwd_scopes,
+                )
+                self.cwd_scopes.append(("function", bindings, local_names, global_writes, nonlocal_writes))
             self.generic_visit(node)
             if cwd_hits is not None:
                 self.cwd_scopes.pop()
@@ -236,7 +291,11 @@ def python_sites(text: str, filename: str, *, finite: bool = False, cwd_hits: li
         def visit_ClassDef(self, node):
             self.scope.append(node.name)
             if cwd_hits is not None:
-                self.cwd_scopes.append(("class", _cwd_bindings(node.body, self.cwd_scopes[-1][1])))
+                inherited = next(bindings for kind, bindings, *_ in reversed(self.cwd_scopes) if kind != "class")
+                bindings, local_names, global_writes, nonlocal_writes = _cwd_bindings(
+                    node.body, inherited, module=self.cwd_scopes[0][1], enclosing=self.cwd_scopes,
+                )
+                self.cwd_scopes.append(("class", bindings, local_names, global_writes, nonlocal_writes))
             self.generic_visit(node)
             if cwd_hits is not None:
                 self.cwd_scopes.pop()
@@ -249,7 +308,9 @@ def python_sites(text: str, filename: str, *, finite: bool = False, cwd_hits: li
             if cwd_hits is not None and name == "spawn_daemon":
                 for keyword in node.keywords:
                     if keyword.arg == "cwd" and _inherited_cwd(keyword.value, self.cwd_scopes[-1][1]):
-                        cwd_hits.append((".".join(self.scope) or "<module>", node.lineno, keyword.value.lineno))
+                        cwd_hits.append((
+                            ".".join(self.scope) or "<module>", node.lineno, keyword.lineno, keyword.value.lineno,
+                        ))
             self.generic_visit(node)
 
     Visitor().visit(tree)
@@ -497,8 +558,10 @@ def verify(root: Path = ROOT, census_path: Path | None = None) -> list[str]:
             parts = key.rsplit("::", 2)
             if len(parts) == 3 and parts[2] == "spawn_daemon":
                 filename, function, _api = parts
-                for scope, call_line, value_line in inherited_cwds.get(filename, []):
-                    if scope == function and not _cwd_exception(source_text[filename], call_line, value_line):
+                for scope, call_line, keyword_line, value_line in inherited_cwds.get(filename, []):
+                    if scope == function and not _cwd_exception(
+                        source_text[filename], call_line, keyword_line, value_line,
+                    ):
                         problems.append(
                             f"{filename}:{value_line}: resident daemon uses an inherited working directory; "
                             "pass its runtime root or home instead"

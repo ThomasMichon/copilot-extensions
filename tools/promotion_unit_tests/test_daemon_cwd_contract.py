@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -125,6 +126,135 @@ def test_comprehension_assignment_can_shadow_enclosing_import(tmp_path: Path) ->
     assert GUARD.verify(tmp_path) == []
 
 
+def _nested_fixture(root: Path, expression: str, outer: str, inner: str) -> None:
+    _fixture(root, expression, setup=inner)
+    source = root / "services" / "example" / "src" / "service.py"
+    text = source.read_text(encoding="utf-8")
+    prefix, body = text.split("def start(runtime_root):\n", 1)
+    source.write_text(
+        prefix + "def outer():\n" + outer
+        + textwrap.indent("def start(runtime_root):\n" + body, "    "),
+        encoding="utf-8",
+    )
+    compile(source.read_text(encoding="utf-8"), str(source), "exec")
+    census = root / "tools" / "daemon-coverage.json"
+    data = json.loads(census.read_text(encoding="utf-8"))
+    data["sites"]["resident"] = {"s:service.py::outer.start::spawn_daemon": 1}
+    census.write_text(json.dumps(data), encoding="utf-8")
+
+
+@pytest.mark.parametrize("declaration", ["global", "nonlocal"])
+def test_scope_declaration_preserves_the_resolved_import(tmp_path: Path, declaration: str) -> None:
+    if declaration == "global":
+        _nested_fixture(
+            tmp_path, "machine_os.getcwd()", "    machine_os = another_object\n",
+            "    global machine_os\n",
+        )
+    else:
+        _nested_fixture(
+            tmp_path, "local_os.getcwd()", "    import os as local_os\n",
+            "    nonlocal local_os\n",
+        )
+    assert any("inherited working directory" in problem for problem in GUARD.verify(tmp_path))
+
+
+def test_module_global_declaration_does_not_hide_an_import(tmp_path: Path) -> None:
+    _fixture(tmp_path, "machine_os.getcwd()")
+    source = tmp_path / "services" / "example" / "src" / "service.py"
+    text = source.read_text(encoding="utf-8")
+    source.write_text("global machine_os\n" + text, encoding="utf-8")
+    assert any("inherited working directory" in problem for problem in GUARD.verify(tmp_path))
+
+
+@pytest.mark.parametrize("declaration", ["global", "nonlocal"])
+def test_scope_declaration_does_not_restore_an_overwritten_import(tmp_path: Path, declaration: str) -> None:
+    if declaration == "global":
+        _fixture(
+            tmp_path, "machine_os.getcwd()",
+            setup="    global machine_os\n    machine_os = another_object\n",
+        )
+    else:
+        _nested_fixture(
+            tmp_path, "machine_os.getcwd()", "    machine_os = another_object\n",
+            "    nonlocal machine_os\n",
+        )
+    assert GUARD.verify(tmp_path) == []
+
+
+def test_parent_global_write_does_not_restore_the_module_import(tmp_path: Path) -> None:
+    _nested_fixture(
+        tmp_path, "machine_os.getcwd()", "    global machine_os\n    machine_os = another_object\n",
+        "    global machine_os\n",
+    )
+    assert GUARD.verify(tmp_path) == []
+
+
+def test_intermediate_nonlocal_write_invalidates_outer_import(tmp_path: Path) -> None:
+    _fixture(tmp_path, "local_os.getcwd()", setup="    nonlocal local_os\n")
+    source = tmp_path / "services" / "example" / "src" / "service.py"
+    text = source.read_text(encoding="utf-8")
+    prefix, body = text.split("def start(runtime_root):\n", 1)
+    source.write_text(
+        prefix + "def outer():\n    import os as local_os\n"
+        + "    def middle():\n"
+        + "        nonlocal local_os\n        local_os = another_object\n"
+        + textwrap.indent("def start(runtime_root):\n" + body, "        "),
+        encoding="utf-8",
+    )
+    compile(source.read_text(encoding="utf-8"), str(source), "exec")
+    census = tmp_path / "tools" / "daemon-coverage.json"
+    data = json.loads(census.read_text(encoding="utf-8"))
+    data["sites"]["resident"] = {"s:service.py::outer.middle.start::spawn_daemon": 1}
+    census.write_text(json.dumps(data), encoding="utf-8")
+    assert GUARD.verify(tmp_path) == []
+
+
+def test_nested_class_body_does_not_inherit_outer_class_bindings(tmp_path: Path) -> None:
+    _fixture(tmp_path, "runtime_root")
+    source = tmp_path / "services" / "example" / "src" / "service.py"
+    text = source.read_text(encoding="utf-8").split("def start(runtime_root):\n", 1)[0]
+    source.write_text(
+        text + "class Outer:\n"
+        "    machine_os = another_object\n"
+        "    class Inner:\n"
+        "        launch(['service'], cwd=machine_os.getcwd(), log_path='service.log')\n",
+        encoding="utf-8",
+    )
+    compile(source.read_text(encoding="utf-8"), str(source), "exec")
+    census = tmp_path / "tools" / "daemon-coverage.json"
+    data = json.loads(census.read_text(encoding="utf-8"))
+    data["sites"]["resident"] = {"s:service.py::Outer.Inner::spawn_daemon": 1}
+    census.write_text(json.dumps(data), encoding="utf-8")
+    assert any("inherited working directory" in problem for problem in GUARD.verify(tmp_path))
+
+
+@pytest.mark.parametrize("pattern", [
+    "machine_os",
+    "[*machine_os]",
+    "{'key': _, **machine_os}",
+], ids=["capture", "star", "mapping"])
+def test_pattern_capture_shadows_an_import(tmp_path: Path, pattern: str) -> None:
+    _fixture(
+        tmp_path, "machine_os.getcwd()",
+        setup=f"    match value:\n        case {pattern}:\n            pass\n",
+    )
+    assert GUARD.verify(tmp_path) == []
+
+
+@pytest.mark.parametrize("setup", [
+    "    import os.path\n",
+    "    import os\n    import os.path\n",
+], ids=["dotted", "plain-and-dotted"])
+def test_unaliased_dotted_import_preserves_the_os_binding(tmp_path: Path, setup: str) -> None:
+    _fixture(tmp_path, "os.getcwd()", setup=setup)
+    assert any("inherited working directory" in problem for problem in GUARD.verify(tmp_path))
+
+
+def test_aliased_dotted_import_does_not_bind_the_os_module(tmp_path: Path) -> None:
+    _fixture(tmp_path, "machine_os.getcwd()", setup="    import os.path as machine_os\n")
+    assert GUARD.verify(tmp_path) == []
+
+
 def test_malformed_resident_site_is_reported_without_crashing(tmp_path: Path) -> None:
     _fixture(tmp_path, "runtime_root")
     census = tmp_path / "tools" / "daemon-coverage.json"
@@ -208,4 +338,21 @@ def test_cwd_exception_may_precede_the_argument(tmp_path: Path) -> None:
                      "                  cwd=", 1),
         encoding="utf-8",
     )
+    assert GUARD.verify(tmp_path) == []
+
+
+@pytest.mark.parametrize("position", ["inline", "above"])
+def test_cwd_exception_uses_keyword_line_for_multiline_value(tmp_path: Path, position: str) -> None:
+    _fixture(tmp_path, "machine_os.getcwd()")
+    source = tmp_path / "services" / "example" / "src" / "service.py"
+    text = source.read_text(encoding="utf-8")
+    before = "                  cwd=machine_os.getcwd(), \n"
+    assert text.count(before) == 1
+    comment = "# daemon-spawn: allow bounded fixture"
+    after = (
+        f"                  cwd=(  {comment}\n" if position == "inline"
+        else f"                  {comment}\n                  cwd=(\n"
+    )
+    after += "                      machine_os.getcwd()\n                  ),\n"
+    source.write_text(text.replace(before, after, 1), encoding="utf-8")
     assert GUARD.verify(tmp_path) == []
