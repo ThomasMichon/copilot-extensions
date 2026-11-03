@@ -4105,6 +4105,39 @@ attestation through the existing release owner. The old subject's attestation
 cannot approve changed index bytes. No dependency bytes enter this index
 hand-off, and the default profile-only output remains unchanged.
 
+`tools/core_native_delivery.py` connects that candidate producer to the
+existing native resolver and delivery owners:
+
+```text
+python tools/core_native_delivery.py --source-checkout <repo> --source-commit <commit> --main-head <main-commit> --core-manifest <manifest> --wheel-dir <wheels> --native-lock <pylock.toml> --materials <materials-json> --material-dir <materials-dir> --uv <uv> --output <delivery.zip>
+```
+
+It composes the selected Git source, checks it against the exact core
+manifest and first-party wheels, and projects the applicable core requirements
+for the running interpreter. `--native-lock` selects a bounded existing UV
+`pylock.toml`; its exact bytes remain held and rechecked. The command does not
+run dependency resolution: native UV redirects are not constrained by the wheel
+acquisition owner's origin allowlist. The lock supplies candidate filenames and
+digests, not approval or a download origin. The source-derived roots and
+complete inspected closure still have to agree, and unused or first-party
+registry entries refuse. The existing feed
+owner requires an affirmatively trusted non-public HTTPS index and uses
+system certificates; separately authorized download origins can be supplied with
+`--download-origin` for the subsequent guarded acquisition.
+The selected external wheels, first-party wheels and caller-selected
+source/notice materials are retained and checked through candidate creation.
+An active third-party local source mapping is refused before resolution;
+the producer never silently substitutes a registry origin. This includes the
+current Linux Manager `dbus-next` wheel workaround, whose removal requires the
+separate affected-feed qualification in #7606. Linux core generation is not
+qualified by the Windows path.
+The output is an inert delivery envelope; its reported `approval` is
+`unattested`. Its selected Main commit establishes ancestry only, not
+authentication. Feed qualification, material clearance, source/release
+admission, attestation, publication and installation remain separate
+responsibilities. The output directory must already exist and support hard
+links; existing output is never replaced.
+
 `tools/runtime_profile_bundle.py` provides the matching repeatable transport producer:
 
 ```text

@@ -31,7 +31,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, TypedDict
 
 _TERMINAL_MARKER = re.compile(r"^=== (.+?) ===\s*$", re.MULTILINE)
 _DISPOSITION = re.compile(r"disposition=(\S+)")
@@ -43,6 +43,16 @@ _LAUNCH_EPOCH_MS = re.compile(r"-(\d{10,})-\d+\.log$")
 # any log this parser cannot confidently classify -- always reported
 # separately, never folded into "ready" or a failure bucket.
 _KNOWN_OUTCOMES = ("ready", "ready-timeout", "peer-closed-before-ready", "crash")
+
+
+class WindowSummaryPayload(TypedDict):
+    label: str
+    window_start: str | None
+    window_end: str | None
+    total: int
+    outcomes: dict[str, int]
+    ready_timeout_rate: float | None
+    cli_versions: dict[str, int]
 
 
 @dataclass
@@ -119,7 +129,7 @@ class WindowSummary:
             return None
         return self.outcomes.get("ready-timeout", 0) / self.total
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> WindowSummaryPayload:
         return {
             "label": self.label,
             "window_start": self.window_start.isoformat() if self.window_start else None,

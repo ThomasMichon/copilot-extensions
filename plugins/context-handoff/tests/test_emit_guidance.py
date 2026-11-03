@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from typing import TypedDict, cast
 
 import pytest
 
@@ -14,6 +15,16 @@ PLUGIN = Path(__file__).resolve().parents[1]
 MANIFEST = PLUGIN / "plugin.json"
 POWERSHELL_PRODUCER = PLUGIN / "scripts" / "emit-guidance.ps1"
 BASH_PRODUCER = PLUGIN / "scripts" / "emit-guidance.sh"
+
+
+class _Command(TypedDict):
+    argv: list[str]
+    availability: str
+
+
+class _Catalog(TypedDict):
+    payload: dict[str, str]
+    commands: list[_Command]
 
 
 def _powershell() -> str | None:
@@ -96,12 +107,12 @@ def _run_native(
 def _context(result: subprocess.CompletedProcess[str]) -> str:
     payload = json.loads(result.stdout)
     assert set(payload) == {"additionalContext"}
-    return payload["additionalContext"]
+    return cast(str, payload["additionalContext"])
 
 
-def _catalog(context: str) -> dict[str, object]:
+def _catalog(context: str) -> _Catalog:
     raw = context.split("```json\n", 1)[1].split("\n```", 1)[0]
-    return json.loads(raw)
+    return cast(_Catalog, json.loads(raw))
 
 
 def test_manifest_registers_output_free_session_writer() -> None:

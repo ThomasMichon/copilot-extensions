@@ -2,6 +2,15 @@
 
 Context window monitoring and session handoff for GitHub Copilot CLI.
 
+The complete six-file Python helper/test scope is checked with strict MyPy
+on the declared Linux and Windows analysis targets:
+`python tools/typecheck.py context-handoff` from the repository root.
+Prepare a missing checker environment explicitly with the same command's
+`--prepare` option; ordinary checking never installs tooling. Dynamic JSON
+and module-loading boundaries retain honest types without changing helper
+behavior or weakening native subprocess controls. This admission does not
+qualify Node sources or embedded/generated Python.
+
 **Native-first continuity:** an explicit boolean `contextManagementTools: true`
 or the complete currently offered context tool set selects native checkpoint/
 terminal rollover rather than a competing custom session transfer. Explicit false
