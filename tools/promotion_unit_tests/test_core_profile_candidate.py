@@ -239,6 +239,27 @@ def _index_candidate(inputs, index, records):
     )
 
 
+def test_core_source_index_requires_the_selected_release():
+    index = {"dev_head": "a" * 40}
+    producer.validate_core_source_index(index, {"last_promotion": {"dev_head": "a" * 40}})
+    for state in ({}, {"last_promotion": {}}, {"last_promotion": {"dev_head": "b" * 40}}):
+        with pytest.raises(ProfileError, match="selected source release"):
+            producer.validate_core_source_index(index, state)
+    with pytest.raises(ProfileError, match="selected source release"):
+        producer.validate_core_source_index({"dev_head": "bad"}, {"last_promotion": {"dev_head": "bad"}})
+
+
+def test_direct_core_index_handoff_binds_exact_manifest_bytes(inputs):
+    manifest_data = json.dumps(inputs[0]).encode()
+    profile = build(inputs)
+    index = _index(inputs)
+    candidate = producer.compose_core_profile_index(index, manifest_data, profile)
+    assert candidate["runtime_profiles"]["profiles"] == [profile.record()]
+    assert {key: value for key, value in candidate.items() if key != "runtime_profiles"} == index
+    with pytest.raises(ProfileError, match="manifest"):
+        producer.compose_core_profile_index(index, json.dumps(inputs[0], indent=2).encode(), profile)
+
+
 def test_index_candidate_preserves_all_existing_source_and_artifact_data(inputs):
     index = _index(inputs)
     original = json.dumps(index, sort_keys=True)

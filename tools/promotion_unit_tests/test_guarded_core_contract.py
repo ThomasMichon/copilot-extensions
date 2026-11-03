@@ -1,6 +1,7 @@
 """Actor-free contracts for guarded core selection."""
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 import time
@@ -60,6 +61,71 @@ def _limits():
         max_index_bytes=4096, max_total_metadata_bytes=8192, max_wheel_bytes=16384,
         max_closure_bytes=32768, max_temporary_bytes=65536, max_workers=2,
     )
+
+
+def test_guarded_project_uses_the_configured_feed_metadata_policy(monkeypatch):
+    observed = []
+
+    class Client:
+        def __init__(self, *_args):
+            pass
+
+        def request(self, _location, _feed, origins, _accept, *, index=False):
+            observed.append((origins, index))
+            raise guard.acquisition.AcquisitionUnavailable("fixture unavailable")
+
+    monkeypatch.setattr(guard.acquisition, "_Client", Client)
+    feed = SimpleNamespace(index_url="https://feed.example/simple")
+    assert guard._fetch_project(feed, "fixture", _limits(), time.monotonic() + 30, None, None) is None
+    assert observed == [(None, True)]
+
+
+def test_guarded_wheel_delegates_only_without_explicit_restrictions(monkeypatch):
+    content = b"fixture wheel bytes"
+    digest = hashlib.sha256(content).hexdigest()
+    observed = []
+
+    class Client:
+        def __init__(self, *_args):
+            pass
+
+        def request(self, location, _feed, origins, _accept):
+            observed.append(origins)
+            return SimpleNamespace(close=lambda: None), location, []
+
+        def read(self, _response, _limit, *, output):
+            output.write(content)
+            return b"", "sha256:" + digest, len(content)
+
+    monkeypatch.setattr(guard.acquisition, "_Client", Client)
+    monkeypatch.setattr(
+        guard.acquisition, "_selected",
+        lambda *_args: ("https://cdn.example/fixture.whl", "2020-01-01T00:00:00Z", None),
+    )
+    monkeypatch.setattr(
+        guard, "inspect_wheel_facts",
+        lambda *_args, **_kwargs: SimpleNamespace(requires_dist=[]),
+    )
+    server = object.__new__(guard._GuardedIndex)
+    server.lock = threading.RLock()
+    server.files = {"/wheel": ("fixture", "fixture-1.0-py3-none-any.whl", digest)}
+    server.wheel_locks, server.cache, server.admitted = {}, {}, {}
+    server.projects = {
+        "fixture": {"entries": [], "base": "https://feed.example/", "origin": "https://feed.example"},
+    }
+    server.cutoffs, server.floor = {}, None
+    server.limits, server.deadline = _limits(), time.monotonic() + 30
+    server.context, server.budget, server.feed = None, None, None
+    server.wheel_limits = SimpleNamespace(
+        max_archive_bytes=100, max_expanded_bytes=100, max_metadata_member_bytes=100,
+    )
+
+    cases = (((), None), (("https://allowed.example",), {"https://feed.example", "https://allowed.example"}))
+    for origins, expected in cases:
+        server.origins = origins
+        server.cache.clear()
+        assert server.wheel("/wheel") == content
+        assert observed[-1] == expected
 
 
 def _response():
