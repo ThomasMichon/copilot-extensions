@@ -21,16 +21,17 @@
 
 ## The problem
 
-**Ordinary update and repair follow the incoming-start-first contract** in the
+**Ordinary update and repair prefer incoming-start-first cutover** in the
 [installer vision](../../visions/installer/README.md): publish and start the
 selected generation independently of the incumbent, then let the displaced
-owner observe supersession and retire itself. Neither a working old IPC
-contract nor installer-driven stop, uninstall, deletion or unregistration is a
-replacement prerequisite. The cold-termination and legacy-recovery mechanisms
-below remain separate, explicitly authorized recovery operations, not a fallback
-that ordinary update or repair may silently invoke. Existing adopters still
-converge component by component; historical automatic-cutover adoption alone
-does not prove this newer lifecycle.
+owner observe supersession and retire itself. A working old IPC contract is
+not a replacement prerequisite. An authorized update includes the bounded cold
+fallback below when the predecessor cannot cooperate or settle; it does not
+require another force/repair flag solely for missing graceful support. Report
+the selected path and any interruption rather than silently claiming seamless
+cutover. Broad historical cleanup remains a separate explicit operation.
+Existing adopters converge component by component; historical automatic-cutover
+adoption alone does not prove cold takeover or this newer lifecycle.
 
 A **Runtime service** plugin (see the plugin-shapes table) runs a long-lived
 local daemon that holds **in-flight, non-resumable work**: agent-bridge hosts a
@@ -104,10 +105,13 @@ preserves the possibly admitted successor and reports failure, never passive
 disposal or rollback. The elected resident reconciles durable predecessor
 records and canonical runtime references, retaining its own demand and displaced
 code until positive native exit. This is not a new daemon or delayed reaper.
-The outgoing runtime must also support readiness-gated retirement without
-grace-forced exit of accepted work. An incapable or unrouted live predecessor
-refuses installation before selector mutation; skipping a forced restart cannot
-make its older self-exit behavior safe. The owner reserves canonical execution
+This asynchronous path requires an outgoing runtime that supports
+readiness-gated retirement without grace-forced exit of accepted work. An
+incapable predecessor must instead use bounded cold takeover; it cannot veto
+the update merely by lacking that capability. An unrouted live process needs
+independent owner/identity attribution before any termination, never a guessed
+PID. These are target requirements, not proof that this adopter already
+implements the legacy fallback. The owner reserves canonical execution
 protection before persisting retirement intent, cancels exact custody only after proven precommit
 rollback, and keeps a pending dev claim through duplicate release attempts.
 Prepared intent cannot execute a retirement grant. Commitment enables native-exit
