@@ -156,6 +156,37 @@ def test_required_refusal_controls_are_present() -> None:
     )
 
 
+def test_guidance_resolution_separates_contexts_and_uses_existing_owners() -> None:
+    skill = " ".join(_read(SKILL / "SKILL.md").split())
+    setup = " ".join(_read(
+        SKILL / "references" / "setup-and-adapters.md"
+    ).split())
+    assert "not because Dispatch is mandatory" in skill
+    assert "a role charter need not live in a recipe" in skill
+    for requirement in (
+        "executing harness",
+        "approved-base target guidance",
+        "Candidate changes are proposals",
+        "state-root --json",
+        "state-root --pair --json",
+        "registrar doctor --json",
+        "registrar discover-repo <resolved-declaration-repository-root>",
+        "identities show <selected-name> --repo-root <defining-supplier-root>",
+        "source/path/shadows/errors",
+        "not a full provenance trace",
+        "no Dispatch registrar is required",
+        "not one universal precedence chain",
+        "silently swap the acting identity",
+        "server candidate/write fences",
+        "author/reviewer independence",
+        "unresolved/missing/ambiguous/conflicting inputs",
+    ):
+        assert requirement in setup, requirement
+    charter = _read(SKILL / "assets" / "CHARTER.md")
+    assert "Executing harness/control owner and reviewed target/base" in charter
+    assert "not candidate-supplied authority" in charter
+
+
 def test_reviewer_posts_directly_without_per_round_coordinator_release() -> None:
     skill = " ".join(_read(SKILL / "SKILL.md").split())
     coordination = " ".join(_read(

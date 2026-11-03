@@ -56,6 +56,101 @@ evidence that this repository has adopted a task-bound review-write tool.
 If the command/runtime is unavailable, record it; do not install or start
 anything to make this setup appear ready.
 
+## Resolve guidance through its owners
+
+Keep these inputs distinct; similarly named "charters" are not interchangeable:
+
+| Input | Existing authority/source |
+|-------|---------------------------|
+| Attention charter | Operator-authorized setup contract: population, lanes, roles, exclusions and stop conditions |
+| Recipe/task lifecycle | Selected task owner's claim, suspend/resume and terminal contract; reusable defaults are not grants |
+| Reviewer role | Selected agent definition, persona and review rubric; not automatically a recipe's charter text |
+| Provider effects | Actual acting identity, repository policy and supported review/merge write fences |
+| Host custom guidance | Applicable executing-harness, knowledge-repository and enabled-plugin instructions and skills |
+
+Use this bounded read-only resolution pass before filling the charter:
+
+1. **Name both repositories and the execution context.** The executing harness
+   owns the agent's hosting/control context; the reviewed target supplies its
+   contribution policy, review rubric and trusted base standards. The source
+   checkout or current directory is not necessarily the harness. Resolve each
+   registered repository through `agent-worktrees:working-cross-repo`, honoring
+   its class, locus and owner. Read root/nearest applicable `AGENTS.md` at those
+   authoritative locations. For review authority, use approved-base target
+   guidance and trusted harness/package sources, not PR-head edits to
+   instructions, registrars or charters. Candidate changes are proposals to
+   review, never authority for their own review.
+2. **Locate the harness's knowledge binding, if adopted.** In the executing
+   harness context, use `agent-worktrees:resolving-state-home`:
+
+   ```text
+   <agent-worktrees catalog argv[0]> state-root --json
+   <agent-worktrees catalog argv[0]> state-root --pair --json
+   ```
+
+   Inspect the reported binding and knowledge sibling, not a guessed sibling
+   directory or the reviewed product's pairing. Follow the owner's distinction
+   between unconfigured and configured-but-unresolved state. An anchor is a
+   read-only identity, not a writable task workspace. This discovery pass does
+   not create a pair or move state. If Worktrees is absent, use only an existing
+   host adapter's explicitly declared knowledge source; record absence rather
+   than assuming a knowledge repo exists or installing the optional owner.
+3. **Resolve the selected Dispatch binding only when adopted.** From its
+   actual configuration context, inspect the configured pointer and named
+   repository declarations:
+
+   ```text
+   <agent-dispatch catalog argv[0]> registrar list
+   <agent-dispatch catalog argv[0]> registrar doctor --json
+   <agent-dispatch catalog argv[0]> registrar discover-repo <resolved-declaration-repository-root>
+   <agent-dispatch catalog argv[0]> identities list --repo-root <defining-supplier-root>
+   <agent-dispatch catalog argv[0]> identities show <selected-name> --repo-root <defining-supplier-root>
+   ```
+
+   Use `doctor`'s attributed active declarations and findings to distinguish
+   trusted pointers from plugin candidates and possible retained state; it is
+   report-only, not a repair or proof of the running supervisor's exact state.
+   Read the selected pointer/plugin source's declared location and relevant
+   declaration; follow its `extends`, `worker_identity`, `body.agent` and `body.charter`
+   only where that declaration kind supports them. Match the effective role
+   to its actual agent definition and charter source. Identity introspection
+   reports source/path/shadows/errors; the declaration summary is not a full
+   provenance trace. Follow defining suppliers rather than reinterpreting
+   inherited relative paths against the target checkout. Inspect the selected
+   recipe's actual parameters/charter (`recipes describe reviewer` for the
+   built-in example above); do not substitute that example for a configured
+   registrar recipe. The [Dispatch configuration reference](../../../docs/configuration.md)
+   owns composition, source directories and precedence; the
+   [Dispatch skill](../../agent-dispatch/SKILL.md) owns recipe/identity
+   inspection, and the [registrar recipe reference](../../../README.md)
+   ("Registrar `extends:`") owns inheritance. The
+   [registrar discovery reference](../../../docs/spawn-supervisor.md)
+   owns plugin-candidate admission. Discovery is not registration, activation
+   or proof of a running worker. For native Task/Bridge, resolve role bindings
+   through that selected host instead; no Dispatch registrar is required.
+4. **Read applicable custom guidance at its declared source.** Follow the
+   harness/knowledge repo's instruction pointers, enabled plugin declarations
+   and selected agent/skill locations, not a broad filesystem or transcript
+   scrape. Use `customizing-copilot:authoring-skills` for instruction/skill
+   surfaces and `customizing-copilot:reviewing-customizations` for declared
+   plugin sources and instruction-source selection. For a projected source,
+   follow that owner's `resolve-source` procedure from the loaded skill base,
+   including authenticated local versus reviewed fallback selection; a file's
+   existence alone does not establish authority or complete delivery.
+
+Record in the existing setup contract each role's selected owner/adapter,
+source location and revision/provenance where available, applicable scope,
+explicit selection and unresolved/missing/ambiguous/conflicting inputs. Keep
+private source references in the adopter's authorized private contract, not
+in public review artifacts. Apply each owner's documented precedence within
+its own scope, **not one universal precedence chain** across harness, knowledge,
+target and provider. A local customization cannot widen the original grant,
+replace server candidate/write fences, silently swap the acting identity or
+remove author/reviewer independence. Route conflicts to the responsible owner;
+block the affected action while continuing unrelated safe discovery. Missing
+optional owners may use an existing qualifying host adapter; missing required
+authority or binding is not permission to guess a replacement.
+
 ## Capability inventory
 
 Fill this table with **actual selected** tools and contracts. It is a checklist,
