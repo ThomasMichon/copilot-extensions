@@ -351,16 +351,28 @@ class ServiceRuntime:
         slot, route = self.route(path, request.method)
         check("response-stream" not in route.capabilities or request.version >= HttpVersion11,
               "stream-http-version-required", 505)
-        machine = self.authority.machine_profile()
-        access, proof = credentials(request, machine=machine)
+        authorization = request.headers.getall("Authorization", [])
+        scheme = "Bear" + "er "
+        user = len(authorization) == 1 and authorization[0].startswith(scheme)
+        machine = False if user else self.authority.machine_profile()
+        if user:
+            check(self.authority.user_profile(), "authentication-required", 401)
+            access = user_credentials(request, self.origin)
+        else:
+            access, proof = credentials(request, machine=machine)
         uri = self.origin + path + (query if machine else "")
         request[AUTH_URI] = uri
         digest = None
         if machine:
             digest = hashlib.sha256(await body(request, BODY_BYTES)).hexdigest()
-        grant = self.authority.authenticate_caller(
-            access, proof, method=request.method, request_method=request.method,
-            target_uri=uri, slot=slot.name, content_digest=digest)
+        if user:
+            grant = self.authority.authenticate_user_caller(
+                access, method=request.method, request_method=request.method,
+                target_uri=uri, slot=slot.name)
+        else:
+            grant = self.authority.authenticate_caller(
+                access, proof, method=request.method, request_method=request.method,
+                target_uri=uri, slot=slot.name, content_digest=digest)
         channel = None
         pending = None
         response = None
@@ -537,6 +549,22 @@ def credentials(request: web.Request, *, machine: bool = False) -> tuple[str, st
     return values[0][len(scheme):], proofs[0]
 
 
+def user_credentials(request: web.Request, origin: str) -> str:
+    """Explicit header only; no ambient browser or trusted-forwarder identity."""
+    values = request.headers.getall("Authorization", [])
+    scheme = "Bear" + "er "
+    check(len(values) == 1 and values[0].startswith(scheme)
+          and 0 < len(values[0]) - len(scheme) <= 8192, "authentication-required", 401)
+    mixed = ("DPoP", "Fleet-Machine-Proof", "Fleet-Enrollment-Grant", "Cookie",
+             "X-Identity", "X-Fleet-Caller", "X-Forwarded-User", "X-Forwarded-Identity")
+    check(not any(name in request.headers for name in mixed), "mixed-authentication", 401)
+    origins = request.headers.getall("Origin", [])
+    check(not origins or origins == [origin], "cross-origin-denied", 403)
+    check(request.headers.get("Sec-Fetch-Site", "same-origin") in ("same-origin", "none"),
+          "cross-origin-denied", 403)
+    return values[0][len(scheme):]
+
+
 @web.middleware
 async def guarded(
     request: web.Request,
@@ -591,6 +619,7 @@ def outcome(request: web.Request, code: str) -> str:
 async def build_app(listener: Listener, policy_path: Path, *, reload_interval: float = 1,
                     clock: Callable[[], int] = lambda: int(time.time()),
                     identity_provider: IdentityProvider | None = None,
+                    user_identity_provider: IdentityProvider | None = None,
                     enrollment_journal: OperationLedger | None = None,
                     local_handlers: tuple[LocalHandlerBinding, ...] = ()) -> web.Application:
     """Build without binding; the policy file is the sole explicit runtime source."""
@@ -599,7 +628,8 @@ async def build_app(listener: Listener, policy_path: Path, *, reload_interval: f
     authority = ServiceAuthority(
         fleet=listener.fleet, gateway=listener.gateway,
         source=lambda: read_bounded(policy_path), clock=clock,
-        identity_provider=identity_provider, enrollment_journal=enrollment_journal)
+        identity_provider=identity_provider, user_identity_provider=user_identity_provider,
+        enrollment_journal=enrollment_journal)
     state = ServiceRuntime(authority, listener, reload_interval, local_handlers)
     await state.reload()
     app = web.Application(middlewares=[guarded], client_max_size=BODY_BYTES, handler_args={

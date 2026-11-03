@@ -22,6 +22,8 @@ from .gateway_service_context import (
 )
 from .machine_identity import MachineIdentity, MachineIdentityVerifier, PROFILE as MACHINE_PROFILE
 from .runtime_identity import IdentityError, IdentityVerifier, VerifiedIdentity
+from .bearer_identity import BearerIdentity, BearerIdentityVerifier
+from .gateway_user_context import parse_user_context
 from .operations import OperationIntent
 from .runtime_admission import AdmissionAuthority, Permit
 from . import planning
@@ -108,8 +110,8 @@ class CallerScope:
 @dataclass(frozen=True)
 class _Record:
     grant: ServiceCandidate | ServiceGrant | CallerGrant
-    identity: VerifiedIdentity = field(repr=False)
-    verifier: ServiceVerifier = field(repr=False)
+    identity: VerifiedIdentity | BearerIdentity = field(repr=False)
+    verifier: ServiceVerifier | BearerIdentityVerifier = field(repr=False)
     slot_fingerprint: str
     slot: str
     caller_fingerprint: str | None = None
@@ -129,15 +131,19 @@ class ServiceAuthority:
     def __init__(self, *, fleet: str, gateway: str, source: Callable[[], bytes],
                  clock: Callable[[], int],
                  identity_provider: IdentityProvider | None = None,
+                 user_identity_provider: IdentityProvider | None = None,
                  enrollment_journal: OperationLedger | None = None) -> None:
         self._fleet, self._gateway = identifier(fleet), identifier(gateway)
         require(callable(source), "invalid-source")
         require(callable(clock), "invalid-clock")
         require(identity_provider is None or type(identity_provider) is IdentityProvider,
                 "invalid-identity-provider")
+        require(user_identity_provider is None or type(user_identity_provider) is IdentityProvider,
+                "invalid-identity-provider")
         require(enrollment_journal is None or type(enrollment_journal) is OperationLedger,
                 "invalid-enrollment-journal")
         self._identity_provider = identity_provider
+        self._user_identity_provider = user_identity_provider
         self._journal = enrollment_journal
         self._enrollment: EnrollmentPolicy | None = None
         self._source, self._clock = source, clock
@@ -145,6 +151,7 @@ class ServiceAuthority:
         self._publication_lock = RLock()
         self._snapshot: ServiceSnapshot | None = None
         self._verifier: ServiceVerifier | None = None
+        self._user_verifier: BearerIdentityVerifier | None = None
         self._services: dict[str, _Record] = {}
         self._candidates: dict[int, _Record] = {}
         self._callers: dict[int, _Record] = {}
@@ -164,15 +171,16 @@ class ServiceAuthority:
         self._last_time = now
         return now
 
-    def _current(self) -> tuple[ServiceContext, ServiceVerifier]:
-        require(self._snapshot is not None and self._verifier is not None, "not-configured")
-        assert self._snapshot is not None and self._verifier is not None
+    def _current(self) -> tuple[ServiceContext, ServiceVerifier | None]:
+        require(self._snapshot is not None, "not-configured")
+        assert self._snapshot is not None
         return self._snapshot.context, self._verifier
 
-    def _active(self) -> tuple[ServiceContext, ServiceVerifier, int]:
+    def _active(self, *, user: bool = False) -> tuple[ServiceContext, ServiceVerifier | None, int]:
         context, verifier = self._current()
         now = self._time()
-        require(now < context.trust_valid_until, "authority-unavailable")
+        expires = context.user_trust_valid_until if user else context.trust_valid_until
+        require(expires is not None and now < expires, "authority-unavailable")
         return context, verifier, now
 
     def status(self) -> ServiceStatus:
@@ -210,11 +218,14 @@ class ServiceAuthority:
                     require(context.digest == current.context.digest, "revision-conflict")
             now = self._time()
             require(now < context.trust_valid_until, "authority-unavailable")
+            require(context.user_trust_valid_until is None
+                    or now < context.user_trust_valid_until, "authority-unavailable")
             return now
 
     def _reload_candidate(self, raw: bytes, decoded: object) -> ServicePublication:
         try:
             enrollment = None
+            user_verifier = None
             eligible_at = None
             if isinstance(decoded, dict) and decoded.get("schema") == ENROLLMENT_SCHEMA:
                 require(self._journal is not None, "enrollment-journal-required")
@@ -232,8 +243,13 @@ class ServiceAuthority:
             else:
                 require(self._enrollment is None and self._journal is None,
                         "enrollment-rollback-refused")
-                context, candidate_verifier = parse_context(
-                    raw, self._clock, identity_provider=self._identity_provider)
+                if isinstance(decoded, dict) and decoded.get("version") == 5:
+                    context, candidate_verifier, user_verifier = parse_user_context(
+                        raw, self._clock, identity_provider=self._identity_provider,
+                        user_identity_provider=self._user_identity_provider)
+                else:
+                    context, candidate_verifier = parse_context(
+                        raw, self._clock, identity_provider=self._identity_provider)
             require(context.manifest.fleet == self._fleet
                     and context.manifest.gateway == self._gateway, "owner-mismatch")
         except ServicePolicyError as exc:
@@ -256,6 +272,8 @@ class ServiceAuthority:
                             and type(candidate_verifier) is MachineIdentityVerifier
                             and self._verifier.refresh(candidate_verifier)):
                         self._verifier = candidate_verifier
+                if not current or current.context.user_trust_digest != context.user_trust_digest:
+                    self._user_verifier = user_verifier
                 self._enrollment = enrollment
                 self._snapshot = ServiceSnapshot(context, current.generation + 1 if current else 1)
                 self._prune(context, now)
@@ -309,7 +327,15 @@ class ServiceAuthority:
         """Return the current verifier nonce, not desired inventory."""
         with self._lock:
             _, verifier, _ = self._active()
+            require(verifier is not None, "unsupported-profile")
+            assert verifier is not None
             return verifier.nonce
+
+    def user_profile(self) -> bool:
+        """Explicit configured capability, never fallback after another proof fails."""
+        with self._lock:
+            self._current()
+            return self._user_verifier is not None
 
     def machine_profile(self) -> bool:
         """Selected runtime capability, never inferred from a presented credential."""
@@ -360,9 +386,13 @@ class ServiceAuthority:
             raise ServicePolicyError(exc.code) from None
         return identity, verifier
 
-    def _verified_current(self, identity: VerifiedIdentity, verifier: ServiceVerifier
+    def _verified_current(self, identity: VerifiedIdentity | BearerIdentity,
+                          verifier: ServiceVerifier | BearerIdentityVerifier
                           ) -> tuple[ServiceContext, int]:
-        context, current, now = self._active()
+        user = type(identity) is BearerIdentity
+        context, current, now = self._active(user=user)
+        if user:
+            current = self._user_verifier
         require(verifier is current, "trust-changed")
         if type(identity) is MachineIdentity and type(current) is MachineIdentityVerifier:
             require(current.current(identity), "trust-changed")
@@ -371,13 +401,16 @@ class ServiceAuthority:
 
     def _valid(self, record: _Record, context: ServiceContext, now: int) -> bool:
         identity = record.identity
+        user = type(identity) is BearerIdentity
+        current = self._user_verifier if user else self._verifier
+        expires = context.user_trust_valid_until if user else context.trust_valid_until
         return (
-            record.verifier is self._verifier
+            record.verifier is current
             and (type(identity) is not MachineIdentity
                  or (type(self._verifier) is MachineIdentityVerifier
                      and self._verifier.current(identity)))
             and identity.verified_at <= now < identity.expires_at
-            and now < context.trust_valid_until
+            and expires is not None and now < expires
             and context.slot_fingerprint(record.slot) == record.slot_fingerprint
             and (record.caller_fingerprint is None or context.caller_fingerprint(
                 identity.subject) == record.caller_fingerprint)
@@ -509,42 +542,77 @@ class ServiceAuthority:
         require(method == request_method, "method-denied")
         identity, verifier = self._verify(
             access, proof, method, target_uri, "caller", slot, content_digest)
+        return self._admit_caller(
+            identity, verifier, method=request_method, target_uri=target_uri, slot=slot)
+
+    def authenticate_user_caller(
+        self, access: str, *, method: str, target_uri: str, slot: str, request_method: str,
+    ) -> CallerGrant:
+        """Explicit bearer caller admission; no proof, enrollment or service identity."""
+        require(method == request_method, "method-denied")
+        with self._lock:
+            self._active(user=True)
+            verifier = self._user_verifier
+            require(type(verifier) is BearerIdentityVerifier, "unsupported-profile")
+        assert type(verifier) is BearerIdentityVerifier
+        try:
+            identity = verifier.verify(
+                access, method=method, target_uri=target_uri, kind="caller")
+            require(type(identity) is BearerIdentity and identity.profile == "user-bearer-v1",
+                    "invalid-credential")
+        except IdentityError as exc:
+            raise ServicePolicyError(exc.code) from None
+        return self._admit_caller(
+            identity, verifier, method=request_method, target_uri=target_uri, slot=slot)
+
+    def _admit_caller(
+        self, identity: VerifiedIdentity | BearerIdentity,
+        verifier: ServiceVerifier | BearerIdentityVerifier, *,
+        method: str, target_uri: str, slot: str,
+    ) -> CallerGrant:
         with self._lock:
             context, now = self._verified_current(identity, verifier)
-            selected, caller = context.slot(slot), context.caller(identity.subject)
-            require(identity.proof_key == context.key(caller.key_source).thumbprint,
-                    "caller-denied")
-            require(selected.name in caller.slots and request_method in caller.methods
-                    and any(request_method in route.methods for route in selected.routes),
+            selected = context.slot(slot)
+            if type(identity) is BearerIdentity:
+                caller = context.user_caller(identity.subject)
+            else:
+                caller = context.caller(identity.subject)
+                require(identity.proof_key == context.key(caller.key_source).thumbprint,
+                        "caller-denied")
+            require(selected.name in caller.slots and method in caller.methods
+                    and any(method in route.methods for route in selected.routes),
                     "caller-denied")
             self._prune(context, now)
             require(len(self._callers) < MAX_CALLER_GRANTS, "resource-limit")
-            grant = CallerGrant(selected.name, request_method, target_uri,
+            grant = CallerGrant(selected.name, method, target_uri,
                                 self._next(), identity.expires_at)
             slot_fingerprint = context.slot_fingerprint(selected.name)
             caller_fingerprint = context.caller_fingerprint(identity.subject)
             assert slot_fingerprint is not None and caller_fingerprint is not None
             self._callers[grant.generation] = _Record(
                 grant, identity, verifier, slot_fingerprint, selected.name,
-                caller_fingerprint, request_method, target_uri)
+                caller_fingerprint, method, target_uri)
             return grant
 
     def revalidate_caller(self, grant: CallerGrant) -> CallerScope:
         """Current lookup/effect checkpoint, not a transferable offline permit."""
         with self._lock:
-            context, _, now = self._active()
             require(type(grant) is CallerGrant and type(grant.generation) is int,
                     "invalid-grant")
             record = self._callers.get(grant.generation)
             require(record is not None and record.grant is grant, "invalid-grant")
             assert record is not None
+            context, _, now = self._active(user=type(record.identity) is BearerIdentity)
             if not self._valid(record, context, now):
                 del self._callers[grant.generation]
                 raise ServicePolicyError("revoked-grant")
             assert record.method is not None and record.target_uri is not None
+            expires = (context.user_trust_valid_until if type(record.identity) is BearerIdentity
+                       else context.trust_valid_until)
+            assert expires is not None
             return CallerScope(
                 context.slot(record.slot), record.method, record.target_uri,
-                record.identity.subject, min(record.identity.expires_at, context.trust_valid_until))
+                record.identity.subject, min(record.identity.expires_at, expires))
 
     def release_caller(self, grant: CallerGrant) -> bool:
         """Release one exact retained request handle without evicting others."""
