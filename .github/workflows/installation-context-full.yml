@@ -149,7 +149,7 @@ jobs:
         run: python -c "import os,subprocess; actual=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(); assert actual == os.environ['GITHUB_SHA']; print('source='+actual)"
       - name: Qualify inactive first touch and configured consumers
         run: >-
-          python tools/run-plugin-tests.py agent-vault
+          python tools/run-plugin-tests.py agent-vault --max-files-per-sub-suite 2
           --test-file tests/test_configuration_layers.py
           --test-file tests/test_installer_readiness.py
           --test-file tests/test_bootstrap_driver.py

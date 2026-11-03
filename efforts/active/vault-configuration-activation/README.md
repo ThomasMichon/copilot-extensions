@@ -155,3 +155,6 @@ remain authoritative for their machine-local custody.
   four bounded sub-suites. An earlier combined run exceeded its 300-second
   group budget; splitting at two files preserves the existing item/group and
   overall limits rather than increasing deadlines.
+- Exact-source native qualification and required CI also passed on `dde5b4a9c3`.
+  The remaining review correction applies the same two-file sub-suite shape to
+  the on-demand workflow, preserving the existing runner budgets.
