@@ -1,0 +1,9 @@
+{
+  "comment": "Capture bounded committed-save evidence and defer optional notifications past record and pair lock lifetimes",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

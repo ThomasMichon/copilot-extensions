@@ -2,6 +2,32 @@
   "schema": "http51-standard-native-send-cases-v1",
   "generation": 51,
   "requests": {
+    "observations": {
+      "session_id": "observation-source",
+      "alias": "observation-native-alias",
+      "unadmitted": "observation-unadmitted",
+      "unknown": "observation-unknown",
+      "project": "fixture",
+      "worktree_id": "fixture-observation-worktree",
+      "snapshot_command": [
+        "--project", "fixture", "observe-session", "observation-source",
+        "--worktree-id", "fixture-observation-worktree", "--contract-version", "1", "--json"
+      ],
+      "abbreviated_snapshot_command": [
+        "--proj=fixture", "--j", "observe-session", "observation-source",
+        "--worktree-id", "fixture-observation-worktree", "--contract-version", "1", "--json"
+      ],
+      "payload_commands": [
+        ["--proj=fixture", "observe-session", "observation-source"],
+        ["--j", "--pr", "fixture", "session-observation-history", "observation-source"],
+        ["--pro", "observe-session", "create", "fixture"]
+      ],
+      "history_command": [
+        "--project", "fixture", "session-observation-history", "observation-source",
+        "--worktree-id", "fixture-observation-worktree", "--contract-version", "1",
+        "--json", "--limit", "1"
+      ]
+    },
     "live_cli_request": {
       "version": 1, "expected_session_id": "fixture-live-original",
       "idempotency_key": "fixture-live-prompt", "sender": "fixture-controller",
@@ -42,6 +68,30 @@
     }
   },
   "expected": {
+    "observations": {
+      "capabilities": {
+        "bridge-session-observations-v1": 1,
+        "bridge-session-observation-history-v1": 1
+      },
+      "snapshot": {
+        "exit": 0, "kind": "snapshot", "registry": "owned",
+        "entry_kinds": ["permission-request", "permission-cleared", "compaction"],
+        "head_session_id": null, "current_requests": "unknown",
+        "used_tokens": 35, "active_capacity_tokens": null, "qualification": "unknown"
+      },
+      "history": {"exit": 0, "kind": "history-page", "entries": 1, "has_more": true},
+      "abbreviated_snapshot": {"exit": 0, "kind": "snapshot", "same_source": true},
+      "unknown": {"exit": 3, "code": "source-unavailable"},
+      "alias": {"exit": 3, "code": "source-unavailable"},
+      "unadmitted": {"exit": 3, "code": "source-unavailable"},
+      "old_capability": {"exit": 3, "code": "unsupported", "source_reads": 0},
+      "wrong_project": "selection-mismatch",
+      "wrong_worktree": "selection-mismatch",
+      "unproven_head": "head-unavailable",
+      "history_follow": 422,
+      "unauthenticated": 401,
+      "no_ensure": true, "no_actor_start": true, "read_only": true
+    },
     "live_cli": {
       "capabilities": {"live_keyed_receipt": 1, "live_exact_notify": 1},
       "prompt": {"exit": 0, "stage": "admitted"},

@@ -460,6 +460,36 @@ class LiveDelta:
 
 
 @dataclass(frozen=True, slots=True)
+class TimelineGap:
+    """Source-qualified retained-history uncertainty, never cursor acceptance."""
+    token: SourceToken
+    position: SourcePosition
+    floor: SourcePosition
+    reason: str
+    details: str
+    availability: Availability
+    completeness: Completeness
+    before: SourcePosition | None = None
+    reconcile: str = "snapshot-and-history"
+    source_ref_json: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.token, SourceToken) or not isinstance(self.position, SourcePosition) or not isinstance(self.floor, SourcePosition):
+            raise TimelineContractError("gap requires typed source, current and retained-floor positions")
+        for position in (self.position, self.floor, self.before):
+            if position is not None and (not isinstance(position, SourcePosition) or not position.matches(self.token.identity)):
+                raise TimelineContractError("gap cursor belongs to another source")
+        if not isinstance(self.reason, str) or self.reason not in {"retention", "source-replaced", "journal-write-failed", "cursor-unavailable"}:
+            raise TimelineContractError("gap requires an exact owner reason")
+        if self.reconcile != "snapshot-and-history":
+            raise TimelineContractError("gap requires explicit reconciliation")
+        if not isinstance(self.availability, Availability) or not isinstance(self.completeness, Completeness):
+            raise TimelineContractError("gap requires typed qualification")
+        text(self.details, "gap details", empty=True)
+        object.__setattr__(self, "source_ref_json", canonical_payload(self.source_ref_json))
+
+
+@dataclass(frozen=True, slots=True)
 class ViewportAnchor:
     event: EventRef
     logical_line: int

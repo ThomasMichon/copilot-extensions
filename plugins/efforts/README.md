@@ -32,6 +32,9 @@ The optional agenda helper is invoked directly from the skill's payload path
 using an existing Python 3 interpreter and an explicit journal/state-home path.
 The [managed command contract](skills/driving-effort-agendas/references/managed-agenda.md)
 owns `read`/`next`/`check`/`history` and explicit `init`/semantic `update`/`publish`.
+The source [passive rich-history reader](skills/driving-effort-agendas/references/agenda-history.md)
+adds negotiated, bounded pages from an explicitly located context-qualified
+store without initializing a lane, publishing state or creating a new runtime.
 The [field contract](skills/driving-effort-agendas/references/field-contract.md)
 distinguishes exact enums/identifiers from prose/raw JSON and documents literal
 text versus Markdown rendering; accepted string punctuation does not imply a

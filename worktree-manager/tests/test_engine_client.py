@@ -9,6 +9,7 @@ assert the parsing, the version-skew retry, and the error paths.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -695,6 +696,19 @@ def test_accept_invalid_inherited_provider_keeps_recovery_commands_usable(
     assert warning and ec.ENGINE_ARGV_ENV in warning
 
 
+def _assert_unsealed_runtime_command(argv: list[str] | None, python: Path, root: Path) -> None:
+    expected_cache = ec.agent_plugin_runtime.python_cache_args(root, runtime=python)
+    assert argv is not None and len(argv) == 5
+    assert argv[:2] == [str(python), expected_cache[0]]
+    assert argv[-2:] == ["-m", "agent_worktrees"]
+    assert argv[2].startswith("pycache_prefix=")
+    actual = Path(argv[2].split("=", 1)[1])
+    expected = Path(expected_cache[1].split("=", 1)[1])
+    assert actual.parent == expected.parent
+    assert re.fullmatch(r"unsealed-[0-9a-f]{32}", actual.name)
+    assert actual != expected, "an unsealed runtime must not reuse a cache identity"
+
+
 def test_installed_engine_command_validates_manifest(monkeypatch, tmp_path):
     root = tmp_path / ".agent-worktrees"
     slot = root / "versions" / "1.2.3"
@@ -717,9 +731,7 @@ def test_installed_engine_command_validates_manifest(monkeypatch, tmp_path):
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("AGENT_HOME", raising=False)
-    assert ec.installed_engine_command() == [
-        str(python), *ec.agent_plugin_runtime.python_cache_args(root), "-m", "agent_worktrees"
-    ]
+    _assert_unsealed_runtime_command(ec.installed_engine_command(), python, root)
 
 
 def test_installed_engine_command_rejects_non_object_manifest(monkeypatch, tmp_path):
@@ -754,9 +766,7 @@ def test_installed_engine_command_allows_manifest_version_skew(monkeypatch, tmp_
     python = slot / ("Scripts/python.exe" if ec.os.name == "nt" else "bin/python")
     python.parent.mkdir(parents=True, exist_ok=True)
     python.write_text("", encoding="utf-8")
-    assert ec.installed_engine_command() == [
-        str(python), *ec.agent_plugin_runtime.python_cache_args(root), "-m", "agent_worktrees"
-    ]
+    _assert_unsealed_runtime_command(ec.installed_engine_command(), python, root)
 
 
 def test_installed_engine_command_falls_back_to_last_known_good(
@@ -780,9 +790,7 @@ def test_installed_engine_command_falls_back_to_last_known_good(
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("AGENT_HOME", raising=False)
-    assert ec.installed_engine_command() == [
-        str(python), *ec.agent_plugin_runtime.python_cache_args(root), "-m", "agent_worktrees"
-    ]
+    _assert_unsealed_runtime_command(ec.installed_engine_command(), python, root)
 
 
 def test_installed_engine_command_honors_agent_home(monkeypatch, tmp_path):
@@ -801,9 +809,7 @@ def test_installed_engine_command_honors_agent_home(monkeypatch, tmp_path):
         encoding="utf-8",
     )
     monkeypatch.setenv("AGENT_HOME", str(tmp_path))
-    assert ec.installed_engine_command() == [
-        str(python), *ec.agent_plugin_runtime.python_cache_args(root), "-m", "agent_worktrees"
-    ]
+    _assert_unsealed_runtime_command(ec.installed_engine_command(), python, root)
 
 
 def test_installed_engine_command_rejects_marker_path_escape(
@@ -837,9 +843,7 @@ def test_installed_engine_command_rejects_marker_path_escape(
         encoding="utf-8",
     )
     monkeypatch.setenv("AGENT_HOME", str(tmp_path))
-    assert ec.installed_engine_command() == [
-        str(legit_python), *ec.agent_plugin_runtime.python_cache_args(root), "-m", "agent_worktrees"
-    ]
+    _assert_unsealed_runtime_command(ec.installed_engine_command(), legit_python, root)
 
 
 def test_installed_engine_command_prefers_versions_over_stray_directories(
@@ -872,9 +876,7 @@ def test_installed_engine_command_prefers_versions_over_stray_directories(
         encoding="utf-8",
     )
     monkeypatch.setenv("AGENT_HOME", str(tmp_path))
-    assert ec.installed_engine_command() == [
-        str(legit_python), *ec.agent_plugin_runtime.python_cache_args(root), "-m", "agent_worktrees"
-    ]
+    _assert_unsealed_runtime_command(ec.installed_engine_command(), legit_python, root)
 
 
 def test_run_json_can_preserve_structured_nonzero_result(monkeypatch):

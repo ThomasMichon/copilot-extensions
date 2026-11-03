@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from typing import TYPE_CHECKING
 
 from . import obligations
+from . import tracking_save_notifications as save_notifications
 
 if TYPE_CHECKING:
     from .tracking import WorktreeRecord
@@ -198,9 +200,18 @@ def validate_save(record: WorktreeRecord, current: WorktreeRecord | None) -> Non
 
 
 @contextmanager
-def lifecycle_guard(record: WorktreeRecord):
+def lifecycle_guard(record: WorktreeRecord) -> Iterator[None]:
+    """Keep notification custody through physical and logical pair cleanup."""
+    with save_notifications.hold():
+        with _lifecycle_guard(record):
+            yield
+
+
+@contextmanager
+def _lifecycle_guard(record: WorktreeRecord) -> Iterator[None]:
     """Fence a sibling probe through the caller's destructive lifecycle action."""
-    from . import config as cfg, tracking
+    from . import config as cfg
+    from . import tracking
 
     if not record.is_paired or record.pair_kind == "anchor":
         yield
@@ -224,7 +235,15 @@ def lifecycle_guard(record: WorktreeRecord):
 
 
 @contextmanager
-def save_guard(record: WorktreeRecord, current: WorktreeRecord | None):
+def save_guard(record: WorktreeRecord, current: WorktreeRecord | None) -> Iterator[None]:
+    """Enclose every nested pair proof's teardown before observer dispatch."""
+    with save_notifications.hold():
+        with _save_guard(record, current):
+            yield
+
+
+@contextmanager
+def _save_guard(record: WorktreeRecord, current: WorktreeRecord | None) -> Iterator[None]:
     """Fence the sibling conclusion through a claim-clearing record write."""
     if _needs_finalized_proof(record, current):
         with ExitStack() as stack:

@@ -1,18 +1,6 @@
-"""Process-boundary client for the agent-worktrees engine (Phase 6b).
-
-The Worktree Manager is a **separate process that shells out to the
-``agent-worktrees`` CLI** -- it never ``import``s the plugin (the dependency-free
-boundary, asserted by ``test_contract_dependency_free``). Every worktree
-operation the Manager renders is fetched by running ``agent-worktrees --project
-<p> <verb> --json`` and parsing the machine-readable envelope, per the pinned
-*engine <-> Picker ``--json`` contract*
-(``plugins/agent-worktrees/docs/engine-picker-contract.md``).
-
-This module is that seam. It resolves the engine binstub, runs a ``--json`` verb
-with robust error handling, and tolerates **version skew**: when a newer Manager
-passes a flag an older engine rejects (e.g. ``--classify``), it degrades the
-request rather than failing (the *version-skew-tolerant contract* property). It
-imports nothing from the plugin; the only coupling is the CLI's stable verbs.
+"""Process-boundary client for agent-worktrees; never import its runtime.
+Use attributed argv and validated JSON per plugins/agent-worktrees/docs/engine-picker-contract.md.
+Optional syntax may downgrade, never authority or terminal resource custody.
 """
 
 from __future__ import annotations
@@ -28,6 +16,7 @@ from pathlib import Path
 from worktree_identity import parse_machine_identity
 
 from . import agent_plugin_runtime, picker_review
+from .engine_posix_process import EngineCleanupError as EngineCleanupError
 from .worktree_rows_contract import (
     _int_field as _int_field,
     _bool_field as _bool_field,
@@ -76,8 +65,14 @@ class EngineFeatureUnavailable(EngineError):
     """The installed engine predates one optional Manager control-plane seam."""
 
 
+class EngineRetirementError(EngineError, EngineCleanupError):
+    """A terminal engine error that retains owned-resource retirement provenance."""
+
+
 def _engine_error_detail(error: EngineError) -> str:
     """Return the engine's payload/stderr detail without the echoed argv."""
+    if isinstance(error, EngineCleanupError):
+        raise error
     text = str(error)
     marker = "): "
     return text.rsplit(marker, 1)[-1] if marker in text else text
@@ -191,6 +186,8 @@ def engine_base_command() -> list[str] | None:
 def engine_available() -> bool:
     try:
         return engine_base_command() is not None
+    except EngineCleanupError:
+        raise
     except EngineError:
         return False
 
@@ -250,6 +247,8 @@ def _run(
             else:
                 execute = picker_review.run_read if picker_review.active() else subprocess.run
                 proc = execute(cmd, **kwargs)
+    except EngineCleanupError as e:
+        raise EngineRetirementError(f"owned {ENGINE_BIN} resource retirement failed: {e}") from e
     except subprocess.TimeoutExpired as e:
         raise EngineError(f"{ENGINE_BIN} {' '.join(args)} timed out") from e
     except OSError as e:
@@ -972,6 +971,8 @@ def orphaned_obligations(project: str, *, runner=None) -> list[dict]:
     """
     try:
         obj = run_json(project, ["claims", "orphans", "--json"], runner=runner)
+    except EngineCleanupError:
+        raise
     except EngineError:
         return []
     rows = obj.get("orphaned")

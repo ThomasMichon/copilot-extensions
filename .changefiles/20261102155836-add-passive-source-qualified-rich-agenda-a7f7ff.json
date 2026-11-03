@@ -1,0 +1,9 @@
+{
+  "comment": "Add passive source-qualified rich agenda history pages through an explicitly admitted reader locator",
+  "changes": [
+    {
+      "plugin": "efforts",
+      "type": "patch"
+    }
+  ]
+}

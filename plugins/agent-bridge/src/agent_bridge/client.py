@@ -530,13 +530,13 @@ class BridgeClient(PromptClientMixin, AnswerClientMixin, SessionStartClientMixin
         params: dict[str, str] | None = None,
         body: dict[str, Any] | None = None,
         request_timeout: float | None = None,
+        stream_factory: Callable[[Any], SseStream] = SseStream,
     ) -> SseStream:
-        """Stream SSE events from an endpoint. Yields parsed event dicts.
+        """Stream SSE through the selected parser (the legacy parser by default).
 
         Raises ``BridgeConnectionError`` if the service is unreachable so the
         streaming engine can reconnect (rather than killing the process). A
-        successful SSE connection resets request outage state, but stream retry
-        duration remains owned by the streaming engine.
+        successful connection resets outage state; stream retry remains caller-owned.
         """
         url = f"{self._base}{path}"
         if params:
@@ -568,7 +568,7 @@ class BridgeClient(PromptClientMixin, AnswerClientMixin, SessionStartClientMixin
             ) from exc
 
         self._mark_connected()
-        return SseStream(resp)
+        return stream_factory(resp)
 
     # -- API methods ---------------------------------------------------------
 

@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable
 from contextlib import closing
 from threading import Event
 from rich.text import Text
 from . import agenda_transport, engine_client
 from .agenda_contract import AgendaFeed, AgendaPublicationFence, AgendaUnavailable
+from .engine_process import EngineCleanupError
+
+logger = logging.getLogger(__name__)
 
 
 def agenda_text(frame: dict | None, error: str | None) -> Text:
@@ -49,6 +53,7 @@ def agenda_text(frame: dict | None, error: str | None) -> Text:
 def subscribe(
     project: str, worktree: str, session: str, *, cancelled: Event, cwd: str,
     publish: Callable[[dict | None, str | None], None],
+    cleanup_failed: Callable[[EngineCleanupError], None] | None = None,
 ) -> None:
     """Keep reconnect admission inside one UI-owned, cancellable worker."""
     supported = False
@@ -83,6 +88,13 @@ def subscribe(
             if cancelled.is_set():
                 return
             raise AgendaUnavailable("agenda feed ended without a terminal notice")
+        except EngineCleanupError as exc:
+            logger.error("Terminal owned Agenda resource retirement failure: %s", exc)
+            if cleanup_failed is not None:
+                cleanup_failed(exc)
+            if not cancelled.is_set():
+                publish(None, f"Terminal Agenda resource retirement failure: {exc}; no replacement will be started.")
+            return
         except InterruptedError as exc:
             if not cancelled.is_set():
                 publish(None, f"agenda read interrupted unexpectedly: {exc}")

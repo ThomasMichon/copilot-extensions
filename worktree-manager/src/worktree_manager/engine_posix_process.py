@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
+from collections.abc import Iterator
+from typing import IO
 import json
 import os
 import select
@@ -34,6 +36,50 @@ finally:
 """
 
 MAX_RECEIPT_BYTES = 4096
+
+
+class EngineCleanupError(RuntimeError):
+    """An owned engine resource failed retirement, independently of platform or read outcome."""
+
+
+@contextmanager
+def cleanup_phase() -> Iterator[None]:
+    try:
+        yield
+    except EngineCleanupError:
+        raise
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        raise EngineCleanupError(f"owned engine resource retirement failed: {exc}") from exc
+
+
+def close_descriptor(fd: int) -> None:
+    with cleanup_phase():
+        os.close(fd)
+
+
+def close_stream(stream: IO[bytes] | IO[str]) -> None:
+    with cleanup_phase():
+        stream.close()
+
+
+def output_pipe() -> tuple[IO[bytes], int]:
+    read_fd, write_fd = os.pipe()
+    try:
+        return os.fdopen(read_fd, "rb"), write_fd
+    except (OSError, ValueError):
+        with cleanup_phase():
+            os.close(read_fd)
+            os.close(write_fd)
+        raise
+
+
+@contextmanager
+def _capture_file() -> Iterator[IO[bytes]]:
+    output = tempfile.TemporaryFile()
+    try:
+        yield output
+    finally:
+        close_stream(output)
 
 
 def parse_completion_receipt(raw: bytes) -> dict:
@@ -98,9 +144,9 @@ def run(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
     kwargs.pop("stdin", None)
     kwargs.pop("stdout", None)
     text = kwargs.get("text", False)
-    with tempfile.TemporaryFile() as output, ExitStack() as cleanup:
+    with _capture_file() as output, ExitStack() as cleanup:
         capture_errors = kwargs.get("stderr") == subprocess.PIPE
-        errors = cleanup.enter_context(tempfile.TemporaryFile()) if capture_errors else None
+        errors = cleanup.enter_context(_capture_file()) if capture_errors else None
         if errors is not None:
             kwargs["stderr"] = errors
         owner = subprocess.Popen(
@@ -128,8 +174,9 @@ def run(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
         finally:
             # No poll/wait reaps this owner before the group sweep, reserving its PID
             # even if the engine already exited or the owner itself became a zombie.
-            try:
-                os.killpg(owner.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            owner.communicate(timeout=5)
+            with cleanup_phase():
+                try:
+                    os.killpg(owner.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                owner.communicate(timeout=5)

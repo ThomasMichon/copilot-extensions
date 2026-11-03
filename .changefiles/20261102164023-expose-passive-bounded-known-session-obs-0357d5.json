@@ -1,0 +1,9 @@
+{
+  "comment": "Expose passive bounded known-session observation and history with source-bound compatibility evidence",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

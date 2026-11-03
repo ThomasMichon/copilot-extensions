@@ -168,6 +168,37 @@ def test_keyboard_scrollbar_drag_and_history_demand_are_single_flight():
     asyncio.run(check())
 
 
+@pytest.mark.parametrize("key", ["pageup", "up"])
+def test_upward_intent_at_short_viewport_requests_one_page_without_scroll(key: str) -> None:
+    window, source = window_with_events(1)
+
+    async def check() -> None:
+        app = TimelineApp(window)
+        async with app.run_test(size=(80, 40)) as pilot:
+            timeline = app.query_one(SubwayTimeline)
+            timeline.focus()
+            await pilot.pause()
+            assert timeline.scroll_offset.y == 0 and not timeline.allow_vertical_scroll
+            await pilot.press(key)
+            await pilot.pause()
+            anchor = timeline.capture_anchor()
+            assert anchor is not None
+            assert not window.follow_live and len(app.requests) == 1
+            assert app.requests[0].before == position(source, "older-0")
+            await pilot.press(key)
+            await pilot.pause()
+            assert len(app.requests) == 1
+            assert timeline.apply_delta(LiveDelta(
+                source, position(source, "live-0"), position(source, "live-1"), (event(source, 1),),
+            )).applied
+            row = timeline.layout_index.anchor_row(anchor)
+            assert row is not None
+            assert row + timeline._padding - int(timeline.scroll_offset.y) == anchor.screen_row
+            assert len(window.unread) == 1 and timeline.has_focus
+
+    asyncio.run(check())
+
+
 def test_keyboard_details_follow_visible_browsing_and_keep_selection_highlight() -> None:
     window, source = window_with_events(64)
     newest = window.events[-1].ref

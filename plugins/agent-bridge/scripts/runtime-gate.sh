@@ -5,6 +5,31 @@ set -euo pipefail
 export PYTHONUTF8=1
 unset PYTHONPATH PYTHONHOME
 
+PASSIVE_OBSERVATION=0
+SKIP_PROJECT=0
+FIRST_ARGUMENT=1
+for ARGUMENT in "$@"; do
+    if [[ "$FIRST_ARGUMENT" == 1 ]]; then
+        FIRST_ARGUMENT=0
+        # A redundant command prefix must not turn a read into first-use work.
+        [[ "$ARGUMENT" != agent-bridge ]] || continue
+    fi
+    if [[ "$SKIP_PROJECT" == 1 ]]; then
+        SKIP_PROJECT=0
+        continue
+    fi
+    case "$ARGUMENT" in
+        --p|--pr|--pro|--proj|--proje|--projec|--project|-p) SKIP_PROJECT=1 ;;
+        --p=*|--pr=*|--pro=*|--proj=*|--proje=*|--projec=*|--project=*|-p?*) ;;
+        --j|--js|--jso|--json) ;;
+        observe-session|session-observation-history)
+            PASSIVE_OBSERVATION=1
+            break
+            ;;
+        *) break ;;
+    esac
+done
+
 PAYLOAD_ROOT="${AGENT_BRIDGE_PAYLOAD_ROOT:-}"
 [[ "$PAYLOAD_ROOT" == /* && -d "$PAYLOAD_ROOT" ]] || {
     printf '[agent-bridge] owning payload root is unavailable.\n' >&2
@@ -177,11 +202,19 @@ if [[ -z "$CONTEXT" ]]; then
     }
 fi
 
-resolve_runtime
+if [[ "$PASSIVE_OBSERVATION" == 1 ]]; then
+    resolve_runtime read-only
+else
+    resolve_runtime
+fi
 if [[ -n "$AGENT_RT_PY" ]]; then
     run_runtime "$@"
 fi
 
+if [[ "$PASSIVE_OBSERVATION" == 1 ]]; then
+    printf '[agent-bridge] runtime not provisioned (passive observation; no self-provision).\n' >&2
+    exit 1
+fi
 if [[ -n "${AGENT_BRIDGE_NO_SELFPROVISION:-}" ]]; then
     printf '[agent-bridge] runtime not provisioned (AGENT_BRIDGE_NO_SELFPROVISION set).\n' >&2
     exit 1

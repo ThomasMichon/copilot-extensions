@@ -52,7 +52,8 @@ from . import companion_attention as ca
 from .companion_topology import topology_view
 from . import handoff_client as hc
 from .companion_agenda import agenda_text, subscribe
-from .companion_timeline_widget import CompanionTimelinePanel
+from .companion_timeline_widget import CompanionTimelinePanel, SubwayTimeline
+from .companion_timeline_attachment import TimelineAttachment
 
 #: Blocker code (from the closure descriptor's ``blockers`` list) -> a short,
 #: plain-language reason. Mirrors the vocabulary in
@@ -419,9 +420,14 @@ class MuxCompanionApp(App):
         self._agenda_cancel = Event()
         self._agenda_worker = None
         self._agenda_generation = 0
+        self._agenda_cleanup_failures: list[ec.EngineCleanupError] = []
+        self._engine_cleanup_failures: list[ec.EngineCleanupError] = []
         self._observer_pane = os.environ.get("TMUX_PANE")
         self._action_message: Text | None = None
         self._timeline_panel = CompanionTimelinePanel(id="timeline")
+        self._timeline_attachment = TimelineAttachment(
+            self._timeline_panel, cwd=self._cwd or os.getcwd(),
+        )
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -486,14 +492,16 @@ class MuxCompanionApp(App):
         finally:
             self._checking_cli = False
 
-    def on_unmount(self) -> None:
+    async def on_unmount(self) -> None:
         self._cancel_owned_reads()
+        await self._timeline_attachment.close()
 
     def action_quit(self) -> None:
         self._cancel_owned_reads()
         self.exit()
 
     def _cancel_owned_reads(self) -> None:
+        self._timeline_attachment.begin_close()
         self._read_cancel.set()
         self._navigation_cancel.set()
         self._observation_cancel.set()
@@ -503,8 +511,21 @@ class MuxCompanionApp(App):
         self._data.agenda = None
         self._data.agenda_error = "subscription closed"
 
+    def _owned_read_runner(self, cancelled: Event):
+        return cc.cancellable_read_runner(
+            cancelled, cwd=self._cwd or os.getcwd(), cleanup_failures=self._engine_cleanup_failures,
+        )
+
     @work(exclusive=True)
-    async def _reload(self) -> None:
+    async def _reload(self, *, reconcile_timeline: bool = False) -> None:
+        if self._engine_cleanup_failures:
+            self._action_message = Text(
+                f"Engine resource retirement unresolved; no read retried: {self._engine_cleanup_failures[0]}",
+                style="bold red",
+            )
+            self._refresh_view(reload=False)
+            return
+        await self._timeline_attachment.set_selection(None)
         self._read_cancel.set()
         self._agenda_cancel.set()
         self._agenda_generation += 1
@@ -530,25 +551,36 @@ class MuxCompanionApp(App):
         try:
             data = await asyncio.to_thread(
                 _load_current_worktree, self._cwd,
-                runner=cc.cancellable_read_runner(
-                    cancelled, cwd=self._cwd or os.getcwd(),
-                ),
+                runner=self._owned_read_runner(cancelled),
             )
         finally:
             cancelled.set()
         if generation != self._agenda_generation:
             return
         self._data = data
+        if self._engine_cleanup_failures:
+            self._action_message = Text(
+                f"Engine resource retirement failed: {self._engine_cleanup_failures[0]}", style="bold red",
+            )
         self._loading = False
         self._refresh_view(reload=False)
         self.query_one("#refresh-btn", Button).disabled = False
         self._poll_attention(force=True)
         self._start_agenda()
+        if self.query_one("#views", TabbedContent).active == "timeline-tab":
+            self._sync_timeline(reconcile=reconcile_timeline)
         if self.query_one("#views", TabbedContent).active == "topology-tab":
             self._load_observations()
 
     def _start_agenda(self) -> None:
         data = self._data
+        if self._agenda_cleanup_failures:
+            data.agenda_error = (
+                "Terminal Agenda resource retirement failure; no replacement will be started: "
+                + str(self._agenda_cleanup_failures[0])
+            )
+            self._update_agenda()
+            return
         heads = [
             row.get("id") for row in data.sessions
             if row.get("is_head") is True and isinstance(row.get("id"), str) and row["id"]
@@ -599,14 +631,56 @@ class MuxCompanionApp(App):
             publish=lambda frame, error: self.call_from_thread(
                 self._receive_agenda, data, generation, cancelled, frame, error,
             ),
+            cleanup_failed=self._agenda_cleanup_failures.append,
         )
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
-        if self._timeline_panel.is_mounted:
+        if (
+            not self._timeline_attachment.closed and self._timeline_panel.is_attached
+            and self._timeline_panel.query(SubwayTimeline)
+        ):
             self._timeline_panel.set_demand_visible(event.pane.id == "timeline-tab")
         if event.pane.id == "topology-tab" and not self._loading:
             if self._observation_owner is not self._data:
                 self._load_observations()
+
+    def on_subway_timeline_history_requested(self, message: SubwayTimeline.HistoryRequested) -> None:
+        self._timeline_attachment.history(message)
+
+    def on_subway_timeline_demand_changed(self, message: SubwayTimeline.DemandChanged) -> None:
+        if not self._loading:
+            self._sync_timeline()
+
+    def on_subway_timeline_reconciliation_requested(
+        self, message: SubwayTimeline.ReconciliationRequested,
+    ) -> None:
+        state = self._timeline_panel.window.sources.get(message.token.identity.source_key)
+        if state is not None and state.token == message.token and state.position == message.position:
+            self.action_refresh()
+
+    @work(group="timeline-selection")
+    async def _sync_timeline(self, *, reconcile: bool = False) -> None:
+        if self._timeline_attachment.closed or not self._timeline_panel.query(SubwayTimeline):
+            return
+        data = self._data
+        selection = None
+        if self._timeline_panel.query_one(SubwayTimeline).demand_visible and not self._loading:
+            heads = [row.get("id") for row in data.sessions if row.get("is_head") is True
+                     and isinstance(row.get("id"), str) and row["id"]]
+            worktree, project = data.worktree.get("id"), data.worktree.get("repo")
+            if not isinstance(project, str) or not project:
+                selected_project, selected_worktree, _ = self._observer_identity
+                project = selected_project if selected_worktree == worktree else None
+            if (
+                not data.error and not data.sessions_error and len(heads) == 1
+                and isinstance(worktree, str) and worktree and isinstance(project, str) and project
+            ):
+                selection = (project, worktree, heads[0])
+            else:
+                self._timeline_attachment.unavailable(
+                    "Selected project/worktree and exactly one canonical head are required.",
+                )
+        await self._timeline_attachment.set_selection(selection, reconcile=reconcile)
 
     @work(exclusive=True, group="session-observations")
     async def _load_observations(self) -> None:
@@ -625,7 +699,7 @@ class MuxCompanionApp(App):
         try:
             result = await asyncio.to_thread(
                 co.read_session_observations, None, heads[0],
-                runner=cc.cancellable_read_runner(cancelled, cwd=self._cwd or os.getcwd()),
+                runner=self._owned_read_runner(cancelled),
             )
             if not cancelled.is_set() and self._data is data:
                 data.session_observation = result["observation"]
@@ -642,6 +716,8 @@ class MuxCompanionApp(App):
         ))
 
     def _poll_attention(self, *, force=False) -> None:
+        if self._engine_cleanup_failures:
+            return
         if self._loading or self._attention_busy or (
             not force and (time.monotonic() < self._attention_next
                            or self._data.attention_error == "head-changed-refresh-required")
@@ -672,7 +748,7 @@ class MuxCompanionApp(App):
             else:
                 result = await asyncio.to_thread(
                     ca.read_session_attention, None, data.worktree["id"], heads[0],
-                    runner=cc.cancellable_read_runner(cancelled, cwd=self._cwd or os.getcwd()),
+                    runner=self._owned_read_runner(cancelled),
                 )
             if not cancelled.is_set() and self._data is data:
                 data.attention, data.attention_error = result["attention"], result["error"]
@@ -700,7 +776,7 @@ class MuxCompanionApp(App):
     def action_refresh(self) -> None:
         if not self._loading:
             self._action_message = None
-            self._reload()
+            self._reload(reconcile_timeline=True)
 
     @work(exclusive=True, group="navigation")
     async def _navigate(self) -> None:
@@ -714,9 +790,7 @@ class MuxCompanionApp(App):
                 cli_pane=self._cli_pane,
                 cancelled=self._navigation_cancel,
                 session_incarnation=self._observer_identity[2],
-                runner=cc.cancellable_read_runner(
-                    self._navigation_cancel, cwd=self._cwd or os.getcwd(),
-                ),
+                runner=self._owned_read_runner(self._navigation_cancel),
             )
         except (PaneError, ec.EngineError) as exc:
             self._action_message = Text(f"View switch failed: {exc}", style="bold red")

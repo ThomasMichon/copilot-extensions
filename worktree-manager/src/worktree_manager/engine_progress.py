@@ -7,6 +7,7 @@ import sys
 import tempfile
 import threading
 from contextlib import contextmanager
+from .engine_posix_process import cleanup_phase
 
 
 @contextmanager
@@ -33,9 +34,13 @@ def streamed_stderr():
     try:
         yield fd, path
     finally:
-        os.close(fd)
-        stopped.set()
-        thread.join()
+        try:
+            with cleanup_phase():
+                os.close(fd)
+        finally:
+            stopped.set()
+            with cleanup_phase():
+                thread.join()
         try:
             os.unlink(path)
         except OSError as exc:
