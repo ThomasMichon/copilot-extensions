@@ -54,24 +54,17 @@ def _producer_capability(args: argparse.Namespace) -> str | None:
     return producer_capability()
 
 
-def local_machine() -> str | None:
-    """This machine's name (its SSH alias), or None if unresolvable.
-
-    Prefer the configured supervisor machine from the environment or
-    ``~/.agent-dispatch/supervisor.env``. It is CWD-independent, preserves
-    supported aliases that differ from the OS hostname, and avoids shelling to
-    agent-worktrees on latency-sensitive reads.
-
-    Fall back to agent-worktrees' authoritative identity, then the normalized
-    host node name. Returns None only when none yield a name.
-    """
-    configured = os.environ.get("AGENT_DISPATCH_SUPERVISE_MACHINE")
+def configured_service_machine(*, strict: bool = False) -> str | None:
+    """Read durable host settings; strict admission refuses unreadable settings."""
     root = install_dir()
-    if not configured:
-        try:
-            configured = (root / "machine").read_text(encoding="utf-8").strip()
-        except OSError:
-            pass
+    configured = None
+    try:
+        configured = (root / "machine").read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        if strict:
+            raise
     if not configured:
         try:
             for line in (root / "supervisor.env").read_text(
@@ -81,8 +74,19 @@ def local_machine() -> str | None:
                 if sep and key.strip() == "AGENT_DISPATCH_SUPERVISE_MACHINE":
                     configured = value.strip().strip("\"'")
                     break
-        except OSError:
+        except FileNotFoundError:
             pass
+        except OSError:
+            if strict:
+                raise
+    return (configured or "").strip().casefold() or None
+
+
+def local_machine() -> str | None:
+    """Resolve the routing alias, retaining legacy environment/node fallbacks."""
+    configured = os.environ.get("AGENT_DISPATCH_SUPERVISE_MACHINE")
+    if not configured:
+        configured = configured_service_machine()
     if configured:
         return configured.strip().casefold()
 

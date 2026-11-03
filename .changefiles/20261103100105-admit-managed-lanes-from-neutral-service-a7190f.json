@@ -1,0 +1,9 @@
+{
+  "comment": "Admit managed lanes from neutral service directories using the existing durable host binding",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
