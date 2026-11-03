@@ -286,6 +286,7 @@ class _GuardedIndex(ThreadingHTTPServer):
         self.projects = {}
         self.files = {}
         self.offered = {}
+        self.admitted = {}
         self.served = set()
         self.cache = {}
         self.local_requests = 0
@@ -441,7 +442,7 @@ class _GuardedIndex(ThreadingHTTPServer):
                 raise GuardedSelectionError("guarded candidate lacks a digest")
             expected = {"name": name, "filename": filename, "sha256": "sha256:" + digest}
             project = self.projects[name]
-            location, _uploaded, _hint = acquisition._selected(
+            location, uploaded, hint = acquisition._selected(
                 project["entries"], expected, project["base"], self.cutoffs.get(name, self.floor),
             )
             client = acquisition._Client(self.limits, self.deadline, self.context, {}, self.budget)
@@ -471,6 +472,9 @@ class _GuardedIndex(ThreadingHTTPServer):
                     raise GuardedSelectionError("guarded candidate has invalid dependencies") from None
                 if requirement.url:
                     raise GuardedSelectionError("guarded candidate has a direct dependency")
+            self.admitted[path] = {
+                "upload-time": uploaded, "requires-python": hint, "yanked": False, "withdrawn": False,
+            }
             self.cache[path] = content
             return content
 
@@ -600,45 +604,56 @@ def _worker(request, control: Path) -> dict:
         raise GuardedSelectionError("guarded resolver template is invalid")
     config.write_text(template.replace(_PLACEHOLDER, server.index_url), encoding="utf-8")
     config.chmod(0o400)
-    temporary = control.parent / "uv-tmp"
-    temporary.mkdir()
-    request["environment"].update({
-        "TMP": str(temporary), "TEMP": str(temporary), "TMPDIR": str(temporary),
-        "UV_CACHE_DIR": str(control.parent / "uv-cache"),
-    })
-    before = inspection._ordinary(config)
-    thread = threading.Thread(target=_serve, args=(server,))
-    thread.start()
-    try:
-        with snapshots._open(config) as held:
-            opened = snapshots._unchanged(config, before, held)
-            original_hash = snapshots._digest(held, _CONTROL_LIMIT, deadline)
-            options = {
-                "cwd": request["cwd"], "env": request["environment"],
-                "stdin": subprocess.DEVNULL, "stderr": subprocess.DEVNULL,
-                "creationflags": subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-            }
-            projection = subprocess.run(
-                [*request["argv"], "--show-settings"], stdout=subprocess.PIPE, check=False,
-                timeout=max(0.001, deadline - time.monotonic()), **options,
-            )
-            if projection.returncode or len(projection.stdout) > _CONTROL_LIMIT:
-                raise GuardedSelectionError("guarded resolver settings are unavailable")
-            _check_local_projection(
-                request["projection"], projection.stdout.decode("utf-8"), server.index_url,
-            )
-            _run_uv(request["argv"], options, server, deadline)
-            snapshots._unchanged(config, before, held, opened=opened)
-            if snapshots._digest(held, _CONTROL_LIMIT, deadline) != original_hash:
-                raise GuardedSelectionError("guarded resolver configuration changed")
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join()
+    with dependencies._temporary_inputs(control.parent) as temporary:
+        temporary = Path(dependencies._native_retained_path(temporary))
+        request["environment"].update({
+            "TMP": str(temporary), "TEMP": str(temporary), "TMPDIR": str(temporary),
+            "UV_CACHE_DIR": str(temporary / "uv-cache"),
+        })
+        before = inspection._ordinary(config)
+        thread = threading.Thread(target=_serve, args=(server,))
+        thread.start()
+        try:
+            with snapshots._open(config) as held:
+                opened = snapshots._unchanged(config, before, held)
+                original_hash = snapshots._digest(held, _CONTROL_LIMIT, deadline)
+                options = {
+                    "cwd": request["cwd"], "env": request["environment"],
+                    "stdin": subprocess.DEVNULL, "stderr": subprocess.DEVNULL,
+                    "creationflags": subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                }
+                projection = subprocess.run(
+                    [*request["argv"], "--show-settings"], stdout=subprocess.PIPE, check=False,
+                    timeout=max(0.001, deadline - time.monotonic()), **options,
+                )
+                if projection.returncode or len(projection.stdout) > _CONTROL_LIMIT:
+                    raise GuardedSelectionError("guarded resolver settings are unavailable")
+                _check_local_projection(
+                    request["projection"], projection.stdout.decode("utf-8"), server.index_url,
+                )
+                _run_uv(request["argv"], options, server, deadline)
+                snapshots._unchanged(config, before, held, opened=opened)
+                if snapshots._digest(held, _CONTROL_LIMIT, deadline) != original_hash:
+                    raise GuardedSelectionError("guarded resolver configuration changed")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
     if server.budget.failure is not None:
         raise GuardedSelectionError("guarded feed input was refused")
+    downloads = control.parent / "downloads"
+    downloads.mkdir()
+    for url in sorted(server.served):
+        inspection._check_deadline(deadline)
+        path = urlsplit(url).path
+        _name, filename, _digest = server.files[path]
+        destination = downloads / filename
+        with destination.open("xb") as output:
+            output.write(server.cache[path])
+        destination.chmod(0o400)
     return {
         "offered": server.offered, "served": sorted(server.served),
+        "admitted": {url: server.admitted[urlsplit(url).path] for url in sorted(server.served)},
         "projects": {name: value["identity"] for name, value in server.projects.items()},
         "usage": _usage(server.budget),
     }
@@ -710,15 +725,18 @@ def _validate_projects(projects, limits):
 
 
 def _validate_response(response, limits, deadline):
-    if not isinstance(response, dict) or set(response) != {"status", "offered", "served", "projects", "usage"}:
+    if not isinstance(response, dict) or set(response) != {
+        "status", "offered", "served", "admitted", "projects", "usage",
+    }:
         raise GuardedSelectionError("guarded resolver returned invalid evidence")
-    offered, served = response["offered"], response["served"]
+    offered, served, admitted = response["offered"], response["served"], response["admitted"]
     _validate_usage(response["usage"], limits)
     _validate_projects(response["projects"], limits)
     if (
         not isinstance(offered, dict) or len(offered) > limits.max_requests * limits.max_workers
         or not isinstance(served, list) or any(not isinstance(url, str) for url in served)
         or len(set(served)) != len(served)
+        or not isinstance(admitted, dict) or set(admitted) != set(served)
     ):
         raise GuardedSelectionError("guarded resolver returned invalid evidence")
     for url, item in offered.items():
@@ -745,8 +763,25 @@ def _validate_response(response, limits, deadline):
         project = acquisition._name(item["filename"].split("-", 1)[0])
         if response["projects"].get(project) is None:
             raise GuardedSelectionError("guarded candidate lacks its project witness")
-    if any(url not in offered or offered[url]["sha256"] is None for url in served):
-        raise GuardedSelectionError("guarded resolver returned invalid served evidence")
+    for url in served:
+        item = admitted[url]
+        if (
+            url not in offered or offered[url]["sha256"] is None or not isinstance(item, dict)
+            or set(item) != {"upload-time", "requires-python", "yanked", "withdrawn"}
+            or item["yanked"] is not False or item["withdrawn"] is not False
+            or not isinstance(item["upload-time"], str) or len(item["upload-time"]) > 128
+            or not item["upload-time"].isascii() or any(ord(char) < 32 for char in item["upload-time"])
+            or (item["requires-python"] not in (None, "") and (
+                not isinstance(item["requires-python"], str) or len(item["requires-python"]) > 4096
+            ))
+        ):
+            raise GuardedSelectionError("guarded resolver returned invalid served evidence")
+        try:
+            uploaded = datetime.fromisoformat(item["upload-time"].replace("Z", "+00:00"))  # noqa: FURB162
+            if uploaded.tzinfo is None:
+                raise ValueError
+        except ValueError:
+            raise GuardedSelectionError("guarded resolver returned invalid upload evidence") from None
 
 
 def _feed_request(feed):
@@ -828,11 +863,12 @@ def _run_isolated(request, root, sources, limits, deadline, procutil):
         raise GuardedSelectionError("guarded worker failed: " + type(error).__name__) from None
 
 
+@contextmanager
 def compile_guarded(
     transaction, projection: str, feed, *, floor: datetime, cutoffs: dict,
     exclusions: tuple[str, ...], limits, wheel_limits, deadline: float, procutil,
-) -> dict:
-    """Run native UV against inspected, origin-guarded candidates only."""
+):
+    """Run native UV against inspected, origin-guarded candidates and retain their bytes."""
     inspection._check_deadline(deadline)
     limits.verify()
     if not isinstance(floor, datetime) or floor.tzinfo is None or not isinstance(exclusions, tuple):
@@ -854,7 +890,13 @@ def compile_guarded(
         }
         response = _run_isolated(request, root, sources, limits, deadline, procutil)
         _validate_response(response, limits, deadline)
-        return response
+        snapshot_budget = (
+            limits.max_temporary_bytes - request["control_bytes"] - _CONTROL_LIMIT
+            - response["usage"]["wheel_bytes"]
+        )
+        if snapshot_budget <= 0:
+            raise GuardedSelectionError("guarded resolver exhausted its snapshot storage budget")
+        yield response, root / "downloads", snapshot_budget
 
 
 def verify_guarded_projects(feed, projects, *, limits, deadline: float, procutil) -> None:
@@ -880,13 +922,13 @@ def verify_guarded_projects(feed, projects, *, limits, deadline: float, procutil
         _validate_usage(response["usage"], limits)
 
 
-def verify_lock_witness(content: bytes, selected: list[dict], witness: dict, deadline: float) -> None:
+def verify_lock_witness(content: bytes, selected: list[dict], witness: dict, deadline: float) -> dict[str, str]:
     """Require every lock URL to be offered locally and every selected wheel served."""
     try:
         document = dependencies._toml_parser().loads(content.decode("utf-8"))
         offered, served = witness["offered"], set(witness["served"])
         selected_keys = {(item["name"], item["filename"], item["sha256"]) for item in selected}
-        observed = set()
+        observed = {}
         for package in document.get("packages", []):
             name = canonicalize_name(package["name"], validate=True)
             for wheel in package["wheels"]:
@@ -898,8 +940,31 @@ def verify_lock_witness(content: bytes, selected: list[dict], witness: dict, dea
                     raise GuardedSelectionError("guarded native lock differs from the offered candidates")
                 key = (name, item["filename"], digest)
                 if key in selected_keys and url in served:
-                    observed.add(key)
-        if observed != selected_keys:
+                    observed[key] = url
+        if set(observed) != selected_keys or len({key[0] for key in selected_keys}) != len(selected_keys):
             raise GuardedSelectionError("guarded native lock contains an uninspected selection")
+        return {key[0]: url for key, url in observed.items()}
     except (KeyError, TypeError, ValueError, UnicodeError):
         raise GuardedSelectionError("guarded native lock lacks its candidate witness") from None
+
+
+def verify_guarded_cutoffs(selected, urls, witness, cutoffs, *, deadline: float) -> None:
+    """Reapply the acquisition owner's file-admission rules to the held selection."""
+    for item in selected:
+        inspection._check_deadline(deadline)
+        try:
+            url = urls[item["name"]]
+            row = witness["offered"][url]
+            admitted = witness["admitted"][url]
+            cutoff = cutoffs[item["name"]]
+            if not isinstance(cutoff, datetime) or cutoff.tzinfo is None:
+                raise GuardedSelectionError("guarded selection lacks a valid cutoff")
+            entry = {
+                "filename": row["filename"], "url": url,
+                "hashes": {"sha256": row["sha256"].removeprefix("sha256:")},
+                "upload-time": admitted["upload-time"], "requires-python": admitted["requires-python"],
+                "yanked": admitted["yanked"], "withdrawn": admitted["withdrawn"],
+            }
+        except (KeyError, TypeError, AttributeError):
+            raise GuardedSelectionError("guarded selection lacks file-admission evidence") from None
+        acquisition._selected([entry], item, url, cutoff)

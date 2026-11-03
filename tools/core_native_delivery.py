@@ -27,12 +27,17 @@ import local_install_source as source_owner
 from core_native_feed_resolution import (
     compile_guarded,
     hold_compile_inputs,
+    verify_guarded_cutoffs,
     verify_guarded_projects,
     verify_lock_witness,
 )
 from core_runtime_profile import _core_manifest, _read, build_core_profile, core_roots
 from installer_engine_process import ChildLaunchError, ChildTimeoutExpired, run_owned
-from installer_wheel_acquisition import AcquisitionLimits, acquire_wheel_inputs
+from installer_wheel_acquisition import (
+    AcquisitionLimits,
+    acquire_wheel_inputs,
+    validate_acquisition_inputs,
+)
 from installer_wheel_inputs import _check_deadline, _ordinary
 from installer_wheel_snapshot import _digest, _open, _unchanged, retain_wheel_inputs
 from packaging.tags import sys_tags
@@ -373,14 +378,14 @@ def _build_from_snapshot(
                         selected, transaction, projections, uv=uv, download_origins=download_origins,
                         exclusions=first_exclusions, deadline=deadline,
                     )
-                    witness = compile_guarded(
+                    witness, guarded_directory, snapshot_budget = compile_owners.enter_context(compile_guarded(
                         transaction, projections[1], initial_feed, floor=floor, cutoffs=cutoffs,
                         exclusions=first_exclusions, limits=acquisition_limits, wheel_limits=limits,
                         deadline=deadline, procutil=_producer_procutil(),
-                    )
+                    ))
                     selected_lock = _read_lock(lock_file, deadline)
                     selected_files = _wheel_pins(selected_lock, target, deadline, prefer_target_tags=True)
-                    verify_lock_witness(selected_lock, selected_files, witness, deadline)
+                    witness_urls = verify_lock_witness(selected_lock, selected_files, witness, deadline)
                     remaining = {
                         "max_requests": acquisition_limits.max_requests - witness["usage"]["requests"],
                         "max_redirects": acquisition_limits.max_redirects - witness["usage"]["redirects"],
@@ -411,21 +416,41 @@ def _build_from_snapshot(
                     policy != initial_policy or feed.policy_id != initial_feed.policy_id
                 ):
                     raise ProfileError("native core feed identity changed during selection")
-                acquisition = acquire_wheel_inputs(
-                    selected_files, feeds=feed.feeds, download_origins=feed.download_origins,
-                    cutoffs=feed.cutoffs, policy_id=feed.policy_id,
-                    limits=acquisition_limits,
-                    deadline=deadline, ssl_context=feed.context, proxies=feed.proxies,
-                    procutil=_producer_procutil(),
-                ) if selected_files else nullcontext(None)
-                acquisition_evidence = None
+                if guarded_feed:
+                    if selected_files:
+                        selected_files, _origins = validate_acquisition_inputs(
+                            selected_files, feeds=feed.feeds, download_origins=feed.download_origins,
+                            cutoffs=feed.cutoffs, policy_id=feed.policy_id, limits=acquisition_limits,
+                            deadline=deadline, ssl_context=feed.context, proxies=feed.proxies,
+                            procutil=_producer_procutil(),
+                        )
+                    verify_guarded_cutoffs(
+                        selected_files, witness_urls, witness, feed.cutoffs, deadline=deadline,
+                    )
+                    acquisition = retain_wheel_inputs(
+                        {item["filename"]: guarded_directory / item["filename"] for item in selected_files},
+                        {item["filename"]: item["sha256"] for item in selected_files},
+                        max_wheels=acquisition_limits.max_packages,
+                        max_archive_bytes=acquisition_limits.max_wheel_bytes,
+                        max_total_bytes=acquisition_limits.max_closure_bytes,
+                        max_snapshot_bytes=snapshot_budget, deadline=deadline,
+                    ) if selected_files else nullcontext(None)
+                else:
+                    acquisition = acquire_wheel_inputs(
+                        selected_files, feeds=feed.feeds, download_origins=feed.download_origins,
+                        cutoffs=feed.cutoffs, policy_id=feed.policy_id,
+                        limits=acquisition_limits,
+                        deadline=deadline, ssl_context=feed.context, proxies=feed.proxies,
+                        procutil=_producer_procutil(),
+                    ) if selected_files else nullcontext(None)
                 with acquisition as acquired:
                     paths = dict(first.paths)
                     expected = dict(first_digests)
-                    if acquired is not None:
-                        if paths.keys() & acquired.snapshot.paths.keys():
+                    external = acquired if guarded_feed else (acquired.snapshot if acquired is not None else None)
+                    if external is not None:
+                        if paths.keys() & external.paths.keys():
                             raise ProfileError("core and native wheel filenames collide")
-                        paths.update(acquired.snapshot.paths)
+                        paths.update(external.paths)
                         expected.update({item["filename"]: item["sha256"] for item in selected_files})
                     with retain_wheel_inputs(
                         paths, expected, max_wheels=256,
@@ -464,10 +489,8 @@ def _build_from_snapshot(
                             deadline=deadline,
                         )
                         retained.verify()
-                    if acquired is not None:
-                        acquired.snapshot.verify()
-                        if guarded_feed:
-                            acquisition_evidence = acquired.evidence()
+                    if external is not None:
+                        external.verify()
                 final_policy, final_feed = native._profile_feed(
                     selected, transaction, projections, uv=uv,
                     download_origins=download_origins, wheels=selected_files, deadline=deadline,
@@ -476,17 +499,7 @@ def _build_from_snapshot(
                 if policy != final_policy or feed.policy_id != final_feed.policy_id:
                     raise ProfileError("native core feed identity changed during construction")
                 if guarded_feed and witness["projects"]:
-                    evidence = acquisition_evidence or {}
-                    remaining = {
-                        "max_requests": acquisition_limits.max_requests - evidence.get("request_count", 0),
-                        "max_redirects": acquisition_limits.max_redirects - evidence.get("redirect_count", 0),
-                        "max_total_metadata_bytes": (
-                            acquisition_limits.max_total_metadata_bytes - evidence.get("metadata_bytes", 0)
-                        ),
-                    }
-                    if any(value <= 0 for value in remaining.values()):
-                        raise ProfileError("guarded native selection exhausted the verification budget")
-                    verification_limits = replace(acquisition_limits, **remaining)
+                    verification_limits = acquisition_limits
                 if project_core_inputs(source, manifest_data, target, deadline=deadline) != (
                     roots, requirements,
                 ):
