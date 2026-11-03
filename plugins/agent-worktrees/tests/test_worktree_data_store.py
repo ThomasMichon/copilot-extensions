@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 import multiprocessing
 import os
+import stat
 from contextlib import contextmanager
 from dataclasses import FrozenInstanceError, asdict
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -222,6 +224,313 @@ def test_current_record_mismatch_refuses_retained_descriptor(
     assert _snapshot(owner) == before
 
 
+def test_initial_allocation_refuses_another_registered_repository(
+    owner: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _record(owner, repo="other-project")
+    looked_up = []
+    monkeypatch.setattr(
+        project_state,
+        "_normalized_repository_remote",
+        lambda repository: looked_up.append(repository) or f"network:example.invalid/{repository}",
+    )
+    before = _snapshot(owner)
+    with pytest.raises(WorktreeDataError) as failure:
+        _allocate()
+    assert failure.value.code == "identity-conflict"
+    assert not looked_up
+    assert _snapshot(owner) == before
+
+
+def test_retained_mixed_project_repository_scope_refuses_without_canonical_record(
+    owner: Path,
+) -> None:
+    import hashlib
+
+    _allocate()
+    repository_id = (
+        "repo-"
+        + hashlib.sha256(
+            b"network:example.invalid/other-project",
+        ).hexdigest()[:24]
+    )
+    _change(
+        owner,
+        lambda document: document["scope"].update(
+            repository="other-project",
+            repository_id=repository_id,
+        ),
+    )
+    (owner / "worktrees" / f"{WORKTREE}.yaml").unlink()
+    before = _snapshot(owner)
+    with pytest.raises(WorktreeDataError) as failure:
+        store.read_worktree_data(PROJECT, WORKTREE, store_id=STORE)
+    assert failure.value.code == "identity-conflict"
+    assert _snapshot(owner) == before
+
+
+@pytest.mark.skipif(os.name == "nt", reason="directory durability backend is POSIX-only")
+def test_allocation_flushes_new_directory_links_and_descriptor_before_success(
+    owner: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events = []
+    real_sync = os.fsync
+    real_replace = tracking._replace_with_retry
+
+    def synced(fd: int) -> None:
+        metadata = os.fstat(fd)
+        kind = "directory" if stat.S_ISDIR(metadata.st_mode) else "file"
+        real_sync(fd)
+        events.append((kind, metadata.st_dev, metadata.st_ino))
+
+    def published(source: str, target: str) -> None:
+        metadata = Path(source).stat()
+        assert ("file", metadata.st_dev, metadata.st_ino) in events
+        assert json.loads(Path(source).read_bytes())["worktree_id"] == WORKTREE
+        events.append(("replace",))
+        real_replace(source, target)
+
+    monkeypatch.setattr(os, "fsync", synced)
+    monkeypatch.setattr(tracking, "_replace_with_retry", published)
+    _allocate()
+    publication = events.index(("replace",))
+    directories = [
+        owner / "worktree-state",
+        owner / "worktree-state" / WORKTREE,
+        owner / "worktree-state" / WORKTREE / "agendas",
+        owner / "worktree-state" / WORKTREE / "agendas" / "main",
+    ]
+    for path in directories:
+        child, parent = path.stat(), path.parent.stat()
+        child_event = ("directory", child.st_dev, child.st_ino)
+        parent_event = ("directory", parent.st_dev, parent.st_ino)
+        child_index = events.index(child_event)
+        assert parent_event in events[child_index + 1 : publication]
+    parent = _descriptor(owner).parent.stat()
+    assert ("directory", parent.st_dev, parent.st_ino) in events[publication + 1 :]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="directory durability backend is POSIX-only")
+def test_descriptor_content_flush_failure_preserves_prior_registration(
+    owner: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = _allocate()
+    original = _descriptor(owner).read_bytes()
+    real_sync = os.fsync
+
+    def rejected(fd: int) -> None:
+        if stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError("synthetic descriptor durability failure")
+        real_sync(fd)
+
+    monkeypatch.setattr(os, "fsync", rejected)
+    with pytest.raises(WorktreeDataError) as failure:
+        _allocate(lane="other", store_id="b" * 32)
+    assert failure.value.code == "allocation-failed"
+    assert _descriptor(owner).read_bytes() == original
+    assert Path(first.state_home).is_dir()
+    assert not list(_descriptor(owner).parent.glob("*.tmp"))
+    with pytest.raises(WorktreeDataError) as refused:
+        store.read_worktree_data(PROJECT, WORKTREE)
+    assert refused.value.code == "partial-registration"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="directory durability backend is POSIX-only")
+def test_publication_directory_flush_failure_cannot_succeed_on_unflushed_retry(
+    owner: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    replaced = []
+    real_replace, real_sync = tracking._replace_with_retry, os.fsync
+    successful_syncs = []
+    reject = [True]
+
+    def published(source: str, target: str) -> None:
+        real_replace(source, target)
+        replaced.append(target)
+
+    def synced(fd: int) -> None:
+        metadata = os.fstat(fd)
+        if replaced and stat.S_ISDIR(metadata.st_mode):
+            if reject[0]:
+                raise OSError("synthetic publication directory durability failure")
+            successful_syncs.append("directory")
+        elif stat.S_ISREG(metadata.st_mode):
+            successful_syncs.append("file")
+        real_sync(fd)
+
+    monkeypatch.setattr(tracking, "_replace_with_retry", published)
+    monkeypatch.setattr(os, "fsync", synced)
+    with pytest.raises(WorktreeDataError) as failure:
+        _allocate()
+    assert failure.value.code == "allocation-failed"
+    original = _descriptor(owner).read_bytes()
+    with pytest.raises(WorktreeDataError):
+        _allocate()
+    reject[0] = False
+    successful_syncs.clear()
+    placement = _allocate()
+    assert Path(placement.state_home).is_dir()
+    assert _descriptor(owner).read_bytes() == original
+    assert "file" in successful_syncs
+    assert successful_syncs[-1] == "directory"
+    assert all(
+        value == "directory" for value in successful_syncs[successful_syncs.index("file") + 1 :]
+    )
+    assert len(replaced) == 1
+
+
+def test_unavailable_directory_durability_refuses_allocation_without_effects(
+    owner: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unsupported(_path: Path) -> None:
+        raise OSError("synthetic filesystem without a directory durability barrier")
+
+    monkeypatch.setattr(store, "_sync_directory", unsupported)
+    before = _snapshot(owner)
+    with pytest.raises(WorktreeDataError) as failure:
+        store.allocate_worktree_data(
+            PROJECT,
+            WORKTREE,
+            creation_nonce=NONCE,
+            domain="agendas",
+            lane="main",
+            store_id=STORE,
+        )
+    assert failure.value.code == "durability-unavailable"
+    assert _snapshot(owner) == before
+    assert store.read_worktree_data(PROJECT, WORKTREE) is None
+
+
+@pytest.mark.parametrize("failure", [None, "open", "flush"])
+def test_windows_directory_barrier_uses_owned_write_handle_and_closes_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str | None,
+) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    calls = []
+
+    class Function:
+        def __init__(self, name: str, result: int) -> None:
+            self.name, self.result = name, result
+
+        def __call__(self, *arguments: Any) -> int:
+            calls.append((self.name, arguments))
+            return self.result
+
+    kernel = SimpleNamespace(
+        CreateFileW=Function("open", wintypes.HANDLE(-1).value if failure == "open" else 7),
+        FlushFileBuffers=Function("flush", 0 if failure == "flush" else 1),
+        CloseHandle=Function("close", 1),
+    )
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *_a, **_kw: kernel, raising=False)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: 5, raising=False)
+    monkeypatch.setattr(
+        ctypes,
+        "WinError",
+        lambda code: OSError(code, "synthetic native flush failure"),
+        raising=False,
+    )
+    if failure:
+        with pytest.raises(OSError, match="native flush failure"):
+            store._windows_flush_directory(tmp_path)
+    else:
+        store._windows_flush_directory(tmp_path)
+    assert calls[0] == ("open", (str(tmp_path), 0x40000000, 0x7, None, 3, 0x02000000, None))
+    assert calls[1:] == ([] if failure == "open" else [("flush", (7,)), ("close", (7,))])
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX-backed Windows adapter simulation")
+@pytest.mark.parametrize("failure", [None, "replace", "directory-after-replace"])
+def test_windows_publication_adapter_preserves_durability_and_retry_fences(
+    owner: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str | None,
+) -> None:
+    from zdd import routing_persistence
+
+    events = []
+    replaced = []
+    fail = [failure]
+    real_sync, real_open = os.fsync, os.open
+    retry_open_flags = []
+
+    def synced(fd: int) -> None:
+        metadata = os.fstat(fd)
+        real_sync(fd)
+        events.append(
+            (
+                "directory" if stat.S_ISDIR(metadata.st_mode) else "file",
+                metadata.st_dev,
+                metadata.st_ino,
+            )
+        )
+
+    def flushed(path: Path) -> None:
+        if replaced and fail[0] == "directory-after-replace":
+            raise OSError("synthetic native post-publication barrier failure")
+        fd = real_open(path, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+    def published(source: Path, target: Path) -> None:
+        metadata = source.stat()
+        assert ("file", metadata.st_dev, metadata.st_ino) in events
+        if fail[0] == "replace":
+            raise OSError("synthetic native write-through failure")
+        os.replace(source, target)
+        replaced.append(target)
+
+    def opened(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        if Path(path) == _descriptor(owner):
+            retry_open_flags.append(flags)
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(store, "_WINDOWS", True)
+    monkeypatch.setattr(store, "_windows_flush_directory", flushed)
+    monkeypatch.setattr(routing_persistence, "windows_replace", published)
+    monkeypatch.setattr(os, "fsync", synced)
+    monkeypatch.setattr(os, "open", opened)
+    if failure:
+        with pytest.raises(WorktreeDataError) as refused:
+            _allocate()
+        assert refused.value.code == "allocation-failed"
+        assert (_descriptor(owner).parent / "agendas" / "main").is_dir()
+        if failure == "replace":
+            assert not _descriptor(owner).exists()
+            return
+        with pytest.raises(WorktreeDataError):
+            _allocate()
+    else:
+        _allocate()
+    fail[0] = None
+    events.clear()
+    retry_open_flags.clear()
+    result = _allocate()
+    assert result.store_id == STORE and len(replaced) == 1
+    assert any(flags & os.O_RDWR for flags in retry_open_flags)
+    assert "file" in [event[0] for event in events]
+    assert events[-1][0] == "directory"
+    assert store.read_worktree_data(PROJECT, WORKTREE, store_id=STORE) is not None
+
+
+@pytest.mark.skipif(os.name != "nt", reason="requires actual native Windows directory flush")
+def test_native_windows_allocation_and_retry_use_real_durability_barriers(owner: Path) -> None:
+    first = _allocate()
+    assert _allocate() == first
+    selected = store.read_worktree_data(PROJECT, WORKTREE, store_id=STORE)
+    assert selected is not None and selected.placements == (first,)
+
+
 @pytest.mark.parametrize("raw", ["{", "[]", '{"worktree_id": 1}', "repo: []\nbranch: x\n"])
 def test_malformed_canonical_record_is_not_absent(owner: Path, raw: str) -> None:
     (owner / "worktrees" / f"{WORKTREE}.yaml").write_text(raw, encoding="utf-8")
@@ -415,7 +724,7 @@ def test_interrupted_publication_preserves_unadmitted_home(
     def fail(_path: Path, _content: bytes) -> None:
         raise OSError("synthetic publication interruption")
 
-    monkeypatch.setattr(tracking, "_atomic_write", fail)
+    monkeypatch.setattr(store, "_publish_descriptor", fail)
     with pytest.raises(WorktreeDataError) as failure:
         _allocate()
     assert failure.value.code == "allocation-failed"
@@ -569,7 +878,7 @@ def test_interrupted_additional_lane_is_not_hidden_by_prior_registration(
     def interrupted(_path: Path, _content: bytes) -> None:
         raise OSError("synthetic additional-publication interruption")
 
-    monkeypatch.setattr(tracking, "_atomic_write", interrupted)
+    monkeypatch.setattr(store, "_publish_descriptor", interrupted)
     with pytest.raises(WorktreeDataError) as failure:
         _allocate(lane="other", store_id="b" * 32)
     assert failure.value.code == "allocation-failed"

@@ -113,6 +113,38 @@ sys.exit(main.main(["--project",sys.argv[2],*sys.argv[3:]]))
 """
 
 
+def test_real_root_cli_refuses_cross_project_record_without_allocating(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    project, foreign = "sample-project", "other-project"
+    worktree, nonce = "machine-20300101-123456-abcd", "0123456789abcdef"
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(cfg, "_home", lambda: tmp_path)
+    root = cfg.project_dir(project)
+    (root / "worktrees").mkdir(parents=True)
+    record = root / "worktrees" / f"{worktree}.yaml"
+    record.write_text(json.dumps({
+        "worktree_id": worktree, "creation_nonce": nonce, "repo": foreign,
+        "branch": "worktree/sample", "worktree_path": str(tmp_path / "absent-checkout"),
+        "machine": "sample-machine", "platform": "linux",
+    }), encoding="utf-8")
+    original = record.read_bytes()
+    result = run_headless(
+        [sys.executable, "-c", CHILD, str(tmp_path), project, "worktree-data-allocate",
+         "--worktree", worktree, "--creation-nonce", nonce,
+         "--lane", "main", "--store-id", "a" * 32, "--json"],
+        capture_output=True, text=True, timeout=30,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+    assert result.returncode == 1, (result.stdout, result.stderr)
+    value = json.loads(result.stdout)
+    assert value["schema"] == cli.SCHEMA and value["ok"] is False
+    assert value["error"]["code"] == "identity-conflict" and "data" not in value
+    assert record.read_bytes() == original
+    assert not (root / "worktree-state").exists()
+    assert not cfg.project_dir(foreign).exists()
+
+
 def test_real_root_cli_allocates_once_and_fresh_reader_survives_retirement(
     tmp_path: Path, monkeypatch,
 ) -> None:

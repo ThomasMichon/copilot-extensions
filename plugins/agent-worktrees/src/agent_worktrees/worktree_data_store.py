@@ -5,8 +5,10 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
+import tempfile
 from dataclasses import replace
 from pathlib import Path
+
 from . import config as cfg
 from . import project_state, record_io, registry_paths, tracking
 from .worktree_data_contract import (
@@ -40,6 +42,7 @@ __all__ = [
 
 _HOME = "worktree-state"
 _DESCRIPTOR = "descriptor.json"
+_WINDOWS = os.name == "nt"
 
 
 def _metadata(path: Path) -> os.stat_result | None:
@@ -92,7 +95,11 @@ def _project_root(project: str) -> tuple[Path, os.stat_result | None]:
     return root, metadata
 
 
-def _canonical_record(root: Path, worktree_id: str) -> tracking.WorktreeRecord | None:
+def _canonical_record(
+    root: Path,
+    worktree_id: str,
+    project: str,
+) -> tracking.WorktreeRecord | None:
     directory = root / "worktrees"
     if _directory(directory, optional=True) is None:
         return None
@@ -105,6 +112,10 @@ def _canonical_record(root: Path, worktree_id: str) -> tracking.WorktreeRecord |
             segment(mapping.get(field), f"canonical {field}")
         if mapping["worktree_id"] != worktree_id:
             raise WorktreeDataError("identity-conflict", "canonical worktree ID does not match")
+        if mapping["repo"] != project:
+            raise WorktreeDataError(
+                "identity-conflict", "canonical repository does not match selected project"
+            )
         return tracking.parse_record_data(mapping, path=path)
     except WorktreeDataError:
         raise
@@ -120,7 +131,11 @@ def _scope(
     root_metadata: os.stat_result,
 ) -> DataScope:
     segment(repository, "repository")
-    remote = project_state._normalized_repository_remote(repository)
+    if repository != project:
+        raise WorktreeDataError(
+            "identity-conflict", "data repository does not match selected project"
+        )
+    remote = project_state._normalized_repository_remote(project)
     repository_id = "repo-" + hashlib.sha256(remote.encode("utf-8")).hexdigest()[:24]
     context = registry_paths.installation_context()
     marketplace = None if context is None else context["marketplaceId"]
@@ -187,7 +202,7 @@ def _load(
 ) -> tuple[Path, os.stat_result | None, tracking.WorktreeRecord | None, DataDescriptor | None]:
     segment(worktree_id, "worktree_id")
     root, root_metadata = _project_root(project)
-    record = _canonical_record(root, worktree_id)
+    record = _canonical_record(root, worktree_id, project)
     base = root / _HOME
     if _directory(base, optional=True) is None:
         return root, root_metadata, record, None
@@ -297,6 +312,101 @@ def read_worktree_data(
 def _mkdir(path: Path) -> None:
     path.mkdir()
     _directory(path)
+    _sync_directory(path)
+    _sync_directory(path.parent)
+
+
+def _sync_directory(path: Path) -> None:
+    if _WINDOWS:
+        _windows_flush_directory(path)
+        return
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _windows_flush_directory(path: Path) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.FlushFileBuffers.argtypes = [wintypes.HANDLE]
+    kernel.FlushFileBuffers.restype = wintypes.BOOL
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    # Match the established directory barrier: GENERIC_WRITE, sharing, OPEN_EXISTING,
+    # BACKUP_SEMANTICS. This opens the owned directory, never an elevated volume.
+    handle = kernel.CreateFileW(str(path), 0x40000000, 0x7, None, 3, 0x02000000, None)
+    if handle == wintypes.HANDLE(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        if not kernel.FlushFileBuffers(handle):
+            raise ctypes.WinError(ctypes.get_last_error())
+    finally:
+        kernel.CloseHandle(handle)
+
+
+def _require_durability(root: Path) -> None:
+    try:
+        _sync_directory(root)
+    except OSError as error:
+        raise WorktreeDataError(
+            "durability-unavailable", "project-data filesystem cannot flush directory entries"
+        ) from error
+
+
+def _publish_descriptor(path: Path, raw: bytes) -> None:
+    descriptor, temporary = tempfile.mkstemp(
+        dir=path.parent,
+        prefix=".descriptor-",
+        suffix=".tmp",
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if _WINDOWS:
+            from zdd.routing_persistence import windows_replace
+
+            windows_replace(Path(temporary), path)
+        else:
+            tracking._replace_with_retry(temporary, str(path))
+        _sync_directory(path.parent)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+
+
+def _sync_registered_home(root: Path, descriptor: DataDescriptor) -> None:
+    directory = root / _HOME / descriptor.worktree_id
+    path = directory / _DESCRIPTOR
+    _regular(path)
+    flags = os.O_RDWR if _WINDOWS else os.O_RDONLY
+    fd = os.open(path, flags | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    # A previous caller may have failed after rename, before acknowledging it.
+    for entry in descriptor.placements:
+        _sync_directory(directory / entry.relative_home)
+    for parent in (directory / "agendas", directory, directory.parent, root):
+        _sync_directory(parent)
 
 
 def allocate_worktree_data(
@@ -312,6 +422,8 @@ def allocate_worktree_data(
 
     An exact retry is idempotent. Foreign homes and interrupted publication are
     retained and refused, never adopted, overwritten or repaired automatically.
+    Success requires file and directory durability barriers. A filesystem unable
+    to flush directory entries refuses allocation before creating state.
     """
     try:
         segment(worktree_id, "worktree_id")
@@ -319,10 +431,11 @@ def allocate_worktree_data(
         store_identity(store_id)
         lane_identity(domain, lane)
         root, root_metadata = _project_root(project)
-        if root_metadata is None or _canonical_record(root, worktree_id) is None:
+        if root_metadata is None or _canonical_record(root, worktree_id, project) is None:
             raise WorktreeDataError(
                 "owner-unavailable", "allocation requires a canonical tracking record"
             )
+        _require_durability(root)
         record_path = root / "worktrees" / f"{worktree_id}.yaml"
         _regular(record_path.with_suffix(".lock"), optional=True)
         with tracking._RecordLock(record_path, require_sidecar=True):
@@ -352,6 +465,7 @@ def allocate_worktree_data(
                         raise WorktreeDataError(
                             "identity-conflict", "lane or store is already allocated"
                         )
+                    _sync_registered_home(root, descriptor)
                     return _placement(root, descriptor, entry)
             if len(descriptor.placements) >= MAX_PLACEMENTS:
                 raise WorktreeDataError("descriptor-limit", "placement inventory is full")
@@ -372,7 +486,7 @@ def allocate_worktree_data(
             _directory(directory / domain)
             _mkdir(directory / entry.relative_home)
             _same_directory(root, root_metadata)
-            tracking._atomic_write(directory / _DESCRIPTOR, raw)
+            _publish_descriptor(directory / _DESCRIPTOR, raw)
             return _placement(root, updated, entry)
     except WorktreeDataError:
         raise

@@ -30,9 +30,11 @@ omitting it requests that worktree's bounded inventory.
 
 Optional creation-nonce and placement-generation expectations reject a different
 incarnation or placement. Repository, project and installation scope remain
-owner-qualified. A descriptor can be retained after checkout retirement without
-a session or live checkout. An existing canonical record must still agree with
-its incarnation; missing canonical identity does not create live authority.
+owner-qualified: a canonical record or retained descriptor cannot substitute
+another project's repository for the selected project. A descriptor can be
+retained after checkout retirement without a session or live checkout. An
+existing canonical record must still agree with its incarnation; missing
+canonical identity does not create live authority.
 
 The JSON response distinguishes a registered placement from genuinely absent
 registration. Malformed, unreadable, partial or unsupported state is an error,
@@ -51,6 +53,17 @@ lock. An exact retry is idempotent. Conflicting store/incarnation identity,
 unsafe child paths and partial or foreign existing homes refuse without
 overwriting or adopting their contents. At most 32 placements and a 64 KiB
 descriptor are admitted through this boundary.
+
+Success follows flushed descriptor contents, atomic publication and directory
+barriers for the placement and its ancestry. Windows uses native write-through
+replacement and directory flushing; exact retries reflush the retained
+registration before acknowledgment. A filesystem or access policy that cannot
+provide those barriers returns `durability-unavailable`, not successful
+allocation with a weaker guarantee. Passive discovery does not require writes.
+
+The focused `tests/test_worktree_data_store.py` packet includes publication-order
+fault injection and a native Windows allocation/retry control. Linux API-double
+coverage does not qualify native Windows or hardware power-loss behavior.
 
 An allocated home is not an initialized or validated agenda store. Efforts owns
 agenda initialization, transactions and complete consistent export. A later
