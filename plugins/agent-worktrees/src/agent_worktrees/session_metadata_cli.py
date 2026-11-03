@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from . import claimant as claimant_mod
 from . import output
@@ -579,53 +579,23 @@ def cmd_effort_focus(args) -> int:
             output.err(str(exc))
             return 1
 
-        global_lock = cfg.tracking_dir() / ".effort-bindings.yaml"
-        with tracking._RecordLock(global_lock, require_sidecar=True):
-            records = tracking.list_records(cfg.tracking_dir())
-            conflict = effort_focus.duplicate_binding(records, worktree_id, record.repo, ref)
-            if conflict:
-                message = f"that effort participant/slice is already bound to worktree {conflict}"
-                if args.json:
-                    return output._json_error(message)
-                output.err(message)
-                return 1
-            with tracking._RecordLock(yaml_path):
-                record = tracking.load_record(yaml_path)
-                inspection = effort_focus.validate_binding(repo_root, ref)
-                if record.active_effort == ref:
-                    payload = _effort_focus_output(record, inspection)
-                    if args.json:
-                        output._json_output(payload)
-                    else:
-                        print(f"[OK] Effort focus already bound: {ref.path}")
-                    return 0
-                if record.active_effort is not None and not args.replace:
-                    message = (
-                        "an effort is already bound; pass --replace to record an "
-                        "explicit replacement"
-                    )
-                    if args.json:
-                        return output._json_error(message)
-                    output.err(message)
-                    return 1
-                replacing = record.active_effort is not None
-                record.active_effort = ref
-                record.effort_revision += 1
-                tracking.set_disposition(
-                    record,
-                    summary=inspection.summary,
-                    follow_up=True,
-                    session_id=os.environ.get("COPILOT_AGENT_SESSION_ID") or None,
-                    kind="effort-replace" if replacing else "effort-bind",
-                    save=False,
-                )
-                tracking.save_record(record)
-        payload = _effort_focus_output(record, inspection)
+        from . import tracking_effort_binding_write
+
+        result = tracking_effort_binding_write.dispatch("effort_bind", {
+            "yaml_path": str(yaml_path), "repo_root": str(repo_root),
+            "worktree_id": worktree_id, "path": ref.path, "participant": ref.participant,
+            "slice": ref.slice, "replace": bool(args.replace),
+            "session_id": os.environ.get("COPILOT_AGENT_SESSION_ID") or None,
+        })
+        if "error" in result:
+            if args.json:
+                return output._json_error(result["error"])
+            output.err(result["error"])
+            return 1
         if args.json:
-            output._json_output(payload)
+            output._json_output(result["payload"])
         else:
-            verb = "replaced" if replacing else "bound"
-            print(f"[OK] Effort focus {verb}: {ref.path}")
+            print(f"[OK] Effort focus {result['action']}: {ref.path}")
         return 0
 
     if action == "release":
@@ -664,47 +634,23 @@ def cmd_effort_focus(args) -> int:
                 output.err(str(exc))
                 return 1
 
-        with tracking._RecordLock(yaml_path):
-            record = tracking.load_record(yaml_path)
-            if record.active_effort != bound_ref:
-                message = "effort focus changed while release was being prepared; retry"
-                if args.json:
-                    return output._json_error(message)
-                output.err(message)
-                return 1
-            if completed and (
-                repo_root is None or not effort_focus.completed_or_archived(repo_root, bound_ref)
-            ):
-                message = (
-                    "the bound effort changed or no longer satisfies the "
-                    "completion gate; retry after resolving it"
-                )
-                if args.json:
-                    return output._json_error(message)
-                output.err(message)
-                return 1
-            record.active_effort = None
-            record.effort_revision += 1
-            slug = PurePosixPath(bound_ref.path).parent.name
-            summary = (
-                f"Completed effort {slug}"
-                if completed
-                else f"Transferred effort {slug} to {transfer}"
-            )
-            tracking.set_disposition(
-                record,
-                summary=summary,
-                follow_up=False,
-                session_id=os.environ.get("COPILOT_AGENT_SESSION_ID") or None,
-                kind="effort-release",
-                save=False,
-            )
-            tracking.save_record(record)
-        payload = _effort_focus_output(record, None)
+        from . import tracking_effort_binding_write
+
+        result = tracking_effort_binding_write.dispatch("effort_release", {
+            "yaml_path": str(yaml_path), "worktree_id": worktree_id,
+            "repo_root": None if repo_root is None else str(repo_root),
+            "bound": bound_ref.to_dict(), "completed": completed, "transfer": transfer,
+            "session_id": os.environ.get("COPILOT_AGENT_SESSION_ID") or None,
+        })
+        if "error" in result:
+            if args.json:
+                return output._json_error(result["error"])
+            output.err(result["error"])
+            return 1
         if args.json:
-            output._json_output(payload)
+            output._json_output(result["payload"])
         else:
-            print(f"[OK] Effort focus released: {summary}")
+            print(f"[OK] Effort focus released: {result['summary']}")
         return 0
 
     message = f"unknown effort-focus action: {action}"

@@ -226,6 +226,17 @@ unsupported or stale cursor changes. This is a cooperative process aide, not a
 guarantee that an agent cannot act outside it. A cursor, child result, or terminal
 graph node never independently proves that the effort is complete.
 
+### discoverable-agenda-data-lifetime
+
+A managed worktree's agenda and accepted history remain predictably discoverable
+for Manager, continuation, logging and archival independently of checkout and
+session lifetime. The worktree owner supplies admitted placement and discovery;
+efforts retains canonical agenda transactions and complete, consistent export.
+Optional logging consumes that evidence rather than becoming its writer.
+Standalone agendas remain supported without requiring managed worktrees or a
+logger. The [worktree-data vision](../agent-worktrees/worktree-data/README.md)
+governs retention and the separation between archival and deletion.
+
 ### judgment-led-agenda-recovery
 
 The agenda should help the agent recall what it was doing, choose what it should

@@ -114,6 +114,13 @@ view highlighting whether resolved head matches the just-resumed session).
 
 ## Request
 
+**Storage/discovery clarification:** the operator requested design/architecture
+for durable agenda/history retention and predictable discovery shared by Manager,
+logging and archival, including the risk of checkout cleanup deleting the data.
+The [verbatim capture and proposed lifetime design](worktree-state-lifetime.md)
+preserve both clarifications. No live relocation, cleanup or collection is
+authorized by that design request.
+
 **2026-11-02 continuation:** turn the subway-map guidance into a real live
 Sidecar with bottom-head/upward-history virtualization, owner push feeds and
 input/problem indicators. The operator defines compaction below 65% of
@@ -451,9 +458,11 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       [proposed observation contract](sidecar-observation-contract.md).
       Preserve every original parent clause, owner and evidence tier; a model,
       widget, provider or source PR alone does not complete this root.
-      S0, S1 and the first S2 selected worktree receiver are merged.
-      Native mutation capture, rich agenda history and owner/consumer integration
-      remain open; the whole S2-S5 and original root gates are unchanged.
+      S0, S1, the selected worktree receiver/Manager adapter, rich agenda
+      owner reader, safe process-local save capture and known-session Bridge
+      provider are merged. Native mutation intake, agenda/Bridge consumer
+      integration and membership remain open; whole S2-S5 and original root
+      gates are unchanged.
 
 ## Validation Plan
 
@@ -530,7 +539,24 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+- [2026-11-02 - Owner readers and first Manager attachment merged; native intake next](journal/2026/11.02-sidecar-owner-consumers.md)
 - [2026-11-02 - Selected worktree receiver merged; source joins next](journal/2026/11.02-sidecar-observation-receiver.md)
+
+### 2026-11-02 - Predictable durable agenda discovery requires an owner contract
+
+- The rich-reader consumer reached an actual admission gap: coarse publication
+  identifies the store but deliberately carries no state-home locator. The
+  resident does not retain the transient home used by the agenda publisher.
+- The operator clarified that Manager and later logging/history need somewhere
+  predictably discoverable and archivable. Ephemeral invocation inputs and a
+  Manager-only path map are not the selected design foundation.
+- Added the linked lifetime/discovery proposal and standing vision extension
+  before storage implementation. Placement remains worktree-owned, agenda
+  semantics/export efforts-owned, and archival logger-owned.
+- The proposal retains legacy rescue, separate checkout/data lifetimes,
+  revision-bound archive verification and explicit migration/deletion authority.
+  Existing native receipt and Bridge membership source work continues; the
+  agenda consumer awaits reviewed producer discovery support.
 
 ### 2026-11-02 - First S2 observation receiver source qualification
 

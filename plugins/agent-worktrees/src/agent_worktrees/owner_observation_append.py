@@ -194,6 +194,7 @@ def delivery_failed(
     batch_id: str,
     entries: list[dict],
     admission=None,
+    native=None,
 ) -> None:
     from . import owner_observation_intent as intents
 
@@ -204,6 +205,8 @@ def delivery_failed(
         with owner._lock, closing(owner._connect(write=True)) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
             owner._fence(conn)
+            if native is not None:
+                native.check()
             if admission is not None:
                 intents.verify(owner, conn, admission, record)
             row = owner._row(conn, selected)
@@ -243,6 +246,7 @@ def append(
     entries: list[dict],
     batch_id: str,
     digest: str,
+    *, captured_head=None,
 ) -> bool:
     source = owner._source(row)
     start = row["position"]
@@ -268,7 +272,7 @@ def append(
             **item,
             "event_id": event_id,
             "cursor": c.position(source, seq),
-            "head_session_id": record.head_session_id,
+            "head_session_id": record.head_session_id if captured_head is None else captured_head(item),
         }
         c.entry(value, stored=True, post_save=True)
         stored.append(value)

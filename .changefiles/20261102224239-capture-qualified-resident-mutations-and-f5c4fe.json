@@ -1,0 +1,13 @@
+{
+  "comment": "Capture qualified resident mutations and preserve bounded native Sidecar evidence",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

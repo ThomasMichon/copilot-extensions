@@ -117,6 +117,9 @@ class WorktreesRuntime:
         from .owner_observation_adapter import OwnerObservationAdapter
 
         self.observations = OwnerObservationAdapter(self)
+        from .owner_observation_native_intake import NativeIntake
+
+        self.native_observations = NativeIntake(self)
 
     @property
     def _read_elected(self):
@@ -163,6 +166,7 @@ class WorktreesRuntime:
             self.feed.activate()
             self.agendas.activate()
             self.observations.activate()
+            self.native_observations.activate()
             if self._wake is not None:
                 self._wake.set()
 
@@ -171,6 +175,7 @@ class WorktreesRuntime:
             self._admitting = False
             self._reason = reason
         self.feed.close(reason)
+        self.native_observations.close_admission()
         self.agendas.close(reason)
         self.observations.close_admission(reason)
 
@@ -193,6 +198,7 @@ class WorktreesRuntime:
             }
         result["capabilities"].extend(self.observations.capabilities())
         result["worktree_observations"] = self.observation_status()
+        result["worktree_observations"]["native_receipts"] = self.native_observations.status()
         return result
 
     def observation_read(self, payload: dict) -> dict:
@@ -203,6 +209,9 @@ class WorktreesRuntime:
 
     def observation_status(self) -> dict:
         return self.observations.status()
+
+    def native_compute(self, kind: str, payload: dict) -> dict:
+        return self.native_observations.compute(kind, payload)
 
     def observation_counts(self, server) -> dict[str, int]:
         from .owner_observation_transport import FEED_ACTION, HISTORY_ACTION, READ_ACTION
@@ -216,6 +225,7 @@ class WorktreesRuntime:
             "worktree-observations-producer": counts["producer"],
             "worktree-observations-publication": counts["publication"],
             "worktree-observations-demand": counts["demand"],
+            **self.native_observations.counts(),
         }
 
     def observation_busy(self, server) -> list[str]:
@@ -224,7 +234,10 @@ class WorktreesRuntime:
     def observation_wait_closed(self, timeout: float) -> None:
         from .owner_observation_contract import ObservationError
 
-        if not self.observations.wait_closed(timeout):
+        deadline = time.monotonic() + timeout
+        if not self.observations.wait_closed(timeout) or not self.native_observations.wait_closed(
+            max(0.0, deadline - time.monotonic()),
+        ):
             raise ObservationError("observation requests have not settled", "unavailable")
 
     def agenda_handle(self, action: str, payload: dict) -> dict:
@@ -364,6 +377,7 @@ class WorktreesRuntime:
                     self.store.publish(
                         project, rows, observed_at=observed_at, authority_check=self._elected,
                     )
+                    self.native_observations.accepted(project)
                     self.observations.accepted(project)
                 self.agendas.roster_changed(project)
             except ProjectionUnavailable as exc:

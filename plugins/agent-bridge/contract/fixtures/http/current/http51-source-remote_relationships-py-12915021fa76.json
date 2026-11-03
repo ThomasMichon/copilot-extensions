@@ -1,20 +1,16 @@
 {
-  "evidence_family": "http51-unchanged-source-link-v1",
-  "preserved_from": {
-    "path": "plugins/agent-bridge/contract/fixtures/http/current/http50-source-remote_relationships-py-12915021fa76.json",
-    "sha256": "f6f3b0f30f9067af8707ad855468a50dce3cc4a54338d166170a26a089b909fd"
-  },
-  "advertisement_evidence": {
+  "evidence_family": "http51-shared-asgi-v1",
+  "shared_operation_evidence": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/http51-standard-native-send.json",
-    "sha256": "2454517118c9bf6aa7d11594d3ead07e2e40d3af8881e2c96f4b7edcbeaa4038"
+    "sha256": "b7554622ed7fdc54bb259ade664578b115c5356f4f24ec3c17c7490c215d5fe7"
   },
-  "scope": "unchanged source and immutable prior operation; no new runtime observation",
+  "scope": "shared named ASGI portfolio, not an independent capture",
   "captured_from": {
-    "commit": "5699534c62bd8d473f6f9f79b61a6a6b1b842aa4",
+    "commit": "a314233f5229c31bca47d252458994f2f148f8a0",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 51,
     "source_path": "plugins/agent-bridge/src/agent_bridge/remote_relationships.py",
-    "source_git_blob": "7c1c1ed66582315cafc9d6242846b81f283b0095",
-    "source_sha256": "e53882344d73fea5c1334bc280d4db253e34b7773d7c790a6da4af81c0dcfd2a"
+    "source_git_blob": "9f8a22ea7a735d09b492c23045473adf59332786",
+    "source_sha256": "18b830ad1c04541a927c8fb7e24539e5fd96a59d12c8498fdce06c2bbaee2e09"
   }
 }

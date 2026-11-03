@@ -60,6 +60,7 @@ def _reconcile_native_id(manager: SessionManager, session: Session) -> dict:
             manager._db.execute_write(
                 "UPDATE remote_acp_relationships SET native_id=? WHERE session_id=? AND native_id IS NULL",
                 (persisted_native_id, session.session_id),
+                membership=True,
             )
             row = _row(manager, session)
     return row
@@ -222,6 +223,7 @@ async def _end_locked(manager: SessionManager, session: Session) -> None:
             manager._db.execute_write(
                 "UPDATE remote_acp_relationships SET phase='retiring' WHERE session_id=?",
                 (session.session_id,),
+                membership=True,
             )
             manager._clear_pending_queue(session, reason="ended")
             # Do not claim remote cancellation: close only our local transport.

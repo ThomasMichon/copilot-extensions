@@ -41,6 +41,7 @@ class _SessionsMixin:
              int(background_recovery_enabled and runtime_admission is None),
              now, now, acp_session_id, admission_document(runtime_admission)),
             runtime_admission,
+            membership=True,
         )
 
     def update_session_status(
@@ -50,11 +51,13 @@ class _SessionsMixin:
             self.execute_write(
                 "UPDATE sessions SET status=?, pid=?, updated_at=? WHERE id=?",
                 (status, pid, now, session_id),
+                membership=True,
             )
         else:
             self.execute_write(
                 "UPDATE sessions SET status=?, pid=NULL, updated_at=? WHERE id=?",
                 (status, now, session_id),
+                membership=True,
             )
 
     def update_session_stopped(
@@ -97,6 +100,7 @@ class _SessionsMixin:
         self.execute_write(
             "UPDATE sessions SET acp_session_id=? WHERE id=?",
             (acp_session_id, session_id),
+            membership=True,
         )
 
     def update_session_background_recovery(
@@ -138,6 +142,7 @@ class _SessionsMixin:
         self.execute_write(
             "UPDATE sessions SET target_json=?, target_dir=? WHERE id=?",
             (target_json, target_dir, session_id),
+            membership=True,
         )
 
     def update_session_usage(

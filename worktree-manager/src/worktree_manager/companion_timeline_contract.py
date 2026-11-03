@@ -18,6 +18,7 @@ MAX_STRIP_CACHE_BYTES = 4 * 1024 * 1024
 MAX_LANES = 32
 MAX_EXPANDED_GROUPS = 16
 MAX_DETAIL_LINES = 64
+MAX_FIELD_BYTES = 4096
 OVERSCAN_LINES = 8
 
 
@@ -101,7 +102,7 @@ class TimelineKind(StrEnum):
     SOURCE_EVENT = "source-event"
 
 
-def text(value: str, label: str, *, empty: bool = False, limit: int = 4096) -> None:
+def text(value: str, label: str, *, empty: bool = False, limit: int = MAX_FIELD_BYTES) -> None:
     if not isinstance(value, str) or "\x00" in value or (not empty and not value.strip()):
         raise TimelineContractError(f"{label} must be literal text without NUL")
     try:
@@ -159,7 +160,7 @@ def _finite_json(value: object, depth: int = 0) -> None:
             size = len(value.encode("utf-8"))
         except UnicodeError as exc:
             raise TimelineContractError("observer JSON contains invalid UTF-8 text") from exc
-        if size > 4096:
+        if size > MAX_FIELD_BYTES:
             raise TimelineContractError("observer JSON exceeds its string bound")
     elif type(value) is float:
         if not math.isfinite(value):
@@ -181,7 +182,7 @@ def _constant(value: str) -> None:
     raise TimelineContractError(f"observer JSON contains {value}")
 
 
-def canonical_payload(value: str | None, *, limit: int = 4096) -> str | None:
+def canonical_payload(value: str | None, *, limit: int = MAX_FIELD_BYTES) -> str | None:
     if value is None:
         return None
     text(value, "observer JSON", limit=limit)

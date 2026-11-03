@@ -49,7 +49,13 @@ def test_http51_uses_the_existing_capture_owner_and_keeps_prior_floors():
     }
     assert set(evidence.AFFECTED) == {
         previous.PREFIX + name for name in (
-            "__main__.py", "app_routes.py", "events.py", "compaction_evidence.py",
+            "owner_membership_read.py", "owner_membership_signal.py",
+            "db_runtime_custody.py", "db_sessions.py", "db_relationships.py",
+            "db_events.py", "db_prompts.py", "db_live_controls.py",
+            "remote_relationships.py", "remote_acp_sessions.py",
+            "owner_membership.py", "owner_membership_records.py", "owner_membership_contract.py",
+            "owner_membership_cli.py", "routes/owner_membership.py",
+            "__main__.py", "app_routes.py", "events.py", "compaction_evidence.py", "db_adoption.py",
             "session_observation_contract.py", "session_observations.py",
             "session_observation_cli.py", "routes/session_observations.py",
             "protocol.py", "native_send_admission.py", "native_bound_prompt.py",
@@ -80,7 +86,9 @@ def test_http51_observation_expansion_retains_the_original_probe_counts():
     assert evidence.PROBES["test_observation_cancellation_preserves_other_subscription"] == 1
     assert evidence.PROBES["test_observer_cli_http_eof"] == 8
     assert evidence.PROBES["test_http51_observer_payload_abbreviations"] == 2
-    assert sum(evidence.PROBES.values()) == 40
+    assert evidence.PROBES["test_http51_owner_membership_observations"] == 2
+    assert evidence.PROBES["test_adopted_writable_connection_preserves_membership_commits"] == 1
+    assert sum(evidence.PROBES.values()) == 43
     assert evidence.GENERATION == 51
     assert evidence.FAMILY == "http51-standard-native-send-asgi-v1"
     assert evidence.CAPABILITY_VERSIONS["bridge-session-observations-v1"] == 1

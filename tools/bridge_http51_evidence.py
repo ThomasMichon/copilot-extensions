@@ -20,7 +20,13 @@ INPUT = CONTRACT + "inputs/http51/standard-native-send.json"
 PRIMARY = previous.CURRENT + "http51-standard-native-send.json"
 FAMILY = "http51-standard-native-send-asgi-v1"
 AFFECTED = tuple(previous.PREFIX + name for name in (
-    "__main__.py", "app_routes.py", "events.py", "compaction_evidence.py",
+    "owner_membership_read.py", "owner_membership_signal.py",
+    "db_runtime_custody.py", "db_sessions.py", "db_relationships.py",
+    "db_events.py", "db_prompts.py", "db_live_controls.py",
+    "remote_relationships.py", "remote_acp_sessions.py",
+    "owner_membership.py", "owner_membership_records.py", "owner_membership_contract.py",
+    "owner_membership_cli.py", "routes/owner_membership.py",
+    "__main__.py", "app_routes.py", "events.py", "compaction_evidence.py", "db_adoption.py",
     "session_observation_contract.py", "session_observations.py",
     "session_observation_cli.py", "routes/session_observations.py",
     "protocol.py", "native_send_admission.py", "native_bound_prompt.py",
@@ -42,6 +48,9 @@ EXTRA_PATHS = (
     "tools/test_bridge_http51_declarations.py",
     "plugins/agent-bridge/contract/README.md",
     "plugins/agent-bridge/docs/session-observations.md",
+    "plugins/agent-bridge/docs/owner-membership.md",
+    "plugins/agent-bridge/tests/test_owner_membership.py",
+    "plugins/agent-bridge/tests/test_owner_membership_budget.py",
     "plugins/agent-bridge/tests/test_http51_capture_guards.py",
     "plugins/agent-bridge/tests/test_session_observations.py",
     "plugins/agent-bridge/tests/test_session_observation_transport.py",
@@ -75,6 +84,7 @@ CAPABILITY_VERSIONS = {
     "live_keyed_receipt": 1, "live_exact_notify": 1,
     "bridge-session-observations-v1": 1,
     "bridge-session-observation-history-v1": 1,
+    "bridge-owner-membership-v1": 1,
 }
 PROBES = {
     "test_http51_capture_actual_observations": 2,
@@ -86,6 +96,8 @@ PROBES = {
     "test_observation_cancellation_preserves_other_subscription": 1,
     "test_observer_cli_http_eof": 8,
     "test_http51_observer_payload_abbreviations": 2,
+    "test_http51_owner_membership_observations": 2,
+    "test_adopted_writable_connection_preserves_membership_commits": 1,
 }
 POLICY = common.POLICY
 encode = common.encode

@@ -14,7 +14,7 @@ from .live_inbox_runtime import LiveInboxRuntime
 from .models import ServiceConfig
 from .routes import (
     acquisitions, acp_ws, admin, agents, dispatch_tasks, health, live_inbox, live_sessions,
-    remote, session_observations, sessions, ui, worktrees,
+    owner_membership, remote, session_observations, sessions, ui, worktrees,
 )
 
 
@@ -46,7 +46,7 @@ def configure_serving_app(
     for router in (
         worktree_native_resume.router,
         acquisitions.router, health.router, ui.router, acp_ws.router,
-        sessions.router, session_observations.router, live_sessions.router,
+        sessions.router, session_observations.router, owner_membership.router, live_sessions.router,
         live_inbox.router, remote.router, agents.router,
         worktrees.router, admin.router, dispatch_tasks.router,
     ):

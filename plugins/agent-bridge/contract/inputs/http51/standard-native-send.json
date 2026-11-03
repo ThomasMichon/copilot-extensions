@@ -2,6 +2,14 @@
   "schema": "http51-standard-native-send-cases-v1",
   "generation": 51,
   "requests": {
+    "owner_membership": {
+      "owner_ref": "fixture-host/demo/fixture-owner",
+      "session_id": "fixture-membership-child",
+      "command": [
+        "--proj=demo", "observe-owner", "--owner-ref", "fixture-host/demo/fixture-owner",
+        "--contract-version", "1", "--json"
+      ]
+    },
     "observations": {
       "session_id": "observation-source",
       "alias": "observation-native-alias",
@@ -68,6 +76,22 @@
     }
   },
   "expected": {
+    "owner_membership": {
+      "capability": 1,
+      "snapshot": {
+        "kind": "snapshot", "completeness": "partial", "registry": "owned",
+        "link_qualification": "reported", "head_session_id": null,
+        "current_answerability": "unknown"
+      },
+      "delta": {"kind": "delta", "state": "idle", "evidence_kind": "observed-change"},
+      "cli": {"exit": 0, "kind": "snapshot", "ensure": false},
+      "unknown": {"kind": "error", "code": "source-unavailable"},
+      "old_capability": {"exit": 3, "code": "unsupported", "source_reads": 0},
+      "retired": {"kind": "session-retired", "grants_claim_release": false},
+      "gone": {"kind": "record-disappeared", "grants_claim_release": false},
+      "token_exclusion": true, "no_ensure": true, "no_actor_start": true,
+      "no_idle_pinning": true, "unauthenticated": 401
+    },
     "observations": {
       "capabilities": {
         "bridge-session-observations-v1": 1,

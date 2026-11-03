@@ -77,6 +77,10 @@ direct caller. It includes a degraded in-process hold and does not upgrade the
 existing sidecar policy into guaranteed cross-process exclusion.
 These fields do not grant actor permission, prove external
 acceptance or establish complete history.
+The separate `exclusion` tag records sidecar qualification only when the matching
+sidecar was held at both capture boundaries. Versioned machine/environment/
+execution identity is retained from the actual record fields, never inferred
+from the machine's display label.
 
 | Resource | Bound |
 | --- | --- |
@@ -98,12 +102,14 @@ Encoded-content accounting is not a process-RSS promise.
 
 ## Remaining integration
 
-This boundary does not append native semantic history, transport receipts to a
+This capture boundary itself does not append native semantic history, transport receipts to a
 different process, preserve pending delivery through process death, rerun
 canonical work, move storage or add archival/cleanup policy. The existing
 worktree-observation receiver still serves its separately qualified sampled
-history. Durable source registration, native operation identities, actor
-qualification and cross-process journal intake remain separate work.
+history. The [owner receiver](worktree-observations.md#qualified-resident-native-saves)
+can consume its own qualified resident-executed saves. Arbitrary external
+publishers, direct fallback transport, actor qualification and complete native
+capture remain separate work.
 
 See [the architecture's record contract](architecture.md#the-worktree-record--single-writer-contract-invariant)
 and [selected worktree observations](worktree-observations.md).

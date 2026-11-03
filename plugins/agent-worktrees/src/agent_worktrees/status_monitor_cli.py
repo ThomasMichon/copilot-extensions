@@ -440,7 +440,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         if tracking_write_server is None:
             try:
                 tracking_write._ensure_verb_modules_loaded()
-                tracking_write_server = tracking_write.start_server(tracking_write.compute)
+                tracking_write_server = tracking_write.start_server(worktrees_runtime.native_compute)
                 tracking_write_server.start()
             except Exception:
                 tracking_write_server = None

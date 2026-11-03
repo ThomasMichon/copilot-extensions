@@ -288,12 +288,14 @@ class _LiveSessionsMixin(LiveControlsMixin):
                 "UPDATE live_sessions SET status='taken-over', updated_at=? "
                 f"WHERE worktree_id=? AND status='live' AND session_id={_CANON}",
                 (now, worktree_id, expected_session_id, expected_session_id),
+                membership=True,
             )
         else:
             cur = self.execute_write(
                 "UPDATE live_sessions SET status='taken-over', updated_at=? "
                 "WHERE worktree_id=? AND status='live'",
                 (now, worktree_id),
+                membership=True,
             )
         n = cur.rowcount
         if n:
@@ -391,6 +393,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
                 f"WHERE session_id IN ({_in(expire_from_live)}) "
                 f"AND status='live' AND updated_at < ?",
                 (*expire_from_live, cutoff),
+                membership=True,
             )
             demoted += cur.rowcount
             self.execute_write(
@@ -406,6 +409,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
                 f"WHERE session_id IN ({_in(wedge_from_live)}) "
                 f"AND status='live' AND updated_at < ?",
                 (*wedge_from_live, cutoff),
+                membership=True,
             )
             demoted += cur.rowcount
         # wedged -> expired (process confirmed gone). Guarded on status='wedged'
@@ -416,6 +420,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
                 f"WHERE session_id IN ({_in(expire_from_wedged)}) "
                 f"AND status='wedged'",
                 (now, *expire_from_wedged),
+                membership=True,
             )
             self.execute_write(
                 f"DELETE FROM live_messages WHERE delivered_at IS NULL AND consumed_at IS NULL "
@@ -444,6 +449,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
                 # a registration re-created for a purged id in between.
                 f"DELETE FROM live_sessions WHERE session_id IN ({_in(dead_ids)})",
                 tuple(dead_ids),
+                membership=True,
             )
         return demoted
 
