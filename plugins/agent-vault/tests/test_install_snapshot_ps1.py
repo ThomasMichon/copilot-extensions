@@ -667,6 +667,7 @@ def _no_service_provision_command(home: Path, installer: Path, pwsh: str) -> lis
     ]
 
 
+@pytest.mark.timeout(60)
 def test_stamp_snapshot_retains_resources_without_creating_runtime(stamped_snapshot) -> None:
     state = stamped_snapshot
     assert (state.snapshot / "scripts" / "installer-engine.ps1").is_file()
@@ -777,3 +778,46 @@ def test_snapshot_compatibility_launcher_does_not_self_provision(provisioned_sna
     assert invoke.returncode == 0, invoke.stderr
     assert f"agent-vault {state.expected_version}" in invoke.stdout
     assert _uv_events(env) == before_launch, "Compatibility launch attempted self-provisioning"
+
+
+@pytest.mark.timeout(60)
+def test_provisioned_management_command_cannot_start_after_withdrawal(provisioned_snapshot):
+    state = provisioned_snapshot
+    selected = Path(state.env["AGENT_VAULT_CONFIG"])
+    before = selected.read_bytes()
+    environment = dict(state.env)
+    slot = state.home / ".agent-vault" / "versions" / state.version
+    packages = (
+        slot / "Lib" / "site-packages" if os.name == "nt"
+        else next((slot / "lib").glob("python*/site-packages"))
+    )
+    guard = packages / "sitecustomize.py"
+    previous_guard = guard.read_bytes() if guard.exists() else None
+    guard.write_text(
+        "from agent_vault import cli\n"
+        "def forbidden(*args, **kwargs):\n"
+        "    raise AssertionError('withdrawn activation must not probe a backend')\n"
+        "cli.send_command = forbidden\n", encoding="utf-8",
+    )
+    if os.name == "nt":
+        command = [
+            state.pwsh, "-NoProfile", "-NonInteractive", "-File",
+            str(state.home / ".local" / "bin" / "agent-vault.ps1"), "start",
+        ]
+    else:
+        command = [str(state.home / ".local" / "bin" / "agent-vault"), "start"]
+    selected.write_text('{"enabled":false}', encoding="utf-8")
+    try:
+        result = subprocess.run(
+            command, env=environment, cwd=state.home, capture_output=True,
+            text=True, timeout=30, **agent_procutil.no_window_kwargs(),
+        )
+    finally:
+        selected.write_bytes(before)
+        if previous_guard is None:
+            guard.unlink()
+        else:
+            guard.write_bytes(previous_guard)
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "inactive" in result.stderr
+    assert not (state.home / ".agent-vault" / "service-stdio.log").exists()

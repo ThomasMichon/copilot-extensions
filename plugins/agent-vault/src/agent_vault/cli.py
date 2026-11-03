@@ -358,8 +358,19 @@ def _ready_for_work(response: dict | None) -> bool:
     )
 
 
+def _runtime_active() -> bool:
+    from .configuration import runtime_enabled
+
+    if not runtime_enabled():
+        print("Agent Vault is inactive; runtime activation requires enabled=true.", file=sys.stderr)
+        return False
+    return True
+
+
 def start_service(tcp_port: int | None = None) -> bool:
     """Start the vault service in the background."""
+    if not _runtime_active():
+        return False
     if tcp_port is None:
         context = config.resolve_context()
         if not IS_WINDOWS and context.sources.get("port") == "default" and _start_service_systemd():
@@ -756,6 +767,8 @@ def cmd_installer_readiness(args):
 
 
 def cmd_start(args):
+    if not _runtime_active():
+        return 2
     resp = send_command({"action": "ping"})
     if _ready_for_work(resp):
         status = _vault_status_label(resp["cli"])

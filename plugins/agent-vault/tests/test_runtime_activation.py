@@ -24,7 +24,7 @@ def test_native_inactive_or_invalid_first_touch_never_installs(tmp_path, configu
     project = tmp_path / "project"
     home.mkdir()
     project.mkdir()
-    payload = _make_fake_plugin(tmp_path, "agent-vault")
+    _, payload, _, _, _ = prepare_payload(tmp_path, "legacy")
     (tmp_path / ".agent-vault.json").unlink()
     if configuration is not None:
         (project / ".agent-vault.json").write_text(
@@ -108,3 +108,46 @@ def test_actual_payload_reader_uses_bundled_sdk_without_site_packages(tmp_path):
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout)["state"] == "configured"
+
+
+def test_automatic_cell_selection_supplies_qualified_activation_owner(tmp_path):
+    home, payload, runtime, _identity, _context = prepare_payload(tmp_path, "namespaced")
+    (tmp_path / ".agent-vault.json").unlink()
+    knowledge = tmp_path / "knowledge"
+    knowledge.mkdir()
+    (knowledge / ".agent-vault.json").write_text('{"enabled":true}', encoding="utf-8")
+    report = {
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "activation-fixture",
+            "execution_machine": "fixture",
+            "installation_cell": str(runtime.parent.parent),
+            "binding": "bound", "base_root": str(tmp_path),
+            "knowledge_root": str(knowledge),
+        },
+    }
+    env = _clean_env({
+        "HOME": str(home), "USERPROFILE": str(home),
+        "COPILOT_PLUGIN_ROOT": str(payload), "AGENT_VAULT_NO_SELFPROVISION": "1",
+        "AGENT_CONFIGURATION_CONTEXT": json.dumps(report),
+    })
+    for key in ("COPILOT_EXTENSIONS_CONTEXT", "AGENT_VAULT_HOME", "AGENT_RT_ROOT"):
+        env.pop(key, None)
+    result = invoke(payload, env, tmp_path, "get", "Example", "password")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "runtime not provisioned" in result.stderr
+    suffix = "ps1" if os.name == "nt" else "sh"
+    script = payload / "scripts" / ("installer-readiness." + suffix)
+    argv = (
+        [str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"),
+         "-NoProfile", "-NonInteractive", "-File", str(script)]
+        if os.name == "nt" else ["bash", str(script)]
+    )
+    readiness = subprocess.run(
+        argv, cwd=tmp_path, env=env, capture_output=True, text=True,
+        timeout=30, **no_window_kwargs(),
+    )
+    assert readiness.returncode == 1, readiness.stdout + readiness.stderr
+    assert json.loads(readiness.stdout)["state"] == "failed"
+    assert "runtime is not installed" in json.loads(readiness.stdout)["detail"]
+    assert not (runtime / "versions").exists()

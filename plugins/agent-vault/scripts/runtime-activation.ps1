@@ -1,5 +1,9 @@
 function Get-VaultRuntimeActivation {
-    param([string]$Project = (Get-Location).ProviderPath)
+    param(
+        [string]$Project = (Get-Location).ProviderPath,
+        [string]$RuntimeRoot,
+        [string]$Context
+    )
     $reader = Join-Path $PSScriptRoot 'runtime-activation.py'
     $python = Get-Command python3 -CommandType Application -ErrorAction SilentlyContinue |
         Where-Object { $_.Source -notlike '*\WindowsApps\*' } | Select-Object -First 1
@@ -17,9 +21,12 @@ function Get-VaultRuntimeActivation {
         throw 'Agent Vault activation requires an available Python reader; no installation was attempted.'
     }
     $previousPreference = $ErrorActionPreference
+    $readerArgs = @('--cwd', $Project)
+    if ($RuntimeRoot) { $readerArgs += "--runtime-root=$RuntimeRoot" }
+    if ($PSBoundParameters.ContainsKey('Context')) { $readerArgs += "--context=$Context" }
     $ErrorActionPreference = 'Continue'
     try {
-        $output = @(& $python.Source @pythonArgs -I -B -X utf8 $reader --cwd $Project)
+        $output = @(& $python.Source @pythonArgs -I -B -X utf8 $reader @readerArgs)
         $code = $LASTEXITCODE
     } finally { $ErrorActionPreference = $previousPreference }
     $result = ($output -join "`n") | ConvertFrom-Json -ErrorAction Stop

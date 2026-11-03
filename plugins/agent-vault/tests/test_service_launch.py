@@ -30,7 +30,23 @@ def recorded_spawns(monkeypatch):
     monkeypatch.setattr(launch, "spawn_service", lambda args: calls.append(list(args)))
     monkeypatch.setattr(cli, "send_command", lambda *_a, **_k: {"ok": True})
     monkeypatch.setattr(cli.time, "sleep", lambda _s: None)
+    monkeypatch.setattr("agent_vault.configuration.runtime_enabled", lambda: True)
     return calls
+
+
+@pytest.mark.parametrize("windows", [False, True])
+def test_withdrawn_activation_refuses_every_runtime_start_path(monkeypatch, windows, capsys):
+    monkeypatch.setattr(cli, "IS_WINDOWS", windows)
+    monkeypatch.setattr("agent_vault.configuration.runtime_enabled", lambda: False)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("withdrawn activation must not touch service or database startup")
+
+    monkeypatch.setattr(cli.config, "resolve_context", forbidden)
+    monkeypatch.setattr(cli, "_start_service_systemd", forbidden)
+    monkeypatch.setattr(launch, "spawn_service", forbidden)
+    assert cli.start_service() is False
+    assert "inactive" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("windows", [True, False])

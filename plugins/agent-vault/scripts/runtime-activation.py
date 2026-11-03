@@ -12,6 +12,8 @@ import sys
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cwd", required=True)
+    parser.add_argument("--runtime-root")
+    parser.add_argument("--context")
     args = parser.parse_args()
     payload = Path(__file__).resolve().parents[1]
     sys.path[:0] = [
@@ -22,11 +24,17 @@ def main() -> int:
         from agent_vault.config import home_dir
         from agent_vault.configuration import runtime_enabled
 
-        context = os.environ.get("COPILOT_EXTENSIONS_CONTEXT")
-        runtime = os.environ.get("AGENT_VAULT_HOME") or (
+        context = args.context if args.context is not None else os.environ.get("COPILOT_EXTENSIONS_CONTEXT")
+        if args.context is not None:
+            if context:
+                os.environ["COPILOT_EXTENSIONS_CONTEXT"] = context
+            else:
+                os.environ.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+        runtime = args.runtime_root or os.environ.get("AGENT_VAULT_HOME") or (
             str(Path(context).parent) if context else str(home_dir())
         )
         os.environ["AGENT_RT_ROOT"] = runtime
+        os.environ["AGENT_VAULT_HOME"] = runtime
         enabled = runtime_enabled(args.cwd)
         state = "configured" if enabled else "configuration-empty"
         detail = (

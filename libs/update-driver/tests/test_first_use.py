@@ -202,6 +202,37 @@ def test_actual_owned_native_provision_keeps_exit_status_and_does_not_leak_ticke
     assert (frozen / "plugin.json").read_bytes() == (payload / "plugin.json").read_bytes()
 
 
+@pytest.mark.parametrize("present", [False, True])
+def test_vault_activation_selectors_survive_a_different_worker(owning_payload, area, monkeypatch, present):
+    payload, installation, project = owning_payload
+    keys = ("AGENT_VAULT_CONFIG", "APPDATA", "XDG_CONFIG_HOME")
+    for name in ("install.ps1", "install.sh"):
+        path = payload / "scripts" / name
+        record = (
+            "[IO.File]::WriteAllLines((Join-Path $InstallDir 'activation-context'), "
+            "[string[]]@($env:AGENT_VAULT_CONFIG,$env:APPDATA,$env:XDG_CONFIG_HOME))\n"
+            if name.endswith(".ps1") else
+            'printf "%s\\n" "${AGENT_VAULT_CONFIG:-}" "${APPDATA:-}" "${XDG_CONFIG_HOME:-}" >"$3/activation-context"\n'
+        )
+        path.write_text(path.read_text().replace("exit 7", record + "exit 7"), encoding="utf-8")
+    selected = {key: str(area / ("accepted-" + key.lower())) for key in keys}
+    for key in keys:
+        if present:
+            monkeypatch.setenv(key, selected[key])
+        else:
+            monkeypatch.delenv(key, raising=False)
+    root = area / "queue"
+    request = provision.enqueue(payload, installation, project, root=root)
+    for key in keys:
+        monkeypatch.setenv(key, str(area / ("foreign-worker-" + key.lower())))
+    drain(root=root)
+    result = status(request.id, root=root)
+    assert result.exit_code == 7, result.log_path.read_text()
+    assert (installation / "activation-context").read_text().splitlines() == [
+        selected[key] if present else "" for key in keys
+    ]
+
+
 @pytest.mark.parametrize("installer_action", ["provision", "stamp"])
 def test_source_substitution_after_acceptance_never_runs_installer(
     owning_payload, area, installer_action,

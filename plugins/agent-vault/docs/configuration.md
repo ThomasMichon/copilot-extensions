@@ -59,6 +59,12 @@ KeePassXC or migrate credentials. Explicit stop/lock operations and validated
 pinned identity-cache requests retain their independent native custody and do
 not gain provisioning authority. Native database/registry/service placement
 remains machine-local; portable activation carries no secrets or database paths.
+Provisioned management commands also check current activation before starting
+a resident; an explicit `start` checks before probing a backend. Payload and
+readiness dispatch use the validated selected runtime/cell, including automatic
+cell selection without inherited routing variables. Queued provisioning retains
+the accepted credential-free configuration-file and native configuration-root
+selectors rather than substituting the worker's environment.
 
 Native active-vault precedence is `AGENT_VAULT` → repository `vault` →
 extension `vault` → global `default_vault` → the sole registered vault → none.

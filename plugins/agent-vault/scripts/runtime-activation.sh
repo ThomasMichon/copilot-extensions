@@ -8,5 +8,7 @@ vault_runtime_activation() {
         printf '%s\n' '{"schema":"copilot-extensions.module-readiness","version":1,"module":"agent-vault/runtime","state":"failed","detail":"Agent Vault activation requires an available Python reader; no installation was attempted."}'
         return 3
     fi
-    "$python" -I -B -X utf8 "$reader_dir/runtime-activation.py" --cwd "${1:-$PWD}"
+    local project="${1:-$PWD}"
+    if [[ $# -gt 0 ]]; then shift; fi
+    "$python" -I -B -X utf8 "$reader_dir/runtime-activation.py" --cwd "$project" "$@"
 }

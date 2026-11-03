@@ -129,16 +129,12 @@ jobs:
     timeout-minutes: 125
     env: *codespaces-installer-env
     steps: *codespaces-installer-steps
-  vault-activation:
+  vault-activation-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'vault-activation'
-    name: Vault configuration activation (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: Vault configuration activation (Linux)
+    runs-on: ubuntu-latest
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    steps:
+    steps: &vault-activation-steps
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
@@ -159,6 +155,19 @@ jobs:
           --test-file tests/test_bootstrap_driver.py
           --test-file tests/test_bootstrap_check_reconcile_always_on.py
           --test-file tests/test_runtime_activation.py
+          --test-file tests/test_install_snapshot_ps1.py
+          --test-file tests/test_service_launch.py
+      - name: Qualify accepted activation context under a different queue worker
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use.py -k activation_selectors
+
+  vault-activation-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'vault-activation'
+    name: Vault configuration activation (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps: *vault-activation-steps
   worktrees-git-probes-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'worktrees-git-probes'
     name: Worktrees Git probe packet (Linux)

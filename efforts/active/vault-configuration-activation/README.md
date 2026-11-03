@@ -80,6 +80,9 @@ those effects.
 - [x] Install-contract checks report zero violations.
 - [ ] Exercise an available isolated external CI lane for platform parity, or
   record the exact unavailable boundary without claiming live qualification.
+- [ ] Qualify provisioned-command withdrawal before backend probing, automatic
+  cell selection without inherited routing, and accepted activation selectors
+  executed under another worker's environment.
 - [ ] Record merged source and release status separately from unapproved rollout,
   resolve every checklist item and archive this source effort.
 
@@ -123,3 +126,17 @@ remain authoritative for their machine-local custody.
 - The existing on-demand installation workflow now has a bounded
   `vault-activation` portfolio for exact-source Linux and Windows qualification.
   It does not enter required unit-only CI or deploy an installed runtime.
+- The first exact-source external packet passed Linux (170 cases) and Windows
+  (166 passed/four skips), but review found warm-command, automatic-cell and
+  queued-selector gaps. Required CI also refused the portfolio's dynamic runner
+  route; the corrected portfolio uses two literal hosted-runner jobs.
+- The revision gates the shared runtime-start path and explicit `start` before
+  backend probing, carries validated runtime/cell identity into activation,
+  shares that dispatch route with readiness and preserves accepted native
+  activation selectors through both queued entry points. Canonical helper copies
+  and producer metadata are synchronized, not patched independently.
+- Revised Windows native controls pass 52 cases with two platform skips,
+  including actual provisioned-command withdrawal with transport access
+  explicitly forbidden. Two durable request controls pass against a different
+  worker environment, including absent selectors. Final external revision and
+  review acceptance remain open.

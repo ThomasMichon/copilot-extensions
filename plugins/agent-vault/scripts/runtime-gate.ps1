@@ -202,7 +202,7 @@ if (-not $context) {
 if (-not (Test-Path Env:AGENT_VAULT_PINNED_CONTEXT)) {
     try {
         . (Join-Path $scriptDir 'runtime-activation.ps1')
-        $activation = Get-VaultRuntimeActivation -Project $project
+        $activation = Get-VaultRuntimeActivation -Project $project -RuntimeRoot $runtimeRoot -Context $context
     } catch {
         [Console]::Error.WriteLine('[agent-vault] activation configuration could not be resolved; correct its configuration, binding or payload.')
         exit 3
