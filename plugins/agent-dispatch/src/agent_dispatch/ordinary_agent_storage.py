@@ -39,6 +39,13 @@ def reservation_native_facts(queue: Any, key: str) -> dict:
             error = _admission_error(conn, row, task, now=queue._now(None))
         except TaskError as exc:
             known, retired, reconcile_retirement, error = [], [], False, str(exc)
+        try:
+            cli_error = (
+                _admission_error(conn, row, task, now=queue._now(None), driver="cli")
+                if pool_bound and row["driver"] == "cli" else None
+            )
+        except TaskError as exc:
+            cli_error = str(exc)
         redrive, redrive_error = None, None
         if row["driver"] == "ordinary-bridge":
             try:
@@ -53,18 +60,21 @@ def reservation_native_facts(queue: Any, key: str) -> dict:
         "reservation_pool_assignment": asdict(assigned) if assigned is not None else None,
         "known_native_session_ids": known, "retired_native_session_ids": retired,
         "ordinary_assignment_error": error,
+        "cli_initial_start_error": cli_error,
         "inherited_retirement_reconcilable": reconcile_retirement,
         "ordinary_redrive": redrive, "ordinary_redrive_error": redrive_error,
     }
 
 
-def _admission_error(conn: Any, row: Any, task: Any, *, now: float) -> str | None:
+def _admission_error(
+    conn: Any, row: Any, task: Any, *, now: float, driver: str = "ordinary-bridge",
+) -> str | None:
     from .queue_pool_placement import pool_assignment
     assigned = pool_assignment(conn, task.id)
     placed = assigned is not None
     if assigned is not None and (
         assigned.reservation_key != row["key"] or assigned.task_generation != task.generation
-        or row["driver"] != "ordinary-bridge" or row["startup_revision"] != 1 or row["startup_fenced"]
+        or row["driver"] != driver or row["startup_revision"] != 1 or row["startup_fenced"]
     ):
         return "ordinary pool assignment incarnation or driver changed"
     if (

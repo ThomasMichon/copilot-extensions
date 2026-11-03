@@ -591,40 +591,23 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         """Prepare the selected backend's reservation-bound startup facts."""
         ordinary = getattr(self.spawn_fn, "ordinary_bridge_for", None)
         restricted = getattr(self.spawn_fn, "restricted_bridge_for", None)
+        if reservation.get("reservation_pool_bound") is True:
+            from .supervisor_pool_allocator import prepare_task
+            task = prepare_task(
+                self.client, task, reservation, instance=self.pool_instance,
+                supervisor_id=self.supervisor_id,
+                driver=self._spawn_attribute(task, "pool_placement_driver", "ordinary-bridge"),
+            )
         if (callable(ordinary) and ordinary(task)) or (callable(restricted) and restricted(task)):
+            if reservation.get("reservation_pool_bound") is True:
+                return task
             from .supervisor_pool_allocator import prepare_task
             return prepare_task(self.client, task, reservation, instance=self.pool_instance if callable(ordinary) and ordinary(task) else None,
                                 supervisor_id=self.supervisor_id)
         if not self._spawn_requires_reusable_worktree(task):
             return task
-        from . import embody
-
-        driver = self._spawn_attribute(task, "allocation_driver", "agent-dispatch")
-        interface = self._spawn_attribute(task, "allocation_interface", "cli")
-        project = reservation.get("allocation_project") or self._spawn_attribute(
-            task, "allocation_project", embody.project_for_task(task) or ""
-        )
-        agent = self._spawn_attribute(task, "allocation_agent", "")
-        prepared = embody.prepare_reusable_worktree(
-            task,
-            reservation,
-            project=project or None,
-            interface=interface,
-            driver=driver,
-            supervisor=self.supervisor_id,
-            agent=agent or None,
-            no_pair=self._spawn_no_pair(task),
-            allocation_client=self.client,
-        )
-        worktree = str(prepared["worktree"])
-        replaced = bool(prepared.get("replaced"))
-        ownership = str(prepared.get("ownership") or "unknown")
-        from .workspace_binding import record_prepared
-        record_prepared(
-            self.client, reservation, prepared, driver=driver, creating_host=self.machine,
-        )
-        from .session_acquisition import spawn_snapshot
-        return spawn_snapshot(task, reservation, worktree, prepared, ownership, replaced)
+        from .workspace_binding import prepare_workspace
+        return prepare_workspace(self, task, reservation)
 
     def _reservation_has_live_process(self, reservation: dict, task: dict) -> bool:
         if reservation.get("state") in SpawnState.ACTIVE and (

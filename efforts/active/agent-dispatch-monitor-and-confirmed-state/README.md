@@ -305,9 +305,10 @@ live claim token. No new blanket ACK or executor appointment is created.
       The default-off source seam preserves global selection, exact launch
       ownership and retained reservation custody; it does not qualify ordinary
       retry/decline, complete mixed-driver adoption or installed/native effects.
-- [ ] Land [driver-correct ordinary ACP startup retries and decisions](journal/2026/11.02-ordinary-startup-retry.md)
+- [x] Land [driver-correct ordinary ACP startup retries and decisions](journal/2026/11.02-ordinary-startup-retry.md)
       through the existing exact retry/completion and supervision owners;
-      preserve unknown effects and separate Bridge/native identity. This does
+      merged in [#10191](https://github.com/ThomasMichon/copilot-extensions/pull/10191).
+      Preserve unknown effects and separate Bridge/native identity. This does
       not qualify worker decline/closeout, complete CLI/mixed-driver adoption
       or installed/native effects.
 - [x] Land source-owned [obsolete-scope exclusion](journal/2026/11.02-obsolete-pool-scopes.md)

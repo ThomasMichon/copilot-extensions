@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import TYPE_CHECKING
+
 from .queue_records import SpawnReservation, SpawnState, Status, TaskError
 from .queue_spawn_cooling import validate_cooling_publication
 
 
 class SpawnDeferralMixin:
+    if TYPE_CHECKING:
+        _update_reservation: Callable[..., SpawnReservation]
+
     def defer_spawn(
         self, key: str, *, detail: str | None = None, now: float | None = None,
         expected_generation: int | None = None,
@@ -20,6 +26,13 @@ class SpawnDeferralMixin:
         can defer only a generation-fenced, still-unclaimed task before any
         delivery receipt, allocation or body exists."""
         def guard(row):
+            with self._connect() as probe:
+                task = self._fetch(probe, row["task_id"])
+                bound = probe.execute(
+                    "SELECT 1 FROM pool_reservation_bindings WHERE reservation_key=?", (key,),
+                ).fetchone()
+            if bound and task is not None and task.status == Status.CLAIMED and task.owner is None:
+                raise TaskError("allocator-owned startup must retain its active reservation, not defer it")
             if row["state"] in {SpawnState.SPAWNED, SpawnState.COLD}:
                 if not row["startup_complete"]:
                     raise TaskError("previous startup remains incomplete")

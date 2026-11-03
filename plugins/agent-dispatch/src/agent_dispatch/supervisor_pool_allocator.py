@@ -102,6 +102,7 @@ def launch_scope(args: argparse.Namespace) -> tuple[str, str] | None:
 def reserve(
     client: DispatchClient, task: dict, supervisor_id: str, *,
     instance: tuple[str, str, str], ordinary: bool, restricted: bool, startup_timeout: float,
+    driver: str | None = None,
 ) -> dict | None:
     """A different global winner waits without being claimed by this caller."""
     catalog = configured_catalog(client)
@@ -113,11 +114,12 @@ def reserve(
         or catalog.get("configured_metadata_ready") is not True
     ):
         raise DispatchError(409, "managed pool allocation is waiting for the complete current catalog")
-    if not ordinary or restricted:
-        raise DispatchUpgradeRequired("managed pool allocation requires the qualified ordinary Bridge backend")
+    driver = "ordinary-bridge" if ordinary else driver
+    if restricted or driver not in {"cli", "ordinary-bridge"} or not ordinary and driver != "cli":
+        raise DispatchUpgradeRequired("managed pool allocation requires a qualified ordinary Bridge or CLI backend")
     placed = client.place_pool_task(
         task["id"], reserved_by=supervisor_id, catalog_revision=revision,
-        driver="ordinary-bridge", expected_instance=instance, startup_timeout=startup_timeout,
+        driver=driver, expected_instance=instance, startup_timeout=startup_timeout,
     )
     return {
         **placed, "reservation": {
@@ -130,14 +132,23 @@ def reserve(
 def prepare_task(
     client: DispatchClient, task: dict, reservation: dict, *,
     instance: tuple[str, str, str] | None, supervisor_id: str,
+    driver: str = "ordinary-bridge",
 ) -> dict:
     """Refresh the allocator's generation before preparing any ordinary effects."""
+    if reservation.get("reservation_pool_bound") is True and instance is None:
+        from .spawn_factories import SpawnPreparationRetained
+        raise SpawnPreparationRetained("allocator preparation requires its exact launch instance")
     if instance is not None:
         from .spawn_factories import SpawnPreparationRetained
 
         try:
-            observed = client.get_reservation(reservation["key"])
+            if reservation.get("reservation_pool_bound") is True and driver == "cli":
+                from .client_pool_placement import _validate_contract
+                _validate_contract(
+                    client.pool_placement_contract(), driver=driver, explicit_start=True, initial_start=True,
+                )
             current = client.get(task["id"])
+            observed = client.get_reservation(reservation["key"])
             if reservation.get("reservation_pool_bound") is True and (
                 observed.get("reservation_pool_bound") is not True
                 or observed.get("reservation_pool_assignment") != reservation.get("reservation_pool_assignment")
@@ -157,14 +168,24 @@ def prepare_task(
                     or current.get("owner_session_id") is not None or current.get("hold_reason")
                     or current.get("awaiting_steer")
                     or observed.get("reserved_by") != supervisor_id
-                    or observed.get("driver") != "ordinary-bridge"
+                    or observed.get("driver") != driver
                     or observed.get("state") != "reserving"
                     or observed.get("release_requested") or observed.get("startup_fenced")
                 ):
                     raise DispatchError(409, "ordinary allocator claim changed before preparation")
+                if driver == "cli":
+                    from .ordinary_pool_startup import require_cli_initial_admission
+                    from .queue_records import TaskError
+                    try:
+                        require_cli_initial_admission(observed)
+                    except TaskError as exc:
+                        raise DispatchError(409, str(exc)) from exc
                 task = current
         except DispatchError as exc:
             raise SpawnPreparationRetained(
                 f"ordinary allocator preparation retained its claim: {exc}",
             ) from exc
-    return {**task, "spawn_reservation_key": reservation["key"], "_spawn_client": client}
+    return {
+        **task, "spawn_reservation_key": reservation["key"], "_spawn_client": client,
+        "spawn_pool_bound": reservation.get("reservation_pool_bound") is True,
+    }

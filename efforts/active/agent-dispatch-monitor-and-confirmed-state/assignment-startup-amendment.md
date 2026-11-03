@@ -225,6 +225,13 @@ selection and refuses another instance's win before claim insertion. Source
 merged in [#10182](https://github.com/ThomasMichon/copilot-extensions/pull/10182). This is
 bounded source integration, not ordinary retry/decline or rollout qualification.
 
+The [ordinary retry source receipt](journal/2026/11.02-ordinary-startup-retry.md)
+records [#10191](https://github.com/ThomasMichon/copilot-extensions/pull/10191).
+Existing supervision retains exact ordinary ACP retry/decision identity and
+original prompt context, with receiver-side no-resume negotiation and
+receipt-only recovery. Decline/closeout, complete CLI/mixed-driver migration
+and installed/native acceptance remain separate gates.
+
 The following sequencing and transaction means are **agent-recommended**;
 they implement the requested guarantees. The source receipts above identify
 the explicit implemented boundaries; remaining integration means are not

@@ -5,7 +5,15 @@ from __future__ import annotations
 from .queue_records import TaskError
 
 
-def assignment(task: dict, reservation: dict) -> dict | None:
+def require_cli_initial_admission(reservation: dict) -> None:
+    """Consume the coordinator's current deadline decision, not a local clock."""
+    if "cli_initial_start_error" not in reservation or reservation["cli_initial_start_error"] is not None:
+        raise TaskError(
+            reservation.get("cli_initial_start_error") or "CLI initial-start admission is unavailable",
+        )
+
+
+def assignment(task: dict, reservation: dict, *, driver: str = "ordinary-bridge") -> dict | None:
     """Keep placed claims separate from the legacy queued/evaluation contract."""
     bound = reservation.get("reservation_pool_bound")
     value = reservation.get("reservation_pool_assignment")
@@ -14,7 +22,7 @@ def assignment(task: dict, reservation: dict) -> dict | None:
             raise TaskError("ordinary allocator claim has no proven pool assignment")
         return None
     if not isinstance(value, dict) or (
-        reservation.get("driver") != "ordinary-bridge"
+        driver not in {"cli", "ordinary-bridge"} or reservation.get("driver") != driver
         or type(reservation.get("startup_revision")) is not int or reservation["startup_revision"] != 1
         or value.get("task_id") != task.get("id")
         or value.get("reservation_key") != reservation.get("key")
