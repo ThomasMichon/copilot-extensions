@@ -111,10 +111,14 @@ the user verifier and invalidate its retained handles. Remote verifier
 nonces/replay fences and active service handles survive user-only changes.
 Each identity mode retains its own current trust expiry.
 Invalid candidates retain the prior bounded publication, never extending expiry.
+A combined policy can still publish revocations while either configured mode
+remains current; an expired mode cannot veto the still-current mode's policy
+withdrawal. Expired identities and handles remain denied independently.
 
 ## Request and operation boundary
 
 Send exactly one explicit `Authorization` header using the Bearer scheme.
+The scheme is case-insensitive; original token bytes are never case-normalized.
 Only that scheme selects user verification; a failed DPoP or machine proof
 never retries as bearer. The original compact token is bounded to 8192 bytes,
 has `alg: RS256`, a bounded `kid`, optional `typ: JWT`, and optional bounded

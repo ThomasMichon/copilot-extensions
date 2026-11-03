@@ -217,9 +217,10 @@ class ServiceAuthority:
                 if context.manifest.revision == current.revision:
                     require(context.digest == current.context.digest, "revision-conflict")
             now = self._time()
-            require(now < context.trust_valid_until, "authority-unavailable")
-            require(context.user_trust_valid_until is None
-                    or now < context.user_trust_valid_until, "authority-unavailable")
+            require(now < context.trust_valid_until
+                    or (context.user_trust_valid_until is not None
+                        and now < context.user_trust_valid_until),
+                    "authority-unavailable")
             return now
 
     def _reload_candidate(self, raw: bytes, decoded: object) -> ServicePublication:

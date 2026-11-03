@@ -198,6 +198,32 @@ def test_old_policy_cannot_select_new_local_slot_shape(rsa_keys):
         h.owner.reload()
 
 
+@pytest.mark.parametrize("expired", ["user", "service"])
+def test_revocation_publishes_when_the_other_mode_trust_has_expired(rsa_keys, expired):
+    h, _ = configured(rsa_keys[0], service=True)
+    if expired == "service":
+        h.document["service"]["identity"]["trust_valid_until"] = NOW + 100
+    else:
+        trust = IdentityTrust(
+            ISSUER, AUDIENCE, planning.canonical(public_jwks(rsa_keys[0])), NOW + 100)
+        h.owner._user_identity_provider = IdentityProvider("user-provider", lambda _: trust)
+    h.owner.reload()
+    user, proof = caller(h, rsa_keys[0]), h.caller()
+    h.clock.value = NOW + 101
+    if expired == "service":
+        h.document["user_callers"]["callers"] = []
+        h.document["user_callers"]["mappings"] = []
+        revoked = user
+    else:
+        h.document["service"]["callers"] = []
+        revoked = proof
+    h.document["manifest"]["revision"] += 1
+    h.document["service"]["manifest"]["revision"] += 1
+    assert h.owner.reload().changed
+    with pytest.raises(ServicePolicyError):
+        h.owner.revalidate_caller(revoked)
+
+
 @pytest.mark.parametrize("change", [
     "provider", "old-schema", "local-remote", "service-scope", "duplicate-mapping",
     "ambiguous-principal", "unknown-field", "unknown-principal",
@@ -256,11 +282,13 @@ def test_real_protected_tls_local_route_current_admission_and_mixed_auth(rsa_key
             access = token(rsa_keys[0], now=rig.h.clock.value)
             headers = {"Authorization": scheme + access}
             assert headers["Authorization"].endswith(access)
-            for _ in range(2):
-                async with rig.session.post(rig.origin + "/api/run", headers=headers) as response:
+            for spelling in (scheme, scheme.lower(), scheme.upper()):
+                selected_headers = {"Authorization": spelling + access}
+                async with rig.session.post(
+                    rig.origin + "/api/run", headers=selected_headers) as response:
                     assert response.status == 200 and await response.read() == b"admitted"
                     assert response.headers["Cache-Control"] == "no-store"
-            assert len(effects) == 2  # Repeated bearer still verifies as a NEW request, not PoP.
+            assert len(effects) == 3  # Repeated bearer still verifies as a NEW request, not PoP.
             for extra, code in (
                 ({"DPoP": "synthetic"}, 401), ({"Fleet-Machine-Proof": "synthetic"}, 401),
                 ({"Cookie": "synthetic"}, 401), ({"X-Identity": "user-a"}, 401),
@@ -280,7 +308,7 @@ def test_real_protected_tls_local_route_current_admission_and_mixed_auth(rsa_key
             current[0] = replace(current[0], revision=2, enrollments=())
             async with rig.session.post(rig.origin + "/api/run", headers=headers) as response:
                 assert response.status == 403
-            assert len(effects) == 2 and len(received) == 3 and not owner._issued
+            assert len(effects) == 3 and len(received) == 4 and not owner._issued
             assert not rig.state.channels and not rig.state.tickets
             assert not rig.state.authority._callers
         finally:

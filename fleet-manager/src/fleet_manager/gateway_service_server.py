@@ -353,7 +353,8 @@ class ServiceRuntime:
               "stream-http-version-required", 505)
         authorization = request.headers.getall("Authorization", [])
         scheme = "Bear" + "er "
-        user = len(authorization) == 1 and authorization[0].startswith(scheme)
+        user = (len(authorization) == 1
+                and authorization[0][:len(scheme)].lower() == scheme.lower())
         machine = False if user else self.authority.machine_profile()
         if user:
             check(self.authority.user_profile(), "authentication-required", 401)
@@ -553,7 +554,7 @@ def user_credentials(request: web.Request, origin: str) -> str:
     """Explicit header only; no ambient browser or trusted-forwarder identity."""
     values = request.headers.getall("Authorization", [])
     scheme = "Bear" + "er "
-    check(len(values) == 1 and values[0].startswith(scheme)
+    check(len(values) == 1 and values[0][:len(scheme)].lower() == scheme.lower()
           and 0 < len(values[0]) - len(scheme) <= 8192, "authentication-required", 401)
     mixed = ("DPoP", "Fleet-Machine-Proof", "Fleet-Enrollment-Grant", "Cookie",
              "X-Identity", "X-Fleet-Caller", "X-Forwarded-User", "X-Forwarded-Identity")
