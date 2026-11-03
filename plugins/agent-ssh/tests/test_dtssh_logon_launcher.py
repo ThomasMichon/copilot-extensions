@@ -115,22 +115,37 @@ def test_a_refused_logon_task_reports_the_startup_fallback(tmp_path):
     assert out[-1].endswith(" False")
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Windows identity and scheduled tasks")
-def test_a_refused_update_keeps_an_identical_task(tmp_path):
-    """Re-registering can be refused where the task already does exactly this:
-    keep it rather than fall back to the slower Startup shortcut."""
-    out = _register(tmp_path, REFUSED + f"""
+def _existing_task(tmp_path: Path, task_enabled: str = "$true", trigger_enabled: str = "$true") -> str:
+    return f"""
 function Get-ScheduledTask {{ param($TaskName, $ErrorAction)
     $me = [Security.Principal.WindowsIdentity]::GetCurrent().Name.Split('\\')[-1]  # Task Scheduler reports it bare
     [pscustomobject]@{{
         Actions = @([pscustomobject]@{{ Execute = 'conhost.exe'; Arguments = '--headless pwsh x'; WorkingDirectory = '{tmp_path}' }})
-        Triggers = @([pscustomobject]@{{ CimClass = [pscustomobject]@{{ CimClassName = 'MSFT_TaskLogonTrigger' }}; UserId = $me }})
+        Triggers = @([pscustomobject]@{{ CimClass = [pscustomobject]@{{ CimClassName = 'MSFT_TaskLogonTrigger' }}; UserId = $me; Enabled = {trigger_enabled} }})
         Principal = [pscustomobject]@{{ UserId = $me; LogonType = 'Interactive' }}
+        Settings = [pscustomobject]@{{ Enabled = {task_enabled} }}
     }} }}
 function Unregister-ScheduledTask {{ param($TaskName, [switch]$Confirm, $ErrorAction) Write-Host "unregister:$TaskName" }}
-""")
+"""
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows identity and scheduled tasks")
+def test_a_refused_update_keeps_an_identical_task(tmp_path):
+    """Re-registering can be refused where the task already does exactly this:
+    keep it rather than fall back to the slower Startup shortcut."""
+    out = _register(tmp_path, REFUSED + _existing_task(tmp_path))
     assert not any(line.startswith("unregister:") for line in out)
     assert out[-1] == "result:True"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows identity and scheduled tasks")
+@pytest.mark.parametrize(("task", "trigger"), [("$false", "$true"), ("$true", "$false")],
+                         ids=["task-disabled", "trigger-disabled"])
+def test_a_refused_update_does_not_keep_a_disabled_task(tmp_path, task, trigger):
+    """A disabled task or trigger never fires: retire it and fall back to the shortcut."""
+    out = _register(tmp_path, REFUSED + _existing_task(tmp_path, task, trigger))
+    assert any(line.startswith("unregister:") for line in out)
+    assert out[-1].endswith(" False")
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows identity and scheduled tasks")

@@ -735,9 +735,11 @@ function Test-LogonTaskCurrent {
     }
     $actions = @($Task.Actions)
     $triggers = @($Task.Triggers)
-    return $actions.Count -eq 1 -and $actions[0].Execute -eq $Execute -and $actions[0].Arguments -eq $Argument -and
+    # A disabled task or trigger never fires: it isn't a working launcher to keep.
+    return $Task.Settings.Enabled -and $triggers.Count -eq 1 -and $triggers[0].Enabled -and
+        $actions.Count -eq 1 -and $actions[0].Execute -eq $Execute -and $actions[0].Arguments -eq $Argument -and
         $actions[0].WorkingDirectory -eq $InstallDir -and
-        $triggers.Count -eq 1 -and $triggers[0].CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger' -and
+        $triggers[0].CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger' -and
         (& $isMe $triggers[0].UserId) -and (& $isMe $Task.Principal.UserId) -and
         "$($Task.Principal.LogonType)" -eq 'Interactive'
 }
