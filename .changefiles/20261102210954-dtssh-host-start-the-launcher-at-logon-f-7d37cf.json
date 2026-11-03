@@ -1,0 +1,9 @@
+{
+  "comment": "dtssh host: start the launcher at logon from a per-user scheduled task (no elevation) instead of a Startup-folder shortcut, which Explorer can start many minutes late; the shortcut remains the fallback where policy refuses the task",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

@@ -1332,13 +1332,14 @@ def runtime_uninstall_argv(
 def dtssh_host_uninstall_argv(
     agent_ssh_dir: Path, *, dry_run: bool = False
 ) -> tuple[str, list[str]] | None:
-    """Build the (display, argv) to remove the dtssh Startup-folder host listener.
+    """Build the (display, argv) to remove the dtssh logon host launcher.
 
     ``agent-ssh``'s own ``scripts/install.{sh,ps1} uninstall`` removes only the
     core agent-ssh runtime; it does NOT cascade into the separate dtssh
     transport's ``transports/dtssh/scripts/install-host.{ps1,sh}``, which is
-    what actually creates the ``agent-ssh-dtssh-host.lnk`` Startup-folder
-    autorun (or the POSIX host launcher). Both scripts' own ``uninstall``
+    what actually creates the per-user logon task (or the
+    ``agent-ssh-dtssh-host.lnk`` Startup-folder fallback, or the POSIX host
+    launcher). Both scripts' own ``uninstall``
     action is idempotent/``Test-Path``-guarded, so it is safe to invoke even
     when the dtssh host was never installed. Returns ``None`` only when the
     script itself is missing from the payload (nothing to cascade to).
@@ -1412,8 +1413,8 @@ def build_uninstall_plan(
     a known runtime behind is the exact failure this exists to prevent.
 
     ``agent-ssh`` gets one additional cascaded step: its own ``uninstall``
-    does not remove the separate dtssh transport's Startup-folder host
-    listener (see :func:`dtssh_host_uninstall_argv`), so that step is appended
+    does not remove the separate dtssh transport's logon host
+    launcher (see :func:`dtssh_host_uninstall_argv`), so that step is appended
     whenever agent-ssh's runtime is in the plan.
 
     Known gap (deliberately out of scope for this sweep, not silently
@@ -1491,7 +1492,7 @@ def build_uninstall_plan(
                     "reason": "dtssh-host-script-missing",
                     "message": (
                         "agent-ssh's own uninstall does not remove the dtssh "
-                        "Startup-folder host listener, and "
+                        "logon host launcher, and "
                         "transports/dtssh/scripts/install-host.{ps1,sh} was "
                         "not found in this payload"
                     ),
