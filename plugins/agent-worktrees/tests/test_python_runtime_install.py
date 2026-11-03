@@ -1309,16 +1309,16 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
                     hook_thread.join(timeout=15)
                     assert not hook_thread.is_alive() and "error" in hook_result
                     assert "bounded legacy takeover" not in log.read_text(encoding="utf-8")
+                    _wait_for(
+                        lambda: not old_slot_retained(),
+                        message="resident did not settle the exited predecessor's runtime custody",
+                    )
                     new_lock = json.loads(lock_path.read_text(encoding="utf-8"))
                     assert new_lock["pid"] == successor.pid
                     health = ControlClient(successor.base_url, token=token.read_text().strip()).health()
                     assert health["published"] is True and health["status"] == "ready"
                     assert routing.read_active_endpoint(route_root) == successor
                     assert "previous" not in routing.read_table(route_root)
-                    _wait_for(
-                        lambda: not old_slot_retained(),
-                        message="resident did not settle the exited predecessor's runtime custody",
-                    )
                     return
                 classify_daemon.wcs_client.release(*demand_endpoint, "retained-cutover-demand")
                 assert not demand_errors, demand_errors

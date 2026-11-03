@@ -158,7 +158,8 @@ def test_predecessor_exit_before_expiry_releases_fallback_before_custody(retirem
     r.exited.add(r.old.pid)
     grace.reconcile(r.root, clock=lambda: 1001.0)
     assert r.calls == []
-    assert routing.read_table(r.directory) == {"active": r.new.to_dict()}
+    assert routing.read_table(r.directory)["active"] == r.new.to_dict()
+    assert "previous" not in routing.read_table(r.directory)
     assert not grace._path(r.root, r.predecessor).exists()
     assert not retirements.reconcile(r.root)
 
@@ -186,7 +187,8 @@ def test_failed_fallback_release_preserves_deadline_and_custody_for_retry(retire
     assert not resident.pending and resident.error is None
     assert not grace._path(r.root, r.predecessor).exists()
     assert not retirements._records(r.root)
-    assert routing.read_table(r.directory) == {"active": r.new.to_dict()}
+    assert routing.read_table(r.directory)["active"] == r.new.to_dict()
+    assert "previous" not in routing.read_table(r.directory)
     assert len(r.calls) == int(forced)
 
 
