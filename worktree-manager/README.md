@@ -55,6 +55,14 @@ records with partial sampled coverage, not fabricated creation, claim or binding
 events. A timestamp refresh or heartbeat is not a timeline milestone.
 See the [owning source contract](../plugins/agent-worktrees/docs/worktree-observations.md).
 
+Qualified native entries retain their actual mutation kind, saved-record fence,
+captured head and unknown actor; sampled changes do not acquire those semantics.
+An owner entry can fit its wire bound while exceeding a display field. The
+projection then shows an explicit detail omission with the original canonical
+entry hash/byte count and retained source/event/cursor identity, without changing
+owner history or enlarging display limits. Actual payload references remain
+unchanged; no raw-detail endpoint is inferred when the owner supplied none.
+
 Live and backward-page cursors remain independent. Browsing retains its anchor
 and unread updates; retention gaps preserve their source, floor, reason and
 reconciliation information without accepting a new live position. Head,

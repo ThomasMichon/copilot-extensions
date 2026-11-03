@@ -13,6 +13,7 @@ from .acquisition_custody_schema import validate_schema as validate_acquisition_
 from .creation_custody_schema import validate_schema as validate_creation_schema
 from .creation_launch_schema import validate_schema as validate_creation_launch_schema
 from .provider_creation_launch_schema import validate_schema as validate_provider_launch_schema
+from .owner_membership import MembershipConnection
 
 
 def open_existing_writable(source: Database) -> Database:
@@ -36,6 +37,7 @@ def open_existing_writable(source: Database) -> Database:
     conn = sqlite3.connect(
         source.db_path.absolute().as_uri() + "?mode=rw",
         uri=True, timeout=0, check_same_thread=False,
+        factory=MembershipConnection,
     )
     candidate = None
     try:
@@ -73,6 +75,7 @@ def open_existing_writable(source: Database) -> Database:
         readonly.close()
         candidate._local.conn = conn
         candidate._read_only = False
+        conn.membership_database = candidate
         return candidate
     except BaseException:
         try:

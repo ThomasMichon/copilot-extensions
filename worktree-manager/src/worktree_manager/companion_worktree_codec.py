@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime
+from hashlib import sha256
 import json
 import re
 from typing import Any
 
 from .companion_timeline_contract import (
-    ActorKind, Availability, Completeness, Durability, EvidenceKind, HistoryPage,
+    ActorKind, Availability, Completeness, Durability, EvidenceKind, HistoryPage, MAX_FIELD_BYTES,
     Provider, Qualification, RelationKind, SourceIdentity, SourcePosition,
     SourceToken, TimelineActor, TimelineContractError, TimelineEvent, TimelineGap,
     TimelineKind, TimelineRelation, TimelineSnapshot, check_wire_body, decode_wire_frame,
@@ -88,6 +89,36 @@ def stamp(value: Any, *, nullable: bool = False) -> datetime | None:
 
 def encoded(value: Any) -> str:
     return json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+
+
+def display_event_detail(item: dict[str, Any]) -> tuple[str, str]:
+    raw = encoded(item).encode("utf-8")
+    details = item["details"] or ""
+    if len(raw) <= MAX_FIELD_BYTES:
+        return raw.decode("utf-8"), details
+    digest = sha256(raw).hexdigest()
+    omission = {
+        "schema": "worktree-manager.owner-event-detail-omission",
+        "version": 1,
+        "encoded_bytes": len(raw),
+        "sha256": digest,
+        "source_ref": item["source_ref"],
+        "captured_head_session_id": item["head_session_id"],
+    }
+    if len(encoded(omission).encode("utf-8")) > MAX_FIELD_BYTES:
+        original_ref = encoded(omission.pop("source_ref")).encode("utf-8")
+        omission.update(source_ref_omitted=True, source_ref_sha256=sha256(original_ref).hexdigest())
+    data = encoded(omission)
+    if len(data.encode("utf-8")) > MAX_FIELD_BYTES:
+        raise TimelineContractError("owner detail omission exceeds its display bound")
+    marker = (
+        f"\nOwner event detail omitted from display ({len(raw)} encoded bytes; SHA256 {digest}). "
+        "Source/event/cursor identity is retained; raw payload availability remains owner-qualified."
+    )
+    budget = MAX_FIELD_BYTES - len(marker.encode("utf-8"))
+    # The source text is valid UTF-8; only an incomplete trailing code point is clipped.
+    prefix = details.encode("utf-8")[:budget].decode("utf-8", errors="ignore")
+    return data, prefix + marker
 
 
 def owner_values(value: Any) -> None:
@@ -285,16 +316,17 @@ class WorktreeCodec:
             observed = stamp(item["observed_at"])
             if observed is None:
                 raise TimelineContractError("owner event omitted observation time")
+            data, details = display_event_detail(item)
             rows.append(TimelineEvent(
                 token.identity, self.position(token, item["cursor"]), item["event_id"],
                 TimelineActor(actor["id"], ActorKind(actor["kind"]), Qualification(actor["qualification"]),
                               actor["id"] or "Unknown actor"),
                 kind, evidence, observed, item["summary"] if item["summary"] else kind.value,
                 occurred_at=stamp(item["occurred_at"], nullable=True),
-                details=item["details"] or "", relations=tuple(relations),
+                details=details, relations=tuple(relations),
                 payload_ref=source["payload_ref"], reported_phase=item["phase"],
                 durability=Durability(value["durability"]),
-                data_json=encoded(item),
+                data_json=data,
             ))
         return tuple(rows)
 

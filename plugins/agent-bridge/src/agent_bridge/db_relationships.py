@@ -70,12 +70,13 @@ class _RelationshipsMixin:
             "UPDATE remote_acp_relationships SET claim_json=?, phase=?, "
             "uncertain=CASE WHEN ?='bound' THEN 0 ELSE uncertain END WHERE session_id=?",
             (json.dumps(claim, sort_keys=True), phase, phase, session_id),
+            membership=True,
         )
 
     def enter_relationship_attempt(self, session_id: str) -> None:
         self.execute_write(
             "UPDATE remote_acp_relationships SET phase='attempting', uncertain=1 "
-            "WHERE session_id=? AND phase='reserved'", (session_id,),
+            "WHERE session_id=? AND phase='reserved'", (session_id,), membership=True,
         )
 
     def save_relationship_absence(self, session_id: str, receipt: dict[str, Any]) -> None:
@@ -85,6 +86,7 @@ class _RelationshipsMixin:
             "WHERE session_id=? AND phase='retired' AND claim_json IS NULL "
             "AND native_id IS NULL AND uncertain=0",
             (json.dumps(receipt, sort_keys=True), session_id),
+            membership=True,
         )
         if cursor.rowcount != 1:
             raise RuntimeError("Unreserved relationship changed before confirmed local close")
@@ -93,11 +95,13 @@ class _RelationshipsMixin:
         self.execute_write(
             "UPDATE remote_acp_relationships SET native_id=?, phase='binding' WHERE session_id=?",
             (native_id, session_id),
+            membership=True,
         )
 
     def retire_relationship(self, session_id: str) -> None:
         self.execute_write(
             "UPDATE remote_acp_relationships SET phase='retired' WHERE session_id=?", (session_id,),
+            membership=True,
         )
 
     def relationship_subject(self, subject: str) -> dict[str, Any] | None:

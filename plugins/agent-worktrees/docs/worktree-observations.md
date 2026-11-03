@@ -66,12 +66,62 @@ heartbeat therefore does not create an event or advance the history cursor.
 `observed_at` describes the accepted roster observation; it is not the canonical
 record's commit time, proof of activity or a rigid freshness deadline.
 
-Recorded changes are labelled `observed-change`, with compact integrity
+Sampled changes are labelled `observed-change`, with compact integrity
 references instead of duplicated large before/after facts. Claim-count
 differences do not manufacture `claim-added`, effort binding or disposition
 events. Changes between samples, before demand or outside supported fields are
-not reconstructed. Native mutation receipts and cross-process capture remain
-separate work.
+not reconstructed.
+
+## Qualified resident native saves
+
+The resident can additionally ingest complete committed-save receipts from
+canonical transactions executed through its existing `tracking_write` server.
+The producer registers explicitly at receiver activation. Its callback only
+queues immutable evidence after all physical/logical record and pair holds;
+the existing publication/wake path performs materialization. There is no public
+receipt-publication RPC, new listener, spool or per-panel producer.
+
+Supported transactions are ordinary claim add/settle/release, disposition and
+the shared effort bind/release transactions. Effort writes retain their global
+binding exclusion, conflict checks, completion/transfer rechecks and direct
+fallback; they do not start a resident merely to obtain observation coverage.
+One compute can save zero, one or several times to its exact admitted record.
+A successful record save retains its receipt if the broader command subsequently
+fails. Receipt intake and materialization both enforce the admitted normalized
+path and full worktree ID; an observer's reentrant direct save of another record
+does not inherit that admission. Path comparison is lexical normalization, not
+proof that symlink/hardlink aliases are interchangeable with the canonical path.
+Nested computes and computes entered with outstanding notification holds,
+delivery or queued work have uncertain attribution and remain diagnosed partial
+coverage. They still execute their canonical operations normally.
+
+Native qualification requires complete selected before/after evidence, matching
+record incarnation and versioned execution identity, the owning canonical path,
+and strong sidecar exclusion at capture. Partial, omitted, degraded, legacy-
+identity, ambiguous or producer-managed claim evidence does not become an
+authoritative native transition. Resource references are relations; save receipt
+IDs and transition discriminators form native event identities.
+
+Native entries use the existing v1 kind/evidence vocabulary and
+`persisted-mutation`; actors remain unknown. Caller session IDs, tokens and
+record heads are not performer identity. The frame still carries the latest
+selected snapshot head/facts; each native entry retains its own captured head
+and canonical-save fence. A delayed A receipt cannot reinstall A's facts over B.
+Index positions order admitted evidence, not a total canonical commit order.
+
+The native-specific dual-fence path validates current-view facts separately
+from saved-record evidence. Ordinary post-save publication retains its original
+fence-equality check. Both paths reuse source/batch/native identity conflict
+guards and durable admission intent, with provider/runtime/producer epochs and
+writer authority rechecked before materialization and resolution.
+
+Retries reuse notification evidence and native identities only; canonical work
+is never replayed to repair a missing acknowledgement. Loss before intake/first
+intent, direct-fallback writers, unsupported producers and bounded-queue loss
+remain explicit partial/unknown native coverage. The running receiver reports
+that limited scope in `worktree_observations.native_receipts`; it does not
+advertise complete canonical history. Native observation failure never changes
+the canonical write result or disables the ordinary roster.
 
 ## Point reads, pages and held feeds
 

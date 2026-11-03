@@ -1,6 +1,7 @@
 """Database pending-prompt queue helpers."""
 
 from __future__ import annotations
+from .owner_membership_signal import commit as commit_membership
 
 from typing import Any
 
@@ -61,7 +62,7 @@ class _PromptsMixin:
             if row is None:
                 return None
             conn.execute("DELETE FROM pending_prompts WHERE id=?", (row["id"],))
-            conn.commit()
+            commit_membership(conn, membership=False)
             return dict(row)
 
     def remove_pending_prompt(self, session_id: str, queue_id: int) -> bool:

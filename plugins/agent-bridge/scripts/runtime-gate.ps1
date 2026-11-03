@@ -27,7 +27,7 @@ foreach ($argument in $forwardArgs) {
               ($argument -clike '-p?*') -or
               ($argument -cin @('--j', '--js', '--jso', '--json'))) {
         continue
-    } elseif ($argument -cin @('observe-session', 'session-observation-history')) {
+    } elseif ($argument -cin @('observe-session', 'session-observation-history', 'observe-owner')) {
         $passiveObservation = $true
         break
     } else {

@@ -149,3 +149,13 @@ def test_semantic_portfolio_requires_receipt_sources_and_probe():
     assert evidence.PROBES["test_observation_cancellation_preserves_other_subscription"] == 1
     assert evidence.PROBES["test_observer_cli_http_eof"] == 8
     assert evidence.PROBES["test_http51_observer_payload_abbreviations"] == 2
+    assert evidence.PROBES["test_http51_owner_membership_observations"] == 2
+    assert evidence.PROBES["test_adopted_writable_connection_preserves_membership_commits"] == 1
+    assert evidence.previous.PREFIX + "db_adoption.py" in evidence.AFFECTED
+    for name in (
+        "owner_membership.py", "owner_membership_records.py", "owner_membership_contract.py",
+        "owner_membership_cli.py", "routes/owner_membership.py",
+        "owner_membership_read.py", "owner_membership_signal.py",
+        "db_sessions.py", "db_relationships.py", "db_live_sessions.py",
+    ):
+        assert evidence.previous.PREFIX + name in evidence.AFFECTED

@@ -24,6 +24,8 @@ from .session_observation_contract import (
 class ObservationStream(SseStream):
     """Bound allocation before parsing; close the owned response on every failure."""
 
+    schemas = frozenset({OBSERVATIONS, HISTORY})
+
     def __next__(self) -> dict[str, Any]:
         if self._response is None:
             raise StopIteration
@@ -49,7 +51,7 @@ class ObservationStream(SseStream):
                     body = decode(data)
                     if (
                         body.get("kind") != event
-                        or body.get("schema") not in {OBSERVATIONS, HISTORY}
+                        or body.get("schema") not in self.schemas
                         or type(body.get("version")) is not int
                         or body["version"] != 1
                     ):

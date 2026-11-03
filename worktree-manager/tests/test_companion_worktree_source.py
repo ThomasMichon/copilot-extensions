@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 import json
 import os
 from pathlib import Path
@@ -504,3 +505,112 @@ def test_owned_transport_failure_can_recover_after_reader_retirement(configured,
         assert not any(thread.name.startswith("agenda-feed-") for thread in threads())
 
     asyncio.run(check())
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.timeout(3 * 20 + 2 * agenda_transport.STARTUP_TIMEOUT + fixtures.JOIN_COMMAND_CLEANUP)
+def test_native_cli_saved_record_actual_roster_owner_cli_and_textual_join(tmp_path, monkeypatch) -> None:
+    from hashlib import sha256
+
+    for source in reversed(SOURCE_PATHS):
+        monkeypatch.syspath_prepend(str(source))
+    python_paths = [str(source) for source in SOURCE_PATHS]
+    if existing := os.environ.get("PYTHONPATH"):
+        python_paths.append(existing)
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join(python_paths))
+    monkeypatch.syspath_prepend(str(fixtures.OWNER_SOURCE.parent / "tests"))
+    from _native_receipt_fixtures import setup
+    from test_owner_observation_native_process import cli
+    from agent_worktrees import config, locks, status_monitor_cutover, tracking, tracking_write
+    from agent_worktrees import __main__ as core, worktrees_current_rows
+    from agent_worktrees import owner_observation_transport as wire
+    from worktree_manager.companion_timeline_model import TimelineWindow
+    from worktree_manager.companion_worktree_codec import WorktreeCodec
+    from test_companion_timeline_widget import TimelineApp
+
+    monkeypatch.setattr(config, "_ACTIVE_PROJECT", config.active_project())
+    owner, path, home = setup(tmp_path, monkeypatch)
+    writer = tracking_write.start_server(owner.native_compute)
+    writer.start()
+
+    def handle(action, payload):
+        if action == "health":
+            return {**owner.health(), "published": True, "status": "ready"}
+        if action == wire.READ_ACTION:
+            return owner.observation_read(payload)
+        if action == wire.HISTORY_ACTION:
+            return owner.observation_history(payload)
+        raise AssertionError(action)
+
+    control = status_monitor_cutover.ControlServer(handle, token="native-fixture")
+    control.start()
+    endpoint = f"http://127.0.0.1:{control.port}"
+    try:
+        locks.write_lock(
+            home / ".agent-worktrees" / "status-monitor.lock",
+            extra=tracking_write.rendezvous_fields(writer),
+        )
+        written = cli(home, [
+            "--project", "native-test", "status", "--worktree-id", "native-one",
+            "--summary", "Native CLI slice", "--json",
+        ])
+        assert written.returncode == 0, (written.stdout, written.stderr)
+        saved = path.read_bytes()
+        record = tracking.load_record(path)
+        rows = worktrees_current_rows.materialize(
+            [record], serialize=core._worktree_to_dict, observed_at=2,
+            state_map={}, mux_map={}, session_ctx=None, bare_orphan_wts=set(), bridge_live_wts=set(),
+        )
+        assert len(rows) == 1
+        assert rows[0]["machine_identity_version"] == 1
+        assert rows[0]["execution_machine"] == record.machine_fields["execution_machine"]
+        owner.publish(record.repo, rows, observed_at=2)
+        common = ["--project", "native-test"]
+        selection = ["--worktree", "native-one", "--session", "head", "--json"]
+        current = cli(home, [*common, "worktree-observations", *selection], endpoint=endpoint)
+        assert current.returncode == 0, (current.stdout, current.stderr)
+        snapshot = json.loads(current.stdout)
+        result = cli(home, [
+            *common, "worktree-observation-history", *selection,
+            "--source-generation", snapshot["source_generation"],
+        ], endpoint=endpoint)
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        history = json.loads(result.stdout)
+        native = [
+            item for item in history["entries"] if item["evidence_kind"] == "persisted-mutation"
+        ]
+        assert len(native) == 1
+        assert native[0]["record_fence"]["saved_sha256"] == sha256(saved).hexdigest()
+        assert native[0]["payload"]["after"]["summary"] == "Native CLI slice"
+        reader = WorktreeCodec("native-test", "native-one", "head", owner.store.generation)
+        decoded = reader.decode(fixtures.raw(snapshot))
+        token = reader.token(decoded, 1)
+        page = reader.decode(fixtures.raw(history))
+        reader.check_source(page, token)
+        observed = replace(reader.snapshot(decoded, token), events=reader.events(page, token))
+        window = TimelineWindow()
+        assert window.bind(token).applied and window.apply_snapshot(observed).applied
+        event = next(item for item in window.events if item.event_id == native[0]["event_id"])
+        assert event.evidence_kind.value == "persisted-mutation" and event.actor.actor_id is None
+        assert event.actor.qualification.value == "unknown"
+        assert event.payload_ref is None and event.source == token.identity
+
+        async def check() -> None:
+            app = TimelineApp(window)
+            async with app.run_test(size=(100, 36)) as pilot:
+                timeline = app.query_one(SubwayTimeline)
+                timeline.focus()
+                await pilot.press("end", "enter")
+                assert timeline.selected == event.ref and event.ref in window.expanded
+                assert window.context()[0] == "Native CLI slice"
+            assert not app.is_running
+
+        asyncio.run(check())
+        assert path.read_bytes() == saved
+    finally:
+        owner.close_admission("closed")
+        writer.close()
+        control.close()
+        owner.shutdown()

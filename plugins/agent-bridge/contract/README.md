@@ -241,7 +241,10 @@ HTTP generation 51, the existing evidence family and all prior protocol floors
 remain unchanged. The original 24 required cases retain their counts; two
 installation-mode observation boundary cases, four transport/lifetime cases,
 eight finite/follow EOF controls and two native-shell payload-abbreviation cases
-expand the required portfolio to 40. The original operation report gains
+expand that portfolio to 40. Two owner-membership producer/reader cases bring
+the portfolio to 42 without removing any of those cases. An existing-only
+writable-adoption membership regression brings the current required count to 43.
+The original operation report gains
 independently expected observation
 results without replacing its native-send, receipt or live-CLI observations.
 
@@ -266,6 +269,15 @@ owning client must supply its existing 15-second I/O silence timeout.
 A separate concurrent-EventLog case cancels one captured observer and verifies
 the second subscriber still receives actual appended evidence. These are source
 resource-boundary tests, not timed installed-network or native qualification.
+
+Membership writer notification performs no projection queries. Audited
+membership producers mark a revision; event/turn/cursor/control/prompt-only
+writes are excluded. Coalesced materialization uses a separate existing-only
+read-only connection with a shared VM-step/deadline budget, source-file/authority
+fences and explicit gap handling. The source closure includes
+`owner_membership_read.py`, `owner_membership_signal.py` and the physical-work
+controls in `test_owner_membership_budget.py`; these files must be committed
+before source-bound capture. Row limits alone are not physical-work evidence.
 
 The EOF controls execute the owning CLI loop against actual stdlib
 `HTTPResponse` objects: empty/truncated point and history reads, and follow EOF

@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import replace
 import asyncio
+from hashlib import sha256
 import json
 import os
 
@@ -101,6 +102,79 @@ def test_actual_owner_history_events_retain_source_evidence_and_literal_text() -
     assert all(item.kind is TimelineKind.OBSERVED_CHANGE for item in result.events)
     assert all(item.evidence_kind is EvidenceKind.OBSERVED_CHANGE for item in result.events)
     assert result.events[0].occurred_at is None and result.events[0].data_json is not None
+
+
+def _large_native_wire(*, escaped_references: bool = False) -> dict:
+    value = snapshot(tip=1, after=0)
+    item = value["entries"][0]
+    item.update(
+        kind="claim-added", evidence_kind="persisted-mutation", native_kind="tracking.claim.add",
+        actor={"kind": "unknown", "id": None, "qualification": "unknown", "session_id": None},
+        head_session_id="captured-head",
+        record_fence={"record_sha256": "a" * 64, "incarnation": "record-one"},
+        details="Literal [not markup] " + "界" * 1300,
+        payload={"before": "λ" * 1200, "after": "λ" * 1200},
+    )
+    item["source_ref"].update(record_id="receipt-one", payload_ref=None)
+    if escaped_references:
+        item["source_ref"].update(
+            source="\\" * 512, generation="\\" * 512, record_id="\\" * 512,
+        )
+        item["head_session_id"] = "\\" * 512
+        item["native_kind"] = "\\" * 512
+    return value
+
+
+@pytest.mark.parametrize("escaped_references", [False, True])
+def test_large_native_wire_has_bounded_visible_detail_without_changing_owner_evidence(
+    escaped_references: bool,
+) -> None:
+    value = _large_native_wire(escaped_references=escaped_references)
+    original = deepcopy(value)
+    reader = codec()
+    decoded = reader.decode(raw(value))
+    selected = reader.token(decoded, 1)
+    observed = reader.snapshot(decoded, selected)
+    event, = observed.events
+    item = value["entries"][0]
+    original_bytes = json.dumps(
+        item, sort_keys=True, ensure_ascii=False, allow_nan=False, separators=(",", ":"),
+    ).encode()
+    detail = json.loads(event.data_json)
+    assert len(original_bytes) > 4096
+    assert len(event.data_json.encode()) <= 4096
+    assert len(event.details.encode()) <= 4096 and "detail omitted" in event.details
+    assert event.details.startswith("Literal [not markup]")
+    assert detail["schema"] == "worktree-manager.owner-event-detail-omission"
+    assert detail["encoded_bytes"] == len(original_bytes)
+    assert detail["sha256"] == sha256(original_bytes).hexdigest()
+    assert detail["captured_head_session_id"] == item["head_session_id"]
+    assert event.source == selected.identity and event.source.head_session_id == "head-a"
+    assert event.position.cursor == item["cursor"] and event.event_id == item["event_id"]
+    assert event.kind is TimelineKind.CLAIM_ADDED
+    assert event.evidence_kind is EvidenceKind.PERSISTED_MUTATION
+    assert event.actor.actor_id is None and event.actor.qualification.value == "unknown"
+    assert event.payload_ref is None
+    assert value == original and decoded == original
+    if escaped_references:
+        assert detail["source_ref_omitted"] is True
+        assert "source_ref" not in detail
+    else:
+        assert detail["source_ref"] == item["source_ref"]
+
+
+def test_omitted_native_detail_still_detects_conflicting_immutable_content() -> None:
+    value = _large_native_wire()
+    reader = codec()
+    selected = reader.token(reader.decode(raw(value)), 1)
+    window = TimelineWindow()
+    assert window.bind(selected).applied
+    assert window.apply_snapshot(reader.snapshot(reader.decode(raw(value)), selected)).applied
+    changed = deepcopy(value)
+    changed["entries"][0]["payload"]["after"] = "μ" * 1200
+    result = window.apply_snapshot(reader.snapshot(reader.decode(raw(changed)), selected))
+    assert not result.applied and result.code is ResultCode.CONTENT_CONFLICT
+    assert window.events[0].source == selected.identity
 
 
 @pytest.mark.parametrize("change", [

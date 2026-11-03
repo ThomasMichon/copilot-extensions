@@ -10,6 +10,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
+from .owner_membership_signal import MembershipSignal, commit as commit_membership
 
 log = logging.getLogger("agent-bridge")
 
@@ -338,6 +339,8 @@ class _CoreMixin:
         if not read_only:
             self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._write_lock = threading.Lock()
+        self._membership_signal = MembershipSignal()
+        self._membership_bind_lock = threading.Lock()
         self._local = threading.local()
         self._event_write_q: queue.Queue[_EventWriteItem | object] = queue.Queue()
         self._writer_state_lock = threading.Lock()
@@ -403,10 +406,14 @@ class _CoreMixin:
                 self._db_path.absolute().as_uri() + "?mode=ro"
                 if self._read_only else str(self._db_path)
             )
+            from .owner_membership import MembershipConnection
+
             conn = sqlite3.connect(
                 target, uri=self._read_only, check_same_thread=False,
                 timeout=0 if self._read_only else 5.0,
+                factory=MembershipConnection,
             )
+            conn.membership_database = self
             conn.row_factory = sqlite3.Row
             if self._read_only:
                 conn.execute("PRAGMA query_only=ON")
@@ -468,6 +475,12 @@ class _CoreMixin:
 
     def close(self) -> None:
         """Flush pending event writes, stop the writer, and close this thread's connection."""
+        membership = getattr(self, "_owner_membership_source", None)
+        if membership is not None:
+            try:
+                membership.close()
+            except Exception as exc:
+                log.error("Membership observer close failed (%s)", type(exc).__name__)
         self.stop_writer()
         conn = getattr(self._local, "conn", None)
         if conn is not None:
@@ -564,7 +577,7 @@ class _CoreMixin:
                     "VALUES (?, ?, ?, ?, ?)",
                     batch,
                 )
-                conn.commit()
+                commit_membership(conn, membership=False)
             except sqlite3.IntegrityError:
                 # `executemany` is atomic: ONE bad row (an orphan event whose
                 # session_id has no `sessions` parent -- a lifecycle/write-
@@ -605,7 +618,7 @@ class _CoreMixin:
             except sqlite3.IntegrityError:
                 sid = item[0] if isinstance(item, (tuple, list)) and item else "?"
                 skipped.append(str(sid))
-        conn.commit()
+        commit_membership(conn, membership=False)
         if skipped:
             distinct = sorted(set(skipped))
             log.warning(
@@ -615,7 +628,9 @@ class _CoreMixin:
                 len(skipped), ", ".join(distinct[:5]),
             )
 
-    def execute_write(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
+    def execute_write(
+        self, sql: str, params: tuple[Any, ...] = (), *, membership: bool = False,
+    ) -> sqlite3.Cursor:
         """Execute a write query under the write lock."""
         if self._read_only:
             raise PermissionError("Read-only database cannot execute writes")
@@ -623,7 +638,7 @@ class _CoreMixin:
         with self._write_lock:
             try:
                 cursor = conn.execute(sql, params)
-                conn.commit()
+                commit_membership(conn, membership=membership)
                 return cursor
             except BaseException:
                 conn.rollback()
