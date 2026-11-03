@@ -18,9 +18,10 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Mapping
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from attribution_profile import ProfileError, guidance as profile_guidance, load_profile
+from attribution_profile import Profile, ProfileError, guidance as profile_guidance, load_profile
 
 _SESSION_IDENTIFIER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,127})$")
 _MAX_INPUT_BYTES = 64 * 1024
@@ -95,7 +96,7 @@ def _run_contributor(root: Path, payload: bytes) -> str:
             timeout=_SUBPROCESS_TIMEOUT_S,
             check=False,
             env={**os.environ, "PYTHONPATH": ""},
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
         )
     except (OSError, subprocess.SubprocessError):
         return ""
@@ -118,7 +119,7 @@ def _repo_root(cwd: str) -> str:
             text=True,
             timeout=_GIT_SUBPROCESS_TIMEOUT_S,
             check=False,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
         )
         if completed.returncode == 0:
             candidate = completed.stdout.strip()
@@ -181,7 +182,7 @@ def _write_cached_guidance(home: Path, cwd: str, guidance: str, *, key: str | No
 
 
 def _cache_profile(
-    home: Path, key: str, profile: dict, guidance: str, repo: str, header: str
+    home: Path, key: str, profile: Profile, guidance: str, repo: str | None, header: str
 ) -> None:
     """Keep base policy separate so removing the last profile cannot replay it."""
     temporary = None
@@ -251,7 +252,7 @@ def _is_link_or_reparse(path: Path) -> bool:
     )
 
 
-def write_session_guidance(payload: dict, *, home: Path | None = None) -> bool:
+def write_session_guidance(payload: Mapping[str, object], *, home: Path | None = None) -> bool:
     home = home or Path.home()
     session_id = payload.get("sessionId")
     if (

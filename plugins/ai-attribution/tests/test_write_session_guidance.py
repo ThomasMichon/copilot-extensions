@@ -13,6 +13,7 @@ import sys
 import time as time_module
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, Callable, cast
 
 import pytest
 
@@ -37,7 +38,7 @@ def _target(home: Path) -> Path:
     )
 
 
-def test_writes_current_policy(monkeypatch, tmp_path):
+def test_writes_current_policy(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(
         writer,
         "_run_contributor",
@@ -50,7 +51,7 @@ def test_writes_current_policy(monkeypatch, tmp_path):
     )
 
 
-def test_no_content_replaces_stale_guidance(monkeypatch, tmp_path):
+def test_no_content_replaces_stale_guidance(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(writer, "_run_contributor", lambda *args: "")
     target = _target(tmp_path)
     target.parent.mkdir(parents=True)
@@ -61,10 +62,10 @@ def test_no_content_replaces_stale_guidance(monkeypatch, tmp_path):
     assert "unavailable" in content
 
 
-def test_cache_miss_calls_contributor_then_hits_cache(monkeypatch, tmp_path):
-    calls = []
+def test_cache_miss_calls_contributor_then_hits_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calls: list[bytes] = []
 
-    def fake_contributor(root, payload):
+    def fake_contributor(root: Path, payload: bytes) -> str:
         calls.append(payload)
         return "[owner: ai-attribution@1.0.0]\npolicy"
 
@@ -94,10 +95,10 @@ def test_cache_miss_calls_contributor_then_hits_cache(monkeypatch, tmp_path):
     assert "policy" in second_target.read_text(encoding="utf-8")
 
 
-def test_cache_expired_recomputes(monkeypatch, tmp_path):
-    calls = []
+def test_cache_expired_recomputes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calls: list[int] = []
     monkeypatch.setattr(
-        writer, "_run_contributor", lambda *args: calls.append(1) or "fresh policy"
+        writer, "_run_contributor", lambda *args: cast(Callable[[int], object], calls.append)(1) or "fresh policy"
     )
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -121,10 +122,10 @@ def test_cache_expired_recomputes(monkeypatch, tmp_path):
     assert "fresh policy" in _target(tmp_path).read_text(encoding="utf-8")
 
 
-def test_force_refresh_env_bypasses_fresh_cache(monkeypatch, tmp_path):
-    calls = []
+def test_force_refresh_env_bypasses_fresh_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calls: list[int] = []
     monkeypatch.setattr(
-        writer, "_run_contributor", lambda *args: calls.append(1) or "recomputed"
+        writer, "_run_contributor", lambda *args: cast(Callable[[int], object], calls.append)(1) or "recomputed"
     )
     monkeypatch.setenv("AI_ATTRIBUTION_FORCE_REFRESH", "1")
     repo = tmp_path / "repo"
@@ -149,10 +150,10 @@ def test_force_refresh_env_bypasses_fresh_cache(monkeypatch, tmp_path):
     assert "recomputed" in _target(tmp_path).read_text(encoding="utf-8")
 
 
-def test_missing_cwd_never_caches(monkeypatch, tmp_path):
-    calls = []
+def test_missing_cwd_never_caches(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calls: list[int] = []
     monkeypatch.setattr(
-        writer, "_run_contributor", lambda *args: calls.append(1) or "policy"
+        writer, "_run_contributor", lambda *args: cast(Callable[[int], object], calls.append)(1) or "policy"
     )
     assert writer.write_session_guidance({"sessionId": "session-1"}, home=tmp_path)
     assert writer.write_session_guidance({"sessionId": "session-2"}, home=tmp_path)
@@ -160,9 +161,9 @@ def test_missing_cwd_never_caches(monkeypatch, tmp_path):
     assert not writer._cache_dir(tmp_path).exists()
 
 
-def test_root_lookup_is_reused_for_cache_and_profile(monkeypatch, tmp_path):
-    calls = []
-    monkeypatch.setattr(writer, "_repo_root", lambda cwd: calls.append(cwd) or cwd)
+def test_root_lookup_is_reused_for_cache_and_profile(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(writer, "_repo_root", lambda cwd: cast(Callable[[str], object], calls.append)(cwd) or cwd)
     monkeypatch.setattr(writer, "_run_contributor", lambda *args: "Required disclosure.")
     monkeypatch.setenv("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", "")
     repo = tmp_path / "repo"
@@ -175,10 +176,10 @@ def test_root_lookup_is_reused_for_cache_and_profile(monkeypatch, tmp_path):
     assert calls == [str(repo)]
 
 
-def test_writer_subprocesses_do_not_allocate_windows_consoles(monkeypatch):
-    calls = []
+def test_writer_subprocesses_do_not_allocate_windows_consoles(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, Any]] = []
 
-    def run(*args, **kwargs):
+    def run(*args: Any, **kwargs: Any) -> SimpleNamespace:
         calls.append(kwargs)
         output = b'{"additionalContext":"policy"}' if "input" in kwargs else "repo"
         return SimpleNamespace(returncode=0, stdout=output)
@@ -187,11 +188,11 @@ def test_writer_subprocesses_do_not_allocate_windows_consoles(monkeypatch):
     monkeypatch.setattr(writer, "_contributor_argv", lambda root: ["shell"])
     assert writer._repo_root("repo") == "repo"
     assert writer._run_contributor(Path("."), b"{}") == "policy"
-    expected = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    expected = getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0
     assert [call["creationflags"] for call in calls] == [expected, expected]
 
 
-def test_over_budget_content_writes_explicit_status(monkeypatch, tmp_path):
+def test_over_budget_content_writes_explicit_status(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(writer, "_run_contributor", lambda *args: "x" * 5000)
     assert writer.write_session_guidance({"sessionId": "session-1"}, home=tmp_path)
     assert "omitted because" in _target(tmp_path).read_text(encoding="utf-8")
@@ -201,7 +202,9 @@ def test_over_budget_content_writes_explicit_status(monkeypatch, tmp_path):
 @pytest.mark.portfolio_tier("T3")
 @pytest.mark.effect("process")
 @pytest.mark.effect("filesystem")
-def test_large_profile_never_displaces_policy_or_tightening(monkeypatch, tmp_path, base_bytes):
+def test_large_profile_never_displaces_policy_or_tightening(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, base_bytes: int,
+) -> None:
     kernel = "Self-authored contributions may omit disclosure."
     base = kernel + "x" * (base_bytes - len(kernel))
     monkeypatch.setattr(writer, "_run_contributor", lambda *args: base)
@@ -230,7 +233,7 @@ def test_large_profile_never_displaces_policy_or_tightening(monkeypatch, tmp_pat
         pytest.skip("native shell unavailable")
     if os.name == "nt":
         native_path = os.pathsep.join((
-            str(Path(shutil.which("git")).parent), str(Path(shell).parent),
+            str(Path(cast(str, shutil.which("git"))).parent), str(Path(shell).parent),
             str(Path(os.environ["SystemRoot"]) / "System32"),
         ))
         command = [shell, "-NoProfile", "-File", str(_PLUGIN / "scripts" / "write-session-guidance.ps1")]
@@ -263,7 +266,9 @@ def test_large_profile_never_displaces_policy_or_tightening(monkeypatch, tmp_pat
     json.dumps({"version": 1, "variables": {"assistant": "human-review"},
                 "rules": [{"header": "{assistant}ed"}]}),
 ], ids=["invalid-json", "deep-json", "review-claim"])
-def test_bad_profile_preserves_kernel_with_visible_diagnostic(monkeypatch, tmp_path, raw):
+def test_bad_profile_preserves_kernel_with_visible_diagnostic(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, raw: str,
+) -> None:
     monkeypatch.setattr(writer, "_run_contributor", lambda *args: "Required disclosure.")
     monkeypatch.setenv("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", "")
     config = tmp_path / ".copilot" / "ai-attribution.json"
@@ -279,7 +284,9 @@ def test_bad_profile_preserves_kernel_with_visible_diagnostic(monkeypatch, tmp_p
 @pytest.mark.parametrize("directories", [
     "~missing-attribution-user/instructions", ",".join(["x"] * 129),
 ], ids=["missing-user", "entry-limit"])
-def test_discovery_errors_preserve_kernel(monkeypatch, tmp_path, directories):
+def test_discovery_errors_preserve_kernel(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, directories: str,
+) -> None:
     monkeypatch.setattr(writer, "_run_contributor", lambda *args: "Required disclosure.")
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
@@ -292,7 +299,9 @@ def test_discovery_errors_preserve_kernel(monkeypatch, tmp_path, directories):
 
 
 @pytest.mark.parametrize("session_id", ("", "../escape", "slash/value", "a" * 129))
-def test_rejects_unsafe_session_ids(monkeypatch, tmp_path, session_id):
+def test_rejects_unsafe_session_ids(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, session_id: str,
+) -> None:
     monkeypatch.setattr(
         writer,
         "_run_contributor",
@@ -303,7 +312,9 @@ def test_rejects_unsafe_session_ids(monkeypatch, tmp_path, session_id):
 
 
 @pytest.mark.parametrize("component", (".copilot", "session-state", "session-1"))
-def test_rejects_ancestor_escape(monkeypatch, tmp_path, component):
+def test_rejects_ancestor_escape(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, component: str,
+) -> None:
     monkeypatch.setattr(writer, "_run_contributor", lambda *args: "policy")
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -326,11 +337,11 @@ def test_rejects_ancestor_escape(monkeypatch, tmp_path, component):
     )
 
 
-def test_resolve_runtime_error_fails_open(monkeypatch, tmp_path):
+def test_resolve_runtime_error_fails_open(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(writer, "_run_contributor", lambda *args: "policy")
     original_resolve = Path.resolve
 
-    def resolve(path, *args, **kwargs):
+    def resolve(path: Path, *args: Any, **kwargs: Any) -> Path:
         if path.name == "session-state":
             raise RuntimeError("symlink loop")
         return original_resolve(path, *args, **kwargs)
@@ -341,7 +352,7 @@ def test_resolve_runtime_error_fails_open(monkeypatch, tmp_path):
     )
 
 
-def test_reparse_detection_without_link_creation():
+def test_reparse_detection_without_link_creation() -> None:
     path = SimpleNamespace(
         lstat=lambda: SimpleNamespace(
             st_mode=stat.S_IFDIR,
@@ -351,13 +362,15 @@ def test_reparse_detection_without_link_creation():
     assert writer._is_link_or_reparse(path)
 
 
-def test_main_always_emits_empty_object(monkeypatch, capsys):
+def test_main_always_emits_empty_object(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     monkeypatch.setattr(sys, "stdin", __import__("io").StringIO("not json"))
     assert writer.main() == 0
     assert capsys.readouterr().out == "{}"
 
 
-def test_powershell_wrapper_writes_bounded_session_file(tmp_path):
+def test_powershell_wrapper_writes_bounded_session_file(tmp_path: Path) -> None:
     shell = shutil.which("pwsh") or shutil.which("powershell.exe")
     if not shell:
         pytest.skip("PowerShell is unavailable")
@@ -398,7 +411,9 @@ def test_powershell_wrapper_writes_bounded_session_file(tmp_path):
     assert len(content.encode("utf-8")) <= writer._GUIDANCE_MAX_BYTES
 
 
-def test_powershell_wrapper_serves_warm_cache_without_spawning_python(monkeypatch, tmp_path):
+def test_powershell_wrapper_serves_warm_cache_without_spawning_python(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     """Proves the wrapper's cache fast path actually skips python on a hit,
     by stripping every python interpreter from PATH before invoking it: if
     the fast path did not serve this from cache and instead fell through to
@@ -471,7 +486,7 @@ def test_powershell_wrapper_serves_warm_cache_without_spawning_python(monkeypatc
     assert "unavailable" not in content
 
 
-def test_powershell_wrapper_falls_back_on_cold_cache(tmp_path):
+def test_powershell_wrapper_falls_back_on_cold_cache(tmp_path: Path) -> None:
     """No cache entry yet -> the wrapper must fall through to the unchanged
     python path rather than silently producing no guidance."""
     shell = shutil.which("pwsh") or shutil.which("powershell.exe")
@@ -514,14 +529,14 @@ def test_powershell_wrapper_falls_back_on_cold_cache(tmp_path):
     assert (writer._cache_dir(home) / f"{writer._repo_cache_key(str(repo))}.json").is_file()
 
 
-def _bash_prereqs():
+def _bash_prereqs() -> tuple[str | None, str | None, str | None]:
     bash = shutil.which("bash")
     jq = shutil.which("jq")
     sha = shutil.which("sha256sum") or shutil.which("shasum")
     return bash, jq, sha
 
 
-def test_bash_wrapper_writes_bounded_session_file(tmp_path):
+def test_bash_wrapper_writes_bounded_session_file(tmp_path: Path) -> None:
     bash, jq, sha = _bash_prereqs()
     if not (bash and jq and sha):
         pytest.skip("bash/jq/sha256sum unavailable")
@@ -550,7 +565,9 @@ def test_bash_wrapper_writes_bounded_session_file(tmp_path):
     assert len(content.encode("utf-8")) <= writer._GUIDANCE_MAX_BYTES
 
 
-def test_bash_wrapper_serves_warm_cache_without_spawning_python(monkeypatch, tmp_path):
+def test_bash_wrapper_serves_warm_cache_without_spawning_python(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     """Same proof as the PowerShell equivalent, adapted for bash: build an
     isolated PATH containing symlinks only to the tools the fast path needs
     (bash, jq, sha256sum/shasum, git, coreutils) and deliberately excluding
@@ -614,7 +631,9 @@ def test_bash_wrapper_serves_warm_cache_without_spawning_python(monkeypatch, tmp
 @pytest.mark.portfolio_tier("T3")
 @pytest.mark.effect("process")
 @pytest.mark.effect("filesystem")
-def test_bash_warm_missing_roster_uses_constant_parser_processes(monkeypatch, tmp_path):
+def test_bash_warm_missing_roster_uses_constant_parser_processes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     bash, jq, sha = _bash_prereqs()
     if os.name == "nt" or not (bash and jq and sha):
         pytest.skip("native POSIX bash/jq/hash tools unavailable")
@@ -666,7 +685,7 @@ def test_bash_warm_missing_roster_uses_constant_parser_processes(monkeypatch, tm
     assert 0 < counts[0] == counts[1] <= 12
 
 
-def test_bash_wrapper_falls_back_on_cold_cache(tmp_path):
+def test_bash_wrapper_falls_back_on_cold_cache(tmp_path: Path) -> None:
     bash, jq, sha = _bash_prereqs()
     if not (bash and jq and sha):
         pytest.skip("bash/jq/sha256sum unavailable")

@@ -1,0 +1,9 @@
+{
+  "comment": "Admit AI Attribution Python helpers and tests to strict typing",
+  "changes": [
+    {
+      "plugin": "ai-attribution",
+      "type": "patch"
+    }
+  ]
+}
