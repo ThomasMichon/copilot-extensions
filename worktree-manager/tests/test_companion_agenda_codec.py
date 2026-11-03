@@ -217,6 +217,41 @@ def test_actual_owner_structural_display_limits_preserve_valid_source_and_stable
         codec.events(malformed, token)
 
 
+@pytest.mark.parametrize(("owner", "expected"), [
+    pytest.param(2**80, 2**80, id="large-positive-domain-integer"),
+    pytest.param(-(2**80), -(2**80), id="large-negative-domain-integer"),
+], indirect=["owner"])
+def test_actual_owner_domain_integers_remain_exact_in_display(owner, expected):
+    codec, _, page, *_ = owner
+    frame = codec.decode(raw(page()))
+    event = codec.snapshot(frame, codec.token(0)).events[0]
+    detail = json.loads(event.data_json)
+    assert detail == frame["entries"][0]
+    contexts = [record["body"] for record in detail["result"]["records"] if record["kind"] == "context"]
+    values = [fact["value"] for context in contexts for fact in context["facts"]]
+    assert values == [expected] and type(values[0]) is int
+    assert "Detail omitted" not in event.details
+
+
+@pytest.mark.parametrize("invalid", [True, False, -1, 1 << 63, 2**80, -(2**80)])
+def test_domain_integer_support_does_not_relax_protocol_revision_bounds(owner, invalid):
+    codec, selected, page, *_ = owner
+    info = deepcopy(selected)
+    info["revision"] = invalid
+    with pytest.raises(TimelineContractError, match="invalid agenda integer"):
+        codec.info(raw(info))
+    frame = page()
+    cursor = frame["cursor"]
+    value = json.loads(base64.urlsafe_b64decode(cursor[4:] + "=" * (-len(cursor[4:]) % 4)))
+    value["revision"] = invalid
+    bad_cursor = "ag1." + base64.urlsafe_b64encode(encoded(value).encode()).decode().rstrip("=")
+    with pytest.raises(TimelineContractError, match="invalid agenda integer"):
+        codec.position(bad_cursor)
+    frame["cursor"] = bad_cursor
+    with pytest.raises(TimelineContractError, match="invalid agenda integer"):
+        codec.decode(raw(frame))
+
+
 def test_actual_owner_omission_retains_original_payload_integrity_and_reference(owner):
     codec, _, page, wait, *_ = owner
     accepted = wait("漢" * 10000)

@@ -15,7 +15,7 @@ from .companion_agenda_codec import AgendaCodec
 from .companion_agenda_commands import AgendaCommands
 from .companion_timeline_contract import (
     Availability, Completeness, LiveDelta, Provider, SourcePosition, SourceToken,
-    TimelineContractError, TimelineGap, TimelineSnapshot,
+    TimelineContractError, TimelineEvent, TimelineGap, TimelineSnapshot,
 )
 from .companion_timeline_controller import TimelineCleanupError, TimelineSourceError
 from .companion_timeline_model import TimelineWindow
@@ -92,10 +92,13 @@ class AgendaReader:
 class AgendaTimelineAttachment:
     def __init__(
         self, panel: CompanionTimelinePanel, *, cwd: str, status: Callable[[str], None],
+        validate_events: Callable[[SourceToken, tuple[TimelineEvent, ...]], None],
     ) -> None:
         self.panel, self.cwd, self.status = panel, cwd, status
+        self._validate_events = validate_events
         self.selection: Selection | None = None
         self._last_selection: Selection | None = None
+        self._invalidated_selection: Selection | None = None
         self.project_root: str | None = None
         self.reader: AgendaReader | None = None
         self.token: SourceToken | None = None
@@ -129,6 +132,7 @@ class AgendaTimelineAttachment:
             (frame.get("project"), frame.get("worktree_id"), frame.get("session_id")) == self.selection
             and frame.get("availability") == "head-changed"
         ):
+            self._invalidated_selection = self.selection
             for token in self._tokens(all_providers=True):
                 self.panel.apply_snapshot(TimelineSnapshot(
                     token, None, Availability.HEAD_CHANGED, Completeness.PARTIAL,
@@ -152,7 +156,7 @@ class AgendaTimelineAttachment:
         if self.selection is None:
             return False
         project, worktree, head = self.selection
-        invalidated = any(
+        invalidated = self._invalidated_selection == self.selection or any(
             (state.token.identity.project, state.token.identity.worktree_id) == (project, worktree)
             and (
                 state.availability is Availability.HEAD_CHANGED
@@ -161,6 +165,7 @@ class AgendaTimelineAttachment:
             for state in self.panel.window.sources.values()
         )
         if invalidated:
+            self._invalidated_selection = self.selection
             self._stop.set()
             self._changed.set()
             self.status("Rich Agenda: head changed; Refresh required")
@@ -199,6 +204,8 @@ class AgendaTimelineAttachment:
         error: str | None = None, *, project_root: str | None = None,
     ) -> None:
         async with self._lock:
+            if self.selection is not None and self._renderable():
+                self._head_current()
             if (
                 selection is not None and selection == self.selection
                 and project_root == self.project_root and self._task is not None and not self._task.done()
@@ -218,8 +225,9 @@ class AgendaTimelineAttachment:
             if not isinstance(project_root, str) or not Path(project_root).is_absolute():
                 self._failure("selected worktree root is unavailable")
                 return
-            if self._last_selection is not None and selection != self._last_selection and self._renderable():
-                if not any(
+            if self._last_selection is not None and selection != self._last_selection:
+                self._invalidated_selection = None
+                if self._renderable() and not any(
                     (state.token.identity.project, state.token.identity.worktree_id,
                      state.token.identity.head_session_id) == selection
                     for state in self.panel.window.sources.values()
@@ -280,6 +288,9 @@ class AgendaTimelineAttachment:
                     continue
                 if not self._head_current():
                     return
+                page_events = tuple(reader.codec.events(page, token) for page in pages)
+                for events in page_events:
+                    self._validate_events(token, events)
                 state = self.panel.window.sources.get(token.identity.source_key)
                 if state is None or state.token != token:
                     result = self.panel.bind_source(token)
@@ -291,8 +302,7 @@ class AgendaTimelineAttachment:
                 snapshot = reader.codec.snapshot(pages[-1], token)
                 if state.position is not None:
                     base = state.position
-                    for page in pages:
-                        events = reader.codec.events(page, token)
+                    for events in page_events:
                         newer = tuple(event for event in events if reader.codec.revision(event.position.cursor) > reader.codec.revision(base.cursor))
                         if not newer:
                             continue
@@ -350,6 +360,8 @@ class AgendaTimelineAttachment:
                 if not self._history_current(token, message.before, stop, epoch):
                     return
                 value = reader.codec.page(frame, token, message.before)
+                if not isinstance(value, TimelineGap):
+                    self._validate_events(token, value.events)
                 result = self.panel.apply_gap(value) if isinstance(value, TimelineGap) else self.panel.prepend_page(value)
                 if not result.applied and not isinstance(value, TimelineGap):
                     raise TimelineSourceError(result.reason)

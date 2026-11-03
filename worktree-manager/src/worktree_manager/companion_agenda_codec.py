@@ -72,8 +72,6 @@ def _values(value: Any, depth: int = 0) -> None:
         _require(not any(ord(char) < 32 and char not in "\n\r\t" or ord(char) == 127
                          for char in value), "agenda text contains a control character")
         value.encode("utf-8")
-    elif type(value) is int:
-        _require(-MAX_REVISION <= value <= MAX_REVISION, "agenda integer exceeds its bound")
     elif type(value) is float:
         _require(math.isfinite(value), "agenda JSON contains a nonfinite number")
 

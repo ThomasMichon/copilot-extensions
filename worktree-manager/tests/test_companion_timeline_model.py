@@ -12,6 +12,18 @@ from worktree_manager.companion_timeline_model import ResultCode, TimelineWindow
 from _companion_timeline_fixtures import event, position, snapshot, token
 
 
+def test_read_failure_cannot_downgrade_known_head_invalidation():
+    source = token()
+    model = TimelineWindow()
+    model.bind(source)
+    initial = snapshot(source, (event(source, 0),))
+    model.apply_snapshot(initial)
+    model.apply_snapshot(replace(initial, events=(), availability=Availability.HEAD_CHANGED))
+    model.source_error(source, "fresh preparation is unavailable")
+    assert model.sources[source.identity.source_key].availability is Availability.HEAD_CHANGED
+    assert not model.events
+
+
 def test_unavailable_source_recovers_exact_multi_page_replay_atomically():
     source = token()
     model = TimelineWindow()

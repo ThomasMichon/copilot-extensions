@@ -78,10 +78,12 @@ class TimelineAttachment:
         self._retained_windows += (window,)
         self._retained_bytes += size
 
-    def _validate_retained(self, token: SourceToken, events: tuple[TimelineEvent, ...]) -> None:
+    def validate_events(self, token: SourceToken, events: tuple[TimelineEvent, ...]) -> None:
+        """Check shared active and retained proofs before any provider publishes."""
+        windows = self._retained_windows + ((self.panel.window,) if self._renderable() else ())
         for event in events:
             digest = None
-            for window in self._retained_windows:
+            for window in windows:
                 state = window.sources.get(token.identity.source_key)
                 if state is None or state.token.identity != token.identity:
                     continue
@@ -89,7 +91,7 @@ class TimelineAttachment:
                 if known is not None:
                     digest = window._digest(event) if digest is None else digest
                     if known != digest:
-                        raise TimelineSourceError("An immutable event conflicts with retained exhausted-window evidence.")
+                        raise TimelineSourceError("An immutable event conflicts with active or retained window evidence.")
 
     async def set_selection(
         self, selection: tuple[str, str, str] | None, *, reconcile: bool = False,
@@ -131,7 +133,7 @@ class TimelineAttachment:
                 ):
                     raise TimelineContractError("prepared snapshot changed the active selection or request epoch")
                 window = self.panel.window
-                self._validate_retained(initial.token, initial.events)
+                self.validate_events(initial.token, initial.events)
                 key = initial.token.identity.source_key
                 if reconcile and window.reconciliation_required and initial.availability is not Availability.OBSERVED:
                     raise TimelineContractError("reconciliation requires fresh observed owner facts")
@@ -158,7 +160,7 @@ class TimelineAttachment:
                     if not current():
                         return
                     if not isinstance(value, TimelineGap):
-                        self._validate_retained(value.token, value.events)
+                        self.validate_events(value.token, value.events)
                     result = (
                         self.panel.apply_snapshot(value) if isinstance(value, TimelineSnapshot)
                         else self.panel.apply_delta(value) if isinstance(value, LiveDelta)
@@ -169,7 +171,7 @@ class TimelineAttachment:
 
                 def page(value: HistoryPage) -> None:
                     if current():
-                        self._validate_retained(value.token, value.events)
+                        self.validate_events(value.token, value.events)
                         result = self.panel.prepend_page(value)
                         if not result.applied:
                             raise TimelineSourceError(result.reason)

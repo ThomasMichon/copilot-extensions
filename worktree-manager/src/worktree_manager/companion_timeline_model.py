@@ -405,7 +405,10 @@ class TimelineWindow:
         if state is None:
             return self._result(False, ResultCode.STALE_TOKEN, "Error belongs to a retired source.")
         self.sources[token.identity.source_key] = replace(
-            state, availability=Availability.UNAVAILABLE, requested_before=None,
+            state, availability=(
+                Availability.HEAD_CHANGED if state.availability is Availability.HEAD_CHANGED
+                else Availability.UNAVAILABLE
+            ), requested_before=None,
         )
         self.revision += 1
         return self._result(False, ResultCode.SOURCE_ERROR, message)

@@ -437,6 +437,7 @@ class MuxCompanionApp(App):
         self._rich_agenda_attachment = AgendaTimelineAttachment(
             self._timeline_panel, cwd=self._cwd or os.getcwd(),
             status=self._rich_agenda_status,
+            validate_events=self._timeline_attachment.validate_events,
         )
 
     def compose(self) -> ComposeResult:

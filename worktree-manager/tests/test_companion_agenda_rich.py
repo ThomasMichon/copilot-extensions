@@ -495,6 +495,7 @@ def test_terminal_retirement_fences_refresh_and_keeps_failure_custody(managed) -
     async def check() -> None:
         attachment = AgendaTimelineAttachment(
             CompanionTimelinePanel(), cwd=str(managed["cwd"]), status=lambda message: None,
+            validate_events=lambda token, events: pytest.fail("terminal retirement must not admit events"),
         )
 
         async def failed() -> None:
