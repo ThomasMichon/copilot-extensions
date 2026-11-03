@@ -41,7 +41,38 @@
 # though the switch was (or was about to be) active.
 set -euo pipefail
 
+if [ "${1:-check}" = "capabilities" ]; then
+  if [ "$#" -ne 1 ]; then
+    echo "[bootstrap-killswitch] capabilities does not accept mutation arguments." >&2
+    exit 2
+  fi
+  [ -f "$(dirname "${BASH_SOURCE[0]}")/killswitch_mutation.py" ] ||
+    { echo "canonical mutation helper unavailable" >&2; exit 1; }
+  printf '{"schema":"copilot-extensions.bootstrap-killswitch-controller","version":1,"capabilities":["conditional-mutation-v1"]}\n'
+  exit 0
+fi
+
+_py() { command -v python3 2>/dev/null || command -v python 2>/dev/null || true; }
+
 StateFile="${BOOTSTRAP_KILLSWITCH_STATE_FILE:-$HOME/.copilot-extensions/killSwitches/bootstrap-killswitch.json}"
+case "$StateFile" in
+  '~'*)
+    py="$(_py)"
+    if [ -z "$py" ]; then
+      echo "[bootstrap-killswitch] error: Python is required to resolve the state-file home override." >&2
+      exit 1
+    fi
+    StateFile="$("$py" -c '
+from pathlib import Path
+import sys
+try:
+    print(Path(sys.argv[1]).expanduser())
+except RuntimeError as error:
+    print(f"[bootstrap-killswitch] invalid state-file override: {error}", file=sys.stderr)
+    raise SystemExit(2)
+' "$StateFile")"
+    ;;
+esac
 LegacyStateFile=""
 if [ -z "${BOOTSTRAP_KILLSWITCH_STATE_FILE:-}" ]; then
   LegacyStateFile="$HOME/.copilot-extensions/bootstrap-killswitch.json"
@@ -50,8 +81,6 @@ ReadStateFile="$StateFile"
 if [ ! -e "$StateFile" ] && [ -n "$LegacyStateFile" ] && [ -f "$LegacyStateFile" ]; then
   ReadStateFile="$LegacyStateFile"
 fi
-
-_py() { command -v python3 2>/dev/null || command -v python 2>/dev/null || true; }
 
 _is_active() {
   local py; py="$(_py)"
@@ -120,10 +149,6 @@ if [ "$#" -gt 0 ]; then
 fi
 mutation_helper="$(dirname "${BASH_SOURCE[0]}")/killswitch_mutation.py"
 case "$cmd" in
-  capabilities)
-    [ -f "$mutation_helper" ] || { echo "canonical mutation helper unavailable" >&2; exit 1; }
-    printf '{"schema":"copilot-extensions.bootstrap-killswitch-controller","version":1,"capabilities":["conditional-mutation-v1"]}\n'
-    ;;
   check)
     if [ -f "$ReadStateFile" ] && [ "$(_is_active)" = "true" ]; then
       r="$(_reason)"

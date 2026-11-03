@@ -43,12 +43,42 @@ param(
 # message the switch never actually achieved.
 $ErrorActionPreference = "Stop"
 
+if ($Command -ceq "capabilities") {
+  if ($Reason -or $ExpectedState) { throw "Capabilities does not accept mutation arguments" }
+  Write-Output '{"schema":"copilot-extensions.bootstrap-killswitch-controller","version":1,"capabilities":["conditional-mutation-v1"]}'
+  exit 0
+}
+
+function Resolve-StateFilePath {
+  param([string]$Path)
+  if ($Path -match '^~([\\/]|$)') {
+    $userHome = $HOME
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+      if ($env:USERPROFILE) { $userHome = $env:USERPROFILE }
+      elseif ($env:HOMEPATH) { $userHome = "$env:HOMEDRIVE$env:HOMEPATH" }
+    } elseif ($env:HOME) { $userHome = $env:HOME }
+    $Path = if ($Path.Length -eq 1) { $userHome } else { Join-Path $userHome $Path.Substring(2) }
+  } elseif ($Path.StartsWith("~")) {
+    throw "Named-user state-file overrides require an explicitly expanded path"
+  }
+  if (-not [IO.Path]::IsPathRooted($Path)) {
+    $location = Get-Location
+    if ($location.Provider.Name -ne "FileSystem") {
+      throw "Relative state-file overrides require a filesystem location"
+    }
+    $Path = Join-Path $location.ProviderPath $Path
+  }
+  return [IO.Path]::GetFullPath($Path)
+}
+
 $StateFile = $env:BOOTSTRAP_KILLSWITCH_STATE_FILE
 $LegacyStateFile = $null
 if (-not $StateFile) {
   $StateFile = Join-Path $HOME ".copilot-extensions\killSwitches\bootstrap-killswitch.json"
   $LegacyStateFile = Join-Path $HOME ".copilot-extensions\bootstrap-killswitch.json"
 }
+$StateFile = Resolve-StateFilePath $StateFile
+if ($LegacyStateFile) { $LegacyStateFile = Resolve-StateFilePath $LegacyStateFile }
 $ReadStateFile = $StateFile
 if ($LegacyStateFile -and -not (Test-Path -LiteralPath $StateFile) -and
     (Test-Path -LiteralPath $LegacyStateFile)) {
@@ -198,9 +228,6 @@ if ($ExpectedState -and $Command -ceq "off" -and $LegacyStateFile) {
 }
 
 switch ($Command) {
-  "capabilities" {
-    Write-Output '{"schema":"copilot-extensions.bootstrap-killswitch-controller","version":1,"capabilities":["conditional-mutation-v1"]}'
-  }
   "check" {
     $state = Read-KillswitchState
     if ($null -ne $state -and $state.active -eq $true) {

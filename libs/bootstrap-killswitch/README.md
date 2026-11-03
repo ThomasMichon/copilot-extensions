@@ -73,6 +73,14 @@ bash ~/.copilot/installed-plugins/copilot-extensions/<any-adopter>/scripts/boots
 read/write the identical shared state file, so it does not matter which
 one's copy you invoke.
 
+`BOOTSTRAP_KILLSWITCH_STATE_FILE` selects an explicit override. Both controllers
+expand a leading current-user `~` before reading or mutating that path, so
+`on`, `check`, `status` and `off` cannot disagree about which hold is active.
+Relative overrides use the calling filesystem directory. PowerShell requires
+named-user `~other` overrides to be expanded explicitly rather than guessing
+another user's home. Read-only `capabilities` discovery does not resolve or
+inspect a state path, including an unsupported override.
+
 **If `agent-machines` happens to be installed**, it additionally exposes
 this as a friendlier, discoverable subcommand (optional, not required):
 

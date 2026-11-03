@@ -51,14 +51,19 @@ def command(controller: str, action: str, expected: str = "") -> list[str]:
     return [*prefix, *arguments, *([flag, expected] if expected else [])]
 
 
-def run(argv: list[str], path: Path) -> subprocess.CompletedProcess[str]:
+def run(
+    argv: list[str], path: Path, *, override: str | None = None,
+    home: Path | None = None, cwd: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
+    home = home or path.parent
     return run_caller_owned(
         argv, timeout=15, max_stdout_bytes=65536, max_stderr_bytes=65536,
+        cwd=cwd,
         env={
             **{key: value for key, value in os.environ.items() if key != "PYTHONPATH"},
-            "BOOTSTRAP_KILLSWITCH_STATE_FILE": str(path),
+            "BOOTSTRAP_KILLSWITCH_STATE_FILE": override if override is not None else str(path),
             "BOOTSTRAP_KILLSWITCH_RECONCILE_SCAN_ROOT": str(path.parent),
-            "HOME": str(path.parent), "USERPROFILE": str(path.parent),
+            "HOME": str(home), "USERPROFILE": str(home),
             "PYTHONNOUSERSITE": "1",
         },
     )
@@ -104,3 +109,41 @@ def test_conditional_mutation_checks_exact_audit_bytes_not_just_active(
     result = run(command(controller, action, mutation.state_revision(path)), path)
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert path.exists() is (action == "on")
+
+
+@pytest.mark.parametrize("controller", ["bash", "powershell"])
+@pytest.mark.parametrize("override", ["~/hold.json", "relative/hold.json"])
+def test_readers_and_writers_select_the_same_normalized_override(
+    tmp_path: Path, controller: str, override: str,
+) -> None:
+    path = tmp_path / ("hold.json" if override.startswith("~") else override)
+
+    def execute(action: str) -> subprocess.CompletedProcess[str]:
+        return run(command(controller, action), path, override=override, home=tmp_path, cwd=tmp_path)
+
+    activated = execute("on")
+    assert activated.returncode == 0, (activated.stdout, activated.stderr)
+    assert json.loads(path.read_bytes())["active"] is True
+    checked = execute("check")
+    assert checked.returncode == 0, (checked.stdout, checked.stderr)
+    assert "ACTIVE" in checked.stderr
+    reported = execute("status")
+    assert reported.returncode == 0, (reported.stdout, reported.stderr)
+    assert json.loads(reported.stdout)["active"] is True
+    cleared = execute("off")
+    assert cleared.returncode == 0, (cleared.stdout, cleared.stderr)
+    assert not path.exists()
+
+
+@pytest.mark.parametrize("controller", ["bash", "powershell"])
+def test_capability_discovery_does_not_resolve_or_touch_state(
+    tmp_path: Path, controller: str,
+) -> None:
+    path = tmp_path / "never-created.json"
+    result = run(
+        command(controller, "capabilities"), path,
+        override="~unknown-controller-capability-user/hold.json", home=tmp_path,
+    )
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert json.loads(result.stdout)["capabilities"] == ["conditional-mutation-v1"]
+    assert not path.exists() and not path.with_name(path.name + ".lock").exists()
