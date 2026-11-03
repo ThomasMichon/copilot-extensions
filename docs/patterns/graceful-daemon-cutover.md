@@ -560,16 +560,20 @@ agent-bridge needs.
    > trigger, has soaked enough to be trusted end to end), demote that
    > plugin's verb back to an installer-internal seam per this invariant --
    > don't treat its present existence as the target state.
-2. **Start independently before retirement.** Ordinary update and repair start
-   the incoming generation beside the incumbent, publish its selected route,
-   and leave old-owner retirement to that owner. An absent, broken or
-   incompatible incumbent never becomes a prerequisite or a stop-and-swap
-   fallback. Brief process overlap is expected; exclusive work remains fenced.
-3. **Outgoing drain is best effort and bounded.** The displaced owner closes
-   admissions and retires its own scope after observing the selected successor.
-   Explicit stop/uninstall or separately authorized stuck-owner recovery may use
-   identity-bound termination; normal update and repair do not. Interrupted
-   non-resumable work requires durable recovery and honest outcome reporting.
+2. **Construct independently; prefer start-first retirement.** Ordinary update
+   and repair build the incoming generation without incumbent cooperation. On
+   the compatible path, start it beside the incumbent, confirm promotion and
+   let the outgoing owner retire. Incompatible, unavailable or non-settling
+   predecessors instead permit bounded cold takeover by the same authorized
+   replacement owner, including retirement before incoming readiness when
+   exclusivity requires it. Missing graceful support needs no extra repair flag;
+   exclusive work remains fenced on either path.
+3. **Outgoing drain is best effort and bounded.** Prefer the displaced owner's
+   admission closure, checkpoint and self-retirement after successor readiness.
+   If that contract is unsupported, unavailable or does not settle, authorized
+   normal update and repair may use identity-bound termination within the
+   bounded cold-takeover contract. Interrupted non-resumable work requires
+   durable recovery and honest outcome reporting, never a false graceful claim.
 4. **Do not strand recovery.** On the compatible path after the commit point, if the old endpoint is
    unreachable, **commit-forward** to the healthy new one (never roll back into a
    dead daemon). An aborted pre-commit cutover **rolls back** (old stays live).
@@ -591,9 +595,9 @@ agent-bridge needs.
 8. **Cross-version isolation and identity-bound replacement.** Never pin a
    child into another generation's immutable slot or mutate its runtime files.
    Compatible discovered control-plane handoff may supplement replacement, but
-   never precedes independent incoming startup as a mandatory gate. For a
-   separately authorized recovery operation, the authorized newcomer
-   or lifecycle owner may terminate the exact displaced daemon and its owned
+   never gates independent incoming construction. For authorized replacement,
+   including normal update or repair, the newcomer or lifecycle owner may use
+   bounded cold takeover to terminate the exact displaced daemon and its owned
    scope through shared native identity/custody primitives; this is not limited
    to pre-protocol legacy residents or numerically older versions. A raw PID,
    process name, stale route or version comparison is never sufficient. Confirm
