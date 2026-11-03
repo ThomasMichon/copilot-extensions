@@ -7357,3 +7357,39 @@ published-successor handoff, failed/unready promotion, accepted-but-unsettled
 predecessor shutdown and exact native exit. These process-level witnesses stay
 outside the required no-actor promotion unit packet and do not qualify an
 installed rollout or a performance threshold.
+
+The focused best-effort monitor-retirement packet combines
+`tests\test_status_monitor_guarded_recovery.py` and
+`tests\test_status_monitor_guarded_cutover_native.py` with
+`--allow-explicit-tiers --timeout 900 -k "not test_native or keeps_incoming_after_failed_predecessor_recovery or drain_receipt_failure_rolls_forward or passive_health_cannot_retire_old or successful_cutover_activates_then_waits"`.
+It retains eight native cases plus the pure contract controls. Disposable
+provider admission allows 60 seconds for real imports/readiness; each native
+case has a 150-second bound including two starts and Job cleanup. The aggregate
+allowance includes these native setup costs, not a change to production startup
+or drain deadlines. Controls require actual outgoing-process exit and old-port
+rebinding while the incoming owner serves, incoming failure rollback and durable
+failed-retirement evidence for unconfirmed cleanup. Run other native files as
+separate bounded packets rather than combining every actor test under one
+default suite allowance.
+
+The ordinary asynchronous installer controls additionally select
+`tests\test_status_monitor_cutover_helper.py`,
+`tests\test_python_runtime_install.py` and the native cutover file with
+`-k "async or installation_promotes_successor or serving_incoming_monitor"`.
+The four native async cases pair an incompatible or timed-out predecessor with
+a serving or capability-incompatible target. They require real old-process
+exit, old-port rebinding and new serving health only for successful targets;
+failed preparation must preserve the predecessor. Unit controls separately
+retain the original runtime slot through missing old metadata/control failure
+and require cleanup failure to preserve successful irreversible publication.
+All cases using this disposable provider share its 60-second import and
+150-second item bounds, including two starts and Job cleanup. Its separate
+180-second maximum lifetime prevents early fixture expiry while another
+provider imports; strict Job cleanup still runs at the item boundary.
+These allowances address fixture import contention, not a production startup
+or performance claim.
+The same packet also selects
+`unnegotiated_predecessor_is_not_drained_when_incoming_fails`: a real legacy
+peer stays serving and receives no drain/shutdown mutation when the incoming
+peer refuses promotion or remains unready. Pure controls pair refused/timed-out
+drain with failed publication/promotion and require zero native retirement.

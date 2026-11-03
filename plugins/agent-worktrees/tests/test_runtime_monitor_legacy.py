@@ -67,8 +67,9 @@ def legacy(monkeypatch, tmp_path):
 
 def test_unsupported_capability_keeps_authenticated_native_owner(legacy):
     root, expected, _guard, state = legacy
+    assert identity.routed_identity(root, require_async_retirement=True) == expected
     with pytest.raises(identity.AsyncRetirementUnsupported) as raised:
-        identity.routed_identity(root, require_async_retirement=True)
+        identity.routed_identity(root, require_async_retirement=True, require_capabilities=True)
     assert raised.value.identity == expected
     assert state["events"] == []
 

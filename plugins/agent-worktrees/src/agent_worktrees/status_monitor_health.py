@@ -19,6 +19,20 @@ class HealthSurface(Protocol):
     def health(self) -> dict: ...
 
 
+def check_predecessor(
+    host: str, port: int, client_factory: Callable[[str], HealthSurface],
+) -> bool:
+    """A fenced resident can recover only after rollback restores its election."""
+    try:
+        status = client_factory(f"http://{host}:{port}").health()
+        roster = status.get("worktrees")
+        return status.get("status") in {"ready", "draining", "unavailable"} and (
+            not isinstance(roster, dict) or roster.get("status") not in {"shutdown", "closed"}
+        )
+    except Exception:
+        return False
+
+
 def env_timeout(name: str, default: float) -> float:
     raw = os.environ.get(name)
     if raw:

@@ -154,6 +154,27 @@ self-provisioning path remains independent and authoritative.
 
 ## Install topology — marketplace to local paths
 
+### Replacement lifecycle: target and current adoption
+
+The [service vision](../visions/plugin-services/README.md#zero-downtime-cutover)
+and [cutover pattern](patterns/graceful-daemon-cutover.md#successor-first-replacement-target)
+define the successor-first architecture: start new; new announces replacement
+and attempts handoff with old; old observes that handoff and independently
+recognizes its stale generation; new proves readiness and declares installation
+completion; old attempts drain; the new owner's existing retirement authority
+waits a bounded grace period, then attempts identity-bound forced old-process
+cleanup. No old reply or cleanup failure displaces a healthy new owner.
+Installation completion is not a predecessor-exit receipt.
+
+Current Worktrees asynchronous installation already separates ready successor
+publication from predecessor drain/exit and retains canonical retirement custody
+with the selected resident. The incompatible-predecessor fallback uses bounded
+native cleanup after successor serving readiness. The complete successor-originated
+handoff announcement and resident-owned grace-expiry escalation remain realization
+work; current compatibility paths and native cleanup tests do not prove that
+whole target. The [actual install contract](install-contract.md) records the
+implemented boundaries. Other services adopt the pattern independently.
+
 Each plugin is vendored by the Copilot CLI into `installed-plugins/`, then its
 installer deploys a self-contained runtime under `~/.agent-*`. **At run time
 nothing depends on a git checkout of this repo.**
