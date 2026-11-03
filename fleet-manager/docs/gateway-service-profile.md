@@ -18,6 +18,11 @@ The separate opt-in [machine-key and delegated continuity
 profile](continuity-bootstrap.md) adds same-owner first-touch caller enrollment
 and a normal setup consumer. It does not broaden the token profiles below.
 
+The independent SDK-only [user bearer caller profile](gateway-user-callers.md)
+adds opt-in RS256 caller authentication and local-only handlers without a
+service identity or proof-key enrollment. It preserves the remote connector
+profiles below; bearer replay semantics are explicitly different from PoP.
+
 ## In-process deployment owners
 
 An SDK embedding may explicitly supply `local_handlers=(LocalHandlerBinding(...),)`
@@ -30,8 +35,10 @@ registers the new binding through its controlled runtime lifecycle.
 
 Local slots support bounded buffered HTTP only, with one active request per
 slot and the existing global admission/body/deadline limits. They cannot also
-accept an outbound connector. Caller JWT/proof verification, enrollment/key/
-method policy, TLS and canonical target checks are unchanged. Existing
+accept an outbound connector. Caller authentication uses the explicitly selected
+profile: existing JWT/proof verification or the independent user bearer mode.
+Current method/route/operation policy, TLS and canonical target checks remain.
+Existing
 unregistered slots retain their original outbound-channel behavior.
 Registering Python code is not installed/healthy/ready evidence for its backend.
 Embedding diagnostics report an exact matching binding as `registered-local`,

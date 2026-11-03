@@ -124,7 +124,7 @@ def test_missing_root_fields(document: dict[str, Any], field: str) -> None:
 
 @pytest.mark.parametrize(("field", "value"), [
     ("schema", "fleet-manager.gateway"), ("version", True), ("version", 1.0),
-    ("version", 2), ("revision", True), ("revision", False), ("revision", 0),
+    ("version", 3), ("revision", True), ("revision", False), ("revision", 0),
     ("revision", -1), ("revision", 2**53), ("revision", 1.0), ("revision", "1"),
     ("revision", None), ("fleet", ""), ("gateway", "bad/name"),
     ("fleet", "a" * 129), ("gateway", False),
