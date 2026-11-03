@@ -59,9 +59,12 @@ def register_routes(app: Any, queue: Any, bus: Any) -> None:
     def record_created(key: str, body: dict[str, Any]) -> dict:
         if (
             not {"task_generation", "agent_info"} <= set(body)
-            or set(body) - {"task_generation", "agent_info", "worktree_record", "startup_invocation"}
+            or set(body) - {"task_generation", "agent_info", "worktree_record", "startup_invocation", "execution_machine"}
             or type(body["task_generation"]) is not int
             or ("worktree_record" in body and not isinstance(body["worktree_record"], dict))
+            or ("execution_machine" in body and (
+                not isinstance(body["execution_machine"], str) or not body["execution_machine"].strip()
+            ))
         ):
             raise HTTPException(422, detail="invalid created-agent request")
         try:
@@ -75,10 +78,13 @@ def register_routes(app: Any, queue: Any, bus: Any) -> None:
     def record_resumed(key: str, body: dict[str, Any]) -> dict:
         if (
             not {"task_generation", "session_info", "worktree_record"} <= set(body)
-            or set(body) - {"task_generation", "session_info", "worktree_record", "startup_invocation"}
+            or set(body) - {"task_generation", "session_info", "worktree_record", "startup_invocation", "execution_machine"}
             or type(body["task_generation"]) is not int
             or not isinstance(body["session_info"], dict)
             or not isinstance(body["worktree_record"], dict)
+            or ("execution_machine" in body and (
+                not isinstance(body["execution_machine"], str) or not body["execution_machine"].strip()
+            ))
         ):
             raise HTTPException(422, detail="invalid resumed-agent request")
         try:
@@ -229,7 +235,21 @@ def start(
         raise BridgeCarriedSessionBusy(f"ordinary startup reservation cannot be read: {exc}") from exc
     if reservation.get("state") != "reserving" or reservation.get("release_requested"):
         raise BridgeUnavailable("ordinary startup reservation is not admitted")
+    from .ordinary_pool_startup import initial_machine
+    try:
+        execution_machine = initial_machine(task, reservation)
+    except TaskError as exc:
+        raise BridgeCarriedSessionBusy(str(exc)) from exc
     info = reservation.get("agent_info")
+    if execution_machine is not None:
+        from .client_pool_placement import _validate_contract
+        try:
+            _validate_contract(client.pool_placement_contract(), driver="ordinary-bridge")
+            if not info:
+                from .ordinary_assignment import current_task
+                current_task(client, task)
+        except (DispatchError, TaskError, ValueError, AttributeError) as exc:
+            raise BridgeCarriedSessionBusy(f"ordinary pool initial startup is unqualified: {exc}") from exc
     diagnostics.creation_key = reservation.get("creation_key")
     assigned = bool(reservation.get("worktree") and not info) or bool(
         info and info.get("fact_kind") == "resumed"
@@ -305,15 +325,26 @@ def start(
             client.record_resumed_agent(
                 key, task_generation=task["generation"], session_info=info,
                 worktree_record=record, startup_invocation=invocation,
+                **({"execution_machine": execution_machine} if execution_machine is not None else {}),
             )
         else:
             facts = {"task_generation": task["generation"], "agent_info": info,
                      "startup_invocation": invocation}
+            if execution_machine is not None:
+                facts["execution_machine"] = execution_machine
             if record is not None:
                 facts["worktree_record"] = record
             client.record_created_agent(key, **facts)
-        readback = client.get_reservation(key).get("agent_info")
-        if not isinstance(readback, dict) or not same_facts(readback.get("startup_invocation"), invocation):
+        stored = client.get_reservation(key)
+        readback = stored.get("agent_info")
+        from .bridge_remote import normalize_host
+        if (
+            not isinstance(readback, dict) or not same_facts(readback.get("startup_invocation"), invocation)
+            or execution_machine is not None and (
+                not isinstance(stored.get("execution_machine"), str)
+                or normalize_host(stored["execution_machine"]) != normalize_host(execution_machine)
+            )
+        ):
             raise CreatedAgentUnrecorded("ordinary invocation storage/read-back capability is unproven")
         info["startup_invocation"] = invocation
 

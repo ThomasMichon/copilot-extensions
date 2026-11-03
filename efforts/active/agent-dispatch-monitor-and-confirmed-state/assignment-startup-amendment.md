@@ -50,6 +50,10 @@ connects explicit complete direct-worker policy to the existing registration
 and effective-source owners without deriving missing legacy semantics.
 Its source merged in [#10111](https://github.com/ThomasMichon/copilot-extensions/pull/10111);
 remaining legacy-row adoption, ordinary migration and native gates are distinct.
+The [obsolete-scope source](journal/2026/11.02-obsolete-pool-scopes.md) merged in
+[#10116](https://github.com/ThomasMichon/copilot-extensions/pull/10116):
+current candidates exclude removed scopes without retiring their publication
+or execution custody. Ordinary activation and native qualification remain open.
 Coordination: [#9709](https://github.com/ThomasMichon/copilot-extensions/issues/9709).
 Parent: [monitor and confirmed-state effort](README.md).
 Standing intent: [Dispatch vision](../../../visions/plugins/agent-dispatch/README.md#pool-owned-assignment-startup).
@@ -325,6 +329,11 @@ coupled queue/API, existing-supervisor, exact-native transport and rollback
 controls for the selected explicit startup/retry policy. This is partial source
 credit, not completion of the ordinary-caller, mixed-cohort or installed/native
 matrix below.
+
+The [ordinary first-prompt source](journal/2026/11.02-ordinary-first-prompt.md)
+expands explicit initial admission to the actual ordinary Bridge driver.
+It preserves the allocator claim and keyed first-turn/native binding without
+claiming automatic allocator-instance or ordinary retry integration.
 
 - [ ] Fake-clock selection and admission before, exactly at and after retry
   eligibility; direct reservation/claim bypass attempts refuse early work.

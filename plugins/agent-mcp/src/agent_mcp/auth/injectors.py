@@ -160,10 +160,22 @@ class EntraInjector(TokenInjector):
     async def _get(self) -> str | None:
         if self.spec.identity_context is None:
             return await super()._get()
-        await self._assert_identity()
-        token = await super()._get()
-        await self._assert_identity()
-        return token
+        try:
+            await self._assert_identity()
+            scope = self.spec.cache.scope
+            # Fresh acquisition already checks identity before returning to the
+            # cache writer. Shared reads can hit disk without acquiring, so keep
+            # their outer post-check, as for an in-memory cache hit.
+            acquiring = scope == "none" or (scope == "memory" and self._cached is None)
+            token = await super()._get()
+            if not acquiring:
+                await self._assert_identity()
+            return token
+        except BaseException:
+            # A failed probe or cancellation is not evidence that cached
+            # credentials still belong to the bound identity.
+            await self.invalidate()
+            raise
 
     def _scope(self) -> str:
         """The AAD scope to request, canonicalized the same way ``az_login`` does."""

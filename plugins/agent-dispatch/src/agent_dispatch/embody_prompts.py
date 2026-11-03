@@ -153,6 +153,37 @@ def autopilot_worker_prompt(
     )
 
 
+def pool_worker_prompt(
+    task_id: str, *, generation: int, route: str = "",
+    repo: str | None = None, all_repos: bool = False,
+) -> str:
+    """Evaluate an existing allocator claim without acquiring a second lease."""
+    ad = "agent-dispatch" + validate_fleet_route(route)
+    if type(generation) is not int or generation < 1 or repo and all_repos:
+        raise ValueError("pool worker prompt requires its current generation and one lane scope")
+    lane = " --all-repos" if all_repos else (f" --repo {repo}" if repo else "")
+    return (
+        f"You are a dispatched autopilot worker. Task {task_id} is already allocator-CLAIMED "
+        f"at generation {generation}; it is not queued for a new worker claim. "
+        f"Use `{ad}` for every command so routing stays with the original coordinator. "
+        "Use this worktree's own machine/worktree identity, not a synthetic worker id. "
+        f"{_charter_read_step(ad, task_charter=AUTOPILOT_CHARTER_NAME, concise=False)}"
+        f"Read `{ad} show {task_id}` and evaluate the charter's contract-net checks, "
+        f"including `{ad} list{lane}` for the duplicate sweep. Do not acquire another "
+        "claim or evaluation lease. Only if the task is still at the assigned generation, "
+        "CLAIMED and unowned, and you independently ACCEPT its contract, use "
+        f"`{ad} start {task_id} --pool-generation {generation}` with the actual retained "
+        "native session identity supplied below. Startup or prompt delivery is not acceptance. "
+        "If you cannot accept, retain the assignment and report the blocker; do not use "
+        "legacy yield/abandon as a substitute for pool-aware decline and workspace closeout. "
+        f"After acceptance, take steering with `{ad} steer take {task_id} --all`, record "
+        f"status beats with `{ad} progress {task_id} --phase <phase> --summary "
+        f'"<one line>", and only submit with `{ad} complete {task_id} --result-ref <ref>` '
+        "once the charter's actual goal and completion gates are met. Preserve all holds, "
+        "workspace/PR obligations and effect custody."
+    )
+
+
 def interactive_worker_prompt(
     task_id: str,
     *,

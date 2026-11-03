@@ -277,13 +277,19 @@ live claim token. No new blanket ACK or executor appointment is created.
       in [#10090](https://github.com/ThomasMichon/copilot-extensions/pull/10090),
       including actual serve-command configuration and bounded worker custody.
 - [ ] Complete ordinary publication/caller integration before activating it.
-      Explicit-definition adoption for remaining legacy direct rows, obsolete-scope withdrawal,
+      Explicit-definition adoption for remaining legacy direct rows,
       ordinary allocator/initial prompts and mixed-driver adoption
       remain required; the default-off source seam is not that completion gate.
-- [ ] Land source-owned [obsolete-scope exclusion](journal/2026/11.02-obsolete-pool-scopes.md)
+- [ ] Land explicit [ordinary first-prompt admission](journal/2026/11.02-ordinary-first-prompt.md)
+      under its actual `ordinary-bridge` driver, allocator claim and execution
+      host. Initial delivery must not reacquire an evaluation lease; automatic
+      allocator-instance selection, ordinary retry/decline and native
+      qualification remain separate integration gates.
+- [x] Land source-owned [obsolete-scope exclusion](journal/2026/11.02-obsolete-pool-scopes.md)
       without erasing publication history, task assignments or accountable
       capacity. Source regressions cover current readiness and remove/re-add;
-      review and merge remain required.
+      merged in [#10116](https://github.com/ThomasMichon/copilot-extensions/pull/10116).
+      Ordinary activation and installed/native qualification remain separate.
 - [x] Land explicit [lossless direct worker definitions](journal/2026/11.02-direct-pool-definitions.md)
       through the registration API/spec/store and effective-source owner.
       Preserve full policy, reversible precedence and supported rollback;
