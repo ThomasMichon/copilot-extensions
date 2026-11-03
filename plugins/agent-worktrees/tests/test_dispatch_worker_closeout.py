@@ -6,6 +6,8 @@ from dataclasses import replace
 import json
 import os
 from pathlib import Path
+import select
+import subprocess
 import sys
 from types import SimpleNamespace
 
@@ -46,10 +48,13 @@ def worker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         record.dispatch_attempt,
     )
     monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", NATIVE)
+    native_source = closeout._native_source
     monkeypatch.setattr(closeout, "_native_source", lambda native: SOURCE if native == NATIVE else None)
     monkeypatch.setattr(closeout, "require_record_mutation", lambda record, config: None)
     monkeypatch.setattr(sessions, "scan_sessions_fast", lambda records: sessions.SessionContext())
-    return SimpleNamespace(record=record, binding=binding, config=config, root=tmp_path)
+    return SimpleNamespace(
+        record=record, binding=binding, config=config, root=tmp_path, native_source=native_source,
+    )
 
 
 def test_own_inbound_allocation_and_session_are_not_an_outbound_closeout_deadlock(worker) -> None:
@@ -83,6 +88,13 @@ def test_preservation_states_never_reach_finalization(worker, change: dict) -> N
     for key, value in change.items():
         setattr(worker.record, key, value)
     with pytest.raises(ValueError):
+        worker.binding.require(worker.record, worker.config)
+
+
+def test_itemized_open_follow_up_blocks_even_without_legacy_flag(worker) -> None:
+    tracking.add_follow_up(worker.record, "Finish remaining work", save=False)
+    assert worker.record.follow_up is False
+    with pytest.raises(ValueError, match="follow-up"):
         worker.binding.require(worker.record, worker.config)
 
 
@@ -267,6 +279,56 @@ def test_actual_foreign_hold_blocks_even_without_legacy_lock_or_active_claim(
         with pytest.raises(ValueError, match="foreign native"):
             worker.binding.require(worker.record, worker.config)
     worker.binding.require(worker.record, worker.config)
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Native holds require Linux procfs")
+def test_same_uuid_resumed_process_cannot_ignore_still_held_prior_activation(worker, monkeypatch) -> None:
+    from agent_worktrees import native_source_context as context, tracking_session_registry as registry
+
+    root = worker.root / "sessions"
+    directory = root / NATIVE
+    directory.mkdir(parents=True)
+    monkeypatch.setattr(sessions, "_session_state_dir", lambda: root)
+    epoch = {"platform": "linux", "environment_id": "e" * 32, "boot_id": NATIVE}
+    monkeypatch.setattr(context, "epoch", lambda: epoch)
+    pid = os.getpid()
+    birth = context.process(pid)["start_time"]
+    witness = {"version": 1, "qualified": True, **epoch, "ancestors": [
+        {"pid": pid, "start_time": birth},
+    ]}
+    monkeypatch.setattr(context, "capture", lambda: witness)
+    monkeypatch.setattr(closeout, "_native_source", worker.native_source)
+    own_source = context.identity(NATIVE, pid, birth, epoch)
+    worker.binding = replace(worker.binding, source=own_source)
+    script = (
+        "import os, pathlib, select, sys\n"
+        "with (pathlib.Path(sys.argv[1]) / f'inuse.{os.getpid()}.hold').open('w'):\n"
+        " print('ready', flush=True)\n"
+        " select.select([sys.stdin], [], [], 20)\n"
+    )
+    with (directory / f"inuse.{pid}.hold").open("w"), subprocess.Popen(
+        [sys.executable, "-c", script, str(directory)],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    ) as prior:
+        try:
+            assert select.select([prior.stdout], [], [], 5)[0]
+            assert prior.stdout.readline() == "ready\n"
+            prior_source = context.identity(
+                NATIVE, prior.pid, context.process(prior.pid)["start_time"], epoch,
+            )
+            entry = worker.record.sessions[0]
+            entry.activations[0].source_identity = prior_source
+            registry._start_session_activation(
+                entry, event_at="2026-01-02", recorded_at="2026-01-02",
+                source="bind", source_identity=own_source,
+            )
+            assert entry.activations[0].end_source == "inferred:next-start"
+            with pytest.raises(ValueError, match="foreign native"):
+                worker.binding.require(worker.record, worker.config)
+        finally:
+            prior.communicate("exit\n", timeout=10)
+        assert prior.returncode == 0
+        worker.binding.require(worker.record, worker.config)
 
 
 @pytest.mark.parametrize("fault", ["unknown", "session-budget", "file-budget", "hold-budget", "unreadable"])

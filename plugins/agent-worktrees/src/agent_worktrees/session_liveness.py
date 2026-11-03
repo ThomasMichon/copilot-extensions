@@ -138,8 +138,11 @@ def session_process_hold_state(
                     continue
                 # DirEntry.stat caches: re-query the descriptor itself to fence
                 # closure/reuse while checking the native ownership pathname.
-                fresh_descriptor = os.stat(descriptor.path)
-                fresh_hold = hold.lstat()
+                try:
+                    fresh_descriptor = os.stat(descriptor.path)
+                    fresh_hold = hold.lstat()
+                except FileNotFoundError:
+                    return "unknown"
                 return "held" if (
                     stat.S_ISREG(fresh_hold.st_mode)
                     and (fresh_descriptor.st_dev, fresh_descriptor.st_ino) == identity

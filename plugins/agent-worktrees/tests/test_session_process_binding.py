@@ -129,6 +129,32 @@ def test_reused_descriptor_is_rechecked_without_direntry_cache(owned, monkeypatc
         assert probe.session_process_owns_hold(NATIVE_ID, pid, born) is False
 
 
+def test_matched_descriptor_closing_cannot_hide_another_open_hold(owned, monkeypatch):
+    probe, root, pid, born = owned
+    path = root / NATIVE_ID / f"inuse.{pid}.hold"
+    with path.open("w") as first, path.open("r") as second:
+        descriptor = f"/proc/{pid}/fd/{first.fileno()}"
+        initial = os.fstat(first.fileno())
+
+        def closed_after_cached_stat():
+            first.close()
+            return initial
+
+        @contextmanager
+        def racing(_path):
+            yield iter([
+                SimpleNamespace(path=descriptor, stat=closed_after_cached_stat),
+                SimpleNamespace(
+                    path=f"/proc/{pid}/fd/{second.fileno()}",
+                    stat=lambda: os.fstat(second.fileno()),
+                ),
+            ])
+
+        monkeypatch.setattr(probe.os, "scandir", racing)
+        assert probe.session_process_hold_state(NATIVE_ID, pid, born) == "unknown"
+        assert os.fstat(second.fileno()).st_ino == path.stat().st_ino
+
+
 @pytest.mark.parametrize("changes", [
     {"session_id": "../unsafe"}, {"pid": True}, {"pid": 0}, {"start_time": ""},
 ])

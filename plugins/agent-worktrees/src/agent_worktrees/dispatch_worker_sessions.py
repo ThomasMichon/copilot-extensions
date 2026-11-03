@@ -14,15 +14,13 @@ MAX_FILES = 4096
 MAX_HOLDS = 64
 
 
-def require_no_foreign_hold(record: tracking.WorktreeRecord, native_id: str) -> None:
+def require_no_foreign_hold(record: tracking.WorktreeRecord, native_id: str, source: str) -> None:
     """Refuse held or uninspectable foreign files, including concluded sessions."""
     indexed = record.sessions or []
     if len(indexed) > MAX_SESSIONS:
         raise ValueError("Own-worker foreign-session inspection exceeds its session budget")
     files = holds = 0
     for session in indexed:
-        if session.session_id == native_id:
-            continue
         try:
             if str(UUID(session.session_id)) != session.session_id:
                 raise ValueError("Noncanonical native identity")
@@ -46,6 +44,10 @@ def require_no_foreign_hold(record: tracking.WorktreeRecord, native_id: str) -> 
                     try:
                         process = native_source_context.process(pid)
                     except FileNotFoundError:
+                        continue
+                    if session.session_id == native_id and native_source_context.identity(
+                        native_id, pid, process["start_time"], native_source_context.epoch(),
+                    ) == source:
                         continue
                     state = session_liveness.session_process_hold_state(
                         session.session_id, pid, process["start_time"],

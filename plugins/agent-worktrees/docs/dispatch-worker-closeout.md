@@ -25,8 +25,8 @@ hold in the invoking process's captured ancestry, not an environment label or
 a stale PID-shaped file. Rechecks retain the original creation nonce, complete
 allocation, native process source and head revision.
 
-Pairing, pending handoff, follow-up, an active effort, active controllers,
-unknown backend metadata, another active recorded/live session, and unsettled
+Pairing, pending handoff, an open itemized or legacy follow-up, an active effort,
+active controllers, unknown backend metadata, another active recorded/live session, and unsettled
 outbound responsibility block this narrow provider. Only the worker's own
 session claim is exempt from that additional outbound check. PR claims are
 deferred to normal authoritative reconciliation before the unchanged
@@ -46,12 +46,16 @@ open-PR override or direct finalized-status write is used.
 
 Foreign native holds are inspected independently of asserted lifecycle state:
 a concluded or handed-off session can still have a real process holding its
-file. Inspection targets only this record's indexed sessions, with limits of
-256 sessions, 4,096 directory entries and 64 native holds per check. Held,
+file. Only the exact invoking process source is exempt, not its entire UUID:
+an earlier activation can still hold another native file under the same UUID
+after a resume infers its end. Inspection targets only this record's indexed
+sessions, with limits of 256 sessions, 4,096 directory entries and 64 native holds per check. Held,
 unreadable, malformed or over-budget observations refuse; a stale unheld file
 does not manufacture a live process. The positive ownership API remains
 boolean-compatible, while this preservation check retains an explicit unknown
 result instead of treating failed corroboration as absence.
+Disappearance during a matching descriptor's fresh recheck remains unknown,
+not proof that no other descriptor holds the file.
 
 Successful finalization retains the checkout and live native session. Before
 returning JSON success, the provider rechecks current ownership and the actual

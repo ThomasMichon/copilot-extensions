@@ -94,7 +94,8 @@ class OwnWorker:
         if len(activations) != 1:
             raise ValueError("Own-worker closeout requires its canonical active native source")
         if (
-            record.pending_handoffs or record.follow_up or record.active_effort is not None
+            record.pending_handoffs or tracking.effective_open_follow_up_count(record)
+            or record.active_effort is not None
             or record.is_paired or record.active_controllers or record.controller_metadata_opaque
             or record.execution_leg_opaque or record.session_backend_opaque
         ):
@@ -113,7 +114,7 @@ class OwnWorker:
             for claim in record.resources
         ):
             raise ValueError("Own-worker closeout retains unsettled outbound responsibility")
-        require_no_foreign_hold(record, self.native_id)
+        require_no_foreign_hold(record, self.native_id, self.source)
         context = sessions.scan_sessions_fast([record])
         live = context.active_sessions.get(sessions._normalize_path(record.worktree_path), [])
         if any(native != self.native_id for native in live):
