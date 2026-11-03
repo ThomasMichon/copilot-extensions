@@ -13,12 +13,13 @@ REPO = Path(__file__).resolve().parents[1]
 def vendor_pairs():
     return [
         (
-            REPO / "libs" / "configuration-layers" / "src" / package / "__init__.py",
+            REPO / "libs" / "configuration-layers" / "src" / package / filename,
             REPO / "plugins" / plugin / "scripts" / "configuration-layers"
-            / "src" / package / "__init__.py",
+            / "src" / package / filename,
         )
         for plugin in ("agent-conduct-guidance", "agent-index")
         for package in ("configuration_layers", "configuration_context")
+        for filename in (("__init__.py", "runtime.py") if package == "configuration_context" else ("__init__.py",))
     ]
 
 

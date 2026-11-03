@@ -95,8 +95,10 @@ machines:
 
 The second document cannot add a transport, alias, host, login or readiness
 grant. An absent/unready legacy Worktrees owner leaves the native mesh intact;
-an existing owner is read only through the runtime's completion-gated
-`versioned_runtime.py` plus shared `ready_owner_prefix`, not an ambient binstub.
+an existing owner is read only through the caller's deployed, completion-gated
+`bin/resolve-runtime.sh` or `.ps1` and the shared
+[`configuration_context` transport](../../../libs/configuration-layers/README.md#ready-only-owner-transport),
+not an ambient binstub.
 
 OpenSSH profiles retain actual connection authority (`HostName`, `User`,
 `Port`, `IdentityFile`, proxy and host-key settings). Topology labels and

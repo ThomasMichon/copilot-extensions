@@ -77,15 +77,15 @@ existing runtime validation. There are no new missing-import ignores or
 unchecked first-party stubs. Other projects do not implicitly gain YAML
 dependencies from this environment.
 
-Configuration Layers checks all four canonical source/test modules strictly
+Configuration Layers checks its canonical source/test modules strictly
 on both declared targets in the base environment. Raw contract inputs remain
 `object` until existing validation succeeds. Source, layer, document and
 composition results use typed records; recursive JSON merging has a concrete
 value union, while arbitrary configuration keys and serialized owner reports
 retain explicit `dict[str, Any]` boundaries. Optional reads retain their
 `None` result and callers narrow it before use. Runtime validation, precedence,
-source ownership and Python/Node parity are unchanged. The four synchronized
-standalone payload copies remain independently pending with their consumers.
+source ownership and Python/Node parity are unchanged. The synchronized standalone payload copies remain independently pending with
+their consumers.
 
 Core Delegation checks all five canonical source/test files on both declared
 targets. Its protocol-agnostic JSON request/response dictionaries retain
