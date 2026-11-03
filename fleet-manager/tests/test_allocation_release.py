@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 import json
 import os
+from pathlib import Path
 import shutil
 import sqlite3
 import subprocess
@@ -10,6 +11,7 @@ import sys
 import pytest
 
 from fleet_manager.ledger import OperationLedger
+from fleet_manager import node_journal
 from fleet_manager.allocation import check_released_generation
 from fleet_manager.node_journal import NodeJournal
 from fleet_manager.operations import AllocationRelease, OperationIntent
@@ -267,6 +269,7 @@ def test_upgrade_preserves_held_ownership_and_old_writer_refuses(
         connection.execute("DROP TABLE allocation_releases")
         if kind == "node":
             connection.execute("DROP TABLE external_owners")
+            connection.execute("DROP TABLE external_evidence")
         connection.execute(f"PRAGMA user_version={version}")
     with pytest.raises(PlanError, match="schema"):
         store.inspect(intent)
@@ -274,7 +277,7 @@ def test_upgrade_preserves_held_ownership_and_old_writer_refuses(
     assert reopened.inspect(intent) is not None
     with closing(sqlite3.connect(store.path)) as connection:
         assert connection.execute("SELECT count(*) FROM allocation_releases").fetchone()[0] == 0
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == (6 if kind == "node" else 4)
     if kind == "node":
         assert reopened.allocation_owner(resource="workspace-1") == intent
     else:
@@ -283,6 +286,7 @@ def test_upgrade_preserves_held_ownership_and_old_writer_refuses(
 
 PROCESS = """
 import json,os,sys
+sys.path.insert(0,sys.argv[4])
 from fleet_manager.node_journal import NodeJournal
 from fleet_manager.ledger import OperationLedger
 from fleet_manager.operations import OperationIntent,AllocationRelease
@@ -297,7 +301,8 @@ def retire(c):
 def run(n, g, intent, body):
     return subprocess.run(
         [sys.executable, "-I", "-c", PROCESS + body, str(n.path), str(g.path),
-         json.dumps(intent.to_dict())], capture_output=True, text=True, timeout=15,
+         json.dumps(intent.to_dict()), str(Path(node_journal.__file__).resolve().parents[1])],
+        capture_output=True, text=True, timeout=15,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
 
 
