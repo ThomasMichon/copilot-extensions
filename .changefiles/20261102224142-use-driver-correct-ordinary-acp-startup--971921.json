@@ -1,0 +1,9 @@
+{
+  "comment": "Use driver-correct ordinary ACP startup retries, decisions and exhaustion without replacing retained native custody",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

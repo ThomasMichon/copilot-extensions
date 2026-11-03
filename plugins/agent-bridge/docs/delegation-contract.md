@@ -183,6 +183,16 @@ This guarded combination currently refuses a busy target and does not support
 their previous behavior. An older daemon refuses the new combination before
 effects; package or payload freshness alone is not support evidence.
 
+For a caller that must not resume a stopped context, `--no-resume` requires
+both the native fence and idempotency key. The receiving daemon must advertise
+`native_send_no_resume: 1`; the client freshly checks it before each send or
+receipt request. The optional JSON `no_resume: true` is retained in the operation
+facts and enforced under the same turn-start lock as admission. A native that
+stops after the caller's status probe refuses with `native_session_stopped`;
+no resume, replacement or turn is attempted. An already-retained exact receipt
+can still be read while stopped. Omission preserves strict-resume behavior and
+the original fact shape, so existing calls and receipts are unchanged.
+
 #### Read-only ordinary-send receipt observation
 
 The optional `native_send_receipt` capability (version 1, HTTP baseline 51)

@@ -3319,7 +3319,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
             if not key or key in self._redriven_spawn_keys:
                 continue
             candidate: dict | None = None
-            if res.get("driver") == "cli":
+            if res.get("driver") in {"cli", "ordinary-bridge"}:
                 try:
                     candidate = self.client.get(res["task_id"])
                 except DispatchError:

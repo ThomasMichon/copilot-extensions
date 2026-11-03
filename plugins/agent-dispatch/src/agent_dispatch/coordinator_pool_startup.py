@@ -52,6 +52,8 @@ class StartupRetryBody(ReachableBody):
     worktree: str = Field(min_length=1)
     machine: str = Field(min_length=1)
     reserved_by: str = Field(min_length=1)
+    driver: Literal["ordinary-bridge"] | None = None
+    bridge_session_id: str | None = Field(default=None, min_length=1)
 
 
 class RetryCompletionBody(StartupRetryBody):
@@ -153,7 +155,7 @@ def register(
         from .queue_pool_startup_retry import record_retry
         from .pool_startup_retry_contract import retry_invocation
 
-        binding = {"task_id": task_id, **body.model_dump(), "action": action}
+        binding = {"task_id": task_id, **body.model_dump(exclude_none=True), "action": action}
         try:
             result = record_retry(queue, body.reservation_key, binding)
         except WorkerAdmissionInhibited as exc:
@@ -163,6 +165,7 @@ def register(
         invocation = retry_invocation(
             {name: value for name, value in binding.items() if name not in {"action", "outcome_kind", "detail"}},
             body.startup_revision + int(action == "retry"),
+            reservation=asdict(result),
         )
         bus.publish({"type": f"spawn.startup_{action}", "reservation_key": body.reservation_key})
         return _envelope({"binding": binding, "reservation": asdict(result), "invocation": invocation})

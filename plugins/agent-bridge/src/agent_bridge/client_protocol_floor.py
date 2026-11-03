@@ -9,6 +9,11 @@ from typing import Any, Callable
 _Request = Callable[..., dict[str, Any] | None]
 
 
+def hold_protocol_floor(client: Any, floor: int) -> None:
+    """Keep the protocol floor true for every attempt, including cutover retries."""
+    client._request = protocol_floored_request(client, floor)
+
+
 def negotiate_http_protocol(
     peer_version: int, peer_minimum: int, *, required: int = 1,
 ) -> int | None:

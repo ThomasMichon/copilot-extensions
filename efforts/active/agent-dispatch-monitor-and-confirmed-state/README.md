@@ -11,6 +11,14 @@
 
 ## Guiding Intent
 
+**Operational milestone (2026-11-02):** the
+[ordinary usability plan](usability-validation.md) records earned source
+progress, the ordered remaining lifecycle/integration work and the actual
+running acceptance matrix. Use authorized source-backed live or whole-stack
+container validation for fast feedback; a source PR/release wait is not itself
+an operational test. This does not waive review, resource ownership or effect
+authorization, and does not declare the parent complete.
+
 **Continuing direction (2026-10-30):** the
 [assignment/startup amendment](assignment-startup-amendment.md) distinguishes
 pool-owned placement before embodiment from worker acceptance, and adds bounded
@@ -219,6 +227,11 @@ live claim token. No new blanket ACK or executor appointment is created.
 
 ### Continuing slice - Pool-owned assignment/startup and retry eligibility
 
+- [ ] Meet the [ordinary usable-again acceptance](usability-validation.md),
+      including actual registration-to-native execution, decline/closeout,
+      suspended recovery, finalize-before-submission and a complete workload's
+      same-native continuation. Keep source, simulation and local running
+      results separate; no merged sub-slice alone closes this milestone.
 - [x] Land the #9709 vision/current-versus-target architecture and
       [repair amendment](assignment-startup-amendment.md) through normal review,
       without behavioral changes. Merged in
@@ -286,11 +299,17 @@ live claim token. No new blanket ACK or executor appointment is created.
       Initial delivery does not reacquire an evaluation lease; automatic
       allocator-instance selection, ordinary retry/decline and native
       qualification remain separate integration gates.
-- [ ] Land the [managed ordinary allocator instance integration](journal/2026/11.02-managed-pool-allocation.md)
-      through current-head independent review, required CI and actual merge.
-      The default-off source seam must preserve global selection, exact launch
+- [x] Land the [managed ordinary allocator instance integration](journal/2026/11.02-managed-pool-allocation.md)
+      in [#10182](https://github.com/ThomasMichon/copilot-extensions/pull/10182),
+      with actual current-head approval, required CI and merge.
+      The default-off source seam preserves global selection, exact launch
       ownership and retained reservation custody; it does not qualify ordinary
       retry/decline, complete mixed-driver adoption or installed/native effects.
+- [ ] Land [driver-correct ordinary ACP startup retries and decisions](journal/2026/11.02-ordinary-startup-retry.md)
+      through the existing exact retry/completion and supervision owners;
+      preserve unknown effects and separate Bridge/native identity. This does
+      not qualify worker decline/closeout, complete CLI/mixed-driver adoption
+      or installed/native effects.
 - [x] Land source-owned [obsolete-scope exclusion](journal/2026/11.02-obsolete-pool-scopes.md)
       without erasing publication history, task assignments or accountable
       capacity. Source regressions cover current readiness and remove/re-add;

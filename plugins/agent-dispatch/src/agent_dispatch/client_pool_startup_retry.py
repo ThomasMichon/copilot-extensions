@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Literal
 from .client_errors import DispatchError
 from .client_pool_placement import _positive_integer
 from .pool_startup_contract import POOL_STARTUP_PATH
-from .pool_startup_retry_contract import retry_invocation
+from .pool_startup_retry_contract import retry_invocation, session_handle
 
 
 class PoolStartupRetryClientMixin:
@@ -20,12 +20,18 @@ class PoolStartupRetryClientMixin:
         generation: int, startup_revision: int, native_id: str,
         worktree: str, machine: str, reserved_by: str,
         outcome_kind: str | None = None, detail: str | None = None,
+        driver: str = "cli", bridge_session_id: str | None = None,
     ) -> dict:
         if (
             any(not isinstance(value, str) or not value.strip() for value in (
                 task_id, key, native_id, worktree, machine, reserved_by,
             ))
             or not _positive_integer(generation) or not _positive_integer(startup_revision)
+            or driver not in {"cli", "ordinary-bridge"}
+            or driver == "cli" and bridge_session_id is not None
+            or driver == "ordinary-bridge" and (
+                not isinstance(bridge_session_id, str) or not bridge_session_id.strip()
+            )
             or action == "complete" and (
                 outcome_kind not in {
                     "startup_succeeded", "startup_failed", "startup_rejected", "startup_unknown",
@@ -38,30 +44,40 @@ class PoolStartupRetryClientMixin:
             "startup_revision": startup_revision, "native_id": native_id,
             "worktree": worktree, "machine": machine, "reserved_by": reserved_by,
         }
+        if driver == "ordinary-bridge":
+            base.update(driver=driver, bridge_session_id=bridge_session_id)
         body = {name: value for name, value in base.items() if name != "task_id"}
         if action == "complete":
             body.update(outcome_kind=outcome_kind, detail=detail)
         result = self._pool_startup_request(
             "POST", f"{POOL_STARTUP_PATH}/tasks/{task_id}/{action}", body,
-            required_features=("fenced_same_native_retry", "fenced_retry_completion"),
+            required_features=("fenced_same_native_retry", "fenced_retry_completion") + (
+                ("ordinary_same_native_retry",) if driver == "ordinary-bridge" else ()
+            ),
+            required_driver=driver,
         )
         expected_binding = {"task_id": task_id, **body, "action": action}
         revision = startup_revision + int(action == "retry")
+        reservation = result.get("reservation") if isinstance(result, dict) else None
+        from .queue_records import TaskError
+        try:
+            invocation = retry_invocation(base, revision, reservation=reservation)
+        except TaskError as exc:
+            raise DispatchError(502, "pool retry outcome is unknown: initial intent changed") from exc
         if not isinstance(result, dict) or (
             not isinstance(result.get("binding"), dict)
             or result["binding"] != expected_binding
             or any(type(result["binding"].get(name)) is not type(value)
                    for name, value in expected_binding.items())
-            or result.get("invocation") != retry_invocation(base, revision)
+            or result.get("invocation") != invocation
         ):
             raise DispatchError(502, "pool retry outcome is unknown: response invocation changed")
-        reservation = result.get("reservation")
         expected_complete = action == "complete" and outcome_kind != "startup_unknown"
         if not isinstance(reservation, dict) or (
             any(reservation.get(name) != value for name, value in {
                 "key": key, "task_id": task_id, "worktree": worktree,
                 "execution_machine": machine, "reserved_by": reserved_by,
-                "session_handle": native_id, "driver": "cli",
+                "session_handle": session_handle(base), "driver": driver,
             }.items())
             or type(reservation.get("startup_revision")) is not int
             or reservation["startup_revision"] != revision
@@ -80,21 +96,25 @@ class PoolStartupRetryClientMixin:
     def retry_pool_startup(
         self, task_id: str, key: str, *, generation: int, startup_revision: int,
         native_id: str, worktree: str, machine: str, reserved_by: str,
+        driver: str = "cli", bridge_session_id: str | None = None,
     ) -> dict:
         """Reserve one next invocation; only its validated reply admits transport."""
         return self._pool_retry(
             "retry", task_id, key, generation=generation, startup_revision=startup_revision,
             native_id=native_id, worktree=worktree, machine=machine, reserved_by=reserved_by,
+            driver=driver, bridge_session_id=bridge_session_id,
         )
 
     def complete_pool_startup(
         self, task_id: str, key: str, *, generation: int, startup_revision: int,
         native_id: str, worktree: str, machine: str, reserved_by: str,
         outcome_kind: str, detail: str,
+        driver: str = "cli", bridge_session_id: str | None = None,
     ) -> dict:
         """Reconcile only the exact original caller; this is never worker acceptance."""
         return self._pool_retry(
             "complete", task_id, key, generation=generation, startup_revision=startup_revision,
             native_id=native_id, worktree=worktree, machine=machine, reserved_by=reserved_by,
             outcome_kind=outcome_kind, detail=detail,
+            driver=driver, bridge_session_id=bridge_session_id,
         )

@@ -122,7 +122,7 @@ def test_real_ordinary_create_store_send_and_affirmative_worker_start(ordinary: 
     assert o.q.pool_startup(o.task["id"]).startup_attempts == 0
     assert len(o.q.attachment_history(o.task["id"])) == 1
     assert o.q.get_reservation(o.placed["reservation"]["key"]).driver == "ordinary-bridge"
-    assert pool_startup_contract()["supported_drivers"] == ["cli"]
+    assert "ordinary-bridge" in pool_startup_contract()["supported_drivers"]
 
 
 @pytest.mark.parametrize("machine", [None, "host-b"])
