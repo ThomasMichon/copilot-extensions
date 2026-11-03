@@ -64,8 +64,9 @@ This does not qualify macOS or authorize a host rollout.
 
 Source CI contains three jobs: operational `checks`, combined impact/execution
 in `unit-tests`, and `pr-gate`. Only PR events publish the fixed required name
-`PR gate (required check)`; other events name that intentionally skipped job
-`Non-PR CI summary`, avoiding a skipped check under the protected PR context.
+`PR gate (required check)`; other events select `Non-PR CI summary` instead.
+GitHub can retain the unevaluated name expression for an already skipped job;
+that check remains distinct from the protected PR context.
 The aggregate's PR admission and required guard/unit-evidence checks are unchanged.
 The unit job
 reads the actual PR base/head diff before installing test tooling or executing
