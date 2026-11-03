@@ -279,7 +279,9 @@ not accumulated for the life of a process. Every inventory and targeted lookup r
 first, including when a reload leaves no driver fleet at all. A fleet's driver
 registration is resolved on every inventory: when its manifest is replaced or
 removed, routes through the previous executable are retired and it is never
-invoked again. When a configuration reload removes
+invoked again. A listing still in flight from a replaced registration binds
+nothing when it completes. A Docker name collision found by a targeted lookup
+clears as soon as a later probe no longer sees it. When a configuration reload removes
 a driver fleet or assigns it another driver, the retired driver's routes for
 that fleet are dropped on the next enumeration, so its names neither reach the
 old driver nor become ambiguous with the replacement. A member name the driver
@@ -296,8 +298,8 @@ recreated after validation is refused by its driver rather than receiving the
 launch or its credentials.
 Session Host preparation records the member's runtime identity
 (`execution_runtime`: `docker`, or `driver:<driver>/<fleet>@<registration>`
-where the registration digest covers the driver's resolved command and
-source), which agent-bridge hands back to state and cleanup as
+where the registration digest covers the driver's resolved command, its
+source and the fleet's effective `driver_options`), which agent-bridge hands back to state and cleanup as
 `--expected-runtime`. If that exact runtime no longer owns the member -- its
 fleet was removed or re-driven, or its driver registration was replaced, even
 when the new runtime reports the same name and id -- cleanup is refused and

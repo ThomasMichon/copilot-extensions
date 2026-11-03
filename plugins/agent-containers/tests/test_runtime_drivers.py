@@ -1094,6 +1094,15 @@ def test_fresh_scoped_lookup_refuses_a_docker_name_collision(fake, tmp_path, mon
     target = resolver.resolve_live_exec_target("example-1", config=load_config(strict=True))
     assert target.container_id == f"example-1.{driver_id}"
 
+    # Same process, no clear_bindings(): a collision blocks, and resolving it
+    # (the distinct Docker container goes away) unblocks on the next probe.
+    docker_answers["id"] = "d" * 64
+    with pytest.raises(RuntimeError, match="distinct Docker container"):
+        resolver.resolve_live_exec_target("example-1", config=load_config(strict=True))
+    docker_answers["id"] = driver_id
+    target = resolver.resolve_live_exec_target("example-1", config=load_config(strict=True))
+    assert target.container_id == f"example-1.{driver_id}"
+
 
 def test_hung_selected_driver_fails_within_the_targeted_budget(fake, no_docker, tmp_path, monkeypatch, capsys):
     import time
@@ -1553,3 +1562,48 @@ def test_removed_driver_registration_retires_its_routes(
         with pytest.raises(RuntimeError, match="docker CLI not found"):
             lifecycle.inspect_container(handle)  # Docker path only, never the old driver
     assert len(fake.state()["calls"]) == old_calls
+
+
+def test_delayed_listing_from_a_replaced_registration_never_rebinds(
+    fake, no_docker, tmp_path, monkeypatch,
+):
+    config = _write_config(tmp_path, monkeypatch)
+    fleet.reconcile_up(config, "example")
+    retired = runtime_drivers.driver_for_fleet(config, "example", config.fleets["example"])
+
+    replacement_root = tmp_path / "replacement-runtime"
+    _register(fake, "example-driver", "--root", str(replacement_root))
+    fleet.reconcile_up(config, "example")  # B provisions its own example-1
+    lifecycle.list_containers(config)
+    current = runtime_drivers.owner_of("example-1").driver
+    assert current is not retired and "--root" in current.spec.command
+
+    retired.list_members()  # A's slow listing completes after B's
+    assert runtime_drivers.owner_of("example-1").driver is current
+    old_calls = len(fake.state()["calls"])
+    assert runtime_drivers.run_routed(["docker", "exec", "example-1", "true"]).returncode == 0
+    assert len(fake.state()["calls"]) == old_calls  # never the retired executable
+    assert [c["verb"] for c in _calls(replacement_root)][-1] == "exec"
+
+
+def test_changed_driver_options_change_the_prepared_runtime_identity(
+    fake, no_docker, tmp_path, monkeypatch, capsys,
+):
+    config = _write_config(tmp_path, monkeypatch, driver_options={"profile": "first"})
+    fleet.reconcile_up(config, "example")
+    [prepared] = lifecycle.list_containers(config)
+    runtime = runtime_drivers.runtime_identity("example-1")  # recorded by prepare
+
+    # Only the profile changes; the runtime reports the same name and id.
+    changed = _write_config(tmp_path, monkeypatch, driver_options={"profile": "second"})
+    [member] = lifecycle.list_containers(changed)
+    assert (member.name, member.container_id) == ("example-1", prepared.container_id)
+    assert runtime_drivers.runtime_identity("example-1") != runtime
+    runtime_drivers.clear_bindings()
+    calls = len(fake.state()["calls"])
+    assert cli.main(["session-host-cleanup", "example-1", "--expected-instance",
+                     prepared.container_id, "--expected-user", "vscode",
+                     "--expected-runtime", runtime,
+                     "--remote-env", "/home/vscode/.agent-containers/launch/env"]) != 0
+    assert "no longer owns it" in capsys.readouterr().err
+    assert [c["verb"] for c in fake.state()["calls"][calls:] if c["verb"] != "list"] == []

@@ -399,6 +399,12 @@ def driver_for_fleet(
     return driver
 
 
+def _superseded(driver: RuntimeDriver) -> bool:
+    """True when another driver now serves ``driver``'s fleet (call under ``_lock``)."""
+    current = _drivers.get((getattr(driver, "fleet_name", None), driver.name))
+    return current is not None and current is not driver
+
+
 def bind_member(driver: RuntimeDriver, info: DockerContainerInfo) -> None:
     """Record that ``info`` lives in ``driver``'s runtime.
 
@@ -412,6 +418,8 @@ def bind_member(driver: RuntimeDriver, info: DockerContainerInfo) -> None:
         handles[route_handle(info)] = info.container_id
     claimant = (driver.name, getattr(driver, "fleet_name", None), info.name)
     with _lock:
+        if _superseded(driver):
+            return  # a delayed listing from a replaced registration binds nothing
         for handle, pinned in handles.items():
             _claims.setdefault(handle, {})[claimant] = (driver, info.name, pinned)
 
@@ -455,6 +463,9 @@ def _reconcile_listing(fleet_name: str, driver: RuntimeDriver, members) -> None:
     replacement or Docker.
     """
     reported = {m.name for m in members}
+    with _lock:
+        if _superseded(driver):
+            return
     _forget(lambda handle, c: c[1] == fleet_name and c[0] == driver.name
             and handle == c[2] and c[2] not in reported)
 
@@ -762,6 +773,8 @@ def scoped_member(
             f"'{name}' identifies both a runtime-driver member and a distinct "
             "Docker container; resolve the name collision before dispatch"
         )
+    # This probe is the current truth for the name: a resolved collision clears.
+    _forget(lambda handle, c: handle == name and c[0] == DOCKER_CLAIM)
     return True, member
 
 
@@ -810,16 +823,20 @@ class RetiredIncarnation(RuntimeError):
 def runtime_identity(name: str) -> str:
     """``docker`` or ``driver:<driver>/<fleet>@<registration>``: who owns ``name``.
 
-    The registration digest covers the driver's resolved command and source,
-    so a fleet re-pointed at another driver -- or a driver whose registration
-    was replaced -- is a different runtime even for the same name and id.
+    The registration digest covers the driver's resolved command and source
+    and the fleet's effective ``driver_options``, so a fleet re-pointed at
+    another driver, a replaced registration or changed driver options (which
+    can select another runtime) is a different runtime even for the same name
+    and id.
     """
     route = owner_of(name)
     if route is None:
         return "docker"
     spec = getattr(route.driver, "spec", None)
+    options = getattr(getattr(route.driver, "fleet", None), "driver_options", None)
     registration = json.dumps(
-        [spec.name, list(spec.command), spec.source] if spec else route.driver.name,
+        [spec.name, list(spec.command), spec.source, options] if spec else route.driver.name,
+        sort_keys=True, default=str,
     )
     digest = hashlib.sha256(registration.encode("utf-8")).hexdigest()[:16]
     return f"driver:{route.driver.name}/{getattr(route.driver, 'fleet_name', None)}@{digest}"
