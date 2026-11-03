@@ -8,7 +8,25 @@ import json
 import os
 import time
 import uuid
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from typing import Protocol
+
+    class _WindowsLocking(Protocol):
+        LK_NBLCK: int
+        LK_UNLCK: int
+
+        def locking(self, fd: int, mode: int, nbytes: int) -> None: ...
+
+    class _PosixLocking(Protocol):
+        LOCK_EX: int
+        LOCK_NB: int
+        LOCK_UN: int
+
+        def flock(self, fd: int, operation: int) -> None: ...
 
 from .marketplace import Marketplace, MarketplacePlugin, load_marketplace, plugin_dir
 from .conventions import LOCAL_MARKETPLACE_SOURCE_KINDS, REMOTE_MARKETPLACE_SOURCE_KINDS, SETTINGS_RELS
@@ -19,7 +37,7 @@ from .settings import (
 )
 
 
-def strict_json(path: Path, *, jsonc_header: bool = False) -> dict:
+def strict_json(path: Path, *, jsonc_header: bool = False) -> dict[str, Any]:
     if not path.exists():
         return {}
     raw = path.read_text(encoding="utf-8")
@@ -38,7 +56,7 @@ def strict_json(path: Path, *, jsonc_header: bool = False) -> dict:
     return value
 
 
-def _settings_document(path: Path, *, jsonc_header: bool = False) -> dict:
+def _settings_document(path: Path, *, jsonc_header: bool = False) -> dict[str, Any]:
     value = strict_json(path, jsonc_header=jsonc_header)
     for key in ("enabledPlugins", "extraKnownMarketplaces"):
         if key in value and not isinstance(value[key], dict):
@@ -48,7 +66,7 @@ def _settings_document(path: Path, *, jsonc_header: bool = False) -> dict:
     return value
 
 
-def _operator_settings(repo: Path, receipt: dict) -> RepoPluginSettings:
+def _operator_settings(repo: Path, receipt: dict[str, Any]) -> RepoPluginSettings:
     """Merge authored layers, peeling only unchanged operation-owned values."""
     enabled = {}
     marketplaces = {}
@@ -74,7 +92,7 @@ def _operator_settings(repo: Path, receipt: dict) -> RepoPluginSettings:
     return RepoPluginSettings(enabled=enabled, marketplaces=marketplaces)
 
 
-def _installation_home(staging: Path, source: str, definition: dict) -> Path:
+def _installation_home(staging: Path, source: str, definition: dict[str, Any]) -> Path:
     _name, marketplace = split_source(source)
     digest = hashlib.sha256(json.dumps([source, definition], sort_keys=True).encode()).hexdigest()
     home = staging / marketplace / "installation" / digest
@@ -84,7 +102,8 @@ def _installation_home(staging: Path, source: str, definition: dict) -> Path:
 
 def _validate_effective_origin(
     source: str, candidate: Path, repo: Path, state_dir: Path,
-    operator: RepoPluginSettings, effective: RepoPluginSettings, publications: dict,
+    operator: RepoPluginSettings, effective: RepoPluginSettings,
+    publications: dict[str, dict[str, Any]],
 ) -> None:
     name, marketplace = split_source(source)
     authority = operator.marketplaces.get(marketplace)
@@ -115,7 +134,7 @@ def _validate_effective_origin(
     raise ValueError(f"Enabled target-native marketplace origin was not prepared: {source}")
 
 
-def atomic_json(path: Path, value: dict) -> None:
+def atomic_json(path: Path, value: dict[str, Any]) -> None:
     pending = path.with_name(f".{path.name}.{uuid.uuid4().hex}.pending")
     try:
         with pending.open("x", encoding="utf-8") as stream:
@@ -129,7 +148,7 @@ def atomic_json(path: Path, value: dict) -> None:
 
 
 @contextlib.contextmanager
-def checkout_lock(directory: Path):
+def checkout_lock(directory: Path) -> Iterator[None]:
     directory.mkdir(parents=True, exist_ok=True)
     with (directory / ".venue-plugins.lock").open("a+b") as stream:
         stream.seek(0, os.SEEK_END)
@@ -143,11 +162,13 @@ def checkout_lock(directory: Path):
                 if os.name == "nt":
                     import msvcrt
 
-                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                    native = cast("_WindowsLocking", msvcrt)
+                    native.locking(stream.fileno(), native.LK_NBLCK, 1)
                 else:
                     import fcntl
 
-                    fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    posix = cast("_PosixLocking", fcntl)
+                    posix.flock(stream.fileno(), posix.LOCK_EX | posix.LOCK_NB)
                 break
             except OSError:
                 if time.monotonic() >= deadline:
@@ -160,23 +181,25 @@ def checkout_lock(directory: Path):
             if os.name == "nt":
                 import msvcrt
 
-                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+                native = cast("_WindowsLocking", msvcrt)
+                native.locking(stream.fileno(), native.LK_UNLCK, 1)
             else:
                 import fcntl
 
-                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+                posix = cast("_PosixLocking", fcntl)
+                posix.flock(stream.fileno(), posix.LOCK_UN)
 
 
 def register_prepared(
     repo: Path, payloads: dict[str, str], enabled: dict[str, bool], roots: dict[str, str],
-    *, state_dir: Path, publications: dict[str, dict],
-    diagnostics: list[dict], initial_owned_plugins: dict[str, bool],
-    check_cancelled=lambda: None,
+    *, state_dir: Path, publications: dict[str, dict[str, Any]],
+    diagnostics: list[dict[str, Any]], initial_owned_plugins: dict[str, bool],
+    check_cancelled: Callable[[], None] = lambda: None,
     inventory: tuple[Path, Path] | None = None,
-    environment=None,
-    prepared_context: dict | None = None,
+    environment: Mapping[str, str] | None = None,
+    prepared_context: dict[str, Any] | None = None,
     omitted_sources: frozenset[str] | set[str] = frozenset(),
-) -> dict:
+) -> dict[str, str]:
     """Merge only unclaimed or unchanged owned keys; return effective directories.
 
     Ownership is advisory and published first. A crash between the two atomic
@@ -221,7 +244,7 @@ def register_prepared(
         for marketplace in origins:
             if operator_marketplaces.get(marketplace) != prior_marketplaces.get(marketplace):
                 origin_active[marketplace] = False
-        catalogs: dict[str, dict] = {}
+        catalogs: dict[str, dict[str, Any]] = {}
         reference_marketplaces = {
             k: v for k, v in receipt.get("referenceMarketplaces", {}).items()
             if owned_marketplaces.get(k) == v
@@ -250,7 +273,7 @@ def register_prepared(
                 from .inventory import inventory_item
 
                 verified = inventory_item(
-                    source, *inventory, definition=details.get("marketplace"),
+                    source, *cast(tuple[Path, Path], inventory), definition=details.get("marketplace"),
                     environment=environment, execution_cwd=repo,
                 )
                 if verified is None or verified.get("inventory") != details["inventory"]:
@@ -312,14 +335,14 @@ def register_prepared(
             else:
                 root.relative_to((state_dir / "marketplaces").resolve())
                 root.mkdir(exist_ok=True)
-                catalog = catalogs.setdefault(marketplace, strict_json(root / "marketplace.json"))
-                entries = {item["name"]: item for item in catalog.get("plugins", [])}
+                staged_catalog = catalogs.setdefault(marketplace, strict_json(root / "marketplace.json"))
+                entries = {item["name"]: item for item in staged_catalog.get("plugins", [])}
                 metadata, entry = catalog_metadata(
                     details.get("logical_source", source), manifest,
                     details.get("catalog", {}), details.get("entry", {}),
                 )
                 entries[name] = {**entry, "source": "./" + Path(os.path.relpath(payload, root)).as_posix()}
-                catalog.update(metadata, plugins=list(entries.values()))
+                staged_catalog.update(metadata, plugins=list(entries.values()))
                 local_definition = details.get("local_source", {}).get("definition", {})
                 definition = {
                     **local_definition, "source": {
@@ -364,10 +387,11 @@ def register_prepared(
                         })
                 elif marketplace in origins and current != prior_marketplaces.get(marketplace):
                     origin_active[marketplace] = False
+                operator_local = local_marketplace_path(marketplace, operator, repo_dir=repo)
                 native_reference = (
                     reference is not None and authority is not None
-                    and local_marketplace_path(marketplace, operator, repo_dir=repo) is not None
-                    and local_marketplace_path(marketplace, operator, repo_dir=repo).resolve() == root
+                    and operator_local is not None
+                    and operator_local.resolve() == root
                 )
                 if (current is None and not native_reference) or marketplace in owned_marketplaces:
                     marketplaces[marketplace] = definition
@@ -433,7 +457,9 @@ def register_prepared(
                     resolved[source] = str(candidate)
                     continue
                 if kind in REMOTE_MARKETPLACE_SOURCE_KINDS and inventory is None:
-                    home = _installation_home(state_dir / "marketplaces", source, authority)
+                    home = _installation_home(
+                        state_dir / "marketplaces", source, cast(dict[str, Any], authority),
+                    )
                     candidate = home / "installed-plugins" / marketplace / name
                     if candidate.is_dir():
                         _validate_effective_origin(
@@ -471,23 +497,23 @@ def register_prepared(
             else:
                 catalog = load_marketplace(local)
             if catalog is not None and catalog.name == marketplace_manifest_name(marketplace, effective):
-                candidate = plugin_dir(catalog, name)
-                if candidate is not None:
+                local_candidate = plugin_dir(catalog, name)
+                if local_candidate is not None:
                     _validate_effective_origin(
-                        source, candidate, repo, state_dir, operator, effective, publications,
+                        source, local_candidate, repo, state_dir, operator, effective, publications,
                     )
-                    resolved[source] = str(candidate)
+                    resolved[source] = str(local_candidate)
         for source in omitted_sources:
             from .reflection import _plan_item
 
             _name, marketplace = split_source(source)
             if local_marketplace_path(marketplace, operator, repo_dir=repo) is None:
                 raise ValueError(f"Omitted plugin lost its target-local authority: {source}")
-            candidate = _plan_item(
+            omitted_candidate = _plan_item(
                 {"source": source, "allow_missing": True}, (repo, operator), operator.marketplaces,
                 allow_external=True, required=False, local_mode="reference",
             )
-            if candidate is not None or source in resolved:
+            if omitted_candidate is not None or source in resolved:
                 raise ValueError(f"Omitted plugin changed during preparation: {source}")
         missing = [source for source in effective.enabled_sources()
                    if source not in resolved and source not in omitted_sources]
@@ -518,7 +544,7 @@ def register_prepared(
                         "status": "disabled" if effective.enabled.get(dependency) is False
                         else "outside-selection",
                     })
-        logical_result = {}
+        logical_result: dict[str, str] = {}
         expected_plugins = []
         for source, directory_path in resolved.items():
             logical = reverse.get(source, source)
@@ -539,9 +565,9 @@ def register_prepared(
             if local is not None:
                 expected["live_marketplace_root"] = str(local.resolve(strict=True))
             expected_plugins.append(expected)
-        for marketplace, catalog in catalogs.items():
+        for marketplace, staged_catalog in catalogs.items():
             check_cancelled()
-            atomic_json(Path(roots[marketplace]) / "marketplace.json", catalog)
+            atomic_json(Path(roots[marketplace]) / "marketplace.json", staged_catalog)
         check_cancelled()
         atomic_json(receipt_path, {
             "enabledPlugins": owned_plugins, "extraKnownMarketplaces": owned_marketplaces,

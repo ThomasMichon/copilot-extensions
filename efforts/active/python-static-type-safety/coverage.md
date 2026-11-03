@@ -8,19 +8,18 @@ not a second checker configuration.
 ## Snapshot and counting rules
 
 Snapshot: **2026-11-02**, merged Dev policy
-`07050311d0220051dd518c61ded848ab4d226dde`, reconciled with
+`8c22b619a2bafc778c0f47de1ad956b0172d2313`, reconciled with
 `python tools/typecheck.py --inventory --json`.
 
-- **27 / 68 checker projects (39.7%)** have merged strict admission.
-- **206 / 7,628 physical Python files (2.7%)** belong to those strict scopes.
-- **41 projects remain pending; none are basic.**
-- All 7,628 tracked physical Python paths are classified. Classification,
+- **28 / 68 checker projects (41.2%)** have merged strict admission.
+- **227 / 7,635 physical Python files (3.0%)** belong to those strict scopes.
+- **40 projects remain pending; none are basic.**
+- All 7,635 tracked physical Python paths are classified. Classification,
   annotations, passing consumer tests and a prepared implementation do not
   count as strict enforcement.
-- Plugin Activation is prepared but not merged: its 21 files are not included
-  in the locked totals. Admission would bring this snapshot to 28 projects
-  and 227 physical files. Plugin Resolve's source artifact is also prepared,
-  but its admission and integration gates remain open.
+- Plugin Activation's 21 files are included after #10150 merged with exact-head
+  approval and required CI. Plugin Resolve's source and consumer qualification
+  are prepared, but its publication and merge gates remain open.
 
 Project percentages are not code-volume or runtime-test percentages. Small
 shared-library projects and large plugins have very different sizes. Physical
@@ -30,11 +29,11 @@ owned files; the manifest remains authoritative for their exact boundaries.
 
 | Area | Checker projects | Merged strict projects | Physical Python files | Files in merged strict scopes |
 |------|-----------------:|-----------------------:|----------------------:|------------------------------:|
-| Shared libraries | 37 | 26 | 712 | 202 |
-| Plugins | 20 | 0 | 5,358 | 0 |
+| Shared libraries | 37 | 27 | 712 | 223 |
+| Plugins | 20 | 0 | 5,365 | 0 |
 | Services and managers | 7 | 0 | 912 | 0 |
 | Tools and support | 4 | 1 | 646 | 4 |
-| **Total** | **68** | **27** | **7,628** | **206** |
+| **Total** | **68** | **28** | **7,635** | **227** |
 
 **Locked** means the complete declared project scope is admitted to strict
 MyPy on both declared analysis targets through a merged, reviewed change and
@@ -67,8 +66,8 @@ Admission decisions and validation details are retained in the
 | `lib-machine-transport` | 19 | **Locked** | #10107; five consumer contracts and native qualification |
 | `lib-payload-invocation` | 29 | Pending | Production and fixture cohorts; emitted templates/copies also need qualification |
 | `lib-peer-launch` | 3 | **Locked** | #9967 |
-| `lib-plugin-activation` | 21 | Pending | Prepared integration #10108; final candidate checks and merge remain |
-| `lib-plugin-resolve` | 23 | Pending | Source artifact #10141; lead review, native Linux, consumers and admission remain |
+| `lib-plugin-activation` | 21 | **Locked** | #10108 / merged #10150; both targets, native fixtures and nine consumer contracts |
+| `lib-plugin-resolve` | 23 | Pending | #10141: lead-reviewed source, native Linux and consumer/copy qualification prepared; required CI and merge remain |
 | `lib-process-telemetry` | 17 | **Locked** | #10083; explicit optional-SDK checker environment |
 | `lib-remote-login-shell` | 1 | **Locked** | Foundation source admission; canonical journal |
 | `lib-remote-login-shell-remaining` | 1 | **Locked** | Leaf helper/test completion; canonical journal |
@@ -102,7 +101,7 @@ cross-cutting qualification gate below.
 | `agent-bridge` | 860 | Pending | Component-sized source, native boundary, fixture and copy cohorts |
 | `agent-codespaces` | 278 | Pending | Runtime, venue/install helpers, fixtures and copies |
 | `agent-conduct-guidance` | 36 | Pending | Scripts, tests and owned copies |
-| `agent-containers` | 187 | Pending | Runtime, providers/install helpers, fixtures and copies |
+| `agent-containers` | 194 | Pending | Runtime, providers/install helpers, fixtures and copies |
 | `agent-dispatch` | 807 | Pending | Registry/worker/runtime subsystems, fixtures and copies |
 | `agent-index` | 397 | Pending | Client/server, scripts, fixtures and copies |
 | `agent-logger` | 239 | Pending | Runtime, native installer fixtures and copies |

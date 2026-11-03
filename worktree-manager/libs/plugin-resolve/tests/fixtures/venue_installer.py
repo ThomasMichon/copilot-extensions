@@ -5,6 +5,7 @@ import hashlib
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 home = Path(os.environ["COPILOT_HOME"])
 assert "copilot-venue-plugins" in home.parts
@@ -16,9 +17,9 @@ if os.environ.get("VENUE_EXPECTED_SETTINGS_SHA256"):
     assert hashlib.sha256(settings.read_bytes()).hexdigest() == os.environ["VENUE_EXPECTED_SETTINGS_SHA256"]
 else:
     assert not settings.exists()
-cache = os.environ.get("COPILOT_CACHE_HOME")
-if cache:
-    cache = Path(cache)
+raw_cache = os.environ.get("COPILOT_CACHE_HOME")
+if raw_cache:
+    cache = Path(raw_cache)
 elif sys.platform == "win32":
     cache = Path(os.environ["LOCALAPPDATA"]) / "copilot"
 elif sys.platform == "darwin":
@@ -45,7 +46,7 @@ native = json.loads(native_settings_path.read_text()) if native_settings_path.ex
 registered = native.setdefault("extraKnownMarketplaces", {})
 
 
-def publish_catalog():
+def publish_catalog() -> None:
     catalog_path.parent.mkdir(parents=True, exist_ok=True)
     catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
     clone = catalog_path.parents[2]
@@ -98,7 +99,7 @@ assert marketplace in registered
 assert any(item["name"] == name for item in catalog["plugins"])
 payload = home / "installed-plugins" / marketplace / name
 payload.mkdir(parents=True, exist_ok=True)
-manifest = {"name": name, "version": "2.3.4"}
+manifest: dict[str, Any] = {"name": name, "version": "2.3.4"}
 if not os.environ.get("VENUE_OMIT_PLUGIN_AUTHOR"):
     manifest["author"] = {"name": "Synthetic Publisher"}
 (payload / "plugin.json").write_text(json.dumps(manifest))
