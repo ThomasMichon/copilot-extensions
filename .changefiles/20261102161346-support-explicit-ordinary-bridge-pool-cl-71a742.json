@@ -1,0 +1,9 @@
+{
+  "comment": "Support explicit ordinary Bridge pool claims and immutable first-prompt acceptance without enabling automatic allocation",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

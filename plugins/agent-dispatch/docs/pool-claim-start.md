@@ -56,7 +56,10 @@ adoption. No code here installs, downgrades or activates such a provider.
 `DispatchClient.place_pool_task(task_id, reserved_by=..., catalog_revision=...)`
 first reads the running coordinator's control-authorized
 `GET /pool-placements/contract`. It requires `pool_placement/v1`, version 1,
-the `cli` driver, atomic claim-before-spawn and affirmative worker start.
+the requested driver, atomic claim-before-spawn and affirmative worker start.
+The default driver remains `cli`. Explicit `driver="ordinary-bridge"` placement
+also requires `ordinary_initial_start_versions: [1]`; it is never relabeled
+as CLI placement.
 The POST supplies the whole catalog's revision, not a preferred pool, a subset
 or a caller-computed capacity count. The provider rechecks its complete
 configured catalog, task routing and occupied capacity in its write transaction.
@@ -86,7 +89,56 @@ identity, already recorded through startup, not a generated placeholder.
 Do not run the legacy `claim --evaluation` step for an allocator-owned claim.
 Decline/closeout and automatic worker-prompt migration remain separate work.
 
-`DispatchClient.start_pool_task(...)` implements this opt-in path. It reads
+## Explicit ordinary first prompt
+
+The ordinary Bridge create/store/send path can consume an explicitly placed
+`ordinary-bridge` assignment. Reservation read-back includes its actual pool
+assignment and claim generation. The initial caller requires the running
+placement descriptor's `ordinary_initial_start_versions: [1]`, the current
+unowned `CLAIMED` task, unexpired startup decision and its assigned local
+execution machine before creating or resuming an agent. The existing reservation
+admission read exposes deadline ineligibility; storage rechecks the deadline
+transactionally so an expiry during creation cannot deliver a first prompt.
+It does not choose another pool or forward a local create to a
+different host. Ordinary automatic selection remains disabled until its
+registration/instance ownership and startup retry consumers are integrated.
+
+`ordinary_invocation.startup_seed` selects a distinct allocator-claimed worker
+prompt for this assignment. It retains coordinator routing, the charter and
+lane-aware duplicate checks, but never emits `claim --evaluation` or a second
+evaluation lease. The worker must independently accept through
+`start --pool-generation` under its real machine/worktree identity and the
+retained actual native identity. A worker that cannot accept retains the claim
+and reports its blocker; the prompt does not present legacy yield/abandon as a
+pool-aware decline/closeout implementation.
+
+The existing created/resumed-agent storage operation accepts the caller's
+`execution_machine` for this path. Its write transaction rechecks the current
+assignment, generation, placed driver, holds, startup fence, routing, workspace
+and native history. It stores the exact invocation and host before the first
+send; read-back must confirm both. No workspace or agent-storage write may
+relabel a placed driver. Legacy queued ordinary creation retains its prior
+request shape and evaluation prompt; the new field is omitted there.
+
+Initial delivery keeps the existing keyed native invocation, frozen first-turn
+position and receipt-only recovery. Delivery still leaves the task `CLAIMED`;
+only current-worker acceptance moves it to `STARTED`. A lost storage reply
+retains the created agent without sending. An exact historical initial receipt
+can be observed after acceptance without replaying the prompt or resetting a
+budget. Unsupported or rolled-back providers do not cause a legacy claim,
+reservation or send fallback.
+
+This is **initial admission only**. The separate `pool_startup/v1` descriptor
+continues to advertise only `cli`, because its current retry transport is the
+live-CLI inbox operation, not ordinary Bridge's ACP native-turn operation.
+Existing supervision retains an ordinary allocator claim rather than passing
+it to legacy gone-worker recovery or claiming that CLI retry qualified it.
+Automatic ordinary retry, decline/closeout, allocator-instance integration,
+publication activation and installed/native qualification remain open gates.
+
+## Worker acceptance transport
+
+`DispatchClient.start_pool_task(...)` implements explicit worker acceptance. It reads
 `/health.pool_placement` and requires `explicit_start_versions: [1]` in addition
 to the placement contract. This descriptor uses ordinary API-read authority;
 workers need no control credential. It sends `pool_placement_version: 1`,
@@ -255,7 +307,7 @@ cooldown already established by those independent transitions and keeps a
 `RELEASING` reservation's capacity and release intent. Conflicting completion
 and unrelated caller identities refuse.
 
-Ordinary placement/worker-prompt migration and installed qualification still
+Automatic ordinary placement/worker-prompt migration and installed qualification still
 gate the complete policy. These explicit consumers do not activate that lane.
 
 ## Integration boundary
@@ -263,7 +315,7 @@ gate the complete policy. These explicit consumers do not activate that lane.
 The descriptor still reports `automatic_lane_migration: false` and
 `startup_retry_policy_complete: false`. Complete configured-source publication,
 mixed-cohort exclusion, reservation-preserving startup attempts, decision
-nudges/exhaustion/cooldowns and ordinary supervisor/prompt migration remain
+nudges/exhaustion/cooldowns and automatic ordinary supervisor/prompt migration remain
 required integration work. Neither these callers nor their source tests
 authorize installed activation, free unresolved effects or qualify the full
 [assignment/startup amendment](../../../efforts/active/agent-dispatch-monitor-and-confirmed-state/assignment-startup-amendment.md).

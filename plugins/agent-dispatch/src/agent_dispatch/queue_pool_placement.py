@@ -46,7 +46,8 @@ def pool_placement_contract() -> dict[str, object]:
     """Describe explicit provider support, not automatic lane admission."""
     return {
         "protocol": POOL_PLACEMENT_PROTOCOL, "supported_versions": [POOL_PLACEMENT_VERSION],
-        "supported_drivers": ["cli"],
+        "supported_drivers": ["cli", "ordinary-bridge"],
+        "ordinary_initial_start_versions": [1],
         "atomic_claim_before_spawn": True, "affirmative_worker_start": True,
         "explicit_start_versions": [1],
         "configured_cohort_reservation_fencing_versions": [1],
@@ -303,8 +304,8 @@ def require_pool_workspace(
     assignment = pool_assignment(conn, task.id)
     if assignment is None:
         return
-    if driver != "cli":
-        raise TaskError("pool workspace supports only the qualified cli startup driver")
+    if driver not in {"cli", "ordinary-bridge"}:
+        raise TaskError("pool workspace requires a qualified startup driver")
     from .bridge_remote import normalize_host
     if (
         not isinstance(execution_machine, str) or not execution_machine.strip()
