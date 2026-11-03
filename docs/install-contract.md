@@ -4142,6 +4142,7 @@ trusted native HTTPS feed and runs UV against a private loopback index. The
 existing acquisition owner fetches candidates with its origin, redirect,
 seasoning and resource guards; each requested wheel is inspected from
 immutable bytes and direct dependency URLs are refused before UV sees it.
+Withdrawn files are not advertised as candidates.
 Native non-index selection settings and first-party exclusions remain in
 force. The observed project indexes are rechecked after selected-wheel
 acquisition and source validation while the delivery is held; source is

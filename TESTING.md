@@ -3463,8 +3463,8 @@ also checks deep Windows pool inputs and bounded, private failure diagnostics.
 source hashing and settlement after a worker failure; the core producer still
 revalidates source changes before exposing a delivery.
 `tools/test_core_guarded_feed.py` exercises the opt-in guarded-feed CLI and real
-UV against local TLS fixtures: transitive selection, seasoning, credential
-isolation, redirect refusal, late index and source rechecks, retained inputs,
+UV against local TLS fixtures: transitive selection, seasoning, withdrawn files,
+credential isolation, redirect refusal, late index and source rechecks, retained inputs,
 shared budgets and Windows owned-worker timeout cleanup. Actor-free projection,
 candidate-witness and recheck controls live in
 `tools/promotion_unit_tests/test_guarded_core_contract.py`.

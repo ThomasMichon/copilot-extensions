@@ -111,7 +111,7 @@ def test_guarded_feed_does_not_bind_the_ephemeral_loopback_endpoint(
     assert first["sha256"] == second["sha256"] and first_path.read_bytes() == second_path.read_bytes()
 
 
-@pytest.mark.parametrize("reason", ["young", "yanked", "yanked-empty", "package-cutoff"])
+@pytest.mark.parametrize("reason", ["young", "yanked", "yanked-empty", "withdrawn", "package-cutoff"])
 def test_guarded_feed_preserves_native_candidate_admission(
     tmp_path, monkeypatch, tls_source, reason,  # noqa: F811
 ):
@@ -123,6 +123,7 @@ def test_guarded_feed_preserves_native_candidate_admission(
         "young": {"upload-time": "2999-01-01T00:00:00Z"},
         "yanked": {"yanked": True},
         "yanked-empty": {"yanked": ""},
+        "withdrawn": {"withdrawn": True},
         "package-cutoff": {"upload-time": "2025-01-01T00:00:00Z"},
     }[reason]
     newer_name, _ = _newer_fixture(

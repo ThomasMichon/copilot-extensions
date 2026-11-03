@@ -1,6 +1,8 @@
 """Actor-free contracts for guarded core selection."""
 from __future__ import annotations
 
+import json
+import threading
 import time
 from copy import deepcopy
 from dataclasses import asdict
@@ -141,6 +143,32 @@ def test_guarded_configuration_refuses_unattributed_source_mappings(tmp_path):
     )
     with pytest.raises(ValueError):
         guard._local_configuration(transaction, tmp_path)
+
+
+def test_guarded_index_omits_withdrawn_candidates_without_actors():
+    index = object.__new__(guard._GuardedIndex)
+    index.exclusions = set()
+    index.lock = threading.RLock()
+    index.limits = _limits()
+    index.wheel_limits = guard.inspection.WheelLimits(
+        max_archive_bytes=16384, max_expanded_bytes=16384, max_member_bytes=16384,
+        max_metadata_bytes=4096, max_members=20, max_tags=100, max_metadata_member_bytes=4096,
+    )
+    index.deadline = time.monotonic() + 30
+    index.project_locks, index.projects, index.files, index.offered = {}, {}, {}, {}
+    index.filenames, index.candidate_count = set(), 0
+    index.secret, index.base = "capability", "http://127.0.0.1:12345/capability"
+    entries = [
+        {"filename": f"fixture-{version}-py3-none-any.whl", "url": f"/{version}.whl",
+         "hashes": {"sha256": DIGEST}, "withdrawn": withdrawn}
+        for version, withdrawn in (("1.0", False), ("2.0", True))
+    ]
+    index._project = lambda _name: (entries, "https://example.invalid/simple/", "https://example.invalid", "b" * 64)
+
+    page = json.loads(index.page("fixture"))
+
+    assert [item["filename"] for item in page["files"]] == ["fixture-1.0-py3-none-any.whl"]
+    assert {item["filename"] for item in index.offered.values()} == {"fixture-1.0-py3-none-any.whl"}
 
 
 def test_guarded_compile_rechecks_retained_inputs_without_actors(tmp_path, monkeypatch):

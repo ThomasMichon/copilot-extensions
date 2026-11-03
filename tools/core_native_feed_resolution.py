@@ -379,6 +379,8 @@ class _GuardedIndex(ThreadingHTTPServer):
                 yanked, withdrawn = entry.get("yanked", False), entry.get("withdrawn", False)
                 if not isinstance(yanked, (bool, str)) or type(withdrawn) is not bool:
                     raise GuardedSelectionError("guarded index contains invalid admission evidence")
+                if withdrawn:
+                    continue
                 hint, uploaded = entry.get("requires-python"), entry.get("upload-time")
                 if hint not in (None, ""):
                     if not isinstance(hint, str) or len(hint) > 4096:
@@ -561,6 +563,10 @@ def _run_uv(argv, options, server, deadline):
             stop()
 
 
+def _serve(server):
+    server.serve_forever(poll_interval=0.05)
+
+
 def _request_feed(request):
     feed_record = request["feed"]
     return acquisition.WheelFeed(
@@ -601,7 +607,7 @@ def _worker(request, control: Path) -> dict:
         "UV_CACHE_DIR": str(control.parent / "uv-cache"),
     })
     before = inspection._ordinary(config)
-    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05})
+    thread = threading.Thread(target=_serve, args=(server,))
     thread.start()
     try:
         with snapshots._open(config) as held:
