@@ -88,8 +88,9 @@ home, never the caller's cwd or a plugin payload) and appends the daemon's
 output to a `log_path` (stderr optionally to its own `stderr_log_path`) instead
 of discarding it.
 Promotion units exercise the Codespaces owner launch with a fake child and
-check its working directory and log location. This is one launch boundary,
-not a census-wide or live-daemon proof.
+check its working directory and log location outside replaceable snapshot and
+version trees. This is one launch boundary, not a census-wide or live-daemon
+proof.
 
 ### Preferred path: normal creation and explicit Job ownership
 

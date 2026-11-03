@@ -7314,8 +7314,8 @@ It also exercises the legacy monitor result adapter with a fake transition,
 including failed, refused and busy outcomes and the previous-live flag.
 The native installer wrappers and actual service cutover remain separate tests.
 The admitted daemon-cwd units exercise the Codespaces owner launch with a fake
-child, checking a durable working directory and runtime-root log. They do not
-cover other launchers or a live daemon.
+child, checking a durable working directory and runtime-root log outside
+replaceable snapshot/version trees. They do not cover other launchers or a live daemon.
 
 ```bash
 ruff check --select F,E9 <touched .py files>   # fast lint (pyflakes + syntax)
