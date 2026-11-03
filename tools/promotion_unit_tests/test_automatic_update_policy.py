@@ -267,6 +267,36 @@ def test_direct_manager_recheck_keeps_its_invocation_directory(
     assert maintenance_policy.update_refusal([]) is None
 
 
+@pytest.mark.parametrize("root_form", ["absolute", "relative", "home", "missing-parent"])
+def test_configuration_inspection_reads_the_same_policy_as_admission(
+    policy: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, root_form: str,
+    manager_policy_boundary: None,
+) -> None:
+    root = policy.home / "manager"
+    root.mkdir()
+    path = root / "config.toml"
+    path.write_text("[maintenance]\nautomatic = false\n", encoding="utf-8")
+    caller = policy.home / "caller"
+    shadow = caller / "~" / "manager" / "config.toml"
+    shadow.parent.mkdir(parents=True)
+    shadow.write_text("[maintenance]\nautomatic = true\n", encoding="utf-8")
+    monkeypatch.chdir(caller)
+    roots = {
+        "absolute": str(root), "relative": "../manager", "home": "~/manager",
+        "missing-parent": str(policy.home / "missing/../manager"),
+    }
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", roots[root_form])
+    state = maintenance_policy.inspect_policy()
+    row = maintenance_policy.configuration_row()
+    assert state.path == path.resolve() and state.enabled is False
+    assert row["enabled"] == "OFF" and row["activity"] == "blocked"
+    request = spec("--auto", WORKTREE_MANAGER_ROOT=roots[root_form])
+    request.cwd = str(caller)
+    assert "maintenance.automatic is false" in policy.owner.automatic_update_refusal(request)
+    assert shadow.read_text(encoding="utf-8") == "[maintenance]\nautomatic = true\n"
+    assert not list(root.glob(".*.lock"))
+
+
 @pytest.mark.parametrize("root_form", ["absolute", "relative", "home"])
 def test_submission_context_freezes_the_same_selected_policy(
     policy: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, root_form: str,
@@ -317,7 +347,8 @@ def test_borrowed_manager_context_freezes_root_and_restores_worker(
     ):
         assert maintenance_policy.update_refusal(["--auto"]) is None
         assert maintenance_policy.inspect_policy().path == root / "config.toml"
-    assert maintenance_policy.inspect_policy().path == Path("worker-original/config.toml")
+    assert maintenance_policy.inspect_policy().path == worker / "worker-original/config.toml"
+    assert update_driver_cli.os.environ["WORKTREE_MANAGER_ROOT"] == "worker-original"
 
 
 def test_invalid_local_policy_is_unknown_not_an_enabled_default(policy: SimpleNamespace) -> None:

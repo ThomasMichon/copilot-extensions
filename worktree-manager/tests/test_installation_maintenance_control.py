@@ -34,6 +34,57 @@ def test_default_control_is_read_only_and_does_not_enroll(policy_home: Path) -> 
     assert not policy_home.exists()
 
 
+@pytest.mark.parametrize("root_form", ["absolute", "relative", "home", "missing-parent"])
+def test_configuration_reads_and_edits_the_enforced_root_not_a_shadow(
+    policy_home: Path, monkeypatch: pytest.MonkeyPatch, root_form: str, capsys,
+) -> None:
+    from worktree_manager import runtime_source_config
+
+    home = policy_home.parent
+    caller = home / "caller"
+    caller.mkdir()
+    policy_home.mkdir()
+    config = policy_home / "config.toml"
+    config.write_text(
+        "# selected policy\n[maintenance]\nautomatic = false\n[source]\nref = 'kept'\n",
+        encoding="utf-8",
+    )
+    shadow = caller / "~" / "manager" / "config.toml"
+    shadow.parent.mkdir(parents=True)
+    shadow.write_text("[maintenance]\nautomatic = true\n", encoding="utf-8")
+    shadow_before = shadow.read_bytes()
+    roots = {
+        "absolute": str(policy_home), "relative": "../manager", "home": "~/manager",
+        "missing-parent": str(home / "missing/../manager"),
+    }
+    monkeypatch.chdir(caller)
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", roots[root_form])
+    monkeypatch.setattr(ui.engine_client, "accept_inherited_engine_command", lambda: None)
+    assert source_config.config_path() == config.resolve()
+    assert source_config.config_path(Path(roots[root_form])) == config.resolve()
+    before = policy.inspect_policy()
+    row = policy.configuration_row()
+    assert before.enabled is False and row["enabled"] == "OFF"
+    assert row["activity"] == "blocked" and row["source"] == str(config.resolve())
+    assert "maintenance.automatic is false" in policy.update_refusal(["--auto"])
+    assert ui.main(["maintenance", "on", "--expected-policy", before.revision]) == 0
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["path"] == str(config.resolve()) and receipt["automatic"] is True
+    assert policy.inspect_policy().enabled is True
+    assert policy.configuration_row()["enabled"] == "ON"
+    assert policy.update_refusal(["--auto"]) is None
+    source_config.set_source(ref="updated", root=Path(roots[root_form]))
+    runtime_source_config.set_source(
+        runtime_source_config.RuntimeSource("main"), root=Path(roots[root_form]),
+    )
+    assert policy.inspect_policy().enabled is True
+    assert source_config.configured_source() == (None, "updated")
+    assert runtime_source_config.configured_source().channel == "main"
+    assert "# selected policy" in config.read_text(encoding="utf-8")
+    assert shadow.read_bytes() == shadow_before
+    assert not list(shadow.parent.glob(".*.lock"))
+
+
 @pytest.mark.parametrize("maintenance", [
     "[maintenance]\nautomatic = false\n",
     "maintenance = { automatic = false }\n",

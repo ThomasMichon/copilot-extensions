@@ -195,7 +195,7 @@ def automatic_update_refusal(spec: RequestSpec) -> str | None:
                 root = Path(spec.cwd) / root
                 if not root.is_absolute():
                     return "Manager automatic-maintenance policy root cannot resolve against request cwd; nothing ran"
-            path = root / "config.toml"
+            path = root.resolve() / "config.toml"
             content = path.read_text(encoding="utf-8")
         except FileNotFoundError:
             content = None

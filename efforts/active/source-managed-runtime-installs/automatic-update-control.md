@@ -259,3 +259,14 @@ pass or skip is credited. The source runner now offers explicit retained
 per-group JUnit output independent of selection, with a new destination required
 for every attempt. It preserves the same containment, admission and deadlines;
 the refused native packet is not replayed or treated as executed.
+
+The next review found the same home-relative selection mismatch in Configuration
+itself: inspection and mutation still interpreted the literal `~` directory
+after update submission had been corrected. The shared configuration selector
+now expands the chosen root and canonicalizes its directory for every reader
+and configuration writer, leaving the config leaf's linked-file refusal intact.
+Raw queued admission uses the same canonical directory, including absent-parent
+`..` forms. Real private-fixture Configuration read/confirm/edit and source/runtime
+writer controls retain the original shadow file, unrelated settings/comments,
+manual-update exemption and independent hold behavior. The earlier packet's
+native execution, if any, remains evidence for its own pinned source only.

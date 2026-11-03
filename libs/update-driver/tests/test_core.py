@@ -66,7 +66,8 @@ def test_manager_policy_rechecks_queued_auto_without_blocking_manual(area):
 
 
 @pytest.mark.parametrize("no_update", [False, True])
-def test_queued_relative_manager_policy_uses_original_cwd(area, monkeypatch, no_update):
+@pytest.mark.parametrize("root_form", ["relative", "home", "missing-parent"])
+def test_queued_relative_manager_policy_uses_original_cwd(area, monkeypatch, no_update, root_form):
     monkeypatch.setenv("HOME", str(area))
     monkeypatch.setenv("USERPROFILE", str(area))
     monkeypatch.delenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", raising=False)
@@ -79,7 +80,8 @@ def test_queued_relative_manager_policy_uses_original_cwd(area, monkeypatch, no_
     runner = TrustedRunner((sys.executable, "-c", "pass"), str(area))
     flags = ("--no-update",) if no_update else ()
     arguments = ("--auto", *flags, "--with-reconcile")
-    context = (("WORKTREE_MANAGER_ROOT", "manager"),)
+    roots = {"relative": "manager", "home": "~/caller/manager", "missing-parent": "missing/../manager"}
+    context = (("WORKTREE_MANAGER_ROOT", roots[root_form]),)
     automatic = enqueue(RequestSpec(
         "engine-launch-update", arguments, cwd=str(caller), context=context,
     ), runner=runner, root=area / "state")

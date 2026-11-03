@@ -694,6 +694,10 @@ automatic = false
 Omitting the table/key preserves the enabled default. Invalid or unreadable
 configuration blocks automatic work with a diagnostic; strings such as
 `"false"` and unknown maintenance keys are errors, not enabled defaults.
+Configuration inspection, confirmed edits and update admission expand a
+current-user `~` in the selected root consistently. Relative roots are anchored
+to the invocation directory before queued execution; missing intermediate
+`..` segments cannot redirect a read or edit into a shadow configuration.
 The Picker reports a disabled policy without blocking ordinary browsing.
 This switch is a veto, not installation consent: `true` does not bypass the
 updater's existing opt-in, publication, or ownership checks.
