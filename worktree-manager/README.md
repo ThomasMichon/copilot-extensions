@@ -425,6 +425,10 @@ The ordinary caller starts the existing finite worker and waits for that whole
 result; losing the observer does not discard accepted work. `--detach` reports
 acceptance, not completion, and `--supervised-debug` drains the same queue inline.
 No new daemon, mutation lock or foreground fallback is introduced.
+POSIX dispatch also waits when it owns a completion scope but deliberately
+forwards no witness, such as authentication inspection. An unowned non-update
+launch retains process replacement. Source-only entries resolve their current
+controller's declared driver dependencies before either platform branch.
 
 Each update acquisition has its own staging directory. Before submission, the
 bootstrap freezes Manager and SDK inputs through the canonical source freezer.
@@ -605,6 +609,9 @@ a positive finite duration of at most 3,600 seconds, for example `600`. The
 durable Manager invocation captures this value, and the worker restores that
 budget rather than inheriting a later caller's setting. An absent choice clears
 the worker's ambient override. Invalid values refuse submission. The internal
+fresh-bootstrap request likewise captures and validates an applicable
+environment-selected budget before retention/submission; inspection, recovery
+and targeted commands do not inherit that suite-only setting. The internal
 Manager argument is consumed before engine handoff: no new shared execution-context
 key or engine argument is required, including for older engine participants.
 Retries still share one deadline and the same attempt ceiling; timeouts are not

@@ -358,8 +358,10 @@ def _windows_console_stream(stream: TextIO | None) -> bool:
     return bool(probe(msvcrt.get_osfhandle(stream.fileno()), ctypes.byref(mode)))
 
 
-def _dispatch_manager(command: list[str], *, handoff: dict[str, str] | None = None) -> int:
-    if os.name == "nt" or handoff:
+def _dispatch_manager(
+    command: list[str], *, handoff: dict[str, str] | None = None, wait_for_exit: bool = False,
+) -> int:
+    if os.name == "nt" or handoff or wait_for_exit:
         console = os.name == "nt" and any(
             _windows_console_stream(stream) for stream in (sys.stdin, sys.stdout, sys.stderr)
         )
@@ -758,10 +760,17 @@ def _finish(args, slot: Path | int, command: list[str]) -> int:
     ]
     from worktree_manager.update_driver_cli import handoff_environment
     from worktree_manager.update_python_path import finish_update
+    from update_driver import participant_environment
 
     handoff = handoff_environment(command)
+    owned_without_handoff = not handoff and bool(participant_environment())
     with runtime.retention_lease(args.root, slot.name):
-        result = _dispatch_manager(invocation, handoff=handoff) if handoff else _dispatch_manager(invocation)
+        if handoff:
+            result = _dispatch_manager(invocation, handoff=handoff)
+        elif owned_without_handoff:
+            result = _dispatch_manager(invocation, wait_for_exit=True)
+        else:
+            result = _dispatch_manager(invocation)
     return finish_update(command, result)
 
 
@@ -877,8 +886,8 @@ def main(argv: list[str] | None = None) -> int:
     if refusal is not None:
         print(refusal, file=sys.stderr)
         return 3
+    driver = _execution_driver(SCRIPTS.parent)
     if os.name == "nt" or command[:1] == ["update"]:
-        driver = _execution_driver(SCRIPTS.parent)
         with _installation_custody() as custody:
             if custody is None:
                 if args.install_only or args.update_participant:
