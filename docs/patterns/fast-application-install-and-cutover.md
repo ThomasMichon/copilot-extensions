@@ -122,6 +122,9 @@ acknowledges completion. The application still owns actual readiness verificatio
 a marker, process PID or arbitrary zero exit is not independent health evidence.
 The final construction-input check runs inside the guarded transaction before
 last-good and success records are written, not during post-success context exit.
+Direct qualification consumers, including Manager's separate self-install owner,
+retain their existing exit-time check; only this generic transaction owns its
+final verification explicitly.
 Setup and publication failures before startup retain guarded rollback. Once a
 nonempty startup action is invoked, a failure, timeout or lost reply has an
 **unknown** outcome: it may already have admitted work. The installer raises

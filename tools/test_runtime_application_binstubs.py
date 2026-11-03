@@ -48,7 +48,7 @@ def install_transaction(tmp_path, monkeypatch):
     monkeypatch.setattr(engine.runtime, "is_complete", lambda *args, **kwargs: True)
 
     @contextmanager
-    def qualified(*_):
+    def qualified(*_, **_kwargs):
         yield engine.runtime, lambda: None
 
     monkeypatch.setattr(runtime_application_install, "_qualified", qualified)
@@ -534,12 +534,13 @@ pathlib.Path.open = legacy(pathlib.Path.open)
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows long repair-slot cwd")
 @pytest.mark.parametrize("application", ["long-repair"], indirect=True)
-def test_generated_install_verifies_actual_long_repair_slot(application):
+@pytest.mark.parametrize("host_name", ["powershell.exe", "pwsh"])
+def test_generated_install_verifies_actual_long_repair_slot(application, host_name):
     root, slot, caller, environment = application
     environment["UV_PYTHON"] = sys.executable
-    host = shutil.which("pwsh")
+    host = shutil.which(host_name)
     if host is None:
-        pytest.skip("native PowerShell 7 is unavailable")
+        pytest.skip(f"native {host_name} is unavailable")
     assert ".repair." in slot.name and len(str(slot)) >= 260
     assert (slot / "install.py").read_bytes() == Path(
         runtime_application_install.__file__,
@@ -702,7 +703,7 @@ def test_partial_selector_failure_restores_previous_publication(application, mon
     assert not (slot / "install-success.json").exists()
 
 
-@pytest.mark.parametrize("failure_point", ["after-start", "after-success"])
+@pytest.mark.parametrize("failure_point", ["after-start", "after-success", "direct-exit"])
 def test_real_qualification_finishes_before_install_success(
     application, monkeypatch, failure_point,
 ):
@@ -716,7 +717,7 @@ def test_real_qualification_finishes_before_install_success(
     spec.loader.exec_module(installer)
     load = installer._load
     success = slot / "install-success.json"
-    trigger = root / "started.json" if failure_point == "after-start" else success
+    trigger = success if failure_point == "after-success" else root / "started.json"
 
     def observed_load(path, name):
         module = load(path, name)
@@ -736,6 +737,14 @@ def test_real_qualification_finishes_before_install_success(
     monkeypatch.setattr(sys, "executable", str(
         slot / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python"),
     ))
+    if failure_point == "direct-exit":
+        record = json.loads((slot / "application.json").read_bytes())
+        with pytest.raises(RuntimeError, match="injected qualification failure direct-exit"):
+            with installer._qualified(slot, record):
+                trigger.write_text("activation fixture", encoding="utf-8")
+        assert not success.exists()
+        assert not (root / "current-version").exists()
+        return
     if failure_point == "after-start":
         with pytest.raises(installer.ApplicationStartupUncertain) as failed:
             installer.install(slot, stage=False, global_bin=root / "global")

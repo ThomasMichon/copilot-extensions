@@ -98,7 +98,7 @@ def _application(slot: Path) -> dict:
 
 
 @contextmanager
-def _qualified(slot: Path, record: dict):
+def _qualified(slot: Path, record: dict, *, verify_on_exit: bool = True):
     runtime_path = slot / "runtime"
     runtime = _load(runtime_path / "versioned_runtime.py", "versioned_runtime")
     sys.path.insert(0, str(runtime_path))
@@ -275,6 +275,8 @@ def _qualified(slot: Path, record: dict):
                 root, slot.name, payload_hash=inputs["payload_hash"], timeout=180,
             ))
         yield runtime, unchanged
+        if verify_on_exit:
+            unchanged()
 
 
 def _run(record: dict, command: list[str], root: Path, slot: Path) -> None:
@@ -341,7 +343,9 @@ def install(
         raise ValueError("application installation has no configurable setup or startup action")
     setup = [*record["setup"], *arguments] if record["setup"] else []
     start = [*record["start"], *arguments] if record["start"] else []
-    with _qualified(slot, record) as (runtime, unchanged), runtime._publication_lease(root):
+    with _qualified(
+        slot, record, verify_on_exit=False,
+    ) as (runtime, unchanged), runtime._publication_lease(root):
         _run(record, setup, root, slot)
         unchanged()
         if not runtime.is_complete(root, slot.name, expect_hash=record["construction"]["payload_hash"]):
