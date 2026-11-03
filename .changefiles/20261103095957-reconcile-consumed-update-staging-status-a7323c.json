@@ -1,0 +1,9 @@
+{
+  "comment": "Reconcile consumed update staging status after successful engine application without clearing newer acquisitions",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

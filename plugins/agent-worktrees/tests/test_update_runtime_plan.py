@@ -94,6 +94,72 @@ def _phase_args(phase, plugins=None):
     )
 
 
+@pytest.mark.parametrize("outcome", [
+    "success", "failed-engine", "failed-peer", "failed-integration", "newer-stage", "already-current",
+])
+def test_comprehensive_update_acknowledges_only_successfully_consumed_stage(
+    phase_portfolio, monkeypatch, tmp_path, outcome,
+):
+    from agent_worktrees import update_stage, update_integration
+
+    engine, peer, calls, planned = phase_portfolio
+    status, lock = tmp_path / "updater-status.json", tmp_path / "updater.lock"
+    prior = dict(
+        stage_done=True, plugin_changed=True, plugin_dir=str(engine), runtime_root=str(engine),
+        payload_version="1", deployed_version="0", ts=1,
+    )
+    update_stage._write_status(status, prior)
+    monkeypatch.setattr(update_stage, "status_path", lambda *a: status)
+    monkeypatch.setattr(update_stage, "lock_path", lambda *a: lock)
+    deployed = {"version": "2" if outcome == "already-current" else "1"}
+    monkeypatch.setattr(reconcile, "runtime_deployed_version", lambda *a, **k: deployed["version"])
+
+    def install(*args, **kwargs):
+        if outcome == "failed-engine":
+            return 7
+        deployed["version"] = "2"
+        if outcome == "newer-stage":
+            update_stage._write_status(status, {**prior, "ts": 2})
+        return 0
+
+    monkeypatch.setattr(update_cli, "_run_engine_installer", install)
+    monkeypatch.setattr(core, "_reconcile_registered_runtimes", lambda *a, **k: outcome != "failed-peer")
+    monkeypatch.setattr(update_integration, "finish", lambda *a: outcome != "failed-integration")
+    assert update_cli._update_in_plugin_steps(_phase_args(None)) == (
+        7 if outcome == "failed-engine" else 1 if outcome.startswith("failed-") else 0
+    )
+    result = update_stage.read_status()
+    assert result["plugin_changed"] is (outcome != "success")
+    assert result["ts"] == (2 if outcome == "newer-stage" else 1)
+
+
+def test_comprehensive_update_reads_staging_owner_separately_from_deployment_target(
+    phase_portfolio, monkeypatch, tmp_path,
+):
+    from agent_worktrees import update_stage
+
+    engine, peer, calls, planned = phase_portfolio
+    legacy, cell = tmp_path / "legacy", tmp_path / "cell"
+    monkeypatch.setattr(config, "install_dir", lambda: legacy)
+    monkeypatch.setattr(
+        reconcile, "runtime_installer_environment",
+        lambda name, directory: ({}, cell if name == "agent-worktrees" else peer),
+    )
+    prior = dict(
+        stage_done=True, plugin_changed=True, plugin_dir=str(engine), runtime_root=str(cell),
+        payload_version="2", deployed_version="1",
+    )
+    update_stage._write_status(update_stage.status_path(), prior)
+    deployed = {"version": "1"}
+    monkeypatch.setattr(reconcile, "runtime_deployed_version", lambda *a, **k: deployed["version"])
+    monkeypatch.setattr(
+        update_cli, "_run_engine_installer", lambda *a, **k: deployed.update(version="2") or 0,
+    )
+    assert update_cli._update_in_plugin_steps(_phase_args(None)) == 0
+    assert update_stage.read_status()["plugin_changed"] is False
+    assert not (cell / "updater-status.json").exists()
+
+
 @pytest.mark.parametrize("kind", ["registered", "module"])
 @pytest.mark.parametrize("phase", ["preflight", "runtimes"])
 def test_selected_runtime_does_not_plan_or_execute_unrelated_work(

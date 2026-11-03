@@ -1966,6 +1966,38 @@ unknown deployed version (no `deploy-manifest.json`) always re-deploys, so a
 stale runtime is never left behind. Pass `--force` to re-deploy every runtime
 unconditionally.
 
+Successful comprehensive and staged engine application reconciles the consumed
+`updater-status.json` record under the staging writer's existing lease. Publication
+requires the same saved record, unchanged applied payload fingerprint and matching
+payload/deployed versions; a concurrent stage or unsuccessful apply is not cleared.
+Prepared-source application does not acknowledge an unrelated marketplace stage.
+The standalone Picker also rejects historical availability when its recorded
+payload version differs from the now-equal local payload/deployment versions.
+That read-only fallback reports `idle`, not successful-update proof, and performs
+neither acquisition, installation probes nor source hashing. It uses the engine's
+already-selected installation root. A matching payload version remains ambiguous:
+a newer same-version acquisition may still be pending even after the deployed
+version advances. Same-version pending changes, actual runtime drift, paused
+updates and live-checker precedence remain intact.
+Rootless records belong only to the legacy installation directory, independently
+of the caller's selected cell; successful acknowledgement records that root.
+The staging status/lease pair is captured separately from the deployment target:
+an ordinary launch can stage in legacy state while applying to a namespaced cell.
+New records retain both writer paths, so staged application and read-only
+live-checker indication preserve that lease even when the caller later selects
+another context. The recorded status
+path must still match; a copied record or legacy custom status with no recorded
+lease remains unchanged with an explicit warning. Legacy default records still
+use their existing default writer pair.
+Both application paths retain that original writer lease rather than deriving
+its location from the target root. If staging state cannot be resolved, or acknowledgement encounters a filesystem
+or metadata error, an explicit warning preserves the independent runtime result.
+The existing atomic writer and lease-release rules remain strict; no failed
+acknowledgement is reported as successful or retried automatically.
+Non-object version manifests remain unknown metadata, preserving pending
+availability and the independent installation result rather than raising from
+dictionary-only readers.
+
 ### Version-cutover reap and live-launcher protection
 
 For the installer handover's exact admission, lock, busy-oracle and rollback
