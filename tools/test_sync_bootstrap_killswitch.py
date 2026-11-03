@@ -22,6 +22,7 @@ def fake_repo(tmp_path, monkeypatch):
     canonical_dir.mkdir(parents=True)
     (canonical_dir / "bootstrap-killswitch-guard.sh").write_text("canonical sh\n", encoding="utf-8")
     (canonical_dir / "bootstrap-killswitch-guard.ps1").write_text("canonical ps1\n", encoding="utf-8")
+    (canonical_dir / "killswitch_mutation.py").write_text("canonical mutation\n", encoding="utf-8")
     (canonical_dir / "pretool_killswitch.py").write_text("canonical pretool\n", encoding="utf-8")
     for entry, marker in (
         ("plugins/agent-worktrees/scripts/hook_client.py", "switch.is_active()"),

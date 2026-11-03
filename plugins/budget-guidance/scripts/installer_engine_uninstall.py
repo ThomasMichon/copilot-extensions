@@ -177,7 +177,7 @@ def profile_for(payload: Path, plugin: str, path: Path | None = None) -> Profile
             helpers += ("runtime-gate.ps1", "runtime-gate.sh",
                         "delegated-waiter-callback.ps1", "delegated-waiter-callback.sh")
         if plugin == "budget-guidance":
-            helpers += ("bootstrap-check.ps1", "bootstrap-check.sh",
+            helpers += ("killswitch_mutation.py", "bootstrap-check.ps1", "bootstrap-check.sh",
                         "bootstrap-killswitch-guard.ps1", "bootstrap-killswitch-guard.sh",
                         "emit-mesh-pointer.ps1", "emit-mesh-pointer.sh")
         commands = (plugin, plugin + ".ps1", plugin + ".cmd")

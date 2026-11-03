@@ -77,6 +77,28 @@ def test_current_automatic_request_rechecks_strict_manager_policy(
     assert policy.owner.automatic_update_refusal(spec(WORKTREE_MANAGER_ROOT=str(root))) is None
 
 
+@pytest.mark.parametrize("software_update", [False, True])
+def test_launch_rechecks_maintenance_but_no_update_ignores_only_software_hold(
+    policy: SimpleNamespace, software_update: bool,
+) -> None:
+    root = policy.home / "manager"
+    root.mkdir()
+    path = root / "config.toml"
+    path.write_text("[maintenance]\nautomatic = true\n", encoding="utf-8")
+    hold = policy.home / ".copilot-extensions/killSwitches/bootstrap-killswitch.json"
+    hold.parent.mkdir(parents=True)
+    hold.write_text('{"active":true}', encoding="utf-8")
+    flags = [] if software_update else ["--no-update"]
+    request = spec("--auto", *flags, "--with-reconcile", WORKTREE_MANAGER_ROOT=str(root))
+    request.backend = "engine-launch-update"
+    initial = policy.owner.automatic_update_refusal(request)
+    assert (initial is not None) is software_update
+    path.write_text("[maintenance]\nautomatic = false\n", encoding="utf-8")
+    assert "maintenance.automatic is false" in policy.owner.automatic_update_refusal(request)
+    request.argv = tuple(flags)
+    assert policy.owner.automatic_update_refusal(request) is None
+
+
 def test_legacy_parser_dispatch_and_missing_parser_are_explicit(policy: SimpleNamespace) -> None:
     root = policy.home / "manager"
     root.mkdir()

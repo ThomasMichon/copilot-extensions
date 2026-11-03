@@ -103,7 +103,27 @@ _live_reconciling_plugins() {
 }
 
 cmd="${1:-check}"
+reason=""
+expected=""
+if [ "$#" -gt 0 ]; then shift; fi
+if [ "$cmd" = "on" ] && [ "$#" -gt 0 ] && [ "$1" != "--expected-state" ]; then
+  reason="$1"; shift
+fi
+if [ "$#" -gt 0 ]; then
+  if { [ "$cmd" != "on" ] && [ "$cmd" != "off" ]; } ||
+      [ "$#" -ne 2 ] || [ "$1" != "--expected-state" ] ||
+      [[ ! "$2" =~ ^[a-f0-9]{64}$ ]]; then
+    echo "usage: $(basename "$0") {check|status|capabilities|on <reason>|off} [--expected-state REVISION]" >&2
+    exit 2
+  fi
+  expected="$2"
+fi
+mutation_helper="$(dirname "${BASH_SOURCE[0]}")/killswitch_mutation.py"
 case "$cmd" in
+  capabilities)
+    [ -f "$mutation_helper" ] || { echo "canonical mutation helper unavailable" >&2; exit 1; }
+    printf '{"schema":"copilot-extensions.bootstrap-killswitch-controller","version":1,"capabilities":["conditional-mutation-v1"]}\n'
+    ;;
   check)
     if [ -f "$ReadStateFile" ] && [ "$(_is_active)" = "true" ]; then
       r="$(_reason)"
@@ -116,30 +136,13 @@ case "$cmd" in
     if [ -f "$ReadStateFile" ]; then cat "$ReadStateFile"; else printf '{"active": false}\n'; fi
     ;;
   on)
-    reason="${2:-}"
-    mkdir -p "$(dirname "$StateFile")"
     py="$(_py)"
     if [ -z "$py" ]; then
       echo "[bootstrap-killswitch] error: no python3/python on PATH; cannot write state." >&2
       exit 1
     fi
-    "$py" -c '
-import json, os, sys, datetime
-data = {
-    "active": True,
-    "reason": sys.argv[2] if len(sys.argv) > 2 else "",
-    "set_by": sys.argv[1],
-    "set_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-}
-target = sys.argv[3]
-tmp = f"{target}.tmp.{os.getpid()}"
-with open(tmp, "w", encoding="utf-8") as fh:
-    json.dump(data, fh, indent=2)
-    fh.write("\n")
-    fh.flush()
-    os.fsync(fh.fileno())
-os.replace(tmp, target)  # same-filesystem rename -- atomic, no torn reads
-' "${USER:-unknown}@$(hostname 2>/dev/null || echo unknown)" "$reason" "$StateFile"
+    "$py" "$mutation_helper" on "$StateFile" "" "$expected" \
+      "${USER:-unknown}@$(hostname 2>/dev/null || echo unknown)" "$reason"
     echo "[bootstrap-killswitch] ACTIVE${reason:+ -- $reason}."
     echo "Every plugin's sessionStart reconcile is now paused on this machine."
     _live="$(_live_reconciling_plugins)"
@@ -153,12 +156,20 @@ os.replace(tmp, target)  # same-filesystem rename -- atomic, no torn reads
     echo "Reset with: agent-machines bootstrap-killswitch off"
     ;;
   off)
-    rm -f -- "$StateFile"
-    if [ -n "$LegacyStateFile" ]; then rm -f -- "$LegacyStateFile"; fi
+    py="$(_py)"
+    if [ -z "$py" ]; then
+      echo "[bootstrap-killswitch] error: no python3/python on PATH; cannot clear state." >&2
+      exit 1
+    fi
+    if [ -n "$expected" ] && [ -n "$LegacyStateFile" ]; then
+      echo "[bootstrap-killswitch] conditional mutation requires an explicit state-file override." >&2
+      exit 2
+    fi
+    "$py" "$mutation_helper" off "$StateFile" "$LegacyStateFile" "$expected" "" ""
     echo "[bootstrap-killswitch] cleared. Plugins resume normal sessionStart reconcile."
     ;;
   *)
-    echo "usage: $(basename "$0") {check|status|on <reason>|off}" >&2
+    echo "usage: $(basename "$0") {check|status|capabilities|on <reason>|off} [--expected-state REVISION]" >&2
     exit 2
     ;;
 esac

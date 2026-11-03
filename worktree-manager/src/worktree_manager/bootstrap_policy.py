@@ -110,6 +110,27 @@ def set_enabled(enabled: bool, *, expected: str) -> BootstrapPolicy:
     command = _guard_command()
     targets = state.paths if enabled else state.paths[:1]
     deadline = time.monotonic() + 15
+    capability = run_caller_owned(
+        [*command, "capabilities"], timeout=15,
+        max_stdout_bytes=65536, max_stderr_bytes=65536,
+    )
+    try:
+        support = json.loads(capability.stdout) if capability.returncode == 0 else None
+    except ValueError:
+        support = None
+    if (
+        not isinstance(support, dict)
+        or support.get("schema") != "copilot-extensions.bootstrap-killswitch-controller"
+        or type(support.get("version")) is not int
+        or support.get("version") != 1
+        or not isinstance(support.get("capabilities"), list)
+        or "conditional-mutation-v1" not in support["capabilities"]
+    ):
+        raise ManagerConfigError(
+            "Canonical controller does not declare conditional mutation support; "
+            "update Manager and refresh. No switch mutation was requested. "
+            + capability.stderr.strip(),
+        )
     output = []
     for path in targets:
         index = state.paths.index(path)
@@ -121,6 +142,8 @@ def set_enabled(enabled: bool, *, expected: str) -> BootstrapPolicy:
         arguments = ["off"] if enabled else [
             "on", "Disabled in Manager Configuration / Installation & Updates",
         ]
+        flag = "-ExpectedState" if Path(command[-1]).suffix == ".ps1" else "--expected-state"
+        arguments.extend([flag, state.file_revisions[index]])
         result = run_caller_owned(
             [*command, *arguments], timeout=remaining,
             env={**os.environ, "BOOTSTRAP_KILLSWITCH_STATE_FILE": str(path)},

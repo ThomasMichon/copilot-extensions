@@ -65,6 +65,44 @@ def test_manager_policy_rechecks_queued_auto_without_blocking_manual(area):
     assert status(manual.id, root=area / "state").exit_code == 0
 
 
+@pytest.mark.parametrize("no_update", [False, True])
+def test_queued_launch_rechecks_maintenance_even_without_software_updates(area, no_update):
+    manager = area / "manager"
+    manager.mkdir()
+    path = manager / "config.toml"
+    path.write_text("[maintenance]\nautomatic = true\n", encoding="utf-8")
+    runner = TrustedRunner((sys.executable, "-c", "pass"), str(area))
+    flags = ("--no-update",) if no_update else ()
+    automatic = enqueue(RequestSpec(
+        "engine-launch-update", ("--auto", *flags, "--with-reconcile"),
+        context=(("WORKTREE_MANAGER_ROOT", str(manager)),),
+    ), runner=runner, root=area / "state")
+    path.write_text("[maintenance]\nautomatic = false\n", encoding="utf-8")
+    observed = []
+    assert drain(root=area / "state", executor=lambda tx: observed.append(tx.request.id) or 0) == 0
+    assert observed == []
+    refused = status(automatic.id, root=area / "state")
+    assert refused.exit_code == 3 and refused.started_at is None
+    assert "maintenance.automatic is false" in refused.error
+
+
+@pytest.mark.parametrize("no_update", [False, True])
+def test_launch_software_hold_does_not_inhibit_intentional_reconciliation(area, no_update):
+    from update_driver.core import automatic_update_refusal
+
+    switch = area / "hold.json"
+    switch.write_text('{"active":true}', encoding="utf-8")
+    flags = ("--no-update",) if no_update else ()
+    reason = automatic_update_refusal(RequestSpec(
+        "engine-launch-update", ("--auto", *flags, "--with-reconcile"),
+        context=(("WORKTREE_MANAGER_ROOT", str(area / "manager")),),
+        killswitch_path=str(switch),
+    ))
+    assert (reason is None) is no_update
+    if not no_update:
+        assert "KillSwitch active" in reason
+
+
 @pytest.mark.parametrize("content", ["[", "[maintenance]\nautomatic = 'false'\n"])
 def test_invalid_manager_policy_blocks_only_explicitly_automatic_work(area, content):
     from update_driver.core import automatic_update_refusal

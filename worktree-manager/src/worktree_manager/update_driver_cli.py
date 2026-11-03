@@ -164,18 +164,23 @@ def request_context() -> dict[str, str]:
 
 
 @contextmanager
-def _request_environment(context):
+def _request_environment(context, *, killswitch_path: str | None = None):
     values = dict(context)
     if values.keys() - set(_CONTEXT_KEYS):
         raise ValueError("update request contains unsupported execution context")
-    previous = {key: os.environ[key] for key in _CONTEXT_KEYS if key in os.environ}
+    keys = _CONTEXT_KEYS
+    if killswitch_path is not None:
+        keys = (*keys, "BOOTSTRAP_KILLSWITCH_STATE_FILE")
+        if killswitch_path:
+            values["BOOTSTRAP_KILLSWITCH_STATE_FILE"] = killswitch_path
+    previous = {key: os.environ[key] for key in keys if key in os.environ}
     try:
-        for key in _CONTEXT_KEYS:
+        for key in keys:
             os.environ.pop(key, None)
         os.environ.update(values)
         yield
     finally:
-        for key in _CONTEXT_KEYS:
+        for key in keys:
             os.environ.pop(key, None)
         os.environ.update(previous)
 
@@ -309,7 +314,9 @@ def cmd_update_request(rest: list[str]) -> int:
                 request = driver.status(custody.request_id, root=custody.root)
                 if request.state != "running" or request.spec.backend not in {"manager", "engine"}:
                     raise driver.StateError("Manager does not own the active update request")
-                with _request_environment(request.spec.context), _acquisition_environment(
+                with _request_environment(
+                    request.spec.context, killswitch_path=request.spec.killswitch_path,
+                ), _acquisition_environment(
                     options.engine_acquisition_timeout,
                 ):
                     _update_context_directory(os.environ)

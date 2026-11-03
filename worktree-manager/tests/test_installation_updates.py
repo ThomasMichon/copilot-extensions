@@ -24,6 +24,10 @@ def test_configuration_child_preserves_sealed_runtime():
 
 @pytest.fixture
 def inventory(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.delenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", raising=False)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path / "manager"))
     monkeypatch.setattr(self_install, "manager_repo", lambda root: "https://example.invalid/suite.git")
     monkeypatch.setattr(self_install, "manager_ref", lambda root: "selected")

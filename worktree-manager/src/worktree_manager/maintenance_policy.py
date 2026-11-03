@@ -51,10 +51,17 @@ def inspect_policy(root: Path | None = None) -> MaintenancePolicy:
 
 def set_enabled(enabled: bool, *, expected: str, root: Path | None = None) -> MaintenancePolicy:
     """Change only the existing maintenance veto after explicit local confirmation."""
-    import tomlkit
+    from .config_write_lock import config_write_lock
 
     if type(enabled) is not bool or re.fullmatch(r"[a-f0-9]{64}", expected) is None:
         raise manager_config.ManagerConfigError("A boolean and current policy revision are required")
+    with config_write_lock(source_config.config_path(root)):
+        return _set_enabled_locked(enabled, expected=expected, root=root)
+
+
+def _set_enabled_locked(enabled: bool, *, expected: str, root: Path | None) -> MaintenancePolicy:
+    import tomlkit
+
     current = inspect_policy(root)
     if current.error:
         raise manager_config.ManagerConfigError(current.error)

@@ -61,7 +61,7 @@ def test_control_preserves_real_toml_and_unrelated_config(
     assert str(data["unrelated"]["when"]) == "2026-10-24"
     assert math.isnan(data["unrelated"]["number"])
     assert data["maintenance"] == {"automatic": True}
-    assert sorted(item.name for item in policy_home.iterdir()) == ["config.toml"]
+    assert sorted(item.name for item in policy_home.iterdir()) == [".config.toml.lock", "config.toml"]
 
 
 def test_stale_control_refuses_without_overwriting_other_edits(policy_home: Path) -> None:
@@ -73,7 +73,7 @@ def test_stale_control_refuses_without_overwriting_other_edits(policy_home: Path
     with pytest.raises(manager_config.ManagerConfigError, match="changed"):
         policy.set_enabled(False, expected=old.revision)
     assert path.read_bytes() == before
-    assert len(list(policy_home.iterdir())) == 1
+    assert sorted(item.name for item in policy_home.iterdir()) == [".config.toml.lock", "config.toml"]
 
 
 @pytest.mark.parametrize("content", [
@@ -110,7 +110,7 @@ def test_failed_atomic_publish_is_not_success(
     with pytest.raises(PermissionError, match="synthetic configuration write denied"):
         policy.set_enabled(False, expected=state.revision)
     assert not (policy_home / "config.toml").exists()
-    assert not list(policy_home.iterdir())
+    assert [item.name for item in policy_home.iterdir()] == [".config.toml.lock"]
 
 
 def test_enable_does_not_clear_an_independent_automatic_hold(policy_home: Path) -> None:
@@ -126,6 +126,100 @@ def test_enable_does_not_clear_an_independent_automatic_hold(policy_home: Path) 
     )
     assert "KillSwitch active" in row["card"]["body"]
     assert held.read_bytes() == baseline
+
+
+@pytest.mark.parametrize("writer", ["source", "runtime", "maintenance-after-source", "maintenance-after-runtime"])
+def test_all_config_writers_serialize_read_modify_publish(
+    policy_home: Path, writer: str,
+) -> None:
+    import os
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+    from agent_procutil.owned_process import run_caller_owned
+    from worktree_manager import runtime_source_config
+    from worktree_manager.config_write_lock import config_write_lock
+
+    policy_home.mkdir()
+    path = policy_home / "config.toml"
+    path.write_text(
+        "# retained comment\n[maintenance]\nautomatic = true\n"
+        "[unrelated]\nwhen = 2026-10-24\nnumber = nan\n", encoding="utf-8",
+    )
+    expected = policy.inspect_policy().revision
+    blocked = policy_home / "contended"
+    code = """
+import sys
+from pathlib import Path
+from worktree_manager import config_write_lock as lock, source_config, runtime_source_config, maintenance_policy
+from worktree_manager.manager_config import ManagerConfigError
+root, blocked, writer, expected = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3], sys.argv[4]
+attempt = lock._try_lock_file_once
+def observed(stream):
+    acquired = attempt(stream)
+    if not acquired:
+        blocked.write_text("native lock contended")
+    return acquired
+lock._try_lock_file_once = observed
+if writer == "source":
+    source_config.set_source(ref="other-owner", root=root)
+elif writer == "runtime":
+    runtime_source_config.set_source(runtime_source_config.RuntimeSource("main"), root=root)
+else:
+    try:
+        maintenance_policy.set_enabled(False, expected=expected, root=root)
+    except ManagerConfigError as error:
+        assert "changed" in str(error), str(error)
+    else:
+        raise AssertionError("stale maintenance confirmation overwrote a newer source")
+"""
+    environment = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with config_write_lock(path):
+            future = pool.submit(
+                run_caller_owned,
+                [sys.executable, "-c", code, str(policy_home), str(blocked), writer, expected],
+                timeout=15, env=environment, max_stdout_bytes=65536, max_stderr_bytes=65536,
+            )
+            deadline = time.monotonic() + 5
+            while not blocked.exists():
+                assert not future.done(), future.result() if future.done() else None
+                assert time.monotonic() < deadline, "writer never attempted the native config lock"
+                time.sleep(0.01)
+            if writer.startswith("maintenance"):
+                if writer.endswith("source"):
+                    source_config._write(None, "new-owner", policy_home)
+                else:
+                    runtime_source_config._set_source_locked(
+                        runtime_source_config.RuntimeSource("main"), root=policy_home,
+                    )
+            else:
+                policy._set_enabled_locked(False, expected=expected, root=policy_home)
+        result = future.result(timeout=15)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    content = path.read_text(encoding="utf-8")
+    data = source_config.tomllib.loads(content)
+    assert "# retained comment" in content
+    assert str(data["unrelated"]["when"]) == "2026-10-24"
+    assert math.isnan(data["unrelated"]["number"])
+    assert data["maintenance"]["automatic"] is writer.startswith("maintenance")
+    if writer == "source":
+        assert data["source"]["ref"] == "other-owner"
+    elif writer == "maintenance-after-source":
+        assert data["source"]["ref"] == "new-owner"
+    else:
+        assert data["runtime_source"]["channel"] == "main"
+
+
+def test_config_writer_lock_is_bounded_and_reusable(policy_home: Path) -> None:
+    from worktree_manager.config_write_lock import config_write_lock
+
+    path = source_config.config_path()
+    with config_write_lock(path):
+        with pytest.raises(TimeoutError, match="writer lock unavailable"):
+            with config_write_lock(path, timeout=0.05):
+                pytest.fail("contended lock admitted a second writer")
+    with config_write_lock(path, timeout=0.05):
+        pass
 
 
 def test_manual_admission_does_not_even_read_automation_policy(

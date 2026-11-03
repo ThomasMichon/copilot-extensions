@@ -139,19 +139,84 @@ def test_controller_exit_is_not_a_state_change_witness(
     import agent_procutil.owned_process
 
     calls = []
+    def controller(argv, **kwargs):
+        calls.append((argv, kwargs))
+        if argv[-1] == "capabilities":
+            return SimpleNamespace(
+                returncode=0, stderr="", stdout=json.dumps({
+                    "schema": "copilot-extensions.bootstrap-killswitch-controller",
+                    "version": 1, "capabilities": ["conditional-mutation-v1"],
+                }),
+            )
+        return SimpleNamespace(returncode=code, stdout="controller fixture", stderr="")
+
     monkeypatch.setattr(
         agent_procutil.owned_process, "run_caller_owned",
-        lambda argv, **kwargs: calls.append((argv, kwargs)) or SimpleNamespace(
-            returncode=code, stdout="controller fixture", stderr="",
-        ),
+        controller,
     )
     with pytest.raises(manager_config.ManagerConfigError):
         policy.set_enabled(False, expected=policy.inspect_policy().revision)
-    assert len(calls) == 1
+    assert len(calls) == 2
     assert policy.inspect_policy().enabled is True
-    assert calls[0][0][-2:] == ["on", "Disabled in Manager Configuration / Installation & Updates"]
-    assert calls[0][1]["timeout"] <= 15
-    assert calls[0][1]["max_stdout_bytes"] == 65536
+    assert calls[1][0][-4:-2] == ["on", "Disabled in Manager Configuration / Installation & Updates"]
+    assert calls[1][1]["timeout"] <= 15
+    assert calls[1][1]["max_stdout_bytes"] == 65536
+
+
+@pytest.mark.parametrize("enabled,index", [(True, 0), (True, 1), (False, 0)])
+def test_new_audit_hold_between_ui_check_and_controller_is_never_overwritten(
+    switch_home: Path, monkeypatch: pytest.MonkeyPatch, enabled: bool, index: int,
+) -> None:
+    import agent_procutil.owned_process
+
+    original = policy.inspect_policy()
+    if enabled:
+        for path in original.paths:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('{"active":true,"reason":"confirmed old hold"}', encoding="utf-8")
+    confirmed = policy.inspect_policy()
+    selected = confirmed.paths[index]
+    new_hold = b'{"active":true,"reason":"new unconfirmed audit hold"}'
+    execute = agent_procutil.owned_process.run_caller_owned
+    injected = []
+
+    def race(argv, **kwargs):
+        if argv[-1] != "capabilities" and kwargs["env"]["BOOTSTRAP_KILLSWITCH_STATE_FILE"] == str(selected):
+            selected.parent.mkdir(parents=True, exist_ok=True)
+            selected.write_bytes(new_hold)
+            injected.append(selected)
+        return execute(argv, **kwargs)
+
+    monkeypatch.setattr(agent_procutil.owned_process, "run_caller_owned", race)
+    with pytest.raises(manager_config.ManagerConfigError, match="changed"):
+        policy.set_enabled(enabled, expected=confirmed.revision)
+    assert injected == [selected]
+    assert selected.read_bytes() == new_hold
+    assert policy.inspect_policy().enabled is False
+
+
+@pytest.mark.parametrize("reply", [
+    "",
+    "{",
+    '{"schema":"copilot-extensions.bootstrap-killswitch-controller","version":true,"capabilities":["conditional-mutation-v1"]}',
+    '{"schema":"copilot-extensions.bootstrap-killswitch-controller","version":1,"capabilities":[]}',
+])
+def test_downlevel_controller_never_receives_unconditional_mutation(
+    switch_home: Path, monkeypatch: pytest.MonkeyPatch, reply: str,
+) -> None:
+    import agent_procutil.owned_process
+
+    calls = []
+    monkeypatch.setattr(
+        agent_procutil.owned_process, "run_caller_owned",
+        lambda argv, **kwargs: calls.append(argv) or SimpleNamespace(
+            returncode=0 if reply else 2, stdout=reply, stderr="unknown or unsupported command",
+        ),
+    )
+    with pytest.raises(manager_config.ManagerConfigError, match="does not declare conditional"):
+        policy.set_enabled(False, expected=policy.inspect_policy().revision)
+    assert len(calls) == 1 and calls[0][-1] == "capabilities"
+    assert not list(switch_home.iterdir())
 
 
 def test_materialized_payload_keeps_both_canonical_controllers(
@@ -162,6 +227,6 @@ def test_materialized_payload_keeps_both_canonical_controllers(
     self_install._copy_payload(source, payload)
     monkeypatch.setattr(self_install, "running_payload_dir", lambda: payload)
     canonical = source.parent / "libs/bootstrap-killswitch"
-    for name in ("bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1"):
+    for name in ("bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1", "killswitch_mutation.py"):
         assert (payload / "scripts" / name).read_bytes() == (canonical / name).read_bytes()
     assert Path(policy._guard_command()[-1]).parent == payload / "scripts"

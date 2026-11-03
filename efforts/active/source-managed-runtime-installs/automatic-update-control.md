@@ -146,11 +146,30 @@ source-contract packet: 33 passed and 11 explicit POSIX-only Bash skips.
 All 11 launch modes passed through both `pwsh` and `powershell`, and all 11
 canonical controller/scope/payload cases passed. The 49 collected cases
 selected 44 and explicitly deselected the observer and four long handoff cases.
-The pinned implementation's selected product, controller and test bytes match
-the current draft. The complete 13,096-entry source archive was independently
+The pinned implementation's selected product, controller and test bytes matched
+the then-reviewed head. The complete 13,096-entry source archive was independently
 verified before effects and preserved afterward. The 184.53-second group
 included source preparation and owned cleanup inside the unchanged 300-second
 group and 30-second item limits; runner, group and supervisor exited zero.
 Private fixture state, application bytes, provided inputs and the two earlier
 refusals were preserved. No desktop observation, production setting,
 installation, service operation or rollout was performed.
+
+The subsequent implementation review identified four real gaps before merge:
+queued no-update reconciliation could miss the maintenance veto, borrowed
+Manager execution could re-read a worker's unrelated switch override, and both
+settings controls had read/modify/publish races. Source corrections now retain
+request-selected scope and serialize confirmed mutations with all existing
+writers. The switch's Bash/Python and Python-free PowerShell controllers share
+native byte-range locking and declare conditional-mutation support explicitly;
+Manager refuses a downlevel controller rather than clearing unconditionally.
+Manager source, runtime-source and maintenance writers share a bounded
+per-config lock across reading and atomic publication.
+
+Bounded private-fixture evidence includes real configuration-writer subprocess
+interleavings, replacement of an audit hold between UI validation and actual
+controller execution, and Linux Bash/PowerShell/Python writer-lock
+interoperability. The earlier Windows result belongs to the earlier source,
+not these changed controllers. New source qualification, independent current-head
+review and any separately authorized Windows execution remain pending; no
+native attempt is implied or authorized by this source correction.

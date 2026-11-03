@@ -10,6 +10,7 @@
     "deploy-manifest.json"
   ],
   "bin_entries": [
+    "killswitch_mutation.py",
     "bootstrap-check.ps1",
     "bootstrap-check.sh",
     "bootstrap-killswitch-guard.ps1",

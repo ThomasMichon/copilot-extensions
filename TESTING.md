@@ -3186,7 +3186,7 @@ cohort and production coverage targets are positively admitted; no Git, child,
 workspace mutation, tool staging or native launch is represented by these units.
 Those effectful counterparts remain in the bounded Worktrees development packet.
 
-The ten units in `tools/promotion_unit_tests/test_automatic_update_policy.py`
+The units in `tools/promotion_unit_tests/test_automatic_update_policy.py`
 exercise the actual shared automatic-policy function bodies without importing
 the native execution owner. Their source AST, strict automatic/manual identity,
 queued-policy predicate, optional legacy parser dispatch, independent-cell scope
@@ -3203,6 +3203,16 @@ delivery, confirmation/cancellation and refresh in private fixtures. The existin
 against a synthetic engine, retaining `--auto`, strict unsupported-flag refusal,
 single submission and separate no-update behavior. Platform skips are not native
 qualification, and the consoleless desktop observer remains a separate opt-in.
+Queued launch controls also distinguish the maintenance veto from a software
+hold during intentional `--no-update` reconciliation, while borrowed Manager
+execution retains each request's selected override, including an empty default.
+Real config-writer subprocess interleavings cover source/runtime-source edits
+and stale maintenance confirmations under one bounded native lock.
+`libs/bootstrap-killswitch/tests/test_mutation_process.py` checks actual
+Bash/PowerShell/Python writer lock contention, release and recovery, plus exact
+audit-byte conditional mutations. Available Linux PowerShell evidence is not
+Windows PowerShell or Windows byte-lock qualification; run the same selected
+native controller controls through each supported Windows host separately.
 The retained lifecycle deadline and guardian-pair units substitute their native
 Windows path-owner/file-open boundaries, retaining actual cleanup/deadline and
 byte-reader logic. Native ownership and file-sharing custody are not unit evidence.

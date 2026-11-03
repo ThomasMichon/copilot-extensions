@@ -107,6 +107,13 @@ def require_marketplace(root: Path | None = None) -> None:
 
 def set_source(selection: RuntimeSource, *, root: Path | None = None) -> None:
     """Replace only this policy table; retain Manager self-source and other config."""
+    from .config_write_lock import config_write_lock
+
+    with config_write_lock(source_config.config_path(root)):
+        _set_source_locked(selection, root=root)
+
+
+def _set_source_locked(selection: RuntimeSource, *, root: Path | None = None) -> None:
     path = source_config.config_path(root)
     configured_source(root)  # Invalid existing policy must not silently become a default.
     try:

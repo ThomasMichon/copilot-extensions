@@ -28,11 +28,14 @@
 #   bootstrap-killswitch-guard.ps1 on "<reason>"
 #   bootstrap-killswitch-guard.ps1 off
 #   bootstrap-killswitch-guard.ps1 status
+[CmdletBinding(PositionalBinding = $false)]
 param(
   [Parameter(Position = 0)]
   [string]$Command = "check",
   [Parameter(Position = 1)]
-  [string]$Reason = ""
+  [string]$Reason = "",
+  [ValidatePattern('^$|^[a-f0-9]{64}$')]
+  [string]$ExpectedState = ""
 )
 
 # Equivalent of bash's `set -e` for `on`/`off`: a failed directory create or
@@ -131,7 +134,73 @@ function Publish-StateFileAtomically {
     }
 }
 
+function Get-StateRevision {
+  param([string]$Path)
+  $fullPath = [IO.Path]::GetFullPath($Path)
+  $prefix = [Text.Encoding]::UTF8.GetBytes($fullPath + [char]0)
+  if ([IO.File]::Exists($fullPath)) {
+    $marker = [Text.Encoding]::UTF8.GetBytes("present" + [char]0)
+    [byte[]]$bytes = $prefix + $marker + [IO.File]::ReadAllBytes($fullPath)
+  } else {
+    [byte[]]$bytes = $prefix + [Text.Encoding]::UTF8.GetBytes("absent")
+  }
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try {
+    return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace("-", "").ToLowerInvariant()
+  } finally {
+    $sha.Dispose()
+  }
+}
+
+function Invoke-StateMutation {
+  param([string]$Path, [string]$Expected, [scriptblock]$Action)
+  $fullPath = [IO.Path]::GetFullPath($Path)
+  [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($fullPath)) | Out-Null
+  $lockPath = "$fullPath.lock"
+  foreach ($candidate in @($fullPath, $lockPath)) {
+    if ((Test-Path -LiteralPath $candidate) -and
+        (([IO.File]::GetAttributes($candidate) -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+      throw "Automatic-update switch or writer lock is linked"
+    }
+  }
+  $stream = [IO.File]::Open($lockPath, [IO.FileMode]::OpenOrCreate,
+    [IO.FileAccess]::ReadWrite, [IO.FileShare]::ReadWrite)
+  $locked = $false
+  try {
+    if ($stream.Length -eq 0) { $stream.WriteByte(0); $stream.Flush() }
+    $deadline = [Diagnostics.Stopwatch]::StartNew()
+    while (-not $locked) {
+      try {
+        $stream.Lock(0, 1)
+        $locked = $true
+      } catch [IO.IOException] {
+        if ($deadline.Elapsed.TotalSeconds -ge 5) {
+          throw "Automatic-update switch writer lock unavailable: $($_.Exception.Message)"
+        }
+        Start-Sleep -Milliseconds 25
+      }
+    }
+    if ($Expected -and (Get-StateRevision $fullPath) -cne $Expected) {
+      throw "Automatic-update switch changed; refresh before applying"
+    }
+    & $Action
+  } finally {
+    if ($locked) { $stream.Unlock(0, 1) }
+    $stream.Dispose()
+  }
+}
+
+if ($ExpectedState -and $Command -cnotin @("on", "off")) {
+  throw "ExpectedState applies only to switch mutations"
+}
+if ($ExpectedState -and $Command -ceq "off" -and $LegacyStateFile) {
+  throw "Conditional mutation requires an explicit state-file override"
+}
+
 switch ($Command) {
+  "capabilities" {
+    Write-Output '{"schema":"copilot-extensions.bootstrap-killswitch-controller","version":1,"capabilities":["conditional-mutation-v1"]}'
+  }
   "check" {
     $state = Read-KillswitchState
     if ($null -ne $state -and $state.active -eq $true) {
@@ -169,7 +238,9 @@ switch ($Command) {
     # via the same atomic replace-or-move helper used for every mutation.
     $json = $data | ConvertTo-Json
     $utf8NoBom = New-Object System.Text.UTF8Encoding $false
-    Publish-StateFileAtomically -Path $StateFile -Content ($json + "`n") -Encoding $utf8NoBom
+    Invoke-StateMutation -Path $StateFile -Expected $ExpectedState -Action {
+      Publish-StateFileAtomically -Path $StateFile -Content ($json + "`n") -Encoding $utf8NoBom
+    }
     Write-Output "[bootstrap-killswitch] ACTIVE$(if ($Reason) { " -- $Reason" })."
     Write-Output "Every plugin's sessionStart reconcile is now paused on this machine."
     $live = Get-LiveReconcilingPlugins
@@ -184,12 +255,16 @@ switch ($Command) {
   }
   "off" {
     foreach ($path in @($StateFile, $LegacyStateFile)) {
-      if ($path -and (Test-Path -LiteralPath $path)) { Remove-Item -LiteralPath $path -Force }
+      if ($path) {
+        Invoke-StateMutation -Path $path -Expected $ExpectedState -Action {
+          if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
+        }
+      }
     }
     Write-Output "[bootstrap-killswitch] cleared. Plugins resume normal sessionStart reconcile."
   }
   default {
-    [Console]::Error.WriteLine("usage: bootstrap-killswitch-guard.ps1 {check|status|on <reason>|off}")
+    [Console]::Error.WriteLine("usage: bootstrap-killswitch-guard.ps1 {check|status|capabilities|on <reason>|off} [-ExpectedState REVISION]")
     exit 2
   }
 }

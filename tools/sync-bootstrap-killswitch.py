@@ -48,7 +48,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 PLUGINS_DIR = REPO / "plugins"
 CANONICAL_DIR = REPO / "libs" / "bootstrap-killswitch"
-GUARD_NAMES = ("bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1")
+GUARD_NAMES = (
+    "bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1",
+    "killswitch_mutation.py",
+)
 
 # The exact, distinctive invocation each wired bootstrap-check.* must contain
 # -- not just the marker comment (which could survive a careless edit that
@@ -130,6 +133,10 @@ def main(argv: list[str] | None = None) -> int:
             (canonical_bytes[name], REPO / "worktree-manager/scripts" / name)
             for name in GUARD_NAMES
         )
+    pairs.append((
+        canonical_bytes["killswitch_mutation.py"],
+        REPO / "plugins/agent-machines/src/agent_machines/killswitch_mutation.py",
+    ))
 
     pretool = CANONICAL_DIR / "pretool_killswitch.py"
     if not pretool.is_file():

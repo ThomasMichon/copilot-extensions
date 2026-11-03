@@ -359,6 +359,7 @@ def test_borrowed_execution_passes_repair_to_the_canonical_body(queued, monkeypa
     request.spec = SimpleNamespace(
         backend="manager", source=driver._source_key(),
         context=(("AGENT_WORKTREES_PAYLOAD_ROOT", "/registered/native/payload"),),
+        killswitch_path="",
     )
 
     class Custody:
@@ -382,6 +383,57 @@ def test_borrowed_execution_passes_repair_to_the_canonical_body(queued, monkeypa
     arguments = ["--repair-engine", "/fresh/source with spaces", "--force"]
     assert driver.cmd_update_request(arguments) == 7
     assert seen["custody"] is True and seen["body"] == arguments
+    assert "spec" not in seen
+
+
+def test_borrowed_execution_rechecks_each_requests_switch_and_restores_worker(
+    queued, monkeypatch, tmp_path,
+):
+    import update_driver
+    from worktree_manager import __main__ as manager, maintenance_policy
+
+    seen, request = queued
+    request.state = "running"
+    policy_root = tmp_path / "manager"
+    context = (("WORKTREE_MANAGER_ROOT", str(policy_root)),)
+    held, allowed = tmp_path / "held.json", tmp_path / "allowed.json"
+    held.write_text('{"active":true}', encoding="utf-8")
+    allowed.write_text('{"active":false}', encoding="utf-8")
+    home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(held))
+
+    class Custody:
+        root = tmp_path
+        request_id = request.id
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def assert_owned(self):
+            seen["custody"] = True
+
+    monkeypatch.setattr(update_driver, "borrowed_custody", Custody)
+    monkeypatch.setattr(update_driver, "status", lambda *args, **kwargs: request)
+    monkeypatch.setattr(
+        manager, "_cmd_update",
+        lambda args: 3 if maintenance_policy.update_refusal(args) else 0,
+    )
+    for selected, arguments, expected in (
+        (str(allowed), ["--auto"], 0),
+        (str(held), ["--auto"], 3),
+        ("", ["--auto"], 0),
+        (str(held), [], 0),
+    ):
+        request.spec = update_driver.RequestSpec(
+            "manager", tuple(arguments), source=driver._source_key(),
+            context=context, killswitch_path=selected,
+        )
+        assert driver.cmd_update_request(arguments) == expected
+        assert driver.os.environ["BOOTSTRAP_KILLSWITCH_STATE_FILE"] == str(held)
     assert "spec" not in seen
 
 
@@ -429,7 +481,9 @@ def test_source_change_refuses_before_checked_participant_executes(queued, monke
 
     seen, request = queued
     request.state = "running"
-    request.spec = SimpleNamespace(backend="manager", source="different-selection", context=())
+    request.spec = SimpleNamespace(
+        backend="manager", source="different-selection", context=(), killswitch_path="",
+    )
 
     class Custody:
         root = tmp_path

@@ -178,7 +178,9 @@ def _spec_document(spec: RequestSpec) -> dict:
 def automatic_update_refusal(spec: RequestSpec) -> str | None:
     """Read applicable automation vetoes; explicit updates never consult them."""
     # Older Manager/engine update requests retained flags without the verb.
-    update = spec.argv[:1] == ("update",) or spec.backend in {"manager", "engine"}
+    update = spec.argv[:1] == ("update",) or spec.backend in {
+        "manager", "engine", "engine-launch-update",
+    }
     if not update or "--auto" not in spec.argv:
         return None
     context = dict(spec.context)
@@ -205,7 +207,7 @@ def automatic_update_refusal(spec: RequestSpec) -> str | None:
                     return "Manager maintenance.automatic is false; automatic update not run"
             except (ModuleNotFoundError, ValueError) as error:
                 return f"Manager automatic-maintenance policy invalid or unsupported: {error}; nothing ran"
-    if cell:
+    if cell or (spec.backend == "engine-launch-update" and "--no-update" in spec.argv):
         return None
     override = spec.killswitch_path
     try:
