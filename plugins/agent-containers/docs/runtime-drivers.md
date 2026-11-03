@@ -282,6 +282,13 @@ pinned to that driver, which refuses the stale incarnation instead of letting
 it reach a replacement member or Docker. Docker name collisions are recomputed
 from every inventory snapshot.
 
+An attached or detached `copilot` launch validates one member incarnation and
+then pins its name to that incarnation for the rest of the launch: SSH
+preparation and its `ProxyCommand`, credential staging, shared plugin
+preparation and cleanup all carry the validated instance id, so a member
+recreated after validation is refused by its driver rather than receiving the
+launch or its credentials.
+
 ## Not part of the protocol
 
 Restricted posture, rescue/session-evidence capture and `unpause` remain

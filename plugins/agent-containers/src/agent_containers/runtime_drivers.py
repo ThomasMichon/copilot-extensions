@@ -350,6 +350,8 @@ _drivers: dict[tuple[str, str], RuntimeDriver] = {}
 _Claimant = tuple[str, "str | None", str]
 _claims: dict[str, dict[_Claimant, tuple[RuntimeDriver | None, str, str | None]]] = {}
 DOCKER_CLAIM = "\0docker"
+# member name -> stack of (token, Route) pinned by an in-flight launch
+_pins: dict[str, list[tuple[object, "Route"]]] = {}
 
 
 @dataclass(frozen=True)
@@ -428,7 +430,8 @@ def reconcile(config: ContainersConfig) -> None:
     the same process never leaves a removed fleet's names routed to its
     retired driver, nor a replaced driver's names ambiguous.
     """
-    current = {name: f.driver for name, f in config.fleets.items() if f.driver}
+    fleets = getattr(config, "fleets", None) or {}
+    current = {name: f.driver for name, f in fleets.items() if getattr(f, "driver", None)}
     _forget(lambda handle, c: c[0] != DOCKER_CLAIM and current.get(c[1]) != c[0])
 
 
@@ -458,9 +461,39 @@ def route_handle(info: DockerContainerInfo) -> str:
     return f"{info.name}.{info.container_id}"
 
 
+def pin_incarnation(name: str, handle: str | None) -> object | None:
+    """Bind ``name`` to the driver incarnation ``handle`` until :func:`unpin`.
+
+    A launch validates one member incarnation and then addresses it by its
+    mutable name (SSH preparation, credential staging, cleanup). While pinned,
+    every routed call naming ``name`` carries the validated instance id, so a
+    member recreated after validation is refused by its driver instead of
+    receiving the launch. Docker members are not pinned (returns ``None``).
+    """
+    route = owner_of(handle) if handle and handle != name else None
+    if route is None or route.name != name or route.instance_id is None:
+        return None
+    token = object()
+    with _lock:
+        _pins.setdefault(name, []).append((token, route))
+    return token
+
+
+def unpin(token: object | None) -> None:
+    if token is None:
+        return
+    with _lock:
+        for name, stack in list(_pins.items()):
+            stack[:] = [entry for entry in stack if entry[0] is not token]
+            if not stack:
+                del _pins[name]
+
+
 def owner_of(target: str) -> Route | None:
     """The external-driver route for member/instance ``target``, if any."""
     with _lock:
+        if _pins.get(target):
+            return _pins[target][-1][1]
         claims = dict(_claims.get(target) or {})
     drivers = [v for c, v in claims.items() if c[0] != DOCKER_CLAIM]
     if not drivers:
@@ -499,6 +532,7 @@ def require_docker_member(target: str, operation: str) -> None:
 def clear_bindings() -> None:
     with _lock:
         _claims.clear()
+        _pins.clear()
         _drivers.clear()
 
 

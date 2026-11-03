@@ -1206,7 +1206,10 @@ def test_configuration_reload_reconciles_driver_routing_without_clearing(
     path = tmp_path / "containers.yaml"
     path.write_text(yaml.safe_dump({"fleets": {}}))
     reloaded = load_config(strict=True)
-    runtime_drivers.list_driver_members(reloaded)
+    refuse = lifecycle._docker
+    _docker_rows(monkeypatch)  # the reloaded config is Docker-only now
+    assert lifecycle.list_containers(reloaded) == []
+    monkeypatch.setattr(lifecycle, "_docker", refuse)
     assert runtime_drivers.owner_of("example-1") is None
     assert runtime_drivers.owner_of(old_id) is None
     argv = ["docker", "exec", "example-1", "true"]
@@ -1221,7 +1224,7 @@ def test_configuration_reload_reconciles_driver_routing_without_clearing(
         "driver": "replacement-driver", "size": 1, "relay_enabled": False,
     }}}))
     replaced = load_config(strict=True)
-    runtime_drivers.list_driver_members(replaced)
+    lifecycle.list_containers(replaced)
     route = runtime_drivers.owner_of("example-1")
     assert route.driver.name == "replacement-driver"
 
@@ -1234,3 +1237,111 @@ def test_configuration_reload_reconciles_driver_routing_without_clearing(
     assert pinned is not None and runtime_drivers.owner_of(f"example-1.{old_id}") is not None
     with pytest.raises(lifecycle.ContainerNotFoundError):
         lifecycle.inspect_container(f"example-1.{old_id}")
+
+
+@pytest.fixture
+def recreated_after_validation(fake, no_docker, tmp_path, monkeypatch):
+    """A launch validated incarnation A; the member is then recreated as B."""
+    monkeypatch.setenv("FAKE_DRIVER_CAPS", json.dumps({"ssh_transport": True}))
+    config = _write_config(tmp_path, monkeypatch, relay_enabled=False)
+    fleet.reconcile_up(config, "example")
+    (validated,) = lifecycle.list_containers(config)
+    target = SimpleNamespace(
+        name="example-1", container_id=runtime_drivers.route_handle(validated),
+        config=config, fleet=config.fleets["example"], user="vscode", actual_profile="trusted",
+        workspace_folder="/workspaces/example",
+    )
+    lifecycle.remove_container("example-1", force=True)
+    fleet.reconcile_up(config, "example")
+    (replacement,) = lifecycle.list_containers(config)
+    assert replacement.container_id != validated.container_id
+    return SimpleNamespace(target=target, old=validated.container_id,
+                           new=replacement.container_id)
+
+
+def _assert_pinned_to_validated(state, seen):
+    route = runtime_drivers.owner_of("example-1")
+    seen.append(route.instance_id)
+    # Credential staging / SSH preparation by name reach only incarnation A,
+    # which the driver refuses rather than serving replacement B.
+    with pytest.raises(runtime_drivers.DriverError):
+        runtime_drivers.run_routed(["docker", "exec", "-i", "example-1", "true"])
+    proxy = runtime_drivers.stream_routed(["docker", "exec", "-i", "example-1", "sshd"])
+    assert state.old in " ".join(proxy) and state.new not in " ".join(proxy)
+
+
+def test_attached_copilot_launch_stays_on_the_validated_incarnation(
+    recreated_after_validation, monkeypatch,
+):
+    import ssh_manager
+    import venue_copilot
+    from agent_containers import config as config_mod, copilot_venue, hosting_policy
+    from agent_containers import ssh_transport
+
+    state = recreated_after_validation
+    seen = []
+
+    class Lock:
+        def __init__(self, *a, **k): pass
+        def acquire(self, force=False): pass
+        def release(self): pass
+
+    def prepare(name, user):
+        _assert_pinned_to_validated(state, seen)
+        raise RuntimeError("stop after preparation")
+
+    monkeypatch.setattr(config_mod, "load_config", lambda *a, **k: state.target.config)
+    monkeypatch.setattr(resolver, "resolve_live_exec_target", lambda name, config=None: state.target)
+    monkeypatch.setattr(venue_copilot, "live_session_for", lambda scope: None)
+    monkeypatch.setattr(venue_copilot, "resolve_daemon_port", lambda: None)
+    monkeypatch.setattr(hosting_policy, "require_container_hosting", lambda *a, **k: None)
+    monkeypatch.setattr(ssh_manager, "TargetLock", Lock)
+    monkeypatch.setattr(ssh_transport, "prepare_ssh_config", prepare)
+    args = SimpleNamespace(name="example-1", worktree_id=None, no_relay=True, force=False,
+                           ref_files=None, ttl_seconds=None, stop=False, detach=False)
+    with pytest.raises(RuntimeError, match="stop after preparation"):
+        copilot_venue.cmd_copilot(
+            args, require_live_relay_port=lambda: 0, relay_healthy=lambda port: True,
+            busy_exit=75, creation_flags=lambda: 0,
+        )
+    assert seen == [state.old]
+    assert runtime_drivers.owner_of("example-1").instance_id is None  # unpinned
+
+
+def test_detached_copilot_launch_stays_on_the_validated_incarnation(
+    recreated_after_validation, monkeypatch, capsys,
+):
+    import ssh_manager
+    import venue_copilot
+    from agent_containers import copilot_detach, forward_keeper, hosting_policy
+
+    state = recreated_after_validation
+    seen = []
+
+    class Lock:
+        def __init__(self, *a, **k): pass
+        def acquire(self, force=False): pass
+        def release(self): pass
+
+    def launch_env(args, target, **kwargs):
+        _assert_pinned_to_validated(state, seen)
+        raise RuntimeError("stop after preparation")
+
+    monkeypatch.setattr(copilot_detach, "_resolve_target", lambda args: state.target)
+    monkeypatch.setattr(copilot_detach, "plan_for", lambda args, target: {
+        "scope_id": "anchor@example-1", "venue": {}, "identity": "anchor"})
+    monkeypatch.setattr(copilot_detach, "with_supervisor", lambda venue: venue)
+    monkeypatch.setattr(copilot_detach, "read_seed", lambda args: None)
+    monkeypatch.setattr(copilot_detach, "upload_for", lambda refs, scope: None)
+    monkeypatch.setattr(copilot_detach, "_launch_env", launch_env)
+    monkeypatch.setattr(venue_copilot, "live_session_for", lambda scope: None)
+    monkeypatch.setattr(forward_keeper, "read_state", lambda name: {})
+    monkeypatch.setattr(hosting_policy, "require_container_hosting", lambda *a, **k: None)
+    monkeypatch.setattr(ssh_manager, "TargetLock", Lock)
+    args = SimpleNamespace(name="example-1", worktree_id=None, force=False, dry_run=False)
+    assert copilot_detach.cmd_detach(
+        args, require_live_relay_port=lambda: 0, relay_healthy=lambda port: True,
+    ) != 0
+    assert "stop after preparation" in capsys.readouterr().out
+    assert seen == [state.old]
+    assert runtime_drivers.owner_of("example-1").instance_id is None  # unpinned

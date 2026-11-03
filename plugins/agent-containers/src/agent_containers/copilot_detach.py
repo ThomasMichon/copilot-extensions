@@ -424,6 +424,10 @@ def cmd_detach(
         print(busy.user_message(), file=sys.stderr)
         return busy_exit
 
+    from .runtime_drivers import pin_incarnation, unpin
+
+    # Everything below addresses the validated incarnation, not the name.
+    pin = pin_incarnation(args.name, getattr(target, "container_id", None))
     remote_env: str | None = None
     adapter: _ContainerAdapter | None = None
     try:
@@ -524,6 +528,7 @@ def cmd_detach(
                 cleanup_remote_env(args.name, target.user, remote_env)
             except RuntimeError:
                 pass
+        unpin(pin)
         target_lock.release()
 
 
