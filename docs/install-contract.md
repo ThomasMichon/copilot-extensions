@@ -4120,6 +4120,12 @@ trusted non-public HTTPS index and uses system certificates; separately
 authorized download origins can be supplied with `--download-origin`.
 The selected external wheels, first-party wheels and caller-selected
 source/notice materials are retained and checked through candidate creation.
+An active third-party local source mapping is refused before resolution;
+the producer never silently substitutes a registry origin. This includes the
+current Linux Manager `dbus-next` wheel workaround, whose removal requires the
+separate affected-feed qualification in #7606. Linux core generation is not
+qualified by the Windows path. Resolver failures include a bounded redacted
+diagnostic without feed URLs.
 The output is an inert delivery envelope; its reported `approval` is
 `unattested`. Its selected Main commit establishes ancestry only, not
 authentication. Feed qualification, material clearance, source/release

@@ -3328,6 +3328,8 @@ existing artifact-set validator; the emitted subject is still not approved.
 retained wheel and material custody, refusal paths and candidate delivery.
 Its native integration uses a disposable Git source, a local TLS feed and the
 real UV resolver and acquisition owner; it skips if Git or UV is unavailable.
+The fixture excludes inherited Git selectors, and Linux projection refuses
+the active Manager wheel mapping rather than silently changing its origin.
 The fixture feed and source do not qualify a production feed, release or
 installation.
 

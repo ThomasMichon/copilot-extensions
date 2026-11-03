@@ -4,9 +4,11 @@ from __future__ import annotations
 import argparse
 from contextlib import nullcontext
 from dataclasses import dataclass
+import importlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import time
@@ -62,9 +64,12 @@ def project_core_inputs(
     _target(target, 10_000, deadline)
     manifest = _core_manifest(manifest_data)
     validate_source_binding(manifest, source)
-    groups, _ranges = bundle_lock.collect_inputs(
-        source, groups=("core",), target_environment=target["environment"],
-    )
+    try:
+        groups, _ranges = bundle_lock.collect_inputs(
+            source, groups=("core",), target_environment=target["environment"],
+        )
+    except bundle_lock.InputError as error:
+        raise ProfileError(f"native core input projection refused: {error}") from error
     versions = {
         canonicalize_name(row["name"]): str(parse_wheel_filename(row["filename"])[1])
         for row in manifest["wheels"]
@@ -87,6 +92,14 @@ def _read_lock(path: Path, deadline: float) -> bytes:
     return content
 
 
+def _producer_procutil():
+    return native.source_inputs.engine._procutil(
+        native.source_inputs.engine.FrozenInputs(
+            ROOT, (ROOT / "libs" / "agent-procutil",), "",
+        ),
+    )
+
+
 def _run_compile(transaction, *, deadline: float) -> None:
     _check_deadline(deadline)
     try:
@@ -98,7 +111,16 @@ def _run_compile(transaction, *, deadline: float) -> None:
     except subprocess.TimeoutExpired:
         raise ProfileError("native core dependency resolution timed out") from None
     if result.returncode:
-        raise ProfileError(f"native core dependency resolution failed (exit {result.returncode})")
+        procutil = _producer_procutil()
+        diagnostics = importlib.import_module(procutil.__name__ + ".diagnostics")
+        detail = diagnostics.safe_diagnostic_text(
+            result.stderr.decode("utf-8", errors="replace"), 400, transaction.environment,
+        )
+        detail = re.sub(r"(?i)\b(?:https?|file)://\S+", "[URL]", detail)
+        raise ProfileError(
+            f"native core dependency resolution failed (exit {result.returncode}): "
+            + (detail or "no diagnostic returned"),
+        )
     _check_deadline(deadline)
 
 
@@ -200,11 +222,7 @@ def _build_from_snapshot(
                         max_closure_bytes=max_bytes, max_temporary_bytes=2 * max_bytes,
                     ),
                     deadline=deadline, ssl_context=feed.context, proxies=feed.proxies,
-                    procutil=native.source_inputs.engine._procutil(
-                        native.source_inputs.engine.FrozenInputs(
-                            ROOT, (ROOT / "libs" / "agent-procutil",), "",
-                        ),
-                    ),
+                    procutil=_producer_procutil(),
                 ) if files else nullcontext(None)
                 with acquisition as acquired:
                     paths = dict(first.paths)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from copy import deepcopy
 from datetime import datetime, timezone
 import hashlib
 import io
@@ -28,6 +29,48 @@ from test_installer_wheel_acquisition import (
 from test_promotion_python_artifacts import _wheel_bytes
 
 
+def _fixture_git(root, git, *arguments):
+    environment = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
+    environment.update({
+        "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull,
+        "GIT_TERMINAL_PROMPT": "0",
+    })
+    return subprocess.run(
+        [git, "-C", str(root), "-c", f"core.hooksPath={root / 'no-hooks'}",
+         "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+         "-c", "commit.gpgsign=false", *arguments],
+        env=environment, capture_output=True, text=True, check=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    ).stdout.strip()
+
+
+def test_git_fixture_ignores_foreign_repository_selectors(tmp_path, monkeypatch):
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("git is not installed")
+    foreign, fixture = tmp_path / "foreign", tmp_path / "fixture"
+    foreign.mkdir()
+    fixture.mkdir()
+    _fixture_git(foreign, git, "init", "-q")
+    sentinel = foreign / "sentinel.txt"
+    sentinel.write_text("original")
+    _fixture_git(foreign, git, "add", "-A")
+    _fixture_git(foreign, git, "commit", "-qm", "foreign baseline")
+    original_head = _fixture_git(foreign, git, "rev-parse", "HEAD")
+    original_index = (foreign / ".git" / "index").read_bytes()
+    sentinel.write_text("changed but not staged")
+    (fixture / "selected.txt").write_text("fixture")
+    monkeypatch.setenv("GIT_DIR", str(foreign / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(foreign))
+    monkeypatch.setenv("GIT_INDEX_FILE", str(foreign / ".git" / "index"))
+    _fixture_git(fixture, git, "init", "-q")
+    assert (fixture / ".git").is_dir()
+    _fixture_git(fixture, git, "add", "-A")
+    _fixture_git(fixture, git, "commit", "-qm", "fixture only")
+    assert _fixture_git(foreign, git, "rev-parse", "HEAD") == original_head
+    assert (foreign / ".git" / "index").read_bytes() == original_index
+
+
 def test_core_projection_uses_the_manifest_roots_and_source_requirements(tmp_path, monkeypatch):
     from core_native_delivery import project_core_inputs
 
@@ -51,6 +94,74 @@ def test_core_projection_refuses_changed_source_before_resolution(tmp_path, monk
             tmp_path, json.dumps(manifest).encode(), _record()["target"],
             deadline=time.monotonic() + 60,
         )
+
+
+def test_core_projection_refuses_active_local_wheel_without_registry_substitution(tmp_path, monkeypatch):
+    import core_native_delivery as producer
+
+    _wheels, manifest, _ = _build(tmp_path, monkeypatch)
+    original = producer.native.dependencies._toml(producer.ROOT / "worktree-manager" / "pyproject.toml")
+    requirement = next(value for value in original["project"]["dependencies"] if value.startswith("dbus-next"))
+    relative = original["tool"]["uv"]["sources"]["dbus-next"]["path"]
+    manager = tmp_path / "worktree-manager"
+    wheel = manager / relative
+    wheel.parent.mkdir(parents=True)
+    wheel.write_bytes((producer.ROOT / "worktree-manager" / relative).read_bytes())
+    (manager / "pyproject.toml").write_text(
+        '[project]\nname = ' + json.dumps(original["project"]["name"]) + '\nversion = "1.0"\n'
+        + 'dependencies = [' + json.dumps(requirement) + ']\n'
+        + '[tool.uv.sources]\ndbus-next = {path = ' + json.dumps(relative) + '}\n',
+    )
+    monkeypatch.setattr(producer, "validate_source_binding", lambda *_args: None)
+    target = deepcopy(_record()["target"])
+    target["environment"].update(
+        os_name="posix", sys_platform="linux", platform_system="Linux",
+        platform_machine="x86_64", platform_release="6",
+    )
+    target["tags"] = ["py3-none-any"]
+    with pytest.raises(ProfileError, match="native core input projection refused.*dbus-next"):
+        producer.project_core_inputs(
+            tmp_path, json.dumps(manifest).encode(), target, deadline=time.monotonic() + 60,
+        )
+
+
+def test_compile_failure_reports_bounded_sanitized_diagnostic(monkeypatch, tmp_path):
+    import core_native_delivery as producer
+
+    secret = "private-example-value"
+    stderr = (
+        "No solution: fixture>=2 conflicts with fixture<2\n"
+        + "https://private.example.invalid/simple?token=" + secret + "\n"
+        + "credential=" + secret + "\n" + "more details " * 200
+    ).encode()
+    monkeypatch.setattr(
+        producer.subprocess, "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=1, stdout=b"", stderr=stderr),
+    )
+    transaction = SimpleNamespace(argv=("fixture-uv",), cwd=tmp_path, environment={"FEED_TOKEN": secret})
+    with pytest.raises(ProfileError) as failure:
+        producer._run_compile(transaction, deadline=time.monotonic() + 60)
+    message = str(failure.value)
+    assert "fixture>=2" in message
+    assert secret not in message and "private.example.invalid" not in message
+    assert len(message) < 600
+
+
+def test_compile_timeout_does_not_expose_command_or_output(monkeypatch, tmp_path):
+    import core_native_delivery as producer
+
+    def timeout(*_args, **_kwargs):
+        raise subprocess.TimeoutExpired(
+            cmd=["https://private.example.invalid/input"], timeout=1,
+            output=b"private diagnostic",
+        )
+
+    monkeypatch.setattr(producer.subprocess, "run", timeout)
+    transaction = SimpleNamespace(argv=("fixture-uv",), cwd=tmp_path, environment={})
+    with pytest.raises(ProfileError, match="native core dependency resolution timed out") as failure:
+        producer._run_compile(transaction, deadline=time.monotonic() + 60)
+    assert "private" not in str(failure.value)
+    assert failure.value.__suppress_context__
 
 
 @pytest.fixture
@@ -218,24 +329,10 @@ def test_core_delivery_runs_native_resolver_against_local_tls(tmp_path, monkeypa
     if uv is None or git is None:
         pytest.skip("native uv and git are required")
     producer, wheels, manifest, state, _wheel, digest = tls_source
-    git_environment = dict(os.environ) | {
-        "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull,
-        "GIT_TERMINAL_PROMPT": "0",
-    }
-
-    def run_git(*arguments):
-        return subprocess.run(
-            [git, "-C", str(tmp_path), "-c", f"core.hooksPath={tmp_path / 'no-hooks'}",
-             "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
-             "-c", "commit.gpgsign=false", *arguments],
-            env=git_environment, capture_output=True, text=True, check=True, timeout=30,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-        ).stdout.strip()
-
-    run_git("init", "-q")
-    run_git("add", "-A")
-    run_git("commit", "-qm", "fixture source")
-    commit = run_git("rev-parse", "HEAD")
+    _fixture_git(tmp_path, git, "init", "-q")
+    _fixture_git(tmp_path, git, "add", "-A")
+    _fixture_git(tmp_path, git, "commit", "-qm", "fixture source")
+    commit = _fixture_git(tmp_path, git, "rev-parse", "HEAD")
     manifest_path = tmp_path / "selected-core.json"
     manifest_path.write_bytes(json.dumps(manifest).encode())
     for key in tuple(os.environ):
