@@ -62,6 +62,8 @@ def test_main_parser_and_lazy_dispatch_are_owned_and_strict(name):
 def test_actual_main_global_project_selection(monkeypatch, capsys):
     calls = []
     monkeypatch.setattr(cli, "cmd_agenda", lambda args: calls.append(args) or 0)
+    if "COMMAND_MAP" in vars(main):
+        monkeypatch.setitem(main.COMMAND_MAP, "agenda-feed", cli.cmd_agenda)
     monkeypatch.setattr(main, "_guard_project_scope", lambda project, command: None)
     monkeypatch.setattr(
         main.front_door_cli,

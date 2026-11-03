@@ -42,4 +42,7 @@ CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "update_launch_cli",
     "worktree_ops_cli",
     "worktree_status_audit",
+    "agenda_cli",
+    "owner_observation_cli",
+    "worktree_data_cli",
 })

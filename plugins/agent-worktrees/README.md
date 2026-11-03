@@ -19,6 +19,10 @@ For passive selected worktree snapshots, partial observed-change history and
 held updates, see [worktree observations](docs/worktree-observations.md).
 The optional receiver does not start a host or become a canonical mutation ledger.
 
+For explicit new data-home allocation and passive retained-store discovery,
+see [owner-managed worktree data](docs/worktree-data.md). It reuses project-data
+ownership without moving active agendas or granting session/resource authority.
+
 The [prepared guarded-anchor map](docs/guarded-anchor-map.md) keeps
 cross-repository write evaluation file-only. Managed mutations and preparation
 publish caller-specific facts; `refresh-guards --repo <checkout> --json`

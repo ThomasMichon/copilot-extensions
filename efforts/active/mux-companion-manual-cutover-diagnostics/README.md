@@ -460,9 +460,10 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       widget, provider or source PR alone does not complete this root.
       S0, S1, the selected worktree receiver/Manager adapter, rich agenda
       owner reader, safe process-local save capture and known-session Bridge
-      provider are merged. Native mutation intake, agenda/Bridge consumer
-      integration and membership remain open; whole S2-S5 and original root
-      gates are unchanged.
+      provider are merged. #10199 also delivers qualified resident mutation
+      intake, bounded Bridge membership and the reviewed data-lifetime design.
+      Agenda/Bridge consumer integration, durable placement/archival and whole
+      S2-S5 and original root gates remain open.
 
 ## Validation Plan
 
@@ -539,6 +540,7 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+- [2026-11-03 - Native intake and membership merged; durable discovery next](journal/2026/11.03-sidecar-native-membership.md)
 - [2026-11-02 - Owner readers and first Manager attachment merged; native intake next](journal/2026/11.02-sidecar-owner-consumers.md)
 - [2026-11-02 - Selected worktree receiver merged; source joins next](journal/2026/11.02-sidecar-observation-receiver.md)
 

@@ -29,7 +29,7 @@ foreach ($argument in $forwardArgs) {
         $worktreesAlias = $true
         continue
     }
-    $passiveObservation = $argument -in @('worktree-observations', 'worktree-observation-history')
+    $passiveObservation = $argument -in @('worktree-observations', 'worktree-observation-history', 'worktree-data-read')
     break
 }
 $scriptDir = Join-Path $payloadRoot 'scripts'
