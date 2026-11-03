@@ -10,9 +10,9 @@ from .provision import restart_needed
 from . import repository_bootstrap
 
 
-def cmd_setup(rest: list[str], *, banner: str) -> int:
+def cmd_setup(rest: list[str], *, banner: str, register: bool = False) -> int:
     try:
-        args = repository_bootstrap.parse(rest)
+        args = repository_bootstrap.parse(rest, register=register)
     except SystemExit as error:
         return int(error.code)
     do_apply = args.apply
@@ -21,7 +21,8 @@ def cmd_setup(rest: list[str], *, banner: str) -> int:
     core = core_status()
 
     print()
-    print(f"  {banner} — setup {'(APPLY)' if do_apply else '(plan / dry-run)'}")
+    command_name = "register" if register else "setup"
+    print(f"  {banner} — {command_name} {'(APPLY)' if do_apply else '(plan / dry-run)'}")
     print()
     if not actions:
         print("  prerequisites: all satisfied — nothing to provision.")
