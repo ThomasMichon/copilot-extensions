@@ -5,8 +5,6 @@ from __future__ import annotations
 import os
 import subprocess
 import time
-from contextlib import contextmanager
-from collections.abc import Iterator
 
 from agent_procutil import (
     contained_test_mode,
@@ -14,21 +12,10 @@ from agent_procutil import (
     spawn_sync_in_kill_on_close_job,
 )
 from . import engine_posix_process
+from .engine_posix_process import EngineCleanupError as EngineCleanupError, cleanup_phase as cleanup_phase
 
 OWNED_GROUP_ENV = "WORKTREE_MANAGER_ENGINE_OWNS_PROCESS_GROUP"
 _WINDOWS = os.name == "nt"
-
-
-class EngineCleanupError(RuntimeError):
-    """An owned process or pipe resource failed its retirement operation."""
-
-
-@contextmanager
-def cleanup_phase() -> Iterator[None]:
-    try:
-        yield
-    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
-        raise EngineCleanupError(f"owned engine resource retirement failed: {exc}") from exc
 
 
 def _communicate(process, argv, timeout, cancelled):

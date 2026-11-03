@@ -114,6 +114,8 @@ class OwnerCommands:
     def probe(self, cancelled: Event) -> str:
         try:
             base = ec.engine_base_command()
+        except EngineCleanupError as exc:
+            raise TimelineCleanupError(str(exc)) from exc
         except ec.EngineError as exc:
             raise OwnerReadError("unavailable", str(exc)) from exc
         if not base or not Path(base[0]).is_absolute():

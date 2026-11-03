@@ -21,7 +21,7 @@ from . import engine_client as ec
 from .companion_client import cancellable_read_runner
 from .engine_process import EngineCleanupError, cleanup_phase
 from .engine_environment import _engine_environment
-from .engine_posix_process import _OWNER, read_completion_receipt
+from .engine_posix_process import _OWNER, read_completion_receipt, output_pipe, close_descriptor, close_stream
 from .agenda_contract import AgendaUnavailable, CONTRACT_VERSIONS, MAX_FRAME_BYTES, _TRANSIENT_ERRORS, bounded_json
 
 STARTUP_TIMEOUT = 5.0
@@ -224,8 +224,7 @@ def _owned_process(argv: list[str], cwd: str):
     # Reuse Manager's unreaped POSIX group-owner protocol; only its stdout
     # destination differs. This reserves the group identity through cleanup.
     if os.name != "nt" and not contained_test_mode():
-        read_fd, write_fd = os.pipe()
-        output = os.fdopen(read_fd, "rb")
+        output, write_fd = output_pipe()
         try:
             owner = subprocess.Popen(
                 [sys.executable, "-B", "-c", _OWNER, json.dumps(argv), str(write_fd)],
@@ -233,10 +232,10 @@ def _owned_process(argv: list[str], cwd: str):
                 env=env, cwd=cwd, start_new_session=True, pass_fds=(write_fd,),
             )
         except BaseException:
-            output.close()
+            close_stream(output)
             raise
         finally:
-            os.close(write_fd)
+            close_descriptor(write_fd)
         try:
             yield output, owner.stderr, lambda stopped: read_completion_receipt(
                 owner.stdout, argv=argv, timeout=None, cancelled=stopped,

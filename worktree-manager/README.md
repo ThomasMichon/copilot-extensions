@@ -94,6 +94,18 @@ again. Only a typed failure of owned process/pipe retirement latches cleanup
 and blocks replacement; ordinary transport failures do not poison that gate.
 Adapters normalize read failures into `TimelineSourceError` and tag failed
 owned-resource retirement with `TimelineCleanupError`, including during stop.
+The same retirement marker covers POSIX group sweep/reaping and portable
+process/pipe cleanup; an ordinary read timeout remains distinct. Legacy Agenda
+reports terminal retirement failures without retrying its subscription or
+disabling Summary/Timeline. Its observer-local terminal gate also prevents
+Refresh from starting a replacement while custody is unresolved. Scoped engine
+readers retain terminal failures, and the base engine API preserves their type
+instead of treating them as compatibility errors or an empty result.
+Agenda's terminal gate is separate from Timeline and base-engine read custody.
+Base-engine and read-only Picker-review scopes refuse further owned reads after
+a retirement failure; compatibility fallback does not reinterpret that failure
+as an unsupported flag. POSIX capture-file/descriptor closure and streamed
+diagnostic cleanup use the same operation-local retirement classification.
 The [implementation and validation plan](../efforts/active/mux-companion-manual-cutover-diagnostics/sidecar-live-timeline.md)
 retains the provider, joined-app, native-client and installed-adoption gates.
 
