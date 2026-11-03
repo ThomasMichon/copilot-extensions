@@ -10,6 +10,14 @@
 
 ## Guiding Intent
 
+The continuing objective obeys
+[authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement):
+launch/scheduled automatic work is suppressible, explicit/manual update is not.
+Old recovery/custody/provenance and stale transaction fences cannot veto that
+manual replacement. Incoming readiness plus all current selections is its
+success boundary, independently of central-daemon self-retirement or an optional
+single finite long-grace fallback. Session hosts/keepers and user state survive.
+
 An already-healthy session must not wait for unrelated runtime installation.
 Keep adopted automatic maintenance available, coordinated and observable rather
 than disabling updates or starting an independent updater for every launch.
@@ -258,6 +266,11 @@ the requested coordinated-background behavior.
 
 ## Validation Plan
 
+- [ ] Prove automatic/manual classification through launch, schedule and explicit
+  entry points under inhibition and stale incumbent state. Keep incoming
+  readiness/current-selection success independent of old drain/cleanup. Do not
+  introduce periodic reaping; any finite central-only fallback rechecks current
+  generation/role at mutation and excludes sessions, keepers and clients.
 ### Normal-process follow-up (#9522; agent-recommended)
 
 - [x] Guidance surfaces agree on normal native creation, independent visibility

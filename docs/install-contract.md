@@ -12,6 +12,52 @@ it needs. This document is the reference, and
 explicitly while developing; publication validation belongs in CI, not a
 git `pre-push` hook).
 
+## Authoritative replacement and completion
+
+The canonical intent is
+[authoritative runtime replacement](../visions/installer/README.md#authoritative-runtime-replacement).
+This section is its normative installer contract, not a declaration that all
+existing installers comply. Per-component descriptions below record current
+mechanisms; legacy refusal/recovery descriptions do not redefine the target.
+
+An explicit/manual update installs admitted incoming runtime code independently
+of incumbent recovery, graceful/ZDD support, old ownership/custody/provenance,
+maintenance banners and stale installer transactions/queue fences. Such evidence
+may select reuse or limit cleanup, never veto the new installation. KillSwitch
+and maintenance inhibition apply only to automatic requests, including scheduled,
+sessionStart and Manager-launch preparation; explicit update retains those
+preferences without being suppressed by them.
+
+Success requires every requested incoming runtime ready, all required central
+services running the incoming generation, and every applicable current-version
+pointer, route, launcher and service/task registration selecting it. Do not
+report whole-set success for queued work, staging alone, Manager alone or an
+unhealthy selected candidate. Incoming authenticity/admission, real build,
+authentication, permissions, I/O and health failures remain honest failures.
+One live installer mutation owner prevents conflicting writes; stale records
+are not proof of a competing writer and old recovery is not its permission gate.
+
+Outgoing central daemons observe supersession, close admission, attempt drain
+and self-clean independently. Neither predecessor drain/exit nor cleanup gates
+success or rolls back a healthy incoming generation. One optional finite
+asynchronous fallback may force-retire remaining outgoing central daemons and
+obsolete central-service schedules after a grace longer than expected cutover.
+Do not require a periodic resident reaper. At each mutation, revalidate native
+identity, installation, explicit central-service role and then-current selection,
+including registrations: delayed cleanup must never kill a future or reselected
+generation. Session hosts/keepers, session-owned Bridge/agent processes,
+foreground clients and protected connectivity are excluded, including children
+of a central service. Unprovable retirement is skipped and reported separately.
+Never sweep by interpreter name.
+
+Runtime code, old daemon generations, stale installer transactions and owned
+launchers/registrations are replaceable; configuration, credentials, repositories,
+worktrees, sessions and databases are not. This is not factory reset. The
+[architecture adoption boundary](architecture.md#replacement-lifecycle-target-and-current-adoption)
+records remaining gaps. Every installer/update effort and bug-fix review must
+cite this contract and state which completion/preservation controls it exercises;
+passing legacy refusal tests alone does not establish conformance.
+
 The independently maintained wheel-first transition has a
 [per-application support and cutover guide](patterns/fast-application-install-and-cutover.md)
 and a [canonical ideal-flow/app-tracking map](../efforts/active/source-managed-runtime-installs/wheel-first-contributors.md).

@@ -8,6 +8,23 @@ and [recognizer manifests](../../../visions/installer/README.md#recognizer-manif
 
 ## Required direction
 
+Completion is governed by
+[authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement):
+all requested incoming runtimes ready/running where required, and all current
+pointers/routes/launchers/registrations selecting them. This is separate from
+outgoing drain, exit and cleanup. Automatic-only holds, old custody/provenance,
+missing monitor capabilities and stale queue/foundation state never veto manual
+replacement. Preserve configuration, credentials, repositories, worktrees,
+sessions and databases.
+
+Outgoing central daemons self-retire; optionally launch one finite async
+central-daemon/obsolete-central-schedule fallback after a longer-than-cutover
+grace. Qualify mutation-time role, native identity and then-current selection,
+including future/reselected generations, before claiming that fallback complete.
+Session hosts/keepers, session-owned Bridge/agent processes, foreground clients
+and protected connectivity are never its targets. This is not a periodic reaper
+or a prerequisite for successful installation.
+
 The global-install binstub intercepts `<repo> update` and routes
 `worktree-manager update --project=<repo>` to the canonical upstream bootstrap.
 The default is the published GitHub Main one-line installation flow

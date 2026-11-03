@@ -8,6 +8,15 @@ that pattern to this repository.
 
 ## Active effort index
 
+Installer/update campaigns and bug-fix slices, including already-active work,
+must cite and evaluate their objective and completion/validation gates against
+[authoritative runtime replacement](../visions/installer/README.md#authoritative-runtime-replacement).
+Incoming readiness plus complete current selection defines installation success;
+best-effort old recovery and retirement are separate. Preserve automatic/manual
+classification, user state and session keepers, and protect the then-current
+generation during central-only cleanup. Record remaining adoption work without
+rewriting historical journal evidence or treating a source merge as rollout.
+
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Copilot CLI Live Controls](active/copilot-cli-live-controls/README.md) | Active; native controls qualified, implementation review and release pending | #10149; preserves native updater, active sessions and isolated execution controls |

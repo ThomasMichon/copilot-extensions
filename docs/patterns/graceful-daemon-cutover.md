@@ -22,7 +22,8 @@
 ## The problem
 
 **Ordinary update and repair prefer incoming-start-first cutover** in the
-[installer vision](../../visions/installer/README.md): publish and start the
+[authoritative replacement contract](../../visions/installer/README.md#authoritative-runtime-replacement):
+publish and start the
 selected generation independently of the incumbent, then let the displaced
 owner observe supersession and retire itself. A working old IPC contract is
 not a replacement prerequisite. An authorized update includes the bounded cold
@@ -51,9 +52,12 @@ handle blocks the swap, and a mid-turn kill loses a non-resumable Copilot turn.
 
 The current rule:
 
-> Handoff is best effort. Prefer preserving in-flight work, but an incompatible,
-> unavailable or non-settling handoff permits prompt owned-scope shutdown and
-> cold takeover. Consumers and sub-daemons must tolerate interruption.
+> Handoff is best effort, not permission to install. Success is incoming
+> readiness and complete current selection, independent of predecessor drain,
+> exit and cleanup. Outgoing central daemons self-retire; an optional finite
+> asynchronous fallback after a longer grace period excludes session-keeping
+> processes. Consumers must tolerate interrupted central-service work without
+> treating protected sessions as disposable.
 
 This is the target contract. The API and per-plugin adoption sections below
 describe the existing graceful path; they do not prove that every adopter
@@ -71,10 +75,12 @@ old wire contract still works:
 START NEW (prepared, not a second exclusive writer)
   -> NEW attempts handoff / announces the selected replacement to OLD
   -> OLD observes the announcement and independently recognizes staleness
-  -> NEW becomes ready and authoritative; NEW declares installation complete
+  -> all requested NEW runtimes are ready; all current selections name NEW
+  -> NEW declares installation complete, without waiting for OLD
   -> OLD closes admission and attempts drain
-  -> NEW's existing lifecycle owner waits a bounded grace period
-  -> if OLD remains, that owner attempts identity-bound forced retirement
+  -> OLD self-retires and cleans its obsolete central-service registrations
+  -> optionally, one finite async fallback waits a longer-than-cutover grace
+  -> fallback revalidates current selection and retires only outgoing central roles
 ```
 
 The announcement flows new-to-old; transferred state flows through the owning
@@ -84,16 +90,20 @@ Full current-generation identity, not numeric version ordering, lets the old
 owner recognize supersession even if notification is lost.
 
 Installation completion and predecessor retirement are different outcomes.
-The installer returns after durable new authority and serving readiness; the
-new resident's existing retirement reconciler owns the grace deadline and
-cleanup independently of installer lifetime. Accepted work gets a best-effort
-drain opportunity, not an indefinite veto: expiry may interrupt it and must
-retain truthful recovery/unknown outcomes. Recheck exact route and native birth
-before forcing; retain unconfirmed custody, never kill foreign or separately
-owned processes or roll back a healthy successor.
+The installer returns after all requested incoming readiness and selections,
+not predecessor settlement. No periodic resident retirement reconciler is
+required. Accepted central-service work gets a best-effort drain opportunity;
+the optional fallback may interrupt it only after the longer grace and must
+retain truthful recovery/unknown outcomes. Recheck then-current selection,
+registration contents, explicit central-service role, installation and native
+birth at each mutation. Never kill a later/reselected generation, session
+host/keeper, session-owned Bridge/agent process, foreground client, protected
+connectivity or unrelated process, including session children of central
+daemons. Unknown cleanup evidence limits cleanup, not installation. No healthy
+incoming generation is rolled back for predecessor failure.
 
 This is the target architecture, not a claim that every current adopter has
-implemented successor-owned grace-period forced retirement.
+implemented this complete completion/retirement contract.
 
 ### Existing compatible active/passive protocol
 
@@ -149,8 +159,9 @@ grace-forced exit of accepted work; successor-owned bounded grace escalation is
 the target above, not yet a qualification claim for this path. An incompatible or unreachable predecessor
 instead uses the existing cutover owner's bounded native retirement fallback
 after successor serving readiness. Cleanup failure cannot reverse that healthy
-incoming generation. An unrouted or identity-unknown owner still refuses
-installation; wire compatibility is not native ownership proof.
+incoming generation. Current implementation still refuses an unrouted or identity-unknown owner;
+wire compatibility is not native ownership proof. This is a remaining
+authoritative-replacement adoption gap, not the desired admission rule.
 The owner reserves canonical execution
 protection before persisting retirement intent, cancels exact custody only after proven precommit
 rollback, and keeps a pending dev claim through duplicate release attempts.
@@ -176,8 +187,14 @@ blocks a replacement's readiness on its accepted-work retirement.
 An authorized selected generation must not be held hostage by an incompatible
 predecessor, a failed control-plane handshake, a stuck drain or a missing final
 checkpoint. A development generation may break every old handoff/wire contract.
-Use the existing installation and service lifecycle authority, not a second
-reaper or a parallel update loop:
+Use one incoming installation mutation owner, not a parallel updater. The
+following describes the existing owned cold-takeover mechanism; its incumbent
+proof and settlement prerequisites are not the target manual-install admission
+contract. Future adoption must satisfy
+[authoritative runtime replacement](../../visions/installer/README.md#authoritative-runtime-replacement)
+without requiring that old recovery succeeds. Destructive cleanup still
+requires exact scoped identity; missing cleanup proof skips that action rather
+than vetoing incoming installation:
 
 1. Confirm a completed, admitted target is still selected and that this
    replacement owns the service/installation transition. Serialize it with

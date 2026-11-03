@@ -611,6 +611,17 @@ work.
 
 ### Contract impact (required for CLI and service-boundary changes)
 
+Installer/update changes, including bug fixes and plan-only effort revisions,
+also cite the installer's
+[authoritative runtime replacement](visions/installer/README.md#authoritative-runtime-replacement)
+in their **Contract impact** assessment. Evaluate incoming readiness and all
+current selections separately from outgoing retirement; identify any remaining
+incumbent recovery/provenance/fence veto, automatic/manual classification,
+state/session preservation and delayed central-only cleanup boundary. Name
+focused acceptance controls or the tracked remaining adoption work. Legacy
+refusal behavior is evidence of current implementation, not an exemption from
+the target. A vision/contract amendment clears review before runtime realization.
+
 Commands, arguments, defaults, exit codes and JSON exchanges are service
 contracts, even when the caller and receiver ship from this repository.
 For a new or changed independently deployed boundary, include a **Contract
@@ -651,7 +662,12 @@ statement in the PR description.
    lifecycle owner verifies termination scope, prevents overlapping exclusive
    owners, and supports consumer retries and crash-consistent child recovery.
    Do not claim zero interruption or make old-contract compatibility a
-   replacement veto. If claiming a lifecycle exemption,
+   replacement veto. For replacement, evaluate the canonical incoming-readiness/
+   all-current-selections success boundary independently of predecessor exit.
+   Any optional finite async fallback has a longer-than-cutover grace and
+   mutation-time current-generation/central-role checks, never session hosts/
+   keepers, session-owned processes or foreground clients as targets. Do not
+   introduce a periodic resident retirement reaper. If claiming a lifecycle exemption,
    explain either **why the process is not a long-lived resident daemon** and
    which lifecycle pattern governs it instead, **or** why it fits the
    documented lighter

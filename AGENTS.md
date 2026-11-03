@@ -161,6 +161,16 @@ below-altitude) *and* check it against the **patterns** and their invariants. A
 below-altitude change (lint, typo, dependency bump) needs neither; a design change
 owes both. Guide, not gate.
 
+Installer/update bug fixes, plans and implementation work must cite
+[authoritative runtime replacement](visions/installer/README.md#authoritative-runtime-replacement)
+and evaluate completion against it: incoming readiness plus all current
+selections, no incumbent-recovery/provenance/stale-fence veto, auto-update-only
+inhibition, preserved user state and independent central-only retirement.
+Record current implementation gaps honestly; existing refusal tests or effort
+custody language do not supersede that goal. The
+[install contract](docs/install-contract.md#authoritative-replacement-and-completion)
+and architecture distinguish target from adoption.
+
 Before opening any PR, complete the documentation-impact review in
 `CONTRIBUTING.md` against the final diff, regardless of change classification.
 Repeat it after material scope or implementation changes. This requirement also
