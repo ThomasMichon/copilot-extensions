@@ -363,7 +363,11 @@ removes an older Python, or rewrites machine PATH. Existing parent terminals
 cannot inherit a child's environment changes and must be restarted; machine
 PATH precedence remains administrator-owned. Automatic, detached, targeted or
 inspection/recovery commands, failed updates and contained tests do not persist
-this preference.
+this preference. Duplicate matching is conservative: distinct Unicode directory
+names are preserved. A physical Python directory containing `%` is refused
+before writing an expandable user PATH, rather than publishing a different
+directory after Windows variable expansion; literal registry strings retain
+their original type.
 
 The Manager is a standalone canonical Python-installer-engine adopter. Bootstrap
 selects Python 3.11 or newer without running project resolution, then the engine

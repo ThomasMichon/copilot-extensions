@@ -6,16 +6,19 @@ import os
 from pathlib import Path
 import sys
 
+_ASCII_CASE = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
+
 
 def _prepend(path: str, directory: str) -> str:
     if not Path(directory).is_absolute() or any(
         character == ";" or ord(character) < 32 for character in directory
     ):
         raise ValueError("Python directory cannot be represented safely on PATH")
-    key = directory.rstrip("\\").casefold()
+    # Keep equivalent non-ASCII aliases rather than merge distinct Windows names.
+    key = directory.rstrip("\\").translate(_ASCII_CASE)
     return ";".join([
         directory,
-        *(entry for entry in path.split(";") if entry and entry.rstrip("\\").casefold() != key),
+        *(entry for entry in path.split(";") if entry and entry.rstrip("\\").translate(_ASCII_CASE) != key),
     ])
 
 
@@ -46,6 +49,8 @@ def _publish_user_path(directory: str) -> bool:
             path, kind = "", winreg.REG_EXPAND_SZ
         if not isinstance(path, str) or kind not in (winreg.REG_SZ, winreg.REG_EXPAND_SZ):
             raise ValueError("User PATH is not a registry string; it was not changed")
+        if kind == winreg.REG_EXPAND_SZ and "%" in directory:
+            raise ValueError("Physical Python directory contains '%' and cannot be published on expandable user PATH")
         preferred = _prepend(path, directory)
         if preferred == path:
             return False

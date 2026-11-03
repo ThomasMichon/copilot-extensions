@@ -55,6 +55,32 @@ def test_waited_update_publishes_physical_base_once_and_keeps_other_entries(publ
     assert len(state.writes) == state.notifications == 1
 
 
+def test_publication_preserves_distinct_windows_names_with_equal_unicode_casefold(public_python):
+    state = public_python
+    directory = str(state.base.parent.parent / "Stra\N{LATIN SMALL LETTER SHARP S}e")
+    unrelated = str(state.base.parent.parent / "Strasse")
+    state.value = (unrelated, 2)
+    assert path_update._publish_user_path(directory) is True
+    assert state.value == (directory + ";" + unrelated, 2)
+
+
+@pytest.mark.parametrize("kind", [1, 2], ids=["literal", "expandable"])
+def test_literal_python_directory_is_never_published_as_a_variable_expression(public_python, kind):
+    state = public_python
+    directory = state.base.parent.parent / "%TEMP%" / "Python311"
+    directory.mkdir(parents=True)
+    state.value = (state.original, kind)
+    if kind == 2:
+        with pytest.raises(ValueError, match="expandable user PATH"):
+            path_update._publish_user_path(str(directory))
+        assert state.writes == [] and state.notifications == 0
+        assert state.value == (state.original, kind)
+    else:
+        assert path_update._publish_user_path(str(directory)) is True
+        assert state.value[0].split(";")[0] == str(directory)
+        assert state.value[1] == kind
+
+
 @pytest.mark.parametrize("command,code", [
     (["update"], 17), (["update", "--auto"], 0), (["update", "--detach"], 0),
     (["update", "--auth-report"], 0), (["update", "--request-status=example"], 0),
