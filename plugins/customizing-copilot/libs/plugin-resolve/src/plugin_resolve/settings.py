@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from .conventions import (
     LOCAL_MARKETPLACE_SOURCE_KINDS,
@@ -31,7 +32,7 @@ class RepoPluginSettings:
 
     enabled: dict[str, bool] = field(default_factory=dict)
     """``enabledPlugins`` -- ``"<name>@<marketplace>" -> bool``."""
-    marketplaces: dict[str, dict] = field(default_factory=dict)
+    marketplaces: dict[str, dict[str, Any]] = field(default_factory=dict)
     """``extraKnownMarketplaces`` -- ``"<marketplace-name>" -> definition``."""
 
     def enabled_sources(self) -> list[str]:
@@ -39,7 +40,7 @@ class RepoPluginSettings:
         return [s for s, on in self.enabled.items() if on and isinstance(s, str)]
 
 
-def _load_json(path: Path) -> dict | None:
+def _load_json(path: Path) -> dict[str, Any] | None:
     try:
         if not path.is_file():
             return None
@@ -59,7 +60,7 @@ def read_repo_settings(repo_dir: str | Path) -> RepoPluginSettings:
     """
     base = Path(repo_dir)
     enabled: dict[str, bool] = {}
-    marketplaces: dict[str, dict] = {}
+    marketplaces: dict[str, dict[str, Any]] = {}
     for rel in SETTINGS_RELS:
         data = _load_json(base.joinpath(*rel))
         if not data:

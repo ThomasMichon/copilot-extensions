@@ -8,7 +8,7 @@
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
 - **Coverage:** [Portfolio tracker and merged lockdown records](coverage.md)
-- **Current slice:** Plugin Activation (#10108); its source-only artifact and shipped-copy baseline are reviewed and natively qualified for integration. Machine Transport (#10107), Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
+- **Current slice:** Plugin Resolve (#10141); source, native Linux, consumer/copy and current-head unit qualification are prepared. Required CI, review and merge remain. Plugin Activation (#10108), Machine Transport (#10107), Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -32,7 +32,7 @@ definition of success.
 
 - **Topology:** Independent per-slice PRs, never a concurrently edited shared staging branch. The lead may integrate non-overlapping test cohorts into one bounded reviewed slice after their isolated validation.
 - **Host (owns PRs):** `lead` owns its PRs and verifies completion of delegated PRs.
-- **Delegates:** The lead owns #10108 integration and its explicit YAML checker prerequisite, all shared admission/coverage manifests, global documentation, the effort and full completion judgment. The completed Plugin Resolve source artifact for #10141 awaits lead review, native Linux and consumer qualification before admission. Publication remains with the lead.
+- **Delegates:** The lead owns #10141 integration, all shared admission/coverage manifests, global documentation, the effort and full completion judgment. The Plugin Resolve source artifact is integrated and qualified; publication and completion remain with the lead.
 - **Handoff:** A merged slice returns to the canonical README, updates its Plan/Validation/Journal, then selects the next unresolved item. A continuation retains #9807, this README, the current slice, live PRs and exactly one next action.
 - Existing contributor PRs are reviewed/coordinated, not superseded. Shared-library changes precede dependent activations; unrelated leaf activations may proceed independently.
 
@@ -156,7 +156,7 @@ rewrite.
 - [x] Strictly admit all canonical Single Instance Lease source/test modules (#10084).
 - [x] Strictly admit all canonical Process Telemetry source/test modules with its declared optional-SDK checker environment (#10083).
 - [x] Strictly admit all canonical Machine Transport source/test modules with its declared YAML checker environment (#10107).
-- [ ] Strictly admit all canonical Plugin Activation source/test modules with its declared YAML checker environment (#10108).
+- [x] Strictly admit all canonical Plugin Activation source/test modules with its declared YAML checker environment (#10108).
 - [ ] Admit near-clean leaf libraries through small annotation/narrowing PRs; activate directly in strict mode when possible.
 - [ ] Admit remaining shared libraries in basic mode, then close their stricter deltas in separate PRs until every shared library is strict.
 - [ ] Replace loose generics and unchecked boundary results with honest callable, protocol and validated data contracts; rerun affected consumer checks/tests.
@@ -2000,3 +2000,91 @@ composition prerequisites, and review/validation rules.
   merged locks. The tracker keeps qualification/issue records and a
   post-merge update procedure. The effort index now links this canonical
   scoreboard instead of carrying a stale second count.
+
+### 2026-11-02 - Plugin Activation merged; both coverage metrics refreshed
+
+- #10150 merged as `fc2cf24697f3055f1187c52b5793aac53e05cba0`
+  after approval on exact head
+  `b0e7dc593994f372828ef322a9c676acfef289b4`, no open review threads and green
+  required CI in
+  [run 41567659422](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41567659422)
+  and the
+  [lockdown run 41567659504](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41567659504).
+  #10108 is closed; #9807 remains open. Managed source synchronization passed.
+- The current merged snapshot has **28 / 68 strict projects (41.2%)** and
+  **227 / 7,635 physical Python files (3.0%)** in those scopes. Forty projects
+  remain pending, with no basic scopes. The tracker records Plugin Activation
+  as locked and accounts for newly added, independently pending Container
+  files rather than freezing the old denominator.
+- Both metrics now have one canonical portfolio tracker with plugin,
+  service/manager, tool/support and shared-library rows. Project percentages
+  remain distinct from file-weighted coverage, and classification remains
+  distinct from enforcement. This Plan and Validation Plan remain active.
+- #10141 is the next slice. Its twenty-three-file source artifact passes
+  strict probes on both targets and 400 contained Windows tests with four
+  explicit POSIX skips. Lead review, actual Linux execution, packaged-copy
+  correspondence, consumers and full admission remain before publication.
+  The completed Plugin Activation implementation child is natively finalized;
+  equality of all twelve owned artifact blobs and realization of its YAML
+  prerequisite established that no unpublished work was discarded.
+
+### 2026-11-02 - Plugin Resolve source and consumer qualification prepared
+
+- The lead reviewed all twenty changed artifact files and integrated the
+  twenty-three-file canonical project. An independent cast-erased AST
+  comparison preserved all 169 test functions, 515 assertions and 74
+  parametrization decorators. Both declared strict targets pass, as does the
+  complete twenty-nine-project enforced cohort. JSON documents retain explicit
+  dynamic values; native lock protocols describe the actual imported APIs.
+- Fresh, hardened, network-disconnected Linux execution on Python 3.10.21
+  passes 393 canonical tests with eleven platform skips in 26.09 seconds.
+  The original contained Windows artifact run passed 400 tests with four POSIX
+  skips. The fourteen-file physical copy matched the pre-change canonical
+  baseline before owner-scoped materialization; its 33 tests and the 62
+  copy-tooling controls pass. Copies remain independently pending scopes.
+- Consumer qualification covers Bridge preparation/hosting, Codespaces
+  preparation/staging/hosting, Containers preparation/hosting, SSH plugin
+  launch, Dispatch registration, Worktrees plugin/related/acquisition contracts,
+  Worktree Manager provider/update contracts, Machines preinstallation and
+  Logger's library-closure transaction. Codespaces passes all 77 selected
+  tests through its normal runner; Containers passes 37, SSH 120 with three
+  platform skips, Dispatch 74, Worktrees 250 with five skips, Manager 64,
+  and Logger eight Windows cases with eight POSIX skips.
+- Four consumer fixture files required contract corrections, not production
+  bypasses: SSH supplies an actual synthetic receiving-policy result and
+  verifies the policy wrapper before inspecting its nested productive command;
+  Codespaces explicitly identifies its synthetic host and checks both current
+  preparation flags; both Machines spies retain every argument/order/refusal
+  check while accounting for the existing `-B` interpreter flag. Machines
+  passes five Windows cases with six skips and seven Linux cases with four
+  skips. Both Linux containers and their volumes were removed after success.
+- The native identity-memo test requires stable ancestor directory versions.
+  Its original assertions pass unchanged in the isolated repository test-run
+  area: all 207 Activation consumer tests pass. Source-hosting tests remain
+  outside that denied repository ancestry. Codespaces' normal runner preserves
+  installed license metadata ahead of source-tree egg-info without substituting
+  installed implementations for canonical source.
+- The changefile names the canonical library and all ten release consumers.
+  Only four existing packet input hashes are refreshed; no unit nodes,
+  coverage targets or deadline are added. Ruff, install-contract, docs and
+  changefile checks pass. Current-head packet execution, required CI, review
+  and merge remain before this row can be locked.
+- Native isolated Linux execution supplies first-touch validation. No live
+  SSH/CodeSpace service rollout or authenticated external receiver is selected
+  or available for this source-only admission; no such execution is claimed.
+  Embedded Python transport/source-map qualification remains an open
+  cross-cutting gate under #9807. Both coverage metrics retain the merged
+  twenty-eight-project snapshot until #10141's admission merges.
+
+### 2026-11-02 - Plugin Resolve current-source packet qualified
+
+- Managed synchronization preserved every integrated canonical artifact file.
+  On source `3c8cfd5fa8dc5212653912617a0624cf64c72418`, the complete current
+  packet passes all 3,811 source-bound unit nodes in 257.922 seconds, with
+  nineteen existing deselections and one coverage collection. All 518 input
+  hashes match; the 213 coverage targets and 300-second deadline are unchanged.
+- The refreshed twenty-nine-project enforced cohort passes both declared
+  targets over the current 7,644-file classified inventory. Incoming pending
+  files are accounted for rather than omitted. Review, required CI and merge
+  remain separate completion gates, and the coverage tracker retains the
+  last merged snapshot rather than crediting this local admission.

@@ -57,19 +57,19 @@ uv() {{ _fail 'Preinstall bypassed canonical dependency policy'; }}
 VENV_PYTHON=venv_python_stub
 SCRIPT_DIR={shlex.quote(str(scripts))}
 venv_python_stub() {{
-    [[ "$#" -ge 9 && "$1" == -I &&
-       "$2" == "$SCRIPT_DIR/installer_dependency_policy.py" && -f "$2" &&
-       "$3" == --uv && "$4" == uv && "$5" == -- &&
-       "$6" == --python && "$7" == "$VENV_PYTHON" ]] ||
+    [[ "$#" -ge 10 && "$1" == -I && "$2" == -B &&
+       "$3" == "$SCRIPT_DIR/installer_dependency_policy.py" && -f "$3" &&
+       "$4" == --uv && "$5" == uv && "$6" == -- &&
+       "$7" == --python && "$8" == "$VENV_PYTHON" ]] ||
         _fail 'Preinstall bypassed canonical dependency policy'
     if [[ "$HAVE_UV" == 1 ]]; then
-        [[ "$#" == 11 && "$8" == --reinstall-package &&
-           "${{9}}" == "$_lib_pkg_name" && "${{11}}" == --quiet ]] ||
+        [[ "$#" == 12 && "$9" == --reinstall-package &&
+           "${{10}}" == "$_lib_pkg_name" && "${{12}}" == --quiet ]] ||
             _fail 'Invalid policy reinstall arguments'
-        _installed_path="${{10}}"
+        _installed_path="${{11}}"
     else
-        [[ "$#" == 9 && "$8" == --quiet ]] || _fail 'Invalid policy arguments'
-        _installed_path="${{9}}"
+        [[ "$#" == 10 && "$9" == --quiet ]] || _fail 'Invalid policy arguments'
+        _installed_path="${{10}}"
     fi
     printf 'POLICY_INSTALL:%s\\n' "$_installed_path"
 }}
@@ -98,7 +98,7 @@ def _make_libs(root: Path) -> None:
 def test_preinstall_loop_requires_canonical_policy_in_both_branches():
     loop = _extract_loop()
     assert loop.count(
-        '"$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" '
+        '"$VENV_PYTHON" -I -B "$SCRIPT_DIR/installer_dependency_policy.py" '
         '--uv uv -- --python "$VENV_PYTHON"'
     ) == 2
     assert "pip install" not in loop

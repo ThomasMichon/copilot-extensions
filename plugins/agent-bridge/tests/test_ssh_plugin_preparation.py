@@ -125,6 +125,12 @@ def receiver(tmp_path, monkeypatch):
         copilot_args=["--model", "selected", "--plugin-dir", "explicit-request"],
         env={"UNCHANGED": "request-value"},
     )
+    async def receiving_policy(_target, *, operation):
+        from repository_policy import require_agent_hosting
+
+        return {**require_agent_hosting(child, operation=operation).to_dict(), "allowed": True}
+
+    monkeypatch.setattr("agent_bridge.hosting_policy.query_ssh_policy", receiving_policy)
     return target, _Receiver(daemon, environment), controller, child, home
 
 
@@ -292,6 +298,10 @@ async def test_spawn_prepares_after_allocation_before_existing_productive_comman
     if os.name == "nt":
         import base64
         command = base64.b64decode(command.rsplit(" ", 1)[1]).decode("utf-16-le")
+        assert "'agent-policy' 'check'" in command
+        command = base64.b64decode(command.rsplit(" ", 1)[1]).decode("utf-16-le")
+    else:
+        assert "agent-policy check" in command
     assert "app" in command and "--worktree-id actual-child" in command
     assert "--model selected" in command and "explicit-request" in command
     assert command.count("--plugin-dir") == 2

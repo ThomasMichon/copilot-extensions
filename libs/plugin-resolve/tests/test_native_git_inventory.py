@@ -6,23 +6,34 @@ import shutil
 import stat
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any, NoReturn, cast
 
 import pytest
 
 from plugin_resolve.preparation import prepare
 from plugin_resolve.reflection import build_plan, build_prepare_python, parse_prepared_context
-from plugin_resolve.registration import atomic_json
+from plugin_resolve.registration import atomic_json, register_prepared, strict_json
 from plugin_resolve.settings import read_repo_settings
 from test_plugin_preparation import init_checkout
 from test_source_preserving_preparation import git, git_origin as git_origin_fixture
 
 git_origin = git_origin_fixture
 
+NativeInventory = tuple[Path, Path, Path, dict[str, Any], dict[str, str]]
+GitOrigin = tuple[Path, str, str]
+
+if TYPE_CHECKING:
+    from typing import Protocol
+
+    class _WindowsJunction(Protocol):
+        def CreateJunction(self, src_path: str, dst_path: str) -> None: ...
+
 
 @pytest.fixture
-def native_inventory(tmp_path, git_origin):
+def native_inventory(tmp_path: Path, git_origin: GitOrigin) -> NativeInventory:
     origin, first, _second = git_origin
     target, home, cache = (tmp_path / name for name in ("target", "home", "cache"))
     init_checkout(target)
@@ -50,7 +61,7 @@ def native_inventory(tmp_path, git_origin):
     return target, home, clone, definition, environment
 
 
-def request(target, definition):
+def request(target: Path, definition: dict[str, Any]) -> dict[str, Any]:
     return {
         "repo": str(target),
         "local_mode": "reference",
@@ -62,20 +73,20 @@ def request(target, definition):
     }
 
 
-def no_install(*args, **kwargs):
+def no_install(*args: Any, **kwargs: Any) -> NoReturn:
     raise AssertionError("cold installation was selected")
 
 
-def test_registered_inventory_can_request_consistency_without_replacing_authority(native_inventory):
+def test_registered_inventory_can_request_consistency_without_replacing_authority(native_inventory: NativeInventory) -> None:
     from plugin_resolve.inventory import native_git_inventory_item
 
     target, home, clone, definition, environment = native_inventory
     atomic_json(home / "settings.json", {"extraKnownMarketplaces": {"git-fixture": definition}})
     before = (home / "settings.json").read_bytes()
-    item = native_git_inventory_item(
+    item = cast(dict[str, Any], native_git_inventory_item(
         "helper@git-fixture", home, clone.parent.parent, definition=definition,
         environment=environment, execution_cwd=target, strict=True,
-    )
+    ))
     assert item["inventory"]["git_root"] == str(clone.resolve())
     assert item["inventory"]["git_commit"] == git(clone, "rev-parse", "HEAD")
     assert item["inventory"]["git_tree"] == git(clone, "rev-parse", "HEAD^{tree}")
@@ -83,23 +94,23 @@ def test_registered_inventory_can_request_consistency_without_replacing_authorit
     assert (home / "settings.json").read_bytes() == before
 
 
-def directory_link(link, target):
+def directory_link(link: Path, target: Path) -> None:
     if os.name == "nt":
         import _winapi
 
-        _winapi.CreateJunction(str(target), str(link))
+        cast("_WindowsJunction", _winapi).CreateJunction(str(target), str(link))
     else:
         link.symlink_to(target, target_is_directory=True)
 
 
 def test_native_git_cache_reuses_qualified_payload_without_global_registration(
-    native_inventory,
-    monkeypatch,
-):
+    native_inventory: NativeInventory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     target, home, clone, definition, environment = native_inventory
     monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
     before = (home / "settings.json").read_bytes()
-    context = {}
+    context: dict[str, Any] = {}
     expected = {"helper@git-fixture": str(clone / "catalog-a" / "helper")}
     assert (
         prepare(
@@ -122,7 +133,7 @@ def test_native_git_cache_reuses_qualified_payload_without_global_registration(
     }
 
 
-def test_native_git_inventory_streams_to_fresh_stdlib_only_receiver(native_inventory):
+def test_native_git_inventory_streams_to_fresh_stdlib_only_receiver(native_inventory: NativeInventory) -> None:
     target, home, clone, definition, environment = native_inventory
     environment = {
         **environment,
@@ -174,10 +185,10 @@ def test_native_git_inventory_streams_to_fresh_stdlib_only_receiver(native_inven
     ],
 )
 def test_unqualified_native_git_cache_uses_ordinary_installation(
-    native_inventory,
-    monkeypatch,
-    changed,
-):
+    native_inventory: NativeInventory,
+    monkeypatch: pytest.MonkeyPatch,
+    changed: str,
+) -> None:
     target, home, clone, definition, environment = native_inventory
     if changed == "origin":
         git(clone, "remote", "set-url", "origin", "https://example.invalid/other.git")
@@ -208,7 +219,7 @@ def test_unqualified_native_git_cache_uses_ordinary_installation(
     assert not (target / ".github" / "copilot" / "settings.local.json").exists()
 
 
-def test_native_git_cache_keeps_explicit_target_disable(native_inventory, monkeypatch):
+def test_native_git_cache_keeps_explicit_target_disable(native_inventory: NativeInventory, monkeypatch: pytest.MonkeyPatch) -> None:
     target, _home, _clone, definition, environment = native_inventory
     path = target / ".github" / "copilot" / "settings.json"
     path.parent.mkdir(parents=True)
@@ -230,10 +241,10 @@ def test_native_git_cache_keeps_explicit_target_disable(native_inventory, monkey
     ["github", "sha", "path", "runtime-cache", "unrelated", "source-spelling"],
 )
 def test_native_git_cache_preserves_supported_source_selectors(
-    native_inventory,
-    monkeypatch,
-    selector,
-):
+    native_inventory: NativeInventory,
+    monkeypatch: pytest.MonkeyPatch,
+    selector: str,
+) -> None:
     target, _home, clone, definition, environment = native_inventory
     folder = "catalog-a"
     if selector == "github":
@@ -271,9 +282,9 @@ def test_native_git_cache_preserves_supported_source_selectors(
 
 
 def test_ambiguous_native_git_clones_refuse_instead_of_selecting_first(
-    native_inventory,
-    monkeypatch,
-):
+    native_inventory: NativeInventory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     target, _home, clone, definition, environment = native_inventory
     shutil.copytree(clone, clone.with_name("second-clone"))
     monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
@@ -284,10 +295,10 @@ def test_ambiguous_native_git_clones_refuse_instead_of_selecting_first(
 
 @pytest.mark.parametrize("mode", ["copy", "unsupported-selector"])
 def test_native_git_cache_does_not_expand_preparation_authority(
-    native_inventory,
-    monkeypatch,
-    mode,
-):
+    native_inventory: NativeInventory,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+) -> None:
     target, _home, _clone, definition, environment = native_inventory
     value = request(target, definition)
     if mode == "copy":
@@ -302,11 +313,11 @@ def test_native_git_cache_does_not_expand_preparation_authority(
 @pytest.mark.parametrize("boundary", ["publication", "effective-resolution"])
 @pytest.mark.parametrize("drift", ["origin", "floating-revision"])
 def test_native_git_inventory_revalidates_before_settings_publication(
-    native_inventory,
-    monkeypatch,
-    boundary,
-    drift,
-):
+    native_inventory: NativeInventory,
+    monkeypatch: pytest.MonkeyPatch,
+    boundary: str,
+    drift: str,
+) -> None:
     import plugin_resolve.inventory as inventory
     import plugin_resolve.preparation as preparation
 
@@ -314,25 +325,25 @@ def test_native_git_inventory_revalidates_before_settings_publication(
     if drift == "floating-revision":
         del definition["source"]["ref"]
 
-    def change():
+    def change() -> None:
         if drift == "origin":
             git(clone, "remote", "set-url", "origin", "https://example.invalid/changed.git")
         else:
             git(clone, "checkout", "--quiet", "origin/HEAD")
 
     monkeypatch.setattr(preparation, "_install", no_install)
-    real_register = preparation.register_prepared
+    real_register = register_prepared
     if boundary == "publication":
 
-        def changed(*args, **kwargs):
+        def changed_registration(*args: Any, **kwargs: Any) -> dict[str, str]:
             change()
             return real_register(*args, **kwargs)
 
-        monkeypatch.setattr(preparation, "register_prepared", changed)
+        monkeypatch.setattr(preparation, "register_prepared", changed_registration)
     else:
         real_inventory = inventory.inventory_item
 
-        def changed(*args, **kwargs):
+        def changed(*args: Any, **kwargs: Any) -> dict[str, Any] | None:
             verified = real_inventory(*args, **kwargs)
             change()
             return verified
@@ -345,10 +356,10 @@ def test_native_git_inventory_revalidates_before_settings_publication(
 
 @pytest.mark.parametrize("failure", ["json", "unreadable"])
 def test_bad_unrelated_cache_does_not_block_valid_native_reuse(
-    native_inventory,
-    monkeypatch,
-    failure,
-):
+    native_inventory: NativeInventory,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
     import plugin_resolve.inventory as inventory
 
     target, _home, clone, definition, environment = native_inventory
@@ -359,9 +370,9 @@ def test_bad_unrelated_cache_does_not_block_valid_native_reuse(
         catalog.write_text("{")
     else:
         atomic_json(catalog, {"name": "unrelated"})
-        original = inventory.strict_json
+        original = strict_json
 
-        def unreadable(path, **kwargs):
+        def unreadable(path: Path, **kwargs: Any) -> dict[str, Any]:
             if path == catalog:
                 raise PermissionError("synthetic unreadable cached catalog")
             return original(path, **kwargs)
@@ -375,17 +386,17 @@ def test_bad_unrelated_cache_does_not_block_valid_native_reuse(
 
 @pytest.mark.parametrize("failure", ["json", "closure", "cycle"])
 def test_invalid_selected_cache_falls_back_to_ordinary_installation(
-    native_inventory,
-    monkeypatch,
-    caplog,
-    failure,
-):
+    native_inventory: NativeInventory,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    failure: str,
+) -> None:
     target, _home, clone, definition, environment = native_inventory
     if failure == "json":
         (clone / "catalog-a" / "marketplace.json").write_text("{")
     else:
 
-        def linked_payload(*args, **kwargs):
+        def linked_payload(*args: Any, **kwargs: Any) -> NoReturn:
             if failure == "cycle":
                 raise RuntimeError("synthetic pre-3.13 asset symlink loop")
             raise ValueError("Linked payload paths cannot be reflected")
@@ -399,10 +410,10 @@ def test_invalid_selected_cache_falls_back_to_ordinary_installation(
 
 @pytest.mark.parametrize("reference", ["file", "directory"])
 def test_deleted_required_sibling_asset_prevents_native_cache_reuse(
-    native_inventory,
-    monkeypatch,
-    reference,
-):
+    native_inventory: NativeInventory,
+    monkeypatch: pytest.MonkeyPatch,
+    reference: str,
+) -> None:
     target, _home, clone, definition, environment = native_inventory
     support = clone / "support"
     support.mkdir()
@@ -426,11 +437,11 @@ def test_deleted_required_sibling_asset_prevents_native_cache_reuse(
 @pytest.mark.parametrize("component", ["source", "plugin-root"])
 @pytest.mark.parametrize("spelling", ["plain", "padded"])
 def test_linked_declared_source_cannot_redirect_native_cache_payload(
-    native_inventory,
-    monkeypatch,
-    component,
-    spelling,
-):
+    native_inventory: NativeInventory,
+    monkeypatch: pytest.MonkeyPatch,
+    component: str,
+    spelling: str,
+) -> None:
     target, _home, clone, definition, environment = native_inventory
     catalog_root = clone / "catalog-a"
     selected = catalog_root / "helper"
@@ -469,11 +480,11 @@ def test_linked_declared_source_cannot_redirect_native_cache_payload(
 
 @pytest.mark.parametrize("style", ["uri", "path"])
 def test_distinct_local_origins_with_git_suffix_do_not_share_inventory(
-    native_inventory,
-    git_origin,
-    monkeypatch,
-    style,
-):
+    native_inventory: NativeInventory,
+    git_origin: tuple[Path, str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    style: str,
+) -> None:
     target, _home, clone, definition, environment = native_inventory
     original = git_origin[0]
     different = original.with_name(original.name + ".git")
@@ -492,10 +503,10 @@ def test_distinct_local_origins_with_git_suffix_do_not_share_inventory(
 
 @pytest.mark.parametrize("schema", ["null-entry", "scalar-entry", "owner", "plugin-root"])
 def test_invalid_native_catalog_schema_falls_back(
-    native_inventory,
-    monkeypatch,
-    schema,
-):
+    native_inventory: NativeInventory,
+    monkeypatch: pytest.MonkeyPatch,
+    schema: str,
+) -> None:
     target, _home, clone, definition, environment = native_inventory
     path = clone / "catalog-a" / "marketplace.json"
     catalog = json.loads(path.read_text())
@@ -515,10 +526,10 @@ def test_invalid_native_catalog_schema_falls_back(
 
 
 def test_linked_required_asset_parent_prevents_native_cache_reuse(
-    native_inventory,
-    monkeypatch,
-    caplog,
-):
+    native_inventory: NativeInventory,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     target, _home, clone, definition, environment = native_inventory
     real_support = clone / "real-support"
     real_support.mkdir()
@@ -547,18 +558,16 @@ def test_linked_required_asset_parent_prevents_native_cache_reuse(
 
 @pytest.mark.parametrize("probe", ["rev-parse", "status"])
 def test_native_cache_git_probe_timeout_uses_ordinary_installation(
-    native_inventory,
-    monkeypatch,
-    caplog,
-    probe,
-):
-    import plugin_resolve.inventory as inventory
-
+    native_inventory: NativeInventory,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    probe: str,
+) -> None:
     target, _home, clone, definition, environment = native_inventory
-    original = inventory.subprocess.run
+    original = subprocess.run
     timed_out = []
 
-    def timeout(arguments, **kwargs):
+    def timeout(arguments: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         if "-C" in arguments and arguments[arguments.index("-C") + 1] == str(clone):
             if arguments[arguments.index("-C") + 2] == probe:
                 assert kwargs["timeout"] == 30
@@ -566,7 +575,7 @@ def test_native_cache_git_probe_timeout_uses_ordinary_installation(
                 raise subprocess.TimeoutExpired(arguments, 30)
         return original(arguments, **kwargs)
 
-    monkeypatch.setattr(inventory.subprocess, "run", timeout)
+    monkeypatch.setattr(subprocess, "run", timeout)
     monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
     with pytest.raises(AssertionError, match="cold installation"):
         prepare(request(target, definition), environment=environment)
@@ -577,10 +586,10 @@ def test_native_cache_git_probe_timeout_uses_ordinary_installation(
 
 @pytest.mark.parametrize("kind", ["git", "github"])
 def test_distinct_network_repository_names_do_not_share_inventory(
-    native_inventory,
-    monkeypatch,
-    kind,
-):
+    native_inventory: NativeInventory,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+) -> None:
     target, _home, clone, definition, environment = native_inventory
     if kind == "git":
         definition["source"]["url"] = definition["source"]["url"].removesuffix(".git")
@@ -598,9 +607,9 @@ def test_distinct_network_repository_names_do_not_share_inventory(
 
 
 def test_github_repository_name_ending_in_git_reuses_exact_repository(
-    native_inventory,
-    monkeypatch,
-):
+    native_inventory: NativeInventory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     target, _home, clone, definition, environment = native_inventory
     git(clone, "remote", "set-url", "origin", "git@github.com:example/catalog.git.git")
     definition["source"] = {
@@ -616,9 +625,9 @@ def test_github_repository_name_ending_in_git_reuses_exact_repository(
 
 
 def test_deleted_higher_priority_catalog_prevents_native_cache_reuse(
-    native_inventory,
-    monkeypatch,
-):
+    native_inventory: NativeInventory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     target, _home, clone, definition, environment = native_inventory
     catalog_root = clone / "catalog-a"
     shutil.copytree(catalog_root / "helper", catalog_root / "other-helper")
@@ -637,16 +646,14 @@ def test_deleted_higher_priority_catalog_prevents_native_cache_reuse(
 
 
 def test_non_utf8_git_status_uses_ordinary_installation(
-    native_inventory,
-    monkeypatch,
-):
-    import plugin_resolve.inventory as inventory
-
+    native_inventory: NativeInventory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     target, _home, clone, definition, environment = native_inventory
-    original = inventory.subprocess.run
+    original = subprocess.run
     observed = []
 
-    def raw_status(arguments, **kwargs):
+    def raw_status(arguments: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         if (
             "-C" in arguments
             and arguments[arguments.index("-C") + 1] == str(clone)
@@ -659,7 +666,7 @@ def test_non_utf8_git_status_uses_ordinary_installation(
             )
         return original(arguments, **kwargs)
 
-    monkeypatch.setattr(inventory.subprocess, "run", raw_status)
+    monkeypatch.setattr(subprocess, "run", raw_status)
     monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
     with pytest.raises(AssertionError, match="cold installation"):
         prepare(request(target, definition), environment=environment)
@@ -667,9 +674,9 @@ def test_non_utf8_git_status_uses_ordinary_installation(
 
 
 def test_byte_transformed_checkout_uses_ordinary_installation(
-    native_inventory,
-    monkeypatch,
-):
+    native_inventory: NativeInventory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     target, _home, clone, definition, environment = native_inventory
     readme = clone / "catalog-a" / "helper" / "README.md"
     readme.write_bytes(b"first line\nsecond line\n")
@@ -684,9 +691,9 @@ def test_byte_transformed_checkout_uses_ordinary_installation(
 
 
 def test_unselected_lower_priority_catalog_changes_do_not_prevent_reuse(
-    native_inventory,
-    monkeypatch,
-):
+    native_inventory: NativeInventory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     target, _home, clone, definition, environment = native_inventory
     catalog_root = clone / "catalog-a"
     fallback = catalog_root / "marketplace.json"
@@ -706,11 +713,11 @@ def test_unselected_lower_priority_catalog_changes_do_not_prevent_reuse(
 @pytest.mark.parametrize("modified", ["clean", "modified", "deleted"])
 @pytest.mark.parametrize("layout", ["direct", "nested"])
 def test_sibling_submodule_asset_cannot_escape_committed_byte_proof(
-    native_inventory,
-    monkeypatch,
-    modified,
-    layout,
-):
+    native_inventory: NativeInventory,
+    monkeypatch: pytest.MonkeyPatch,
+    modified: str,
+    layout: str,
+) -> None:
     target, _home, clone, definition, environment = native_inventory
     relative = Path("support") if layout == "direct" else Path("deps") / "support"
     support = clone / relative
@@ -736,14 +743,14 @@ def test_sibling_submodule_asset_cannot_escape_committed_byte_proof(
 
 
 def test_unreadable_cache_directory_uses_ordinary_installation(
-    native_inventory,
-    monkeypatch,
-    caplog,
-):
+    native_inventory: NativeInventory,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     target, _home, clone, definition, environment = native_inventory
     original = Path.iterdir
 
-    def unreadable(path):
+    def unreadable(path: Path) -> Iterator[Path]:
         if path == clone.parent:
             raise PermissionError("synthetic cache enumeration denied")
         return original(path)
@@ -757,19 +764,19 @@ def test_unreadable_cache_directory_uses_ordinary_installation(
 
 @pytest.mark.parametrize("probe", ["lstat", "resolve"])
 def test_candidate_path_permission_error_preserves_installation_fallback(
-    native_inventory,
-    monkeypatch,
-    caplog,
-    probe,
-):
+    native_inventory: NativeInventory,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    probe: str,
+) -> None:
     target, _home, clone, definition, environment = native_inventory
     original = getattr(Path, probe)
     denied = clone if probe == "lstat" else clone / "catalog-a"
 
-    def inaccessible(path, *args, **kwargs):
+    def inaccessible(path: Path, *args: Any, **kwargs: Any) -> os.stat_result | Path:
         if path == denied:
             raise PermissionError("synthetic candidate path denied")
-        return original(path, *args, **kwargs)
+        return cast(os.stat_result | Path, original(path, *args, **kwargs))
 
     monkeypatch.setattr(Path, probe, inaccessible)
     monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
@@ -781,11 +788,11 @@ def test_candidate_path_permission_error_preserves_installation_fallback(
 @pytest.mark.parametrize("platform", ["linux", "win32"])
 @pytest.mark.parametrize("committed_executable", [False, True])
 def test_cache_file_mode_proof_respects_platform_semantics(
-    native_inventory,
-    monkeypatch,
-    platform,
-    committed_executable,
-):
+    native_inventory: NativeInventory,
+    monkeypatch: pytest.MonkeyPatch,
+    platform: str,
+    committed_executable: bool,
+) -> None:
     import plugin_resolve.inventory as inventory
 
     target, _home, clone, definition, environment = native_inventory
@@ -801,7 +808,9 @@ def test_cache_file_mode_proof_respects_platform_semantics(
     definition["source"]["ref"] = "HEAD"
     original = Path.stat
 
-    def changed_mode(path, *args, **kwargs):
+    def changed_mode(
+        path: Path, *args: Any, **kwargs: Any,
+    ) -> os.stat_result | SimpleNamespace:
         info = original(path, *args, **kwargs)
         if path != marker:
             return info
@@ -824,10 +833,10 @@ def test_cache_file_mode_proof_respects_platform_semantics(
 @pytest.mark.skipif(os.name == "nt", reason="POSIX executable-bit filesystem semantics")
 @pytest.mark.parametrize("committed_executable", [False, True])
 def test_native_posix_executable_mode_drift_prevents_reuse(
-    native_inventory,
-    monkeypatch,
-    committed_executable,
-):
+    native_inventory: NativeInventory,
+    monkeypatch: pytest.MonkeyPatch,
+    committed_executable: bool,
+) -> None:
     target, _home, clone, definition, environment = native_inventory
     marker = clone / "catalog-a" / "helper" / "marker.txt"
     git(
@@ -849,10 +858,10 @@ def test_native_posix_executable_mode_drift_prevents_reuse(
 
 @pytest.mark.parametrize("modified", [False, True])
 def test_excluded_payload_root_cannot_supply_unverified_inventory(
-    native_inventory,
-    monkeypatch,
-    modified,
-):
+    native_inventory: NativeInventory,
+    monkeypatch: pytest.MonkeyPatch,
+    modified: bool,
+) -> None:
     target, _home, clone, definition, environment = native_inventory
     root = clone / "catalog-a"
     hidden = root / ".venv" / "helper"
@@ -872,14 +881,14 @@ def test_excluded_payload_root_cannot_supply_unverified_inventory(
 
 
 def test_cache_root_permission_error_preserves_installation_fallback(
-    native_inventory,
-    monkeypatch,
-    caplog,
-):
+    native_inventory: NativeInventory,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     target, _home, clone, definition, environment = native_inventory
     original = Path.is_dir
 
-    def inaccessible(path):
+    def inaccessible(path: Path) -> bool:
         if path == clone.parent:
             raise PermissionError("synthetic cache root denied")
         return original(path)
@@ -893,11 +902,11 @@ def test_cache_root_permission_error_preserves_installation_fallback(
 
 @pytest.mark.parametrize("path_kind", ["candidate", "catalog", "payload"])
 def test_legacy_python_cyclic_path_error_preserves_installation_fallback(
-    native_inventory,
-    monkeypatch,
-    caplog,
-    path_kind,
-):
+    native_inventory: NativeInventory,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    path_kind: str,
+) -> None:
     target, _home, clone, definition, environment = native_inventory
     denied = {
         "candidate": clone,
@@ -906,7 +915,7 @@ def test_legacy_python_cyclic_path_error_preserves_installation_fallback(
     }[path_kind]
     original = Path.resolve
 
-    def cyclic(path, *args, **kwargs):
+    def cyclic(path: Path, *args: Any, **kwargs: Any) -> os.stat_result | Path:
         if path == denied:
             raise RuntimeError("synthetic pre-3.13 symlink loop")
         return original(path, *args, **kwargs)
@@ -920,9 +929,9 @@ def test_legacy_python_cyclic_path_error_preserves_installation_fallback(
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX unprivileged symbolic-link creation")
 def test_native_cyclic_source_links_preserve_installation_fallback(
-    native_inventory,
-    monkeypatch,
-):
+    native_inventory: NativeInventory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     target, _home, clone, definition, environment = native_inventory
     selected = clone / "catalog-a" / "helper"
     selected.rename(selected.with_name("retained-helper"))

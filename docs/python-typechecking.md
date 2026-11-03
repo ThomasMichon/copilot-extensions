@@ -9,7 +9,7 @@ Killswitch, Config Migrate, Configuration Layers, Core Delegation, Docker Resour
 Producer, Dropin Registry,
 Endpoint Rendezvous, Fleet Contracts, Fleet Index/Vault Adapters, Installation
 Context, Installer Readiness, Lazy CLI Dispatch, Machine Transport,
-Peer Launch, Plugin Activation, Process Telemetry, Remote Login Shell, Repository Policy, Session Liveness Probe, Single
+Peer Launch, Plugin Activation, Plugin Resolve, Process Telemetry, Remote Login Shell, Repository Policy, Session Liveness Probe, Single
 Instance Lease, Update Telemetry, Work
 Coalescing Singleton and Worktree Identity
 source/test projects.
@@ -44,6 +44,7 @@ python tools/typecheck.py lib-machine-transport
 python tools/typecheck.py lib-peer-launch
 python tools/typecheck.py lib-plugin-activation --prepare
 python tools/typecheck.py lib-plugin-activation
+python tools/typecheck.py lib-plugin-resolve
 python tools/typecheck.py lib-process-telemetry --prepare
 python tools/typecheck.py lib-process-telemetry
 python tools/typecheck.py lib-repository-policy
@@ -78,6 +79,15 @@ their pointer-correct signatures and platform gates. Resolution, preservation,
 precedence and filesystem behavior are unchanged. The synchronized Customizing
 Copilot copy and all nine release consumers remain independently pending
 checker projects.
+
+Plugin Resolve checks all twenty-three canonical source, test and installer-fixture
+files strictly on both targets in the base environment. JSON manifests,
+registration documents and preparation plans retain explicit dynamic values;
+paths, subprocess results, cancellation callbacks and native locking operations
+have concrete contracts. Runtime validation, source authority, preparation
+precedence and locking behavior are unchanged. Its synchronized Customizing
+Copilot copy and ten release consumers remain independently pending projects;
+canonical admission does not qualify embedded Python transports.
 
 Config Migrate selects `tools/typecheck-yaml-requirements.txt`, a separate flat
 hash lock containing the same checker/pytest pins plus seasoned PyYAML and its

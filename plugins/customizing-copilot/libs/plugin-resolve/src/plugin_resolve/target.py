@@ -6,7 +6,9 @@ import hashlib
 import os
 import re
 import subprocess
+from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
+from typing import Any, cast
 
 from .conventions import LOCAL_MARKETPLACE_SOURCE_KINDS
 from .execution import execution_environment, execution_executable
@@ -29,7 +31,9 @@ def github_repository_slug(remote: str) -> str | None:
     return f"{match.group(1)}/{match.group(2)}" if match else None
 
 
-def requires_repository_binding(specs, repo_roots) -> bool:
+def requires_repository_binding(
+    specs: Sequence[dict[str, Any]], repo_roots: Sequence[Path],
+) -> bool:
     marketplaces = {split_source(spec["source"])[1] for spec in specs}
     for root in repo_roots:
         settings = read_repo_settings(root)
@@ -43,7 +47,9 @@ def requires_repository_binding(specs, repo_roots) -> bool:
     return False
 
 
-def _repository_lines(path: Path, arguments, environment=None) -> list[str] | None:
+def _repository_lines(
+    path: Path, arguments: Sequence[str], environment: Mapping[str, str] | None = None,
+) -> list[str] | None:
     env = dict(os.environ if environment is None else environment)
     for key in tuple(env):
         if key.startswith("GIT_"):
@@ -60,7 +66,9 @@ def _repository_lines(path: Path, arguments, environment=None) -> list[str] | No
     return result.stdout.strip().splitlines()
 
 
-def repository_info(path: Path, environment=None) -> tuple[Path, Path] | None:
+def repository_info(
+    path: Path, environment: Mapping[str, str] | None = None,
+) -> tuple[Path, Path] | None:
     lines = _repository_lines(path, ["--show-toplevel", "--git-common-dir"], environment)
     if lines is None:
         return None
@@ -69,7 +77,9 @@ def repository_info(path: Path, environment=None) -> tuple[Path, Path] | None:
     return Path(lines[0]).resolve(strict=True), Path(lines[1]).resolve(strict=True)
 
 
-def _bare_repository(path: Path, environment=None) -> tuple[Path, Path] | None:
+def _bare_repository(
+    path: Path, environment: Mapping[str, str] | None = None,
+) -> tuple[Path, Path] | None:
     lines = _repository_lines(
         path, ["--is-bare-repository", "--git-common-dir", "--absolute-git-dir"], environment,
     )
@@ -86,7 +96,10 @@ def common_identity(info: tuple[Path, Path]) -> str:
     return "git-common:" + hashlib.sha256(str(info[1]).encode()).hexdigest()
 
 
-def owned_relative(root: Path, payload: Path, repository: str, bound_roots, environment=None) -> dict | None:
+def owned_relative(
+    root: Path, payload: Path, repository: str, bound_roots: Sequence[Path],
+    environment: Mapping[str, str] | None = None,
+) -> dict[str, str] | None:
     owner = repository_info(root, environment)
     payload_owner = repository_info(payload, environment)
     for bound in bound_roots:
@@ -111,7 +124,10 @@ def owned_relative(root: Path, payload: Path, repository: str, bound_roots, envi
     return None
 
 
-def bind_target(item: dict, repo: Path, repository: str | None, environment=None) -> dict:
+def bind_target(
+    item: dict[str, Any], repo: Path, repository: str | None,
+    environment: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
     from .reflection import _plan_item
 
     descriptor = item["target_relative"]
@@ -137,15 +153,15 @@ def bind_target(item: dict, repo: Path, repository: str | None, environment=None
     root = repo
     for part in relative.parts:
         root /= part
-        if root.is_symlink() or getattr(root.lstat(), "st_reparse_tag", 0):
+        if root.is_symlink() or getattr(root.lstat(), "st_reparse_tag", False):
             raise ValueError("Linked target-relative marketplace paths are not permitted")
     root.resolve(strict=True).relative_to(repo)
     _name, marketplace = split_source(item["source"])
     local_definition = {**definition, "source": {**origin, "path": "./" + relative.as_posix()}}
     settings = RepoPluginSettings(marketplaces={marketplace: local_definition})
-    result = _plan_item(
+    result = cast(dict[str, Any], _plan_item(
         item, (repo, settings), settings.marketplaces, local_mode="reference",
-    )
+    ))
     reference = result["reference"]
     if repository_info(root, environment) != info or repository_info(Path(reference["payload"]), environment) != info:
         raise ValueError("Target-relative marketplace or plugin belongs to a nested repository")
