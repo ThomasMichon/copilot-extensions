@@ -14,7 +14,7 @@ import subprocess
 import sys
 
 import pytest
-from test_agenda_store import documents as documents, home as home, proof
+from test_agenda_store import CLI, documents as documents, home as home, proof
 from test_agenda_v2_core import SKILL, STORE, current, lane as lane, update
 
 HISTORY = importlib.import_module("agenda_history")
@@ -262,3 +262,58 @@ def test_actual_history_cli_failure_is_bounded_structured_and_write_free(lane, e
     failure = json.loads(result.stdout)
     assert failure["type"] == "error" and failure["error"]["code"] == code
     assert len(result.stdout) <= WIRE.FRAME_BYTES and bytes_in(lane) == before
+
+
+@pytest.mark.parametrize("command", ["reader-info", "history-page"])
+@pytest.mark.parametrize("placement", ["common-before", "all-before"])
+def test_actual_passive_cli_routes_options_before_command_to_the_same_strict_reader(
+    lane, command, placement,
+):
+    selected = info(lane)
+    common = ["--state-home", str(lane)]
+    reader = ["--worktree", "fixture-lane", "--store-id", selected["source"]["store_id"],
+              "--contract-version", "1", "--json"]
+    options = [*common, command, *reader] if placement == "common-before" else [*common, *reader, command]
+    before = bytes_in(lane)
+    result = subprocess.run(
+        [sys.executable, "-B", str(SKILL / "scripts" / "agenda_cli.py"), *options],
+        capture_output=True, timeout=10,
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+    )
+    assert result.returncode == 0, result.stderr
+    expected = selected if command == "reader-info" else page(lane)
+    assert json.loads(result.stdout) == expected
+    assert result.stderr == b"" and bytes_in(lane) == before
+
+
+@pytest.mark.parametrize("command", ["reader-info", "history-page"])
+def test_passive_command_without_required_selection_never_enters_legacy_read(
+    lane, monkeypatch, command,
+):
+    monkeypatch.setattr(CLI, "read", lambda *args: pytest.fail("passive verb entered legacy read"))
+    with pytest.raises(SystemExit) as error:
+        CLI.main(["--state-home", str(lane), command])
+    assert error.value.code == 2
+
+
+@pytest.mark.parametrize("option", ["--store-id", "--before-cursor", "--contract-version"])
+def test_new_reader_flags_do_not_become_silently_accepted_legacy_read_options(lane, option):
+    with pytest.raises(SystemExit) as error:
+        CLI.main(["read", "--state-home", str(lane), option, "1"])
+    assert error.value.code == 2
+
+
+@pytest.mark.parametrize("value", ["reader-info", "history-page"])
+def test_legacy_option_values_are_not_mistaken_for_the_new_passive_command(
+    lane, monkeypatch, capsys, value,
+):
+    called = []
+
+    def legacy_read(*args):
+        called.append(args)
+        return {"legacy": True}
+
+    monkeypatch.setattr(CLI, "read", legacy_read)
+    assert CLI.main(["--state-home", str(lane), "--worktree", value, "read"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"legacy": True}
+    assert len(called) == 1 and called[0][-1] == value

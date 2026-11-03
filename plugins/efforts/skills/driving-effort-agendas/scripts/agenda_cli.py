@@ -15,9 +15,6 @@ from agenda_store import history, mutate, read, safe_path
 
 def main(argv: list[str] | None = None) -> int:
     args_list = sys.argv[1:] if argv is None else argv
-    if args_list and args_list[0] in ("reader-info", "history-page"):
-        from agenda_history_cli import main as history_main
-        return history_main(args_list)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("read", "next", "check", "history", "init", "update", "publish",
                                             "reader-info", "history-page"))
@@ -36,7 +33,19 @@ def main(argv: list[str] | None = None) -> int:
                         help="one trusted argv token; use --publish-arg=--flag for flags")
     parser.add_argument("--publisher-python", help="explicit resolved provider-v2 interpreter")
     parser.add_argument("--publisher-project", help="explicit provider project selection")
-    args = parser.parse_args(argv)
+    parser.add_argument("--store-id", help="passive history commands only: expected store identity")
+    parser.add_argument("--contract-version", type=int, help="passive history commands only")
+    parser.add_argument("--before-cursor", help="passive history commands only")
+    parser.add_argument("--json", action="store_true", help="passive history commands only")
+    args = parser.parse_args(args_list)
+    if args.command in ("reader-info", "history-page"):
+        from agenda_history_cli import main as history_main
+        return history_main(args_list)
+    if (
+        args.store_id is not None or args.contract_version is not None
+        or args.before_cursor is not None or args.json
+    ):
+        parser.error("store-id/contract-version/before-cursor/json require reader-info or history-page")
     try:
         provider_configured = args.publisher_python is not None or args.publisher_project is not None
         if provider_configured and (args.publisher_python is None or args.publisher_project is None):

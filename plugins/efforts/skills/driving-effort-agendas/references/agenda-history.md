@@ -38,6 +38,11 @@ Subsequent pages require the expected store ID. An available legacy store report
 `unsupported`. Missing or unsafe storage is unavailable, never an empty history
 or an instruction to migrate an active lane.
 
+Options may precede the command. Dispatch uses the parsed command and preserves
+the exact arguments for the strict passive parser; a passive name cannot fall
+through to legacy `read`. Required worktree/store selection remains enforced,
+and reader-only flags are rejected by legacy commands.
+
 The locator remains caller-owned. This interface does not create a locator
 registry, move storage, archive it or change checkout cleanup. Store format
 version is **not** a restore epoch. A restored database can rewind its revision
