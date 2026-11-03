@@ -35,6 +35,7 @@ def public_python(tmp_path, monkeypatch):
 
     registry.SetValueEx = write
     monkeypatch.setitem(sys.modules, "winreg", registry)
+    monkeypatch.setattr(path_update, "config_write_lock", lambda *args: nullcontext())
     monkeypatch.setattr(path_update, "_notify_environment_change", notify)
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(sys, "_base_executable", str(base))
@@ -88,6 +89,19 @@ def test_retry_notifies_an_already_written_path_without_rewriting(public_python,
     assert path_update.finish_update(["update"], 0) == 0
     assert state.notifications == 2 and len(state.writes) == 1
     assert path_update.os.environ["PATH"] == state.expected
+
+
+def test_unavailable_publication_lock_is_an_explicit_failure_without_a_write(
+    public_python, monkeypatch, capsys,
+):
+    def unavailable(*args):
+        raise TimeoutError("writer lock unavailable")
+
+    monkeypatch.setattr(path_update, "config_write_lock", unavailable)
+    assert path_update.finish_update(["update"], 0) == 1
+    assert public_python.writes == [] and public_python.notifications == 0
+    assert path_update.os.environ["PATH"] == public_python.original
+    assert "writer lock unavailable" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("kind", [1, 2], ids=["literal", "expandable"])

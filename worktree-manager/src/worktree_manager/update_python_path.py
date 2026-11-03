@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 import sys
 
+from .config_write_lock import config_write_lock
+
 def _prepend(path: str, directory: str) -> str:
     if not Path(directory).is_absolute() or any(
         character == ";" or ord(character) < 32 for character in directory
@@ -34,7 +36,7 @@ def _notify_environment_change() -> None:
 def _publish_user_path(directory: str) -> bool:
     import winreg
 
-    with winreg.CreateKeyEx(
+    with config_write_lock(Path.home() / ".agent-worktrees" / "python-user-path"), winreg.CreateKeyEx(
         winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_READ | winreg.KEY_WRITE,
     ) as key:
         try:

@@ -366,6 +366,9 @@ inspection/recovery commands, failed updates and contained tests do not persist
 this preference. Only byte-identical duplicate entries are removed; other case,
 Unicode and separator aliases are preserved. Verified desired PATH is notified
 even when no write is needed, allowing a failed notification to be retried.
+Concurrent publishers share the bounded Manager configuration-writer lock
+through registry read, modification and verification, preserving each other's
+entries. This does not serialize unrelated tools that write user PATH directly.
 A physical Python directory containing `%` is refused
 before writing an expandable user PATH, rather than publishing a different
 directory after Windows variable expansion; literal registry strings retain
