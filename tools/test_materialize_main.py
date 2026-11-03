@@ -132,7 +132,15 @@ def test_materialize_refuses_linked_source_content(tmp_path, native_file_symlink
         f'[tool.uv.sources]\ndependency = {{ path = "{reference}" }}\n',
     )
     log = mm.materialize(tmp_path, canonical_root=tmp_path)
-    assert any("linked" in line for line in log), log
+    assert any(
+        line.startswith("SKIP") and (
+            "linked" in line
+            or kind == "outside-traversal" and "not relative to its own payload" in line
+        )
+        for line in log
+    ), log
+    assert (original / "module.py").read_text() == "value = 1\n"
+    assert not (package / "src").exists() or kind == "source"
 
 
 def test_materialized_closure_allows_an_aliased_parent(tmp_path, native_file_symlink):
@@ -467,6 +475,35 @@ def test_find_file_pointers_ignores_non_pointer_files(tmp_path: Path):
 
     found = mm.find_file_pointers(root)
     assert [p.name for p in found] == ["real-pointer.md"]
+
+
+@pytest.mark.parametrize("relative", ["outside.md", "repo/../outside.md"])
+def test_file_pointer_candidates_cannot_write_outside_extracted_root(tmp_path, relative):
+    root = tmp_path / "repo"
+    root.mkdir()
+    outside = tmp_path / "outside.md"
+    contents = "<!-- VENDOR_POINTER: source=canonical.md kind=file -->\n"
+    outside.write_text(contents)
+    (root / "canonical.md").write_text("canonical\n")
+    with pytest.raises(ValueError, match="outside the extracted root"):
+        mm.materialize_file_pointers(
+            root, canonical_root=root, candidates=[tmp_path / relative],
+        )
+    assert outside.read_text() == contents
+
+
+def test_extracted_pointer_candidate_still_refuses_a_symlink(tmp_path, native_file_symlink):
+    root = tmp_path / "repo"
+    root.mkdir()
+    victim = tmp_path / "victim"
+    contents = "<!-- VENDOR_POINTER: source=canonical.md kind=file -->\n"
+    victim.write_text(contents)
+    pointer = root / "pointer"
+    native_file_symlink(pointer, victim)
+    (root / "canonical.md").write_text("canonical\n")
+    log = mm.materialize_file_pointers(root, canonical_root=root, candidates=[pointer])
+    assert any(line.startswith("SKIP") and "is a symlink" in line for line in log)
+    assert victim.read_text() == contents
 
 
 def test_build_materializes_file_pointers_end_to_end(tmp_path: Path):

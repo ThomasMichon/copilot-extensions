@@ -54,6 +54,13 @@ ordinary callers retain their existing defaults. Callers still own whole-task
 process containment and source acquisition; this parameter grants no source
 authorization.
 
+Local install-source composition collects possible file pointers while reading
+the exact Git archive: only files whose first byte can match the anchored marker
+need another filesystem read. The unchanged parser, root/symlink refusal checks
+and complete vendor-closure validation still run. This candidate list applies
+only to the freshly extracted, unchanged snapshot; ordinary materialization of
+arbitrary trees retains its full file scan.
+
 `runtime_source_build.py` is a repository-only composition over this preparation,
 the actual configured-runtime-source owner, the retained native dependency
 compiler, governed wheel acquisition and the existing numbered constructor.

@@ -4251,7 +4251,7 @@
         "tools/launch_wrapper_assets_ref.py": "8b1eb2f5620cf4ba245a8acd992749e16e64694e6ebc08da4874db50c3d8e414",
         "tools/materialize_installer_engine.py": "0fbdd8c974257e61f462ca5e6816938054980c399eaa95323eebda5407442e28",
         "tools/materialize_launch_wrapper_assets.py": "c8441a7c7edff2e36ad2019d79942b6160493f3927251b560d43219f9c75d45f",
-        "tools/materialize_main.py": "e47b95bdc19d7d6b04a04b304ae7cde169c3d45ae1bb7aca913111c2dc24d8f0",
+        "tools/materialize_main.py": "0b248728284d755eda50aca6f328fc47cfbf22c8f8cb98fb909cd8ca66a7e41f",
         "tools/materialized_candidate_inventory.py": "9a8ff5cdc600c7ef83328ddf490981c3c4a31cbab3fc1da6a84e4c1c022bb580",
         "tools/native_daemon_artifacts.py": "c0261221fc6334f0f70d1272dde0ed8e28668f84fb7131071e1660615329f81d",
         "tools/native_qualification_contract.py": "2535d0a37a793863feaa21adb23f274faf0db416d73d3014ef361bdd539709e1",
