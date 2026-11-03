@@ -526,7 +526,7 @@ def _foreground_install(args, driver) -> Path | int:
         ),
     )
     driver.drain()
-    result = driver.wait(request.id, output=sys.stdout)
+    result = driver.wait(request.id, output=sys.stderr)
     if result.state != "completed" or result.exit_code is None:
         raise RuntimeError(f"Manager bootstrap did not complete: {result.state}")
     if result.exit_code:

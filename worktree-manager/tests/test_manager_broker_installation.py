@@ -178,7 +178,7 @@ def test_contained_and_posix_installation_do_not_adopt_a_host_task(installation,
 @pytest.mark.parametrize("changed", [None, "root", "source", "slot", "version", "oversized"])
 @pytest.mark.parametrize("skip_reconcile", [False, True])
 def test_foreground_bootstrap_queues_only_its_fixed_installation_not_application_arguments(
-    installation, monkeypatch, changed, skip_reconcile,
+    installation, monkeypatch, capsys, changed, skip_reconcile,
 ):
     state = installation
     monkeypatch.setattr(state.adapter, "_source_digest", lambda payload: "a" * 64)
@@ -198,10 +198,15 @@ def test_foreground_bootstrap_queues_only_its_fixed_installation_not_application
     state.adapter.runtime.mark_complete(state.root, "9.9.9", payload_hash="c" * 64)
     (state.root / "current-version").write_text("9.9.9\n", encoding="utf-8")
     queued = []
+
+    def wait(request, *, output):
+        output.write(log.read_text(encoding="utf-8"))
+        return SimpleNamespace(state="completed", exit_code=0, log_path=log)
+
     driver = SimpleNamespace(
         RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
         enqueue=lambda spec, **kwargs: queued.append((spec, kwargs["runner"])) or SimpleNamespace(id="request"),
-        drain=Mock(), wait=Mock(return_value=SimpleNamespace(state="completed", exit_code=0, log_path=log)),
+        drain=Mock(), wait=Mock(side_effect=wait),
     )
     args = SimpleNamespace(
         payload=state.root, root=state.root, repair_update=False, recover_adopted=None,
@@ -227,7 +232,10 @@ def test_foreground_bootstrap_queues_only_its_fixed_installation_not_application
         *(("--skip-instance-reconcile",) if skip_reconcile else ()),
     )
     driver.drain.assert_called_once_with()
-    driver.wait.assert_called_once_with("request", output=sys.stdout)
+    driver.wait.assert_called_once_with("request", output=sys.stderr)
+    captured = capsys.readouterr()
+    assert not captured.out
+    assert captured.err == log.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(("command", "repair"), [

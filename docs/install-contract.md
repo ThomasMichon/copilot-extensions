@@ -2288,6 +2288,9 @@ does not manufacture activity while a copy, read or hash is stalled.
 Failed diagnostic delivery aborts preparation without sealing or publishing
 the candidate. Inventory/path checks, atomic payload replacement, quiet
 allowances and independently absolute wheel deadlines are unchanged.
+Preparation terminates its diagnostic line before the bootstrap receipt.
+Foreground bootstrap presents its shared driver log on stderr, keeping the
+selected Manager command's stdout independent of cold construction diagnostics.
 
 The read-only Windows consumer census refreshes an incomplete current-user
 candidate at most once by PID and checks that its creation identity is unchanged.
