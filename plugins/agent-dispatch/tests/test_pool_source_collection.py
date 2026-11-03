@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import time
 from concurrent.futures import Future
 from dataclasses import FrozenInstanceError, replace
@@ -356,7 +357,8 @@ def test_legacy_adapter_qualifies_complete_sources_and_preserves_precedence(
 
 
 @pytest.mark.parametrize("failure", [
-    "permission", "encoding", "malformed", "directory-read", "primary-type", "directory-type",
+    "permission", "encoding", "malformed", "export", "empty-key", "numeric-key",
+    "directory-read", "primary-type", "directory-type",
 ])
 def test_legacy_adapter_never_qualifies_a_best_effort_partial_read(
     tmp_path: Any, monkeypatch: Any, failure: str,
@@ -376,8 +378,16 @@ def test_legacy_adapter_never_qualifies_a_best_effort_partial_read(
         profiles.write_text("not a directory")
     elif failure == "encoding":
         primary.write_bytes(b"# invalid UTF-8: \xff\nAGENT_DISPATCH_SUPERVISE_LABELS=legacy\n")
-    elif failure == "malformed":
-        primary.write_text("unsupported shell statement\nAGENT_DISPATCH_SUPERVISE_LABELS=legacy\n")
+    elif failure in {"malformed", "export", "empty-key", "numeric-key"}:
+        line = {
+            "malformed": "unsupported shell statement",
+            "export": "export AGENT_DISPATCH_SUPERVISE_LABELS=legacy",
+            "empty-key": "=unsupported",
+            "numeric-key": "3BAD=unsupported",
+        }[failure]
+        primary.write_text(line + "\n" + (
+            "" if failure == "export" else "AGENT_DISPATCH_SUPERVISE_LABELS=legacy\n"
+        ))
     elif failure == "permission":
         read = Path.read_text
         def denied(path: Any, *args: Any, **kwargs: Any) -> Any:
@@ -396,8 +406,55 @@ def test_legacy_adapter_never_qualifies_a_best_effort_partial_read(
     sources = RegistrarSources(base=tmp_path, dropins=tmp_path / "absent", activation_source=lambda: None)
     result = read_supervisor_declarations(sources, legacy=True)
     assert not result.complete and result.reason == "legacy-source-unavailable"
-    if failure in {"malformed", "encoding", "directory-read", "directory-type"}:
+    if failure in {"malformed", "empty-key", "numeric-key", "encoding", "directory-read", "directory-type"}:
         assert [item.name for item in result] == ["supervisor"]
+    if failure == "export":
+        assert result.declarations == ()
+
+
+def test_legacy_strict_enumeration_preserves_windows_case_matching(
+    tmp_path: Any, monkeypatch: Any,
+) -> None:
+    from pathlib import Path, PureWindowsPath
+    from agent_dispatch import registrar_discovery
+    from agent_dispatch.registrar_discovery import RegistrarSources
+
+    monkeypatch.setattr(registrar_discovery, "install_dir", lambda: tmp_path)
+    monkeypatch.setattr(Path, "match", lambda path, pattern: PureWindowsPath(path.name).match(pattern))
+    profiles = tmp_path / "supervisors"
+    profiles.mkdir()
+    (profiles / "review.ENV").write_text("AGENT_DISPATCH_SUPERVISE_LABELS=review\n")
+    sources = RegistrarSources(base=tmp_path, dropins=tmp_path / "absent", activation_source=lambda: None)
+    result = read_supervisor_declarations(sources, legacy=True)
+    assert result.complete and [item.name for item in result] == ["review"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX special file fixtures")
+@pytest.mark.parametrize("kind", ["fifo", "device"])
+def test_legacy_special_profile_refuses_without_reading_or_blocking(
+    tmp_path: Any, monkeypatch: Any, kind: str,
+) -> None:
+    from pathlib import Path
+    from agent_dispatch import registrar_discovery
+    from agent_dispatch.registrar_discovery import RegistrarSources
+
+    monkeypatch.setattr(registrar_discovery, "install_dir", lambda: tmp_path)
+    profiles = tmp_path / "supervisors"
+    profiles.mkdir()
+    entry = profiles / "review.env"
+    if kind == "fifo":
+        os.mkfifo(entry)
+    else:
+        entry.symlink_to(os.devnull)
+    read = Path.read_text
+    def no_special_read(path: Any, *args: Any, **kwargs: Any) -> Any:
+        assert path != entry, "neither strict nor compatibility reads may open special files"
+        return read(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "read_text", no_special_read)
+    sources = RegistrarSources(base=tmp_path, dropins=tmp_path / "absent", activation_source=lambda: None)
+    result = read_supervisor_declarations(sources, legacy=True)
+    assert not result.complete and result.reason == "legacy-source-unavailable"
+    assert result.declarations == ()
 
 
 def test_legacy_adapter_qualifies_confirmed_absent_profiles(tmp_path: Any, monkeypatch: Any) -> None:

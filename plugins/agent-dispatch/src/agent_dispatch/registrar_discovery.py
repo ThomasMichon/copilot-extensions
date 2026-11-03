@@ -26,6 +26,7 @@ import json
 from contextlib import contextmanager
 import logging
 import os
+import re
 import stat
 import time
 from collections.abc import Callable, Iterable, Mapping
@@ -725,6 +726,10 @@ def _parse_env_file(path: Path, *, strict: bool = False) -> dict[str, str]:
     """Parse a simple ``KEY=VALUE`` env file (``#`` comments + blanks skipped)."""
     out: dict[str, str] = {}
     try:
+        if not stat.S_ISREG(path.stat().st_mode):
+            if strict:
+                raise RegistrarError("legacy profile requires a regular file")
+            return out
         text = path.read_text(encoding="utf-8", errors="strict" if strict else "replace")
     except OSError:
         if strict:
@@ -737,6 +742,8 @@ def _parse_env_file(path: Path, *, strict: bool = False) -> dict[str, str]:
         if not s or s.startswith("#") or "=" not in s:
             continue
         key, value = s.split("=", 1)
+        if strict and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key.strip()) is None:
+            raise RegistrarError("legacy profile contains an unsupported assignment key")
         out[key.strip()] = value.strip()
     return out
 
@@ -782,7 +789,7 @@ def read_legacy_env_profiles(
     if primary.is_file():
         sources.append((primary.stem, primary))
     if profiles.is_dir():
-        paths = (f for f in profiles.iterdir() if f.name.endswith(".env")) if strict else profiles.glob("*.env")
+        paths = (f for f in profiles.iterdir() if f.match("*.env")) if strict else profiles.glob("*.env")
         sources.extend((f.stem, f) for f in sorted(paths))
 
     out: list[ProfileDeclaration] = []

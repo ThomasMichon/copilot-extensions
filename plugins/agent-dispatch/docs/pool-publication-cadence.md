@@ -83,7 +83,12 @@ qualify the complete set; it no longer withholds every publication merely
 because the compatibility reader is enabled. Missing primary/profile paths are
 confirmed absence. Unreadable, invalid-encoding, unsupported-line or wrong-type
 inputs withhold metadata qualification instead of certifying a partial empty
-set. Legacy launch discovery keeps its best-effort behavior. First-class
+set. Strict keys must use the simple env assignment syntax; shell `export`
+statements are not silently treated as inert keys. Profile enumeration retains
+platform-native extension matching, including `.ENV` on Windows. Both readers
+skip opening non-regular profile entries, so a failed strict read cannot block
+its compatibility fallback on a FIFO or device. Legacy launch discovery
+otherwise keeps its best-effort behavior. First-class
 declarations still supersede same-name legacy profiles, and label-less profiles
 remain inert. No source file, supervisor argv or activation setting is migrated.
 
