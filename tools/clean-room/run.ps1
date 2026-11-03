@@ -476,7 +476,8 @@ function Start-Container {
             }
             return
         }
-        $existing = (& docker ps -aq --filter "name=^/${Container}$" | Out-String).Trim()
+        $escapedName = [regex]::Escape($Container)
+        $existing = (& docker ps -aq --filter "name=^/${escapedName}$" | Out-String).Trim()
         if ($LASTEXITCODE -ne 0) { throw 'Could not check bounded container name availability' }
         if ($existing) { throw "Bounded container name already exists: $Container; refusing reuse or replacement" }
     }

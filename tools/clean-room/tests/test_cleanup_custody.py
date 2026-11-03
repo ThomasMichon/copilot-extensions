@@ -223,3 +223,28 @@ def test_unreadable_id_record_refuses_all_alias_cleanup(cleanup_lab):
     assert result.returncode != 0
     assert cleanup_lab.records() == before
     assert cleanup_lab.manifest.exists()
+
+
+@pytest.mark.parametrize("route", ["bridge-unregister", "down", "prune"])
+def test_unregistered_container_cleanup_preserves_unrelated_registration(cleanup_lab, route):
+    cleanup_lab.containers({REPLACEMENT: "cr-other"})
+    assert cleanup_lab.provider("register", "--container", "cr-other").returncode == 0
+    before = cleanup_lab.records()
+    cleanup_lab.containers({IDENTITY: NAME})
+    result = cleanup_lab.wrapper(route)
+    assert result.returncode == 0, result.stderr
+    assert cleanup_lab.records() == before
+    assert cleanup_lab.manifest.exists()
+    assert cleanup_lab.containers() == ({IDENTITY: NAME} if route == "bridge-unregister" else {})
+    if route == "bridge-unregister":
+        assert cleanup_lab.wrapper(route).returncode == 0
+        assert cleanup_lab.records() == before
+
+
+def test_unregistered_container_does_not_ignore_unreadable_alias(cleanup_lab):
+    cleanup_lab.register()
+    (cleanup_lab.registrations / "unknown.json").write_text("{", encoding="utf-8")
+    before = cleanup_lab.records()
+    result = cleanup_lab.wrapper("bridge-unregister")
+    assert result.returncode != 0
+    assert cleanup_lab.records() == before

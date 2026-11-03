@@ -232,8 +232,8 @@ start_container() {
             }
             return 0
         fi
-        local existing
-        existing="$(docker ps -aq --filter "name=^/${CONTAINER}$")" || return 1
+        local existing escaped_name="${CONTAINER//./\\.}"
+        existing="$(docker ps -aq --filter "name=^/${escaped_name}$")" || return 1
         [ -z "$existing" ] || { echo "bounded container name already exists: $CONTAINER; refusing reuse or replacement" >&2; return 1; }
     fi
     # Auth: prefer a host-grabbed Copilot token (COPILOT_GITHUB_TOKEN) -- no

@@ -452,7 +452,10 @@ def cmd_unregister(args) -> int:
         keys.add(expected_id)
     for key in _registered_containers():
         registration = _load_registration(key)
-        if registration and registration["container_id"] == expected_id:
+        if registration is None:
+            print(f"registration for '{key}' is unreadable; retain unknown ownership", file=sys.stderr)
+            return 2
+        if registration["container_id"] == expected_id:
             keys.add(key)
     # Lock every selected alias before checking ownership or deleting any record.
     # An ID-keyed bounded record and a legacy name-keyed record can coexist.
@@ -489,9 +492,6 @@ def cmd_unregister(args) -> int:
                     )
                     return 2
             owned.append(key)
-        if not owned and args.container != expected_id and _registered_containers():
-            print("no registration can be attributed to this container reference; retain unknown ownership", file=sys.stderr)
-            return 2
         for key in owned:
             _registration_path(key).unlink(missing_ok=True)
     others = _registered_containers()

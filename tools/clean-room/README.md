@@ -194,6 +194,8 @@ name cannot redirect registration or provider resolution to another container.
 Later standalone `bridge-unregister`, `down` and `prune` invocations resolve the
 physical Docker ID and clean up records owned by that ID, including existing
 legacy name-keyed records. Prune resolves abbreviated Docker IDs before removal.
+An identified container with no matching registration is a successful no-op;
+valid unrelated registrations and their shared provider manifest remain intact.
 Replacement mismatches, Docker errors, ambiguous IDs and unreadable records
 refuse cleanup rather than guessing ownership. If an ID-keyed original is
 already absent and only its old name is known, ownership cannot be recovered

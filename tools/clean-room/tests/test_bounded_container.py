@@ -38,7 +38,7 @@ def wrapper(request, tmp_path):
     docker.write_text(
         f"#!{sys.executable}\n"
         + """
-import json, os, pathlib, sys
+import json, os, pathlib, re, sys
 a = sys.argv[1:]
 with open(os.environ["COMMANDS"], "a") as stream:
     stream.write(json.dumps(a) + "\\n")
@@ -47,6 +47,10 @@ identity = "a" * 64
 if a[0] == "ps":
     if mode.startswith("existing"):
         print(identity)
+    elif mode == "similar-name":
+        name_filter = next(part[5:] for part in a if part.startswith("name="))
+        if re.search(name_filter, "/cr-base-proofx1"):
+            print(identity)
 elif a[0] == "images":
     print("cached-image")
 elif a[0] == "run":
@@ -85,11 +89,11 @@ elif a[0] in ("build", "rm"):
         "CLEAN_ROOM_DOCKER_COMMAND_JSON": json.dumps([sys.executable, str(docker)]),
     }
 
-    def invoke(options=(), *, mode="run", then="none", fixture=""):
+    def invoke(options=(), *, mode="run", then="none", fixture="", suffix="bounded-fixture"):
         env["DOCKER_FIXTURE"] = fixture
         if request.param == "bash":
             args = [executable, str(RIG / "run.sh"), "--scenario", str(scenario),
-                    "--name-suffix", "bounded-fixture", "--then", then]
+                    "--name-suffix", suffix, "--then", then]
             args += list(options) + [mode]
         else:
             names = {
@@ -98,7 +102,7 @@ elif a[0] in ("build", "rm"):
                 "--os": "-Os",
             }
             args = [executable, "-NoProfile", "-File", str(RIG / "run.ps1"),
-                    "-Scenario", str(scenario), "-NameSuffix", "bounded-fixture",
+                    "-Scenario", str(scenario), "-NameSuffix", suffix,
                     "-Then", then, "-Mode", mode]
             args += [names.get(option, option) for option in options]
         result = subprocess.run(args, env=env, capture_output=True, text=True, timeout=30)
@@ -175,6 +179,14 @@ def test_bounded_request_refuses_foreign_running_or_stopped_container_before_aut
     assert result.returncode != 0
     assert "name already exists" in result.stderr.lower()
     assert len(calls) == 1 and calls[0][0] == "ps"
+
+
+def test_dotted_name_does_not_match_an_unrelated_container(wrapper):
+    result, calls = wrapper(LIMITS, fixture="similar-name", suffix="proof.1")
+    assert result.returncode == 0, result.stderr
+    creates = [call for call in calls if call[0] == "run"]
+    assert len(creates) == 1
+    assert creates[0][creates[0].index("--name") + 1] == "cr-base-proof.1"
 
 
 @pytest.mark.parametrize("fixture", ["changed", "expired"])
