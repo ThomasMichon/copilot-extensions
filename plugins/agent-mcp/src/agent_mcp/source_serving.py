@@ -60,6 +60,26 @@ def startup_transaction(server):
             yield generation_selected(server)
 
 
+def publish_control_route(server, *, bind: str, port: int):
+    from zdd import routing
+
+    publication = routing.publish_active
+    guards = {}
+    if server._runtime_root is not None:
+        publication = routing.publish_active_with_previous_guarded
+        guards = {
+            "require_expected_active": False,
+            "refuse_current": lambda _raw: (
+                None if generation_selected(server)
+                else "MCP startup slot is not the selected generation"
+            ),
+        }
+    return publication(
+        server._config_dir(), bind=bind, port=port,
+        pid=os.getpid(), version=server._version, demote_existing=True, **guards,
+    )
+
+
 def data_handle_matches(fixed: Path, data_socket: Path) -> bool:
     """Observe the committed fixed handle without changing its owner."""
     from . import serve

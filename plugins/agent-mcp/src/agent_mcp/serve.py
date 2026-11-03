@@ -746,21 +746,7 @@ class Server:
 
                 raise ControlError("MCP startup slot is not the selected generation")
             try:
-                publication = routing.publish_active
-                guards = {}
-                if self._runtime_root is not None:
-                    publication = routing.publish_active_with_previous_guarded
-                    guards = {
-                        "require_expected_active": False,
-                        "refuse_current": lambda _raw: (
-                            None if source_serving.generation_selected(self)
-                            else "MCP startup slot is not the selected generation"
-                        ),
-                    }
-                publication(
-                    self._config_dir(), bind=_TCP_HOST, port=control_port,
-                    pid=os.getpid(), version=self._version, demote_existing=True, **guards,
-                )
+                source_serving.publish_control_route(self, bind=_TCP_HOST, port=control_port)
             except Exception as error:
                 if (
                     self._runtime_root is not None
