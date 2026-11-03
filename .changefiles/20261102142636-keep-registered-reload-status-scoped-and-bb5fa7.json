@@ -1,0 +1,9 @@
+{
+  "comment": "Keep registered reload status scoped and current, explain row controls, and retain uncached reads during source retirement.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

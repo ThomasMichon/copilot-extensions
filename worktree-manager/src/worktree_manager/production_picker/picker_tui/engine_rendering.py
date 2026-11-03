@@ -11,9 +11,10 @@ from .engine_helpers import C_BAND, C_BTN_SEL, C_DIM, C_DISABLED, C_ENV, C_FAINT
 from .engine_regions import _PickerButtons, _PickerMachine, _PickerNativeData, _PickerPivots, _PickerSegment, _PickerStickyHeader
 
 from .engine_navigation_rendering import PickerNavigationRenderingMixin
+from .engine_footer import PickerFooterMixin
 
 
-class PickerScreenRenderingMixin(PickerNavigationRenderingMixin):
+class PickerScreenRenderingMixin(PickerNavigationRenderingMixin, PickerFooterMixin):
     def build_body(self, width, *, deferred=False):
         vrows = []
         cur_band = None
@@ -599,6 +600,14 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin):
         rather than silently skipping segments for an un-audited cause.
         """
         seg_ids = self._CAUSE_SEGMENTS.get(cause, self._ALL_NF_SEGMENTS)
+        # A replacement read can settle without changing rows or the global busy state.
+        if getattr(self, "_registered_refresh_note", None) is not None:
+            from .registered_scopes import refresh_footer
+
+            status = refresh_footer(self, self.debug)
+            if cause == "pulse" and status != getattr(self, "_registered_footer_status", None):
+                seg_ids = (*seg_ids, "nf-footer")
+            self._registered_footer_status = status
         for seg_id in seg_ids:
             try:
                 w = self.query_one(f"#{seg_id}")
@@ -814,118 +823,6 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin):
                     if v_focus else "[ ] switch view ")
             l2.append(hint.rjust(max(1, W - l2.cell_len)), style=C_DIM)
         return [l1, l2]
-    def _focus_hint(self):
-        """Focus-specific footer hint: exactly what Enter/Space do for the
-        current focus, naming the concrete target (#1344)."""
-        zone = self.sel[0]
-        if zone == "UPD":
-            return ("Enter: apply staged update + restart the picker"
-                    " · ↑↓ move · Tab region")
-        if zone == "MUP":
-            return ("Enter: update the Worktree Manager + restart the picker"
-                    " · ↑↓ move · Tab region")
-        if zone == "V":
-            return (f"◀▶ view / ⚙ Config (on {self.htabs[self.htab]})"
-                    f" · Enter: focus body · Tab region · [ ] view")
-        if zone == "CFG":
-            return ("◀▶ back to pivots · Enter: focus sections"
-                    " · ↑↓ move · Tab region")
-        if zone == "M":
-            if self._in_configuration():
-                return "◀▶ section · Enter: focus content · Esc: return to previous view"
-            m, e, _ = self.cur_machine()
-            scope = "All machines" if self.is_all() else f"{m} {e}"
-            return (f"◀▶ switch machine (on {scope}) · Enter: focus actions"
-                    f" · Tab region · ^◀▶ machine")
-        if zone == "BTN":
-            btn = self.active_button()
-            if btn == "N":
-                tm, te = self.create_target()
-                return (f"Enter: new worktree on {tm} {te}"
-                        f" · Tab region · ^◀▶ machine")
-            if btn == "K":
-                return "Enter: open Cleanup dialog · ◀▶ Cleanup/Sync · Tab region"
-            if btn == "SY":
-                return "Enter: open Sync dialog · ◀▶ Cleanup/Sync · Tab region"
-            if btn == "PA":
-                n = self.pending_count()
-                return (f"Enter: apply {n} profile change(s) · ◀▶ Apply/Reset"
-                        f" · ↑ grid · Tab region")
-            if btn == "PReset":
-                return ("Enter: reset grid to applied · ◀▶ Apply/Reset"
-                        " · ↑ grid · Tab region")
-            if btn == "NC":
-                reg = self._reg_pivot()
-                label = reg.create_action.label if reg and reg.create_action else "entry"
-                return (f"Enter: {label} · Tab region · ^◀▶ machine")
-            if btn and btn.startswith("VA:"):
-                actions = self._pivot_view_actions()
-                index = int(btn.split(":")[1])
-                return f"Enter: {actions[index].label} · Tab region" if index < len(actions) else ""
-            return ""
-        if zone == "L":
-            rec = self._selected_record()
-            wid = rec.get("id4") if rec else "?"
-            nsel = len(self.wt_sel)
-            if nsel:
-                return (f"Space: select/deselect · Enter: actions for "
-                        f"{nsel} selected · / filter · s sort"
-                        f" · Tab region · ^◀▶ machine")
-            return (f"Space: select · Enter: sub-menu for worktree {wid}"
-                    f" · / filter · s sort · Tab region · ^◀▶ machine")
-        if zone == "C":
-            rec = self._selected_record()
-            wid = rec.get("id4") if rec else "?"
-            nsel = self.maint_sel.count(self._maint_ids())
-            tgt = f"{nsel} selected" if nsel else f"row {wid}"
-            return (f"Space: select {wid} · Enter: actions for {tgt}"
-                    f" · Tab region · ^◀▶ machine")
-        if zone == "SA":
-            ids = self._maint_ids()
-            all_on = self.maint_sel.all_selected(ids)
-            verb = "clear all" if all_on else "select all"
-            return f"Space / Enter: {verb} ({len(ids)}) · ↓ rows · Tab region"
-        if zone == "GH":
-            groups = self.maint_groups()
-            gi = self.sel[1]
-            st = groups[gi][0] if 0 <= gi < len(groups) else "?"
-            return f"Space / Enter: select all {st} · ↓ rows · Tab region"
-        if zone == "PR":
-            ti = self.sel[1]
-            if not self.host_cols:
-                return "No profile hosts configured · Tab region"
-            host = "{1} {2}".format(*self.host_cols[self.pcol])
-            tlabel = (self.targets[ti]["label"]
-                      if 0 <= ti < len(self.targets) else "?")
-            return (f"Space: toggle {host} → {tlabel} · ◀▶ host · ↑↓ target"
-                    f" · Enter: to Apply · Tab region")
-        return ""
-    def footer(self, W):
-        if self.progress:
-            hints = ("Esc cancel" if not self.progress["done"]
-                     else "Enter/Esc close")
-        else:
-            hints = self._focus_hint()
-        f = Text(" " + hints, style=C_META)
-        if self._busy_label:
-            # Always-async: while a background action runs, show the shared
-            # animated spinner + its label (not a static line), so no control ever
-            # looks like it did nothing. The tick keeps this at ~10 fps.
-            dbg = f"· {self.spin()} {self._busy_label}… "
-        else:
-            status = self.debug
-            if status == "loading" and self._kind() == "registered":
-                state, _rows, _error = self._task_state()
-                status = f"{self._reg_pivot().label}: " + {
-                    "loading": "reading declared scope(s)",
-                    "error": "read failed or incomplete; see source errors",
-                    "ready": "read settled",
-                }.get(state, state)
-            dbg = f"· {status} "
-        f.append(dbg.rjust(max(1, W - f.cell_len)), style=C_DIM)
-        if f.cell_len > W:
-            f = Text(f.plain[:W])
-        return f
     def _stop_line(self, vrows, stop):
         for i, vr in enumerate(vrows):
             if vr.stop == stop or (isinstance(vr.stop, list) and stop in vr.stop):

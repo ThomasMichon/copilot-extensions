@@ -313,13 +313,13 @@ def test_legacy_configuration_timeout_explains_the_read_not_its_launcher_argv(mo
     assert "Command [" not in message
 
 
-def wait(predicate, timeout=3):
+def wait(predicate, timeout=3, *, diagnostics=None):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if predicate():
             return
         time.sleep(.01)
-    assert predicate(), "provider request did not settle"
+    assert predicate(), diagnostics() if diagnostics else "provider request did not settle"
 
 
 def test_startup_fanout_is_bounded_and_cached_failures_do_not_retry_per_frame():
@@ -395,7 +395,7 @@ def test_invalidation_reserves_scope_before_retirement_capture(monkeypatch):
     runtime.invalidate("a")
     wait(lambda: not runtime._scope_retirements)
     assert retired == [old]
-    runtime.ensure("a")
+    wait(lambda: starts == [True])
     assert starts == [True] and runtime._pending_requests[0][0] == "a"
 
 
@@ -703,9 +703,23 @@ def test_held_stream_first_commits_release_bounded_startup_slots(tmp_path):
     }, name="held", source_path="fixture")
     runtime = tasks.RegisteredPivotRuntime(reg)
     scopes = ["a", "b", "c", "d", "e", "f"]
+
+    def diagnostics():
+        with runtime._lock:
+            return {
+                "cached": {scope: runtime._cache.get(scope) for scope in scopes},
+                "starting": tuple(runtime._starting_scopes),
+                "queued": tuple(scope for scope, _generation in runtime._pending_requests),
+            }
+
     try:
         runtime.ensure_many(scopes)
-        wait(lambda: all(runtime.get(scope)[0] == "ready" for scope in scopes))
+        # Real child startup uses the provider's first-response budget, not a speed assertion.
+        wait(
+            lambda: all(runtime.get(scope)[0] == "ready" for scope in scopes)
+            and not runtime._starting_scopes,
+            timeout=tasks.STREAM_TIMEOUT, diagnostics=diagnostics,
+        )
         assert len(runtime._procs) == 6
         assert not runtime._starting_scopes
     finally:
@@ -731,6 +745,7 @@ def test_explicit_source_reload_replaces_only_its_owned_held_channel(tmp_path, o
     try:
         runtime.ensure_many(["a", "b"])
         wait(lambda: all(runtime.get(scope)[0] == "ready" for scope in ("a", "b")))
+        wait(lambda: not runtime.read_pending("a") and not runtime.read_pending("b"))
         other = next(proc for proc in runtime._procs if proc._picker_scope == "b")
         getattr(runtime, operation)("a")
         if operation == "invalidate":
@@ -740,6 +755,63 @@ def test_explicit_source_reload_replaces_only_its_owned_held_channel(tmp_path, o
         assert runtime.get("b")[1] == [{"id": "b-1"}]
         assert other.poll() is None
         assert len(runtime._procs) == 2
+    finally:
+        runtime.close()
+
+
+@pytest.mark.parametrize("cached", [False, True])
+@pytest.mark.parametrize("phase", ["retirement", "retirement-inflight", "inflight"])
+def test_ensure_during_retirement_retains_only_an_uncached_read(cached, phase):
+    runtime = tasks.RegisteredPivotRuntime(pivot())
+    starts = []
+    runtime._start_pending_lists = lambda: starts.append(tuple(runtime._pending_requests))
+    if "retirement" in phase:
+        runtime._scope_retirements["a"] = object()
+    if "inflight" in phase:
+        runtime._inflight.add("a")
+        runtime._active_requests["a"] = (runtime._gen, 0, object())
+        if not cached:
+            runtime._scope_generations["a"] = 1
+    if cached:
+        runtime._cache["a"] = ("ready", [{"id": "retained"}], "")
+    try:
+        runtime.ensure("a")
+        assert not starts
+        runtime._scope_retirements.pop("a", None)
+        runtime._inflight.discard("a")
+        runtime._active_requests.pop("a", None)
+        runtime._refresh_when_idle("a")
+        assert len(starts) == (0 if cached else 1)
+        if not cached:
+            assert starts[0][0][0] == "a"
+    finally:
+        runtime._scope_retirements.clear()
+        runtime.close()
+
+
+@pytest.mark.parametrize("subscribe", [False, True])
+def test_ensure_admission_consumes_the_deferred_finalizer_request(subscribe):
+    runtime = tasks.RegisteredPivotRuntime(pivot(stream=True, subscribe=subscribe))
+    starts = []
+    runtime._start_pending_lists = lambda: starts.append(True)
+    runtime._scope_generations["a"] = 1
+    runtime._inflight.add("a")
+    runtime._active_requests["a"] = (runtime._gen, 0, object())
+    try:
+        runtime.ensure("a")
+        runtime._inflight.discard("a")
+        runtime._active_requests.pop("a")
+        runtime.ensure("a")
+        assert starts == [True]
+        runtime._pending_requests.clear()
+        runtime._cache["a"] = ("ready", [{"id": "current"}], "")
+        runtime._refresh_when_idle("a")
+        if subscribe:
+            assert not runtime.read_pending("a")
+        runtime._inflight.discard("a")
+        runtime._active_requests.pop("a")
+        runtime._refresh_when_idle("a")
+        assert starts == [True]
     finally:
         runtime.close()
 
@@ -815,6 +887,167 @@ def test_terminal_registered_error_footer_does_not_claim_global_loading():
     screen.debug = "loading"
     assert "read failed or incomplete" in screen.footer(180).plain
     assert "· loading " not in screen.footer(180).plain
+
+
+@pytest.mark.parametrize("terminal,expected", [
+    ("ready", "read settled"),
+    ("error", "read failed or incomplete"),
+])
+@pytest.mark.parametrize("width", [80, 180])
+def test_refresh_footer_tracks_read_completion_and_origin(terminal, expected, width):
+    states = {
+        "host-a": ("ready", [{"id": "a"}], ""),
+        "host-b": ("ready", [], ""),
+    }
+
+    def refresh(scope):
+        states[scope] = ("loading", states[scope][1], "")
+
+    runtime = SimpleNamespace(
+        ensure_many=lambda scopes: None, get=states.__getitem__, refresh_read=refresh,
+    )
+    screen = engine(runtime, pivot())
+    screen.sel = ("T", 0)
+    screen._dispatch_key("r")
+    assert "reading declared scope(s)" in screen.footer(width).plain
+    assert screen.footer(width).cell_len <= width
+    states["host-a"] = (terminal, [{"id": "a"}], "unavailable" if terminal == "error" else "")
+    states["host-b"] = ("ready", [], "")
+    assert expected in screen.footer(width).plain
+    assert "refreshing" not in screen.footer(width).plain
+
+    screen.machine_idx = 1
+    assert "Fixture tasks:" not in screen.footer(width).plain
+    screen.machine_idx = 0
+    assert expected in screen.footer(width).plain
+    screen.pivots.append({"kind": "worktrees", "label": "Worktrees", "pivot": None})
+    screen.htab = 1
+    screen.sel = ("M", 0)
+    assert "Fixture tasks:" not in screen.footer(width).plain
+    screen.debug = "independent diagnostic"
+    screen.htab = 0
+    screen.sel = ("T", 0)
+    assert "independent diagnostic" in screen.footer(width).plain
+
+
+def test_registered_row_focus_explains_actions_and_reload():
+    runtime = SimpleNamespace(
+        ensure_many=lambda scopes: None,
+        get=lambda scope: ("ready", [{"id": "a"}], ""),
+    )
+    screen = engine(runtime, pivot())
+    screen.sel = ("T", 0)
+    footer = screen.footer(180).plain
+    assert "Enter: actions for Fixture tasks row" in footer
+    assert "Tab region" in footer and "r reload" in footer
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_refresh_footer_does_not_mistake_retained_ready_rows_for_a_completed_read(stream):
+    runtime = tasks.RegisteredPivotRuntime(pivot(machine=False, stream=stream))
+    runtime._cache[""] = ("ready", [{"id": "retained"}], "")
+    entered, release = threading.Event(), threading.Event()
+
+    def read(scope, generation):
+        if stream:
+            with runtime._lock:
+                runtime._cache[scope] = ("ready", [{"id": "partial"}], "")
+            runtime._release_startup(scope)
+        entered.set()
+        assert release.wait(3)
+        runtime._finish(scope, ("ready", [{"id": "current"}], ""), {})
+
+    runtime._run_list = read
+    screen = engine(runtime, runtime.pivot)
+    screen.sel = ("T", 0)
+    try:
+        screen._dispatch_key("r")
+        wait(entered.is_set)
+        assert runtime.get("")[0] == "ready"
+        assert "reading declared scope(s)" in screen.footer(180).plain
+        release.set()
+        wait(lambda: not runtime.read_pending(""))
+        assert "read settled" in screen.footer(180).plain
+        assert runtime.get("")[1] == [{"id": "current"}]
+    finally:
+        release.set()
+        runtime.close()
+
+
+def test_refresh_does_not_overwrite_synchronous_admission_diagnostic():
+    runtime = SimpleNamespace(
+        ensure_many=lambda scopes: None, get=lambda scope: ("ready", [{"id": "a"}], ""),
+    )
+    screen = engine(runtime, pivot())
+    screen.sel = ("T", 0)
+    runtime.refresh_read = lambda scope: setattr(screen, "debug", "read admission failed")
+    screen._dispatch_key("r")
+    assert "read admission failed" in screen.footer(180).plain
+
+
+def test_native_reload_key_repaints_scoped_footer_and_navigation(monkeypatch):
+    from test_picker_tui import _wait_for_initial_setup
+
+    tick = PickerScreen._tick
+    monkeypatch.setattr(PickerScreen, "_tick", lambda self: None)
+    state = {"pending": False}
+    calls = []
+
+    def refresh(scope):
+        calls.append(scope)
+        state["pending"] = True
+
+    async def run():
+        app = PickerApp(_fixture_source(), live=False)
+        async with app.run_test(size=(180, 36)) as pilot:
+            screen = app.query_one(PickerScreen)
+            await _wait_for_initial_setup(pilot, screen)
+            reg = pivot()
+            screen.pivots.append({
+                "kind": "registered", "label": reg.label, "pivot": reg, "placement": "left",
+            })
+            screen.htabs.append(reg.label)
+            screen.htab = len(screen.pivots) - 1
+            screen._machine_key_map = lambda: {}
+            screen._pivot_runtime = lambda _reg: SimpleNamespace(
+                ensure_many=lambda scopes: None,
+                get=lambda scope: ("ready", [{"id": "a", "title": "Example"}], ""),
+                refresh_read=refresh,
+                read_pending=lambda scope: state["pending"],
+            )
+            screen.sel = ("T", 0)
+            screen._sync_focus_to_sel()
+            screen.refresh()
+            await pilot.pause()
+            footer = screen.query_one("#nf-footer")
+            render = footer.render
+            painted = []
+
+            def paint():
+                result = render()
+                painted.append(result.plain)
+                return result
+
+            monkeypatch.setattr(footer, "render", paint)
+            await pilot.press("r")
+            assert calls
+            assert "reading declared scope(s)" in painted[-1]
+            state["pending"] = False
+            screen._busy_label = None
+            screen.update_state = "idle"
+            screen._nav_dirty = False
+            screen._poll_update_state = lambda: None
+            screen.frame = 4
+            painted.clear()
+            tick(screen)
+            await pilot.pause()
+            assert painted and "read settled" in painted[-1]
+            assert "Enter: actions for Fixture tasks row" in painted[-1]
+            await pilot.press("ctrl+shift+left")
+            assert screen._kind() == "worktrees"
+            assert "Fixture tasks:" not in painted[-1]
+
+    asyncio.run(run())
 
 
 def test_source_failure_and_recovery_repaint_native_empty_body(monkeypatch):
