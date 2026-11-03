@@ -30,7 +30,7 @@ def declaration(args: tuple, kwargs: dict) -> dict:
 
 def profile(plugin: str, cov_source: str) -> dict:
     return {
-        "kind": "python-inprocess/v1", "plugin": plugin, "cov_source": cov_source,
+        "kind": "python-inprocess/v2", "plugin": plugin, "cov_source": cov_source,
         "platform": sys.platform, "python": platform.python_version(),
         "implementation": platform.python_implementation(),
         "architecture": platform.machine(), "optimization": sys.flags.optimize,
@@ -42,7 +42,10 @@ def file_digest(root: Path, name: str) -> str:
     if not path.is_file() or path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
         raise ValueError("audit dependency is missing or outside the source root")
     with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
+        digest = hashlib.sha256()
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+        return digest.hexdigest()
 
 def dependency_names(root: Path, node: str, declared: dict, plugin: str = "") -> set[str]:
     test_file = node.split("::", 1)[0]
@@ -156,7 +159,7 @@ def verified_exclusions(
             "kind", "plugin", "cov_source", "platform", "python",
             "implementation", "architecture", "optimization",
         }
-        or current_profile.get("kind") != "python-inprocess/v1"
+        or current_profile.get("kind") != "python-inprocess/v2"
     ):
         return {}
     digests = {} if cache is None else cache

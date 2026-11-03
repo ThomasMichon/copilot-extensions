@@ -7014,8 +7014,11 @@ The ordinary schema-v4 collector qualifies only the bounded T0/T1 in-process
 families with no declared effects beyond filesystem. Every declared production
 Python dependency needs runtime-context attribution, and an undeclared
 runtime-covered source refuses qualification rather than trusting an incomplete
-closure. Its bytes and all input digests must agree before/after collection and
-at selection/execution. This is
+closure. Each collection chunk uses a fresh private bytecode-cache prefix and
+disables cache writes, so timestamp/size-valid stale bytecode cannot substitute
+for current source. The `python-inprocess/v2` profile rejects earlier evidence
+that did not enforce this. Its bytes and all input digests must agree
+before/after collection and at selection/execution. This is
 not a claim of 100% line/branch coverage. A changed dependency file retains the
 test even if line attribution is incomplete. Native/process/network/service
 behavior has no qualification in this collector and remains always retained

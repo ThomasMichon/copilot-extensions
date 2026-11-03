@@ -57,6 +57,32 @@ def test_installation_context_prepares_only_its_source_test_prerequisites(
     assert (cache / ".dep-fingerprint").read_text() == "source-fingerprint"
 
 
+def test_legacy_selection_loads_without_controller_toml_support(tmp_path, monkeypatch):
+    import builtins
+
+    original_import = builtins.__import__
+
+    def without_tomllib(name, *args, **kwargs):
+        if name == "tomllib":
+            raise ModuleNotFoundError(name)
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", without_tomllib)
+    spec = importlib.util.spec_from_file_location("legacy_selection", TOOLS / "plugin_test_selection.py")
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
+    spec.loader.exec_module(module)
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_sample.py").write_text("def test_selected(): pass\n", encoding="utf-8")
+    selection = module.selection_from_payload({
+        "version": 1, "plugin": "fixture",
+        "nodes": ["tests/test_sample.py::test_selected"], "files": [], "include_guards": False,
+    }, "fixture", tmp_path)
+    assert selection.nodes == ("tests/test_sample.py::test_selected",)
+
+
 @pytest.fixture
 def selection_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
     tests = tmp_path / "tests"

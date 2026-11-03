@@ -548,13 +548,13 @@ def collect_baseline(
 
         if project_dir is not None:
             python_exe = _prepare_project_venv(project_dir, tmp_path, timeout_s=timeout_s)
-            command_prefix = [str(python_exe), str(driver_file)]
+            command_prefix = [str(python_exe)]
         else:
             command_prefix = [
                 "uv", "run",
                 "--with", "coverage",
                 "--with", "pytest-json-report",
-                "python", str(driver_file),
+                "python",
             ]
 
         chunks = _plan_chunks(cwd, test_path, max_files_per_chunk)
@@ -580,7 +580,11 @@ def collect_baseline(
                 str(chunk_cov_data_file), str(chunk_json_report_file), str(chunk_out_file),
                 str(basetemp),
             ]
-            command = [*command_prefix, *driver_args]
+            # Never read pre-existing bytecode or create caches later chunks could reuse.
+            command = [
+                *command_prefix, "-B", "-X", f"pycache_prefix={tmp_path / f'pc{index}'}",
+                str(driver_file), *driver_args,
+            ]
             tasks.append(Chunk(
                 index=index, total=len(chunks),
                 command=command, cwd=str(cwd),

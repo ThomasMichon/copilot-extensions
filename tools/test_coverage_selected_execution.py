@@ -652,7 +652,10 @@ def test_auditability_declaration_cannot_grant_ambiguous_exclusion(args, kwargs)
         auditability.declaration(args, kwargs)
 
 
-def test_auditability_requires_observed_unchanged_complete_profile(tmp_path):
+def test_auditability_requires_observed_unchanged_complete_profile(tmp_path, monkeypatch):
+    import hashlib
+
+    monkeypatch.delattr(hashlib, "file_digest", raising=False)
     source = tmp_path / "src"
     source.mkdir()
     (source / "app.py").write_text("def value(): return 2\n", encoding="utf-8")
@@ -674,6 +677,9 @@ def test_auditability_requires_observed_unchanged_complete_profile(tmp_path):
     proof = auditability.evidence(tmp_path, node, metadata, coverage, current)
     assert proof is not None
     assert auditability.verified_exclusions(tmp_path, {node: proof}, current) == {node: proof}
+    assert auditability.verified_exclusions(
+        tmp_path, {node: proof}, {**current, "kind": "python-inprocess/v1"},
+    ) == {}
     assert auditability.evidence(tmp_path, node, metadata, {}, current) is None
     assert auditability.evidence(
         tmp_path, node, metadata,
@@ -696,8 +702,9 @@ def test_auditability_requires_observed_unchanged_complete_profile(tmp_path):
     os.environ.get("CGS_RUN_INTEGRATION_TEST") != "1",
     reason="opt-in actual coverage metadata and contained selected execution",
 )
+@pytest.mark.parametrize("stale_bytecode", [False, True])
 def test_auditable_selection_retains_unknown_inventory_and_fails_its_regression(
-    tmp_path, monkeypatch, request, capfd,
+    tmp_path, monkeypatch, request, capfd, stale_bytecode,
 ):
     from tools.coverage_guided_selection import baseline as baseline_mod
 
@@ -706,6 +713,21 @@ def test_auditable_selection_retains_unknown_inventory_and_fails_its_regression(
     source.mkdir(parents=True)
     tests.mkdir()
     (source / "app.py").write_text("def value():\n    return 2\n", encoding="utf-8")
+    if stale_bytecode:
+        import marshal
+        import py_compile
+
+        app = source / "app.py"
+        app.write_text("def value():\n    return 9\n", encoding="utf-8")
+        stat = app.stat()
+        cached = py_compile.compile(
+            str(app), doraise=True, invalidation_mode=py_compile.PycInvalidationMode.TIMESTAMP,
+        )
+        app.write_text("def value():\n    return 2\n", encoding="utf-8")
+        os.utime(app, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        namespace = {}
+        exec(marshal.loads(Path(cached).read_bytes()[16:]), namespace)
+        assert namespace["value"]() == 9
     (plugin / "pyproject.toml").write_text(
         '[tool.pytest.ini_options]\ntestpaths=["tests"]\n', encoding="utf-8",
     )

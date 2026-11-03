@@ -152,7 +152,7 @@ order.
 - [x] Review and merge the [plan-only auditability amendment](coverage-auditability-selection.md)
       before changing selection behavior. #10194 merged as
       `2c7b0c4fc865e5c8959d7ae1068d52d22b8cae16`.
-- [ ] Re-scope #6783 to metadata, conservative eligible-inventory selection
+- [x] Re-scope #6783 to metadata, conservative eligible-inventory selection
       and focused qualification; preserve its native prototype separately,
       without shipping it or crediting its unearned acceptance.
 - [ ] Qualify the actual metadata-to-selected-run consumer contract, merge

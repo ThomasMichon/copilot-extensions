@@ -5,7 +5,6 @@ import json
 from collections.abc import Iterable
 import fnmatch
 import shlex
-import tomllib
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
@@ -138,6 +137,8 @@ def selection_from_payload(payload: object, plugin: str, plugin_root: Path) -> T
     selection.collection_files(plugin_root)
     return selection
 def default_collection_files(root: Path) -> tuple[Path, ...]:
+    import tomllib
+
     project = root / "pyproject.toml"
     config = tomllib.loads(project.read_text(encoding="utf-8")) if project.is_file() else {}
     ignored = config.get("tool", {}).get("pytest", {}).get("ini_options", {}).get("norecursedirs", [])

@@ -39,7 +39,7 @@ retain their obligations; this bounded change does not complete the umbrella.
       provenance, not completion evidence. The successor owns deferred research,
       not permission to resume universal collection or alter required CI.
       Retained in #10209; active references now point there.
-- [ ] Base the owned #6783 branch on reviewed current `dev`, preserving the
+- [x] Base the owned #6783 branch on reviewed current `dev`, preserving the
       exact prototype first. Replace that PR's scope and description through
       the managed rewrite flow, retaining its discussion and identity.
 - [ ] Implement and qualify the bounded selection contract below.
@@ -48,29 +48,29 @@ retain their obligations; this bounded change does not complete the umbrella.
 
 ## Implementation plan
 
-- [ ] Add auditability classification to the existing portfolio metadata
+- [x] Add auditability classification to the existing portfolio metadata
       owner (`tools/pytest_portfolio_guard.py`), separately from tier/effect
       and contract tags. Unknown or malformed classification cannot grant
       diff-exclusion permission.
-- [ ] Define auditable admission against complete relevant execution and
+- [x] Define auditable admission against complete relevant execution and
       dependency attribution for the actual profile. Cover source plus
       configuration/data dependencies; preserve conservative invalidation
       when coverage cannot attribute them. A coverage hit, percentage or
       author-supplied tag alone is insufficient.
-- [ ] Carry classification and profile-correct proof through the existing
+- [x] Carry classification and profile-correct proof through the existing
       baseline/selection pipeline rather than add a collector, daemon or
       independent coverage store. Legacy or incomplete evidence remains
       usable only where it supports conservative execution, not exclusions.
-- [ ] Obtain the current eligible test inventory independently of baseline
+- [x] Obtain the current eligible test inventory independently of baseline
       membership. Compose the actual run set from eligible unauditable and
       unknown tests, implicated proven-auditable tests, and existing required
       guards/changed tests/fallback additions. Missing baseline entries or
       inventory drift cannot drop tests. Never budget-prune the mandatory union.
-- [ ] Wire the existing selected-test executor and actual CI consumer, inspect
+- [x] Wire the existing selected-test executor and actual CI consumer, inspect
       shadow versus active modes, and report why each retained/selected test
       ran. Preserve existing enrollment and lane gates; no new broad native
       or integration release prerequisites.
-- [ ] Initially classify only bounded families whose completeness can be
+- [x] Initially classify only bounded families whose completeness can be
       demonstrated. Report remaining unknown/unauditable populations honestly.
       Further testability improvements are separately scoped work, not a
       prerequisite to aggressively classify every configuration in this PR.
