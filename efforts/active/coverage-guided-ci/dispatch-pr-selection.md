@@ -60,8 +60,9 @@ existing coverage-guided CI and test-portfolio visions, not new operator intent.
 - Pilot only `agent-dispatch` PRs. Keep push, manual, promotion and other
   plugin lanes on their existing portfolio unless separately reviewed.
   Leave Fleet Manager collector/admission work in
-  [#6783](https://github.com/ThomasMichon/copilot-extensions/pull/6783) with
-  its existing owner. The unrelated shadow-only rollout remains in
+  [#10209](https://github.com/ThomasMichon/copilot-extensions/issues/10209),
+  which retains the former #6783 prototype's unearned qualification. The
+  unrelated shadow-only rollout remains in
   [Phase 4](README.md#phase-4--rollout-replace-agent-worktrees-collect-only-tier).
 
 ## Plan and validation

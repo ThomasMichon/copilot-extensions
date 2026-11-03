@@ -51,8 +51,9 @@ except ImportError:  # plain-script entry point
     )
 
 from tools.plugin_test_containment import TestSandbox
+from tools.coverage_guided_selection.auditability import evidence
 
-BASELINE_SCHEMA_VERSION = 3
+BASELINE_SCHEMA_VERSION = 4
 DEFAULT_MAX_FILES_PER_CHUNK = 5
 # v1: {schema_version, plugin, cov_source, generated_at, tests, coverage}
 # v2: adds `measured_commit` (the `dev` SHA this run was measured against,
@@ -69,6 +70,8 @@ DEFAULT_MAX_FILES_PER_CHUNK = 5
 #     simply has no `portfolio_tier` key per test, which
 #     `default_tier_eligible_tests` treats as eligible (same as an
 #     explicitly untiered test), not as excluded.
+# v4: reviewed auditability/dependency declarations and pre/post source digests,
+#     tied to the collecting interpreter/profile. Older evidence grants no exclusion.
 
 # Environment variables that can silently narrow which tests pytest
 # actually collects/runs (e.g. `PYTEST_ADDOPTS=-k smoke` or `-m guard`)
@@ -93,6 +96,7 @@ _DRIVER_SCRIPT = textwrap.dedent(
 
     import coverage
     import pytest
+    from _cgs_auditability import declaration, dependency_names, file_digest, profile
 
     # Every statement below must stay inside this guard. A plugin's own
     # tests may spawn real child processes via `multiprocessing.get_context
@@ -127,6 +131,7 @@ _DRIVER_SCRIPT = textwrap.dedent(
         # declared tier even though this driver never registers that
         # guard plugin.
         tier_by_nodeid = {}
+        audit_by_nodeid = {}
 
         class _TierCollector:
             def pytest_collection_modifyitems(self, items):
@@ -137,6 +142,28 @@ _DRIVER_SCRIPT = textwrap.dedent(
                         if marker and marker.args
                         else None
                     )
+                    markers = list(item.iter_markers("coverage_auditability"))
+                    if len(markers) > 1:
+                        raise pytest.UsageError("multiple coverage_auditability markers")
+                    if markers:
+                        try:
+                            declared = declaration(markers[0].args, markers[0].kwargs)
+                            root = Path(cwd).resolve()
+                            audit_by_nodeid[item.nodeid] = {
+                                "auditability": declared,
+                                "effects": [
+                                    str(mark.args[0]).lower()
+                                    for mark in item.iter_markers("effect") if mark.args
+                                ],
+                                "audit_dependency_digests": {
+                                    name: file_digest(root, name)
+                                    for name in dependency_names(
+                                        root, item.path.resolve().relative_to(root).as_posix(), declared
+                                    )
+                                },
+                            }
+                        except (OSError, ValueError) as error:
+                            raise pytest.UsageError(str(error)) from error
 
         class _ContextSwitcher:
             # One switch_context() per test (at setup, covering setup +
@@ -292,7 +319,9 @@ _DRIVER_SCRIPT = textwrap.dedent(
 
         Path(out_file).write_text(
             json.dumps(
-                {"durations": durations, "tiers": tier_by_nodeid, "coverage": coverage_map}
+                {"durations": durations, "tiers": tier_by_nodeid, "coverage": coverage_map,
+                 "auditability": audit_by_nodeid,
+                 "auditability_profile": profile("", cov_source)}
             )
         )
         sys.exit(0)
@@ -418,17 +447,24 @@ def _merge_chunk_results(chunks: list[dict]) -> dict:
     raising a `KeyError`."""
     durations: dict[str, float] = {}
     tiers: dict[str, str | None] = {}
+    auditability = {}
     coverage: dict[str, dict[str, list[str]]] = {}
     for chunk in chunks:
         durations.update(chunk["durations"])
         tiers.update(chunk.get("tiers", {}))
+        auditability.update(chunk.get("auditability", {}))
         for file, per_line in chunk["coverage"].items():
             merged_file = coverage.setdefault(file, {})
             for line, tests in per_line.items():
                 existing = set(merged_file.get(line, ()))
                 existing.update(tests)
                 merged_file[line] = sorted(existing)
-    return {"durations": durations, "tiers": tiers, "coverage": coverage}
+    profiles = [chunk.get("auditability_profile") for chunk in chunks]
+    current_profile = profiles[0] if profiles and all(value == profiles[0] for value in profiles) else None
+    return {
+        "durations": durations, "tiers": tiers, "coverage": coverage,
+        "auditability": auditability, "auditability_profile": current_profile,
+    }
 
 
 def collect_baseline(
@@ -503,19 +539,22 @@ def collect_baseline(
         tmp_path = Path(tmp)
         driver_file = tmp_path / "_cgs_driver.py"
         driver_file.write_text(_DRIVER_SCRIPT)
+        (tmp_path / "_cgs_auditability.py").write_bytes(
+            Path(__file__).with_name("auditability.py").read_bytes()
+        )
         sandbox = tmp_path / "sandbox"  # one sandbox reused across every
         # chunk -- matches `run-plugin-tests.py`'s own sequential sub-suite
         # loop, which shares a single sandbox the same way.
 
         if project_dir is not None:
             python_exe = _prepare_project_venv(project_dir, tmp_path, timeout_s=timeout_s)
-            command_prefix = [str(python_exe), str(driver_file)]
+            command_prefix = [str(python_exe)]
         else:
             command_prefix = [
                 "uv", "run",
                 "--with", "coverage",
                 "--with", "pytest-json-report",
-                "python", str(driver_file),
+                "python",
             ]
 
         chunks = _plan_chunks(cwd, test_path, max_files_per_chunk)
@@ -541,7 +580,11 @@ def collect_baseline(
                 str(chunk_cov_data_file), str(chunk_json_report_file), str(chunk_out_file),
                 str(basetemp),
             ]
-            command = [*command_prefix, *driver_args]
+            # Never read pre-existing bytecode or create caches later chunks could reuse.
+            command = [
+                *command_prefix, "-B", "-X", f"pycache_prefix={tmp_path / f'pc{index}'}",
+                str(driver_file), *driver_args,
+            ]
             tasks.append(Chunk(
                 index=index, total=len(chunks),
                 command=command, cwd=str(cwd),
@@ -557,16 +600,31 @@ def collect_baseline(
 
         merged = _merge_chunk_results(chunk_results)
 
+    current_profile = merged.get("auditability_profile")
+    if current_profile is not None:
+        current_profile = {**current_profile, "plugin": plugin}
+    test_metadata = {}
+    for nodeid, duration in merged["durations"].items():
+        metadata = {
+            "duration_s": duration, "portfolio_tier": merged["tiers"].get(nodeid),
+            **merged.get("auditability", {}).get(nodeid, {}),
+        }
+        proof = (
+            evidence(cwd, nodeid, metadata, merged["coverage"], current_profile)
+            if current_profile is not None else None
+        )
+        metadata.pop("audit_dependency_digests", None)
+        if "auditability" in metadata:
+            metadata["auditability_evidence"] = proof
+        test_metadata[nodeid] = metadata
     return {
         "schema_version": BASELINE_SCHEMA_VERSION,
         "plugin": plugin,
         "cov_source": cov_source,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "measured_commit": measured_commit,
-        "tests": {
-            nodeid: {"duration_s": d, "portfolio_tier": merged["tiers"].get(nodeid)}
-            for nodeid, d in merged["durations"].items()
-        },
+        "auditability_profile": current_profile,
+        "tests": test_metadata,
         "coverage": merged["coverage"],
     }
 

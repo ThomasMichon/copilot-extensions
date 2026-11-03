@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from coverage_guided_selection import selection as select
 
 
@@ -29,6 +31,13 @@ def _synthetic_baseline() -> dict:
 
 
 class TestSelectTests:
+    pytestmark = [
+        pytest.mark.portfolio_tier("T0"),
+        pytest.mark.coverage_auditability(
+            "auditable", dependencies=["tools/coverage_guided_selection/selection.py"],
+        ),
+    ]
+
     def test_selects_exact_covering_tests_for_a_changed_line(self) -> None:
         result = select.select_tests(_synthetic_baseline(), {"file.py": [1]})
         assert result.selected_tests == ("test_a",)
