@@ -330,14 +330,84 @@ def test_registrar_adapter_uses_same_refresh_report(
     assert bool(result.reason) != complete
 
 
-def test_legacy_adapter_keeps_declarations_but_requires_source_qualification() -> None:
-    declaration = _declaration()
-    result = read_supervisor_declarations(
-        SimpleNamespace(discover_with_legacy=lambda: [declaration]), legacy=True,
-    )
-    assert list(result) == [declaration]
-    assert not result.complete
-    assert result.reason == "legacy-source-unconfirmed"
+def test_legacy_adapter_qualifies_complete_sources_and_preserves_precedence(
+    tmp_path: Any, monkeypatch: Any,
+) -> None:
+    from agent_dispatch import registrar_discovery
+    from agent_dispatch.registrar_discovery import RegistrarSources, add_pointer
+
+    monkeypatch.setattr(registrar_discovery, "install_dir", lambda: tmp_path)
+    trusted = tmp_path / "trusted"
+    trusted.mkdir()
+    (trusted / "worker.json").write_text(json.dumps({
+        "name": "worker", "owner": "repo:example", "labels": ["worker"], "concurrency": 3,
+    }))
+    add_pointer("trusted", trusted, base=tmp_path)
+    profiles = tmp_path / "supervisors"
+    profiles.mkdir()
+    (profiles / "worker.env").write_text("AGENT_DISPATCH_SUPERVISE_LABELS=shadowed\n")
+    (profiles / "review.env").write_text("AGENT_DISPATCH_SUPERVISE_LABELS=review\n")
+    sources = RegistrarSources(base=tmp_path, dropins=tmp_path / "absent", activation_source=lambda: None)
+    result = read_supervisor_declarations(sources, legacy=True)
+    assert result.complete and not result.reason
+    assert {item.name for item in result} == {"worker", "review"}
+    assert next(item for item in result if item.name == "worker").concurrency == 3
+    assert next(item for item in result if item.name == "review").effective_filters().permit["task-type"] == frozenset({"review"})
+
+
+@pytest.mark.parametrize("failure", [
+    "permission", "encoding", "malformed", "directory-read", "primary-type", "directory-type",
+])
+def test_legacy_adapter_never_qualifies_a_best_effort_partial_read(
+    tmp_path: Any, monkeypatch: Any, failure: str,
+) -> None:
+    from pathlib import Path
+    from agent_dispatch import registrar_discovery
+    from agent_dispatch.registrar_discovery import RegistrarSources
+
+    monkeypatch.setattr(registrar_discovery, "install_dir", lambda: tmp_path)
+    primary = tmp_path / "supervisor.env"
+    primary.write_text("AGENT_DISPATCH_SUPERVISE_LABELS=legacy\n")
+    profiles = tmp_path / "supervisors"
+    if failure == "primary-type":
+        primary.unlink()
+        primary.mkdir()
+    elif failure == "directory-type":
+        profiles.write_text("not a directory")
+    elif failure == "encoding":
+        primary.write_bytes(b"# invalid UTF-8: \xff\nAGENT_DISPATCH_SUPERVISE_LABELS=legacy\n")
+    elif failure == "malformed":
+        primary.write_text("unsupported shell statement\nAGENT_DISPATCH_SUPERVISE_LABELS=legacy\n")
+    elif failure == "permission":
+        read = Path.read_text
+        def denied(path: Any, *args: Any, **kwargs: Any) -> Any:
+            if path == primary:
+                raise PermissionError("private source")
+            return read(path, *args, **kwargs)
+        monkeypatch.setattr(Path, "read_text", denied)
+    else:
+        profiles.mkdir()
+        iterate = Path.iterdir
+        def denied_directory(path: Any) -> Any:
+            if path == profiles:
+                raise PermissionError("private directory")
+            return iterate(path)
+        monkeypatch.setattr(Path, "iterdir", denied_directory)
+    sources = RegistrarSources(base=tmp_path, dropins=tmp_path / "absent", activation_source=lambda: None)
+    result = read_supervisor_declarations(sources, legacy=True)
+    assert not result.complete and result.reason == "legacy-source-unavailable"
+    if failure in {"malformed", "encoding", "directory-read", "directory-type"}:
+        assert [item.name for item in result] == ["supervisor"]
+
+
+def test_legacy_adapter_qualifies_confirmed_absent_profiles(tmp_path: Any, monkeypatch: Any) -> None:
+    from agent_dispatch import registrar_discovery
+    from agent_dispatch.registrar_discovery import RegistrarSources
+
+    monkeypatch.setattr(registrar_discovery, "install_dir", lambda: tmp_path)
+    sources = RegistrarSources(base=tmp_path, dropins=tmp_path / "absent", activation_source=lambda: None)
+    result = read_supervisor_declarations(sources, legacy=True)
+    assert result.complete and result.declarations == ()
 
 
 def test_snapshot_boundary_requires_every_source_and_explicit_scope() -> None:
