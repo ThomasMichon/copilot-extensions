@@ -140,6 +140,31 @@ def test_prepare_is_noneditable_relocatable_and_reuses_exact_bytes(
     ).read_bytes()
 
 
+def test_prepare_archive_uses_lf_without_overriding_explicit_crlf(repository, tmp_path):
+    root, _ = repository
+    (root / ".gitattributes").write_text("* text=auto\n*.cmd text eol=crlf\n", encoding="utf-8")
+    plugin = root / "plugins" / PLUGIN
+    (plugin / "automatic.txt").write_bytes(b"first\nsecond\n")
+    (plugin / "explicit.cmd").write_bytes(b"first\nsecond\n")
+    commit = _merged_commit(root)
+    _git(root, "config", "core.eol", "crlf")
+    prepared = source_runtime.prepare(root, commit, PLUGIN, tmp_path / "prepared")
+    assert (prepared.payload / "automatic.txt").read_bytes() == b"first\nsecond\n"
+    assert (prepared.payload / "explicit.cmd").read_bytes() == b"first\r\nsecond\r\n"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+@pytest.mark.parametrize("extended", [False, True])
+def test_prepare_creates_and_reuses_deep_output(repository, tmp_path, extended):
+    root, commit = repository
+    base = Path(os.path._getfinalpathname(tmp_path)) if extended else tmp_path
+    output = base / ("first-" + "x" * 100) / ("second-" + "y" * 100) / "prepared"
+    first = source_runtime.prepare(root, commit, PLUGIN, output)
+    second = source_runtime.prepare(root, commit, PLUGIN, output)
+    assert first.payload == second.payload and not first.reused and second.reused
+    assert (first.payload / "src" / "agent_bridge" / "__init__.py").is_file()
+
+
 @pytest.mark.parametrize("archive_mask", ["0000", "0002", "0077"])
 def test_prepare_retains_safe_executable_modes_independent_of_git_config(
     repository, tmp_path, monkeypatch, archive_mask,
@@ -192,6 +217,18 @@ def test_preparation_git_child_preserves_original_deadline(repository, monkeypat
     monkeypatch.setattr(source_runtime.subprocess, "run", run)
     assert source_runtime._git(repository[0], "rev-parse", "HEAD", deadline=time.monotonic() + 5) == repository[1]
     assert len(timeouts) == 1 and 0 < timeouts[0] <= 5
+
+
+def test_archive_reports_git_failure_and_never_overwrites_existing_output(repository, tmp_path):
+    root, _ = repository
+    archive = tmp_path / "source.tar"
+    with pytest.raises(source_runtime.SourcePreparationError, match="Source Git probe failed"):
+        source_runtime._archive(root, "0" * 40, archive, deadline=time.monotonic() + 10)
+    archive.unlink()
+    archive.write_bytes(b"existing")
+    with pytest.raises(FileExistsError):
+        source_runtime._archive(root, "0" * 40, archive, deadline=time.monotonic() + 10)
+    assert archive.read_bytes() == b"existing"
 
 
 def test_deadline_is_checked_between_archive_copy_chunks(monkeypatch):

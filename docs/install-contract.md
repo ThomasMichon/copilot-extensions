@@ -4073,6 +4073,23 @@ approval. This command neither authenticates source/release admission nor
 acquires dependencies, signs, publishes, installs or activates anything.
 Its caller retains those existing authorities and distribution obligations.
 
+For the pre-signing hand-off, `--artifact-index python-artifacts.json` makes
+the same command emit a new artifact-index candidate instead of a bare profile.
+The release-profile owner's `with_release_profiles` preserves every existing
+source/artifact field and profile, checks the additions against the exact
+manifest binding and refuses duplicate profiles. It does not modify the input
+subject. The CLI reports both the profile and new index digests.
+Candidate subjects obey the same inclusive byte limit as the existing source
+release reader; the producer and reader share the artifact owner's limit.
+
+Existing profiles, including those for another artifact, remain data for the
+existing full-set pre-signing validator; this composition step is not their
+renewed approval. Place the new subject with its unchanged artifact files in
+the existing staging flow, revalidate the whole index and acquire fresh
+attestation through the existing release owner. The old subject's attestation
+cannot approve changed index bytes. No dependency bytes enter this index
+hand-off, and the default profile-only output remains unchanged.
+
 `tools/runtime_profile_bundle.py` provides the matching repeatable transport producer:
 
 ```text
@@ -4472,7 +4489,12 @@ can continue using their existing source installers.
 
 `tools/local_install_source.py` freezes one full Git commit, materializes its
 declared resources and builds associated first-party wheels without consuming
-changefiles or changing package versions. Its default selects Manager only.
+changefiles or changing package versions. Archive text conversion uses LF
+unless repository attributes explicitly select another EOL; Windows snapshot
+inputs use native filesystem paths. On Windows, construction uses a compact
+disposable copy of the selected build inputs and a toolchain; the copy must
+match the retained inputs, which are checked again before the record is
+published. Its default selects Manager only.
 Repeated `--project` options select a bounded set, such as
 `--project standalone:worktree-manager --project agent-worktrees`; `--suite`
 is a separate, explicit portfolio-wide choice. A first-party-only snapshot is

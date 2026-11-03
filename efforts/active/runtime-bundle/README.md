@@ -144,22 +144,35 @@ Comparison request (verbatim):
   publish third-party runtime bytes or enable ordinary installations.
 
 ### Slice D - Release-bound complete profile candidate
-- [ ] Observe actual promotion/publication of the merged core implementation
+- [x] Observe actual promotion/publication of the merged core implementation
   and independently authenticate the released core asset through the existing
   release-index/attestation owner. A source merge is not a published artifact.
-- [ ] Generate a complete profile candidate from the real core manifest,
+- [x] Generate a complete profile candidate from the real core manifest,
   inspected first-party wheel bytes and an independently selected exact
   external closure. Derive roots/extras/conditions from the core's bound
   selection, not another roster. Retain the selected target/backend and
   acquisition policy; reject incompatible, missing or changed external bytes.
-- [ ] Reuse existing whole-profile validation, wheel-input custody and release
+- [x] Reuse existing whole-profile validation, wheel-input custody and release
   bindings to produce inert candidate data, not a resolver, approval map,
   signer, transport format or ordinary consumer.
-- [ ] Prove the actual producer command against retained native inputs and
+- [x] Prove the actual producer command against retained native inputs and
   failing-first identity/closure/metadata controls. Candidate assembly does not
   establish approval, feed access, publication authority or live activation.
 - [ ] Have the pending lock-input generator adopt the shared root selector
   before that separate source slice lands; preserve its qualified-origin gate.
+
+### Slice E - Candidate profile-to-index hand-off
+- [ ] Compose inspected complete-profile candidates into the existing artifact
+  index through its release-profile owner, retaining original artifact/source
+  data and all existing profiles. Reject duplicate or mismatched new bindings;
+  preserve full-set pre-signing revalidation of the unchanged prior records.
+- [ ] Expose that hand-off through the existing core producer command. Emit
+  a separate candidate subject without modifying the input or replacing output;
+  the changed subject requires fresh approval/attestation by existing owners.
+  No signer, feed policy, ordinary consumer or publication activation is added.
+- [ ] Prove the actual producer-to-index-to-validator path with authenticated
+  released first-party bytes and unchanged exact external pins. Preserve the
+  native-input generation, full profile approval and aggregate channel gates.
 
 ### Later slices - Explicitly retained, not completed by the first proof
 - [x] Retain an independently selected aggregate transport through the existing
@@ -509,3 +522,58 @@ choose the wheel path, not a reason to relax source identity.
   availability. No channel, live runtime or service registration changes.
 - Source review/merge, authenticated published-core readback, native input
   generation and ordinary consumer adoption remain explicit next gates.
+
+### 2026-10-28 - Published core authenticated; candidate producer merged
+
+- #9451 completes source promotion into Main as
+  `6da0fa5ffeb0d754fe79ebbe6f4a402a80e2fa87`; promotion run `40769166050`
+  succeeds. The existing source release contains a real 42-wheel,
+  10,557,990-byte core asset. The existing protected-Main index/attestation
+  owners, bundle validator and every wheel digest pass independent readback.
+- #9450 merges as `f0541fe0fa23f01fff5225d9c16199b7c9864059` after
+  current-head approval, zero open/previously-missed findings, no inline
+  threads and green full hosted CI. The managed merge uses no review bypass.
+- The actual producer against those authenticated published bytes emits
+  116 wheels with 74 unchanged external pins in 6.781 seconds. This closes
+  release-bound candidate assembly, not production dependency-policy
+  qualification, profile publication or ordinary consumption. No resolver,
+  third-party upload, installation or activation runs.
+- Re-read the effort after merge and close only Slice D's implemented gates.
+  The pending input generator's shared-selector adoption remains open. Slice E
+  is the next bounded producer seam: existing-index hand-off without a second
+  publisher or an implicit approval transition.
+
+### 2026-10-28 - Candidate profile-to-index hand-off
+
+- The existing release-profile owner now composes new complete profile records
+  into a separate index candidate. All source/artifact data and prior profiles
+  survive; exact new manifest bindings, duplicates and index source-header
+  shapes are checked. Prior profiles for another artifact remain unchanged data
+  for the existing full-set pre-signing validator, not a renewed approval.
+- The core producer's optional `--artifact-index` invokes that hand-off only
+  after inspecting the complete selected wheel set. Default profile output is
+  unchanged. The new subject is emitted exclusively without mutating its input;
+  no second publisher, approval map, signer or feed policy is introduced.
+- Actual native intake authenticates and validates all 20 published first-party
+  artifact bundles through the existing owners. The real command emits one
+  116-wheel profile inside the existing index; the unchanged artifact set and
+  full profile bindings pass `validate_artifacts`. A second command produces
+  identical subject bytes in 7.719 seconds. These are candidate-composition
+  timings, not installation/update or service-cutover throughput.
+- Original pinned index attestation passes. The changed index is rejected for
+  its exact new digest; its digest-scoped 404 is disambiguated with the positive
+  same-repository original-subject control. Carrying unchanged admission data
+  does not carry the old subject's signature or grant approval to the candidate.
+- Failing-first controls cover the missing API/CLI, preservation of a prior
+  other-artifact profile and a candidate one byte above the source reader's
+  existing limit. Producer and reader now share that limit; its inclusive
+  boundary passes. Thirteen exact no-actor nodes cover the new decisions without
+  changing effect, coverage or time-budget rules.
+- Unit and actual command-to-validator/attestation controls exercise the simple
+  end-to-end lane. No fresh host provisioning, Linux/macOS target qualification,
+  ordinary consumer or service activation is changed by this source-only
+  hand-off; those native lanes are not represented as available here. The real
+  GitHub release is read-only evidence, not a new upload or enabled pipeline.
+- Source review/merge, regularly qualified native-input generation and actual
+  profile publication remain the next gates. The private aggregate channel
+  stays unselected and no third-party content is published.

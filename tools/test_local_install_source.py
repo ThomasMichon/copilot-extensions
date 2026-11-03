@@ -89,6 +89,78 @@ def test_main_ancestor_snapshot_keeps_finalized_version_and_does_not_follow_edit
     assert (repo / "version.txt").read_text(encoding="utf-8") == "uncommitted newer label\n"
 
 
+def test_main_snapshot_uses_portable_archive_eol_and_keeps_explicit_crlf(repository, tmp_path):
+    repo, _ = repository
+    (repo / ".gitattributes").write_text("* text=auto\n*.cmd text eol=crlf\n", encoding="utf-8")
+    (repo / "automatic.txt").write_bytes(b"first\nsecond\n")
+    (repo / "explicit.cmd").write_bytes(b"first\nsecond\n")
+    (repo / "binary.bin").write_bytes(bytes(range(256)))
+    local.preparation._git(repo, "add", ".gitattributes", "automatic.txt", "explicit.cmd", "binary.bin")
+    local.preparation._git(
+        repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "commit", "--quiet", "-m", "Archive attributes",
+    )
+    commit = local.preparation._git(repo, "rev-parse", "HEAD")
+    local.preparation._git(repo, "config", "core.eol", "crlf")
+    output = tmp_path / "prepared"
+    local.compose(repo, commit, commit, output, finalized_main=True)
+    assert (output / "source" / "automatic.txt").read_bytes() == b"first\nsecond\n"
+    assert (output / "source" / "explicit.cmd").read_bytes() == b"first\r\nsecond\r\n"
+    assert (output / "source" / "binary.bin").read_bytes() == bytes(range(256))
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+@pytest.mark.parametrize(
+    ("reference", "problem"),
+    [
+        ("../second", None),
+        ("../missing/../second", "missing path component"),
+        ("../ordinary-file/../second", "missing path component"),
+        ("../../../example/libs/second", "leaves its owning payload"),
+    ],
+)
+def test_extended_source_paths_validate_each_dependency_component(tmp_path, reference, problem):
+    consumer = tmp_path / "example"
+    first, second = consumer / "libs" / "first", consumer / "libs" / "second"
+    first.mkdir(parents=True)
+    second.mkdir()
+    (first.parent / "ordinary-file").write_text("not a directory")
+    (consumer / "pyproject.toml").write_text('[tool.uv.sources]\nfirst = {path = "libs/first"}\n')
+    (first / "pyproject.toml").write_text(f'[tool.uv.sources]\nsecond = {{path = "{reference}"}}\n')
+    (second / "pyproject.toml").write_text('[project]\nname = "second"\nversion = "1"\n')
+    extended = Path(os.path._getfinalpathname(consumer))
+    problems = local.materialization.uer.materialized_local_source_problems(extended)
+    if problem is None:
+        assert problems == []
+    else:
+        assert any(problem in item for item in problems)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+@pytest.mark.parametrize("extended", [False, True])
+def test_main_snapshot_extracts_deep_paths_from_normal_or_extended_output(
+    repository, tmp_path, extended,
+):
+    repo, _ = repository
+    segment = "nested-" + "x" * 50
+    relative = Path(segment) / segment / "payload.txt"
+    (repo / relative).parent.mkdir(parents=True)
+    (repo / relative).write_bytes(b"selected source")
+    local.preparation._git(repo, "add", "--", str(relative))
+    local.preparation._git(
+        repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "commit", "--quiet", "-m", "Deep source path",
+    )
+    commit = local.preparation._git(repo, "rev-parse", "HEAD")
+    output = tmp_path / ("output-" + "y" * 120)
+    native = Path("\\\\?\\" + str(output))
+    record = local.compose(repo, commit, commit, native if extended else output, finalized_main=True)
+    assert len(str(output / "source" / relative)) > 260
+    assert (native / "source" / relative).read_bytes() == b"selected source"
+    assert not (native / "source.tar").exists()
+    assert record["source_commit"] == commit
+
+
 def test_development_snapshot_materializes_without_seeding_or_consuming_changefiles(
     repository, tmp_path, monkeypatch,
 ):
@@ -195,15 +267,31 @@ def test_local_source_can_retain_explicit_existing_provenance_without_a_remote(r
     }
 
 
-def test_suite_build_preserves_roster_versions_and_uses_one_toolchain(tmp_path, monkeypatch):
+@pytest.mark.parametrize("deep", [False, True])
+def test_suite_build_preserves_roster_versions_and_uses_one_toolchain(tmp_path, monkeypatch, deep):
     import build_python_artifacts
     import build_toolchain_lock
     import promotion_python_artifacts
     import standalone_python_artifacts
     from versioned_runtime_source import payload_package_version, read_source_identity
 
-    output = tmp_path / "prepared"
-    source = output / "source"
+    if deep and os.name != "nt":
+        pytest.skip("Windows extended-length paths")
+    if os.name == "nt":
+        temp_root = tmp_path / "builder-temp"
+        (temp_root / "libs" / "versioned-runtime").mkdir(parents=True)
+        monkeypatch.setattr(local.tempfile, "gettempdir", lambda: str(temp_root))
+    output = tmp_path / (("prepared-" + "y" * 140) if deep else "prepared")
+    native_output = Path(local.native_retained_path(output))
+    source = native_output / "source"
+    source.mkdir(parents=True)
+    (source / "unselected-only.txt").write_text("not a build input")
+    for relative in (
+        "libs/versioned-runtime", "libs/installer-engine", "libs/agent-procutil/src/agent_procutil",
+    ):
+        resource = source / relative
+        resource.mkdir(parents=True)
+        (resource / "fixture.txt").write_text("declared build resource")
     projects = {
         "agent-worktrees": "1.0.0",
         "standalone:worktree-manager": "2.0.0",
@@ -225,18 +313,43 @@ def test_suite_build_preserves_roster_versions_and_uses_one_toolchain(tmp_path, 
             (payload / "plugin.json").write_text(json.dumps({"name": component, "version": version}))
     monkeypatch.setattr(promotion_python_artifacts, "candidate_projects", lambda root: projects)
     toolchain = SimpleNamespace(record={"fixture": "one-admitted-toolchain"})
-    resolutions, builds = [], []
+    resolutions, builds, build_roots = [], [], []
     monkeypatch.setattr(
         build_toolchain_lock, "resolve_toolchain_lock",
-        lambda *a, **kw: (resolutions.append(kw) or toolchain),
+        lambda path, **kw: (resolutions.append((path, kw)) or toolchain),
     )
-    builder = SimpleNamespace(__file__=build_python_artifacts.__file__)
+    builder = SimpleNamespace(
+        __file__=build_python_artifacts.__file__, uer=build_python_artifacts.uer,
+        resolve_vendored_libs=lambda root: [],
+    )
     monkeypatch.setattr(promote_release, "_load_module", lambda *a: builder)
     admitted_toolchain = toolchain
 
     def build(component, *, out_dir, toolchain, builder=builder):
-        assert toolchain is admitted_toolchain and builder.REPO == source
+        assert toolchain is admitted_toolchain
+        if os.name == "nt":
+            assert builder.REPO != source
+            assert builder.REPO.parent == Path(local.native_retained_path(resolutions[0][0])).parent
+            assert not (builder.REPO / "unselected-only.txt").exists()
+        else:
+            assert builder.REPO == source
         key = "standalone:" + component if "standalone:" + component in projects else component
+        relative = standalone_python_artifacts.COMPONENTS[component] if ":" in key else "plugins/" + component
+        assert (builder.REPO / relative / "pyproject.toml").read_bytes() == (
+            source / relative / "pyproject.toml"
+        ).read_bytes()
+        if os.name == "nt" and component == "worktree-manager":
+            helpers = [
+                parent / "libs" / "versioned-runtime"
+                for parent in list((builder.REPO / relative).parents)[:3]
+                if (parent / "libs" / "versioned-runtime").exists()
+            ]
+            assert helpers == [builder.REPO / "libs" / "versioned-runtime"]
+        if os.name == "nt":
+            generated = builder.REPO / relative / "build"
+            generated.mkdir(exist_ok=True)
+            (generated / "generated.txt").write_text("backend output")
+        build_roots.append(builder.REPO)
         builds.append(key)
         return {
             "component" if ":" in key else "plugin": component,
@@ -251,12 +364,73 @@ def test_suite_build_preserves_roster_versions_and_uses_one_toolchain(tmp_path, 
     }
     local.build_projects(output, record)
     assert builds == list(projects) and len(resolutions) == 1
+    if os.name == "nt":
+        assert len(set(build_roots)) == 1
+        assert not build_roots[0].exists()
     for project in record["projects"].values():
-        payload = output / project["payload"]
+        payload = native_output / project["payload"]
         component = project["source"]["plugin"]
         version = payload_package_version(payload, component)
         assert read_source_identity(payload, version, plugin=component).document() == project["source"]
         assert project["artifact"]["version"] == version
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows compact build workspace")
+@pytest.mark.parametrize("change", ["copy", "retained", "built"])
+def test_suite_refuses_changed_compact_or_retained_source(tmp_path, monkeypatch, change):
+    import build_python_artifacts
+    import build_toolchain_lock
+    import promotion_python_artifacts
+
+    output = Path(local.native_retained_path(tmp_path / "prepared"))
+    source = output / "source"
+    payload = source / "plugins" / "agent-worktrees"
+    payload.mkdir(parents=True)
+    (payload / "pyproject.toml").write_text('[project]\nname="agent-worktrees"\nversion="1.0.0"\n')
+    (payload / "plugin.json").write_text('{"name":"agent-worktrees","version":"1.0.0"}')
+    monkeypatch.setattr(promotion_python_artifacts, "candidate_projects", lambda root: {
+        "agent-worktrees": "1.0.0",
+    })
+    toolchain = SimpleNamespace(record={"fixture": "one-admitted-toolchain"})
+    monkeypatch.setattr(build_toolchain_lock, "resolve_toolchain_lock", lambda *a, **kw: toolchain)
+    builder = SimpleNamespace(
+        __file__=build_python_artifacts.__file__, uer=build_python_artifacts.uer,
+        resolve_vendored_libs=lambda root: [],
+    )
+    monkeypatch.setattr(promote_release, "_load_module", lambda *a: builder)
+    builds = []
+
+    def build(component, *, out_dir, toolchain):
+        builds.append(component)
+        target = payload if change == "retained" else builder.REPO / "plugins" / component
+        (target / "runtime-source.json").write_text("changed")
+        return {"plugin": component, "version": "1.0.0", "build_toolchain": toolchain.record}
+
+    builder.build_plugin_artifacts = build
+    if change == "copy":
+        copytree = shutil.copytree
+
+        def altered_copy(src, dst, *args, **kwargs):
+            result = copytree(src, dst, *args, **kwargs)
+            if Path(src) == payload:
+                (Path(dst) / "runtime-source.json").write_text("changed")
+            return result
+
+        monkeypatch.setattr(local.shutil, "copytree", altered_copy)
+    record = {
+        "schema": local.SCHEMA, "version": 1, "kind": "source",
+        "source_commit": "a" * 40, "source_tree": "b" * 40, "projects": {},
+    }
+    message = {
+        "copy": "compact build source differs",
+        "retained": "retained installation source changed",
+        "built": "compact build source changed",
+    }[change]
+    with pytest.raises(ValueError, match=message):
+        local.build_projects(output, record)
+    assert builds == ([] if change == "copy" else ["agent-worktrees"])
+    assert record["projects"] == {}
+    assert not (output / local.MANIFEST).exists()
 
 
 def test_first_party_registry_projection_preserves_selected_extras_and_marker_cycles():
