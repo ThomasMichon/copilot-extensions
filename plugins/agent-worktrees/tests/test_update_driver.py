@@ -602,11 +602,26 @@ def test_actual_queued_engine_keeps_each_scope_and_original_invocation(tmp_path,
             assert rows and all(row.state == "completed" and row.exit_code == 0 for row in rows), [
                 (row.state, row.exit_code, row.error, row.log_path.read_text()) for row in rows
             ]
+            assert all(
+                row.spec.cwd == os.path.normcase(os.path.normpath(
+                    str(Path(dict(row.spec.context)["AGENT_HOME"]) / "invocation")
+                ))
+                for row in rows
+            )
     if windows is not None:
         assert windows.surfaced == {}, windows.surfaced
         assert windows.focus_changes == {}, windows.focus_changes
+    entries = [
+        json.loads(line) for line in phases.read_text(encoding="utf-8").splitlines()
+        if json.loads(line)["phase"] == "manager-entry-cwd"
+    ]
+    assert [entry["cwd"] for entry in entries] == (
+        [str(tmp_path / "first" / "anchor")] * 2 if with_manager else []
+    )
     for name in scopes:
         scope = tmp_path / name
+        # Native update re-entry uses captured settings context; project routing
+        # still selects the anchor. Manager entry is observed separately above.
         assert json.loads((scope / "result.json").read_text()) == {
             "anchor": str(scope / "anchor"),
             "invocation": str(scope / "invocation"),

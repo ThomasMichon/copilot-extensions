@@ -20,13 +20,13 @@ if prepared is None and sys.argv[1:2] != ["prepare"]:
     sys.path[:0] = json.loads(os.environ["UPDATE_DRIVER_TEST_IMPORT_PATH"])
 
 
-def phase(name):
+def phase(name, **details):
     path = os.environ.get("UPDATE_DRIVER_TEST_PHASE_LOG")
     if path:
         with Path(path).open("a", encoding="utf-8") as logfile:
             logfile.write(json.dumps({
                 "time": time.monotonic(), "role": sys.argv[1],
-                "phase": name, "pid": os.getpid(),
+                "phase": name, "pid": os.getpid(), **details,
             }) + "\n")
 
 
@@ -311,6 +311,7 @@ def main():
         return 0
     scope = Path(os.environ["AGENT_HOME"])
     if sys.argv[1] == "manager":
+        phase("manager-entry-cwd", cwd=str(Path.cwd()))
         if prepared is None:
             sys.path.insert(0, str(repository / "worktree-manager" / "src"))
         phase("manager-import-start")
