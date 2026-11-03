@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Callable
 from copy import deepcopy
 import json
+from pathlib import Path
 from threading import Event
 from typing import Any
 
@@ -31,10 +32,10 @@ def _raw(value: dict[str, Any]) -> bytes:
 
 
 class AgendaReader:
-    def __init__(self, selection: Selection, store: str, *, cwd: str) -> None:
+    def __init__(self, selection: Selection, store: str, *, cwd: str, project_root: str) -> None:
         self.selection, self.store = selection, store
         project, worktree, session = selection
-        self.commands = AgendaCommands(project, worktree, store, cwd=cwd)
+        self.commands = AgendaCommands(project, worktree, store, cwd=cwd, project_root=project_root)
         self.codec = AgendaCodec(project, worktree, session, store)
         self.revision = 0
 
@@ -79,9 +80,10 @@ class AgendaReader:
         return list(reversed(pages))
 
     def history(self, cancelled: Event, cursor: str) -> dict[str, Any]:
+        minimum_revision = self.revision
         self.commands.discover(cancelled)
         frame = self.codec.decode(_raw(self.commands.read(cancelled, history=True, before=cursor)))
-        if self.codec.revision(frame["cursor"]) < self.revision:
+        if self.codec.revision(frame["cursor"]) < minimum_revision:
             raise OwnerReadError("source-replaced", "agenda history returned a rewound store")
         return frame
 
@@ -92,6 +94,7 @@ class AgendaTimelineAttachment:
     ) -> None:
         self.panel, self.cwd, self.status = panel, cwd, status
         self.selection: Selection | None = None
+        self.project_root: str | None = None
         self.reader: AgendaReader | None = None
         self.token: SourceToken | None = None
         self._stop = asyncio.Event()
@@ -136,10 +139,28 @@ class AgendaTimelineAttachment:
         return not self._closed and self.panel.is_attached and bool(self.panel.query(SubwayTimeline))
 
     def _failure(self, message: str) -> None:
-        if self._renderable():
+        if self._renderable() and (self.selection is None or self._head_current()):
             self.status("Rich Agenda: " + message)
             for token in self._tokens():
                 self.panel.source_error(token, message)
+
+    def _head_current(self) -> bool:
+        if self.selection is None:
+            return False
+        project, worktree, head = self.selection
+        invalidated = any(
+            (state.token.identity.project, state.token.identity.worktree_id) == (project, worktree)
+            and (
+                state.availability is Availability.HEAD_CHANGED
+                or state.token.identity.head_session_id not in (None, head)
+            )
+            for state in self.panel.window.sources.values()
+        )
+        if invalidated:
+            self._stop.set()
+            self._changed.set()
+            self.status("Rich Agenda: head changed; Refresh required")
+        return not invalidated
 
     def _tokens(self) -> tuple[SourceToken, ...]:
         return tuple(
@@ -171,10 +192,13 @@ class AgendaTimelineAttachment:
 
     async def set_selection(
         self, selection: Selection | None, frame: dict[str, Any] | None = None,
-        error: str | None = None,
+        error: str | None = None, *, project_root: str | None = None,
     ) -> None:
         async with self._lock:
-            if selection is not None and selection == self.selection and self._task is not None and not self._task.done():
+            if (
+                selection is not None and selection == self.selection
+                and project_root == self.project_root and self._task is not None and not self._task.done()
+            ):
                 return
             self.selection = None
             try:
@@ -187,6 +211,10 @@ class AgendaTimelineAttachment:
             if selection is None or self._closed:
                 return
             self.selection = selection
+            if not isinstance(project_root, str) or not Path(project_root).is_absolute():
+                self._failure("selected worktree root is unavailable")
+                return
+            self.project_root = project_root
             self._stop = asyncio.Event()
             self.publication(frame, error)
             self._task = asyncio.create_task(self._observe(), name="sidecar-agenda-rich")
@@ -199,6 +227,8 @@ class AgendaTimelineAttachment:
                 return
             frame, error, version = self._publication, self._error, self._version
             try:
+                if not self._head_current():
+                    return
                 if error or frame is None:
                     self._failure(error or "awaiting provider snapshot")
                     continue
@@ -216,10 +246,14 @@ class AgendaTimelineAttachment:
                     continue
                 publication = frame["observation"]
                 store = publication["source"]["store_id"]
+                if self.project_root is None:
+                    raise OwnerReadError("unavailable", "selected worktree root is unavailable")
                 if self.reader is None or self.reader.selection != self.selection:
-                    self.reader = AgendaReader(self.selection, store, cwd=self.cwd)
+                    self.reader = AgendaReader(self.selection, store, cwd=self.cwd, project_root=self.project_root)
                 elif self.reader.store != store:
                     raise OwnerReadError("source-replaced", "selected head changed its agenda store")
+                elif self.reader.commands.project_root != self.project_root:
+                    raise OwnerReadError("source-replaced", "selected worktree root changed")
                 reader = self.reader
                 token = reader.codec.token(self._epoch)
                 state = self.panel.window.sources.get(token.identity.source_key)
@@ -232,9 +266,13 @@ class AgendaTimelineAttachment:
                 )
                 if self._stop.is_set() or version != self._version or not self._renderable():
                     continue
-                result = self.panel.bind_source(token)
-                if not result.applied:
-                    raise TimelineSourceError(result.reason)
+                if not self._head_current():
+                    return
+                state = self.panel.window.sources.get(token.identity.source_key)
+                if state is None or state.token != token:
+                    result = self.panel.bind_source(token)
+                    if not result.applied:
+                        raise TimelineSourceError(result.reason)
                 self.token = token
                 state = self.panel.window.sources[token.identity.source_key]
                 replay: list[LiveDelta] = []
@@ -284,6 +322,8 @@ class AgendaTimelineAttachment:
         if self.token != message.token or self.reader is None or self._stop.is_set() or self._cleanup_failure is not None:
             self._failure("history request belongs to an inactive agenda")
             return
+        if not self._head_current():
+            return
         if self._page is not None and not self._page.done():
             return
 
@@ -293,6 +333,8 @@ class AgendaTimelineAttachment:
             try:
                 frame = await owned(lambda: reader.history(cancelled, message.before.cursor), stop, cancelled)
                 if stop.is_set() or self.token != token or not self._renderable():
+                    return
+                if not self._head_current():
                     return
                 value = reader.codec.page(frame, token, message.before)
                 result = self.panel.apply_gap(value) if isinstance(value, TimelineGap) else self.panel.prepend_page(value)

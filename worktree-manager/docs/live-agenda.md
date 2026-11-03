@@ -176,7 +176,11 @@ Unregistered, old, ambiguous, changed or unavailable placement is a visible
 optional-feature failure; Manager never allocates a store or searches for one.
 
 The shared activation resolver selects exactly one enabled, identity-verified
-efforts payload for the current checkout, without scanning other projects.
+efforts payload for the selected worktree root, without scanning other projects.
+That root comes from the current-worktree owner response, separately from
+launch CWD. A launch beneath `checkout/src` still honors the checkout's
+project-only activation and project-level disables; an unavailable root refuses
+rich discovery rather than borrowing launch-directory or global-only settings.
 An isolated Manager-owned interpreter invokes its ordinary absolute
 `agenda_history_cli.py` path after checking the actual rich-reader declaration.
 It imports that payload's own scripts only inside the child, never into
@@ -212,6 +216,14 @@ use the existing bounded JSONL/process cleanup primitives; hide, reload and
 unmount join their cancellation. Failed retirement fences replacement reads.
 The rich-source status occupies a fixed-height area so changing diagnostics do
 not move a browsing anchor.
+
+Rich-result admission rechecks shared head evidence after every awaited latest
+or history read. Worktree-provider invalidation fences an old-head Agenda result
+even before the Agenda subscription delivers its own terminal notice. Live
+updates do not rebind an unchanged source token or clear its pending backward
+request. Each history read captures its minimum admitted revision before
+starting, so a concurrent live advance cannot falsely turn that older atomic
+page into a rewound-store error or move the independent live boundary.
 
 `tests/test_companion_agenda_rich.py` joins actual allocation/discovery commands,
 efforts reader processes and Textual presentation. Its separate whole-chain

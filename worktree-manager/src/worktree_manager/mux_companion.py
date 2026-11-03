@@ -708,7 +708,9 @@ class MuxCompanionApp(App):
                 )
         await self._timeline_attachment.set_selection(selection, reconcile=reconcile)
         if data is self._data and not self._loading:
-            await self._rich_agenda_attachment.set_selection(selection, data.agenda, data.agenda_error)
+            await self._rich_agenda_attachment.set_selection(
+                selection, data.agenda, data.agenda_error, project_root=data.worktree.get("path"),
+            )
 
     @work(exclusive=True, group="session-observations")
     async def _load_observations(self) -> None:

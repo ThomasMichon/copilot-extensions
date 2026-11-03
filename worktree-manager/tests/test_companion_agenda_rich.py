@@ -34,6 +34,12 @@ pytestmark = [
 STORE = "b" * 32
 
 
+def current_managed_data(managed):
+    data = current_data()
+    data.worktree["path"] = str(managed["cwd"])
+    return data
+
+
 @pytest.fixture
 def managed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     for path in reversed(SOURCE_PATHS):
@@ -151,7 +157,7 @@ def managed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def test_actual_passive_discovery_and_reader_share_exact_managed_store(managed) -> None:
-    reader = AgendaReader(("example", "selected", "head-a"), STORE, cwd=str(managed["cwd"]))
+    reader = AgendaReader(("example", "selected", "head-a"), STORE, cwd=str(managed["cwd"]), project_root=str(managed["cwd"]))
     pages = reader.latest(managed["publication"]()["observation"], Event(), None)
     assert len(pages) == 1 and len(pages[0]["entries"]) == 1
     assert reader.commands.placement["creation_nonce"] == "retained-incarnation"
@@ -167,13 +173,13 @@ def test_actual_passive_discovery_and_reader_share_exact_managed_store(managed) 
 
 
 def test_unregistered_store_and_old_owner_refuse_before_reader_or_new_syntax(managed, monkeypatch) -> None:
-    commands = AgendaCommands("example", "selected", "c" * 32, cwd=str(managed["cwd"]))
+    commands = AgendaCommands("example", "selected", "c" * 32, cwd=str(managed["cwd"]), project_root=str(managed["cwd"]))
     with pytest.raises(OwnerReadError, match="not-registered"):
         commands.discover(Event())
     assert commands.script is None and commands.placement is None
     monkeypatch.setattr(ec, "engine_base_command", lambda: [sys.executable, "-m", "json"])
     with pytest.raises(ValueError, match="unsupported"):
-        AgendaCommands("example", "selected", STORE, cwd=str(managed["cwd"])).discover(Event())
+        AgendaCommands("example", "selected", STORE, cwd=str(managed["cwd"]), project_root=str(managed["cwd"])).discover(Event())
 
 
 def test_actual_parser_refuses_inconsistent_old_owner_before_default_dispatch(managed, monkeypatch) -> None:
@@ -204,12 +210,12 @@ def test_actual_parser_refuses_inconsistent_old_owner_before_default_dispatch(ma
     interpreter.chmod(0o700)
     monkeypatch.setattr(ec, "engine_base_command", lambda: [str(interpreter), "-m", "agent_worktrees"])
     with pytest.raises(OwnerReadError, match="unsupported"):
-        AgendaCommands("example", "selected", STORE, cwd=str(managed["cwd"])).discover(Event())
+        AgendaCommands("example", "selected", STORE, cwd=str(managed["cwd"]), project_root=str(managed["cwd"])).discover(Event())
     assert not dispatched.exists()
 
 
 def test_rich_reader_rejects_rewound_publication_join_and_changed_placement(managed) -> None:
-    reader = AgendaReader(("example", "selected", "head-a"), STORE, cwd=str(managed["cwd"]))
+    reader = AgendaReader(("example", "selected", "head-a"), STORE, cwd=str(managed["cwd"]), project_root=str(managed["cwd"]))
     publication = managed["publication"]()["observation"]
     reader.latest(publication, Event(), None)
     ahead = deepcopy(publication)
@@ -224,7 +230,7 @@ def test_rich_reader_rejects_rewound_publication_join_and_changed_placement(mana
 
 
 def test_actual_rich_pages_and_multi_page_catchup_do_not_consume_history_boundary(managed) -> None:
-    reader = AgendaReader(("example", "selected", "head-a"), STORE, cwd=str(managed["cwd"]))
+    reader = AgendaReader(("example", "selected", "head-a"), STORE, cwd=str(managed["cwd"]), project_root=str(managed["cwd"]))
     initial = reader.latest(managed["publication"]()["observation"], Event(), None)[0]
     for _ in range(70):
         managed["update"]()
@@ -268,7 +274,7 @@ def test_rich_push_history_hide_reopen_and_reload_reuse_one_coarse_subscription(
         return None
 
     monkeypatch.setattr(companion, "subscribe", subscribe)
-    monkeypatch.setattr(companion, "_load_current_worktree", lambda *args, **kwargs: current_data())
+    monkeypatch.setattr(companion, "_load_current_worktree", lambda *args, **kwargs: current_managed_data(managed))
     monkeypatch.setattr(companion.MuxCompanionApp, "_poll_attention", lambda *args, **kwargs: None)
     monkeypatch.setattr(companion.TimelineAttachment, "set_selection", no_worktree_source)
 
@@ -369,7 +375,7 @@ def test_actual_commit_publisher_resident_cli_and_managed_reader_join(managed, m
     managed["runtime_configuration"].write_text(json.dumps({
         "endpoint": f"http://127.0.0.1:{server.port}", "token": server.token,
     }))
-    monkeypatch.setattr(companion, "_load_current_worktree", lambda *args, **kwargs: current_data())
+    monkeypatch.setattr(companion, "_load_current_worktree", lambda *args, **kwargs: current_managed_data(managed))
     monkeypatch.setattr(companion.MuxCompanionApp, "_poll_attention", lambda *args, **kwargs: None)
 
     async def no_worktree_source(*args, **kwargs) -> None:
@@ -451,7 +457,7 @@ def test_hiding_timeline_cancels_and_reaps_an_owned_rich_point_process(managed, 
         return None
 
     monkeypatch.setattr(rich_commands, "_point", point)
-    monkeypatch.setattr(companion, "_load_current_worktree", lambda *args, **kwargs: current_data())
+    monkeypatch.setattr(companion, "_load_current_worktree", lambda *args, **kwargs: current_managed_data(managed))
     monkeypatch.setattr(companion.MuxCompanionApp, "_start_agenda", lambda self: None)
     monkeypatch.setattr(companion.MuxCompanionApp, "_poll_attention", lambda *args, **kwargs: None)
     monkeypatch.setattr(companion.TimelineAttachment, "set_selection", no_worktree_source)

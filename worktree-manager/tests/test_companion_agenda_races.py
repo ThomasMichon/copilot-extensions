@@ -1,0 +1,220 @@
+"""Concurrent owner invalidation, independent page reads and selected-root activation."""
+
+from __future__ import annotations
+
+import asyncio
+from dataclasses import replace
+import json
+import os
+from pathlib import Path
+from threading import Event
+
+import pytest
+from textual.widgets import Static, TabbedContent
+
+from worktree_manager import mux_companion as companion
+from worktree_manager.companion_agenda_attachment import AgendaReader
+from worktree_manager.companion_timeline_contract import (
+    Availability, Completeness, Provider, SourceIdentity, SourcePosition,
+    SourceToken, TimelineSnapshot,
+)
+from worktree_manager.companion_timeline_widget import SubwayTimeline
+from test_companion_agenda_live import until
+from test_companion_agenda_rich import current_managed_data, managed as managed
+
+pytestmark = [
+    pytest.mark.portfolio_tier("T3"), pytest.mark.effect("filesystem"),
+    pytest.mark.skipif(os.name == "nt", reason="POSIX attributed-interpreter fixture; native qualification remains open"),
+]
+
+
+def configure(managed, monkeypatch) -> None:
+    async def no_worktree_source(*args, **kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(companion, "_load_current_worktree", lambda *args, **kwargs: current_managed_data(managed))
+    monkeypatch.setattr(companion.MuxCompanionApp, "_start_agenda", lambda self: None)
+    monkeypatch.setattr(companion.MuxCompanionApp, "_poll_attention", lambda *args, **kwargs: None)
+    monkeypatch.setattr(companion.TimelineAttachment, "set_selection", no_worktree_source)
+
+
+def publish(app, frame, error=None) -> None:
+    app._receive_agenda(app._data, app._agenda_generation, app._agenda_cancel, frame, error)
+
+
+def seed_worktree(panel) -> TimelineSnapshot:
+    token = SourceToken(SourceIdentity(
+        Provider.WORKTREES, "fixture-worktree", "example", "selected", "head-a", "fixture-generation",
+    ), 0)
+    snapshot = TimelineSnapshot(
+        token, SourcePosition(token.identity.source_key, token.identity.generation, "fixture-position"),
+        Availability.OBSERVED, Completeness.PARTIAL,
+    )
+    assert panel.bind_source(token).applied
+    assert panel.apply_snapshot(snapshot).applied
+    return snapshot
+
+
+@pytest.mark.parametrize("phase", ["initial", "same-revision", "history"])
+def test_worktree_head_change_fences_inflight_rich_results_without_agenda_callback(
+    managed, monkeypatch, phase: str,
+) -> None:
+    configure(managed, monkeypatch)
+    if phase == "history":
+        for _ in range(35):
+            managed["update"]()
+    blocked, captured, release = Event(), Event(), Event()
+    original = AgendaReader.history if phase == "history" else AgendaReader.latest
+
+    def delayed(self, *args):
+        value = original(self, *args)
+        if blocked.is_set():
+            captured.set()
+            assert release.wait(5), "fixture did not release its captured owner result"
+        return value
+
+    monkeypatch.setattr(AgendaReader, "history" if phase == "history" else "latest", delayed)
+
+    async def check() -> None:
+        app = companion.MuxCompanionApp(cwd=str(managed["cwd"]))
+        async with app.run_test(size=(110, 40)) as pilot:
+            try:
+                await until(pilot, lambda: not app._loading)
+                app._agenda_cancel = Event()
+                publish(app, managed["publication"]())
+                owner = seed_worktree(app._timeline_panel)
+                if phase == "initial":
+                    blocked.set()
+                app.query_one("#views", TabbedContent).active = "timeline-tab"
+                attachment = app._rich_agenda_attachment
+                if phase != "initial":
+                    await until(pilot, lambda: attachment.token is not None)
+                    blocked.set()
+                    if phase == "history":
+                        state = app._timeline_panel.window.sources[attachment.token.identity.source_key]
+                        assert state.before is not None
+                        assert app._timeline_panel.window.request_history(state.token, state.before).applied
+                        attachment.history(SubwayTimeline.HistoryRequested(state.token, state.before))
+                    else:
+                        publish(app, managed["publication"]())
+                await until(pilot, captured.is_set)
+                version, stop = attachment._version, attachment._stop
+                assert not stop.is_set()
+                assert app._timeline_panel.apply_snapshot(replace(
+                    owner, availability=Availability.HEAD_CHANGED,
+                )).applied
+                assert not app._timeline_panel.window.events
+                assert attachment._version == version and not stop.is_set()
+                release.set()
+                await until(pilot, stop.is_set)
+                await pilot.pause()
+                assert not app._timeline_panel.window.events
+                assert all(
+                    state.availability is Availability.HEAD_CHANGED
+                    for state in app._timeline_panel.window.sources.values()
+                )
+                publish(app, managed["publication"]())
+                await pilot.pause()
+                assert not app._timeline_panel.window.events
+            finally:
+                release.set()
+
+    asyncio.run(check())
+
+
+def test_live_update_preserves_an_inflight_backward_page_and_its_start_revision(managed, monkeypatch) -> None:
+    configure(managed, monkeypatch)
+    for _ in range(35):
+        managed["update"]()
+    captured, release = Event(), Event()
+
+    async def check() -> None:
+        app = companion.MuxCompanionApp(cwd=str(managed["cwd"]))
+        async with app.run_test(size=(110, 40)) as pilot:
+            try:
+                await until(pilot, lambda: not app._loading)
+                app._agenda_cancel = Event()
+                publish(app, managed["publication"]())
+                app.query_one("#views", TabbedContent).active = "timeline-tab"
+                attachment = app._rich_agenda_attachment
+                await until(pilot, lambda: attachment.token is not None)
+                reader, token = attachment.reader, attachment.token
+                original = reader.commands.read
+                historical = []
+
+                def delayed(cancelled, *, history=False, before=None):
+                    frame = original(cancelled, history=history, before=before)
+                    if before is not None:
+                        historical.append(frame)
+                        captured.set()
+                        assert release.wait(5), "fixture did not release its captured history page"
+                    return frame
+
+                monkeypatch.setattr(reader.commands, "read", delayed)
+                window = app._timeline_panel.window
+                state = window.sources[token.identity.source_key]
+                before, start_revision = state.before, reader.revision
+                assert before is not None
+                assert window.request_history(token, before).applied
+                attachment.history(SubwayTimeline.HistoryRequested(token, before))
+                await until(pilot, captured.is_set)
+                publish(app, managed["update"]())
+                await until(pilot, lambda: reader.revision == start_revision + 1)
+                await until(pilot, lambda: reader.codec.revision(
+                    window.sources[token.identity.source_key].position.cursor,
+                ) == start_revision + 1)
+                live = window.sources[token.identity.source_key].position
+                assert window.sources[token.identity.source_key].requested_before == before
+                release.set()
+                await until(pilot, lambda: attachment._page.done())
+                state = window.sources[token.identity.source_key]
+                assert state.availability is Availability.OBSERVED and state.position == live
+                assert state.requested_before is None
+                assert reader.codec.revision(historical[0]["cursor"]) == start_revision
+                assert all(
+                    any(event.event_id == entry["event_id"] for event in window.events)
+                    for entry in historical[0]["entries"]
+                )
+            finally:
+                release.set()
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("disabled", [False, True])
+def test_nested_launch_uses_selected_root_activation_and_respects_project_disable(
+    managed, monkeypatch, disabled: bool,
+) -> None:
+    configure(managed, monkeypatch)
+    nested = managed["cwd"] / "src"
+    nested.mkdir()
+    if disabled:
+        global_settings = Path(os.environ["HOME"]) / ".copilot/settings.json"
+        global_settings.parent.mkdir()
+        global_settings.write_text(managed["settings"].read_text(), encoding="utf-8")
+        managed["settings"].write_text(json.dumps({
+            "enabledPlugins": {"efforts@source-fixture": False},
+        }), encoding="utf-8")
+
+    async def check() -> None:
+        app = companion.MuxCompanionApp(cwd=str(nested))
+        async with app.run_test(size=(110, 40)) as pilot:
+            await until(pilot, lambda: not app._loading)
+            app._agenda_cancel = Event()
+            publish(app, managed["publication"]())
+            app.query_one("#views", TabbedContent).active = "timeline-tab"
+            attachment = app._rich_agenda_attachment
+            if disabled:
+                await until(pilot, lambda: "unambiguous enabled efforts" in str(
+                    app.query_one("#timeline-agenda-status", Static).content,
+                ))
+                assert not app._timeline_panel.window.events
+                assert attachment.reader.commands.script is None
+            else:
+                await until(pilot, lambda: attachment.token is not None)
+                assert app._timeline_panel.window.events
+            assert attachment.reader.commands.cwd == str(nested)
+            assert attachment.reader.commands.project_root == str(managed["cwd"])
+            assert app._data.agenda_error is None
+
+    asyncio.run(check())

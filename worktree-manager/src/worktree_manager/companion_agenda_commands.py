@@ -98,8 +98,13 @@ def _point(argv: list[str], cancelled: Event, cwd: str) -> dict[str, Any]:
 
 
 class AgendaCommands:
-    def __init__(self, project: str, worktree: str, store_id: str, *, cwd: str) -> None:
+    def __init__(
+        self, project: str, worktree: str, store_id: str, *, cwd: str, project_root: str,
+    ) -> None:
         self.project, self.worktree, self.store_id, self.cwd = project, worktree, generation(store_id), cwd
+        if not isinstance(project_root, str) or not Path(project_root).is_absolute():
+            raise OwnerReadError("unavailable", "selected worktree root must be absolute")
+        self.project_root = project_root
         self.base: list[str] | None = None
         self.script: str | None = None
         self.placement: dict[str, Any] | None = None
@@ -172,7 +177,7 @@ class AgendaCommands:
         if expected is not None and placement != expected:
             raise OwnerReadError("source-replaced", "admitted agenda placement changed; Refresh cannot erase its fence")
         if self.script is None:
-            selected = _point([sys.executable, "-I", "-B", "-c", _SELECT, self.cwd], cancelled, self.cwd)
+            selected = _point([sys.executable, "-I", "-B", "-c", _SELECT, self.project_root], cancelled, self.cwd)
             object_fields(selected, {"ok", "source", "script"})
             if (
                 selected["ok"] is not True or not isinstance(selected["source"], str)
