@@ -782,10 +782,13 @@ The latter is an array of at most 256 ASCII origins, each at most 2048 character
 it permits no userinfo, wildcard, query, fragment or path beyond a root slash.
 DNS labels and hexadecimal IPv6 literals are validated; ports must be 1-65535.
 Case, default port and root slash are normalized, entries sorted, and duplicates
-refused. Missing/empty origins preserve existing selection defaults; a nonempty
-set enters the existing owner-bound policy identity. It supplements selected
-index-origin trust, never authorizes another index or a public-feed fallback,
-and is not published in a portable release profile.
+refused. Missing/empty origins use configured-feed delegation for the current
+metadata's exact, hash-locked files and bounded HTTPS redirects; operators need
+not enumerate backing storage domains. A nonempty set restricts artifact
+destinations to the index origin and those origins, and enters the existing
+owner-bound and native acquisition policy identities. It never authorizes
+another index or a public-feed fallback and is not published in a portable
+release profile.
 All three native deployment readers validate these
 fields; malformed or self-authorizing fields, including an approvals map,
 refuse rather than becoming defaults. Older readers safely refuse this

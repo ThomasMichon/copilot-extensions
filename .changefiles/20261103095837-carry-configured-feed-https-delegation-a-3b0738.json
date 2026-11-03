@@ -1,0 +1,13 @@
+{
+  "comment": "Carry configured-feed HTTPS delegation and its acquisition-policy identity through the shared installer consumers.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
