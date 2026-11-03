@@ -11,6 +11,12 @@
 
 ## Guiding Intent
 
+**Current consumer-adoption prerequisite (2026-11-03):** the
+[independent resident lifetime slice](journal/2026/11.03-independent-resident-lifetime.md)
+repairs shared Linux daemon launches that remain in their caller's systemd
+cleanup cgroup. Source controls and isolated native lifetime proof do not move
+existing residents or qualify ordinary Dispatch recovery.
+
 **Operational milestone (2026-11-02):** the
 [ordinary usability plan](usability-validation.md) records earned source
 progress, the ordered remaining lifecycle/integration work and the actual
@@ -293,9 +299,14 @@ live claim token. No new blanket ACK or executor appointment is created.
       Explicit-definition adoption for remaining legacy direct rows,
       ordinary allocator/initial prompts and mixed-driver adoption
       remain required; the default-off source seam is not that completion gate.
-      The installed master's `--legacy-env` composition also needs the
-      [complete legacy observation correction](journal/2026/11.03-legacy-pool-observation.md);
-      a valid declaration-only snapshot does not qualify that actual caller.
+      The installed master's `--legacy-env` source observation correction
+      [merged in #10220](journal/2026/11.03-legacy-pool-observation.md);
+      a valid declaration-only snapshot still does not qualify running adoption.
+- [x] Land complete legacy-composed pool observation in
+      [#10220](https://github.com/ThomasMichon/copilot-extensions/pull/10220)
+      after current-head approval, green CI and actual merge. Preserve strict
+      completeness, native extension matching and nonblocking special-file
+      refusal. Runtime/cohort/native acceptance remains open.
 - [x] Land explicit [ordinary first-prompt admission](journal/2026/11.02-ordinary-first-prompt.md)
       under its actual `ordinary-bridge` driver, allocator claim and execution
       host in [#10123](https://github.com/ThomasMichon/copilot-extensions/pull/10123).

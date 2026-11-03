@@ -356,10 +356,12 @@ function Activate {{
     & $RealPython $vr --root $InstallDir --link-name venv activate $SrcVersion --no-link | Out-Null
     if ($LASTEXITCODE -ne 0) {{ throw 'setup activate failed' }}
 }}
+# admission-fixture: setup
 New-Item -ItemType Directory -Force -Path $VenvDir | Out-Null
 {_PS_SETUP[scenario]}$m = Join-Path $VenvDir '.install-complete.json'
 if (Test-Path -LiteralPath $m) {{ Copy-Item -LiteralPath $m {_ps_quote(tmp_path / "before.json")} }}
 if (Test-Path -LiteralPath $VenvDir) {{ Copy-Item -LiteralPath $VenvDir {_ps_quote(tmp_path / "before-slot")} -Recurse }}
+# admission-fixture: action
 Rec 'START'
 try {{
 {action}
@@ -381,6 +383,7 @@ def _run_ps(harness: Path) -> subprocess.CompletedProcess:
         text=True,
         timeout=120,
         check=False,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
 
 
@@ -882,9 +885,11 @@ ph="$(_payload_hash)"
 slot_python() {{ mkdir -p "$VENV_DIR/bin"; cp "$SHIM" "$VENV_DIR/bin/python"; chmod +x "$VENV_DIR/bin/python"; }}
 mark() {{ "$SHIM" "$vr" --root "$INSTALL_DIR" --link-name venv mark-complete "$SRC_VERSION" --payload-hash "$1" >/dev/null; }}
 activate() {{ "$SHIM" "$vr" --root "$INSTALL_DIR" --link-name venv activate "$SRC_VERSION" --no-link >/dev/null; }}
+# admission-fixture: setup
 mkdir -p "$VENV_DIR"
 {_SH_SETUP[scenario]}if [[ -e "$VENV_DIR/.install-complete.json" ]]; then cp "$VENV_DIR/.install-complete.json" {_sh_quote(_posix(tmp_path / "before.json"))}; fi
 if [[ -d "$VENV_DIR" ]]; then cp -R "$VENV_DIR" {_sh_quote(_posix(tmp_path / "before-slot"))}; fi
+# admission-fixture: action
 rec START
 {action}
 """
@@ -900,7 +905,55 @@ def _run_sh(harness: Path) -> subprocess.CompletedProcess:
         text=True,
         timeout=_SH_TIMEOUT_SECONDS,
         check=False,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
+
+
+def _assert_same_version_reruns(tmp_path: Path, harness: Path, run) -> None:
+    source = harness.read_text(encoding="utf-8")
+    setup_marker = "# admission-fixture: setup\n"
+    action_marker = "# admission-fixture: action\n"
+    assert source.count(setup_marker) == source.count(action_marker) == 1
+    setup_at = source.index(setup_marker)
+    action_at = source.index(action_marker)
+    assert setup_at < action_at
+    # Prepare once, then launch the original action in two fresh processes.
+    prepare = harness.with_name("prepare" + harness.suffix)
+    replay = harness.with_name("replay" + harness.suffix)
+    prepare.write_text(source[:action_at], encoding="utf-8", newline="\n")
+    replay.write_text(source[:setup_at] + source[action_at:], encoding="utf-8", newline="\n")
+    prepared = run(prepare)
+    assert prepared.returncode == 0, prepared.stdout + prepared.stderr
+    slot = tmp_path / "install" / "versions" / _VERSION
+    marker = _slot_marker(tmp_path)
+    old_mtime = 1_600_000_000_000_000_000
+    for path in (slot, marker):
+        os.utime(path, ns=(old_mtime, old_mtime))
+
+    def identity(path: Path):
+        info = path.stat()
+        return info.st_dev, info.st_ino, info.st_mtime_ns
+
+    before = identity(slot), identity(marker), marker.read_bytes(), _tree(slot)
+    for _ in range(2):
+        result = run(replay)
+        _assert_outcome(tmp_path, result, _NOOP)
+        assert (identity(slot), identity(marker), marker.read_bytes(), _tree(slot)) == before
+    assert _events(tmp_path).count("START") == 2
+
+
+@pytest.mark.timeout(_SH_TIMEOUT_SECONDS)
+@pytest.mark.skipif(_PWSH is None, reason="pwsh is not available")
+def test_ps1_same_version_update_twice_preserves_slot(tmp_path: Path) -> None:
+    harness = _ps_harness(tmp_path, "match-active", "Invoke-Update", libraries=False)
+    _assert_same_version_reruns(tmp_path, harness, _run_ps)
+
+
+@pytest.mark.timeout(_SH_TIMEOUT_SECONDS)
+@pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
+def test_sh_same_version_update_twice_preserves_slot(tmp_path: Path) -> None:
+    harness = _sh_harness(tmp_path, "match-active", "do_update", libraries=False)
+    _assert_same_version_reruns(tmp_path, harness, _run_sh)
 
 
 @pytest.mark.timeout(_SH_TIMEOUT_SECONDS)
