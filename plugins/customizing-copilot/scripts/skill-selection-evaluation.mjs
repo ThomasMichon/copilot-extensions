@@ -135,7 +135,8 @@ export async function runSelectionEvaluation({ sdk, root, runtimePath, profile, 
         unsubscribe?.();
         report.usage = usage.summary();
         report.elapsedMs = Math.round(performance.now() - started);
-        if (usageError || report.cleanup.errors.length) {
+        if (signal?.aborted) report.error ??= "independent evaluation cancelled during settlement";
+        if (usageError || report.cleanup.errors.length || signal?.aborted) {
             report.status = "unavailable"; report.result = null;
             if (usageError) report.error = safeError(usageError);
         }

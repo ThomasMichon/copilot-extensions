@@ -333,7 +333,8 @@ export async function runOwnedSelection({ sdk, root, runtimePath, profile, snaps
         }));
         report.liveInferenceDispatched = requests.some(item => item.forwarded);
         report.elapsedMs = Math.round(performance.now() - started);
-        if (report.cleanup.errors.length || usageError) {
+        if (signal?.aborted) report.error ??= "selector decision cancelled during settlement";
+        if (report.cleanup.errors.length || usageError || signal?.aborted) {
             report.status = "unavailable";
             report.result = null;
         }

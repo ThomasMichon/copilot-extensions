@@ -94,7 +94,7 @@ test("owned request guard checks effective profile and tools without consuming t
 
 function fakeSdk({ configMismatch = false, usageMismatch = false, malformed = false,
     stopError = false, hang = false, signal, toolFailure = false, forkMismatch = false,
-    acquisition } = {}) {
+    acquisition, stopGate } = {}) {
     const observed = { stops: 0, aborts: 0, sends: 0, forwards: 0 };
     const histories = new Map();
     let serial = 0;
@@ -135,6 +135,8 @@ function fakeSdk({ configMismatch = false, usageMismatch = false, malformed = fa
                     }
                     await thisClient.options.requestHandler.sendRequest(
                         new Request("https://example.invalid/responses", { method: "POST", body: JSON.stringify(body({
+                            instructions: config.customAgents[0].prompt,
+                            tools: config.tools.map(tool => ({ type: "function", name: tool.name, parameters: tool.parameters })),
                             input: [{ role: "user", content: prompt }],
                         })) }),
                         { sessionId: id, signal: new AbortController().signal });
@@ -145,12 +147,21 @@ function fakeSdk({ configMismatch = false, usageMismatch = false, malformed = fa
                     });
                     const used = event(usageMismatch ? { model: "fallback" } : {});
                     handlers.forEach(callback => { callback(used); callback({ ...used, id: "replay" }); });
-                    return { data: { content: malformed ? "{}" : JSON.stringify(result) } };
+                    const value = config.agent === "independent-guidance-evaluator"
+                        ? { summary: "Synthetic evaluation.", cases: [{
+                            id: "fixture", requiredRecall: 1, precision: 1, abstentionCorrect: true,
+                            guideProvenanceCorrect: true, sourceCoverage: "complete", forbiddenFailures: [], notes: "Fixture.",
+                        }] } : result;
+                    return { data: { content: malformed ? "{}" : JSON.stringify(value) } };
                 },
                 async abort() { observed.aborts++; },
             };
         }
-        async stop() { observed.stops++; return stopError ? [new Error("owned stop failed")] : []; }
+        async stop() {
+            observed.stops++;
+            await stopGate?.();
+            return stopError ? [new Error("owned stop failed")] : [];
+        }
     }
     let thisClient;
     return { sdk: { CopilotRequestHandler: Base, RuntimeConnection: { forStdio: value => value },
@@ -259,6 +270,33 @@ test("cancelled acquisitions settle before selector or evaluator cleanup can cla
         assert.equal(report.cleanup.runtimeStopped, true);
         assert.equal(fake.observed.stops, 1);
         assert.equal(fake.observed.forwards, 0);
+    }
+});
+
+test("cancellation during successful shutdown invalidates selector output and independent grades", async t => {
+    for (const host of ["selector", "evaluator"]) for (const cancel of [false, true]) {
+        const parent = await mkdtemp(join(tmpdir(), "selector-settlement-test-"));
+        t.after(() => rm(parent, { recursive: true, force: true }));
+        const signal = new AbortController();
+        let release, reachedStop;
+        const gate = new Promise(resolve => { release = resolve; });
+        const stopped = new Promise(resolve => { reachedStop = resolve; });
+        const fake = fakeSdk({ stopGate: async () => { reachedStop(); await gate; } });
+        const options = { ...fake, root: join(parent, "decision"), runtimePath: resolve("fixture-runtime"),
+            profile, snapshot, trustedRoots: [parent], request, signal: signal.signal,
+            evidence: { reports: [{ id: "fixture" }] } };
+        const running = (host === "selector" ? runOwnedSelection : runSelectionEvaluation)(options);
+        await stopped;
+        if (cancel) signal.abort();
+        release();
+        const report = await running;
+        assert.equal(fake.observed.forwards, 1);
+        assert.equal(report.cleanup.runtimeStopped, true);
+        assert.equal(report.status, cancel ? "unavailable" : "completed");
+        if (cancel) {
+            assert.equal(report.result, null);
+            assert.match(report.error, /cancelled during settlement/);
+        } else assert(report.result);
     }
 });
 
