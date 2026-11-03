@@ -6991,6 +6991,8 @@ whole existing admitted file inventory, then excludes an unrequested node
 only when its current auditability declaration and unchanged dependency
 digests match earned evidence for the actual interpreter/platform profile.
 Missing, legacy, malformed, partial or cross-profile evidence retains tests.
+Coverage-selected subprocesses use the collector's fresh-cache, no-write
+policy too; legacy version-1 exact selection keeps its existing behavior.
 Existing tier/platform skips and manual opt-ins are not overridden.
 
 Declare auditability independently of tier/effect/contract markers:

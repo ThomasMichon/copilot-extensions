@@ -610,8 +610,13 @@ def run_plugin(
             group_temp = basetemp / f"g{index}"
             group_temp.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             group_temp.mkdir(mode=0o700, exist_ok=True)
+            source_options = (
+                ["-B", "-X", f"pycache_prefix={sandbox / f'pc{index}'}"]
+                if selection is not None and selection.coverage_profile is not None else []
+            )
             cmd = [
                 str(py),
+                *source_options,
                 "-m",
                 "pytest",
                 "-q",
