@@ -753,7 +753,7 @@ def render(
     return rendered
 
 
-def expected_files(manifest: Path) -> dict[Path, str]:
+def expected_files(manifest: Path) -> dict[Path, str | bytes]:
     data = load_manifest(manifest)
     installer = str(data["installer"])
     protected_paths: set[Path] = set()
@@ -766,7 +766,7 @@ def expected_files(manifest: Path) -> dict[Path, str]:
             raise ValueError(f"{manifest}: runtime resolver not found: {resolver_path}")
         protected_paths.update((installer_path, resolver_path))
     output = manifest.parent / str(data["outputDir"])
-    generated: dict[Path, str] = {}
+    generated: dict[Path, str | bytes] = {}
     commands = data["commands"]
     assert isinstance(commands, list)
     for command in commands:
@@ -891,9 +891,12 @@ def process_manifest(manifest: Path, *, check: bool) -> list[str]:
         )
         if check:
             try:
-                actual = path.read_text(encoding="utf-8")
+                actual = (
+                    path.read_bytes() if isinstance(expected, bytes)
+                    else path.read_text(encoding="utf-8")
+                )
             except OSError:
-                actual = ""
+                actual = b"" if isinstance(expected, bytes) else ""
             if actual != expected:
                 errors.append(f"{display_path(path)}: generated content is stale")
             if (
@@ -905,7 +908,10 @@ def process_manifest(manifest: Path, *, check: bool) -> list[str]:
                 errors.append(f"{display_path(path)}: POSIX shim is not executable")
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(expected, encoding="utf-8", newline="\n")
+        if isinstance(expected, bytes):
+            path.write_bytes(expected)
+        else:
+            path.write_text(expected, encoding="utf-8", newline="\n")
         if executable:
             path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
         print(f"generated {display_path(path)}")

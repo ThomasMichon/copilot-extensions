@@ -37,7 +37,10 @@ def _toolkit(tmp_path):
     for relative, content in packager.expected_files(repo).items():
         path = toolkit / relative
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8", newline="\n")
+        if isinstance(content, bytes):
+            path.write_bytes(content)
+        else:
+            path.write_text(content, encoding="utf-8", newline="\n")
         if path.suffix == ".sh":
             path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     return toolkit

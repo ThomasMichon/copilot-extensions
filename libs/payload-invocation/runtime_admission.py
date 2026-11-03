@@ -17,7 +17,7 @@ REPOSITORY_ADAPTERS = {
     "publish_python_artifacts", "promote_release",
 }
 _IGNORED = {"tests", "__pycache__", ".venv", ".test-runs", "build", "dist"}
-_RESOURCE_SUFFIXES = {".py", ".sh", ".ps1", ".c", ".h", ".json", ".typed"}
+_RESOURCE_SUFFIXES = {".py", ".sh", ".ps1", ".c", ".h", ".json", ".typed", ".awk", ".pyz"}
 _RESOURCES = (
     "libs/agent-procutil/setup.py",
     "libs/versioned-runtime/standalone_build.py",
@@ -64,7 +64,7 @@ def _imports(name: str, path: Path, content: str):
             yield from (f"{module}.{alias.name}" for alias in node.names)
 
 
-def expected_files(repo: Path) -> dict[Path, str]:
+def expected_files(repo: Path) -> dict[Path, str | bytes]:
     """Return first-party bytes with their own complete internal resource layout.
 
     Static imports close ordinary module edges. Whole selected libraries also
@@ -78,7 +78,8 @@ def expected_files(repo: Path) -> dict[Path, str]:
         library / "src" if (library / "src").is_dir() else library
         for library in sorted((repo / "libs").iterdir()) if library.is_dir()
     )
-    modules, contents = {}, {}
+    modules = {}
+    contents: dict[Path, str | bytes] = {}
     for root in roots:
         for path in _sources(root):
             if path.suffix != ".py":
@@ -117,7 +118,10 @@ def expected_files(repo: Path) -> dict[Path, str]:
             # Dynamic components execute with their original sibling paths.
             for resource in _sources(root):
                 _ordinary(resource, repo)
-                contents[resource.relative_to(repo)] = resource.read_text(encoding="utf-8")
+                contents[resource.relative_to(repo)] = (
+                    resource.read_bytes() if resource.suffix == ".pyz"
+                    else resource.read_text(encoding="utf-8")
+                )
                 if resource.suffix == ".py":
                     sibling = ".".join(resource.relative_to(root).with_suffix("").parts)
                     pending.append(sibling.removesuffix(".__init__"))

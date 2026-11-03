@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import importlib.util
 import os
+from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -112,3 +114,66 @@ print("self-contained-admission-toolkit-ok")
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "self-contained-admission-toolkit-ok"
+
+
+@pytest.mark.parametrize("adapter", ["posix", "powershell"])
+def test_generated_toolkit_executes_copied_installation_adapters(tmp_path, adapter):
+    if adapter == "posix":
+        if os.name == "nt":
+            pytest.skip("the POSIX adapter requires a native POSIX host")
+        host = shutil.which("bash")
+    else:
+        host = shutil.which("pwsh") or shutil.which("powershell")
+    if host is None:
+        pytest.skip(f"{adapter} host is unavailable")
+    manifest = _enabled(tmp_path)
+    assert generator.process_manifest(manifest, check=False) == []
+    library = manifest.parent / "scripts" / "_runtime_admission" / "libs" / "installation-context"
+    descriptor = tmp_path / "source.json"
+    descriptor.write_text(
+        '{"source":"github","repo":"example/marketplace"}', encoding="utf-8",
+    )
+    if adapter == "posix":
+        argv = [
+            host, str(library / "installation-context.sh"), "source-id",
+            "--source-file", str(descriptor),
+        ]
+    else:
+        argv = [
+            host, "-NoProfile", "-NonInteractive", "-File",
+            str(library / "installation-context.ps1"), "source-id",
+            "-SourceFile", str(descriptor),
+            "-CopilotHome", str(tmp_path / "copilot"),
+            "-DurableHome", str(tmp_path / "durable"),
+        ]
+    result = subprocess.run(
+        argv, cwd=tmp_path, capture_output=True, text=True, timeout=30,
+        env={
+            key: value for key, value in os.environ.items()
+            if key not in {"PYTHONPATH", "COPILOT_PLUGIN_ROOT", "COPILOT_EXTENSIONS_CONTEXT"}
+        },
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout)["canonical"] == "github:example/marketplace"
+    assert not (tmp_path / "copilot").exists()
+    assert not (tmp_path / "durable").exists()
+
+
+def test_generated_toolkit_preserves_and_checks_binary_adapter_resource(tmp_path):
+    manifest = _enabled(tmp_path)
+    assert generator.process_manifest(manifest, check=False) == []
+    relative = Path("libs") / "installation-context" / "daemon_instance_runtime.pyz"
+    toolkit = manifest.parent / "scripts" / "_runtime_admission"
+    copied = toolkit / relative
+    assert copied.read_bytes() == (generator.REPO / relative).read_bytes()
+    assert relative.as_posix() in json.loads(
+        (toolkit / "toolkit.json").read_text(encoding="utf-8"),
+    )["files"]
+    assert generator.process_manifest(manifest, check=True) == []
+    copied.write_bytes(copied.read_bytes()[:-1])
+    assert generator.process_manifest(manifest, check=True) == [
+        f"{generator.display_path(copied)}: generated content is stale",
+    ]
+    assert generator.process_manifest(manifest, check=False) == []
+    assert generator.process_manifest(manifest, check=True) == []

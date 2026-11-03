@@ -86,6 +86,9 @@ to false and changes neither command/catalog bytes nor installer behavior.
 The generator preserves the helpers' own internal resource layout, including
 dynamic constructor/process modules and trusted native-build templates; no
 source checkout or sibling installed plugin supplies missing files.
+Copied installation-context adapters retain their sibling JSON-query script
+and first-party caller-lifetime archive. Generation and stale-content checks
+preserve the archive's binary bytes rather than decoding or rewriting it.
 
 An installation owner invokes `_runtime_admission.activate()` in its separately
 admitted Python 3.11+ tooling environment with its exact, governed Packaging
@@ -108,6 +111,8 @@ denies Manager/CLI/publishing imports and checks loaded first-party locations.
 The separate admitted-seed witness imports every toolkit entry and runs actual
 semantic profile validation with only its governed Packaging wheel installed,
 including refusal of an incomplete dependency closure.
+Copied POSIX and PowerShell adapter tests execute source-identity selection
+without importing a checkout or creating installation state.
 This qualifies toolkit delivery, not normal-consumer enablement, production
 feed access, credential-key ACLs, ordinary first-tooling integration or measured
 speedups.
