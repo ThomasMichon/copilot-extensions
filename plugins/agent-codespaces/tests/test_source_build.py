@@ -13,11 +13,18 @@ PACKAGE = "1.2.3-dev4"
 SOURCE = f"{PACKAGE}+source.{'0' * 39}1.{'0' * 15}2"
 
 
-def test_installed_source_slot_advertises_exact_identity(tmp_path: Path) -> None:
-    prefix = tmp_path / "versions" / SOURCE
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("suffix", ["", ".profile." + "a" * 16,
+                                   ".profile." + "a" * 16 + ".repair." + "b" * 32])
+def test_installed_source_slot_advertises_exact_identity(
+    tmp_path: Path, nested: bool, suffix: str,
+) -> None:
+    identity = SOURCE + suffix
+    slot = tmp_path / "versions" / identity
+    prefix = slot / ".venv" if nested else slot
     assert effective_runtime_version(
         "1.2.3.dev4", prefix=prefix, module_path=prefix / "lib" / "source_build.py",
-    ) == SOURCE
+    ) == identity
 
 
 @pytest.mark.parametrize("version", ["1.2.3-dev4", "9.0.0"])
@@ -33,6 +40,28 @@ def test_foreign_package_version_cannot_claim_slot(tmp_path: Path) -> None:
     assert effective_runtime_version(
         "9.0.0", prefix=prefix, module_path=prefix / "lib" / "source_build.py",
     ) == "9.0.0"
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_owner_capture_uses_physical_slot_retention_bootstrap(tmp_path, monkeypatch, nested):
+    from agent_codespaces import source_build
+
+    root = tmp_path / "runtime"
+    slot = root / "versions" / SOURCE
+    prefix = slot / ".venv" if nested else slot
+    bootstrap = slot / ".runtime-bootstrap"
+    bootstrap.mkdir(parents=True)
+    (bootstrap / "versioned_runtime.py").write_text("FIXTURE_SLOT = True\n")
+    monkeypatch.setattr(sys, "prefix", str(prefix))
+    monkeypatch.setattr(source_build, "__file__", str(prefix / "lib" / "source_build.py"))
+    monkeypatch.setattr(source_build, "_owner_slot_identity", lambda runtime, home, name: (
+        "completion" if runtime.FIXTURE_SLOT and home == root and name == SOURCE else None
+    ))
+    selection = source_build.capture_owner_runtime(root)
+    assert selection is not None
+    assert selection.identity == "completion"
+    assert selection.root == root
+    assert Path(selection.runtime.__file__) == bootstrap / "versioned_runtime.py"
 
 
 @pytest.mark.parametrize("source_slot", [False, True])

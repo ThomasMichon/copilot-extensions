@@ -3,6 +3,37 @@
 See the [configuration reference](docs/configuration.md) for native files,
 fields, precedence, source-relative provisioning and credential boundaries.
 
+Wheel-application regular installation invokes the app-owned `__source-setup`
+and `__source-start` receivers. Setup contributes the plain schema-0
+`providers.d/agent-codespaces.standalone.json`, referencing the exact installed
+version-neutral global command even if that command or Bridge is not installed
+yet. The explicit `AGENT_BRIDGE_PROVIDERS_DIR` override wins; otherwise the
+directory belongs to `AGENT_BRIDGE_CONFIG_DIR` or the default Bridge config root.
+Publication is atomic, create-only and idempotent through the canonical drop-in
+writer. It never invokes a registration hook or backend.
+
+The identity-bearing payload entry `agent-codespaces.json` stays separate and
+untouched. An eligible attributed entry retains Bridge's existing filename-order
+precedence; when that plugin is disabled, the installed app remains discoverable
+without source trust, redirects or Copilot activation. Bridge's existing
+unattributed-provider compatibility advisory still applies to the plain entry;
+this is not schema-1 attribution or backend readiness. Collisions at the plain
+destination or with other anonymous/foreign namespace entries refuse rather than
+overwrite, including a prior plain entry at the payload filename. Those entries
+require their owner's migration; application setup never silently downgrades one.
+Malformed or oversized unrelated peers are isolated; unsafe paths and storage
+failures still refuse publication.
+
+Startup reads merged configuration without current-directory overlays and uses
+the existing finite Connection Owner ensure only when enabled and executing
+from the selected installed flat or nested source/profile slot. It does not
+register tasks or force a disabled Owner. The explicit startup receiver requires
+the selected completion's existing ownership proof and the same attributed
+process binding before ensuring an Owner; it refuses missing or unreadable
+attribution rather than falling back to legacy readiness. Ordinary legacy
+on-demand ensure keeps its compatibility behavior. Stage-only installation invokes
+neither callback; a staged environment is not installed/provider/serving readiness.
+
 GitHub Codespaces lifecycle management, SSH transport, and credential relay
 for Copilot CLI.
 

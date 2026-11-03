@@ -1,0 +1,9 @@
+{
+  "comment": "Keep installed application providers separate from attributed payload contributions",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "dev"
+    }
+  ]
+}
