@@ -136,7 +136,8 @@ class KomodoWorkloadSelection:
             compose = decode(previous.get("file_contents", "").encode())
             expected = self.compose()
             old_image = compose.get("services", {}).get(self.binding.role, {}).get("image")
-            if not isinstance(old_image, str) or not _IMAGE.fullmatch(old_image):
+            if (not isinstance(old_image, str)
+                    or not (_IMAGE.fullmatch(old_image) or _DIGEST.fullmatch(old_image))):
                 raise PlanError("Komodo incumbent image is not immutable")
             expected["services"][self.binding.role]["image"] = old_image
             if (compose != expected or previous != self.config(contents=previous["file_contents"])
@@ -200,7 +201,7 @@ class KomodoWorkloadSelection:
             env_file_path=".env", send_alerts=True, skip_secret_interp=True,
             pre_deploy={"path": "", "command": "", "shell_mode": False},
             post_deploy={"path": "", "command": "", "shell_mode": False},
-            file_contents=canonical(self.compose()).decode() if contents is None else contents,
+            file_contents=canonical(self.compose()).decode() + "\n" if contents is None else contents,
         )
         return config
 
@@ -221,6 +222,29 @@ class KomodoWorkloadSelection:
         })
 
 
+@dataclass(frozen=True)
+class KomodoProjectCensus:
+    """Existing physical owner authenticates a current native census, not Core cache."""
+
+    server_fingerprint: str
+    projects: tuple[str, ...]
+    observed_at: int
+    valid_until: int
+
+    def __post_init__(self):
+        if (type(self.server_fingerprint) is not str
+                or not re.fullmatch(r"[0-9a-f]{64}", self.server_fingerprint)
+                or type(self.projects) is not tuple or len(self.projects) > 256
+                or len(set(self.projects)) != len(self.projects)):
+            raise PlanError("Komodo current native project census is unavailable")
+        for name in self.projects:
+            identifier(name, "Komodo native project")
+        integer(self.observed_at, "Komodo project observation time")
+        integer(self.valid_until, "Komodo project observation expiry")
+        if not self.observed_at < self.valid_until <= self.observed_at + 5:
+            raise PlanError("Komodo current native project census must have a finite freshness bound")
+
+
 class KomodoWorkloadOwner:
     """Code-selected caller-owned work, never an automatic planner or API proxy."""
 
@@ -228,11 +252,15 @@ class KomodoWorkloadOwner:
                  credentials: Callable[[], tuple[str, str] | str],
                  custody: Callable[[KomodoWorkloadSelection], AbstractContextManager],
                  journal: NodeJournal, admission: AdmissionAuthority,
-                 authority: str, clock: Callable[[], int]):
+                 authority: str, clock: Callable[[], int],
+                 current_projects: Callable[[KomodoWorkloadSelection], KomodoProjectCensus] | None = None):
         if not all(map(callable, (current, credentials, custody, clock))):
             raise PlanError("Komodo workload requires existing code-registered owners")
+        if current_projects is not None and not callable(current_projects):
+            raise PlanError("Komodo native census requires its existing code-registered owner")
         self.current, self.credentials, self.custody = current, credentials, custody
         self.journal, self.admission, self.authority, self.clock = journal, admission, authority, clock
+        self.current_projects = current_projects
 
     def _selected(self, request: OperationIntent, expected: str | None = None):
         selected = self.current()
@@ -283,6 +311,19 @@ class KomodoWorkloadOwner:
                     raise PlanError("Komodo workload permit fleet differs from selection")
                 if time.monotonic() >= deadline:
                     raise PlanError("Komodo workload response deadline expired")
+
+            def project_absent():
+                checkpoint()
+                if self.current_projects is None:
+                    raise PlanError("Komodo creation requires current authenticated native project absence")
+                census = self.current_projects(selected)
+                now = self.clock()
+                if (type(census) is not KomodoProjectCensus
+                        or census.server_fingerprint != digest(server_identity(decode(selected.server)))
+                        or not census.observed_at <= now < census.valid_until
+                        or selected.binding.resource in census.projects):
+                    raise PlanError("Komodo current authenticated project absence is unproved")
+                checkpoint()
 
             async with aiohttp.ClientSession(
                 trust_env=False, cookie_jar=aiohttp.DummyCookieJar(),
@@ -369,7 +410,7 @@ class KomodoWorkloadOwner:
                         raise PlanError("Komodo original Stack still has unfinished backend work")
                     return stack
 
-                async def readback(stack_id):
+                async def readback(stack_id, *, expected_native=None):
                     stack = await stack_read(stack_id)
                     if stack["config"] != selected.config():
                         raise PlanError("Komodo Stack configuration differs from admitted content")
@@ -380,6 +421,8 @@ class KomodoWorkloadOwner:
                         raise PlanError("Komodo Stack service set differs from admitted workload")
                     container = await call("/read/InspectStackContainer",
                                            {"stack": stack_id, "service": selected.binding.role})
+                    if expected_native is not None and native_fingerprint(container) != expected_native:
+                        raise PlanError("Komodo original no-deploy container was replaced or changed")
                     image = await prerequisites()
                     _verify_container(container, selected, image=image)
                     if (await stack_read(stack_id))["config"] != selected.config():
@@ -405,13 +448,10 @@ class KomodoWorkloadOwner:
                 needs_deploy = True
                 if prior is None or prior.to_dict()["status"] == "accepted":
                     if selected.stack_id is None:
+                        project_absent()
                         stacks = await call("/read/ListStacks", {
                             "query": {"names": [selected.binding.resource]}, "page": 0, "limit": 2})
-                        projects = await call("/read/ListComposeProjects", {"server": server_id})
-                        if stacks != [] or not isinstance(projects, list) or any(
-                            not isinstance(item, dict) or item.get("name") == selected.binding.resource
-                            for item in projects
-                        ):
+                        if stacks != []:
                             raise PlanError("Komodo matching names do not establish Stack or project custody")
                     else:
                         stack = await stack_read(selected.stack_id)
@@ -439,10 +479,15 @@ class KomodoWorkloadOwner:
                 if status == "accepted":
                     self.journal.retain_external_evidence(
                         request, name="selection", evidence={"deployment": content})
+                    self.journal.retain_external_evidence(
+                        request, name="decision", evidence={
+                            "mode": "mutation" if needs_deploy else "read-only",
+                            "stack": selected.stack_id})
                     if not self.journal.begin_external(request):
                         raise PlanError("Komodo original workload attempt already began")
                     stack_id = selected.stack_id
                     if stack_id is None:
+                        project_absent()
                         created = await call("/write/CreateStack", {
                             "name": selected.binding.resource, "config": selected.config()})
                         stack_id = object_id(created)
@@ -463,13 +508,15 @@ class KomodoWorkloadOwner:
                         raise PlanError("Komodo write did not retain the exact selected configuration")
                     if needs_deploy:
                         await prerequisites()
+                        if selected.stack_id is None:
+                            project_absent()
                         deployment = await call("/execute/DeployStack", {
                             "stack": stack_id, "services": [], "stop_time": None})
                         _verify_update(deployment, stack_id)
                         self.journal.retain_external_evidence(
                             request, name="deployment", evidence={"id": object_id(deployment), "stack": stack_id})
                     else:
-                        outcome = await readback(stack_id)
+                        outcome = await readback(stack_id, expected_native=selected.previous_container)
                         self.journal.retain_external_evidence(request, name="outcome", evidence=outcome)
                     facts = self.journal.external_evidence(request)
                 if facts.get("selection") != {"deployment": content}:
@@ -477,7 +524,14 @@ class KomodoWorkloadOwner:
                 if "outcome" not in facts:
                     deployment = facts.get("deployment")
                     if deployment is None:
-                        return self.journal.inspect(request)
+                        if facts.get("decision") != {"mode": "read-only", "stack": selected.stack_id}:
+                            return self.journal.inspect(request)
+                        outcome = await readback(
+                            selected.stack_id, expected_native=selected.previous_container)
+                        self.journal.retain_external_evidence(request, name="outcome", evidence=outcome)
+                        facts = self.journal.external_evidence(request)
+                if "outcome" not in facts:
+                    deployment = facts["deployment"]
                     stack_id = deployment["stack"]
                     while True:
                         update = await call("/read/GetUpdate", {"id": deployment["id"]})

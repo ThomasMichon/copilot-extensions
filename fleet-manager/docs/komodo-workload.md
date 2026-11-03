@@ -26,7 +26,7 @@ No wire field selects Python imports, callbacks, endpoints, credentials or APIs.
 
 The adopting application's trusted code constructs `KomodoWorkloadSelection`
 and `KomodoWorkloadOwner(current=..., credentials=..., custody=..., journal=...,
-admission=..., authority=..., clock=...)`. These records authenticate nothing
+admission=..., authority=..., clock=..., current_projects=...)`. These records authenticate nothing
 themselves. Existing configuration, artifact, credential and physical-resource
 owners must independently authenticate their inputs:
 
@@ -60,6 +60,16 @@ Komodo 2.3.4 has no conditional Stack-write/idempotency fence, so this SDK
 cannot manufacture distributed exclusion. Missing exclusion is a deployment
 prerequisite, not permission to proceed with names alone.
 
+Creation additionally requires `current_projects(selection)` from the existing
+authenticated physical-resource observer, returning `KomodoProjectCensus`:
+the selected Server identity fingerprint, complete native project names,
+observation time and an expiry at most five seconds later. The SDK rechecks
+exact target/freshness and project absence before acceptance, CreateStack and
+DeployStack. This is a read-only owner seam, not another Docker deployment
+writer. The observer must acquire a current native census under that custody;
+constructing a record or recycling Core cache data authenticates nothing.
+Missing/unqualified observation refuses creation explicitly.
+
 `credentials()` obtains the existing owner's current API key/secret tuple or
 existing raw JWT string ephemerally for each HTTP request. The latter uses the
 same raw `authorization` contract as the existing authenticated substrate-health
@@ -76,12 +86,18 @@ Source verification uses its tagged
 [write API](https://github.com/moghtech/komodo/blob/v2.3.4/client/core/rs/src/api/write/stack.rs),
 [read APIs](https://github.com/moghtech/komodo/blob/v2.3.4/client/core/rs/src/api/read/docker.rs)
 and [asynchronous execution router](https://github.com/moghtech/komodo/blob/v2.3.4/bin/core/src/api/execute/mod.rs).
+The [vendor content normalizer](https://github.com/moghtech/komodo/blob/v2.3.4/client/core/rs/src/deserializers/file_contents.rs)
+requires a trailing newline on nonempty file contents; generated Compose JSON
+includes it before content admission. The
+[Core project-list implementation](https://github.com/moghtech/komodo/blob/v2.3.4/bin/core/src/api/read/docker.rs)
+uses a cache and can return empty without Docker data; it is never absence proof.
 `x-api-key` and `x-api-secret` follow the
 [vendor client](https://github.com/moghtech/komodo/blob/v2.3.4/client/core/rs/src/request.rs).
 
 The finite sequence authenticates version, exact Server/Periphery, existing
 volumes and installed image. New resources additionally require absence of the
-exact Stack name and native Compose project. The only mutations are
+exact Stack name and a current authenticated native Compose-project census.
+The only mutations are
 `CreateStack` or `UpdateStack`, then `DeployStack`. Existing Stack configuration
 must match the independently admitted baseline before any write.
 Updates cannot change Server, project, mounts, commands or profile; the
@@ -122,6 +138,11 @@ Lost create/update/deploy responses, or a crash before retaining the returned
 ID, remain UNKNOWN: no name-based adoption, inferred success or fresh mutation.
 Even an apparently healthy desired container cannot settle that missing-ID case.
 An unsettled original operation blocks replacement by a fresh operation.
+
+An unchanged running incumbent retains an immutable **read-only decision**
+before UNKNOWN/readback. If that readback is interrupted, the same original
+attempt can resume only readback of its original Stack/native fingerprint.
+This does not infer a no-deploy decision for an attempt that already mutated.
 
 Generation 4 journals migrate transactionally to 6 without changing original
 intents/receipts. Generation 5 remains incompatible and rejected; its separate

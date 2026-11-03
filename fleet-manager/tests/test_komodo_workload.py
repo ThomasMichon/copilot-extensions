@@ -15,10 +15,10 @@ import pytest
 from fleet_manager.komodo_evidence import native_fingerprint
 from fleet_manager.komodo_roles import KomodoRoleProvider
 from fleet_manager.komodo_workload import (
-    MAX_RESPONSE, KomodoWorkloadOwner, KomodoWorkloadSelection,
+    MAX_RESPONSE, KomodoProjectCensus, KomodoWorkloadOwner, KomodoWorkloadSelection, server_identity,
 )
 from fleet_manager.node_journal import NodeJournal
-from fleet_manager.planning import PlanError, canonical
+from fleet_manager.planning import PlanError, canonical, digest
 from fleet_manager.role_bindings import ProviderInstance, RoleBinding
 from fleet_manager.runtime_admission import AdmissionAuthority, AdmissionError, OperationGrant
 from test_runtime_admission import harness as harness, intent, policy, actor
@@ -57,6 +57,7 @@ class Backend:
         self.lost = self.large = self.slow = self.hook = None
         self.failed, self.polls = False, 0
         self.jwt = False
+        self.native_projects = ()
 
     def runtime(self):
         selected = self.selected
@@ -118,10 +119,12 @@ class Backend:
         elif path == "/write/CreateStack":
             self.stack = {"_id": {"$oid": STACK}, "name": body["name"], "template": False,
                           "config": deepcopy(body["config"]), "info": {}}
+            self.stack["config"]["file_contents"] = self.stack["config"]["file_contents"].rstrip() + "\n"
             result = self.stack
         elif path == "/write/UpdateStack":
             assert body["id"] == STACK
             self.stack["config"] = deepcopy(body["config"])
+            self.stack["config"]["file_contents"] = self.stack["config"]["file_contents"].rstrip() + "\n"
             result = self.stack
         elif path == "/read/GetStack":
             assert body == {"stack": STACK}
@@ -135,6 +138,7 @@ class Backend:
         elif path == "/execute/DeployStack":
             assert body == {"stack": STACK, "services": [], "stop_time": None}
             self.container = self.runtime()
+            self.native_projects = ("worker-stack",)
             result = self.update()
         elif path == "/read/GetUpdate":
             assert body == {"id": UPDATE}
@@ -218,6 +222,9 @@ class WorkloadRig:
             current=lambda: self.selected, credentials=lambda: ("fixture-existing-key", "fixture-existing-secret"),
             custody=custody, journal=self.journal, admission=harness.owner,
             authority="gateway-a", clock=harness.clock,
+            current_projects=lambda selected: KomodoProjectCensus(
+                digest(server_identity(json.loads(selected.server))),
+                backend.native_projects, harness.clock.value, harness.clock.value + 5),
         )
         self.admit_selection()
 
@@ -240,7 +247,7 @@ class WorkloadRig:
             prior_image = "example.invalid/old@sha256:" + "1" * 64
             contents = old.compose()
             contents["services"]["worker"]["image"] = prior_image
-            self.backend.stack["config"]["file_contents"] = canonical(contents).decode()
+            self.backend.stack["config"]["file_contents"] = canonical(contents).decode() + "\n"
             self.backend.container["Config"]["Image"] = prior_image
             self.backend.container["Image"] = "sha256:" + "2" * 64
         self.selected = replace(
@@ -426,6 +433,67 @@ def test_existing_owner_jwt_is_ephemeral_and_reaches_real_http_header(tmp_path, 
         assert rig.run().to_dict()["status"] == "succeeded"
         assert set(backend.headers) == {"fixture-existing-jwt"}
         assert b"fixture-existing-jwt" not in rig.journal.path.read_bytes()
+
+
+@pytest.mark.parametrize("evidence", ["foreign-project", "missing-owner", "stale", "wrong-server"])
+def test_current_native_absence_never_comes_from_a_stale_empty_core_cache(tmp_path, harness, evidence):
+    backend = Backend()
+    with protocol(backend) as endpoint:
+        rig = WorkloadRig(tmp_path, harness, backend, endpoint)
+        if evidence == "foreign-project":
+            backend.native_projects = ("worker-stack",)
+        elif evidence == "missing-owner":
+            rig.owner.current_projects = None
+        else:
+            rig.owner.current_projects = lambda selected: KomodoProjectCensus(
+                digest(server_identity(json.loads(selected.server))) if evidence == "stale" else "0" * 64,
+                (), harness.clock.value - 5, harness.clock.value)
+        with pytest.raises(PlanError, match="absence"):
+            rig.run()
+        assert not backend.writes
+        assert not any(path == "/read/ListComposeProjects" for path, _ in backend.calls)
+        assert rig.journal.inspect(rig.request) is None
+
+
+@pytest.mark.parametrize("upgrade", [False, True])
+def test_local_digest_incumbent_can_converge_and_upgrade(tmp_path, harness, upgrade):
+    backend = Backend()
+    with protocol(backend) as endpoint:
+        rig = WorkloadRig(tmp_path, harness, backend, endpoint)
+        rig.selected = replace(rig.selected, image=IMAGE_ID)
+        backend.image["RepoDigests"] = []
+        rig.admit_selection()
+        rig.incumbent()
+        if upgrade:
+            contents = json.loads(backend.stack["config"]["file_contents"])
+            contents["services"]["worker"]["image"] = "sha256:" + "2" * 64
+            backend.stack["config"]["file_contents"] = canonical(contents).decode() + "\n"
+            backend.container["Config"]["Image"] = "sha256:" + "2" * 64
+            backend.container["Image"] = "sha256:" + "2" * 64
+            rig.selected = replace(
+                rig.selected, previous_config=canonical(backend.stack["config"]),
+                previous_container=native_fingerprint(backend.container))
+            rig.admit_selection()
+        assert rig.run().to_dict()["status"] == "succeeded"
+        assert [path for path, _ in backend.writes] == (
+            ["/write/UpdateStack", "/execute/DeployStack"] if upgrade else [])
+
+
+def test_original_no_deploy_decision_recovers_readback_without_mutating(tmp_path, harness):
+    backend = Backend()
+    with protocol(backend) as endpoint:
+        rig = WorkloadRig(tmp_path, harness, backend, endpoint)
+        rig.incumbent()
+        backend.lost = "/read/ListStackServices"
+        with pytest.raises(PlanError, match="uncertain"):
+            rig.run()
+        assert rig.journal.inspect(rig.request).to_dict()["status"] == "unknown"
+        facts = rig.journal.external_evidence(rig.request)
+        assert facts["decision"] == {"mode": "read-only", "stack": STACK}
+        assert "deployment" not in facts
+        backend.lost = None
+        assert rig.run().to_dict()["status"] == "succeeded"
+        assert not backend.writes
 
 
 def test_retained_original_async_update_resumes_only_reads_after_deadline(tmp_path, harness):
