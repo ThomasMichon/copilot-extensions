@@ -156,10 +156,20 @@ case "$REPO:$source_prefix" in
     esac ;;
 esac
 
+update_staging=""
 if [ "$recovery_only" -eq 1 ]; then
     recovery_staging="$(mktemp -d -t manager-repair.XXXXXXXX)"
     STAGING="$recovery_staging/source"
     trap 'rm -rf -- "$recovery_staging"' EXIT
+elif [ -z "$install_source" ] && [ "${1-}" = update ]; then
+    mkdir -p "$ROOT/bootstrap-acquisition"
+    update_staging="$(mktemp -d "$ROOT/bootstrap-acquisition/update.XXXXXXXX")"
+    STAGING="$update_staging/source"
+    update_detach=0
+    for argument in "$@"; do
+        [ "$argument" != --detach ] || update_detach=1
+    done
+    trap 'status=$?; if [ "$status" -eq 0 ] && [ "$update_detach" -eq 0 ]; then rm -rf -- "$update_staging"; fi' EXIT
 fi
 
 _bootstrap_progress 'Worktree Manager bootstrap'
@@ -269,6 +279,10 @@ esac
 # Then run whatever the caller asked for through the freshly-installed app.
 if [ "$recovery_only" -eq 1 ]; then
     "$PYTHON" -I -S -B -X utf8 scripts/runtime_install.py --root "$ROOT" --payload "$PWD" "${installer_args[@]}"
+    exit "$?"
+fi
+if [ -n "$update_staging" ]; then
+    "$PYTHON" -I -S -B -X utf8 scripts/runtime_install.py --root "$ROOT" --payload "$PWD" "${installer_args[@]}" -- "$@"
     exit "$?"
 fi
 if [ "$#" -eq 0 ]; then

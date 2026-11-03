@@ -111,7 +111,10 @@ creation, not an implicit permission migration or a read-only status side effect
   explicitly set `coalesce_running=True`: equivalent active arrivals then
   follow the same request, output and outcome, including a nonzero result.
   A moving ref or identical update arguments alone do not establish that target;
-  Manager and engine retain the default later execution for active arrivals.
+  Installed Manager and engine requests retain the default later execution for
+  active arrivals. Fresh Manager bootstrap also keeps later active arrivals
+  separate: its retained Manager/SDK inputs do not pin every marketplace target
+  discovered by the following suite update.
   Distinct inputs/options stay separate, and completed requests never debounce
   a new attempt. This does not yet resolve a central desired target, order
   versions, or bound worker-launch fan-out. The opt-in changes no journal schema.

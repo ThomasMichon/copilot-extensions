@@ -325,6 +325,8 @@ if ($SystemPythonRequested) {
     )) { throw 'System Python mode cannot be repeated or combined with bootstrap repair.' }
 }
 $RecoveryStaging = $null
+$UpdateStaging = $null
+$commandExit = $null
 if ($commandArgs.Count -and $commandArgs[0] -ceq '--recover-for-repair') {
     $installerArgs += '--recover-for-repair'
     $commandArgs = @($commandArgs | Select-Object -Skip 1)
@@ -351,6 +353,10 @@ if ($commandArgs.Count -and $commandArgs[0] -ceq '--bootstrap-update') {
     $Ref = $commandArgs[2]
     $installerArgs += '--repair-update'
     $commandArgs = @($commandArgs | Select-Object -Skip 3)
+}
+if (-not $InstallSource -and $commandArgs.Count -and $commandArgs[0] -ceq 'update') {
+    $UpdateStaging = Join-Path $Root ('bootstrap-acquisition\update.' + [Guid]::NewGuid().ToString('N'))
+    $Staging = Join-Path $UpdateStaging 'source'
 }
 if (-not $Repo -or $Repo.StartsWith('-') -or -not $Ref -or $Ref.StartsWith('-') -or
     $Repo -match '[\x00-\x1f\x7f]' -or $Ref -match '[\x00-\x1f\x7f]') {
@@ -485,4 +491,8 @@ if ($commandExit -eq 0 -and ($env:PATH -split ';') -notcontains $LocalBin) {
 exit $commandExit
 } finally {
     if ($RecoveryStaging) { Remove-Item -LiteralPath $RecoveryStaging -Recurse -Force }
+    if ($UpdateStaging -and $commandExit -eq 0 -and '--detach' -cnotin $commandArgs -and
+        (Test-Path -LiteralPath $UpdateStaging)) {
+        Remove-Item -LiteralPath $UpdateStaging -Recurse -Force
+    }
 }

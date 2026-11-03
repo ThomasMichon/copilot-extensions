@@ -20,6 +20,7 @@ def short_home(tmp_path_factory: pytest.TempPathFactory, monkeypatch):
     # Exercise queue ownership, not the platform's AF_UNIX address-length limit.
     home = tmp_path_factory.mktemp("ud") / "home"
     home.mkdir()
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(home / ".worktree-manager"))
     registry = home.parent / "daemon-instances"
     cleanup = []
     with daemon_test_lifecycle(
@@ -627,7 +628,9 @@ def test_real_cli_worker_preserves_exit_and_serializes_processes(tmp_path, monke
             ) for _ in range(2)
         ]
         results = [future.result() for future in futures]
-    assert [result.returncode for result in results] == [6, 6]
+    assert [result.returncode for result in results] == [6, 6], [
+        result.stderr for result in results
+    ]
     assert all("Update request " in result.stderr for result in results)
     assert all("synthetic canonical updater started" in result.stderr for result in results)
     records = [json.loads(line) for line in events.read_text(encoding="utf-8").splitlines()]
@@ -669,6 +672,7 @@ def test_real_cli_manual_auto_hold_reaches_the_execution_owner(
     assert result.returncode == (3 if skipped else 6), result.stderr
     request, = update_driver.status()
     assert request.spec.repair is not automatic
+    assert dict(request.spec.context)["WORKTREE_MANAGER_ROOT"] == str(short_home / ".worktree-manager")
     assert ("--auto" in request.runner.argv) is automatic
     assert "--force" not in request.runner.argv
     assert request.state == "completed" and request.exit_code == result.returncode

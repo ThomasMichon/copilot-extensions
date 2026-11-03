@@ -359,12 +359,14 @@ def _windows_console_stream(stream: TextIO | None) -> bool:
 
 
 def _dispatch_manager(command: list[str], *, handoff: dict[str, str] | None = None) -> int:
-    if os.name == "nt":
-        console = any(_windows_console_stream(stream)
-                      for stream in (sys.stdin, sys.stdout, sys.stderr))
+    if os.name == "nt" or handoff:
+        console = os.name == "nt" and any(
+            _windows_console_stream(stream) for stream in (sys.stdin, sys.stdout, sys.stderr)
+        )
         process = subprocess.Popen(
             command, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr,
-            creationflags=0 if console else subprocess.CREATE_NO_WINDOW,
+            **({"creationflags": 0 if console else subprocess.CREATE_NO_WINDOW}
+               if os.name == "nt" else {}),
             **({"env": {**os.environ, **handoff}} if handoff else {}),
         )
         try:
@@ -377,8 +379,6 @@ def _dispatch_manager(command: list[str], *, handoff: dict[str, str] | None = No
 
 
 def _installation_child_options() -> dict[str, object]:
-    if os.name != "nt":
-        return {}
     from update_driver import participant_environment
 
     return {"env": {**os.environ, **participant_environment()}}
@@ -472,7 +472,7 @@ def _automatic_bootstrap_refusal(args) -> str | None:
     options, _forwarded = parse_options(command[1:])
     if not options.auto:
         return None
-    driver = _execution_driver(args.payload)
+    driver = _execution_driver(SCRIPTS.parent)
     request = driver.RequestSpec(
         "manager-bootstrap", ("update", "--auto"),
         context=tuple({**request_context(), "WORKTREE_MANAGER_ROOT": str(args.root.resolve())}.items()),
@@ -756,8 +756,6 @@ def _finish(args, slot: Path | int, command: list[str]) -> int:
         str(slot / ".runtime-bootstrap" / "runtime_launcher.py"),
         "-m", "worktree_manager", *command,
     ]
-    if os.name != "nt":
-        return _dispatch_manager(invocation)
     from worktree_manager.update_driver_cli import handoff_environment
     from worktree_manager.update_python_path import finish_update
 
@@ -779,6 +777,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--install-only", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--update-participant", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--source-digest", help=argparse.SUPPRESS)
     parser.add_argument("--skip-instance-reconcile", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--install-source", type=Path)
@@ -789,7 +788,8 @@ def main(argv: list[str] | None = None) -> int:
         if any((
             args.root, args.install_source, args.command, args.uninstall, args.apply,
             args.recover_adopted, args.describe_recovery, args.repair_update,
-            args.recover_for_repair, args.json, args.install_only, args.source_digest,
+            args.recover_for_repair, args.json, args.install_only, args.update_participant,
+            args.source_digest,
             args.skip_instance_reconcile,
         )):
             parser.error("Source-input discovery cannot be combined with an operation")
@@ -809,7 +809,8 @@ def main(argv: list[str] | None = None) -> int:
         if (
             args.root is None or args.recover_adopted or args.describe_recovery
             or args.repair_update or args.recover_for_repair or args.command
-            or args.install_only or args.source_digest or args.skip_instance_reconcile
+            or args.install_only or args.update_participant or args.source_digest
+            or args.skip_instance_reconcile
             or args.payload.resolve() != SCRIPTS.parent
         ):
             parser.error("--uninstall requires --root and only accepts --apply and --json")
@@ -819,7 +820,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.recover_for_repair:
         if (
             args.recover_adopted or args.describe_recovery or args.repair_update or args.command
-            or args.install_only or args.source_digest or args.skip_instance_reconcile
+            or args.install_only or args.update_participant or args.source_digest
+            or args.skip_instance_reconcile
         ):
             parser.error("Repair recovery cannot be combined with installation or application commands")
         if args.payload.resolve() != SCRIPTS.parent:
@@ -840,17 +842,23 @@ def main(argv: list[str] | None = None) -> int:
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if args.install_only and (command or args.source_digest is None):
         parser.error("Installation participant requires a source digest and no application command")
+    if args.update_participant and (
+        args.install_only or command[:1] != ["update"] or args.source_digest is None
+        or args.recover_adopted is not None
+    ):
+        parser.error("Update participant requires a source digest and one update command")
     if args.skip_instance_reconcile and not args.install_only:
         parser.error("Instance reconciliation policy requires an installation participant")
     if args.source_digest is not None and (
-        not args.install_only or re.fullmatch("[0-9a-f]{64}", args.source_digest) is None
+        not (args.install_only or args.update_participant)
+        or re.fullmatch("[0-9a-f]{64}", args.source_digest) is None
     ):
         parser.error("Source digest requires an installation participant and a SHA-256")
     if args.repair_update and not args.install_only and command[:1] != ["update"]:
         parser.error("Bootstrap repair is only valid for update")
     os.environ.pop("__PYVENV_LAUNCHER__", None)
     os.environ["WORKTREE_MANAGER_ROOT"] = str(args.root.resolve())
-    sys.path.insert(0, str(args.payload / "src"))
+    sys.path.insert(0, str(SCRIPTS.parent / "src"))
     if not args.install_only:
         args.skip_instance_reconcile = bool(command and command[:1] not in (["update"], ["self-install"]))
     if command[:1] == ["update"]:
@@ -865,22 +873,39 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, ValueError) as error:
             print(f"Runtime source: {error}", file=sys.stderr)
             return 1
-    refusal = _automatic_bootstrap_refusal(args)
+    refusal = None if args.update_participant else _automatic_bootstrap_refusal(args)
     if refusal is not None:
         print(refusal, file=sys.stderr)
         return 3
-    if os.name == "nt":
-        driver = _execution_driver(args.payload)
+    if os.name == "nt" or command[:1] == ["update"]:
+        driver = _execution_driver(SCRIPTS.parent)
         with _installation_custody() as custody:
             if custody is None:
-                if args.install_only:
+                if args.install_only or args.update_participant:
                     raise RuntimeError("Manager installation participant requires live driver custody")
+                if command[:1] == ["update"]:
+                    from bootstrap_update import execute
+
+                    return execute(args, driver, source_digest=_source_digest(args.payload))
                 slot = _foreground_install(args, driver)
             else:
+                if args.update_participant:
+                    from worktree_manager.update_driver_cli import _request_environment
+
+                    request = driver.status(custody.request_id, root=custody.root)
+                    with _request_environment(
+                        request.spec.context, killswitch_path=request.spec.killswitch_path,
+                        cwd=request.spec.cwd,
+                    ):
+                        refusal = _automatic_bootstrap_refusal(args)
+                        if refusal is not None:
+                            print(refusal, file=sys.stderr)
+                            return 3
+                        return _finish(args, _install(args), command)
                 slot = _install(args)
             return _finish(args, slot, command)
     else:
-        if args.install_only:
+        if args.install_only or args.update_participant:
             raise RuntimeError("Windows installation participant is unsupported on this platform")
         slot = _install(args)
     return _finish(args, slot, command)
