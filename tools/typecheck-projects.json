@@ -475,7 +475,7 @@
         "plugins/context-handoff"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict"
     },
     {
       "name": "copilot-extensions-harness",
