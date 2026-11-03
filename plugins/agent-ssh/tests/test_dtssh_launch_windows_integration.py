@@ -344,10 +344,14 @@ def test_logon_task_registers_unelevated_and_runs_windowless_in_the_users_sessio
     register = (
         "$ErrorActionPreference = 'Stop'\n"
         f"$InstallDir = '{install}'\n$LogonTaskName = '{task}'\n"
-        + _function("Register-LogonTask") + "\n" + _function("Get-LogonTask") + "\n"
-        + f"if (-not (Register-LogonTask -Execute (Join-Path $env:SystemRoot 'System32\\conhost.exe') "
-        + f"-Argument '--headless \"{pwsh}\" -NoProfile -NonInteractive -ExecutionPolicy Bypass "
-        + f"-File \"{watchdog}\" \"{tmp_path / 'state-dir.txt'}\"')) {{ exit 3 }}\n"
+        + _function("Register-LogonTask") + "\n" + _function("Test-LogonTaskCurrent") + "\n"
+        + _function("Get-LogonTask") + "\n"
+        + "$Execute = Join-Path $env:SystemRoot 'System32\\conhost.exe'\n"
+        + f"$Argument = '--headless \"{pwsh}\" -NoProfile -NonInteractive -ExecutionPolicy Bypass "
+        + f"-File \"{watchdog}\" \"{tmp_path / 'state-dir.txt'}\"'\n"
+        + "if (-not (Register-LogonTask -Execute $Execute -Argument $Argument)) { exit 3 }\n"
+        # The real registered task must read back as current, so a refused re-registration keeps it.
+        + "if (-not (Test-LogonTaskCurrent -Task (Get-LogonTask) -Execute $Execute -Argument $Argument)) { exit 4 }\n"
     )
     try:
         registered = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-Command", register],

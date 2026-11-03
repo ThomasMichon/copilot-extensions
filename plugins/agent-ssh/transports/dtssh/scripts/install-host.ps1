@@ -702,9 +702,15 @@ function Register-LogonTask {
         return $true
     } catch {
         $reason = $_.Exception.Message.Trim()
+        $existing = Get-LogonTask
+        # Re-registering an identical task can be refused where creating it once was
+        # allowed; the registered one still starts the same launcher, so keep it.
+        if ($existing -and (Test-LogonTaskCurrent -Task $existing -Execute $Execute -Argument $Argument)) {
+            return $true
+        }
         # A task this install registered before would still fire at logon beside the
         # shortcut, with whatever alias, port and tunnel it was given then.
-        if (Get-LogonTask) {
+        if ($existing) {
             try {
                 Unregister-ScheduledTask -TaskName $LogonTaskName -Confirm:$false -ErrorAction Stop
             } catch {
@@ -714,6 +720,26 @@ function Register-LogonTask {
         Write-Warning "Could not register the logon task '$LogonTaskName' ($reason); using the Startup-folder shortcut, which can start late on a busy logon."
         return $false
     }
+}
+
+function Test-LogonTaskCurrent {
+    # Whether a registered task already runs exactly this launcher at this user's logon.
+    param([Parameter(Mandatory)]$Task, [Parameter(Mandatory)][string]$Execute, [Parameter(Mandatory)][string]$Argument)
+    $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    # Task Scheduler reports a bare or qualified account name: compare the SIDs they resolve to.
+    $isMe = {
+        param($name)
+        if (-not $name) { return $false }
+        try { return ([Security.Principal.NTAccount]"$name").Translate([Security.Principal.SecurityIdentifier]).Value -eq $sid }
+        catch { return "$name" -eq $sid }
+    }
+    $actions = @($Task.Actions)
+    $triggers = @($Task.Triggers)
+    return $actions.Count -eq 1 -and $actions[0].Execute -eq $Execute -and $actions[0].Arguments -eq $Argument -and
+        $actions[0].WorkingDirectory -eq $InstallDir -and
+        $triggers.Count -eq 1 -and $triggers[0].CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger' -and
+        (& $isMe $triggers[0].UserId) -and (& $isMe $Task.Principal.UserId) -and
+        "$($Task.Principal.LogonType)" -eq 'Interactive'
 }
 
 function Get-LogonTask {

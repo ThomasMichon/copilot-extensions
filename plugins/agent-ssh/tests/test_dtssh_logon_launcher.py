@@ -67,7 +67,7 @@ def _register_script(tmp_path: Path, register: str) -> str:
         f"$InstallDir = '{tmp_path}'\n"
         + _task_name_line() + "\n"
         + RECORDING_CMDLETS + register + "\n"
-        + _function("Register-LogonTask") + "\n" + _function("Get-LogonTask")
+        + _function("Register-LogonTask") + "\n" + _function("Test-LogonTaskCurrent") + "\n" + _function("Get-LogonTask")
         + "\nWrite-Host \"me:$([Security.Principal.WindowsIdentity]::GetCurrent().Name)\""
         + "\nWrite-Host \"sid:$([Security.Principal.WindowsIdentity]::GetCurrent().User.Value)\""
         + "\nWrite-Host \"result:$(Register-LogonTask -Execute 'conhost.exe' -Argument '--headless pwsh x' 3>&1)\"\n"
@@ -113,6 +113,24 @@ def test_a_refused_logon_task_reports_the_startup_fallback(tmp_path):
     out = _register(tmp_path, REFUSED + "function Get-ScheduledTask { param($TaskName, $ErrorAction) }\n")
     assert "Access is denied." in out[-1] and "Startup-folder shortcut" in out[-1]
     assert out[-1].endswith(" False")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows identity and scheduled tasks")
+def test_a_refused_update_keeps_an_identical_task(tmp_path):
+    """Re-registering can be refused where the task already does exactly this:
+    keep it rather than fall back to the slower Startup shortcut."""
+    out = _register(tmp_path, REFUSED + f"""
+function Get-ScheduledTask {{ param($TaskName, $ErrorAction)
+    $me = [Security.Principal.WindowsIdentity]::GetCurrent().Name.Split('\\')[-1]  # Task Scheduler reports it bare
+    [pscustomobject]@{{
+        Actions = @([pscustomobject]@{{ Execute = 'conhost.exe'; Arguments = '--headless pwsh x'; WorkingDirectory = '{tmp_path}' }})
+        Triggers = @([pscustomobject]@{{ CimClass = [pscustomobject]@{{ CimClassName = 'MSFT_TaskLogonTrigger' }}; UserId = $me }})
+        Principal = [pscustomobject]@{{ UserId = $me; LogonType = 'Interactive' }}
+    }} }}
+function Unregister-ScheduledTask {{ param($TaskName, [switch]$Confirm, $ErrorAction) Write-Host "unregister:$TaskName" }}
+""")
+    assert not any(line.startswith("unregister:") for line in out)
+    assert out[-1] == "result:True"
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows identity and scheduled tasks")
