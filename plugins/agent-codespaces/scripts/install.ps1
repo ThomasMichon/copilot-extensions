@@ -1586,6 +1586,7 @@ function Materialize-SnapshotDependencies {
     New-Item -ItemType Directory -Path $libsDir -Force | Out-Null
     $libraries = [ordered]@{
         'agent-repository-policy' = 'repository-policy'
+        'agent-configuration-layers' = 'configuration-layers'
         'agent-update-driver' = 'update-driver'
         'agent-ssh-manager' = 'ssh-manager'
         'agent-credential-relay' = 'credential-relay'
@@ -1617,7 +1618,7 @@ function Materialize-SnapshotDependencies {
             if (Test-Path -LiteralPath $destination) {
                 Remove-Item -LiteralPath $destination -Recurse -Force -ErrorAction Stop
             }
-           Copy-InstallSnapshotItem -Source $source -Destination $destination
+            Copy-InstallSnapshotItem -Source $source -Destination $destination
         }
         $oldLine = '{0} = {{ path = "../../libs/{1}", editable = true }}' -f $entry.Key, $entry.Value
         $newLine = '{0} = {{ path = "libs/{1}" }}' -f $entry.Key, $entry.Value

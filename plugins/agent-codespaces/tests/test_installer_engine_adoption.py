@@ -974,15 +974,9 @@ def test_codespaces_library_install_order_retry_and_errors(
     ext, editable, mode, orchestration_runs,
 ):
     result, calls, records, expected, engine, sources = orchestration_runs(ext, editable, mode)
-    python = Path(sys._base_executable)
     assert bool(result.returncode) == (mode == "fatal"), result.stdout + result.stderr
-    expected = ["pip", "install", "--python", str(python)]
-    for package, source in zip(PACKAGES, sources):
-        expected.extend(["--reinstall-package", package, str(source)])
-    expected.append("--quiet")
-    assert [_without_policy_arguments(args) for args in calls] == (
-        [expected] * (1 if mode == "fatal" else 3)
-    )
+    expected_call = ["pip", "install", *expected["arguments"]["closure"]]
+    assert calls == [expected_call] * (1 if mode == "fatal" else 3)
     if mode == "fatal":
         assert "permanent failure" in result.stderr
         assert "agent-codespaces closure install failed" in result.stderr
@@ -1150,7 +1144,8 @@ def test_codespaces_admission_spy_refuses_incorrect_or_bypassed_calls(fault, orc
     if fault == "bypassed":
         damaged.clear()
     elif fault == "source":
-        damaged[0]["arguments"][-2] = str(PLUGIN / "unrecognized-source")
+        arguments = damaged[0]["arguments"]
+        arguments[arguments.index(PACKAGES[-1]) + 1] = str(PLUGIN / "unrecognized-source")
     elif fault == "roots":
         damaged[0]["trusted_source_roots"] = []
     elif fault == "editable":
