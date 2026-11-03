@@ -6,6 +6,7 @@ import json
 import subprocess
 from collections.abc import Iterator
 from dataclasses import asdict
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -33,6 +34,7 @@ api = controls.api
 @pytest.fixture
 def ordinary(
     q: TaskQueue, api: TestClient, monkeypatch: pytest.MonkeyPatch, admission_owner: SimpleNamespace,
+    tmp_path: Path,
 ) -> Iterator[SimpleNamespace]:
     revision = publish(q, pool())
     requested = task(q)
@@ -42,6 +44,9 @@ def ordinary(
         requested.id, reserved_by="allocator", catalog_revision=revision, driver="ordinary-bridge",
     )
     snapshot = {**asdict(q.get(requested.id)), "spawn_reservation_key": placed["reservation"]["key"]}
+    install_root = tmp_path / "dispatch-install"
+    install_root.mkdir()
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(install_root))
     monkeypatch.setattr(identity, "resolve_machine", lambda: "host-a")
     monkeypatch.setattr(bridge, "registered_agent_project", lambda *args, **kwargs: None)
     monkeypatch.setattr(ordinary_bridge, "agent_bridge_launch_prefix", lambda: ["bridge"])
@@ -82,6 +87,7 @@ def ordinary(
     ))
     yield SimpleNamespace(
         q=q, api=api, task=snapshot, client=client, requests=requests, calls=calls, placed=placed,
+        install_root=install_root,
     )
     client.close()
 
@@ -134,6 +140,51 @@ def test_wrong_or_unknown_launch_host_never_creates_or_sends(
         launch(ordinary)
     assert not ordinary.calls
     assert ordinary.q.get(ordinary.task["id"]).status == Status.CLAIMED
+    assert ordinary.q.get_reservation(ordinary.placed["reservation"]["key"]).session_handle is None
+
+
+@pytest.mark.parametrize("binding", ["machine", "supervisor.env"])
+def test_installed_binding_admits_neutral_service_start_without_project_discovery(
+    ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, binding: str,
+) -> None:
+    value = "HOST-A\n" if binding == "machine" else "AGENT_DISPATCH_SUPERVISE_MACHINE='HOST-A'\n"
+    (ordinary.install_root / binding).write_text(value, encoding="utf-8")
+    monkeypatch.setenv("AGENT_DISPATCH_SUPERVISE_MACHINE", "ambient-other-host")
+    monkeypatch.chdir(ordinary.install_root)
+
+    def no_project() -> str:
+        raise AssertionError("durable service identity must not probe a project")
+
+    monkeypatch.setattr(identity, "resolve_machine", no_project)
+    assert launch(ordinary)["session"] == "local-body:bridge-a"
+    assert [argv[2] for argv, _ in ordinary.calls] == ["create", "send"]
+    stored = ordinary.q.get_reservation(ordinary.placed["reservation"]["key"])
+    assert stored.execution_machine == "host-a"
+
+
+@pytest.mark.parametrize("machine", ["host-b", "host-a-wsl"])
+def test_installed_binding_mismatch_does_not_fall_back_to_matching_project(
+    ordinary: SimpleNamespace, machine: str,
+) -> None:
+    (ordinary.install_root / "machine").write_text(machine, encoding="utf-8")
+    with pytest.raises(bridge.BridgeCarriedSessionBusy, match="assigned execution machine"):
+        launch(ordinary)
+    assert not ordinary.calls
+    assert ordinary.q.get(ordinary.task["id"]).status == Status.CLAIMED
+
+
+@pytest.mark.parametrize("failure", ["directory", "invalid-utf8"])
+def test_unreadable_installed_binding_does_not_fall_back_or_create(
+    ordinary: SimpleNamespace, failure: str,
+) -> None:
+    path = ordinary.install_root / "machine"
+    if failure == "directory":
+        path.mkdir()
+    else:
+        path.write_bytes(b"\xff")
+    with pytest.raises(bridge.BridgeCarriedSessionBusy, match="binding is unreadable"):
+        launch(ordinary)
+    assert not ordinary.calls
     assert ordinary.q.get_reservation(ordinary.placed["reservation"]["key"]).session_handle is None
 
 

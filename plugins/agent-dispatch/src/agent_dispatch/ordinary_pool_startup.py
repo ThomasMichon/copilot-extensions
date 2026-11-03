@@ -43,8 +43,13 @@ def initial_machine(task: dict, reservation: dict) -> str | None:
         return None
     from .bridge_remote import normalize_host
     from .identity import resolve_machine
+    from .remote_dispatch import configured_service_machine
 
-    machine = resolve_machine()
+    try:
+        machine = configured_service_machine(strict=True)
+    except (OSError, UnicodeError) as exc:
+        raise TaskError("ordinary pool startup installed machine binding is unreadable") from exc
+    machine = machine or resolve_machine()
     if (
         not isinstance(machine, str) or not machine.strip()
         or normalize_host(machine) != normalize_host(placed["machine"])

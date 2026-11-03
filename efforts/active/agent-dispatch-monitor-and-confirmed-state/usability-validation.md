@@ -43,11 +43,35 @@ are still open. The isolated whole-workload path first needs the existing
 clean-room runner's optional resource/lifetime controls, tracked by
 [#10274](https://github.com/ThomasMichon/copilot-extensions/issues/10274);
 a host command timeout alone cannot bound its persistent container.
-The bounded runner source now passes 81 wrapper/provider controls. A separate
+The bounded runner source passes 127 wrapper/provider controls, including
+fresh-process physical/legacy cleanup, unrelated-registration no-ops,
+unreadable ownership and literal dotted-name filters. Exact-head approval and
+green CI preceded the normal merge of
+[#10278](https://github.com/ThomasMichon/copilot-extensions/pull/10278)
+as `32140ada10f2650d3fb15e2ddb2a82897a433f70`.
+A separate
 Linux witness confirms kernel resource settings and autonomous expiry; its
 short deadline interrupted shared metadata reporting, so it is not a complete
-scenario PASS. Source review/merge and the actual whole-workload scenario remain
-separate gates.
+scenario PASS. The actual configured-cohort/allocator/worker path and
+whole-workload scenario remain separate gates; the next integration leg must
+exercise the real master and worker CLI, not a controller-side manual claim.
+
+A subsequent isolated ordinary case reaches actual complete publication and
+allocator-owned `CLAIMED` before any workspace/native. It retains that claim
+at the existing unsupported ordinary Bridge no-pair override, before worker
+creation or delivery. The next supported-default case must prove affirmative
+worker start; no-pair consumer qualification remains open with complete caller
+adoption. This partial ordering result does not close the acceptance matrix.
+
+A supported-default fresh case confirms the same pre-spawn claim, then exposes
+[#10289](https://github.com/ThomasMichon/copilot-extensions/issues/10289):
+ordinary initial startup still asks project-bound host discovery from its
+neutral service directory. The bounded correction reuses strict installed
+machine admission, with project fallback only when no binding exists.
+The coupled ordinary-startup/lane packet passes 118 contained controls,
+including actual binding-file and unreadable/mismatched negative cases.
+Source review/merge and a fresh whole-stack worker acceptance remain required;
+there is no affirmative worker-start or complete lifecycle credit yet.
 
 The following is an **agent-recommended execution/validation sequence** under
 the existing reviewed five-outcome contract. It does not create an operational
