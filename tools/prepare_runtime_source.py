@@ -149,7 +149,10 @@ def _copy(source, destination, *, deadline: float | None = None) -> None:
         destination.write(block)
 
 
-def _extract_archive(archive: Path, destination: Path, *, deadline: float | None = None) -> None:
+def _extract_archive(
+    archive: Path, destination: Path, *, deadline: float | None = None,
+    file_pointer_candidates: list[Path] | None = None,
+) -> None:
     with tarfile.open(archive, "r:") as source:
         for member in source:
             _remaining(deadline)
@@ -168,6 +171,11 @@ def _extract_archive(archive: Path, destination: Path, *, deadline: float | None
                 if content is None:
                     raise SourcePreparationError("Source archive file has no readable content")
                 with content, target.open("xb") as output:
+                    # The anchored file-pointer grammar starts with "<". Inspect
+                    # the buffered archive bytes before copying, not thousands
+                    # of freshly extracted files through another filesystem open.
+                    if file_pointer_candidates is not None and content.peek(1).startswith(b"<"):
+                        file_pointer_candidates.append(target)
                     _copy(content, output, deadline=deadline)
                 target.chmod(member.mode & 0o777)
             else:

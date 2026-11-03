@@ -344,8 +344,8 @@ def test_file_admission_refusals_precede_wheel_download(feeds, change, message, 
     assert len(state["requests"]) == 1
 
 
-@pytest.mark.parametrize("route", ["link", "redirect", "index-redirect"])
-def test_untrusted_origin_is_refused_before_endpoint_receives_a_request(feeds, route):
+@pytest.mark.parametrize("route", ["link", "redirect"])
+def test_explicit_download_restriction_refuses_other_origins_before_request(feeds, route):
     state, untrusted = feeds(), feeds()
     location = untrusted["origin"] + "/files/" + FILENAME + "?signature=synthetic-private-value"
     project(state)
@@ -355,17 +355,73 @@ def test_untrusted_origin_is_refused_before_endpoint_receives_a_request(feeds, r
         state["routes"]["/files/" + FILENAME] = (
             302, {"Location": location}, b"",
         )
-    else:
-        state["routes"]["/simple/fixture/"] = (
-            302, {"Location": untrusted["origin"] + "/simple/fixture/"}, b"",
-        )
     with pytest.raises(ValueError, match="source trust") as error:
-        with acquire(state):
+        with acquire(state, download_origins=(state["origin"],)):
             pytest.fail("untrusted endpoint was reached")
     assert untrusted["requests"] == []
     assert untrusted["origin"] in str(error.value)
     assert "synthetic-private-value" not in str(error.value)
     assert FILENAME not in str(error.value)
+
+
+@pytest.mark.parametrize("index_redirect", [False, True])
+def test_feed_delegates_https_delivery_without_origin_list_or_credential_forwarding(feeds, index_redirect):
+    state, delegated, storage = feeds(), feeds(), feeds()
+    signature = "synthetic-private-value"
+    location = delegated["origin"] + "/files/" + FILENAME + "?signature=" + signature
+    if index_redirect:
+        project(delegated, [listed(url=location)])
+        state["routes"]["/simple/fixture/"] = (
+            302, {"Location": delegated["origin"] + "/simple/fixture/"}, b"",
+        )
+    else:
+        project(state, [listed(url=location)])
+    delegated["routes"]["/files/" + FILENAME + "?signature=" + signature] = (
+        307, {"Location": storage["origin"] + "/files/" + FILENAME}, b"",
+    )
+    storage["routes"]["/files/" + FILENAME] = (200, {}, DATA)
+    credential = "synthetic-test-header"
+    feed = acquisition.WheelFeed(
+        IDENTITY, state["origin"] + "/simple", (("Authorization", credential),),
+    )
+    with acquire(state, feeds=(feed,)) as result:
+        paths = tuple(result.snapshot.paths.values())
+        assert result.snapshot.archives[FILENAME].read() == DATA
+        assert result.evidence()["redirect_count"] == 1 + int(index_redirect)
+        assert result.evidence()["files"][0]["feed"] == IDENTITY
+        assert credential.encode() not in result.evidence_json
+        assert signature.encode() not in result.evidence_json
+        assert b"127.0.0.1" not in result.evidence_json
+    assert all(not path.exists() for path in paths)
+    assert all(headers.get("Authorization") == credential for _, headers in state["requests"])
+    assert delegated["requests"] and storage["requests"]
+    assert all("Authorization" not in headers for _, headers in (
+        delegated["requests"] + storage["requests"]
+    ))
+
+
+@pytest.mark.parametrize("route", ["index", "artifact"])
+@pytest.mark.parametrize("location", ["http://127.0.0.1:9/file", "file:///untrusted.whl"])
+def test_delegated_redirect_refuses_downgrade_and_non_https_before_request(feeds, route, location):
+    state = feeds()
+    project(state)
+    path = "/simple/fixture/" if route == "index" else "/files/" + FILENAME
+    state["routes"][path] = (302, {"Location": location}, b"")
+    with pytest.raises(acquisition.WheelError, match="HTTPS location"):
+        with acquire(state):
+            pytest.fail("unsafe delegated redirect admitted")
+    assert len(state["requests"]) == (1 if route == "index" else 2)
+
+
+def test_delegated_index_redirect_cannot_substitute_public_registry(feeds):
+    state = feeds()
+    state["routes"]["/simple/fixture/"] = (
+        302, {"Location": "https://pypi.org/simple/fixture/"}, b"",
+    )
+    with pytest.raises(acquisition.WheelError, match="public package index"):
+        with acquire(state):
+            pytest.fail("public registry substituted for configured feed")
+    assert len(state["requests"]) == 1
 
 
 def test_explicit_download_origin_allows_redirect_without_forwarding_credentials(feeds):

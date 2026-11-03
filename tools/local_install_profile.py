@@ -490,7 +490,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--uv", required=True)
     parser.add_argument("--timeout", type=float, default=300)
     parser.add_argument("--prepare-profile", action="store_true")
-    parser.add_argument("--download-origin", action="append", default=[])
+    parser.add_argument(
+        "--download-origin", action="append", default=[],
+        help="Optional exact HTTPS artifact-origin restriction; default follows configured-feed delivery",
+    )
     parser.add_argument("--component", default="worktree-manager")
     parser.add_argument("--extra", action="append", default=[])
     args = parser.parse_args(argv)
