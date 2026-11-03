@@ -50,8 +50,15 @@ force-legacy support remains explicitly unavailable rather than PID-only signali
 The separate `Legacy monitor native acceptance` workflow selects only the
 live compatible and `legacy-protocol` cases on Linux and Windows. It runs on
 demand and is path-gated on its workflow, owning lifecycle source and native
-fixture changes on PR branches. This is a focused smoke lane, not an expansion
-of required unit-only CI. Existing serving-slot retention selectors remain unchanged.
+fixture changes on PR branches. Both jobs also run the focused
+retirement/preparation/legacy custody and grace/handover/completion controls.
+Windows additionally runs the six finite Job/native-identity grace and
+asynchronous-installer cases; Linux native expiry is exercised by the real
+installer case above, not inferred from skipped Windows controls. These packets
+retain their 180-second subsuite, 600-second aggregate and existing item bounds.
+The real-installer packet and twenty-minute job bounds are unchanged.
+This is a focused smoke lane, not an expansion of required unit-only CI.
+Existing serving-slot retention selectors remain unchanged.
 
 Dispatch's actor-free `test_dispatch_runtime_resolution.py` promotion packet
 checks flat/nested physical slot selection, unchanged fallback tiers, BOM
