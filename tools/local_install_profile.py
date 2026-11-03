@@ -337,7 +337,10 @@ def _profile_feed(
         wheels=wheels, profile_policy="native-source-profile",
         opaque_identity=_opaque_index_identity, excluded_local_packages=excluded_local_packages,
     )
-    if tuple(item.index_url for item in feed.feeds) != (trusted[0],):
+    if (
+        {item.index_url for item in feed.feeds} != {trusted[0]}
+        or len({item.identity for item in feed.feeds}) != 1
+    ):
         raise ProfileError("native profile indexes differ from the selected governed feed")
     return policy, feed
 
