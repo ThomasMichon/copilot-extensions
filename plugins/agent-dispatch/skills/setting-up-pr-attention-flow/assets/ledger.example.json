@@ -1,0 +1,73 @@
+{
+  "example_only": true,
+  "description": "Synthetic, non-authoritative coordination data. Not a runtime schema, grant, task queue, forge snapshot or receipt. Null means unknown or absent; replace only with original evidence from its existing owner.",
+  "example_format_version": 1,
+  "charter_reference": null,
+  "original_grant_reference": null,
+  "lane_choice": {
+    "active_limit": 2,
+    "mode": "continuous",
+    "stop_reference": null,
+    "cadence_reference": null
+  },
+  "coordination_storage": {
+    "owner_reference": null,
+    "durable_location_reference": null,
+    "session_sql_index": "optional and reconstructible; does not survive new-owner handoff by itself"
+  },
+  "candidates": [
+    {
+      "synthetic_target": "example/project",
+      "synthetic_pr_number": 42,
+      "provider_scope_reference": null,
+      "actor_reference": null,
+      "current_candidate": {
+        "head": null,
+        "base": null,
+        "signature": null,
+        "observed_at": null,
+        "complete": null
+      },
+      "task_binding": null,
+      "reviewer_handle": null,
+      "author_owner_reference": null,
+      "workspace_custody_reference": null,
+      "prior_rounds": [],
+      "pending_round": {
+        "original_prepare_receipt": null,
+        "original_post_receipt": null,
+        "original_readback_receipt": null,
+        "native_review_id": null,
+        "current_fence_reference": null,
+        "unresolved_findings": [],
+        "author_replies": [],
+        "unknown_evidence": [
+          "No original grant, natural task binding, live candidate, receipt, official verdict or effect observation has been supplied."
+        ],
+        "effect_state": "unobserved"
+      },
+      "consent_evidence": null,
+      "hold_evidence": null,
+      "watch": {
+        "owner_reference": null,
+        "subscription_id": null,
+        "returned_cursor": null,
+        "observed_state": null
+      },
+      "communication": {
+        "retained_handle": null,
+        "original_idempotency_key": null,
+        "returned_message_id": null,
+        "original_receipt": null,
+        "semantic_acceptance": null,
+        "nudge_grant": null,
+        "cooldown_reservation": null
+      },
+      "old_owner_effects": "unknown",
+      "accepted_transfer_reference": null,
+      "obligations": [],
+      "provider_terminal_observation": null,
+      "next_action": "Resolve original authority and actual adapter bindings; no write, consent, merge, send, replacement or transfer is authorized by this example."
+    }
+  ]
+}
