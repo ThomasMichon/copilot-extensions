@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .marketplace import load_marketplace, plugin_dir
+from .marketplace import Marketplace, load_marketplace, plugin_dir
 from .settings import (
     RepoPluginSettings,
     local_marketplace_path,
@@ -57,7 +57,7 @@ def resolve_repo_plugins(repo_dir: str | Path) -> ResolvedPlugins:
     except Exception:
         return result
     # Cache marketplace loads by resolved path.
-    loaded: dict[str, object] = {}
+    loaded: dict[str, Marketplace | None] = {}
     for source in settings.enabled_sources():
         name, marketplace = split_source(source)
         if not name or not marketplace:

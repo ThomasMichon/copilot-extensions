@@ -10,13 +10,17 @@ import json
 import os
 import re
 import tarfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
+from typing import Any, cast
 
 from .execution import execution_environment
-from .marketplace import load_marketplace, plugin_dir
+from .marketplace import Marketplace, load_marketplace, plugin_dir
 from .payload import dependencies, plugin_manifest, publication_metadata, report_diagnostic
-from .settings import local_marketplace_path, marketplace_manifest_name, read_repo_settings, split_source
+from .settings import (
+    RepoPluginSettings, local_marketplace_path, marketplace_manifest_name, read_repo_settings,
+    split_source,
+)
 from .target import common_identity, owned_relative, repository_info
 
 _EXCLUDED = {".git", ".venv", "node_modules", "__pycache__", ".pytest_cache",
@@ -25,8 +29,10 @@ _RELATIVE = re.compile(r"(?:\.\./)+[A-Za-z0-9_./-]+")
 _IDENTITY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
 
-def selection_spec(value) -> dict:
+def selection_spec(value: object) -> dict[str, Any]:
     """Retain explicit booleans without imposing plugin identity syntax."""
+    source: object
+    enable: object
     if isinstance(value, str):
         source, enable = value, True
     elif isinstance(value, Mapping):
@@ -43,7 +49,7 @@ def selection_spec(value) -> dict:
     return {"source": source, "enable": enable, **({"allow_missing": True} if allow_missing else {})}
 
 
-def selection_cli_args(value) -> list[str]:
+def selection_cli_args(value: object) -> list[str]:
     """Encode install-only selections without overloading source strings."""
     spec = selection_spec(value)
     if spec.get("allow_missing"):
@@ -51,12 +57,12 @@ def selection_cli_args(value) -> list[str]:
     return ["--stage-plugin" if spec["enable"] else "--stage-plugin-disabled", spec["source"]]
 
 
-def selection_json(value: str) -> dict:
+def selection_json(value: str) -> dict[str, Any]:
     """Decode an explicit structured CLI selection, without source-string overloading."""
     return selection_spec(json.loads(value))
 
 
-def _validate_absence(root: Path, manifest, name: str) -> None:
+def _validate_absence(root: Path, manifest: Marketplace | None, name: str) -> None:
     """An opt-out covers an absent entry, never an invalid catalog or payload."""
     from .marketplace import marketplace_manifest_path
 
@@ -65,7 +71,7 @@ def _validate_absence(root: Path, manifest, name: str) -> None:
         raise ValueError("Cannot allow a missing plugin from an invalid marketplace")
     for member in (root, path, *path.relative_to(root).parents):
         member = member if member.is_absolute() else root / member
-        if member.is_symlink() or getattr(member.lstat(), "st_reparse_tag", 0):
+        if member.is_symlink() or getattr(member.lstat(), "st_reparse_tag", False):
             raise ValueError("Linked marketplace evidence cannot authorize omission")
     raw = json.loads(path.read_text(encoding="utf-8"))
     metadata = raw.get("metadata", {})
@@ -122,7 +128,7 @@ def subset(
         if not _allowed(path.relative_to(root)) or path in visited:
             continue
         visited.add(path)
-        if path.is_symlink() or getattr(path.lstat(), "st_reparse_tag", 0):
+        if path.is_symlink() or getattr(path.lstat(), "st_reparse_tag", False):
             raise ValueError(f"Linked payload paths cannot be reflected: {path.name}")
         path.resolve(strict=True).relative_to(root)
         if path.is_dir():
@@ -172,16 +178,19 @@ def subset(
 
 
 def _plan_item(
-    spec, owner, declarations: dict, *, allow_external: bool = False,
+    spec: object, owner: tuple[Path, RepoPluginSettings] | None,
+    declarations: dict[str, dict[str, Any]], *, allow_external: bool = False,
     existing_root: Path | None = None, required: bool = True, local_mode: str = "copy",
-    target_repository: str | None = None, target_source_roots=(), environment=None,
-) -> dict | None:
+    target_repository: str | None = None, target_source_roots: Sequence[Path] = (),
+    environment: Mapping[str, str] | None = None,
+) -> dict[str, Any] | None:
     """Plan against supplied authority, without re-reading a generated overlay."""
     item = selection_spec(spec)
     source = item["source"]
     name, marketplace = identity(source)
     local = local_marketplace_path(marketplace, owner[1], repo_dir=owner[0]) if owner else None
     if local is not None:
+        owner = cast(tuple[Path, RepoPluginSettings], owner)
         authored_local = local
         local = local.resolve(strict=True)
         base = owner[0].resolve()
@@ -196,7 +205,7 @@ def _plan_item(
             if manifest is not None and name in manifest.plugins and isinstance(manifest.plugins[name].source, dict):
                 raise ValueError(f"Acquisition of a remote-source entry in a local catalog is not supported: {source}")
             if item.get("allow_missing"):
-                if authored_local.is_symlink() or getattr(authored_local.lstat(), "st_reparse_tag", 0):
+                if authored_local.is_symlink() or getattr(authored_local.lstat(), "st_reparse_tag", False):
                     raise ValueError("Linked marketplace evidence cannot authorize omission")
                 if external and not allow_external:
                     raise ValueError(f"Local marketplace escapes declaring checkout: {marketplace}")
@@ -237,24 +246,25 @@ def _plan_item(
                 relative=payload.relative_to(base).as_posix(),
             )
     else:
-        definition = declarations.get(marketplace)
-        if not definition:
+        remote_definition = declarations.get(marketplace)
+        if not remote_definition:
             item["resolve_on_target"] = True
             return item
-        kind = definition.get("source", {}).get("source")
+        kind = remote_definition.get("source", {}).get("source")
         if kind in {"directory", "local"}:
             raise ValueError(f"Local marketplace has no declaring checkout: {marketplace}")
-        item["marketplace"] = definition
+        item["marketplace"] = remote_definition
     return item
 
 
 def build_plan(
-    specs: list[dict], repo_roots: list[Path], *, marketplaces: dict | None = None,
+    specs: list[dict[str, Any]], repo_roots: list[Path],
+    *, marketplaces: dict[str, dict[str, Any]] | None = None,
     allow_external: bool = False, existing_root: Path | None = None,
     local_mode: str = "copy",
     target_checkout: Path | None = None, target_repository: str | None = None,
-    target_source_roots=(), environment=None,
-) -> dict:
+    target_source_roots: Sequence[Path] = (), environment: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
     """Resolve local sources first-wins; remote sources remain install requests."""
     if local_mode not in {"copy", "reference"}:
         raise ValueError("Unknown local payload preparation mode")
@@ -301,12 +311,14 @@ def build_plan(
     }
 
 
-def plan_digest(plan: dict) -> str:
+def plan_digest(plan: dict[str, Any]) -> str:
     """Identify producer inputs without persisting their contents in a receipt."""
     return hashlib.sha256(json.dumps(plan, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def build_prepare_python(plan: dict, repo: str, *, include_prepared_context: bool = False) -> str:
+def build_prepare_python(
+    plan: dict[str, Any], repo: str, *, include_prepared_context: bool = False,
+) -> str:
     """Build the stdlib-only engine for streaming to the receiver's Python."""
     if not isinstance(repo, str) or not repo.strip():
         raise ValueError("Plugin preparation requires the execution checkout")
@@ -346,7 +358,9 @@ def build_prepare_python(plan: dict, repo: str, *, include_prepared_context: boo
     )
 
 
-def build_prepare_script(plan: dict, repo: str, *, include_prepared_context: bool = False) -> str:
+def build_prepare_script(
+    plan: dict[str, Any], repo: str, *, include_prepared_context: bool = False,
+) -> str:
     """Ship the stdlib-only engine over an existing POSIX script transport."""
     return (
         "set -e\npython3 - <<'VENUE_PLUGIN_PREPARE'\n"
@@ -355,7 +369,7 @@ def build_prepare_script(plan: dict, repo: str, *, include_prepared_context: boo
     )
 
 
-def parse_prepared_context(output: str, *, expected_repo: str | None = None) -> dict:
+def parse_prepared_context(output: str, *, expected_repo: str | None = None) -> dict[str, Any]:
     """Read opt-in effective-selection metadata without changing dir parsing."""
     lines = output.splitlines()
     directories = next(
@@ -380,7 +394,9 @@ def parse_prepared_context(output: str, *, expected_repo: str | None = None) -> 
                 import ntpath
                 import posixpath
 
-                normalize = ntpath.normcase if ntpath.splitdrive(expected_repo)[0] else lambda value: value
+                normalize: Callable[[str], str] = (
+                    ntpath.normcase if ntpath.splitdrive(expected_repo)[0] else lambda value: value
+                )
                 path = ntpath if ntpath.splitdrive(expected_repo)[0] else posixpath
                 if normalize(path.normpath(context["cwd"])) != normalize(path.normpath(expected_repo)):
                     raise ValueError("Prepared plugin context does not match the execution checkout")

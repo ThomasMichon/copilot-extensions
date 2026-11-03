@@ -9,32 +9,35 @@ import subprocess
 import sys
 import tarfile
 from pathlib import Path
+from typing import Any, BinaryIO, cast
 
 import pytest
 
 from plugin_resolve.preparation import prepare
 from plugin_resolve.reflection import build_plan
-from plugin_resolve.registration import atomic_json
+from plugin_resolve.registration import atomic_json, register_prepared
 from plugin_resolve.resolve import resolve_repo_plugins
 from plugin_resolve.conventions import SETTINGS_RELS
 from plugin_resolve.reflection import selection_spec, selection_cli_args
 from plugin_resolve.settings import read_repo_settings
 
 
-def init_checkout(path):
+def init_checkout(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", "--quiet", str(path)], check=True,
                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
 
-def git_status(path):
+def git_status(path: Path) -> str:
     return subprocess.run(
         ["git", "-C", str(path), "status", "--porcelain"], text=True, capture_output=True,
         check=True, timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     ).stdout
 
 
-def local_plan(root, name="sample", marketplace="local"):
+def local_plan(
+    root: Path, name: str = "sample", marketplace: str = "local",
+) -> dict[str, Any]:
     payload = root / ".ai" / name
     payload.mkdir(parents=True, exist_ok=True)
     atomic_json(payload / "plugin.json", {
@@ -60,8 +63,8 @@ def local_plan(root, name="sample", marketplace="local"):
 @pytest.mark.parametrize("mode", ["copy", "reference"])
 @pytest.mark.parametrize("controller", [False, True])
 def test_missing_override_is_exact_and_preserves_authored_settings(
-    tmp_path, caplog, convention, mode, controller,
-):
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, convention: tuple[str, ...], mode: str, controller: bool,
+) -> None:
     host, target = tmp_path / "host", tmp_path / "target"
     local_plan(host)
     local_plan(target, name="support")
@@ -74,7 +77,7 @@ def test_missing_override_is_exact_and_preserves_authored_settings(
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     atomic_json(settings_path, settings)
     before = settings_path.read_bytes()
-    specs = [{"source": "sample@local"}]
+    specs: list[dict[str, Any]] = [{"source": "sample@local"}]
     roots = [host] if controller else []
     request = {"repo": str(target), **build_plan(specs, roots, local_mode=mode), "local_mode": mode}
     with pytest.raises(ValueError, match="Required local plugin is absent"):
@@ -82,7 +85,7 @@ def test_missing_override_is_exact_and_preserves_authored_settings(
     assert not (target / ".github" / "copilot" / "settings.local.json").exists()
     specs[0]["allow_missing"] = True
     request = {"repo": str(target), **build_plan(specs, roots, local_mode=mode), "local_mode": mode}
-    diagnostics = []
+    diagnostics: list[dict[str, Any]] = []
     expected = {"support@local": str((target / ".ai" / "support").resolve())}
     assert prepare(request, diagnostics=diagnostics) == expected
     assert prepare(request) == expected
@@ -99,7 +102,7 @@ def test_missing_override_is_exact_and_preserves_authored_settings(
 
 
 @pytest.mark.parametrize("enabled", [True, False])
-def test_present_optional_plugin_keeps_target_enablement(tmp_path, enabled):
+def test_present_optional_plugin_keeps_target_enablement(tmp_path: Path, enabled: bool) -> None:
     target = tmp_path / "target"
     local_plan(target)
     init_checkout(target)
@@ -113,7 +116,7 @@ def test_present_optional_plugin_keeps_target_enablement(tmp_path, enabled):
 
 
 @pytest.mark.parametrize("mode", ["copy", "reference"])
-def test_missing_override_retires_only_stale_owned_marketplace(tmp_path, mode):
+def test_missing_override_retires_only_stale_owned_marketplace(tmp_path: Path, mode: str) -> None:
     host, target = tmp_path / "host", tmp_path / "target"
     local_plan(host)
     init_checkout(target)
@@ -135,7 +138,7 @@ def test_missing_override_retires_only_stale_owned_marketplace(tmp_path, mode):
     assert "local" not in overlay["extraKnownMarketplaces"]
 
 
-def test_missing_override_blocks_dependency_from_authored_retained_alias(tmp_path):
+def test_missing_override_blocks_dependency_from_authored_retained_alias(tmp_path: Path) -> None:
     host, target = tmp_path / "host", tmp_path / "target"
     local_plan(host)
     local_plan(target, name="native")
@@ -162,7 +165,7 @@ def test_missing_override_blocks_dependency_from_authored_retained_alias(tmp_pat
 @pytest.mark.parametrize("metadata", [
     None, [], {"pluginRoot": 123}, {"pluginRoot": None}, {"pluginRoot": False}, "absolute-root",
 ])
-def test_missing_override_rejects_malformed_empty_catalog_metadata(tmp_path, metadata):
+def test_missing_override_rejects_malformed_empty_catalog_metadata(tmp_path: Path, metadata: object) -> None:
     target = tmp_path / "target"
     init_checkout(target)
     catalog = target / ".ai" / "marketplace.json"
@@ -185,7 +188,7 @@ def test_missing_override_rejects_malformed_empty_catalog_metadata(tmp_path, met
 
 
 @pytest.mark.parametrize("failure", ["dependency", "broken-payload", "wrong-identity", "malformed"])
-def test_missing_override_does_not_weaken_required_or_invalid_sources(tmp_path, failure):
+def test_missing_override_does_not_weaken_required_or_invalid_sources(tmp_path: Path, failure: str) -> None:
     target = tmp_path / "target"
     local_plan(target, name="support")
     init_checkout(target)
@@ -213,7 +216,7 @@ def test_missing_override_does_not_weaken_required_or_invalid_sources(tmp_path, 
     assert not (target / ".github" / "copilot" / "settings.local.json").exists()
 
 
-def test_optional_absent_producer_survives_plan_and_cli_roundtrip(tmp_path):
+def test_optional_absent_producer_survives_plan_and_cli_roundtrip(tmp_path: Path) -> None:
     from plugin_resolve.reflection import selection_json
 
     local_plan(tmp_path)
@@ -228,7 +231,7 @@ def test_optional_absent_producer_survives_plan_and_cli_roundtrip(tmp_path):
             selection_spec({**spec, "allow_missing": value})
 
 
-def test_streamed_receiver_honors_missing_override_without_controller_marketplace(tmp_path):
+def test_streamed_receiver_honors_missing_override_without_controller_marketplace(tmp_path: Path) -> None:
     from plugin_resolve.reflection import build_prepare_python
 
     target, profile = tmp_path / "target", tmp_path / "profile"
@@ -258,7 +261,7 @@ def test_streamed_receiver_honors_missing_override_without_controller_marketplac
     assert prepared == {"support@local": str((target / ".ai" / "support").resolve())}
 
 
-def test_reference_mode_is_direct_repeatable_and_never_writes_source_catalog(tmp_path):
+def test_reference_mode_is_direct_repeatable_and_never_writes_source_catalog(tmp_path: Path) -> None:
     host, target = tmp_path / "host", tmp_path / "target"
     local_plan(host)
     init_checkout(target)
@@ -295,7 +298,7 @@ def test_reference_mode_is_direct_repeatable_and_never_writes_source_catalog(tmp
     assert prepare(request) == {}
 
 
-def test_reference_mode_native_authority_and_recovery(tmp_path):
+def test_reference_mode_native_authority_and_recovery(tmp_path: Path) -> None:
     host, target = tmp_path / "host", tmp_path / "target"
     local_plan(host)
     local_plan(target)
@@ -307,7 +310,7 @@ def test_reference_mode_native_authority_and_recovery(tmp_path):
     assert prepare({"repo": str(target), "plugins": [], "local_mode": "reference"}) == expected
 
 
-def test_reference_requires_opt_in_and_validates_again_before_publication(tmp_path):
+def test_reference_requires_opt_in_and_validates_again_before_publication(tmp_path: Path) -> None:
     host, target = tmp_path / "host", tmp_path / "target"
     local_plan(host)
     init_checkout(target)
@@ -320,19 +323,17 @@ def test_reference_requires_opt_in_and_validates_again_before_publication(tmp_pa
     assert not (target / ".github" / "copilot" / "settings.local.json").exists()
 
 
-def test_explicit_environment_reaches_git_and_installer_without_mutating_host(tmp_path, monkeypatch):
-    from plugin_resolve import preparation as module
-
+def test_explicit_environment_reaches_git_and_installer_without_mutating_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     target = tmp_path / "target"
     init_checkout(target)
     calls = []
-    run = module.subprocess.run
+    run = subprocess.run
 
-    def capture(*args, **kwargs):
+    def capture(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(kwargs["env"])
         return run(*args, **kwargs)
 
-    monkeypatch.setattr(module.subprocess, "run", capture)
+    monkeypatch.setattr(subprocess, "run", capture)
     environment = {**os.environ, "VENUE_EXPLICIT_ENV": "child-only", "GIT_DIR": "invalid"}
     prepare({"repo": str(target), "plugins": []}, environment=environment)
     assert calls and all(env["VENUE_EXPLICIT_ENV"] == "child-only" for env in calls)
@@ -357,7 +358,7 @@ def test_explicit_environment_reaches_git_and_installer_without_mutating_host(tm
     ]
 
 
-def test_reference_concurrent_registration_retains_both_selected_sets(tmp_path, monkeypatch):
+def test_reference_concurrent_registration_retains_both_selected_sets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from concurrent.futures import ThreadPoolExecutor
     import threading
     from plugin_resolve import preparation as module
@@ -373,9 +374,9 @@ def test_reference_concurrent_registration_retains_both_selected_sets(tmp_path, 
     value["plugins"].append({"name": "extra", "source": "extra"})
     atomic_json(catalog, value)
     barrier = threading.Barrier(2, timeout=10)
-    register = module.register_prepared
+    register = register_prepared
 
-    def overlap(*args, **kwargs):
+    def overlap(*args: Any, **kwargs: Any) -> dict[str, str]:
         barrier.wait()
         return register(*args, **kwargs)
 
@@ -391,9 +392,7 @@ def test_reference_concurrent_registration_retains_both_selected_sets(tmp_path, 
     assert set(resolve_repo_plugins(target).resolved) == {"sample@local", "extra@local"}
 
 
-def test_reference_atomic_failure_keeps_previous_overlay(tmp_path, monkeypatch):
-    from plugin_resolve import registration
-
+def test_reference_atomic_failure_keeps_previous_overlay(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     host, target = tmp_path / "host", tmp_path / "target"
     local_plan(host)
     init_checkout(target)
@@ -401,14 +400,14 @@ def test_reference_atomic_failure_keeps_previous_overlay(tmp_path, monkeypatch):
     path.parent.mkdir(parents=True)
     atomic_json(path, {"unrelated": "preserved"})
     before = path.read_bytes()
-    original = registration.os.replace
+    original = os.replace
 
-    def fail(source, destination):
+    def fail(source: str | Path, destination: str | Path) -> None:
         if Path(destination) == path:
             raise OSError("synthetic interrupted publication")
         return original(source, destination)
 
-    monkeypatch.setattr(registration.os, "replace", fail)
+    monkeypatch.setattr(os, "replace", fail)
     plan = build_plan([{"source": "sample@local"}], [host], local_mode="reference")
     with pytest.raises(OSError, match="interrupted publication"):
         prepare({"repo": str(target), **plan, "local_mode": "reference"})
@@ -425,7 +424,7 @@ def test_reference_atomic_failure_keeps_previous_overlay(tmp_path, monkeypatch):
     ({"source": "/p/one with spaces", "enable": False},
      {"source": "/p/one with spaces", "enable": False}),
 ])
-def test_selection_specs_and_unambiguous_cli_args(value, expected):
+def test_selection_specs_and_unambiguous_cli_args(value: object, expected: dict[str, Any]) -> None:
     assert selection_spec(value) == expected
     assert selection_cli_args(value) == [
         "--stage-plugin" if expected["enable"] else "--stage-plugin-disabled", expected["source"],
@@ -438,14 +437,14 @@ def test_selection_specs_and_unambiguous_cli_args(value, expected):
     {"source": "sample@local", "enable": 0},
     {"source": "sample@local", "enable": None},
 ])
-def test_selection_specs_reject_non_boolean_flags_and_empty_sources(value):
+def test_selection_specs_reject_non_boolean_flags_and_empty_sources(value: object) -> None:
     with pytest.raises(ValueError):
         selection_spec(value)
     with pytest.raises(ValueError):
         selection_cli_args(value)
 
 
-def _expect_installer_settings(monkeypatch, target):
+def _expect_installer_settings(monkeypatch: pytest.MonkeyPatch, target: Path) -> None:
     local = target / ".github" / "copilot" / "settings.local.json"
     if local.exists():
         monkeypatch.setenv("VENUE_EXPECTED_SETTINGS_SHA256", hashlib.sha256(local.read_bytes()).hexdigest())
@@ -454,7 +453,7 @@ def _expect_installer_settings(monkeypatch, target):
 
 
 @pytest.mark.parametrize("layer", SETTINGS_RELS)
-def test_every_native_remote_layer_overrides_overlapping_host_origin(tmp_path, monkeypatch, layer):
+def test_every_native_remote_layer_overrides_overlapping_host_origin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layer: tuple[str, ...]) -> None:
     target = tmp_path / "target"
     init_checkout(target)
     path = target.joinpath(*layer)
@@ -488,7 +487,7 @@ def test_every_native_remote_layer_overrides_overlapping_host_origin(tmp_path, m
 
 
 @pytest.mark.parametrize("layer", SETTINGS_RELS)
-def test_native_local_origin_reloads_payload_and_new_catalog_entries(tmp_path, layer):
+def test_native_local_origin_reloads_payload_and_new_catalog_entries(tmp_path: Path, layer: tuple[str, ...]) -> None:
     target = tmp_path / "target"
     local_plan(target)
     base = target / ".github" / "copilot" / "settings.json"
@@ -526,8 +525,8 @@ def test_native_local_origin_reloads_payload_and_new_catalog_entries(tmp_path, l
 @pytest.mark.parametrize("native", [False, True])
 @pytest.mark.parametrize("repeated", [False, True])
 def test_all_operator_enable_layers_win_both_directions_first_and_repeated(
-    tmp_path, layer, native, repeated,
-):
+    tmp_path: Path, layer: tuple[str, ...], native: bool, repeated: bool,
+) -> None:
     target = tmp_path / "target"
     init_checkout(target)
     plan = local_plan(tmp_path / "host")
@@ -545,7 +544,7 @@ def test_all_operator_enable_layers_win_both_directions_first_and_repeated(
         assert ("sample@local" in result) is native
 
 
-def test_native_layer_order_wins_behind_owned_generated_values(tmp_path):
+def test_native_layer_order_wins_behind_owned_generated_values(tmp_path: Path) -> None:
     target = tmp_path / "target"
     init_checkout(target)
     plan = local_plan(tmp_path / "host")
@@ -564,7 +563,7 @@ def test_native_layer_order_wins_behind_owned_generated_values(tmp_path):
     assert "sample@local" in prepare({"repo": str(target), **plan})
 
 
-def test_underlying_operator_disable_applies_even_without_another_host_selection(tmp_path):
+def test_underlying_operator_disable_applies_even_without_another_host_selection(tmp_path: Path) -> None:
     target = tmp_path / "target"
     init_checkout(target)
     prepare({"repo": str(target), **local_plan(tmp_path / "host")})
@@ -575,7 +574,7 @@ def test_underlying_operator_disable_applies_even_without_another_host_selection
     assert read_repo_settings(target).enabled["sample@local"] is False
 
 
-def test_operator_enable_edit_relinquishes_ownership_even_when_returning_to_old_value(tmp_path):
+def test_operator_enable_edit_relinquishes_ownership_even_when_returning_to_old_value(tmp_path: Path) -> None:
     target = tmp_path / "target"
     init_checkout(target)
     plan = local_plan(tmp_path / "host")
@@ -595,7 +594,7 @@ def test_operator_enable_edit_relinquishes_ownership_even_when_returning_to_old_
     assert "sample@local" not in receipt["enabledPlugins"]
 
 
-def test_explicit_former_projection_path_does_not_reacquire_operation_ownership(tmp_path):
+def test_explicit_former_projection_path_does_not_reacquire_operation_ownership(tmp_path: Path) -> None:
     target = tmp_path / "target"
     init_checkout(target)
     plan = local_plan(tmp_path / "host")
@@ -621,7 +620,7 @@ def test_explicit_former_projection_path_does_not_reacquire_operation_ownership(
     assert "local" not in receipt["extraKnownMarketplaces"]
 
 
-def test_saved_authored_local_remote_origin_outweighs_new_lower_base_origin(tmp_path, monkeypatch):
+def test_saved_authored_local_remote_origin_outweighs_new_lower_base_origin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     target = tmp_path / "target"
     init_checkout(target)
     local = target / ".github" / "copilot" / "settings.local.json"
@@ -638,7 +637,7 @@ def test_saved_authored_local_remote_origin_outweighs_new_lower_base_origin(tmp_
     assert prepare({"repo": str(target), "plugins": []}, copilot_command=command) == first
 
 
-def test_real_prepare_and_independent_consumer(tmp_path):
+def test_real_prepare_and_independent_consumer(tmp_path: Path) -> None:
     host, target = tmp_path / "host", tmp_path / "target"
     init_checkout(target)
     plan = local_plan(host)
@@ -657,7 +656,7 @@ def test_real_prepare_and_independent_consumer(tmp_path):
     assert json.loads(consumer.stdout) == ["sample@local"]
 
 
-def test_consecutive_complete_selections_prune_only_stale_owned_enablement(tmp_path):
+def test_consecutive_complete_selections_prune_only_stale_owned_enablement(tmp_path: Path) -> None:
     target = tmp_path / "target"
     init_checkout(target)
     first = prepare({"repo": str(target), **local_plan(tmp_path / "first", name="sample")})
@@ -673,8 +672,8 @@ def test_consecutive_complete_selections_prune_only_stale_owned_enablement(tmp_p
 @pytest.mark.parametrize("layer", SETTINGS_RELS)
 @pytest.mark.parametrize("decision", [False, True])
 def test_authored_decisions_survive_empty_selection_and_owned_projection_pruning(
-    tmp_path, layer, decision,
-):
+    tmp_path: Path, layer: tuple[str, ...], decision: bool,
+) -> None:
     target = tmp_path / "target"
     init_checkout(target)
     first = prepare({"repo": str(target), **local_plan(tmp_path / "host")})
@@ -698,7 +697,7 @@ def test_authored_decisions_survive_empty_selection_and_owned_projection_pruning
 
 
 @pytest.mark.parametrize("initial", [False, True])
-def test_pruning_preserves_owned_value_changed_after_initial_snapshot(tmp_path, monkeypatch, initial):
+def test_pruning_preserves_owned_value_changed_after_initial_snapshot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, initial: bool) -> None:
     from plugin_resolve import preparation as module
 
     target = tmp_path / "target"
@@ -706,10 +705,10 @@ def test_pruning_preserves_owned_value_changed_after_initial_snapshot(tmp_path, 
     plan = local_plan(tmp_path / "host")
     plan["plugins"][0]["enable"] = initial
     prepare({"repo": str(target), **plan})
-    register = module.register_prepared
-    interleaved = []
+    register = register_prepared
+    interleaved: list[bool] = []
 
-    def publish_after_snapshot(*args, **kwargs):
+    def publish_after_snapshot(*args: Any, **kwargs: Any) -> dict[str, str]:
         if not interleaved:
             interleaved.append(True)
             changed = build_plan([{"source": "sample@local", "enable": not initial}], [tmp_path / "host"])
@@ -725,7 +724,7 @@ def test_pruning_preserves_owned_value_changed_after_initial_snapshot(tmp_path, 
     assert "sample@local" not in read_repo_settings(target).enabled
 
 
-def test_sibling_assets_and_explicit_disable_survive(tmp_path):
+def test_sibling_assets_and_explicit_disable_survive(tmp_path: Path) -> None:
     host, target = tmp_path / "host", tmp_path / "target"
     init_checkout(target)
     local_plan(host)
@@ -747,7 +746,7 @@ def test_sibling_assets_and_explicit_disable_survive(tmp_path):
     assert json.loads(path.read_text())["unrelated"] == {"retained": True}
 
 
-def test_failed_copy_never_publishes_settings(tmp_path):
+def test_failed_copy_never_publishes_settings(tmp_path: Path) -> None:
     plan = local_plan(tmp_path / "host")
     plan["plugins"][0]["archive"] = "broken"
     target = tmp_path / "target"
@@ -757,7 +756,7 @@ def test_failed_copy_never_publishes_settings(tmp_path):
     assert not (target / ".github" / "copilot" / "settings.local.json").exists()
 
 
-def test_concurrent_subprocess_registration_retains_both(tmp_path):
+def test_concurrent_subprocess_registration_retains_both(tmp_path: Path) -> None:
     target = tmp_path / "target"
     init_checkout(target)
     plans = [local_plan(tmp_path / f"host-{name}", name) for name in ("first", "second")]
@@ -803,7 +802,7 @@ module.prepare(json.loads(sys.argv[1]))
 
 @pytest.mark.parametrize("layer", SETTINGS_RELS)
 @pytest.mark.parametrize("changed", [False, True])
-def test_local_origin_change_during_install_refuses_before_publication(tmp_path, monkeypatch, layer, changed):
+def test_local_origin_change_during_install_refuses_before_publication(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layer: tuple[str, ...], changed: bool) -> None:
     from plugin_resolve import preparation as module
 
     target = tmp_path / "target"
@@ -832,7 +831,7 @@ def test_local_origin_change_during_install_refuses_before_publication(tmp_path,
     install = module._install
     edits = []
 
-    def interleave(*args, **kwargs):
+    def interleave(*args: Any, **kwargs: Any) -> tuple[Path, dict[str, Any], dict[str, Any]]:
         installed = install(*args, **kwargs)
         data = json.loads(operator_path.read_text())
         if changed:
@@ -861,7 +860,7 @@ def test_local_origin_change_during_install_refuses_before_publication(tmp_path,
     assert Path(first["sample@local"]).is_dir()
 
 
-def test_real_remote_install_and_copy_both_precede_registration(tmp_path):
+def test_real_remote_install_and_copy_both_precede_registration(tmp_path: Path) -> None:
     plan = local_plan(tmp_path / "host")
     plan["plugins"].append({
         "source": "remote@synthetic", "enable": True,
@@ -878,8 +877,8 @@ def test_real_remote_install_and_copy_both_precede_registration(tmp_path):
 @pytest.mark.parametrize("layer", SETTINGS_RELS)
 @pytest.mark.parametrize("late", ["missing-local", "remote", "resolved-local", "disabled"])
 def test_operator_enable_during_install_is_validated_before_any_publication(
-    tmp_path, monkeypatch, layer, late,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layer: tuple[str, ...], late: str,
+) -> None:
     from plugin_resolve import preparation as module
 
     host, target = tmp_path / "host", tmp_path / "target"
@@ -898,7 +897,7 @@ def test_operator_enable_during_install_is_validated_before_any_publication(
     manifest["dependencies"] = ["unselected-companion"]
     atomic_json(manifest_path, manifest)
     plan = build_plan([{"source": "sample@local"}], [host])
-    baseline_diagnostics = []
+    baseline_diagnostics: list[dict[str, Any]] = []
     baseline = prepare({"repo": str(target), **plan}, diagnostics=baseline_diagnostics)
     assert set(baseline) == {"sample@local"}
     assert any(item["status"] == "outside-selection" for item in baseline_diagnostics)
@@ -916,7 +915,7 @@ def test_operator_enable_during_install_is_validated_before_any_publication(
     written = []
     install = module._install
 
-    def interleave(*args, **kwargs):
+    def interleave(*args: Any, **kwargs: Any) -> tuple[Path, dict[str, Any], dict[str, Any]]:
         result = install(*args, **kwargs)
         value = json.loads(operator_path.read_text()) if operator_path.exists() else {}
         value.setdefault("enabledPlugins", {})[source] = enabled
@@ -931,7 +930,7 @@ def test_operator_enable_during_install_is_validated_before_any_publication(
         "marketplace": {"source": {"source": "github", "repo": "example/installer-marketplace"}},
     })
     command = (sys.executable, str(Path(__file__).parent / "fixtures" / "venue_installer.py"))
-    diagnostics = []
+    diagnostics: list[dict[str, Any]] = []
     request = {"repo": str(target), **plan}
     if late in {"missing-local", "remote"}:
         with pytest.raises(ValueError, match=source):
@@ -962,7 +961,7 @@ def test_operator_enable_during_install_is_validated_before_any_publication(
 @pytest.mark.parametrize("mode", [
     "changed-remote", "changed-local", "inactive-remote", "cached-remote", "no-origin", "direct-local",
 ])
-def test_late_enabled_owned_projection_requires_current_origin_proof(tmp_path, monkeypatch, layer, mode):
+def test_late_enabled_owned_projection_requires_current_origin_proof(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layer: tuple[str, ...], mode: str) -> None:
     from plugin_resolve import preparation as module
 
     target = tmp_path / "target"
@@ -999,7 +998,7 @@ def test_late_enabled_owned_projection_requires_current_origin_proof(tmp_path, m
     edits = []
     _expect_installer_settings(monkeypatch, target)
 
-    def interleave(*args, **kwargs):
+    def interleave(*args: Any, **kwargs: Any) -> tuple[Path, dict[str, Any], dict[str, Any]]:
         installed = install(*args, **kwargs)
         chosen = local if mode == "direct-local" else operator_path
         value = json.loads(chosen.read_text()) if chosen.exists() else {}
@@ -1044,11 +1043,11 @@ def test_late_enabled_owned_projection_requires_current_origin_proof(tmp_path, m
 ])
 @pytest.mark.parametrize("omit_author", [False, True])
 def test_remote_installed_catalog_and_entry_survive_without_plugin_authorship(
-    tmp_path, monkeypatch, origin, omit_author,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, origin: dict[str, str], omit_author: bool,
+) -> None:
     target = tmp_path / "target"
     init_checkout(target)
-    catalog = {
+    catalog: dict[str, Any] = {
         "name": "synthetic", "owner": {"name": "Catalog Steward", "email": "catalog@example.invalid"},
         "description": "Catalog description", "metadata": {"pluginRoot": "./plugins", "tag": "retained"},
         "plugins": [{
@@ -1087,14 +1086,14 @@ def test_remote_installed_catalog_and_entry_survive_without_plugin_authorship(
     assert read_repo_settings(target).marketplaces["synthetic"] == {"source": origin}
 
 
-def _remote_request(target):
+def _remote_request(target: Path) -> dict[str, Any]:
     return {"repo": str(target), "plugins": [{
         "source": "remote@synthetic", "enable": True,
         "marketplace": {"source": {"source": "github", "repo": "example/catalog"}},
     }]}
 
 
-def test_remote_cache_uses_native_catalog_over_distinct_legacy_and_nested_lookalikes(tmp_path, monkeypatch):
+def test_remote_cache_uses_native_catalog_over_distinct_legacy_and_nested_lookalikes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     target = tmp_path / "target"
     init_checkout(target)
     catalogs = []
@@ -1128,7 +1127,7 @@ def test_remote_cache_uses_native_catalog_over_distinct_legacy_and_nested_lookal
     assert json.loads((home / ".installation-complete.json").read_text()) == publication
 
 
-def test_installed_metadata_ignores_nested_only_clones_and_cache_files(tmp_path):
+def test_installed_metadata_ignores_nested_only_clones_and_cache_files(tmp_path: Path) -> None:
     from plugin_resolve.preparation import _installed_metadata
 
     home = tmp_path / "installation"
@@ -1147,7 +1146,7 @@ def test_installed_metadata_ignores_nested_only_clones_and_cache_files(tmp_path)
         _installed_metadata(home, "remote@synthetic")
 
 
-def test_installed_metadata_still_rejects_competing_clone_roots(tmp_path):
+def test_installed_metadata_still_rejects_competing_clone_roots(tmp_path: Path) -> None:
     from plugin_resolve.preparation import _installed_metadata
 
     home = tmp_path / "installation"
@@ -1164,7 +1163,7 @@ def test_installed_metadata_still_rejects_competing_clone_roots(tmp_path):
 
 
 @pytest.mark.parametrize("linked", ["clone", "manifest"])
-def test_installed_metadata_refuses_linked_clone_or_selected_manifest(tmp_path, linked):
+def test_installed_metadata_refuses_linked_clone_or_selected_manifest(tmp_path: Path, linked: str) -> None:
     from plugin_resolve.preparation import _installed_metadata
 
     home = tmp_path / "installation"
@@ -1189,11 +1188,11 @@ def test_installed_metadata_refuses_linked_clone_or_selected_manifest(tmp_path, 
         _installed_metadata(home, "remote@synthetic")
 
 
-def _recorded_native_calls(path):
+def _recorded_native_calls(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
 
-def _legacy_native_cache(home):
+def _legacy_native_cache(home: Path) -> None:
     receipt = json.loads((home / ".installation-complete.json").read_text())
     catalog = home / "cache" / "marketplaces" / "legacy-clone" / ".github" / "plugin"
     catalog.mkdir(parents=True)
@@ -1202,8 +1201,8 @@ def _legacy_native_cache(home):
 
 @pytest.mark.parametrize("available_catalog", [True, False])
 def test_source_only_receipt_hydrates_without_duplicate_registration_or_install(
-    tmp_path, monkeypatch, available_catalog,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, available_catalog: bool,
+) -> None:
     target = tmp_path / "target"
     init_checkout(target)
     log = tmp_path / "native-calls.jsonl"
@@ -1240,7 +1239,7 @@ def test_source_only_receipt_hydrates_without_duplicate_registration_or_install(
         assert (home / "prior-native-cache").is_dir()
 
 
-def test_partial_install_retry_retains_registration_and_retries_only_install(tmp_path, monkeypatch):
+def test_partial_install_retry_retains_registration_and_retries_only_install(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     target = tmp_path / "target"
     init_checkout(target)
     log = tmp_path / "native-calls.jsonl"
@@ -1272,7 +1271,7 @@ def test_partial_install_retry_retains_registration_and_retries_only_install(tmp
     assert (home / "installed-plugins" / "synthetic" / "remote" / "partial-marker").read_text() == "retained"
 
 
-def test_native_fixture_refuses_duplicate_add_without_repointing_registration(tmp_path, monkeypatch):
+def test_native_fixture_refuses_duplicate_add_without_repointing_registration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     target = tmp_path / "target"
     init_checkout(target)
     command = (sys.executable, str(Path(__file__).parent / "fixtures" / "venue_installer.py"))
@@ -1294,7 +1293,7 @@ def test_native_fixture_refuses_duplicate_add_without_repointing_registration(tm
 
 
 @pytest.mark.parametrize("mismatch", ["receipt", "origin", "origin-null", "payload"])
-def test_installation_identity_mismatch_refuses_before_native_operations(tmp_path, monkeypatch, mismatch):
+def test_installation_identity_mismatch_refuses_before_native_operations(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mismatch: str) -> None:
     target = tmp_path / "target"
     init_checkout(target)
     log = tmp_path / "native-calls.jsonl"
@@ -1319,7 +1318,7 @@ def test_installation_identity_mismatch_refuses_before_native_operations(tmp_pat
     assert _recorded_native_calls(log) == []
 
 
-def test_legacy_catalog_refresh_failure_is_explicit_and_keeps_existing_state(tmp_path, monkeypatch):
+def test_legacy_catalog_refresh_failure_is_explicit_and_keeps_existing_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     target = tmp_path / "target"
     init_checkout(target)
     log = tmp_path / "native-calls.jsonl"
@@ -1348,7 +1347,7 @@ def test_legacy_catalog_refresh_failure_is_explicit_and_keeps_existing_state(tmp
     assert prepare(_remote_request(target), copilot_command=command) == result
 
 
-def test_failed_real_install_never_publishes_settings(tmp_path, monkeypatch):
+def test_failed_real_install_never_publishes_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("VENUE_FAIL_INSTALL", "1")
     target = tmp_path / "target"
     init_checkout(target)
@@ -1365,7 +1364,7 @@ def test_failed_real_install_never_publishes_settings(tmp_path, monkeypatch):
     assert not (target / ".github" / "copilot" / "settings.local.json").exists()
 
 
-def test_copied_alias_with_explicit_manifest_name_resolves(tmp_path):
+def test_copied_alias_with_explicit_manifest_name_resolves(tmp_path: Path) -> None:
     """A settings alias whose local catalog has a different ``manifestName``.
 
     Copy mode stages the catalog under the alias, so the copied declaration must
@@ -1392,7 +1391,7 @@ def test_copied_alias_with_explicit_manifest_name_resolves(tmp_path):
     assert declared.get("manifestName", "harness-local") == staged["name"]
     assert resolve_repo_plugins(target).resolved == {"sample@harness-local": Path(result["sample@harness-local"])}
 
-def test_same_named_plugins_remain_marketplace_qualified(tmp_path):
+def test_same_named_plugins_remain_marketplace_qualified(tmp_path: Path) -> None:
     first = local_plan(tmp_path / "first", marketplace="first")
     second = local_plan(tmp_path / "second", marketplace="second")
     target = tmp_path / "target"
@@ -1403,7 +1402,7 @@ def test_same_named_plugins_remain_marketplace_qualified(tmp_path):
 
 
 @pytest.mark.parametrize("mode", ["copy", "reference"])
-def test_native_plugins_in_the_same_marketplace_remain_resolvable(tmp_path, mode):
+def test_native_plugins_in_the_same_marketplace_remain_resolvable(tmp_path: Path, mode: str) -> None:
     target = tmp_path / "target"
     local_plan(target, name="native")
     init_checkout(target)
@@ -1433,7 +1432,7 @@ def test_native_plugins_in_the_same_marketplace_remain_resolvable(tmp_path, mode
         assert not list((target / ".git").rglob("snapshots"))
 
 
-def test_mixed_reference_alias_operator_choices_and_owned_cleanup(tmp_path):
+def test_mixed_reference_alias_operator_choices_and_owned_cleanup(tmp_path: Path) -> None:
     host, target = tmp_path / "host", tmp_path / "target"
     local_plan(host)
     local_plan(target, name="native")
@@ -1467,7 +1466,7 @@ def test_mixed_reference_alias_operator_choices_and_owned_cleanup(tmp_path):
     assert "sample@local" not in prepare(request)
 
 
-def test_reference_alias_cleanup_does_not_keep_selection_alive(tmp_path):
+def test_reference_alias_cleanup_does_not_keep_selection_alive(tmp_path: Path) -> None:
     host, target = tmp_path / "host", tmp_path / "target"
     local_plan(host)
     local_plan(target, name="native")
@@ -1483,8 +1482,8 @@ def test_reference_alias_cleanup_does_not_keep_selection_alive(tmp_path):
 
 @pytest.mark.parametrize("related", [False, True])
 def test_reference_installed_inventory_uses_child_home_without_network_or_catalog_writes(
-    tmp_path, related,
-):
+    tmp_path: Path, related: bool,
+) -> None:
     target, home, cache = tmp_path / "target", tmp_path / "child-home", tmp_path / "child-cache"
     init_checkout(target)
     payload = home / "installed-plugins" / "catalog" / "helper"
@@ -1510,7 +1509,7 @@ def test_reference_installed_inventory_uses_child_home_without_network_or_catalo
 
 
 @pytest.mark.parametrize("bad", ["missing", "name", "namespace", "manifest", "registration", "catalog"])
-def test_reference_installed_inventory_rejects_bad_qualified_metadata(tmp_path, bad):
+def test_reference_installed_inventory_rejects_bad_qualified_metadata(tmp_path: Path, bad: str) -> None:
     target, home, cache = tmp_path / "target", tmp_path / "home", tmp_path / "cache"
     init_checkout(target)
     payload = home / "installed-plugins" / "catalog" / "helper"
@@ -1544,7 +1543,7 @@ def test_reference_installed_inventory_rejects_bad_qualified_metadata(tmp_path, 
     assert not (target / ".github" / "copilot" / "settings.local.json").exists()
 
 
-def test_reference_installed_inventory_validates_available_local_catalog_and_operator_disable(tmp_path):
+def test_reference_installed_inventory_validates_available_local_catalog_and_operator_disable(tmp_path: Path) -> None:
     target, home, cache = tmp_path / "target", tmp_path / "home", tmp_path / "cache"
     init_checkout(target)
     original = tmp_path / "original"
@@ -1577,7 +1576,7 @@ def test_reference_installed_inventory_validates_available_local_catalog_and_ope
     }
 
 
-def test_child_registered_live_local_catalog_needs_no_installed_copy_and_reloads_home(tmp_path):
+def test_child_registered_live_local_catalog_needs_no_installed_copy_and_reloads_home(tmp_path: Path) -> None:
     target = tmp_path / "target"
     init_checkout(target)
     directory = target / ".github" / "copilot"
@@ -1612,7 +1611,7 @@ def test_child_registered_live_local_catalog_needs_no_installed_copy_and_reloads
 
 
 @pytest.mark.parametrize("native", [False, True])
-def test_declared_remote_selection_reuses_matching_qualified_local_inventory(tmp_path, native):
+def test_declared_remote_selection_reuses_matching_qualified_local_inventory(tmp_path: Path, native: bool) -> None:
     target, home = tmp_path / "target", tmp_path / "home"
     init_checkout(target)
     payload = home / "installed-plugins" / "catalog" / "helper"
@@ -1637,7 +1636,7 @@ def test_declared_remote_selection_reuses_matching_qualified_local_inventory(tmp
     assert read_repo_settings(target).marketplaces["catalog"] == definition
 
 
-def test_documentation_links_do_not_expand_payload_closure(tmp_path):
+def test_documentation_links_do_not_expand_payload_closure(tmp_path: Path) -> None:
     host = tmp_path / "host"
     local_plan(host)
     (host / "CONTRIBUTING.md").write_text("not a runtime asset")
@@ -1649,7 +1648,7 @@ def test_documentation_links_do_not_expand_payload_closure(tmp_path):
     assert not (snapshot / "CONTRIBUTING.md").exists()
 
 
-def test_malformed_local_settings_are_not_overwritten(tmp_path):
+def test_malformed_local_settings_are_not_overwritten(tmp_path: Path) -> None:
     plan = local_plan(tmp_path / "host")
     directory = tmp_path / "target" / ".github" / "copilot"
     directory.mkdir(parents=True)
@@ -1661,29 +1660,28 @@ def test_malformed_local_settings_are_not_overwritten(tmp_path):
     assert path.read_text() == "{broken"
 
 
-def test_interrupted_publication_leaves_previous_settings_valid(tmp_path, monkeypatch):
+def test_interrupted_publication_leaves_previous_settings_valid(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     plan = local_plan(tmp_path / "host")
     target = tmp_path / "target"
     init_checkout(target)
     prepare({"repo": str(target), **plan})
     path = target / ".github" / "copilot" / "settings.local.json"
     previous = path.read_bytes()
-    import plugin_resolve.registration as registration
-    replace = registration.os.replace
+    replace = os.replace
 
-    def interrupted(source, destination):
+    def interrupted(source: str | Path, destination: str | Path) -> None:
         if Path(destination) == path:
             raise OSError("interrupted settings publication")
         return replace(source, destination)
 
-    monkeypatch.setattr(registration.os, "replace", interrupted)
+    monkeypatch.setattr(os, "replace", interrupted)
     with pytest.raises(OSError, match="interrupted"):
         prepare({"repo": str(target), **plan})
     assert path.read_bytes() == previous
     assert json.loads(previous)["enabledPlugins"] == {"sample@local": True}
 
 
-def test_declared_sibling_dependency_is_prepared_and_resolved(tmp_path):
+def test_declared_sibling_dependency_is_prepared_and_resolved(tmp_path: Path) -> None:
     host = tmp_path / "host"
     local_plan(host)
     sibling = host / ".ai" / "support"
@@ -1704,7 +1702,7 @@ def test_declared_sibling_dependency_is_prepared_and_resolved(tmp_path):
     assert set(prepare({"repo": str(target), **plan})) == {"sample@local", "support@local"}
 
 
-def test_object_dependencies_and_native_publication_schema(tmp_path):
+def test_object_dependencies_and_native_publication_schema(tmp_path: Path) -> None:
     host = tmp_path / "host"
     local_plan(host)
     sibling = host / ".ai" / "support"
@@ -1759,7 +1757,7 @@ def test_object_dependencies_and_native_publication_schema(tmp_path):
     assert git_status(target) == ""
 
 
-def test_target_native_remote_is_installed_alongside_host_local(tmp_path):
+def test_target_native_remote_is_installed_alongside_host_local(tmp_path: Path) -> None:
     plan = local_plan(tmp_path / "host")
     target = tmp_path / "target"
     init_checkout(target)
@@ -1778,7 +1776,7 @@ def test_target_native_remote_is_installed_alongside_host_local(tmp_path):
     assert (Path(result["native@remote"]) / "plugin.json").is_file()
 
 
-def test_disabled_companion_preserves_the_override_and_reports_external_ownership(tmp_path):
+def test_disabled_companion_preserves_the_override_and_reports_external_ownership(tmp_path: Path) -> None:
     host = tmp_path / "host"
     local_plan(host)
     sibling = host / ".ai" / "support"
@@ -1796,7 +1794,7 @@ def test_disabled_companion_preserves_the_override_and_reports_external_ownershi
     plan = build_plan([{"source": "sample@local"}, {"source": "support@local", "enable": False}], [host])
     target = tmp_path / "target"
     init_checkout(target)
-    diagnostics = []
+    diagnostics: list[dict[str, Any]] = []
     result = prepare({"repo": str(target), **plan}, diagnostics=diagnostics)
     assert set(result) == {"sample@local"}
     assert diagnostics == [{
@@ -1806,7 +1804,7 @@ def test_disabled_companion_preserves_the_override_and_reports_external_ownershi
     assert settings["enabledPlugins"]["support@local"] is False
 
 
-def test_host_disable_and_explicit_target_enable_have_distinct_authority(tmp_path):
+def test_host_disable_and_explicit_target_enable_have_distinct_authority(tmp_path: Path) -> None:
     plan = local_plan(tmp_path / "host")
     plan["plugins"][0]["enable"] = False
     target = tmp_path / "target"
@@ -1820,7 +1818,7 @@ def test_host_disable_and_explicit_target_enable_have_distinct_authority(tmp_pat
     assert "sample@local" in prepare({"repo": str(target), **plan})
 
 
-def test_target_native_external_marketplace_retains_its_original_path(tmp_path):
+def test_target_native_external_marketplace_retains_its_original_path(tmp_path: Path) -> None:
     native = tmp_path / "native"
     local_plan(native, name="native")
     target = tmp_path / "target"
@@ -1838,7 +1836,7 @@ def test_target_native_external_marketplace_retains_its_original_path(tmp_path):
     assert Path(result["native@local"]) == native / ".ai" / "native"
 
 
-def test_git_file_checkout_keeps_all_generated_state_in_its_git_metadata(tmp_path):
+def test_git_file_checkout_keeps_all_generated_state_in_its_git_metadata(tmp_path: Path) -> None:
     target = tmp_path / "target"
     init_checkout(target)
     metadata = tmp_path / "metadata"
@@ -1850,7 +1848,7 @@ def test_git_file_checkout_keeps_all_generated_state_in_its_git_metadata(tmp_pat
     assert git_status(target) == ""
 
 
-def test_inherited_git_selectors_cannot_redirect_the_supplied_checkout(tmp_path, monkeypatch):
+def test_inherited_git_selectors_cannot_redirect_the_supplied_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     target, other = tmp_path / "target", tmp_path / "other"
     init_checkout(target)
     init_checkout(other)
@@ -1874,8 +1872,8 @@ def test_inherited_git_selectors_cannot_redirect_the_supplied_checkout(tmp_path,
     (".environment", True), (".ENVIRONMENT", True), ("settings.env", True),
 ])
 def test_reflection_environment_basename_policy_matches_native_staging(
-    tmp_path, filename, permitted, nested,
-):
+    tmp_path: Path, filename: str, permitted: bool, nested: bool,
+) -> None:
     host = tmp_path / "control"
     local_plan(host)
     payload = host / ".ai" / "sample"
@@ -1891,7 +1889,10 @@ def test_reflection_environment_basename_policy_matches_native_staging(
     (skill / "SKILL.md").write_text("[guide](../../../support/guide.md)", encoding="utf-8")
     plan = build_plan([{"source": "sample@local"}], [host])
     with tarfile.open(fileobj=io.BytesIO(base64.b64decode(plan["plugins"][0]["archive"]))) as archive:
-        contents = {item.name: archive.extractfile(item).read() for item in archive.getmembers()}
+        contents = {
+            item.name: cast(BinaryIO, archive.extractfile(item)).read()
+            for item in archive.getmembers()
+        }
     member = (directory / filename).relative_to(host).as_posix()
     assert (member in contents) is permitted
     if permitted:
@@ -1903,7 +1904,7 @@ def test_reflection_environment_basename_policy_matches_native_staging(
     assert ".ai/sample/plugin.json" in contents
 
 
-def test_script_root_expressions_do_not_reflect_ancestor_directories(tmp_path):
+def test_script_root_expressions_do_not_reflect_ancestor_directories(tmp_path: Path) -> None:
     host = tmp_path / "control"
     local_plan(host)
     payload = host / ".ai" / "sample"
@@ -1929,7 +1930,7 @@ def test_script_root_expressions_do_not_reflect_ancestor_directories(tmp_path):
     assert ".ai/unrelated-marketplace-state.json" not in members
 
 
-def test_unselected_companions_are_diagnostics_not_propagation_authority(tmp_path, caplog):
+def test_unselected_companions_are_diagnostics_not_propagation_authority(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     host = tmp_path / "control"
     local_plan(host)
     companion = host / ".ai" / "host-companion"
@@ -1965,8 +1966,8 @@ def test_unselected_companions_are_diagnostics_not_propagation_authority(tmp_pat
 
 @pytest.mark.parametrize("host_selects_same_identity", [False, True])
 def test_native_remote_origin_in_local_settings_is_preserved_and_localized(
-    tmp_path, monkeypatch, host_selects_same_identity,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host_selects_same_identity: bool,
+) -> None:
     target = tmp_path / "target"
     init_checkout(target)
     directory = target / ".github" / "copilot"
@@ -1980,7 +1981,7 @@ def test_native_remote_origin_in_local_settings_is_preserved_and_localized(
     monkeypatch.setenv("VENUE_EXPECTED_SETTINGS_SHA256", hashlib.sha256(path.read_bytes()).hexdigest())
     plan = local_plan(tmp_path / "host", name="native", marketplace="remote") if host_selects_same_identity else {"plugins": []}
     command = (sys.executable, str(Path(__file__).parent / "fixtures" / "venue_installer.py"))
-    diagnostics = []
+    diagnostics: list[dict[str, Any]] = []
     result = prepare({"repo": str(target), **plan}, copilot_command=command, diagnostics=diagnostics)
     assert set(result) == {"native@remote"}
     assert "installation" in Path(result["native@remote"]).parts
@@ -1994,7 +1995,7 @@ def test_native_remote_origin_in_local_settings_is_preserved_and_localized(
     assert prepare({"repo": str(target), **plan}, copilot_command=command) == result
 
 
-def test_explicit_target_local_payload_path_is_not_replaced(tmp_path):
+def test_explicit_target_local_payload_path_is_not_replaced(tmp_path: Path) -> None:
     plan = local_plan(tmp_path / "host")
     other = tmp_path / "operator"
     local_plan(other)
@@ -2012,7 +2013,7 @@ def test_explicit_target_local_payload_path_is_not_replaced(tmp_path):
     assert value["extraKnownMarketplaces"]["local"] == origin
 
 
-def test_explicit_target_only_nondefault_plugin_is_deferred_then_prepared(tmp_path):
+def test_explicit_target_only_nondefault_plugin_is_deferred_then_prepared(tmp_path: Path) -> None:
     plan = build_plan([{"source": "nondefault@target"}], [])
     assert plan["plugins"] == [{
         "source": "nondefault@target", "enable": True, "resolve_on_target": True,
@@ -2036,7 +2037,7 @@ def test_explicit_target_only_nondefault_plugin_is_deferred_then_prepared(tmp_pa
 
 
 @pytest.mark.parametrize("missing", ["marketplace", "payload"])
-def test_deferred_target_selection_missing_authority_or_payload_blocks_publication(tmp_path, missing):
+def test_deferred_target_selection_missing_authority_or_payload_blocks_publication(tmp_path: Path, missing: str) -> None:
     plan = build_plan([{"source": "nondefault@target"}], [])
     target = tmp_path / "target"
     if missing == "payload":
@@ -2047,7 +2048,7 @@ def test_deferred_target_selection_missing_authority_or_payload_blocks_publicati
     assert not (target / ".github" / "copilot" / "settings.local.json").exists()
 
 
-def test_two_plugins_localize_one_operator_origin_without_deactivating_it(tmp_path, monkeypatch):
+def test_two_plugins_localize_one_operator_origin_without_deactivating_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     target = tmp_path / "target"
     init_checkout(target)
     directory = target / ".github" / "copilot"
@@ -2060,7 +2061,7 @@ def test_two_plugins_localize_one_operator_origin_without_deactivating_it(tmp_pa
     })
     monkeypatch.setenv("VENUE_EXPECTED_SETTINGS_SHA256", hashlib.sha256(path.read_bytes()).hexdigest())
     installer = (sys.executable, str(Path(__file__).parent / "fixtures" / "venue_installer.py"))
-    diagnostics = []
+    diagnostics: list[dict[str, Any]] = []
     first = prepare({"repo": str(target), "plugins": []}, copilot_command=installer, diagnostics=diagnostics)
     receipt_path = target / ".git" / "copilot-venue-plugins" / "ownership.json"
     receipt = json.loads(receipt_path.read_text())
@@ -2076,8 +2077,8 @@ def test_two_plugins_localize_one_operator_origin_without_deactivating_it(tmp_pa
 
 @pytest.mark.parametrize("origin_file", ["settings.json", "settings.local.json"])
 def test_new_native_selection_uses_active_origin_and_respects_changed_local_override(
-    tmp_path, monkeypatch, origin_file,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, origin_file: str,
+) -> None:
     target = tmp_path / "target"
     init_checkout(target)
     directory = target / ".github" / "copilot"

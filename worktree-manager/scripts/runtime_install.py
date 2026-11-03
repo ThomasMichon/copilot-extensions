@@ -526,7 +526,7 @@ def _foreground_install(args, driver) -> Path | int:
         ),
     )
     driver.drain()
-    result = driver.wait(request.id, output=sys.stdout)
+    result = driver.wait(request.id, output=sys.stderr)
     if result.state != "completed" or result.exit_code is None:
         raise RuntimeError(f"Manager bootstrap did not complete: {result.state}")
     if result.exit_code:
@@ -559,12 +559,15 @@ def _foreground_install(args, driver) -> Path | int:
 
 
 def _uninstall(args) -> int:
-    from runtime_uninstall import uninstall, validate_frontdoor
+    from runtime_uninstall import report_absent_target, uninstall, validate_frontdoor
 
     if validate_frontdoor(args.root, as_json=args.json):
         return 1
     if os.name != "nt" or not args.apply:
         return uninstall(args.root, apply=args.apply, as_json=args.json)
+    absent = report_absent_target(args.root, as_json=args.json)
+    if absent is not None:
+        return absent
     sys.path.insert(0, str(args.payload / "src"))
     driver = _execution_driver(args.payload)
     with _installation_custody() as custody:

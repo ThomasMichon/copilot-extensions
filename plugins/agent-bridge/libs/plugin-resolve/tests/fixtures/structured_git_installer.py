@@ -19,7 +19,7 @@ assert origin["url"].startswith("file://"), "fixture must never access a network
 clone = Path.cwd() / "acquired"
 
 
-def git(*args):
+def git(*args: str) -> str:
     return subprocess.run(
         ["git", *args], check=True, capture_output=True, text=True, timeout=20,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),

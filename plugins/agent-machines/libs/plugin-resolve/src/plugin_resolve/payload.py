@@ -6,6 +6,7 @@ import json
 import logging
 import re
 from pathlib import Path
+from typing import Any
 
 from .marketplace import marketplace_manifest_path
 from .settings import split_source
@@ -16,7 +17,7 @@ def is_harness_only(source: str) -> bool:
     return name.endswith("-harness") or "-harness-" in name
 
 
-def report_diagnostic(item: dict) -> None:
+def report_diagnostic(item: dict[str, Any]) -> None:
     logger = logging.getLogger("plugin-resolve")
     if item["status"] == "missing-local-allowed":
         logger.warning(
@@ -38,7 +39,7 @@ def report_diagnostic(item: dict) -> None:
         )
 
 
-def plugin_manifest(payload: Path) -> dict:
+def plugin_manifest(payload: Path) -> dict[str, Any]:
     for path in (payload / "plugin.json", payload / ".claude-plugin" / "plugin.json"):
         if path.is_file():
             value = json.loads(path.read_text(encoding="utf-8"))
@@ -48,7 +49,7 @@ def plugin_manifest(payload: Path) -> dict:
     raise ValueError(f"Prepared plugin manifest is missing: {payload.name}")
 
 
-def dependencies(manifest: dict, marketplace: str) -> list[str]:
+def dependencies(manifest: dict[str, Any], marketplace: str) -> list[str]:
     """Native dependency objects; retain qualified-string compatibility."""
     items = manifest.get("dependencies", [])
     if not isinstance(items, list):
@@ -71,7 +72,7 @@ def dependencies(manifest: dict, marketplace: str) -> list[str]:
     return result
 
 
-def publication_metadata(root: Path, source: str) -> tuple[dict, dict]:
+def publication_metadata(root: Path, source: str) -> tuple[dict[str, Any], dict[str, Any]]:
     path = marketplace_manifest_path(root)
     if path is None:
         raise ValueError("Marketplace manifest is missing")
@@ -79,9 +80,11 @@ def publication_metadata(root: Path, source: str) -> tuple[dict, dict]:
     return _publication_metadata(catalog, source)
 
 
-def _publication_metadata(catalog: dict, source: str) -> tuple[dict, dict]:
+def _publication_metadata(catalog: dict[str, Any], source: str) -> tuple[dict[str, Any], dict[str, Any]]:
     name, _marketplace = split_source(source)
-    entry = next((item for item in catalog.get("plugins", []) if item.get("name") == name), {})
+    entry: dict[str, Any] = next(
+        (item for item in catalog.get("plugins", []) if item.get("name") == name), {},
+    )
     metadata = {key: value for key, value in catalog.items() if key != "plugins"}
     if isinstance(metadata.get("metadata"), dict):
         metadata["metadata"] = {key: value for key, value in metadata["metadata"].items()
@@ -89,7 +92,9 @@ def _publication_metadata(catalog: dict, source: str) -> tuple[dict, dict]:
     return metadata, dict(entry)
 
 
-def catalog_metadata(source: str, manifest: dict, metadata: dict, entry: dict) -> tuple[dict, dict]:
+def catalog_metadata(
+    source: str, manifest: dict[str, Any], metadata: dict[str, Any], entry: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """Produce a native-valid catalog, not merely shared-resolver-valid JSON."""
     name, marketplace = split_source(source)
     catalog = dict(metadata)

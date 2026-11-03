@@ -12,13 +12,15 @@ import subprocess
 import sys
 import tarfile
 import time
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any, cast
 
 from .conventions import (
     LOCAL_MARKETPLACE_SOURCE_KINDS, MARKETPLACE_MANIFEST_RELS, REMOTE_MARKETPLACE_SOURCE_KINDS,
 )
 from .execution import execution_environment, execution_executable
-from .marketplace import _is_reparse, load_marketplace, marketplace_manifest_path, plugin_dir
+from .marketplace import Marketplace, _is_reparse, load_marketplace, marketplace_manifest_path, plugin_dir
 from .payload import catalog_metadata, plugin_manifest, publication_metadata
 from .remote_identity import normalize_remote
 from .registration import _settings_document, strict_json
@@ -44,8 +46,8 @@ def _require_unlinked_path(root: Path, path: Path, *, allow_missing: bool = Fals
 
 def inventory_paths(repo: Path, environment: dict[str, str] | None) -> tuple[Path, Path]:
     env = os.environ if environment is None else environment
-    user_home = env.get("USERPROFILE") if os.name == "nt" else env.get("HOME")
-    user_home = Path(user_home) if user_home else Path.home()
+    raw_home = env.get("USERPROFILE") if os.name == "nt" else env.get("HOME")
+    user_home = Path(raw_home) if raw_home else Path.home()
     home = Path(env["COPILOT_HOME"]) if env.get("COPILOT_HOME") else user_home / ".copilot"
     if env.get("COPILOT_CACHE_HOME"):
         cache = Path(env["COPILOT_CACHE_HOME"])
@@ -58,7 +60,7 @@ def inventory_paths(repo: Path, environment: dict[str, str] | None) -> tuple[Pat
     return (repo / home).resolve(), (repo / cache).resolve()
 
 
-def installed_item(source: str, home: Path, cache: Path) -> dict:
+def installed_item(source: str, home: Path, cache: Path) -> dict[str, Any]:
     name, marketplace = split_source(source)
     registration = _settings_document(home / "settings.json", jsonc_header=True).get(
         "extraKnownMarketplaces", {},
@@ -66,7 +68,7 @@ def installed_item(source: str, home: Path, cache: Path) -> dict:
     expected_name = marketplace
     declared_catalog = None
     if registration is not None:
-        definition = registration.get("source") if isinstance(registration, dict) else None
+        definition: Any = registration.get("source") if isinstance(registration, dict) else None
         kind = definition.get("source") if isinstance(definition, dict) else None
         if kind not in LOCAL_MARKETPLACE_SOURCE_KINDS | REMOTE_MARKETPLACE_SOURCE_KINDS:
             raise ValueError(f"Invalid installed marketplace registration: {marketplace}")
@@ -156,9 +158,9 @@ def installed_item(source: str, home: Path, cache: Path) -> dict:
 
 
 def inventory_item(
-    source: str, home: Path, cache: Path, *, definition: dict | None = None,
-    environment=None, execution_cwd: Path | None = None,
-) -> dict | None:
+    source: str, home: Path, cache: Path, *, definition: dict[str, Any] | None = None,
+    environment: Mapping[str, str] | None = None, execution_cwd: Path | None = None,
+) -> dict[str, Any] | None:
     """Reuse installed authority or qualify an unchanged native Git-cache payload."""
     if definition is None:
         return installed_item(source, home, cache)
@@ -179,10 +181,10 @@ def inventory_item(
 
 
 def native_git_inventory_item(
-    source: str, home: Path, cache: Path, *, definition: dict,
-    environment=None, execution_cwd: Path | None = None,
+    source: str, home: Path, cache: Path, *, definition: dict[str, Any],
+    environment: Mapping[str, str] | None = None, execution_cwd: Path | None = None,
     deadline: float | None = None, strict: bool = False,
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Prove cache consistency, independently of registration or origin trust.
 
     Strict consumers refuse an ineligible candidate attributable to the selected
@@ -194,7 +196,7 @@ def native_git_inventory_item(
         "extraKnownMarketplaces", {},
     ).get(marketplace)
 
-    def remaining():
+    def remaining() -> float:
         if deadline is None:
             return 30
         if (
@@ -243,7 +245,7 @@ def native_git_inventory_item(
     env.update(GIT_OPTIONAL_LOCKS="0", GIT_NO_REPLACE_OBJECTS="1")
     executable = execution_executable("git", env, cwd)
 
-    def git(root, *arguments):
+    def git(root: Path, *arguments: str) -> str | None:
         try:
             result = subprocess.run(
                 [executable, "--literal-pathspecs", "-c", "core.fsmonitor=false",
@@ -271,7 +273,7 @@ def native_git_inventory_item(
         try:
             if not candidate.is_dir():
                 continue
-            if candidate.is_symlink() or getattr(candidate.lstat(), "st_reparse_tag", 0):
+            if candidate.is_symlink() or getattr(candidate.lstat(), "st_reparse_tag", False):
                 continue
             if strict:
                 candidate_remote = git(candidate, "config", "--get", "remote.origin.url")
@@ -344,7 +346,9 @@ def native_git_inventory_item(
         try:
             if not _allowed(payload.relative_to(candidate)):
                 raise ValueError("Native cache payload root is excluded from content proof")
-            declared = Path(catalog.plugin_root) / catalog.plugins[name].source.strip()
+            declared = Path(cast(Marketplace, catalog).plugin_root) / cast(
+                str, cast(Marketplace, catalog).plugins[name].source,
+            ).strip()
             _require_unlinked_path(candidate, root / declared)
             content = subset(candidate, payload, referenced_paths=references)
             for member in references:
@@ -383,8 +387,8 @@ def native_git_inventory_item(
                 remaining()
                 if not row:
                     continue
-                metadata, separator, filename = row.partition("\t")
-                mode, object_type, object_id = metadata.split()
+                tree_metadata, separator, filename = row.partition("\t")
+                mode, object_type, object_id = tree_metadata.split()
                 relative = Path(filename)
                 if not _allowed(relative):
                     continue

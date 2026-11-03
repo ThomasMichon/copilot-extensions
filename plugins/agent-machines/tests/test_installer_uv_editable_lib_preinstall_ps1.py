@@ -48,15 +48,15 @@ $ErrorActionPreference = 'Stop'
 function Write-Fail {{ param([string]$Message) }}
 function Write-Ok {{ param([string]$Message) [Console]::Out.Write($Message + "|") }}
 function Invoke-StubVenvPython {{
-    if ($args[0] -ne '-I' -or $args[1] -ne '{policy}' -or
-        -not (Test-Path -LiteralPath $args[1]) -or
-        $args[2] -ne '--uv' -or $args[3] -ne 'uv' -or
-        $args[4] -ne '--python' -or $args[5] -ne 'Invoke-StubVenvPython') {{
+    if ($args[0] -ne '-I' -or $args[1] -ne '-B' -or $args[2] -ne '{policy}' -or
+        -not (Test-Path -LiteralPath $args[2]) -or
+        $args[3] -ne '--uv' -or $args[4] -ne 'uv' -or
+        $args[5] -ne '--python' -or $args[6] -ne 'Invoke-StubVenvPython') {{
         throw 'Preinstall bypassed canonical dependency policy'
     }}
     # PowerShell consumes the standalone separator when binding a function spy.
-    $pathIndex = if ($haveUv) {{ 8 }} else {{ 7 }}
-    if ($haveUv -and $args[6] -ne '--reinstall-package') {{
+    $pathIndex = if ($haveUv) {{ 9 }} else {{ 8 }}
+    if ($haveUv -and $args[7] -ne '--reinstall-package') {{
         throw 'Preinstall omitted package reinstall'
     }}
     [Console]::Out.Write("POLICY_INSTALL:" + $args[$pathIndex] + "|")

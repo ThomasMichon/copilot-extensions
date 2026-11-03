@@ -183,6 +183,39 @@ def test_copy_payload_preserves_bundled_dbus_next_wheel(tmp_path):
     assert (slot / si._SLOT_COMPLETE_MARKER).is_file()
 
 
+@pytest.mark.parametrize("failed_sink", [False, True])
+def test_completed_copy_progress_preserves_atomic_payload_publication(tmp_path, failed_sink):
+    payload = _fake_payload(tmp_path, "1.2.3")
+    slot = tmp_path / "slot"
+    slot.mkdir()
+    (slot / "old").write_bytes(b"retained")
+    completed = []
+
+    def progress():
+        staging, = tmp_path.glob("slot.staging.*")
+        copied = [path for path in staging.rglob("*") if path.is_file()]
+        assert copied
+        assert all(
+            path.read_bytes() == (payload / path.relative_to(staging)).read_bytes()
+            for path in copied
+        )
+        completed.append(len(copied))
+        if failed_sink:
+            raise OSError("progress sink failed")
+
+    if failed_sink:
+        with pytest.raises(RuntimeError, match="progress sink failed"):
+            si._copy_payload(payload, slot, on_progress=progress)
+        assert (slot / "old").read_bytes() == b"retained"
+        assert not (slot / si._SLOT_COMPLETE_MARKER).exists()
+    else:
+        si._copy_payload(payload, slot, on_progress=progress)
+        assert completed == [1, 2, 3]
+        assert (slot / si._SLOT_COMPLETE_MARKER).is_file()
+        assert not (slot / "old").exists()
+    assert not list(tmp_path.glob("slot.staging.*"))
+
+
 def test_dry_run_writes_nothing(tmp_path, monkeypatch):
     pd = _fake_payload(tmp_path, "1.2.3")
     root = tmp_path / "root"

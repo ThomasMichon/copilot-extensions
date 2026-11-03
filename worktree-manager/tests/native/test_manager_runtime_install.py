@@ -58,6 +58,82 @@ def _environment(directory):
     return env
 
 
+@pytest.mark.parametrize("phase", ["payload-copy", "inventory"])
+@pytest.mark.parametrize("outcome", ["productive", "silent", "failed-sink"])
+def test_preparation_completed_units_reach_native_inactivity_owner(tmp_path, phase, outcome):
+    engine = si._runtime_installer().engine
+    payload = tmp_path / "input"
+    package = payload / "src" / "worktree_manager"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text('__version__="1.2.3"\n', encoding="utf-8")
+    (package / "__main__.py").write_text("", encoding="utf-8")
+    (payload / "pyproject.toml").write_text(
+        '[project]\nname="copilot-extensions-worktree-manager"\nversion="1.2.3"\n',
+        encoding="utf-8",
+    )
+    for index in range(30):
+        (payload / f"data-{index}.txt").write_text(f"fixture-{index}\n", encoding="utf-8")
+    original = {str(path.relative_to(payload)): path.read_bytes()
+                for path in payload.rglob("*") if path.is_file()}
+    target = tmp_path / "copied"
+    code = """
+import contextlib,json,pathlib,sys,time
+source,payload,target=map(pathlib.Path,sys.argv[1:4])
+phase,outcome=sys.argv[4:]
+sys.path[:0]=[str(source/"src"),str(source/"scripts")]
+from worktree_manager.runtime_candidate import _completed_progress
+from worktree_manager.self_install_payload import _copy_payload
+import runtime_uninstall
+report=_completed_progress(phase)
+def completed():
+    if outcome!="silent":
+        report()
+    time.sleep(.25)
+class FailedSink:
+    def write(self,text):
+        raise OSError("progress sink failed")
+    def flush(self):
+        raise OSError("progress sink failed")
+def produce():
+    if phase=="payload-copy":
+        _copy_payload(payload,target,on_progress=completed)
+    else:
+        runtime_uninstall._tree(payload,on_progress=completed)
+if outcome=="failed-sink":
+    with contextlib.redirect_stderr(FailedSink()):
+        produce()
+else:
+    produce()
+print(json.dumps({"completed":True}))
+"""
+    inputs = engine.FrozenInputs(SOURCE, engine._package_roots(SOURCE), "fixture")
+    arguments = [sys.executable, "-I", "-B", "-c", code,
+                 str(SOURCE), str(payload), str(target), phase, outcome]
+
+    def run():
+        return engine._child(
+            arguments, inputs=inputs, descriptor=-1, timeout=4, cwd=tmp_path,
+        )
+
+    started = time.monotonic()
+    if outcome == "productive":
+        result = run()
+        assert json.loads(result.stdout)["completed"] is True
+        assert time.monotonic() - started > 4
+        assert f"phase={phase} completed-units=1" in result.stderr
+        if phase == "payload-copy":
+            assert (target / ".install-complete").is_file()
+    else:
+        error = engine.ChildTimeoutExpired if outcome == "silent" else subprocess.CalledProcessError
+        with pytest.raises(error) as failure:
+            run()
+        if outcome == "failed-sink":
+            assert "progress sink failed" in failure.value.stderr
+        assert not (target / ".install-complete").exists()
+    assert original == {str(path.relative_to(payload)): path.read_bytes()
+                        for path in payload.rglob("*") if path.is_file()}
+
+
 def _prepare_command(argv, env, cwd):
     # The complete preparation phase is owned by the native group's unchanged
     # 300-second supervisor; the production engine owns each construction child.

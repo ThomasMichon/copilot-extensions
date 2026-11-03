@@ -97,7 +97,7 @@ def _posix_run(encoded: str, timeout: float) -> tuple[bytes, bytes, int]:
     results = []
     failures = []
 
-    def communicate():
+    def communicate() -> None:
         try:
             results.append(keeper.communicate(json.dumps({
                 "program": encoded, "bootstrap": _WORKER, "timeout": timeout,
@@ -120,7 +120,7 @@ def _posix_run(encoded: str, timeout: float) -> tuple[bytes, bytes, int]:
         os.close(completion)
         # The keeper remains alive after the actual worker's success or error,
         # so its PID/group cannot be recycled before this cleanup boundary.
-        if keeper.poll() is None:
+        if sys.platform != "win32" and keeper.poll() is None:
             os.killpg(keeper.pid, signal.SIGKILL)
         drain.join(timeout=15)
     if drain.is_alive():
