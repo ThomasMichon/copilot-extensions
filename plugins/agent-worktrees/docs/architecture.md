@@ -1979,6 +1979,8 @@ already-selected installation root. A matching payload version remains ambiguous
 a newer same-version acquisition may still be pending even after the deployed
 version advances. Same-version pending changes, actual runtime drift, paused
 updates and live-checker precedence remain intact.
+Rootless records belong only to the legacy installation directory, independently
+of the caller's selected cell; successful acknowledgement records that root.
 
 ### Version-cutover reap and live-launcher protection
 

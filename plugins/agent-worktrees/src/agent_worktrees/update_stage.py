@@ -489,7 +489,7 @@ def acknowledge_applied(
         or prior.get("skipped") or prior.get("runtime_apply_blocked")
         or prior.get("acquisition_ok") is False
         or prior.get("plugin_dir") != str(plugin_dir)
-        or (prior["runtime_root"] if "runtime_root" in prior else str(cfg.install_dir())) != str(runtime_root)
+        or (prior["runtime_root"] if "runtime_root" in prior else str(cfg.legacy_install_dir())) != str(runtime_root)
     ):
         return
     status, lock = status or status_path(runtime_root), lock or lock_path(runtime_root)
@@ -505,6 +505,7 @@ def acknowledge_applied(
         result = {
             **prior, "plugin_changed": False, "venv_drift": False,
             "payload_version": payload_version, "deployed_version": deployed_version,
+            "runtime_root": str(runtime_root),
             "fingerprint": applied_fingerprint, "applied_ts": time.time(),
         }
         result.pop("plugin_changed_reason", None)
@@ -525,7 +526,7 @@ def _obsolete_available(st: dict) -> bool:
         if plugin_dir is None or st.get("plugin_dir") != str(plugin_dir):
             return False
         root = cfg.install_dir()
-        if (st["runtime_root"] if "runtime_root" in st else str(cfg.install_dir())) != str(root):
+        if (st["runtime_root"] if "runtime_root" in st else str(cfg.legacy_install_dir())) != str(root):
             return False
         payload = reconcile.payload_version(plugin_dir)
         deployed = reconcile.runtime_deployed_version("agent-worktrees", root=root)

@@ -924,6 +924,7 @@ def applied_stage(tmp_path, monkeypatch):
     monkeypatch.setattr(us, "lock_path", lambda *a: lock)
     monkeypatch.setattr(us, "status_path", lambda *a: status)
     monkeypatch.setattr(us.cfg, "install_dir", lambda: root)
+    monkeypatch.setattr(us.cfg, "legacy_install_dir", lambda: root)
     return payload, root, status, lock, prior
 
 
@@ -1006,12 +1007,15 @@ def test_legacy_status_without_runtime_root_uses_only_the_default_installation(a
     prior.pop("runtime_root")
     us._write_status(status, prior)
     assert us.indicator_state() == "idle"
-    monkeypatch.setattr(us.cfg, "install_dir", lambda: root / "other-installation")
+    other = root / "other-installation"
+    other.mkdir()
+    (other / "deploy-manifest.json").write_text('{"source":{"version":"2"}}')
+    monkeypatch.setattr(us.cfg, "install_dir", lambda: other)
     assert us.indicator_state() == "available"
-    us.acknowledge_applied(prior, payload, root, us.fingerprint(payload))
+    us.acknowledge_applied(prior, payload, other, us.fingerprint(payload))
     assert us.read_status() == prior
-    monkeypatch.setattr(us.cfg, "install_dir", lambda: root)
     us.acknowledge_applied(prior, payload, root, us.fingerprint(payload))
+    assert us.read_status()["runtime_root"] == str(root)
     assert us.indicator_state() == "current"
 
 
