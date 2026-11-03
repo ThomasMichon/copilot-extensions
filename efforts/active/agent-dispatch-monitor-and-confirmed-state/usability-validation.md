@@ -26,6 +26,16 @@ spawn and whole-cohort adoption remain unproven.
 Installed/native acceptance, complete cohort adoption and the remaining
 worker-side lifecycle behavior are still unqualified.
 
+The independent resident-lifetime prerequisite merged in #10234. Actual
+service-context follow-through then exposed #10267: managed lanes ask a
+project-bound host lookup from a neutral runtime directory. The bounded source
+repair reuses Dispatch's installed machine binding and configured supervisor
+file, with Worktrees fallback only when neither exists. Ambient machine values,
+detected hostnames and physical/guest-name equivalence do not admit an instance.
+An unreadable or conflicting installed binding refuses. The next acceptance
+step remains actual selected-runtime lane admission, then complete configured
+cohort and allocator-before-spawn proof; no lifecycle acceptance row is closed.
+
 The following is an **agent-recommended execution/validation sequence** under
 the existing reviewed five-outcome contract. It does not create an operational
 grant, a second effort or a requirement to wait for a marketplace release

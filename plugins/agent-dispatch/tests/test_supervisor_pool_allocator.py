@@ -174,6 +174,60 @@ def test_legacy_foreground_scope_does_not_invent_managed_instance():
     assert launch_scope(cli.build_parser().parse_args(["supervise", "--all-repos"])) is None
 
 
+@pytest.mark.parametrize("binding", ["machine", "supervisor.env"])
+def test_managed_lane_from_neutral_service_directory_uses_installed_binding(monkeypatch, tmp_path, binding):
+    root = tmp_path / "installation"
+    root.mkdir()
+    (root / binding).write_text(
+        "HOST-A" if binding == "machine" else 'AGENT_DISPATCH_SUPERVISE_MACHINE="HOST-A"\n',
+        encoding="utf-8",
+    )
+    neutral = tmp_path / "service"
+    neutral.mkdir()
+    monkeypatch.chdir(neutral)
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(root))
+    monkeypatch.setenv("AGENT_DISPATCH_SUPERVISE_MACHINE", "ambient-other-host")
+    monkeypatch.setattr(identity, "resolve_machine", lambda: pytest.fail("no project lookup needed"))
+    command = build_command({
+        "id": "worker", "kind": "supervised-lane", "machine": "host-a", "env": "linux",
+        "spec": {"all_repos": True},
+    }, python="python")
+    args = cli.build_parser().parse_args(command[3:])
+    assert launch_scope(args) == ("host-a", "linux")
+    for foreign in ("host-b", "host-a-wsl"):
+        with pytest.raises(ValueError, match="differs from its executing host"):
+            launch_scope(managed_args(machine=foreign))
+
+
+def test_managed_lane_without_binding_does_not_trust_environment_or_hostname(monkeypatch):
+    monkeypatch.setenv("AGENT_DISPATCH_SUPERVISE_MACHINE", "host-a")
+    monkeypatch.setattr("platform.node", lambda: "host-a")
+    monkeypatch.setattr(identity, "resolve_machine", lambda: None)
+    with pytest.raises(ValueError, match="differs from its executing host"):
+        launch_scope(managed_args())
+
+
+@pytest.mark.parametrize("unreadable", ["encoding", "directory"])
+def test_unreadable_installed_binding_cannot_fall_back_to_matching_project(monkeypatch, tmp_path, unreadable):
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
+    if unreadable == "encoding":
+        (tmp_path / "machine").write_bytes(b"\xff")
+    else:
+        (tmp_path / "machine").mkdir()
+    monkeypatch.setattr(identity, "resolve_machine", lambda: pytest.fail("unreadable binding must refuse"))
+    with pytest.raises(ValueError, match="installed machine binding is unreadable"):
+        launch_scope(managed_args())
+
+
+def test_installed_machine_marker_precedes_supervisor_file(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
+    (tmp_path / "machine").write_text("host-b", encoding="utf-8")
+    (tmp_path / "supervisor.env").write_text("AGENT_DISPATCH_SUPERVISE_MACHINE=host-a\n", encoding="utf-8")
+    monkeypatch.setattr(identity, "resolve_machine", lambda: pytest.fail("configured mismatch must refuse"))
+    with pytest.raises(ValueError, match="differs from its executing host"):
+        launch_scope(managed_args())
+
+
 @pytest.mark.parametrize("enabled", [None, "0", "1"])
 def test_actual_cli_allocation_is_default_off_and_passes_exact_instance(q, api, monkeypatch, enabled):
     monkeypatch.setattr(identity, "resolve_machine", lambda: "host-a")

@@ -84,6 +84,14 @@ The existing master passes its actual registration ID, machine and environment
 to its same-runtime lane child. The strict parser retains this instance scope
 instead of substituting the child's ambient environment; a different or unknown
 execution host refuses before launch.
+Admission first reads Dispatch's existing installed `machine` binding, then
+the configured `AGENT_DISPATCH_SUPERVISE_MACHINE` entry in `supervisor.env`.
+These durable service settings do not require a repository working directory.
+When neither is configured, the existing Worktrees project lookup remains the
+fallback. A child's ambient machine variable or detected hostname cannot admit
+a managed instance; an unreadable installed binding refuses rather than falling
+through to a different authority. Registration scope remains literal: a physical
+host name is not silently equated with a distinct execution-environment identity.
 
 The managed caller first reads the ordinary data-authorized
 `/health.pool_cohort` version-1 revision observation. A positively unprojected

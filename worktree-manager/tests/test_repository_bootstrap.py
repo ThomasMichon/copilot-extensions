@@ -125,6 +125,58 @@ def test_no_repository_preserves_existing_setup(monkeypatch) -> None:
     assert events == ["readiness", "prerequisites", "core"]
 
 
+@pytest.mark.parametrize("apply", [False, True])
+@pytest.mark.parametrize("status", [0, 7])
+@pytest.mark.parametrize("trusted", [False, True])
+def test_register_uses_existing_setup_readiness_trust_and_exit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    apply: bool, status: int, trusted: bool,
+) -> None:
+    from worktree_manager import __main__ as manager
+
+    events = providers(monkeypatch)
+    calls: list[tuple[str | None, list[str]]] = []
+
+    def passthrough(project: str | None, argv: list[str], **kwargs: object) -> int:
+        assert kwargs == {"terminal_aware": True}
+        events.append("repository")
+        calls.append((project, argv))
+        return status
+
+    monkeypatch.setattr(repository, "run_engine_passthrough", passthrough)
+    target = str(tmp_path / "chosen checkout")
+    result = manager.main([
+        "register", URL, "--repository-target", target,
+        "--repository-commit", "A" * 40, "--context", "example",
+        *(["--apply"] if apply else []),
+        *(["--trust-repository-setup"] if trusted else []),
+    ])
+    assert result == (status if apply else 0)
+    if apply:
+        assert events[-3:] == ["core", "readiness", "repository"]
+        assert calls == [(None, [
+            "repos", "setup", URL, "--apply", "--target", target,
+            "--commit", "a" * 40,
+            *(["--trust-repository-setup"] if trusted else []), "--context", "example",
+        ])]
+    else:
+        assert calls == []
+        assert "plan only" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("argv", [
+    [], [URL, "--repository", URL], [URL, "--unknown"],
+    ["file:///local/source"], ["https://name:secret@example.invalid/source"],
+])
+def test_register_rejects_invalid_selection_before_provision(
+    monkeypatch: pytest.MonkeyPatch, argv: list[str],
+) -> None:
+    from worktree_manager import __main__ as manager
+
+    monkeypatch.setattr(cli, "detect_baseline", lambda: pytest.fail("invalid register provisioned"))
+    assert manager.main(["register", "--apply", *argv]) == 2
+
+
 @pytest.mark.parametrize("status", [1, 7, 130])
 def test_repository_failure_is_preserved_without_repeating_core(monkeypatch, status) -> None:
     events = providers(monkeypatch)
@@ -147,7 +199,8 @@ def test_old_engine_refuses_only_optional_stage(monkeypatch, capsys) -> None:
     assert "core is retained" in capsys.readouterr().out
 
 
-def test_real_engine_boundary_inherits_input_exact_argv_and_exit(tmp_path: Path) -> None:
+@pytest.mark.parametrize("register", [False, True])
+def test_real_engine_boundary_inherits_input_exact_argv_and_exit(tmp_path: Path, register: bool) -> None:
     engine = tmp_path / "synthetic engine.py"
     log = tmp_path / "owner result.json"
     engine.write_text(
@@ -162,13 +215,14 @@ import sys
 from worktree_manager import engine_client, repository_bootstrap as repository
 engine_client.set_engine_command([sys.executable, sys.argv[1], sys.argv[2]])
 raise SystemExit(repository.run(repository.parse([
-    '--apply', '--repository', sys.argv[3],
+    '--apply', *([] if sys.argv[5] == 'register' else ['--repository']), sys.argv[3],
     '--repository-target', sys.argv[4], '--trust-repository-setup'
-])))
+], register=sys.argv[5] == 'register')))
 """
     before = dict(os.environ)
     result = subprocess.run(
-        [sys.executable, "-c", driver, str(engine), str(log), URL, str(tmp_path / "chosen source")],
+        [sys.executable, "-c", driver, str(engine), str(log), URL, str(tmp_path / "chosen source"),
+         "register" if register else "setup"],
         input="caller-owned-stdin\n", capture_output=True, text=True, timeout=120,
         **no_window_kwargs(),
     )

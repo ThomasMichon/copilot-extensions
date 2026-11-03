@@ -40,10 +40,11 @@ def _context(value: str) -> str:
     return value
 
 
-def parse(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="worktree-manager setup", allow_abbrev=False)
+def parse(argv: list[str], *, register: bool = False) -> argparse.Namespace:
+    command = "register" if register else "setup"
+    parser = argparse.ArgumentParser(prog=f"worktree-manager {command}", allow_abbrev=False)
     parser.add_argument("--apply", action="store_true")
-    parser.add_argument("--repository", type=_repository)
+    parser.add_argument("repository" if register else "--repository", type=_repository)
     parser.add_argument("--repository-target")
     parser.add_argument("--repository-commit", type=_commit)
     parser.add_argument("--trust-repository-setup", action="store_true")

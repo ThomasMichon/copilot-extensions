@@ -542,6 +542,10 @@ matrix; no schedule or cadence is enabled by this plan.
 - [ ] Preserve independent Manager/service/plugin-content selections, configured roles and exact per-run source identity across scheduled operation and retries.
 - [ ] Prove unchanged-source reuse, a merged-source advance and explicit dirty/unavailable/overlapping/failed-candidate outcomes on Linux and Windows.
 
+The bounded Manager-first repository command entry merged in #10270, composing
+the existing setup caller and engine. Its [source qualification](<journal/2026/11.03 manager-register.md>)
+does not close the enrollment, native worker, actual adopter or release gates above.
+
 ### Phase 4a.1 - Manager automatic-update controls
 
 The [bounded control refinement](automatic-update-control.md) extends the

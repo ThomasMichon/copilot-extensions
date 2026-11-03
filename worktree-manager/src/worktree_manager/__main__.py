@@ -1521,6 +1521,8 @@ def main(argv: list[str] | None = None) -> int:
         print("  setup [--apply]        plan (default) or run prereq provisioning + core install")
         print("    [--repository HTTPS_URL] [--repository-target ABSOLUTE_PATH]")
         print("    [--repository-commit FULL_COMMIT_ID] [--trust-repository-setup]")
+        print("  register HTTPS_URL [--apply]  same setup flow with a required repository URL")
+        print("                         accepts setup's target, commit, trust and context options")
         print("  self-install [--apply] version the app: current-version marker + ~/.local/bin binstub")
         print("  source                 show the self-update source (git repo + ref/branch)")
         print("  source set [--repo URL] [--ref BRANCH]   track a fork / canary branch for updates")
@@ -1599,10 +1601,10 @@ def main(argv: list[str] | None = None) -> int:
         from . import doctor_cli
 
         return doctor_cli.cmd_doctor(args[1:])
-    if args and args[0] == "setup":
+    if args and args[0] in ("setup", "register"):
         from .setup_cli import cmd_setup
 
-        return cmd_setup(args[1:], banner=_BANNER)
+        return cmd_setup(args[1:], banner=_BANNER, register=args[0] == "register")
     if args and args[0] == "self-install":
         return _cmd_self_install(args[1:])
     if args and args[0] == "source":
