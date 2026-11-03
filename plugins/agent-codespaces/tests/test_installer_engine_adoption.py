@@ -642,6 +642,21 @@ def _attributed_library_sources(tmp_path: Path, layout: str):
     )
     for name in retained_scripts:
         shutil.copyfile(PLUGIN / "scripts" / name, payload / "scripts" / name)
+    # Both input layouts feed the same fixture-owned canonical metadata graph.
+    for pyproject in repository.rglob("pyproject.toml"):
+        project = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+        for spec in project.get("tool", {}).get("uv", {}).get("sources", {}).values():
+            path = spec.get("path", "")
+            if not path.startswith("libs/"):
+                continue
+            lib = Path(path).name
+            assert path == f"libs/{lib}" and uer.is_safe_lib_name(lib)
+            assert (repository / "libs" / lib / "pyproject.toml").is_file()
+            assert uer.can_rewrite_uv_source_to_editable(pyproject, lib)
+            uer.rewrite_uv_source_to_editable(
+                pyproject, lib,
+                uer.uv_editable_relpath(pyproject.parent, lib, libs_dir=repository / "libs"),
+            )
     logs = mm.materialize_uv_editable_refs(repository, canonical_root=repository)
     skipped = [line for line in logs if line.startswith("SKIP")]
     assert not skipped, "\n".join(skipped)
