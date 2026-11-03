@@ -116,6 +116,41 @@ new command spelling merely to satisfy this document.
 | Serving commit succeeded, reply lost or retirement delayed | Observe actual current state and follow the existing commit-forward/recovery contract. Do not restore only a marker while the incoming service still owns live work, or report a timeout as success. |
 | Existing layout cannot be recognized | Preserve the independent installation-application versus readiness/handoff outcome in [fresh-default installation](../../efforts/active/source-managed-runtime-installs/fresh-default-installation.md); do not invent a new receipt/layout gate or treat uncertainty as permission to delete old state. Actual I/O failure remains literal. |
 
+The generated generic installer publishes the selected slot before invoking its
+declared startup action, but advances `last-known-good` only after that action
+acknowledges completion. The application still owns actual readiness verification;
+a marker, process PID or arbitrary zero exit is not independent health evidence.
+The final construction-input check runs inside the guarded transaction before
+last-good and success records are written, not during post-success context exit.
+Direct qualification consumers, including Manager's separate self-install owner,
+retain their existing exit-time check; only this generic transaction owns its
+final verification explicitly.
+Setup and publication failures before startup retain guarded rollback. Once a
+nonempty startup action is invoked, a failure, timeout or lost reply has an
+**unknown** outcome: it may already have admitted work. The installer raises
+`ApplicationStartupUncertain` with the selected `slot` and the original exception
+as its cause, retains selection and management launchers, and does not attempt
+native cleanup or infer that nothing started. Cancellation retains its original
+exception after reporting the same uncertainty. Concurrent selector/launcher
+winners are preserved.
+
+This is a conservative change to failure defaults, not a new callback protocol:
+existing arguments and deadlines are unchanged, and there is no new force flag,
+daemon manager or ownership receipt. A startup failure does not create a new
+success record or promote an unacknowledged candidate to last-known-good;
+an existing record remains historical evidence, not proof of this attempt.
+Reconcile actual serving/data ownership through the application's existing
+lifecycle owner before retry or reverse selection. The generated installer does
+not itself provide application recovery or automatically retry an unknown action.
+Manager's separate `self-install --apply` owner is unchanged.
+
+On Windows, construction health probes preserve long physical repair slots
+without passing that slot as `CreateProcess`'s initial cwd, which rejects long
+values even with extended-path spelling. The same selected isolated interpreter
+enters the canonical native slot path before executing the original probe.
+Source/profile, wheel-content, interpreter and completion checks remain intact;
+no short-root alias, alternate environment or installed-slot rewrite is used.
+
 ## App-specific implementation and acceptance
 
 The [app matrix](../../efforts/active/source-managed-runtime-installs/wheel-first-contributors.md#per-app-tracking)
