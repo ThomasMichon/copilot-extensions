@@ -1658,13 +1658,41 @@ jobs:
         run: python -m pytest -q tools/test_installer_source_build.py tools/test_runtime_source_wheel_cache.py
       - name: Persisted Manager admission and fresh-process offline reuse
         if: ${{ matrix.suite == 'manager' }}
-        run: >-
-          python -m pytest -q
-          tools/test_manager_source_install.py
-          tools/test_manager_source_native.py
-          tools/test_runtime_source_reuse.py
-          worktree-manager/tests/test_manager_update_check.py
-          libs/versioned-runtime/tests/test_runtime_source_identity.py::test_source_and_repair_slots_preserve_the_declared_package_version
+        shell: python
+        run: |
+          import os, sys
+          from pathlib import Path
+          repo = Path.cwd()
+          sys.path.insert(0, str(repo / "tools"))
+          from plugin_test_containment import Limits, TestSandbox, isolated_environment, run_contained
+          packets = [
+              (300, [
+                  "tools/test_manager_source_install.py",
+                  "tools/test_manager_source_native.py",
+                  "tools/test_runtime_source_reuse.py",
+                  "worktree-manager/tests/test_manager_update_check.py",
+                  "libs/versioned-runtime/tests/test_runtime_source_identity.py::test_source_and_repair_slots_preserve_the_declared_package_version",
+              ]),
+              (120, ["worktree-manager/tests/test_runtime_source.py"]),
+          ]
+          for wall_seconds, tests in packets:
+              owner = TestSandbox(prefix="manager-source-native-")
+              with owner as directory:
+                  temporary = Path(directory)
+                  environment = isolated_environment(os.environ, temporary)
+                  environment["PYTHONPATH"] = str(repo / "tools")
+                  code = run_contained(
+                      [sys.executable, "-m", "pytest", "-q", *tests,
+                       "--basetemp", str(temporary / "pytest")],
+                      cwd=repo, env=environment, sandbox=temporary,
+                      limits=Limits(wall_seconds=wall_seconds),
+                  )
+              if owner.retained or temporary.exists():
+                  raise RuntimeError("Manager native test cleanup did not settle")
+              print(f"MANAGER_NATIVE_NORMAL_CLEANUP=TRUE EXIT={code}", flush=True)
+              if code:
+                  raise SystemExit(code)
+          raise SystemExit(0)
 
   source-cache-linux:
     if: ${{ inputs.source_cache }}

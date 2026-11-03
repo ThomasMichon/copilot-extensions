@@ -784,6 +784,53 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
             assert step["env"]["INSTALLATION_CONTEXT_POWERSHELL"] == "powershell"
 
 
+@pytest.mark.parametrize("job_key", ["source-build-linux", "source-build-windows"])
+@pytest.mark.parametrize("failure_at", [None, 0, 1])
+def test_manager_native_step_retains_owned_cleanup_and_child_failure(
+    tmp_path, monkeypatch, job_key, failure_at,
+) -> None:
+    import plugin_test_containment as containment
+
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
+    )
+    job = workflow["jobs"][job_key]
+    step = next(
+        step for step in job["steps"]
+        if step.get("name") == "Persisted Manager admission and fresh-process offline reuse"
+    )
+    assert step["shell"] == "python"
+    calls = []
+
+    def run(command, *, cwd, env, sandbox, limits):
+        assert cwd == tmp_path and sandbox.is_dir()
+        assert Path(env["HOME"]).resolve().is_relative_to(sandbox.resolve())
+        assert env["PYTHONPATH"] == str(tmp_path / "tools")
+        calls.append((command, sandbox, limits))
+        return 23 if failure_at == len(calls) - 1 else 0
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "path", sys.path.copy())
+    monkeypatch.setattr(containment, "run_contained", run)
+    with pytest.raises(SystemExit) as result:
+        exec(compile(step["run"], "<manager-native-workflow>", "exec"), {})
+    assert result.value.code == (0 if failure_at is None else 23)
+    assert len(calls) == (1 if failure_at == 0 else 2)
+    assert not any(sandbox.exists() for _command, sandbox, _limits in calls)
+    assert calls[0][0][:4] == [sys.executable, "-m", "pytest", "-q"]
+    assert calls[0][0][4:-2] == [
+        "tools/test_manager_source_install.py",
+        "tools/test_manager_source_native.py",
+        "tools/test_runtime_source_reuse.py",
+        "worktree-manager/tests/test_manager_update_check.py",
+        "libs/versioned-runtime/tests/test_runtime_source_identity.py::test_source_and_repair_slots_preserve_the_declared_package_version",
+    ]
+    assert [limits.wall_seconds for _command, _sandbox, limits in calls] == [300, 120][:len(calls)]
+    if len(calls) == 2:
+        assert calls[1][0][4:-2] == ["worktree-manager/tests/test_runtime_source.py"]
+    assert job["timeout-minutes"] == 6
+
+
 def test_real_broker_consumers_retain_native_removal_failures_without_expanding_other_lanes() -> None:
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()

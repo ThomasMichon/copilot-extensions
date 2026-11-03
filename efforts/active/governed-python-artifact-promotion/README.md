@@ -925,6 +925,34 @@ win grows with build complexity.
 
 ## Journal
 
+### 2026-11-03 - Native follow-through preserves actual containment and refusal
+
+The first current-candidate native run,
+[41558262555](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41558262555),
+selected 31 jobs and failed four; its successful statuses are not substituted
+for complete qualification. Both wheel lanes exposed a stale deadline witness
+that patched a digest no longer used by buffered freezing. Both Manager lanes
+exposed acceptance gaps: Windows ran without the actual contained boundary,
+and Linux observed the legitimate earlier completion-integrity refusal.
+
+The deadline witness now expires after a real copy, retaining source-preservation
+and owned-partial cleanup assertions. The Manager tests retain all three
+corrupt-input refusals, forbidden cold admission and unchanged-marker checks,
+while accepting the two explicit integrity-owning error types. No production
+deadline, admission or integrity guard changed. The hosted Manager step now
+uses the existing owned boundary, retaining its original cases and adding the
+installed-layout acquisition file on both platforms without a new matrix or
+larger job limit.
+
+Five focused deadline/absolute-UV cases passed in 157.95 seconds. All 130
+workflow contracts plus the remaining command-UV case passed together in
+181.94 seconds, with normal cleanup. This also repairs stale metadata
+assertions while preserving both existing immutable-runtime commands and named
+role-construction selection. Final published-head native evidence remains open.
+The independently owned packet-size repair merged in #10129; integrate it and
+qualify the complete bounded candidate before closing the toolkit source gate.
+The parent remains Active and no release or installed rollout is claimed.
+
 ### 2026-11-03 - Toolkit candidate reconciled with installed resource layouts
 
 The candidate now uses Manager's existing read-only runtime-resource lookup

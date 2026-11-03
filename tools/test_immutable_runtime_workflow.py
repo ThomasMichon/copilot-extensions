@@ -258,15 +258,17 @@ def test_exact_native_matrix_and_read_only_immutable_checkout(name, runner):
 def test_exact_runner_selection_budgets_and_failure_propagation(name):
     job = WORKFLOW["jobs"][name]
     assert EXECUTION["env"] == {"RUNTIME_MODE": "${{ matrix.mode }}"}
-    assert EXECUTION["run"] == (
-        "python tools/run-plugin-tests.py agent-worktrees "
-        "--test-file tests/test_python_runtime_dev_live.py "
-        '-k "$RUNTIME_MODE" --timeout 2500 --plugin-timeout 2700'
-    )
-    assert shlex.split(EXECUTION["run"]) == [
-        "python", "tools/run-plugin-tests.py", "agent-worktrees",
-        "--test-file", "tests/test_python_runtime_dev_live.py",
-        "-k", "$RUNTIME_MODE", "--timeout", "2500", "--plugin-timeout", "2700",
+    assert [shlex.split(line) for line in EXECUTION["run"].splitlines()] == [
+        [
+            "python", "tools/run-plugin-tests.py", "installation-context",
+            "--test-file", "tests/test_digest_cache_hardening.py", "-k", "darwin_metadata",
+            "--timeout", "120", "--plugin-timeout", "240",
+        ],
+        [
+            "python", "tools/run-plugin-tests.py", "agent-worktrees",
+            "--test-file", "tests/test_python_runtime_dev_live.py",
+            "-k", "$RUNTIME_MODE", "--timeout", "2500", "--plugin-timeout", "2700",
+        ],
     ]
     assert not job.get("continue-on-error")
     assert "defaults" not in job and "defaults" not in WORKFLOW

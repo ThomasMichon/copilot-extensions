@@ -1301,6 +1301,16 @@ the public lease import; its actual loaded file must belong to that installed
 layout. Both cases reproduced the missing-helper failure before the lookup
 was routed through the existing read-only resource owner.
 
+The existing Linux/Windows Manager source-build partition now uses the canonical
+owned test boundary and isolated homes rather than bare pytest or a forged
+contained marker. It retains the original admission/reuse files and separately
+runs the source-acquisition file, including both installed layouts. The
+six-minute job limit is unchanged; child packets retain explicit 300/120-second
+bounds and fail on unsettled cleanup or a failing child. Integrity tests retain
+all tamper refusals even when completion rejects changed evidence before the
+detailed input owner. The freeze-deadline witness expires only after a real
+buffered-file copy, not through an unused digest seam.
+
 `tools/test_runtime_profile_bootstrap.py` also runs runtime source-policy and
 actual wheel inspection in a fresh isolated Python process with the Manager
 installer, promotion and publisher modules explicitly refused. Pure owner

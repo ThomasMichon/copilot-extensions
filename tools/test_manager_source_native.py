@@ -207,7 +207,11 @@ print(json.dumps(asdict(result)))
             original = path.read_bytes()
             path.write_text(content)
             try:
-                with pytest.raises(builds.dependencies.DependencyPolicyError, match="input evidence"):
+                # Completion may authenticate these bytes before the detailed input owner.
+                with pytest.raises(
+                (builds.ProfileError, builds.dependencies.DependencyPolicyError),
+                match="(?:input|completion) evidence",
+                ):
                     install()
                 assert builds.engine.runtime.current_version(root) == slot.name
                 assert (marker.read_bytes(), marker.stat().st_mtime_ns) == before
