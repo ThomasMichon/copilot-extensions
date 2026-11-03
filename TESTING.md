@@ -34,7 +34,14 @@ keeps an admitted request blocked, then invokes the real retained-slot installer
 It requires forced native predecessor exit, interrupted request reporting and an
 authenticated ready published successor, without invoking generic stale-runtime
 cleanup. It uses disposable roots and real UV construction, not installed-host
-rollout or a package-version simulation. The actor-free
+rollout or a package-version simulation.
+The installer must first return while the legacy predecessor and its admitted
+request remain alive, with the ready successor's durable five-minute grace
+record. The fixture then expires only that private record and wakes the real
+resident through its existing promotion seam; the resident, not the installer,
+performs native retirement. This tests consumer wiring without waiting five
+minutes or changing the production grace interval.
+The actor-free
 `tests/test_runtime_monitor_legacy.py` and focused installer controls separately
 cover owner/route/birth changes, absent cutover custody, unconfirmed exit and
 failed candidate activation. Required unit-only CI does not gain a native matrix.

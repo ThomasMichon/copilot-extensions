@@ -108,14 +108,15 @@ def test_native_async_installer_falls_forward_only_after_successor_serves(
                 assert "previous" not in routing.read_table(root)
             else:
                 assert result["ok"] and result["committed"] and not result["rolled_back"], result
-                assert result["predecessor_cleanup"]["exit_confirmed"] is True
-                assert result["predecessor_cleanup"]["route_released"] is True
-                assert data["process"].wait(timeout=5) is not None and new_data["process"].poll() is None
+                assert result["predecessor_cleanup"] == {
+                    "exit_confirmed": False, "reason": "successor-resident-grace-pending",
+                }
+                assert result["retirement_pending"]
+                assert data["process"].poll() is None and new_data["process"].poll() is None
                 assert recovery.active_endpoint(root).pid == new_route.pid
-                assert "previous" not in routing.read_table(root)
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as released:
-                    released.bind((old.client_host, old.port))
-                    released.listen(1)
+                assert routing.read_table(root)["previous"] == old.to_dict()
+                assert not (root / "drain-requested").exists()
+                assert not (root / "shutdown-requested").exists()
                 health = control.ControlClient(new_route.base_url, token=data["token"]).health()
                 assert health["published"] and health["worktrees"]["status"] == "ready"
                 assert health["repositories"]["admitting"] is True

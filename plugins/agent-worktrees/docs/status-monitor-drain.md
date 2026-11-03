@@ -12,10 +12,18 @@ Ownership-transfer and serving-convergence follow-ups remain tracked by
 
 The ordinary asynchronous installer retains native predecessor custody even
 when the old peer lacks its retirement/recovery capabilities or its control
-request times out. After the incoming monitor passes actual serving readiness,
-the existing cutover owner attempts bounded termination of that exact PID/birth
-and guarded release of its previous endpoint. A failed cleanup is reported
-without rolling back the healthy incoming monitor. Runtime-reference and
+request times out. The incoming resident attempts one bounded `successor-handoff`
+notice before promotion, selected through its running peer's
+`status-monitor-successor-handoff-v1` health capability. Health lookup and notice
+share one five-second budget; missing support skips only the notice. A compatible old resident observes it without treating
+it as readiness or closing admission. Independent ready-route observation still
+triggers old drain. Once the incoming monitor passes actual serving readiness,
+it arms a durable five-minute deadline in `status-monitor-retirement-grace/`,
+without changing the legacy retirement-record schema. Installation returns
+without waiting for that grace or predecessor exit. The selected resident's
+existing retirement loop then attempts bounded termination of that exact PID/birth
+and guarded release of its previous endpoint after expiry. A failed cleanup is
+reported without rolling back the healthy incoming monitor. Runtime-reference and
 dev-claim settlement remains with the existing retirement lifecycle, not a new
 reaper. Unknown native identity, changed routes and unsupported incoming
 capabilities still refuse their respective operation.

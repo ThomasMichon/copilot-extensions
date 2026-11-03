@@ -637,6 +637,9 @@ class ResidentRetirements:
     def refresh(self, *, cleanup: bool = True) -> None:
         try:
             if cleanup:
+                from . import runtime_monitor_grace
+
+                runtime_monitor_grace.reconcile(self.root)
                 cancel_abandoned_preparations(self.root)
             pending = reconcile(self.root, cleanup=cleanup)
         except (OSError, ValueError, RuntimeError, ImportError) as error:

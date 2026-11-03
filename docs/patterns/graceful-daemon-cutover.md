@@ -158,14 +158,17 @@ preserves the possibly admitted successor and reports failure, never passive
 disposal or rollback. The elected resident reconciles durable predecessor
 records and canonical runtime references, retaining its own demand and displaced
 code until positive native exit. This is not a new daemon or delayed reaper.
-Current compatible outgoing runtimes support readiness-gated retirement without
-grace-forced exit of accepted work; the optional finite long-grace fallback in
-the target above is not yet a qualification claim for this path.
-An incompatible or unreachable predecessor
-instead uses the existing cutover owner's bounded native retirement fallback
-after successor serving readiness. Cleanup failure cannot reverse that healthy
-incoming generation. Current implementation still refuses an unrouted or
-identity-unknown owner;
+Compatible outgoing runtimes attempt readiness-gated drain. The incoming
+Worktrees resident makes a best-effort new-to-old announcement before promotion
+and persists a five-minute grace deadline after serving readiness, separately
+from the legacy retirement custody schema. Its existing reconciliation loop
+attempts expiry through native identity-bound retirement under current route
+and cutover authority; installation does not wait for it. Incompatible or
+unreachable predecessors use that same resident-owned grace path. Cleanup
+failure cannot reverse that healthy
+incoming generation. This resident-owned grace is an adoption detail, not a
+qualification claim for the target's optional finite central-only fallback.
+Current implementation still refuses an unrouted or identity-unknown owner;
 wire compatibility is not native ownership proof. This is a remaining
 authoritative-replacement adoption gap, not the desired admission rule.
 The owner reserves canonical execution

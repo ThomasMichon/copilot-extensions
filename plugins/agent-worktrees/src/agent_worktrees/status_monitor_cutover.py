@@ -851,9 +851,9 @@ def activate_after_update(
 
         published_successor = None
         if asynchronous_retirement and options.get("retire_failed_predecessor") is not None:
-            retire_incompatible = options["retire_failed_predecessor"]
-            options["retire_failed_predecessor"] = lambda _old: retire_incompatible(published_successor)
-
+            options["retire_failed_predecessor"] = lambda _old: {
+                "exit_confirmed": False, "reason": "successor-resident-grace-pending",
+            }
         def activate_successor(endpoint: routing.Endpoint) -> None:
             nonlocal retirement_complete, published_successor
             if reserved:
