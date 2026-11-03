@@ -21,6 +21,7 @@ from standalone_python_artifacts import artifact_label
 from release_controller_contract import required_mode_arguments
 from artifact_attestation import _check, _gh, verify_attestation_subject as _verify_subject
 from artifact_attestation import time as time
+from artifact_release_discovery import is_not_found, tag_commit
 
 CONTROLLER_REQUIRED_ARGUMENTS = (
     (("publish",), (), ("--merged-commit", "--candidate-commit", "--dev-head")),
@@ -39,10 +40,7 @@ SOURCE_CANDIDATE_REQUIRED_ARGUMENTS = (
 
 
 def _is_not_found(result: subprocess.CompletedProcess) -> bool:
-    return result.returncode != 0 and re.fullmatch(
-        r"(?:gh:\s+[^\r\n]*\(HTTP[ \t]+404\)|\(HTTP[ \t]+404\)|(?:gh:[ \t]+)?HTTP[ \t]+404(?::[^\r\n]*)?)",
-        result.stderr.strip(),
-    ) is not None
+    return is_not_found(result)
 
 
 def verify_attestation_subject(
@@ -109,27 +107,7 @@ def verify_attestations(
 
 
 def _tag_commit(repository: str, tag: str) -> str | None:
-    result = _gh(["api", f"repos/{repository}/git/ref/tags/{tag}"])
-    if result.returncode:
-        if _is_not_found(result):
-            return None
-        _check(result)
-    seen = set()
-    for _ in range(8):
-        try:
-            obj = json.loads(_check(result))["object"]
-            kind, sha = obj["type"], obj["sha"]
-            if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha) or sha in seen:
-                raise ValueError("invalid or cyclic tag object")
-            seen.add(sha)
-            if kind == "commit":
-                return sha
-            if kind != "tag":
-                raise ValueError("tag does not resolve to a commit")
-        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
-            raise PromotionArtifactError(f"{tag}: invalid tag response") from exc
-        result = _gh(["api", f"repos/{repository}/git/tags/{sha}"])
-    raise PromotionArtifactError(f"{tag}: annotated tag chain exceeds validation limit")
+    return tag_commit(repository, tag, runner=_gh)
 
 
 def _validate_tag_binding(

@@ -58,6 +58,9 @@ owner's published locator or an explicit assignment/adopter setting. Keep
 the managed store (or legacy `agenda.json` and `cursor.json`) there, near the journal, without
 rewriting its records or guessing an implementation-private path. A shared
 journal home needs an owner-allocated compartment for this worktree.
+For explicitly selected fresh context-qualified stores, use the optional
+[managed placement helper](references/managed-placement.md) only after
+establishing the selected allocator's actual support; it does not migrate a lane.
 There is no mandatory journal provider: when none is available, choose an
 explicit worktree-local home such as `.effort-agenda/<lane>/`, excluded from
 publication using the repository's normal ignore convention.
@@ -323,6 +326,8 @@ the safety of a later write or the authority of its caller.
 - [Queue, continuations and context-qualified revisits](references/context-qualified-continuations.md)
 - [Context-qualified source CLI and worked fixtures](references/context-qualified-commands.md)
 - [Field types, enums, prose and Markdown](references/field-contract.md)
+- [Explicit new managed placement](references/managed-placement.md)
+- [Complete consistent export and local readback](references/agenda-export.md)
 - [Deferred branches, decision packets and revisit points](references/deferred-branches.md)
 - [Deferred board example](assets/agenda.deferred.example.json)
 - [Version-2 deferred cursor example](assets/cursor.deferred.example.json)

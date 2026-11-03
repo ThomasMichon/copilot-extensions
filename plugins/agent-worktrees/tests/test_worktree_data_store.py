@@ -681,6 +681,7 @@ def test_configured_project_root_alias_is_accepted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     placement = _allocate()
+    descriptor = _descriptor(owner).read_bytes()
     alias = tmp_path / "configured-owner-alias"
     try:
         alias.symlink_to(owner, target_is_directory=True)
@@ -691,6 +692,63 @@ def test_configured_project_root_alias_is_accepted(
     assert selected is not None
     assert os.path.samefile(selected.placements[0].state_home, placement.state_home)
     assert os.path.samefile(_allocate().state_home, placement.state_home)
+    assert selected.placements == (placement,)
+    assert _allocate() == placement
+    assert _descriptor(owner).read_bytes() == descriptor
+
+
+def test_initial_aliased_owner_returns_canonical_home_with_domain_content_and_retained_reads(
+    owner: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    alias = tmp_path / "configured-owner-alias"
+    try:
+        alias.symlink_to(owner, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"symlink creation unavailable: {error}")
+    monkeypatch.setattr(cfg, "project_dir", lambda _project: alias)
+    placement = _allocate()
+    expected = owner.resolve(strict=True) / "worktree-state" / WORKTREE / "agendas" / "main"
+    assert placement.state_home == str(expected)
+    domain_member = expected / "agenda.sqlite3"
+    domain_member.write_bytes(b"opaque domain-owned contents")
+    descriptor = _descriptor(owner).read_bytes()
+    assert _allocate() == placement
+    selected = store.read_worktree_data(PROJECT, WORKTREE, store_id=STORE)
+    assert selected is not None and selected.placements == (placement,)
+    (owner / "worktrees" / f"{WORKTREE}.yaml").unlink()
+    retained = store.read_worktree_data(PROJECT, WORKTREE, store_id=STORE)
+    assert retained is not None and retained.canonical_record == "missing"
+    assert retained.placements == (placement,)
+    assert _descriptor(owner).read_bytes() == descriptor
+    assert domain_member.read_bytes() == b"opaque domain-owned contents"
+    assert not retained.placements[0].store_content_validated
+
+
+def test_admitted_root_alias_does_not_admit_a_domain_child_alias(
+    owner: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    placement = _allocate()
+    alias = tmp_path / "configured-owner-alias"
+    home = Path(placement.state_home)
+    foreign = tmp_path / "foreign-domain-home"
+    try:
+        alias.symlink_to(owner, target_is_directory=True)
+        home.rename(foreign)
+        home.symlink_to(foreign, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"symlink creation unavailable: {error}")
+    monkeypatch.setattr(cfg, "project_dir", lambda _project: alias)
+    for operation in (
+        lambda: store.read_worktree_data(PROJECT, WORKTREE, store_id=STORE),
+        _allocate,
+    ):
+        with pytest.raises(WorktreeDataError) as failure:
+            operation()
+        assert failure.value.code == "unsafe-path"
 
 
 @pytest.mark.parametrize(

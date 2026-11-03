@@ -147,9 +147,12 @@ The `dependency_compile` selector's existing source-build rows distribute
 ordinary constructor profiles, source-input refusal controls and normal
 constructor/cache reuse across `profiles`, `refusals` and `normal`. Their
 selections preserve all 75 constructor/cache cases; the standalone
-`source_cache` selector still runs the complete selection. The four-row matrix,
-Manager row and six-minute source-build jobs are unchanged. Profile and refusal
-constructor controls use the same hash-pinned real backend as the normal row.
+`source_cache` selector still runs the complete selection. A separate `toolkit`
+row carries all copied-admission and fresh-interpreter witnesses, leaving
+profile/refusal selection to the source-build and cache files. The five rows
+retain the same six-minute source-build limits and unchanged Manager row.
+Profile and refusal constructor controls use the same hash-pinned real backend
+as the normal row; the toolkit row does not acquire that unrelated fixture.
 The Logger Linux fixture explicitly qualifies its daemon-supervision interpreter
 through the shipped custody checks, rather than weakening those checks when a
 hosted toolcache interpreter is writable.
@@ -1328,9 +1331,10 @@ executes both canonical aggregate-wheel retention APIs. Exact selected bytes
 survive retention; a changed transport digest or insufficient byte budget
 refuses without changing the caller's input. No alternate extractor or
 fixture-injected process helper supplies those paths.
-These run in the existing source-build profile partition on
-Linux and Windows (`dependency_compile=true`), without a new job, longer timeout
-or required-unit expansion.
+These run in the source-build `toolkit` partition on Linux and Windows
+(`dependency_compile=true`), separately from the source/profile and constructor
+cohorts. This preserves every witness within the unchanged six-minute job
+limits without expanding required unit CI.
 The credential-free fixture retains the existing deterministic opaque-identity
 seam; keyed authentication and credential-key ACLs have independent controls.
 This is fresh toolkit-delivery evidence, not first-tooling admission,

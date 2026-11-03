@@ -10,6 +10,9 @@ the rich agenda owner reader and known-session Bridge surfaces also have source
 implementations from #10131. #10199 delivers the qualified resident native
 intake and Bridge membership provider. Qualified pre-window measurement and
 the remaining consumer joins retain their proposed/unqualified status.
+#10224 supplies the separately negotiated worktree-data placement/discovery
+provider; its [owning contract](../../../plugins/agent-worktrees/docs/worktree-data.md)
+does not initialize agendas or complete rich consumer/archival integration.
 Providers advertise actual running support before independently installed
 callers use new syntax. Existing roster, agenda-v1/v2 and raw Bridge event
 contracts remain unchanged.
@@ -49,6 +52,7 @@ measurement support is not inferred from either receipt.
 | --- | --- | --- |
 | agent-worktrees | `worktree-observations-feed-v1` | `worktree-observations`: one-shot selected snapshot; `--follow` and an opaque after cursor select held updates |
 | agent-worktrees | `worktree-observations-history-v1` | `worktree-observation-history`: bounded page before an opaque source cursor |
+| agent-worktrees | `worktree-data-v1` | Passive `worktree-data-read` and separate explicit new-home `worktree-data-allocate`; placement is not store-content validation or live authority |
 | Bridge | `bridge-owner-membership-v1` | `observe-owner`: authenticated owner-scoped snapshot and optional follow/position |
 | Bridge | `bridge-session-observations-v1` | `observe-session`: bounded semantic projection over an admitted known session stream |
 | Bridge | `bridge-session-observation-history-v1` | `session-observation-history`: bounded supported retained history, not a raw-SSE query masquerading as a page |
