@@ -34,7 +34,8 @@ from .killswitch_mutation import mutate
 def _state_file() -> Path:
     override = os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE")
     if override:
-        return Path(override).expanduser()
+        path = Path(override).expanduser()
+        return path.parent.resolve() / path.name
     return Path.home() / ".copilot-extensions" / "killSwitches" / "bootstrap-killswitch.json"
 
 
@@ -132,7 +133,6 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 def cmd_on(args: argparse.Namespace) -> int:
     path = _state_file()
-    path.parent.mkdir(parents=True, exist_ok=True)
     reason = getattr(args, "reason", None) or ""
     who = f"{getpass.getuser()}@{socket.gethostname()}"
     state = {

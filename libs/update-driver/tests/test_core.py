@@ -66,6 +66,38 @@ def test_manager_policy_rechecks_queued_auto_without_blocking_manual(area):
 
 
 @pytest.mark.parametrize("no_update", [False, True])
+def test_queued_relative_manager_policy_uses_original_cwd(area, monkeypatch, no_update):
+    monkeypatch.setenv("HOME", str(area))
+    monkeypatch.setenv("USERPROFILE", str(area))
+    monkeypatch.delenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", raising=False)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    caller = area / "caller"
+    manager = caller / "manager"
+    manager.mkdir(parents=True)
+    path = manager / "config.toml"
+    path.write_text("[maintenance]\nautomatic = true\n", encoding="utf-8")
+    runner = TrustedRunner((sys.executable, "-c", "pass"), str(area))
+    flags = ("--no-update",) if no_update else ()
+    arguments = ("--auto", *flags, "--with-reconcile")
+    context = (("WORKTREE_MANAGER_ROOT", "manager"),)
+    automatic = enqueue(RequestSpec(
+        "engine-launch-update", arguments, cwd=str(caller), context=context,
+    ), runner=runner, root=area / "state")
+    manual = enqueue(RequestSpec(
+        "engine-launch-update", flags, cwd=str(caller), context=context, repair=True,
+    ), runner=runner, root=area / "state")
+    path.write_text("[maintenance]\nautomatic = false\n", encoding="utf-8")
+    monkeypatch.chdir(area)
+    observed = []
+    assert drain(root=area / "state", executor=lambda tx: observed.append(tx.request.id) or 0) == 0
+    assert observed == [manual.id]
+    refused = status(automatic.id, root=area / "state")
+    assert refused.exit_code == 3 and refused.started_at is None
+    assert "maintenance.automatic is false" in refused.error
+    assert status(manual.id, root=area / "state").exit_code == 0
+
+
+@pytest.mark.parametrize("no_update", [False, True])
 def test_queued_launch_rechecks_maintenance_even_without_software_updates(area, no_update):
     manager = area / "manager"
     manager.mkdir()

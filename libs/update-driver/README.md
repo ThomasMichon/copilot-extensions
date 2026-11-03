@@ -76,6 +76,11 @@ creation, not an implicit permission migration or a read-only status side effect
   when needed. It participates in identity; a detached or already-running
   worker never substitutes its own override. The empty default is omitted
   from ordinary records, and legacy records continue to use canonical paths.
+  Hold readers normalize the selected parent directory consistently with the
+  controllers. A relative `WORKTREE_MANAGER_ROOT` in saved context is resolved
+  against the retained absolute request cwd, never the worker directory.
+  Automatic work with a relative Manager root but no absolute request cwd is
+  visibly refused; explicit updates do not consult that automation policy.
 - `TrustedRunner(argv, cwd, timeout=7200, env=(), context_keys=())` stores a complete internally
   constructed pinned invocation. Only Python import mapping (`PYTHONPATH`,
   `__PYVENV_LAUNCHER__`) can be persisted as environment metadata. Authentication

@@ -101,6 +101,22 @@ def test_stale_switch_never_calls_controller(
     assert before.paths[0].read_bytes() == baseline
 
 
+def test_missing_parent_segments_keep_manager_and_controller_confirmation_aligned(
+    switch_home: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = switch_home / "hold.json"
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(switch_home / "missing/../hold.json"))
+    first = policy.inspect_policy()
+    assert first.paths == (path,)
+    disabled = policy.set_enabled(False, expected=first.revision)
+    assert disabled.enabled is False
+    assert policy.inspect_policy().revision == disabled.revision
+    assert json.loads(path.read_bytes())["active"] is True
+    enabled = policy.set_enabled(True, expected=disabled.revision)
+    assert enabled.enabled is True and not path.exists()
+    assert not (switch_home / "missing").exists()
+
+
 def test_independent_cell_neither_reads_nor_changes_default_switch(
     switch_home: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

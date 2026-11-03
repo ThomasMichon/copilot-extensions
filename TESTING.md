@@ -3213,6 +3213,12 @@ Bash/PowerShell/Python writer lock contention, release and recovery, plus exact
 audit-byte conditional mutations. Available Linux PowerShell evidence is not
 Windows PowerShell or Windows byte-lock qualification; run the same selected
 native controller controls through each supported Windows host separately.
+The controller and Manager packets also cover `missing/../hold.json` with an
+absent intermediate directory, path-bound confirmation and linked-leaf refusal.
+The actor-free automatic-policy controls bind a relative Manager root to the
+retained caller cwd, refuse missing/relative cwd for automatic admission, and
+keep explicit requests exempt. The durable queue counterpart changes policy
+after enqueue and drains from a different directory before synthetic effects.
 The retained lifecycle deadline and guardian-pair units substitute their native
 Windows path-owner/file-open boundaries, retaining actual cleanup/deadline and
 byte-reader logic. Native ownership and file-sharing custody are not unit evidence.

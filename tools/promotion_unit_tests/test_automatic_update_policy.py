@@ -6,7 +6,7 @@ import ast
 import importlib
 from io import StringIO
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import sys
 from types import SimpleNamespace
 
@@ -49,8 +49,65 @@ def policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
 
 def spec(*arguments: str, **context: str) -> SimpleNamespace:
     return SimpleNamespace(
-        backend="engine", argv=arguments, context=tuple(context.items()), killswitch_path="",
+        backend="engine", argv=arguments, context=tuple(context.items()), killswitch_path="", cwd="",
     )
+
+
+def test_relative_manager_policy_uses_retained_request_directory(
+    policy: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    caller = policy.home / "caller"
+    manager = caller / "manager"
+    manager.mkdir(parents=True)
+    path = manager / "config.toml"
+    path.write_text("[maintenance]\nautomatic = true\n", encoding="utf-8")
+    request = spec("--auto", WORKTREE_MANAGER_ROOT="manager")
+    request.cwd = str(caller)
+    monkeypatch.chdir(policy.home)
+    assert policy.owner.automatic_update_refusal(request) is None
+    path.write_text("[maintenance]\nautomatic = false\n", encoding="utf-8")
+    assert "maintenance.automatic is false" in policy.owner.automatic_update_refusal(request)
+    request.argv = ()
+    assert policy.owner.automatic_update_refusal(request) is None
+
+
+@pytest.mark.parametrize("cwd", ["", "relative-caller"])
+def test_relative_manager_policy_requires_absolute_request_directory(
+    policy: SimpleNamespace, cwd: str,
+) -> None:
+    request = spec("--auto", WORKTREE_MANAGER_ROOT="manager")
+    request.cwd = cwd
+    assert "absolute request cwd" in policy.owner.automatic_update_refusal(request)
+    request.argv = ()
+    assert policy.owner.automatic_update_refusal(request) is None
+
+
+def test_hold_reader_normalizes_missing_parent_segments(policy: SimpleNamespace) -> None:
+    path = policy.home / "hold.json"
+    path.write_text('{"active":true}', encoding="utf-8")
+    request = spec("--auto")
+    request.killswitch_path = str(policy.home / "missing/../hold.json")
+    assert "KillSwitch active" in policy.owner.automatic_update_refusal(request)
+    request.argv = ()
+    assert policy.owner.automatic_update_refusal(request) is None
+
+
+def test_drive_relative_manager_root_never_borrows_worker_drive(
+    policy: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class WindowsPolicyPath(PureWindowsPath):
+        def expanduser(self) -> WindowsPolicyPath:
+            return self
+
+        def read_text(self, **kwargs: object) -> str:
+            pytest.fail("unresolved drive-relative policy read")
+
+    monkeypatch.setitem(policy.owner.automatic_update_refusal.__globals__, "Path", WindowsPolicyPath)
+    request = spec("--auto", WORKTREE_MANAGER_ROOT="C:manager")
+    request.cwd = "D:/caller"
+    assert "cannot resolve against request cwd" in policy.owner.automatic_update_refusal(request)
+    request.argv = ()
+    assert policy.owner.automatic_update_refusal(request) is None
 
 
 def test_plain_update_never_reads_automation_policy(

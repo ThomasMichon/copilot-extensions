@@ -55,24 +55,24 @@ fi
 _py() { command -v python3 2>/dev/null || command -v python 2>/dev/null || true; }
 
 StateFile="${BOOTSTRAP_KILLSWITCH_STATE_FILE:-$HOME/.copilot-extensions/killSwitches/bootstrap-killswitch.json}"
-case "$StateFile" in
-  '~'*)
-    py="$(_py)"
-    if [ -z "$py" ]; then
-      echo "[bootstrap-killswitch] error: Python is required to resolve the state-file home override." >&2
-      exit 1
-    fi
+if [ -n "${BOOTSTRAP_KILLSWITCH_STATE_FILE:-}" ]; then
+  py="$(_py)"
+  if [ -n "$py" ]; then
     StateFile="$("$py" -c '
 from pathlib import Path
 import sys
 try:
-    print(Path(sys.argv[1]).expanduser())
-except RuntimeError as error:
+    path = Path(sys.argv[1]).expanduser()
+    print(path.parent.resolve() / path.name)
+except (OSError, RuntimeError) as error:
     print(f"[bootstrap-killswitch] invalid state-file override: {error}", file=sys.stderr)
     raise SystemExit(2)
 ' "$StateFile")"
-    ;;
-esac
+  elif [[ "$StateFile" == '~'* ]]; then
+    echo "[bootstrap-killswitch] error: Python is required to resolve the state-file home override." >&2
+    exit 1
+  fi
+fi
 LegacyStateFile=""
 if [ -z "${BOOTSTRAP_KILLSWITCH_STATE_FILE:-}" ]; then
   LegacyStateFile="$HOME/.copilot-extensions/bootstrap-killswitch.json"

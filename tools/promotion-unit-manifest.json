@@ -1,6 +1,11 @@
 {
     "profile": "copilot-extensions.promotion-units/v1",
     "nodes": [
+        "tools/promotion_unit_tests/test_automatic_update_policy.py::test_relative_manager_policy_uses_retained_request_directory",
+        "tools/promotion_unit_tests/test_automatic_update_policy.py::test_relative_manager_policy_requires_absolute_request_directory[]",
+        "tools/promotion_unit_tests/test_automatic_update_policy.py::test_relative_manager_policy_requires_absolute_request_directory[relative-caller]",
+        "tools/promotion_unit_tests/test_automatic_update_policy.py::test_hold_reader_normalizes_missing_parent_segments",
+        "tools/promotion_unit_tests/test_automatic_update_policy.py::test_drive_relative_manager_root_never_borrows_worker_drive",
         "tools/promotion_unit_tests/test_automatic_update_policy.py::test_plain_update_never_reads_automation_policy",
         "tools/promotion_unit_tests/test_automatic_update_policy.py::test_current_automatic_request_rechecks_strict_manager_policy[false]",
         "tools/promotion_unit_tests/test_automatic_update_policy.py::test_current_automatic_request_rechecks_strict_manager_policy['false']",
@@ -3826,11 +3831,11 @@
         "tools/promotion_unit_tests/test_bundle_inputs.py::TestBundleInputs::test_target_render_attributes_complete_context_without_approval"
     ],
     "sources": {
-        "tools/promotion_unit_tests/test_automatic_update_policy.py": "59c7d88bc331a4b78a467aed6ca953ebba09ce3095ac0a77941e26ffe0f9f6ec",
+        "tools/promotion_unit_tests/test_automatic_update_policy.py": "b74ebd3df59bd2368ad52ecc40f76d5ccaa4417c9e2120c7a7e7d0f72f334c5e",
         "worktree-manager/scripts/runtime_install.py": "29810d269ff7b9b491a01a079925dae2f88d6da5631cb8189b36ea9b485ab2b3",
         "worktree-manager/src/worktree_manager/update_driver_cli.py": "d3cb5a4b37460dfb10f5f0808c43fcbba23640512ca089db13a14e8863cb2a5a",
         "worktree-manager/src/worktree_manager/engine_acquisition_budget.py": "8184f8974fb1cacb06cdbaeb75bbe4a8995c813a5356e164f362e08da513085d",
-        "libs/update-driver/src/update_driver/core.py": "0aa11d8219055b8b46245f3e732e3bedc854a3bb329c3ece7d8a4f21ec273619",
+        "libs/update-driver/src/update_driver/core.py": "3a50209b723b7777b383e0e53de3fb7219c858350e69fc9972dd755221b987d5",
         "worktree-manager/src/worktree_manager/__init__.py": "1b1fc236627940a7b00bf58b1443547b3acb51441de40e3e5225e8dd10a10785",
         "worktree-manager/src/worktree_manager/manager_config.py": "c14c0da49474c721397be47bb0dc1c7760d18cf33082232e4f46746139640ec4",
         "worktree-manager/src/worktree_manager/source_config.py": "79b8c765b22e5d125f40f6ac5bd51f3682189a08066b8cdd8f68eb68d55d1f7e",

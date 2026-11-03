@@ -187,12 +187,19 @@ def automatic_update_refusal(spec: RequestSpec) -> str | None:
     cell = bool(context.get("COPILOT_EXTENSIONS_CONTEXT", "").strip())
     manager_root = context.get("WORKTREE_MANAGER_ROOT")
     if not cell or manager_root or spec.backend == "manager":
-        path = (Path(manager_root).expanduser() if manager_root else Path.home() / ".worktree-manager") / "config.toml"
         try:
+            root = Path(manager_root).expanduser() if manager_root else Path.home() / ".worktree-manager"
+            if not root.is_absolute():
+                if not spec.cwd or not Path(spec.cwd).is_absolute():
+                    return "Manager automatic-maintenance policy requires an absolute request cwd; nothing ran"
+                root = Path(spec.cwd) / root
+                if not root.is_absolute():
+                    return "Manager automatic-maintenance policy root cannot resolve against request cwd; nothing ran"
+            path = root / "config.toml"
             content = path.read_text(encoding="utf-8")
         except FileNotFoundError:
             content = None
-        except (OSError, UnicodeError) as error:
+        except (OSError, UnicodeError, RuntimeError) as error:
             return f"Manager automatic-maintenance policy unavailable: {error}; nothing ran"
         if content is not None:
             try:
@@ -213,13 +220,14 @@ def automatic_update_refusal(spec: RequestSpec) -> str | None:
     try:
         base = Path.home() / ".copilot-extensions"
         path = Path(override).expanduser() if override else base / "killSwitches" / "bootstrap-killswitch.json"
+        path = path.parent.resolve() / path.name
         if not override and not path.exists():
             path = base / "bootstrap-killswitch.json"
         with path.open("rb") as stream:
             data = stream.read(65537)
     except FileNotFoundError:
         return None
-    except OSError as error:
+    except (OSError, RuntimeError) as error:
         print(f"[bootstrap-killswitch] unreadable state; automatic update allowed: "
               f"{type(error).__name__}", file=sys.stderr)
         return None

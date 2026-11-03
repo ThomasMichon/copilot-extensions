@@ -208,3 +208,23 @@ admitted strict projects pass both static platform views; 41 projects remain
 pending. These results do not renew or consume an earlier exact-source native
 authorization, qualify Windows execution, or close independent source review,
 required CI, merge, rollout or the parent acceptance gate.
+
+The next review found two further path-selection gaps: a hold override with
+an absent intermediate directory and `..` could be written canonically but
+read as absent, and a relative saved Manager root could be read from a
+different worker directory. Readers now select the same normalized hold
+parent as mutations while retaining the unchanged leaf and linked-leaf refusal.
+Automatic admission resolves a relative Manager root against its retained
+absolute request cwd and visibly refuses an unusable cwd; manual admission is
+unchanged. The default Bash hook path adds no normalization subprocess.
+
+The corrected canonical controllers, Manager controls, actor-free policy
+functions and durable queue cohort passed 146 private-fixture Linux cases.
+A separate public Machines CLI regression passed as well. These include
+fresh reads before mutation, conditional clearing, linked-leaf preservation,
+and queued policy changes with a worker directory distinct from the caller.
+All 27 admitted strict projects pass both static platform views; 41 pending
+projects remain pending. The affected canonical copies and unchanged-revision
+MCP footprint digests were regenerated. Exact committed unit qualification,
+independent review/CI and any newly authorized native execution remain separate
+gates; no earlier exact-source native approval is renewed by these corrections.

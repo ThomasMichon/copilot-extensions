@@ -111,28 +111,72 @@ def test_conditional_mutation_checks_exact_audit_bytes_not_just_active(
     assert path.exists() is (action == "on")
 
 
-@pytest.mark.parametrize("controller", ["bash", "powershell"])
-@pytest.mark.parametrize("override", ["~/hold.json", "relative/hold.json"])
+@pytest.mark.parametrize("controller", ["bash", "powershell", "machines"])
+@pytest.mark.parametrize("override", ["~/hold.json", "relative/hold.json", "missing/../hold.json"])
 def test_readers_and_writers_select_the_same_normalized_override(
     tmp_path: Path, controller: str, override: str,
 ) -> None:
-    path = tmp_path / ("hold.json" if override.startswith("~") else override)
+    selected = tmp_path / ("hold.json" if override.startswith("~") else override)
+    path = selected.parent.resolve() / selected.name
 
     def execute(action: str) -> subprocess.CompletedProcess[str]:
         return run(command(controller, action), path, override=override, home=tmp_path, cwd=tmp_path)
 
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"active":true}', encoding="utf-8")
+    initial = execute("status")
+    assert initial.returncode == 0, (initial.stdout, initial.stderr)
+    assert json.loads(initial.stdout)["active"] is True
     activated = execute("on")
     assert activated.returncode == 0, (activated.stdout, activated.stderr)
     assert json.loads(path.read_bytes())["active"] is True
-    checked = execute("check")
-    assert checked.returncode == 0, (checked.stdout, checked.stderr)
-    assert "ACTIVE" in checked.stderr
+    if controller != "machines":
+        checked = execute("check")
+        assert checked.returncode == 0, (checked.stdout, checked.stderr)
+        assert "ACTIVE" in checked.stderr
     reported = execute("status")
     assert reported.returncode == 0, (reported.stdout, reported.stderr)
     assert json.loads(reported.stdout)["active"] is True
     cleared = execute("off")
     assert cleared.returncode == 0, (cleared.stdout, cleared.stderr)
     assert not path.exists()
+    if override.startswith("missing/"):
+        assert not (tmp_path / "missing").exists()
+
+
+@pytest.mark.parametrize("controller", ["bash", "powershell"])
+def test_normalized_override_retains_path_bound_confirmation(
+    tmp_path: Path, controller: str,
+) -> None:
+    path = tmp_path / "hold.json"
+    path.write_bytes(b'{"active":true,"reason":"retained audit hold"}')
+    expected = mutation.state_revision(path)
+    result = run(
+        command(controller, "off", expected), path,
+        override="missing/../hold.json", home=tmp_path, cwd=tmp_path,
+    )
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert not path.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink fixture; no Windows elevation")
+@pytest.mark.parametrize("controller", ["bash", "powershell", "machines"])
+@pytest.mark.parametrize("action", ["on", "off"])
+def test_normalized_override_does_not_follow_linked_state_leaf(
+    tmp_path: Path, controller: str, action: str,
+) -> None:
+    target = tmp_path / "retained.json"
+    baseline = b'{"active":true,"reason":"retained audit hold"}'
+    target.write_bytes(baseline)
+    path = tmp_path / "hold.json"
+    path.symlink_to(target)
+    result = run(
+        command(controller, action), path,
+        override="missing/../hold.json", home=tmp_path, cwd=tmp_path,
+    )
+    assert result.returncode != 0, (result.stdout, result.stderr)
+    assert "linked" in result.stderr.lower()
+    assert path.is_symlink() and target.read_bytes() == baseline
 
 
 @pytest.mark.parametrize("controller", ["bash", "powershell"])

@@ -76,7 +76,12 @@ one's copy you invoke.
 `BOOTSTRAP_KILLSWITCH_STATE_FILE` selects an explicit override. Both controllers
 expand a leading current-user `~` before reading or mutating that path, so
 `on`, `check`, `status` and `off` cannot disagree about which hold is active.
-Relative overrides use the calling filesystem directory. PowerShell requires
+Relative overrides use the calling filesystem directory. Readers and writers
+normalize the parent directory before selecting the unchanged leaf name, so
+an override such as `missing/../hold.json` addresses the same file even when
+`missing` does not exist. Mutations still refuse a linked state-file leaf;
+normalization does not follow it or bypass path-bound confirmation.
+PowerShell requires
 named-user `~other` overrides to be expanded explicitly rather than guessing
 another user's home. Read-only `capabilities` discovery does not resolve or
 inspect a state path, including an unsupported override.
