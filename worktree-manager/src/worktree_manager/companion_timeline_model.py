@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import deque
 from collections.abc import Iterable
+from copy import deepcopy
 from enum import StrEnum
 from hashlib import sha256
 import json
@@ -420,6 +421,35 @@ class TimelineWindow:
         if delta.position in self._cursors.get(delta.token.identity.source_key, set()):
             return self._result(False, ResultCode.CURSOR_MISMATCH, "Delta returned a previously consumed cursor.")
         return self._commit(delta.events, replace(state, position=delta.position))
+
+    def recover_snapshot(
+        self, snapshot: TimelineSnapshot, replay: tuple[LiveDelta, ...],
+    ) -> WindowResult:
+        """Atomically restore an unavailable source through a bounded exact replay."""
+        state = self._source(snapshot.token)
+        if (
+            state is None or state.availability is not Availability.UNAVAILABLE
+            or state.position is None or snapshot.availability is not Availability.OBSERVED
+            or not isinstance(replay, tuple) or not 1 <= len(replay) <= 4
+            or any(not isinstance(delta, LiveDelta) or delta.token != snapshot.token for delta in replay)
+            or replay[0].base != state.position or replay[-1].position != snapshot.position
+        ):
+            return self._result(False, ResultCode.CURSOR_MISMATCH, "Recovery requires a fresh snapshot and its exact retained-boundary replay.")
+        candidate = deepcopy(self)
+        key = snapshot.token.identity.source_key
+        candidate.sources[key] = replace(state, availability=Availability.OBSERVED)
+        for delta in replay:
+            result = candidate.apply_delta(delta)
+            if not result.applied:
+                break
+        else:
+            result = candidate.apply_snapshot(snapshot)
+        if not result.applied:
+            if key in candidate.reconciliation_required:
+                return self._integrity_gap(key, result.reason)
+            return self._result(False, result.code, result.reason)
+        self.__dict__.update(candidate.__dict__)
+        return result
 
     def request_history(self, token: SourceToken, before: SourcePosition) -> WindowResult:
         state = self._source(token)

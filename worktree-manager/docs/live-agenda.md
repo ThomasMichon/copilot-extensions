@@ -159,6 +159,69 @@ Cancellation after a health child completes is a normal subscription return,
 so Refresh can join that worker. An unexpected interruption without a cancelled
 owner is an explicit unavailable error, not a silent cancellation.
 
+## Optional rich Timeline history
+
+The Timeline view reuses that same permanent Agenda subscription. Admitted
+snapshot/update callbacks notify one coalescing, in-process demand task; there
+is no second coarse feed, agenda-file timer, publisher-supplied command or
+per-event child. Summary remains the initial view. Hidden Timeline demand
+retires its optional point/page reads without stopping the Agenda tab's feed.
+
+For an observed store, Manager probes the selected engine interpreter for the
+actual `worktree-data-v1` declaration before dispatching `worktree-data-read`.
+The exact store-filtered inventory must contain one matching agenda placement.
+Project, repository, worktree, incarnation, placement generation and allocated/
+unvalidated/non-authoritative qualifiers remain fenced across later reads.
+Unregistered, old, ambiguous, changed or unavailable placement is a visible
+optional-feature failure; Manager never allocates a store or searches for one.
+
+The shared activation resolver selects exactly one enabled, identity-verified
+efforts payload for the current checkout, without scanning other projects.
+An isolated Manager-owned interpreter invokes its ordinary absolute
+`agenda_history_cli.py` path after checking the actual rich-reader declaration.
+It imports that payload's own scripts only inside the child, never into
+Manager or the worktree runtime. Reader paths do not come from agenda content.
+Missing or unsupported readers leave the coarse Agenda view usable.
+
+The reader must match the published worktree/store and supply a supported
+format-2 accepted-operation history. Reader revisions cannot precede the
+publication or retained reader evidence; equal revisions must agree on commit
+time. A reader ahead of publication is accepted-operation evidence, not proof
+that its current projection was delivered. Store format and placement generation
+do not establish a restore epoch or prove that an independently copied store
+never rewound.
+
+History uses the owner's canonical cursors, immutable accepted-operation IDs
+and timestamps. Historical caller sessions remain reported actors, not the
+selected head or authenticated execution authority. Completeness stays partial
+and scoped to accepted planning operations. Large raw results retain a bounded,
+explicit omission reference rather than silently becoming complete display
+data. Backward pages do not consume the live publication boundary.
+
+Each notification starts a bounded latest page. At most four owner pages bridge
+a coalesced live jump; an unbridgeable boundary refuses visibly instead of
+fabricating adjacency or discarding retained evidence. Closing and reopening
+Companion creates a fresh partial viewer window; it neither deletes canonical
+history nor claims the intervening range was loaded. A transiently unavailable
+source recovers through a fresh latest snapshot and an exact bounded replay,
+committed atomically in the viewer only after the whole replay passes its
+cursor/content/budget fences. It never promotes a historical page into a current
+snapshot or reactivates partial replay facts after a failure. The existing
+timeline model retains immutable-content and request-epoch fences. Owned reads
+use the existing bounded JSONL/process cleanup primitives; hide, reload and
+unmount join their cancellation. Failed retirement fences replacement reads.
+The rich-source status occupies a fixed-height area so changing diagnostics do
+not move a browsing anchor.
+
+`tests/test_companion_agenda_rich.py` joins actual allocation/discovery commands,
+efforts reader processes and Textual presentation. Its separate whole-chain
+case uses real core commit, version-2 publisher negotiation, resident,
+authenticated held CLI, the single Manager subscription and rich reader. It
+also checks backward/catch-up boundaries, browsing anchors, hide/reopen/reload,
+late callbacks, canonical head clearing and birth-qualified cancellation of an
+owned stalled point process. These are isolated source fixtures, not installed
+or native Windows acceptance, legacy rescue, collection or archive readback.
+
 ## Source checks and deployment boundary
 
 From the repository root, run through the bounded supervisor and existing

@@ -171,6 +171,9 @@ class SubwayTimeline(ScrollView, can_focus=True):
     def apply_delta(self, delta: LiveDelta) -> WindowResult:
         return self._change(lambda: self.window.apply_delta(delta))
 
+    def recover_snapshot(self, snapshot: TimelineSnapshot, replay: tuple[LiveDelta, ...]) -> WindowResult:
+        return self._change(lambda: self.window.recover_snapshot(snapshot, replay))
+
     def prepend_page(self, page: HistoryPage) -> WindowResult:
         return self._change(lambda: self.window.prepend_page(page))
 
@@ -381,6 +384,9 @@ class CompanionTimelinePanel(Vertical):
 
     def apply_delta(self, delta: LiveDelta) -> WindowResult:
         return self.query_one(SubwayTimeline).apply_delta(delta)
+
+    def recover_snapshot(self, snapshot: TimelineSnapshot, replay: tuple[LiveDelta, ...]) -> WindowResult:
+        return self.query_one(SubwayTimeline).recover_snapshot(snapshot, replay)
 
     def prepend_page(self, page: HistoryPage) -> WindowResult:
         return self.query_one(SubwayTimeline).prepend_page(page)
