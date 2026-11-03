@@ -182,6 +182,9 @@ def test_failed_fallback_release_preserves_deadline_and_custody_for_retry(retire
     assert grace._path(r.root, r.predecessor).exists() and retirements._records(r.root)
     assert routing.read_table(r.directory)["previous"] == r.old.to_dict()
     assert len(r.calls) == int(forced)
+    with pytest.raises(OSError, match="route release failed"):
+        retirements.reconcile(r.root)
+    assert grace._path(r.root, r.predecessor).exists() and retirements._records(r.root)
     monkeypatch.setattr(routing, "release_previous_guarded", release)
     resident.refresh()
     assert not resident.pending and resident.error is None
@@ -190,6 +193,63 @@ def test_failed_fallback_release_preserves_deadline_and_custody_for_retry(retire
     assert routing.read_table(r.directory)["active"] == r.new.to_dict()
     assert "previous" not in routing.read_table(r.directory)
     assert len(r.calls) == int(forced)
+
+
+def test_exit_between_resident_passes_keeps_custody_until_route_cleanup(retirement, monkeypatch):
+    r = retirement
+    grace.arm(r.root, ready=lambda: True)
+    reconcile = grace.reconcile
+
+    def exit_after_grace(root):
+        reconcile(root)
+        r.exited.add(r.old.pid)
+
+    monkeypatch.setattr(grace, "reconcile", exit_after_grace)
+    release = routing.release_previous_guarded
+
+    def failed(*a, **kw):
+        raise OSError("fixture route release failed")
+
+    monkeypatch.setattr(routing, "release_previous_guarded", failed)
+    resident = retirements.ResidentRetirements(r.root)
+    resident.refresh()
+    assert resident.pending and "route release failed" in resident.error
+    assert grace._path(r.root, r.predecessor).exists() and retirements._records(r.root)
+    monkeypatch.setattr(routing, "release_previous_guarded", release)
+    resident.refresh()
+    assert not resident.pending and not retirements._records(r.root)
+    assert "previous" not in routing.read_table(r.directory) and r.calls == []
+
+
+@pytest.mark.parametrize("supported", [False, True])
+def test_incoming_health_selects_grace_or_bounded_legacy_cleanup(retirement, monkeypatch, supported):
+    from agent_worktrees import status_monitor_health as health
+
+    r = retirement
+    monkeypatch.setattr(health.diagnostics, "process_start_time", r.identities.get)
+    capabilities = [retirements.CAPABILITY, recovery.CAPABILITY]
+    if supported:
+        capabilities.append(grace.CAPABILITY)
+    observed = {
+        "status": "ready", "pid": r.new.pid, "process_start_time": r.new.process_start_time,
+        "runtime_generation": "a" * 32, "capabilities": capabilities,
+    }
+    captured = {"discarded-previous-health"}
+    assert health.check_successor(
+        r.new.client_host, r.new.port, lambda _url: SimpleNamespace(health=lambda: observed),
+        require_async_retirement=True, expected_identity=(r.new.pid, r.new.process_start_time),
+        supported_capabilities=captured,
+    )
+    calls = []
+    cleanup = grace.retirement_callback(
+        lambda old: calls.append(old) or {"exit_confirmed": True}, captured,
+    )
+    assert cleanup(r.old) == (
+        {"exit_confirmed": False, "reason": "successor-resident-grace-pending"}
+        if supported else {"exit_confirmed": True}
+    )
+    assert calls == ([] if supported else [r.old])
+    assert captured == set(capabilities)
 
 
 @pytest.mark.parametrize("changed", ["active", "previous", "absent"])

@@ -77,7 +77,7 @@ def test_native_installer_keeps_incoming_after_failed_predecessor_recovery(provi
 
 
 @pytest.mark.parametrize("old_mode", ["old-provider", "health-timeout"])
-@pytest.mark.parametrize("new_mode", ["candidate", "candidate-legacy"])
+@pytest.mark.parametrize("new_mode", ["candidate", "candidate-legacy", "candidate-pre-grace"])
 def test_native_async_installer_falls_forward_only_after_successor_serves(
     tmp_path, monkeypatch, old_mode, new_mode,
 ):
@@ -106,6 +106,20 @@ def test_native_async_installer_falls_forward_only_after_successor_serves(
                 assert data["process"].poll() is None and new_data["process"].poll() is not None
                 assert recovery.active_endpoint(root) == old
                 assert "previous" not in routing.read_table(root)
+            elif new_mode == "candidate-pre-grace":
+                assert result["ok"] and result["committed"] and not result["rolled_back"], result
+                assert result["predecessor_cleanup"]["exit_confirmed"] is True, result
+                assert result["predecessor_cleanup"]["route_released"] is True
+                assert data["process"].wait(timeout=5) is not None
+                assert new_data["process"].poll() is None
+                assert recovery.active_endpoint(root).pid == new_route.pid
+                assert "previous" not in routing.read_table(root)
+                health = control.ControlClient(new_route.base_url, token=data["token"]).health()
+                assert health["published"] and health["repositories"]["admitting"] is True
+                from agent_worktrees import runtime_monitor_retirements as retirements
+
+                assert not retirements.reconcile(root.parent)
+                assert not retirements._records(root.parent)
             else:
                 assert result["ok"] and result["committed"] and not result["rolled_back"], result
                 assert result["predecessor_cleanup"] == {

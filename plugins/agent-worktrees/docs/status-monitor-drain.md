@@ -27,6 +27,12 @@ reported without rolling back the healthy incoming monitor. Runtime-reference an
 dev-claim settlement remains with the existing retirement lifecycle, not a new
 reaper. Unknown native identity, changed routes and unsupported incoming
 capabilities still refuse their respective operation.
+Deferral requires `status-monitor-retirement-grace-v1` in the incoming
+preparation health. Restoring an older, pre-grace runtime retains the existing
+bounded native cleanup after successor publication instead of assigning that
+runtime an unsupported deadline. Canonical custody settlement, including direct
+installer callers, first completes any matching grace-route cleanup; failure
+retains the original record and runtime references for retry.
 
 ## What actually happens
 

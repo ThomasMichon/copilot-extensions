@@ -14,6 +14,7 @@ from zdd import breadcrumb, diagnostics, routing
 from . import locks, runtime_monitor_retirements as retirements
 
 GRACE_SECONDS = 300.0
+CAPABILITY = "status-monitor-retirement-grace-v1"
 
 
 def _endpoint(raw) -> routing.Endpoint | None:
@@ -116,6 +117,31 @@ def _release_previous(root: Path, grace: dict) -> None:
         raise RuntimeError("Monitor retirement fallback release remains pending")
 
 
+def settle_exited(root: Path, predecessor: dict) -> None:
+    """Settle grace before custody; caller holds inventory and proved native exit."""
+    path = _path(root, predecessor)
+    grace = _read(path)
+    if grace is None:
+        return
+    if (
+        predecessor["state"] != "retiring"
+        or (predecessor["pid"], predecessor["start"])
+        != (grace["old"]["pid"], grace["old"]["process_start_time"])
+    ):
+        raise RuntimeError("Monitor retirement grace lacks its original committed custody")
+    _release_previous(root, grace)
+    path.unlink()
+
+
+def retirement_callback(retire, supported_capabilities: set[str]):
+    def cleanup(old):
+        if CAPABILITY in supported_capabilities:
+            return {"exit_confirmed": False, "reason": "successor-resident-grace-pending"}
+        return retire(old)
+
+    return cleanup
+
+
 def _force(root: Path, path: Path, grace: dict, predecessor: dict) -> None:
     from . import status_monitor_cutover as cutover
     from . import status_monitor_recovery_contract as recovery
@@ -185,7 +211,6 @@ def reconcile(root: Path, *, clock=time.time) -> None:
             with retirements.tracking._RecordLock(inventory / "inventory", require_sidecar=True):
                 if dict(retirements._records(root)).get(_record_path) != predecessor or _read(path) != grace:
                     continue
-                _release_previous(root, grace)
-                path.unlink()
+                settle_exited(root, predecessor)
         elif clock() - grace["ready_at"] >= GRACE_SECONDS:
             _force(root, path, grace, predecessor)

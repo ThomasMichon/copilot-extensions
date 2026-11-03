@@ -54,11 +54,16 @@ fixture changes on PR branches. Both jobs also run the focused
 retirement/preparation/legacy custody and grace/handover/completion controls.
 These include early predecessor exit and retryable fallback-route release;
 custody remains until guarded route cleanup settles.
-Windows additionally runs the six finite Job/native-identity grace and
+Direct cleanup after route-release failure and exit between resident passes
+exercise the same canonical gate. Incoming preparation-health controls
+distinguish grace support from asynchronous retirement alone.
+Windows additionally runs the eight finite Job/native-identity grace and
 asynchronous-installer cases; Linux native expiry is exercised by the real
 installer case above, not inferred from skipped Windows controls. The finite
 native grace controls assert authenticated health-handler entry before crediting
-old-peer timeout. All packets
+old-peer timeout. The native transition cases include a newer controller and
+pre-grace successor, as used when restoring a retained release, with bounded
+native predecessor cleanup and settlement instead of unsupported deferral. All packets
 retain their 180-second subsuite, 600-second aggregate and existing item bounds.
 The real-installer packet and twenty-minute job bounds are unchanged.
 This is a focused smoke lane, not an expansion of required unit-only CI.

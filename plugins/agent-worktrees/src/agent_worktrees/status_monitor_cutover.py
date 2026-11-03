@@ -836,6 +836,7 @@ def activate_after_update(
             summary.update(action="refused", reason=reason, result={"ok": False, "error": reason})
             return summary
         prepared_health = None
+        successor_capabilities: set[str] = set()
 
         def spawn(port: int):
             nonlocal prepared_health
@@ -843,7 +844,9 @@ def activate_after_update(
             if asynchronous_retirement:
                 from .status_monitor_health import prepared_check
 
-                prepared_health = prepared_check(handle, routing_dir(), make_client)
+                prepared_health = prepared_check(
+                    handle, routing_dir(), make_client, supported_capabilities=successor_capabilities,
+                )
             if spawned_handles is not None:
                 spawned_handles.append(handle)
                 print(f"Monitor transition: passive spawned pid={getattr(handle, 'pid', None)} port={port}", flush=True)
@@ -851,9 +854,8 @@ def activate_after_update(
 
         published_successor = None
         if asynchronous_retirement and options.get("retire_failed_predecessor") is not None:
-            options["retire_failed_predecessor"] = lambda _old: {
-                "exit_confirmed": False, "reason": "successor-resident-grace-pending",
-            }
+            from .runtime_monitor_grace import retirement_callback
+            options["retire_failed_predecessor"] = retirement_callback(options["retire_failed_predecessor"], successor_capabilities)
         def activate_successor(endpoint: routing.Endpoint) -> None:
             nonlocal retirement_complete, published_successor
             if reserved:
@@ -863,9 +865,6 @@ def activate_after_update(
             published_successor = endpoint
             if make_client(endpoint.base_url).promote().get("adopted") is not True:
                 raise ValueError("status-monitor successor refused promotion")
-
-        def healthy_successor(host: str, port: int) -> bool:
-            return prepared_health is not None and prepared_health(host, port)
 
         def serving_successor(host: str, port: int) -> bool:
             return published_successor is not None and guarded_recovery.successor_healthy(
@@ -877,7 +876,8 @@ def activate_after_update(
             bind=_BIND,
             version=None,
             spawn_passive=spawn,
-            health_check=healthy_successor if asynchronous_retirement else health_check,
+            health_check=(lambda host, port: prepared_health is not None and prepared_health(host, port))
+            if asynchronous_retirement else health_check,
             predecessor_health_check=predecessor_health_check,
             make_client=make_client,
             pick_free_port=pick_free_port,

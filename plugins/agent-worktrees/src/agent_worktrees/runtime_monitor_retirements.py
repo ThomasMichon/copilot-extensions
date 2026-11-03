@@ -434,6 +434,9 @@ def reconcile(root: Path, *, runtime: ModuleType | None = None, cleanup: bool = 
                     _retain(root, record, runtime if runtime is not None else _runtime())
                 pending = _demand(record, exited) or pending
                 continue
+            from . import runtime_monitor_grace
+
+            runtime_monitor_grace.settle_exited(root, record)
             if record["slot"] is not None:
                 helper = runtime if runtime is not None else _runtime()
                 claim = record["release_claim"] if record["state"] == "retiring" else None

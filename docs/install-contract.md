@@ -5290,6 +5290,11 @@ and a lost reply is not replayed under the same successor identity.
 The receiver checks both native identities and current routing; observation is
 not readiness, drain permission or an installation prerequisite. Independent
 ready-successor observation remains the old resident's drain trigger.
+Deferring failed outgoing cleanup requires the incoming preparation health's
+`status-monitor-retirement-grace-v1` capability. A newer controller restoring
+a retained pre-grace successor instead keeps the existing bounded native cleanup
+after verified successor publication; asynchronous retirement support alone
+does not promise a resident grace loop.
 Only after the successor serves, it arms a durable five-minute grace interval.
 The deadline is subordinate to the original committed retirement record and
 stored separately so legacy residents still read their existing custody schema.
@@ -5299,7 +5304,9 @@ route authority, checks its own serving readiness and the exact predecessor
 birth again, then attempts native termination and releases only that matching
 previous endpoint reservation. Failed cleanup remains explicit while the new generation
 stays authoritative; canonical runtime references and dev claims remain with
-the existing resident retirement reconciler until positive native exit.
+the existing retirement reconciler until positive native exit and matching
+grace-route cleanup. That canonical settlement gate applies to direct installer
+callers as well as the resident loop, including exit between reconciliation passes.
 An unrouted, identity-unknown or changed owner remains an explicit refusal.
 This fallback does not weaken the incoming runtime's preparation contract.
 The existing explicit cold-retirement helper retains its held cutover guard,
