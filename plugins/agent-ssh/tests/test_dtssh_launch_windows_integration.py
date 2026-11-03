@@ -12,6 +12,12 @@ exits and its Job is closed, the watchdog must keep ticking, running a console
 child on every tick, with no visible window or foreground change across two
 cycles. Fixture processes are tracked by pid handle and cleaned up only by
 that identity.
+
+The same flag runs the per-user logon task path: the real
+``Register-LogonTask`` registers a disposable current-user task (no
+elevation) whose runs start the synthetic watchdog; each run must be this
+user in this desktop session, tick a console child, and surface no window or
+foreground change. The task is removed afterwards.
 """
 
 from __future__ import annotations
@@ -61,7 +67,9 @@ $deadline = (Get-Date).AddSeconds(90)
 while ((Get-Date) -lt $deadline -and -not (Test-Path -LiteralPath $stop)) {
     & cmd.exe /c 'exit 0'
     $ticks++
-    $line = @{ pid = $PID; ticks = $ticks; cwd = (Get-Location).ProviderPath } |
+    $line = @{ pid = $PID; ticks = $ticks; cwd = (Get-Location).ProviderPath
+               user = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+               session = (Get-Process -Id $PID).SessionId } |
         ConvertTo-Json -Compress
     Add-Content -LiteralPath $status -Value $line -Encoding utf8
     Start-Sleep -Milliseconds 100
@@ -73,6 +81,12 @@ def _function(name: str) -> str:
     text = SCRIPT.read_text(encoding="utf-8-sig")
     start = text.index(f"function {name} {{")
     return text[start:text.index("\nfunction ", start + 1)]
+
+
+def _system_env() -> dict[str, str]:
+    """The environment without the test runner's PSModulePath, so pwsh rebuilds its
+    default one and loads Windows' own modules (ScheduledTasks), as an installer does."""
+    return {k: v for k, v in os.environ.items() if k.upper() != "PSMODULEPATH"}
 
 
 def _win32():
@@ -267,3 +281,89 @@ def test_wmi_launch_outlives_a_no_breakaway_caller_job_without_windows(tmp_path)
         time.sleep(0.5)
     assert observer.surfaced == {}, f"visible windows surfaced: {observer.surfaced}"
     assert observer.focus == {}, f"foreground transitions: {observer.focus}"
+
+
+def _task_cycle(tmp_path: Path, cycle: int, pwsh: str, task: str, kernel32) -> None:
+    """Run the disposable logon task once: its synthetic watchdog must run as this
+    user in this desktop session, tick a console child, and exit on request."""
+    import subprocess
+
+    state = tmp_path / f"task-state-{cycle}"
+    state.mkdir()
+    (tmp_path / "state-dir.txt").write_text(str(state), encoding="utf-8")
+    subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-Command",
+                    f"Start-ScheduledTask -TaskName '{task}'"],
+                   check=True, timeout=60, creationflags=_CREATE_NO_WINDOW, env=_system_env())
+    status_path = state / "status.jsonl"
+    handle = None
+    try:
+        first = _wait(lambda: (s := _latest(status_path)) and s["ticks"] >= _CYCLES and s,
+                      60, "the task's watchdog ticks")
+        handle = kernel32.OpenProcess(_SYNCHRONIZE | _QUERY | _PROCESS_TERMINATE, False, first["pid"])
+        assert handle, "the task's watchdog exited before it could be observed"
+        session = wintypes.DWORD()
+        assert kernel32.ProcessIdToSessionId(os.getpid(), ctypes.byref(session))
+        me = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-Command",
+                             "[Security.Principal.WindowsIdentity]::GetCurrent().User.Value"],
+                            capture_output=True, text=True, check=True, timeout=60,
+                            creationflags=_CREATE_NO_WINDOW, env=_system_env()).stdout.strip()
+        assert first["user"] == me, "the logon task must run as the installing user"
+        assert first["session"] == session.value, "the logon task must run in the user's desktop session"
+        (state / "stop").write_text("", encoding="utf-8")
+        assert kernel32.WaitForSingleObject(handle, 30000) == _WAIT_OBJECT_0
+    finally:
+        if handle:
+            if kernel32.WaitForSingleObject(handle, 0) != _WAIT_OBJECT_0:
+                kernel32.TerminateProcess(handle, 1)
+                kernel32.WaitForSingleObject(handle, 5000)
+            kernel32.CloseHandle(handle)
+
+
+def test_logon_task_registers_unelevated_and_runs_windowless_in_the_users_session(tmp_path):
+    """The installer's real Register-LogonTask, for a disposable task that runs a
+    synthetic watchdog: registration needs no elevation, and each run starts the
+    watchdog as this user in this session with no window or foreground change."""
+    import subprocess
+    import uuid
+
+    pwsh = shutil.which("pwsh")
+    if pwsh is None:
+        pytest.skip("PowerShell 7 (pwsh) is not available")
+    user32, kernel32, callback = _win32()
+    kernel32.ProcessIdToSessionId.argtypes = [wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
+    task = f"agent-ssh-dtssh-host-test-{uuid.uuid4().hex[:12]}"
+    install = tmp_path / "install"
+    install.mkdir()
+    watchdog = tmp_path / "watchdog.ps1"
+    # The task's arguments are fixed at registration, so each run reads its state dir from a file.
+    watchdog.write_text(
+        _WATCHDOG.replace("param([string]$State)",
+                          "param([string]$StateFile)\n$State = (Get-Content -LiteralPath $StateFile -Raw).Trim()"),
+        encoding="utf-8",
+    )
+    register = (
+        "$ErrorActionPreference = 'Stop'\n"
+        f"$InstallDir = '{install}'\n$LogonTaskName = '{task}'\n"
+        + _function("Register-LogonTask") + "\n" + _function("Get-LogonTask") + "\n"
+        + f"if (-not (Register-LogonTask -Execute (Join-Path $env:SystemRoot 'System32\\conhost.exe') "
+        + f"-Argument '--headless \"{pwsh}\" -NoProfile -NonInteractive -ExecutionPolicy Bypass "
+        + f"-File \"{watchdog}\" \"{tmp_path / 'state-dir.txt'}\"')) {{ exit 3 }}\n"
+    )
+    try:
+        registered = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-Command", register],
+                                    capture_output=True, text=True, timeout=120,
+                                    creationflags=_CREATE_NO_WINDOW, env=_system_env())
+        assert registered.returncode == 0, (
+            "Register-LogonTask must register a current-user logon task without elevation: "
+            + (registered.stdout + registered.stderr).strip()
+        )
+        with _Observer(user32, kernel32, callback) as observer:
+            for cycle in range(_CYCLES):
+                _task_cycle(tmp_path, cycle, pwsh, task, kernel32)
+            time.sleep(0.5)
+        assert observer.surfaced == {}, f"visible windows surfaced: {observer.surfaced}"
+        assert observer.focus == {}, f"foreground transitions: {observer.focus}"
+    finally:
+        subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-Command",
+                        f"Unregister-ScheduledTask -TaskName '{task}' -Confirm:$false -ErrorAction SilentlyContinue"],
+                       timeout=60, creationflags=_CREATE_NO_WINDOW, env=_system_env())
