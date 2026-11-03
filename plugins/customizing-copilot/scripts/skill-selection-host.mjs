@@ -31,6 +31,14 @@ export function readContentDelivered(body, content) {
         && contains(message.output ?? message.content));
 }
 
+export function recordReadDelivery(body, outputs, delivered) {
+    const pending = [...outputs].filter(([digest]) => !delivered.has(digest));
+    if (pending.some(([, content]) => !readContentDelivered(body, content))) {
+        throw new Error("acquired source content was not delivered inline to the selector");
+    }
+    for (const [digest] of pending) delivered.add(digest);
+}
+
 /** Replayed accounting identities count once; contradictory duplicates are errors. */
 export function selectionUsage() {
     const calls = new Map();
@@ -67,7 +75,8 @@ export function selectionUsage() {
 
 /** This guard belongs only to a newly owned client, never to the requesting runtime. */
 export function selectionRequestHandler(Base, { owned, profile, requests, maxRequests = 16, live = true,
-    syntheticOnly = () => false, seedRequests = [], inspectReadDelivery = () => {}, readParameters }) {
+    syntheticOnly = () => false, seedRequests = [], inspectReadDelivery = () => {}, readParameters,
+    isCancelled = () => false }) {
     let attempts = 0, metadata = 0;
     const seed = syntheticHandler(Base, owned, seedRequests);
     return new class extends Base {
@@ -76,12 +85,13 @@ export function selectionRequestHandler(Base, { owned, profile, requests, maxReq
                 if (++metadata > 4) throw new Error("selector model-metadata allowance exhausted");
                 return super.sendRequest(request, context);
             }
-            if (!owned.has(context.sessionId) || context.signal.aborted) {
+            if (!owned.has(context.sessionId) || context.signal.aborted || isCancelled()) {
                 throw new Error("unowned or cancelled selector request refused");
             }
             if (syntheticOnly()) return seed.sendRequest(request.clone(), context);
             if (++attempts > maxRequests) throw new Error("selector request allowance exhausted");
             const body = await request.clone().json();
+            if (context.signal.aborted || isCancelled()) throw new Error("selector cancelled during request inspection");
             const inspection = canonicalRequestEvidence(body, profile);
             if (readParameters) {
                 const parameters = (body.tools?.[0]?.function ?? body.tools?.[0])?.parameters;
@@ -152,15 +162,8 @@ export async function runOwnedSelection({ sdk, root, runtimePath, profile, snaps
             requestHandler: selectionRequestHandler(sdk.CopilotRequestHandler,
                 { owned, profile, requests, maxRequests, live, syntheticOnly: () => seeding, seedRequests,
                     readParameters: selectionReadParameters(snapshot),
-                    inspectReadDelivery(body) {
-                        for (const [digest, content] of readOutputs) {
-                            if (delivered.has(digest)) continue;
-                            if (!readContentDelivered(body, content)) {
-                                throw new Error("acquired source content was not delivered inline to the selector");
-                            }
-                            delivered.add(digest);
-                        }
-                    } }),
+                    isCancelled: () => cancelled || signal?.aborted,
+                    inspectReadDelivery: body => recordReadDelivery(body, readOutputs, delivered) }),
         });
         // Acquisitions must settle before cleanup: a deadline race can orphan a late runtime/session.
         await client.start();

@@ -57,10 +57,11 @@ export async function runSelectionEvaluation({ sdk, root, runtimePath, profile, 
             if (request.method === "GET" && /\/models\/?$/.test(new URL(request.url).pathname)) {
                 return super.sendRequest(request, context);
             }
-            if (signal?.aborted || context.sessionId !== session?.sessionId || report.requests.length >= 8) {
+            if (signal?.aborted || context.signal.aborted || context.sessionId !== session?.sessionId || report.requests.length >= 8) {
                 throw new Error("unowned, cancelled or excess evaluation request refused");
             }
             const body = await request.clone().json();
+            if (signal?.aborted || context.signal.aborted) throw new Error("evaluation cancelled during request inspection");
             const messages = body.messages ?? body.input ?? [];
             const system = [body.instructions, ...messages.filter(item => ["system", "developer"].includes(item.role))
                 .map(item => typeof item.content === "string" ? item.content
@@ -114,6 +115,7 @@ export async function runSelectionEvaluation({ sdk, root, runtimePath, profile, 
         if (signal?.aborted || !matches(report.resolvedAfter) || usageError) {
             throw usageError ?? new Error("cancelled or mismatched independent evaluation");
         }
+        if (!report.requests.length) throw new Error("independent evaluator request evidence missing");
         const calls = usage.summary().calls;
         if (!calls.length || calls.some(call => call.model !== profile.model || call.reasoningEffort !== profile.reasoningEffort)) {
             throw new Error("actual independent evaluator usage profile unavailable or mismatched");

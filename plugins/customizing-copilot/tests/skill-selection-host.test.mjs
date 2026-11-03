@@ -4,7 +4,8 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { selectionAgent, selectionSnapshot, selectionReadParameters } from "../scripts/skill-selection-contract.mjs";
-import { runOwnedSelection, selectionRequestHandler, selectionUsage, readContentDelivered } from "../scripts/skill-selection-host.mjs";
+import { runOwnedSelection, selectionRequestHandler, selectionUsage, readContentDelivered,
+    recordReadDelivery } from "../scripts/skill-selection-host.mjs";
 import { validateEvaluation, runSelectionEvaluation } from "../scripts/skill-selection-evaluation.mjs";
 
 const profile = { model: "fixture-candidate", reasoningEffort: "medium", contextTier: "long_context" };
@@ -35,6 +36,16 @@ test("source delivery must be actual tool content, not a read receipt, user quot
         output: "Output saved to a file; use a filesystem tool to read it." }] }, content), false);
     assert.equal(readContentDelivered({ input: [{ type: "function_call_output",
         output: JSON.stringify({ contentDigest: "receipt-only" }) }] }, content), false);
+});
+test("rejected partial source delivery cannot accumulate false coverage across retries", () => {
+    const outputs = new Map([["a", "Complete source A"], ["b", "Complete source B"]]), delivered = new Set();
+    const input = values => ({ input: values.map(content => ({ type: "function_call_output", output: content })) });
+    for (const content of outputs.values()) {
+        assert.throws(() => recordReadDelivery(input([content]), outputs, delivered), /not delivered/);
+        assert.equal(delivered.size, 0);
+    }
+    recordReadDelivery(input([...outputs.values()]), outputs, delivered);
+    assert.deepEqual([...delivered], ["a", "b"]);
 });
 test("usage deduplicates replay without inventing a price and rejects contradictory accounting", () => {
     const usage = selectionUsage();
@@ -94,7 +105,7 @@ test("owned request guard checks effective profile and tools without consuming t
 
 function fakeSdk({ configMismatch = false, usageMismatch = false, malformed = false,
     stopError = false, hang = false, signal, toolFailure = false, forkMismatch = false,
-    acquisition, stopGate } = {}) {
+    acquisition, stopGate, bodyInspection, bypassHandler = false, requestSignal } = {}) {
     const observed = { stops: 0, aborts: 0, sends: 0, forwards: 0 };
     const histories = new Map();
     let serial = 0;
@@ -133,13 +144,20 @@ function fakeSdk({ configMismatch = false, usageMismatch = false, malformed = fa
                         signal.abort();
                         return new Promise(() => {});
                     }
-                    await thisClient.options.requestHandler.sendRequest(
-                        new Request("https://example.invalid/responses", { method: "POST", body: JSON.stringify(body({
+                    if (!bypassHandler) {
+                        const outbound = new Request("https://example.invalid/responses", { method: "POST", body: JSON.stringify(body({
                             instructions: config.customAgents[0].prompt,
                             tools: config.tools.map(tool => ({ type: "function", name: tool.name, parameters: tool.parameters })),
                             input: [{ role: "user", content: prompt }],
-                        })) }),
-                        { sessionId: id, signal: new AbortController().signal });
+                        })) });
+                        if (bodyInspection) {
+                            const clone = outbound.clone.bind(outbound);
+                            outbound.clone = () => ({ json: async () => { await bodyInspection(); return clone().json(); } });
+                        }
+                        observed.lastRequest = thisClient.options.requestHandler.sendRequest(outbound,
+                            { sessionId: id, signal: requestSignal ?? new AbortController().signal });
+                        await observed.lastRequest;
+                    }
                     history.push({ id: `user-${++serial}`, type: "user.message", data: { content: prompt } },
                         { id: `assistant-${++serial}`, type: "assistant.message", data: { content: "fixture reply" } });
                     if (toolFailure) await config.tools[0].handler({ skill: "fixture-skill" }, {
@@ -297,6 +315,52 @@ test("cancellation during successful shutdown invalidates selector output and in
             assert.equal(report.result, null);
             assert.match(report.error, /cancelled during settlement/);
         } else assert(report.result);
+    }
+});
+
+test("both hosts refuse forwarding after caller or SDK cancellation during body inspection", async t => {
+    for (const host of ["selector", "evaluator"]) for (const source of ["caller", "sdk"]) {
+        const parent = await mkdtemp(join(tmpdir(), "selector-inspection-test-"));
+        t.after(() => rm(parent, { recursive: true, force: true }));
+        const signal = new AbortController();
+        const sdkSignal = new AbortController();
+        let release, inspecting;
+        const gate = new Promise(resolve => { release = resolve; });
+        const entered = new Promise(resolve => { inspecting = resolve; });
+        const fake = fakeSdk({ requestSignal: sdkSignal.signal,
+            bodyInspection: async () => { inspecting(); await gate; } });
+        const running = (host === "selector" ? runOwnedSelection : runSelectionEvaluation)({
+            ...fake, root: join(parent, "decision"), runtimePath: resolve("fixture-runtime"),
+            profile, snapshot, trustedRoots: [parent], request, signal: signal.signal,
+            evidence: { reports: [{ id: "fixture" }] },
+        });
+        await entered;
+        (source === "caller" ? signal : sdkSignal).abort();
+        release();
+        const report = await running;
+        await assert.rejects(fake.observed.lastRequest, /cancelled/);
+        assert.equal(fake.observed.forwards, 0);
+        assert.deepEqual(report.requests, []);
+        assert.equal(report.status, "unavailable");
+        assert.equal(report.result, null);
+        assert.equal(report.cleanup.runtimeStopped, true);
+    }
+});
+
+test("valid-looking replies and usage without an inspected request cannot pass either host", async t => {
+    for (const host of ["selector", "evaluator"]) {
+        const parent = await mkdtemp(join(tmpdir(), "selector-missing-request-"));
+        t.after(() => rm(parent, { recursive: true, force: true }));
+        const fake = fakeSdk({ bypassHandler: true });
+        const report = await (host === "selector" ? runOwnedSelection : runSelectionEvaluation)({
+            ...fake, root: join(parent, "decision"), runtimePath: resolve("fixture-runtime"),
+            profile, snapshot, trustedRoots: [parent], request, evidence: { reports: [{ id: "fixture" }] },
+        });
+        assert.equal(report.usage.uniqueCalls, 1);
+        assert.deepEqual(report.requests, []);
+        assert.equal(report.status, "unavailable");
+        assert.match(report.error, /request evidence missing/);
+        assert.equal(report.result, null);
     }
 });
 
