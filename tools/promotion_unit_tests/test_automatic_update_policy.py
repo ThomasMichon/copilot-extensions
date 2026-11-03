@@ -53,6 +53,18 @@ def spec(*arguments: str, **context: str) -> SimpleNamespace:
     )
 
 
+@pytest.fixture
+def manager_policy_boundary(
+    policy: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "update_driver", SimpleNamespace(
+        RequestSpec=lambda backend, argv, **kwargs: SimpleNamespace(backend=backend, argv=argv, **kwargs),
+    ))
+    monkeypatch.setitem(sys.modules, "update_driver.core", SimpleNamespace(
+        automatic_update_refusal=policy.owner.automatic_update_refusal,
+    ))
+
+
 def test_relative_manager_policy_uses_retained_request_directory(
     policy: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -241,7 +253,7 @@ def test_read_only_controls_preserve_defaults_without_creating_state(
 
 
 def test_direct_manager_recheck_keeps_its_invocation_directory(
-    policy: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+    policy: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, manager_policy_boundary: None,
 ) -> None:
     root = policy.home / "manager"
     root.mkdir()
@@ -258,6 +270,7 @@ def test_direct_manager_recheck_keeps_its_invocation_directory(
 @pytest.mark.parametrize("root_form", ["absolute", "relative", "home"])
 def test_borrowed_manager_context_freezes_root_and_restores_worker(
     policy: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, root_form: str,
+    manager_policy_boundary: None,
 ) -> None:
     from worktree_manager import update_driver_cli
 

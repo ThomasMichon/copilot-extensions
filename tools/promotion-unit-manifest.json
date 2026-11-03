@@ -3835,7 +3835,7 @@
         "tools/promotion_unit_tests/test_bundle_inputs.py::TestBundleInputs::test_target_render_attributes_complete_context_without_approval"
     ],
     "sources": {
-        "tools/promotion_unit_tests/test_automatic_update_policy.py": "91f5c10ab8d276132e938e5d206c900948d7a53bd4e79295a8aaa150594804cd",
+        "tools/promotion_unit_tests/test_automatic_update_policy.py": "e51e5be7b2f003f35550772c947a17d3a42ed1f12142218dcbfdd44ac0421489",
         "worktree-manager/scripts/runtime_install.py": "29810d269ff7b9b491a01a079925dae2f88d6da5631cb8189b36ea9b485ab2b3",
         "worktree-manager/src/worktree_manager/update_driver_cli.py": "1a8d179dae5cf3df30ecd0f8153ff6793dd344296f3e66b5cd35d4cd472f8a10",
         "worktree-manager/src/worktree_manager/engine_acquisition_budget.py": "8184f8974fb1cacb06cdbaeb75bbe4a8995c813a5356e164f362e08da513085d",
