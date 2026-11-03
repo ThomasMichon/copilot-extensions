@@ -195,10 +195,14 @@ compatibility mechanism must not redefine the goal.
 
 Incoming source authenticity and the user's authority over the addressed
 installation remain required. These are not provenance tests against the old
-installation. Live installation writers still require a single mutation owner;
-actual conflicting writes, OS file locks and permission failures must be
-handled truthfully, not bypassed by concurrent installers or broad termination.
-Stale bookkeeping alone is not evidence of such a live conflict.
+installation. Concrete conflicting writes may be coordinated internally by
+bounded wait/join or replacement so the explicit update proceeds; preserving an
+old serialization protocol is not a goal or admission requirement. Neither a
+recorded nor a running installer may create persistent denial, an indefinite
+queue fence or a separate operator-recovery prerequisite. The incoming installer
+owns that bounded continuation within the addressed scope, without broadly
+terminating unrelated processes. Actual OS I/O/permission failures remain
+truthful failures; an old owner/custody record is not such a failure.
 
 This contract is intent, not a claim that every installer already realizes it.
 The [architecture adoption boundary](../../docs/architecture.md#replacement-lifecycle-target-and-current-adoption)
@@ -305,9 +309,10 @@ source staging and plugin removal. A running legacy launcher is not rewritten
 inside its own execution stream. Unknown incumbent ownership limits reuse and
 cleanup, not explicit runtime replacement under
 [authoritative-runtime-replacement](#authoritative-runtime-replacement).
-An inaccessible destination, unrelated installation or actual live writer
-remains outside that authority; never escalate privilege or adopt a different
-source to hide the failure.
+An inaccessible destination or unrelated installation remains outside that
+authority; never escalate privilege or adopt a different source to hide the
+failure. A recorded or running old installer instead receives bounded internal
+coordination/replacement, not a persistent refusal or another approval demand.
 
 Raw self-install and rollback remain usable without the old Manager, tool
 commands, updater queue or services being replaced. Core source/toolchain
@@ -346,8 +351,9 @@ Manual update without the automatic flag, raw self-install, setup/install-source
 doctor/list and ordinary launch still reach their normal owner. A launch's
 skipped automatic preparation is not a launch failure. This distinction never
 removes incoming source or privilege requirements. Legacy owner metadata and
-unsettled-effect records do not become manual-update admission policy; actual
-live writer exclusion follows the authoritative replacement contract.
+unsettled-effect records do not become manual-update admission policy; concrete
+write coordination must make bounded progress under the authoritative
+replacement contract rather than preserve an incumbent veto.
 The [configuration workbench](configurator/README.md#installation-and-updates)
 makes automatic-update policy visible and adjustable, with a clear distinction
 between allowing an automatic request and enrolling a recurring controller.
@@ -367,8 +373,8 @@ establish fresh incoming execution without cooperation from the broken
 installation. Authorization is distinct from native cleanup proof: retain old
 uncertainty without replaying it or relabeling it successful. An unavailable
 legacy recovery boundary is diagnostic evidence, not a veto on the requested
-replacement. Incoming source, integrity, privilege and actual live writer
-exclusion remain required; success follows
+replacement. Incoming source, integrity and privilege remain required;
+concrete write coordination does not confer an incumbent veto. Success follows
 [authoritative-runtime-replacement](#authoritative-runtime-replacement), never
 queue release alone.
 
@@ -609,8 +615,12 @@ or agent sessions. Lock and owner records identify the live installer process
 and its source. They coordinate cooperation; stale records, an absent source
 or an installer that is no longer running cannot permanently veto a new
 installer. A fresh intact installer can assume control through the supported
-normal or explicitly approved repair path without depending on the broken
-installation to grant permission.
+normal path without depending on the broken installation to grant permission.
+For a directly requested update, a running old installer receives bounded
+wait/join or replacement within the addressed scope, not persistent refusal,
+indefinite queuing or a separate operator-recovery prerequisite. Coordination
+prevents concrete conflicting writes; preserving old serialization is not an
+installation requirement.
 
 The execution owner has a standalone installation foundation available before
 plugin provisioning, including first installation without an existing Python
@@ -631,9 +641,10 @@ callers to cause accidental rollback. Deliberate repair or rollback selection
 remains explicit. Pending, running, interrupted, blocked and completed outcomes
 remain attributable and observable. Recovery does not mistake a failed prior
 execution for success or silently replay it.
-Incoming construction and publication retain one live mutation owner. Missing
-or stale legacy custody does not become an admission prerequisite for that
-owner; the authoritative replacement contract governs manual continuation.
+Incoming construction and publication coordinate concrete conflicting writes
+internally. Missing, stale or concurrent legacy custody does not become an
+admission prerequisite; the authoritative replacement contract requires
+bounded manual continuation, not a persistent live-writer refusal.
 
 Installation recovery preserves live-cutover expectations. An interrupted
 update does not make a host, operating-system or kernel restart a prerequisite
@@ -673,10 +684,10 @@ prefer start-first/self-retirement, falling back to bounded identity-checked
 cold takeover when the old owner cannot cooperate or settle. No extra repair
 mode is needed solely because graceful cutover is unsupported. An old runtime
 cannot veto construction or activation merely by lacking the new handoff contract.
-An active installation writer remains subject to the existing execution owner;
-competing repair callers do not become concurrent writers or repeatedly kill
-one another. Separately authorized stuck-writer recovery is not the routine
-service-replacement path.
+An active old installer is handled by bounded internal wait/join or replacement
+under the explicit update's authority, not a second operator-recovery ceremony
+or indefinite refusal. Prevent concrete conflicting writes and repeated
+installer kill loops without making the old serializer a prerequisite.
 
 An explicit operator order to repair, clean-install or force-reinstall is
 sufficient authorization for that recovery mode. Historical cleanup proof,

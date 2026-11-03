@@ -985,6 +985,8 @@ reuse/admission behavior is not an exception to the fresh-default revision.
   fences do not block incoming installation; only automatic requests are
   inhibited. Prove every requested incoming readiness/current-selection result
   independently of predecessor drain/cleanup, preserving user state and sessions.
+  A recorded or running old installer receives bounded internal wait/join or
+  replacement, never persistent denial or a separate operator-recovery demand.
 - [ ] If the finite delayed fallback is adopted, prove central-only role and
   schedule selection, longer-than-cutover grace, mutation-time protection for
   future/reselected generations and exclusion of session keepers/clients.

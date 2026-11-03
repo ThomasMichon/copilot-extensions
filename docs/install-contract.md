@@ -34,8 +34,12 @@ pointer, route, launcher and service/task registration selecting it. Do not
 report whole-set success for queued work, staging alone, Manager alone or an
 unhealthy selected candidate. Incoming authenticity/admission, real build,
 authentication, permissions, I/O and health failures remain honest failures.
-One live installer mutation owner prevents conflicting writes; stale records
-are not proof of a competing writer and old recovery is not its permission gate.
+The incoming installer coordinates concrete conflicting writes by bounded
+internal wait/join or replacement so explicit update proceeds. A recorded or
+running old writer, missing custody or an old serialization protocol cannot
+create persistent denial, indefinite queuing or a separate operator-recovery
+prerequisite. Actual OS I/O/permission failures remain failures; owner metadata
+alone is not one.
 
 Outgoing central daemons observe supersession, close admission, attempt drain
 and self-clean independently. Neither predecessor drain/exit nor cleanup gates
