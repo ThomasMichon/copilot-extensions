@@ -13,6 +13,8 @@ def test_linux_container_starts_require_docker_init_in_both_wrappers():
     sh_body = shell[sh_start:]
     assert "docker run -d --init --name $Container `" in ps_body
     assert 'docker run -d --init --name "$CONTAINER" \\' in sh_body
-    assert "--entrypoint sleep $img infinity" in ps_body
-    assert '--entrypoint sleep "$img" infinity' in sh_body
+    assert "--entrypoint sleep $img $SleepDuration" in ps_body
+    assert '--entrypoint sleep "$img" "${SLEEP_DURATION:-infinity}"' in sh_body
+    assert "$SleepDuration = 'infinity'" in powershell
+    assert "SLEEP_DURATION=infinity" in shell
     assert "--init" not in powershell[:ps_start]
