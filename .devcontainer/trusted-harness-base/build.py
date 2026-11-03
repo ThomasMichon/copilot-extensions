@@ -16,6 +16,15 @@ import subprocess
 import sys
 import tarfile
 import time
+from typing import Any, Callable, Iterator, Protocol, TextIO, cast
+
+
+class InspectionRunner(Protocol):
+    def __call__(self, argv: list[str], *, timeout: float) -> str: ...
+
+
+class BuildRunner(Protocol):
+    def __call__(self, argv: list[str], *, timeout: float, env: dict[str, str]) -> str: ...
 
 ROOT = Path(__file__).resolve().parent
 CONTEXT = ("Dockerfile", "dependencies.lock.json", "install.py", "build.py",
@@ -39,7 +48,7 @@ def context_digest(files: dict[str, bytes]) -> str:
     return digest.hexdigest()
 
 
-def validate_inputs(inputs: object, digest: str) -> dict:
+def validate_inputs(inputs: object, digest: str) -> dict[str, Any]:
     if not isinstance(inputs, dict) or set(inputs) != {
         "schema_version", "source_revision", "context_sha256", "builder", "timeout_seconds",
     }:
@@ -71,7 +80,7 @@ def validate_inputs(inputs: object, digest: str) -> dict:
     return inputs
 
 
-def validate_age(lock: dict, now: datetime | None = None) -> None:
+def validate_age(lock: dict[str, Any], now: datetime | None = None) -> None:
     now = now or datetime.now(timezone.utc)
     if lock["minimum_age_seconds"] != 604800 or lock["platform"] != "linux/amd64":
         raise ValueError("The platform and seven-day minimum are fixed")
@@ -95,7 +104,7 @@ class ChildCustodyError(subprocess.SubprocessError):
 
 
 @contextmanager
-def windows_job():
+def windows_job() -> Iterator[tuple[Callable[[subprocess.Popen[str]], None], Callable[[], None]]]:
     """Contain only this invocation, before its gated launcher can spawn the CLI."""
     import ctypes
     from ctypes import wintypes
@@ -112,7 +121,7 @@ def windows_job():
                     ("process_memory", ctypes.c_size_t), ("job_memory", ctypes.c_size_t),
                     ("peak_process", ctypes.c_size_t), ("peak_job", ctypes.c_size_t)]
 
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
     kernel.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
     kernel.CreateJobObjectW.restype = wintypes.HANDLE
     kernel.SetInformationJobObject.argtypes = [
@@ -123,31 +132,32 @@ def windows_job():
     kernel.CloseHandle.argtypes = [wintypes.HANDLE]
     job = kernel.CreateJobObjectW(None, None)
     if not job:
-        raise ctypes.WinError(ctypes.get_last_error())
+        raise getattr(ctypes, "WinError")(getattr(ctypes, "get_last_error")())
     try:
         limits = ExtendedLimits()
         limits.basic.flags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
         if not kernel.SetInformationJobObject(job, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise getattr(ctypes, "WinError")(getattr(ctypes, "get_last_error")())
 
-        def assign(process):
-            if not kernel.AssignProcessToJobObject(job, int(process._handle)):
-                raise ctypes.WinError(ctypes.get_last_error())
+        def assign(process: subprocess.Popen[str]) -> None:
+            if not kernel.AssignProcessToJobObject(job, int(getattr(process, "_handle"))):
+                raise getattr(ctypes, "WinError")(getattr(ctypes, "get_last_error")())
 
-        def terminate():
+        def terminate() -> None:
             if not kernel.TerminateJobObject(job, 1):
-                raise ctypes.WinError(ctypes.get_last_error())
+                raise getattr(ctypes, "WinError")(getattr(ctypes, "get_last_error")())
 
         yield assign, terminate
     finally:
         kernel.CloseHandle(job)
 
 
-def observe_unreaped(process):
-    if signal.getsignal(signal.SIGCHLD) != signal.SIG_DFL or process.returncode is not None:
+def observe_unreaped(process: subprocess.Popen[str]) -> Any:
+    if signal.getsignal(getattr(signal, "SIGCHLD")) != signal.SIG_DFL or process.returncode is not None:
         raise ChildCustodyError("CLI child custody was released")
     try:
-        status = os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+        status = getattr(os, "waitid")(getattr(os, "P_PID"), process.pid,
+                                      getattr(os, "WEXITED") | getattr(os, "WNOHANG") | getattr(os, "WNOWAIT"))
     except OSError as error:
         raise ChildCustodyError("CLI child custody is unconfirmed") from error
     if status is not None and status.si_pid != process.pid:
@@ -155,11 +165,11 @@ def observe_unreaped(process):
     return status
 
 
-def communicate_unreaped(process, argv, timeout):
+def communicate_unreaped(process: subprocess.Popen[str], argv: list[str], timeout: float) -> tuple[str, str]:
     deadline = time.monotonic() + timeout
     output = [bytearray(), bytearray()]
 
-    def remaining():
+    def remaining() -> float:
         duration = deadline - time.monotonic()
         if duration <= 0:
             raise subprocess.TimeoutExpired(argv, timeout)
@@ -167,8 +177,8 @@ def communicate_unreaped(process, argv, timeout):
 
     with selectors.DefaultSelector() as selector:
         for index, stream in enumerate((process.stdout, process.stderr)):
-            os.set_blocking(stream.fileno(), False)
-            selector.register(stream, selectors.EVENT_READ, index)
+            getattr(os, "set_blocking")(cast(TextIO, stream).fileno(), False)
+            selector.register(cast(TextIO, stream), selectors.EVENT_READ, index)
         while selector.get_map():
             for key, _ in selector.select(remaining()):
                 try:
@@ -181,10 +191,12 @@ def communicate_unreaped(process, argv, timeout):
                     selector.unregister(key.fileobj)
     while observe_unreaped(process) is None:
         time.sleep(min(0.01, remaining()))
-    return tuple(bytes(data).decode().replace("\r\n", "\n").replace("\r", "\n") for data in output)
+    return cast(tuple[str, str], tuple(
+        bytes(data).decode().replace("\r\n", "\n").replace("\r", "\n") for data in output
+    ))
 
 
-def execute(argv: list[str], *, timeout: float = 30, env=None) -> str:
+def execute(argv: list[str], *, timeout: float = 30, env: dict[str, str] | None = None) -> str:
     if os.name == "nt":
         with windows_job() as (assign, terminate):
             # The job assignment precedes the byte that allows any CLI descendant.
@@ -196,32 +208,36 @@ def execute(argv: list[str], *, timeout: float = 30, env=None) -> str:
             )
             return execute_contained(
                 [sys.executable, "-B", "-c", launcher, json.dumps(argv)], argv,
-                timeout, assign, terminate, creationflags=subprocess.CREATE_NO_WINDOW,
+                timeout, assign, terminate, creationflags=getattr(subprocess, "CREATE_NO_WINDOW"),
                 stdin=subprocess.PIPE, env=env,
             )
     if (not hasattr(os, "waitid") or not hasattr(os, "WNOWAIT")
-            or signal.getsignal(signal.SIGCHLD) != signal.SIG_DFL):
+            or signal.getsignal(getattr(signal, "SIGCHLD")) != signal.SIG_DFL):
         raise ChildCustodyError("CLI child requires exclusive unreaped POSIX custody")
     return execute_contained(argv, argv, timeout, lambda p: None, None,
                              start_new_session=True, stdin=subprocess.DEVNULL, env=env)
 
 
-def execute_contained(command, argv, timeout, assign, terminate, **flags):
+def execute_contained(
+    command: list[str], argv: list[str], timeout: float,
+    assign: Callable[[subprocess.Popen[str]], None], terminate: Callable[[], None] | None,
+    **flags: Any,
+) -> str:
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                text=True, **flags)
 
-    def stop(force=False):
+    def stop(force: bool = False) -> None:
         if terminate is not None:
             terminate()
         else:
             # WNOWAIT plus exclusive Popen ownership pins this group leader's PID.
             observe_unreaped(process)
             try:
-                os.killpg(process.pid, signal.SIGKILL if force else signal.SIGTERM)
+                getattr(os, "killpg")(process.pid, getattr(signal, "SIGKILL") if force else signal.SIGTERM)
             except ProcessLookupError:
                 pass
 
-    def communicate(duration):
+    def communicate(duration: float) -> tuple[str, str]:
         if terminate is None:
             return communicate_unreaped(process, argv, duration)
         return process.communicate(input="1" if process.stdin and not process.stdin.closed else None,
@@ -286,14 +302,14 @@ BUILDKIT_IMAGE = ("moby/buildkit@sha256:"
                   "2be0a5be7ae3cd9268f6836782e9690cce7bc4124142f7700f1641af5ccca8de")
 
 
-def validate_driver_options(options, selected: dict) -> None:
+def validate_driver_options(options: object, selected: dict[str, Any]) -> None:
     if (not isinstance(options, dict) or set(options) != {
             "image", "memory", "memory-swap", "cpu-period", "cpu-quota",
     } or any(not isinstance(value, str) for value in options.values())
             or options["image"] != BUILDKIT_IMAGE):
         raise ValueError("Only the digest-pinned, explicitly bounded BuildKit driver is supported")
 
-    def memory(value):
+    def memory(value: str) -> int:
         match = re.fullmatch(r"([1-9][0-9]{0,15})([kmg]?)", value)
         if not match:
             raise ValueError("Unsupported BuildKit memory bound")
@@ -310,7 +326,7 @@ def validate_driver_options(options, selected: dict) -> None:
         raise ValueError("BuildKit driver CPU bound exceeds admission")
 
 
-def docker_environment(selected: dict, output: Path) -> dict[str, str]:
+def docker_environment(selected: dict[str, Any], output: Path) -> dict[str, str]:
     ambient = dict(os.environ)
     home = Path(ambient.get("USERPROFILE" if os.name == "nt" else "HOME") or Path.home())
     docker = Path(ambient.get("DOCKER_CONFIG") or home / ".docker")
@@ -351,7 +367,7 @@ def docker_environment(selected: dict, output: Path) -> dict[str, str]:
     return environment
 
 
-def verify_builder(engine: str, selected: dict, runner) -> dict:
+def verify_builder(engine: str, selected: dict[str, Any], runner: InspectionRunner) -> dict[str, Any]:
     def local_context() -> None:
         endpoint = json.loads(runner(
             [engine, "--context", "default", "context", "inspect", "default",
@@ -453,13 +469,13 @@ def oci_identity(archive: Path) -> dict[str, str]:
             if not member.isfile() or member.size != layer["size"]:
                 raise ValueError("Invalid OCI layer")
             stream = tar.extractfile(member)
-            if stream is None or hashlib.file_digest(stream, "sha256").hexdigest() != digest[7:]:
+            if stream is None or getattr(hashlib, "file_digest")(stream, "sha256").hexdigest() != digest[7:]:
                 raise ValueError("OCI layer checksum mismatch")
     return {"manifest_digest": manifest_digest, "config_digest": config_digest}
 
 
-def build(inputs: object, output: Path, engine: str = "docker", runner=None,
-          root: Path = ROOT, now: datetime | None = None) -> dict:
+def build(inputs: object, output: Path, engine: str = "docker", runner: BuildRunner | None = None,
+          root: Path = ROOT, now: datetime | None = None) -> dict[str, Any]:
     files = context_files(root)
     approval = validate_inputs(inputs, context_digest(files))
     lock = json.loads(files["dependencies.lock.json"])
@@ -471,14 +487,14 @@ def build(inputs: object, output: Path, engine: str = "docker", runner=None,
     if "," in str(output) or "\n" in str(output) or "\r" in str(output):
         raise ValueError("Unsupported artifact path")
     create_output(output)
-    runner = partial(runner or execute, env=docker_environment(approval["builder"], output))
-    bounds = verify_builder(engine, approval["builder"], runner)
+    bound_runner = partial(runner or execute, env=docker_environment(approval["builder"], output))
+    bounds = verify_builder(engine, approval["builder"], bound_runner)
     context = output / "context"
     context.mkdir()
     for name, content in files.items():
         (context / name).write_bytes(content)
     archive = output / "image.oci.tar"
-    receipt = {"schema_version": 1, "source_revision": approval["source_revision"],
+    receipt: dict[str, Any] = {"schema_version": 1, "source_revision": approval["source_revision"],
                "context_sha256": approval["context_sha256"], "platform": "linux/amd64",
                "approval_sha256": hashlib.sha256(
                    json.dumps(approval, sort_keys=True, separators=(",", ":")).encode()
@@ -500,9 +516,9 @@ def build(inputs: object, output: Path, engine: str = "docker", runner=None,
 
     save_receipt()
     try:
-        runner(build_command(engine, approval["builder"]["name"], context, archive),
+        bound_runner(build_command(engine, approval["builder"]["name"], context, archive),
                timeout=approval["timeout_seconds"])
-        verify_builder(engine, approval["builder"], runner)
+        verify_builder(engine, approval["builder"], bound_runner)
         receipt.update(oci_identity(archive))
         receipt["archive_sha256"] = file_sha256(archive)
         receipt["status"] = "built-not-runtime-validated"
@@ -520,7 +536,7 @@ def build(inputs: object, output: Path, engine: str = "docker", runner=None,
 
 def file_sha256(path: Path) -> str:
     with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
+        return cast(str, getattr(hashlib, "file_digest")(stream, "sha256").hexdigest())
 
 
 def main() -> int:
