@@ -3,6 +3,21 @@
 See the [configuration reference](docs/configuration.md) for coordinator
 environment, reusable registrar/identity fields and configuration boundaries.
 
+For an authorized sustained review setup, use
+[setting-up-pr-attention-flow](skills/setting-up-pr-attention-flow/SKILL.md):
+configurable independent lanes, retained per-PR context, repository-specific
+merge policy and existing agent-to-agent communication. The skill supplies
+guidance and synthetic coordination examples, not a new reviewer engine,
+runtime configuration, watcher, scheduler or grant of review/merge authority.
+Missing task-bound review tools, receipts or mutation fences remain explicit
+adapter blockers or policy-permitted review-only/manual handoffs.
+
+Other task and coordination skills:
+[agent-dispatch](skills/agent-dispatch/SKILL.md),
+[pick-and-claim](skills/pick-and-claim/SKILL.md),
+[auditing-worktree-conclusions](skills/auditing-worktree-conclusions/SKILL.md),
+and [troubleshooting-agent-dispatch](skills/troubleshooting-agent-dispatch/SKILL.md).
+
 Native `uninstall` removes named runtime slots, snapshots, selectors, generated
 helpers and service launchers while retaining task databases, supervisor
 profiles, environment configuration, endpoint receipts, logs and unknown files.

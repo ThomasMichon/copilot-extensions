@@ -1,0 +1,9 @@
+{
+  "comment": "Add portable sustained PR-attention setup guidance and structural validation",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
