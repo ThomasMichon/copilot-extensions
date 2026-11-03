@@ -7,29 +7,39 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from importlib.machinery import ModuleSpec
+from importlib.abc import Loader
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
+if TYPE_CHECKING:
+    from attribution_profile import Profile
+
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
-SPEC = importlib.util.spec_from_file_location("attribution_profile", SCRIPTS / "attribution_profile.py")
+SPEC = cast(ModuleSpec, importlib.util.spec_from_file_location(
+    "attribution_profile", SCRIPTS / "attribution_profile.py"
+))
 profile = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(profile)
+cast(Loader, SPEC.loader).exec_module(profile)
 CONTEXT = {"domain": "forge", "visibility": "public", "activity": "comment"}
 
 
-def parsed(*rules, **variables):
-    return profile.validate({"version": 1, "variables": variables, "rules": list(rules)})
+def parsed(*rules: dict[str, object], **variables: str) -> "Profile":
+    return cast("Profile", profile.validate(
+        {"version": 1, "variables": variables, "rules": list(rules)}
+    ))
 
 
-def directory_link(link, target):
+def directory_link(link: Path, target: Path) -> None:
     if os.name == "nt":
         subprocess.run(["cmd.exe", "/c", "mklink", "/J", str(link), str(target)],
-                       capture_output=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                       capture_output=True, check=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW"))
     else:
         link.symlink_to(target, target_is_directory=True)
 
 
-def test_sparse_slots_specificity_and_explicit_empty():
+def test_sparse_slots_specificity_and_explicit_empty() -> None:
     data = parsed(
         {"header": "AI: ", "footer": "\nAI footer"},
         {"when": {"domain": "forge"}, "header": ""},
@@ -43,8 +53,8 @@ def test_sparse_slots_specificity_and_explicit_empty():
     assert profile.resolve(data, CONTEXT)["header"] == "[AI-assisted] "
 
 
-def test_conflicting_incomparable_selectors_fail_not_key_order():
-    rules = [
+def test_conflicting_incomparable_selectors_fail_not_key_order() -> None:
+    rules: list[dict[str, object]] = [
         {"when": {"domain": "forge"}, "header": "AI one"},
         {"when": {"visibility": "public"}, "header": "AI two"},
     ]
@@ -55,7 +65,7 @@ def test_conflicting_incomparable_selectors_fail_not_key_order():
     assert profile.resolve(parsed(*rules), CONTEXT)["footer"] == "AI two"
 
 
-def test_later_layer_wins_equal_specificity_and_only_tightens():
+def test_later_layer_wins_equal_specificity_and_only_tightens() -> None:
     data = parsed({"header": "AI one", "required": True})
     data["rules"].append({"header": "AI two", "_layer": 1})
     assert profile.resolve(data, {**CONTEXT, "required": False})["required"] is True
@@ -64,7 +74,7 @@ def test_later_layer_wins_equal_specificity_and_only_tightens():
         parsed({"required": False})
 
 
-def test_interpolation_is_text_and_review_facts_are_not_assumed():
+def test_interpolation_is_text_and_review_facts_are_not_assumed() -> None:
     data = parsed({"header": "**[{assistant} for {operator}; {review_status}]** "},
                   operator="<a>*name*", assistant="Copilot")
     actual = profile.resolve(data, CONTEXT)
@@ -79,7 +89,7 @@ def test_interpolation_is_text_and_review_facts_are_not_assumed():
 
 
 @pytest.mark.parametrize("variable", ["AI\u202e", "AI\u200b", "AI\u0085"])
-def test_variables_reject_display_controls(variable):
+def test_variables_reject_display_controls(variable: str) -> None:
     with pytest.raises(profile.ProfileError, match="variable"):
         parsed({"header": "{assistant}"}, assistant=variable)
 
@@ -90,7 +100,9 @@ def test_variables_reject_display_controls(variable):
     ("header_variants", "{assistant}", "human-reviewed"),
     ("footer_variants", "{assistant}ed", "human-review"),
 ])
-def test_interpolated_review_claims_rejected_by_both_consumers(slot, template, variable):
+def test_interpolated_review_claims_rejected_by_both_consumers(
+    slot: str, template: str, variable: str,
+) -> None:
     data = parsed({slot: [template] if slot.endswith("_variants") else template},
                   assistant=variable)
     with pytest.raises(profile.ProfileError, match="review claims"):
@@ -105,7 +117,9 @@ def test_interpolated_review_claims_rejected_by_both_consumers(slot, template, v
     ("&{assistant};", "nbsp"),
     (r"\{assistant}[AI-assisted]", "!"),
 ])
-def test_assembled_markup_rejected_in_both_consumers(slot, template, variable):
+def test_assembled_markup_rejected_in_both_consumers(
+    slot: str, template: str, variable: str,
+) -> None:
     data = parsed({slot: [template] if slot.endswith("_variants") else template},
                   assistant=variable)
     with pytest.raises(profile.ProfileError, match="markup"):
@@ -114,7 +128,7 @@ def test_assembled_markup_rejected_in_both_consumers(slot, template, variable):
         profile.guidance(data)
 
 
-def test_assembled_validation_preserves_escaped_literal_identity_and_review_status():
+def test_assembled_validation_preserves_escaped_literal_identity_and_review_status() -> None:
     data = parsed({"header": "[{assistant} for {operator}; {review_status}] "},
                   assistant="![literal]", operator="<Example> & *Name*")
     signature = profile.resolve(data, CONTEXT)
@@ -130,12 +144,12 @@ def test_assembled_validation_preserves_escaped_literal_identity_and_review_stat
     {"header": "AI\x00"}, {"when": {"unknown": "x"}},
     {"when": {"domain": "a`b"}}, {"footer_variants": [""]},
 ])
-def test_rejects_malformed_data(rule):
+def test_rejects_malformed_data(rule: dict[str, object]) -> None:
     with pytest.raises(profile.ProfileError):
         parsed(rule)
 
 
-def test_dedup_only_owned_boundary_variants_not_quotes_or_other_authors():
+def test_dedup_only_owned_boundary_variants_not_quotes_or_other_authors() -> None:
     signature = profile.resolve(parsed({
         "header": "**[Copilot for {operator}]** ",
         "footer": "\n[AI-assisted]",
@@ -151,7 +165,7 @@ def test_dedup_only_owned_boundary_variants_not_quotes_or_other_authors():
     assert profile.decorate(draft, signature) == draft
 
 
-def test_current_marker_wins_over_overlapping_historical_variant():
+def test_current_marker_wins_over_overlapping_historical_variant() -> None:
     signature = profile.resolve(parsed({
         "header": "[AI-assisted] ",
         "header_variants": ["[AI-assisted] Drafted with Copilot.\n\n"],
@@ -186,7 +200,9 @@ def test_current_marker_wins_over_overlapping_historical_variant():
     ({"header": "[AI] ", "footer": "\nAI footer",
       "header_variants": ["original"], "footer_variants": ["original"]}, "original"),
 ])
-def test_cross_slot_overlap_preserves_draft_and_idempotence(rule, draft):
+def test_cross_slot_overlap_preserves_draft_and_idempotence(
+    rule: dict[str, object], draft: str,
+) -> None:
     signature = profile.resolve(parsed(rule), CONTEXT)
     once = profile.decorate(draft, signature)
     assert draft in once
@@ -201,14 +217,14 @@ def test_cross_slot_overlap_preserves_draft_and_idempotence(rule, draft):
     "&nbsp;", "\u200bAI-assisted", "```AI-assisted\n```",
     "![AI-assisted] ", "![AI-assisted][]", "![AI-assisted][logo]",
 ])
-def test_hidden_or_active_markup_is_not_a_disclosure(header):
+def test_hidden_or_active_markup_is_not_a_disclosure(header: str) -> None:
     with pytest.raises(profile.ProfileError, match="markup"):
         parsed({"header": header})
     signature = profile.resolve(parsed({"header": "***", "footer": ""}), CONTEXT)
     assert profile.decorate("body", signature) == "[AI-assisted] body"
 
 
-def test_split_slot_link_fragments_cannot_hide_disclosure():
+def test_split_slot_link_fragments_cannot_hide_disclosure() -> None:
     with pytest.raises(profile.ProfileError, match="markup"):
         parsed({"header": "[", "footer": "](https://example.com/AI-assisted)"})
     for template in ("[", "]", "[AI", "AI]"):
@@ -216,7 +232,7 @@ def test_split_slot_link_fragments_cannot_hide_disclosure():
             parsed({"header": template})
 
 
-def test_symlinked_instruction_directory_is_rejected_before_resolution(tmp_path):
+def test_symlinked_instruction_directory_is_rejected_before_resolution(tmp_path: Path) -> None:
     repo, target, link = tmp_path / "repo", tmp_path / "target", tmp_path / "link"
     repo.mkdir()
     target.mkdir()
@@ -233,7 +249,7 @@ def test_symlinked_instruction_directory_is_rejected_before_resolution(tmp_path)
     assert not data["_inputs"]
 
 
-def test_load_authority_order_invalid_layer_and_target_contained_dirs(tmp_path):
+def test_load_authority_order_invalid_layer_and_target_contained_dirs(tmp_path: Path) -> None:
     home = tmp_path / "home"
     repo = tmp_path / "repo"
     shared = tmp_path / "shared"
@@ -253,7 +269,7 @@ def test_load_authority_order_invalid_layer_and_target_contained_dirs(tmp_path):
     assert profile.resolve(data, CONTEXT)["header"] == "AI shared"
 
 
-def test_personal_profile_keeps_its_last_high_priority_occurrence(tmp_path):
+def test_personal_profile_keeps_its_last_high_priority_occurrence(tmp_path: Path) -> None:
     shared = tmp_path / "shared"
     personal = tmp_path / ".copilot"
     for directory, header in ((personal, "AI personal"), (shared, "AI shared")):
@@ -271,7 +287,9 @@ def test_personal_profile_keeps_its_last_high_priority_occurrence(tmp_path):
 
 @pytest.mark.parametrize("directories", ["x" * 65537, ",".join(["x"] * 129)],
                          ids=["character-limit", "entry-limit"])
-def test_discovery_overflow_is_bounded_before_probing(monkeypatch, tmp_path, directories):
+def test_discovery_overflow_is_bounded_before_probing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, directories: str,
+) -> None:
     monkeypatch.setattr(profile, "_safe_file", lambda path: pytest.fail("must not probe"))
     data, errors = profile.load_profile(tmp_path, None, {
         "COPILOT_CUSTOM_INSTRUCTIONS_DIRS": directories,
@@ -280,7 +298,9 @@ def test_discovery_overflow_is_bounded_before_probing(monkeypatch, tmp_path, dir
     assert not data["_probes"]
 
 
-def test_discovery_failure_becomes_profile_diagnostic(monkeypatch, tmp_path):
+def test_discovery_failure_becomes_profile_diagnostic(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     monkeypatch.setattr(Path, "expanduser", lambda path: (_ for _ in ()).throw(
         RuntimeError("unavailable user")
     ))
@@ -291,7 +311,7 @@ def test_discovery_failure_becomes_profile_diagnostic(monkeypatch, tmp_path):
     assert not data["_probes"]
 
 
-def test_guidance_and_resolver_consume_same_effective_profile(tmp_path):
+def test_guidance_and_resolver_consume_same_effective_profile(tmp_path: Path) -> None:
     config = tmp_path / ".copilot" / "ai-attribution.json"
     config.parent.mkdir()
     config.write_text(json.dumps(parsed(
@@ -308,7 +328,7 @@ def test_guidance_and_resolver_consume_same_effective_profile(tmp_path):
     b'{"version":1,"version":1}', b" " * (65536 + 1), b'{"version":true}',
     b'{"version":1,"rules":' + b"[" * 10000 + b"]" * 10000 + b"}",
 ], ids=["duplicate-key", "oversized-file", "boolean-version", "deep-json"])
-def test_invalid_profile_file_is_rejected_as_a_layer(tmp_path, raw):
+def test_invalid_profile_file_is_rejected_as_a_layer(tmp_path: Path, raw: bytes) -> None:
     config = tmp_path / ".copilot" / "ai-attribution.json"
     config.parent.mkdir()
     config.write_bytes(raw)
@@ -317,7 +337,9 @@ def test_invalid_profile_file_is_rejected_as_a_layer(tmp_path, raw):
     assert not data["_inputs"]
 
 
-def test_nonregular_profile_is_rejected_before_open(monkeypatch, tmp_path):
+def test_nonregular_profile_is_rejected_before_open(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     config = tmp_path / ".copilot" / "ai-attribution.json"
     config.parent.mkdir()
     config.write_text('{"version":1}', encoding="utf-8")
@@ -332,10 +354,10 @@ def test_nonregular_profile_is_rejected_before_open(monkeypatch, tmp_path):
 @pytest.mark.portfolio_tier("T3")
 @pytest.mark.effect("filesystem")
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFOs unavailable")
-def test_fifo_profile_does_not_block_loading(tmp_path):
+def test_fifo_profile_does_not_block_loading(tmp_path: Path) -> None:
     config = tmp_path / ".copilot" / "ai-attribution.json"
     config.parent.mkdir()
-    os.mkfifo(config)
+    getattr(os, "mkfifo")(config)
     _, errors = profile.load_profile(tmp_path, None, {})
     assert errors == ["profile layer 1 rejected"]
 
@@ -343,7 +365,7 @@ def test_fifo_profile_does_not_block_loading(tmp_path):
 @pytest.mark.portfolio_tier("T3")
 @pytest.mark.effect("process")
 @pytest.mark.effect("filesystem")
-def test_actual_cli_is_pure_and_invalid_config_is_visible(tmp_path):
+def test_actual_cli_is_pure_and_invalid_config_is_visible(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
     config = home / ".copilot" / "ai-attribution.json"
@@ -374,7 +396,9 @@ def test_actual_cli_is_pure_and_invalid_config_is_visible(tmp_path):
 @pytest.mark.effect("process")
 @pytest.mark.effect("filesystem")
 @pytest.mark.parametrize("home_suffix", ["", os.sep], ids=["plain-home", "trailing-separator"])
-def test_native_hook_reads_profile_changes_with_warm_base_cache(tmp_path, home_suffix):
+def test_native_hook_reads_profile_changes_with_warm_base_cache(
+    tmp_path: Path, home_suffix: str,
+) -> None:
     shell = (shutil.which("pwsh") or shutil.which("powershell.exe")) if os.name == "nt" else shutil.which("bash")
     if not shell:
         pytest.skip("native shell unavailable")
@@ -390,10 +414,10 @@ def test_native_hook_reads_profile_changes_with_warm_base_cache(tmp_path, home_s
     env.pop("AI_ATTRIBUTION_FORCE_REFRESH", None)
     script = SCRIPTS / ("write-session-guidance.ps1" if os.name == "nt" else "write-session-guidance.sh")
     command = [shell, "-NoProfile", "-File", str(script)] if os.name == "nt" else [shell, str(script)]
-    warm_env = dict(env)
+    warm_env: dict[str, str] | None = dict(env)
     if os.name == "nt":
-        warm_env["PATH"] = os.pathsep.join((
-            str(Path(shutil.which("git")).parent), str(Path(shell).parent),
+        cast(dict[str, str], warm_env)["PATH"] = os.pathsep.join((
+            str(Path(cast(str, shutil.which("git"))).parent), str(Path(shell).parent),
             str(Path(os.environ["SystemRoot"]) / "System32"),
         ))
     elif shutil.which("jq") and (shutil.which("sha256sum") or shutil.which("shasum")):
@@ -404,7 +428,7 @@ def test_native_hook_reads_profile_changes_with_warm_base_cache(tmp_path, home_s
             executable = shutil.which(name)
             if executable:
                 (tools / name).symlink_to(executable)
-        warm_env["PATH"] = str(tools)
+        cast(dict[str, str], warm_env)["PATH"] = str(tools)
     else:
         warm_env = None
     for index, template in enumerate((None, "[AI first] ", "[AI updated] ", None)):

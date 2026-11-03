@@ -14,11 +14,46 @@ import string
 import sys
 import unicodedata
 from pathlib import Path
+from typing import Any, Callable, Literal, Mapping, TypedDict, cast
+
+Slot = Literal["header", "footer"]
+
+
+class Rule(TypedDict, total=False):
+    when: dict[str, str]
+    header: str
+    footer: str
+    required: bool
+    header_variants: list[str]
+    footer_variants: list[str]
+    _layer: int
+
+
+class Probe(TypedDict, total=False):
+    path: str
+    sha256: str | None
+    kind: str
+
+
+class Profile(TypedDict, total=False):
+    version: int
+    variables: dict[str, str]
+    rules: list[Rule]
+    _inputs: list[Probe]
+    _probes: list[Probe]
+
+
+class Signature(TypedDict):
+    header: str
+    footer: str
+    header_variants: list[str]
+    footer_variants: list[str]
+    required: bool
 
 MAX_BYTES = 65536
 MAX_RULES = 32
 AXES = ("domain", "visibility", "activity")
-SLOTS = ("header", "footer")
+SLOTS: tuple[Slot, Slot] = ("header", "footer")
 FIELDS = {"operator", "assistant", "review_status"}
 DEFAULTS = {"header": "[AI-assisted] ", "footer": ""}
 TOKEN = re.compile(r"^(?:\*|[a-z][a-z0-9-]{0,47})$")
@@ -28,8 +63,8 @@ class ProfileError(ValueError):
     """Invalid or ambiguous inert profile data."""
 
 
-def _object(pairs):
-    result = {}
+def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
     for key, value in pairs:
         if key in result:
             raise ProfileError("duplicate JSON key")
@@ -77,7 +112,7 @@ def _template(value: object) -> str:
     return value
 
 
-def validate(value: object) -> dict:
+def validate(value: object) -> Profile:
     if not isinstance(value, dict) or type(value.get("version")) is not int:
         raise ProfileError("profile needs integer version 1")
     if value["version"] != 1 or set(value) - {"version", "variables", "rules"}:
@@ -94,7 +129,7 @@ def validate(value: object) -> dict:
     rules = value.get("rules", [])
     if not isinstance(rules, list) or len(rules) > MAX_RULES:
         raise ProfileError("profile allows at most 32 rules")
-    seen = set()
+    seen: set[tuple[str, ...]] = set()
     for rule in rules:
         if not isinstance(rule, dict) or set(rule) - {
             "when", "header", "footer", "required", "header_variants", "footer_variants"
@@ -120,11 +155,11 @@ def validate(value: object) -> dict:
             for variant in variants:
                 if not _template(variant):
                     raise ProfileError("empty variant")
-    return value
+    return cast(Profile, value)
 
 
 def profile_paths(
-    home: Path, repo: Path | None, env: dict | None = None, *,
+    home: Path, repo: Path | None, env: Mapping[str, str] | None = None, *,
     excluded: list[Path] | None = None,
 ) -> list[Path]:
     """Repository presentation defaults, trusted instruction defaults, personal."""
@@ -168,10 +203,12 @@ def _safe_file(path: Path) -> bool:
     return True
 
 
-def load_profile(home: Path, repo: Path | None, env: dict | None = None) -> tuple[dict, list[str]]:
-    profile = {"version": 1, "variables": {}, "rules": [], "_inputs": [], "_probes": []}
+def load_profile(
+    home: Path, repo: Path | None, env: Mapping[str, str] | None = None,
+) -> tuple[Profile, list[str]]:
+    profile: Profile = {"version": 1, "variables": {}, "rules": [], "_inputs": [], "_probes": []}
     errors = []
-    excluded = []
+    excluded: list[Path] = []
     try:
         paths = profile_paths(home, repo, env, excluded=excluded)
     except (OSError, ValueError, RuntimeError):
@@ -181,7 +218,7 @@ def load_profile(home: Path, repo: Path | None, env: dict | None = None) -> tupl
         for path in dict.fromkeys(excluded)
     )
     for index, path in enumerate(paths):
-        probe = {"path": str(path), "sha256": None}
+        probe: Probe = {"path": str(path), "sha256": None}
         profile["_probes"].append(probe)
         try:
             if not _safe_file(path):
@@ -212,16 +249,16 @@ def load_profile(home: Path, repo: Path | None, env: dict | None = None) -> tupl
     return profile, errors
 
 
-def _literal_variables(profile: dict) -> dict:
+def _literal_variables(profile: Profile) -> dict[str, str]:
     return {"operator": "the operator", "assistant": "Copilot", **profile.get("variables", {})}
 
 
-def _escaped_variables(variables: dict) -> dict:
+def _escaped_variables(variables: Mapping[str, str]) -> dict[str, str]:
     return {k: re.sub(r"([\\`*_\[\]{}!~])", r"\\\1", html.escape(v))
             for k, v in variables.items()}
 
 
-def _checked_template(template: str, variables: dict) -> str:
+def _checked_template(template: str, variables: Mapping[str, str]) -> str:
     template = _template(template)
     if re.search(r"\breviewed\b", template.format_map(
         {**variables, "review_status": ""}
@@ -239,7 +276,7 @@ def _checked_template(template: str, variables: dict) -> str:
     return template
 
 
-def resolve(profile: dict, context: dict) -> dict:
+def resolve(profile: Profile, context: Mapping[str, object]) -> Signature:
     if not isinstance(context, dict):
         raise ProfileError("context must be an object")
     for axis in AXES:
@@ -253,13 +290,14 @@ def resolve(profile: dict, context: dict) -> dict:
         r for r in profile.get("rules", [])
         if all(r.get("when", {}).get(k, "*") in ("*", context[k]) for k in AXES)
     ]
-    result = dict(DEFAULTS)
+    # Slot selection combines string and variant-list fields before rendering.
+    result: dict[str, Any] = dict(DEFAULTS)
     for field in ("header", "footer", "header_variants", "footer_variants"):
-        candidates = [r for r in matches if field in r]
+        candidates = [cast(dict[str, Any], r) for r in matches if field in r]
         if not candidates:
             result.setdefault(field, [])
             continue
-        rank = lambda r: (
+        rank: Callable[[dict[str, Any]], tuple[int, int]] = lambda r: (
             sum(v != "*" for v in r.get("when", {}).values()), r.get("_layer", 0)
         )
         best = max(map(rank, candidates))
@@ -290,31 +328,32 @@ def resolve(profile: dict, context: dict) -> dict:
     ):
         result.update(DEFAULTS)
     result["required"] = required
-    return result
+    return cast(Signature, result)
 
 
-def decorate(draft: str, signature: dict) -> str:
+def decorate(draft: str, signature: Signature) -> str:
     """Only supplied draft text is changed; never a send or approval operation."""
     if not signature["required"]:
         return draft
-    present, removed = {}, {}
+    present: dict[Slot, bool] = {}
+    removed: dict[Slot, int] = {}
     for slot in SLOTS:
         current = signature[slot]
-        at_boundary = lambda text: (
+        at_boundary: Callable[[str], bool] = lambda text: (
             draft.startswith(text) if slot == "header" else draft.endswith(text)
         )
         present[slot] = bool(current and at_boundary(current))
         removed[slot] = 0
         if not current or present[slot]:
             continue
-        variants = signature[slot + "_variants"]
+        variants = signature["header_variants"] if slot == "header" else signature["footer_variants"]
         variants = sorted({v for v in variants if v}, key=len, reverse=True)
         found = next((v for v in variants if at_boundary(v)), None)
         if found is not None:
             removed[slot] = len(found)
     if removed["header"] + removed["footer"] > len(draft):
         removed = dict.fromkeys(SLOTS, 0)
-    for slot, opposite in (("header", "footer"), ("footer", "header")):
+    for slot, opposite in (SLOTS, SLOTS[::-1]):
         if present[opposite] and removed[slot] + len(signature[opposite]) > len(draft):
             removed[slot] = 0
     body = draft[removed["header"]:len(draft) - removed["footer"]]
@@ -324,14 +363,16 @@ def decorate(draft: str, signature: dict) -> str:
     )
 
 
-def guidance(profile: dict) -> str:
+def guidance(profile: Profile) -> str:
     if not profile["rules"] and not profile["variables"]:
         return ""
     variables = _literal_variables(profile)
     for rule in profile["rules"]:
         for slot in SLOTS:
             _checked_template(rule.get(slot, ""), variables)
-            for variant in rule.get(slot + "_variants", []):
+            for variant in (
+                rule.get("header_variants", []) if slot == "header" else rule.get("footer_variants", [])
+            ):
                 _checked_template(variant, variables)
     # JSON strings inside code spans keep templates visibly data rather than instructions.
     rows = [
@@ -345,7 +386,7 @@ def guidance(profile: dict) -> str:
         "`not human-reviewed` unless this exact draft was actually reviewed. "
         "Decorate before final preview/approval, never afterwards.",
     ]
-    def literal(value):
+    def literal(value: object) -> str:
         return json.dumps(value, ensure_ascii=True).replace("`", "\\u0060").replace(
             "<", "\\u003c").replace(">", "\\u003e")
     rows.append("Variables: `" + literal(variables) + "`")
@@ -365,6 +406,7 @@ def main() -> int:
         profile, errors = load_profile(Path.home(), args.repo)
         if errors:
             raise ProfileError("; ".join(errors))
+        output: dict[str, object]
         if args.action == "guidance":
             output = {"guidance": guidance(profile)}
         else:

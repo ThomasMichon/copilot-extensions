@@ -459,7 +459,7 @@
         "plugins/ai-attribution"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict"
     },
     {
       "name": "budget-guidance",
