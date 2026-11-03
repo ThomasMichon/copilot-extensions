@@ -165,6 +165,7 @@ rewrite.
 
 ### Phase 4 - Runtime and service ratchet
 
+- [x] Strictly admit the complete unchanged Dispatch service Python source/test project (#10184 / merged #10189).
 - [ ] Activate each runtime plugin and standalone service independently, using basic mode only where needed and recording its remaining strict delta.
 - [ ] Tighten each activated runtime/service to strict through component-sized PRs; cover source, optional extras and platform-specific implementations.
 - [ ] Converge the larger Worktrees, Worktree Manager and Fleet Manager surfaces through subsystem-sized PRs, preserving lazy-loading and native behavior.
@@ -172,6 +173,7 @@ rewrite.
 ### Phase 5 - Tests, tools and bootstrap
 
 - [x] Strictly admit AI Attribution's complete five-file Python helper/test portfolio (#10171), preserving shell emission and signature/disclosure behavior.
+- [x] Strictly admit Context Handoff's complete six-file Python helper/test portfolio (#10179 / merged #10192), preserving native continuity and sync controls.
 - [ ] Admit repository tools and CI helpers with unambiguous module identities and strict local/CI behavior.
 - [ ] Admit tests in bounded package/fixture-family PRs, typing fixtures, doubles and monkeypatch interfaces without weakening assertions.
 - [ ] Admit installer/bootstrap, hooks, payload-only Python, `.devcontainer`, effort-hosted executable helpers and every remaining inventory path.
@@ -2332,3 +2334,37 @@ composition prerequisites, and review/validation rules.
   applicable to this annotation-only payload change. The fresh isolated Linux
   helper run proves the supported Python 3.10 path without installation or
   rollout. Embedded/generated Python remains an independently open gate.
+
+### 2026-11-03 - Context Handoff and Dispatch service merged
+
+- #10192 merged as `8c65cf0a7f33eef721c536157a73cce3053f4c67` on the
+  unchanged reviewed head `df239e359fde667985f6ff1ef4fce2a11a603b63`.
+  Copilot's owner-PR Comment verdict identified only the required Documentation
+  impact statement. The description now links the affected documents; the
+  exact thread is resolved, with no remaining blocking findings. Required
+  [CI run 41592786412](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41592786412),
+  the metadata-refresh
+  [CI run 41593796949](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41593796949)
+  and their lockdown checks are green. The ordinary role-scoped managed merge
+  completed without ignoring CI or a change request. #10179 is closed.
+- #10189 merged as `a821288054999248812454320a578228ff14b19d` after exact-head
+  Copilot approval, green required
+  [CI run 41590811517](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41590811517)
+  and zero review threads. Its complete six-file source is unchanged; 16 native
+  cases and the original 3,811-unit packet passed. #10184 is closed and its
+  implementation child is finalized with the parent claim at rest.
+- Canonical-source synchronization encountered an already-carried journal
+  replay. Complete coverage-file equality and complete journal-prefix equality
+  against the pinned upstream target proved that the sole local commit was
+  redundant before its replay was skipped. No useful work was discarded.
+- Both metrics are refreshed: **33 / 68 strict projects (48.5%)** and
+  **279 / 7,670 physical Python files (3.6%)**. Thirty-five projects remain
+  pending; none are basic. Two new Dispatch-plugin files and two repository-tool
+  files are counted in their pending owners rather than omitted or credited.
+- Devcontainer and Harness Knowledge continue in their independent worktrees.
+  Devcontainer qualification exposed the existing Python 3.11 wrapper minimum;
+  its declared checker target and native qualification must match that contract,
+  not introduce unrequested Python 3.10 runtime behavior. Harness Knowledge
+  retains its Python 3.10 copied-payload and native qualification gates.
+  #9807, this Plan and this Validation Plan remain active; no runtime rollout
+  or whole-campaign completion is claimed.

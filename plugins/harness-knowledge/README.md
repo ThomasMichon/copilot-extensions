@@ -79,3 +79,14 @@ Re-running is safe: the pointer is replaced in place, stale managed instruction
 fragments are retired, and the compatibility assembler delegates to
 agent-worktrees' single managed-overlay implementation. The agent-worktrees
 `session-conduct` hook owns live binding, pairing, routing, and worktree context.
+
+## Development checks
+
+The `harness-knowledge` typecheck project includes all five configurator scripts
+and all four test modules, without exclusions. Run
+`python tools/typecheck.py harness-knowledge` from the repository root for
+strict Python 3.10 checks on both Linux and Windows targets; use `--prepare`
+first when the checker environment is missing. Native command and platform-lock
+protocols describe the existing delegated interfaces. JSON input stays dynamic
+until the existing shape validators have accepted it; the annotations do not
+change registration, binding, or overlay ownership.

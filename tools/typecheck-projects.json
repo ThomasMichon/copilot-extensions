@@ -508,7 +508,7 @@
         "plugins/harness-knowledge"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict"
     },
     {
       "name": "service-chat",

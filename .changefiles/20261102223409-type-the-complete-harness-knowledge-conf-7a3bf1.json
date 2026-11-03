@@ -1,0 +1,9 @@
+{
+  "comment": "Type the complete harness-knowledge configurator and fixture project for strict cross-platform checks.",
+  "changes": [
+    {
+      "plugin": "harness-knowledge",
+      "type": "patch"
+    }
+  ]
+}

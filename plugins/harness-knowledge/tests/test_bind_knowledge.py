@@ -12,13 +12,15 @@ import pytest
 
 _MOD = Path(__file__).resolve().parents[1] / "skills" / "binding-knowledge" / "scripts" / "bind_knowledge.py"
 _spec = importlib.util.spec_from_file_location("bind_knowledge", _MOD)
+if _spec is None or _spec.loader is None:
+    raise ImportError(f"Cannot load the binding configurator from {_MOD}")
 bk = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(bk)
 
 
 # --- set_top_yaml_key ---------------------------------------------------------
 
-def test_insert_after_comment_header():
+def test_insert_after_comment_header() -> None:
     text = "# header comment\n# more\nrepo_name: h\n"
     out = bk.set_top_yaml_key(text, "knowledge_repo", "k")
     lines = out.splitlines()
@@ -29,7 +31,7 @@ def test_insert_after_comment_header():
     assert out.endswith("\n")
 
 
-def test_replace_existing_key():
+def test_replace_existing_key() -> None:
     text = "repo_name: h\nknowledge_repo: old\nother: 1\n"
     out = bk.set_top_yaml_key(text, "knowledge_repo", "new")
     assert "knowledge_repo: new" in out
@@ -38,7 +40,7 @@ def test_replace_existing_key():
     assert "other: 1" in out  # rest preserved
 
 
-def test_replace_preserves_comments():
+def test_replace_preserves_comments() -> None:
     text = "# c1\nknowledge_repo: old  # inline\nrepo_name: h\n"
     out = bk.set_top_yaml_key(text, "knowledge_repo", "new")
     assert "# c1" in out
@@ -48,7 +50,7 @@ def test_replace_preserves_comments():
 
 # --- bind (end to end, machine-local) -----------------------------------------
 
-def test_bind_writes_pointer_without_instruction_fragment(tmp_path: Path):
+def test_bind_writes_pointer_without_instruction_fragment(tmp_path: Path) -> None:
     home = tmp_path / "home"
     summary = bk.bind("citadel-harness", "citadel-knowledge", "C:/k",
                       home=home, harness_path="C:/h")
@@ -63,7 +65,7 @@ def test_bind_writes_pointer_without_instruction_fragment(tmp_path: Path):
     assert summary["knowledge_repo"] == "citadel-knowledge"
 
 
-def test_bind_retires_stale_auto_loaded_fragment(tmp_path: Path):
+def test_bind_retires_stale_auto_loaded_fragment(tmp_path: Path) -> None:
     # A prior bind wrote the auto-loaded file; re-binding retires it (marker-guarded).
     home = tmp_path / "home"
     old_dir = home / ".citadel-harness" / ".github" / "instructions"
@@ -77,7 +79,7 @@ def test_bind_retires_stale_auto_loaded_fragment(tmp_path: Path):
     assert not (home / ".citadel-harness" / "knowledge-binding.md").exists()
 
 
-def test_bind_retires_stale_hook_fragment(tmp_path: Path):
+def test_bind_retires_stale_hook_fragment(tmp_path: Path) -> None:
     home = tmp_path / "home"
     base = home / ".citadel-harness"
     base.mkdir(parents=True)
@@ -89,7 +91,7 @@ def test_bind_retires_stale_hook_fragment(tmp_path: Path):
     assert not fragment.exists()
 
 
-def test_bind_leaves_unmarked_user_instructions(tmp_path: Path):
+def test_bind_leaves_unmarked_user_instructions(tmp_path: Path) -> None:
     # An unmarked user file in the instructions dir must never be deleted.
     home = tmp_path / "home"
     old_dir = home / ".citadel-harness" / ".github" / "instructions"
@@ -102,7 +104,7 @@ def test_bind_leaves_unmarked_user_instructions(tmp_path: Path):
     assert user_file.exists(), "an unmarked user file must never be deleted"
 
 
-def test_bind_preserves_existing_config(tmp_path: Path):
+def test_bind_preserves_existing_config(tmp_path: Path) -> None:
     home = tmp_path / "home"
     base = home / ".citadel-harness"
     base.mkdir(parents=True)
@@ -117,7 +119,7 @@ def test_bind_preserves_existing_config(tmp_path: Path):
     assert "knowledge_repo: kn" in text
 
 
-def test_bind_idempotent_repoint(tmp_path: Path):
+def test_bind_idempotent_repoint(tmp_path: Path) -> None:
     home = tmp_path / "home"
     bk.bind("h", "k1", "C:/k1", home=home)
     bk.bind("h", "k2", "C:/k2", home=home)  # re-point
@@ -141,9 +143,9 @@ def _completed(
 @pytest.mark.parametrize("repo_class", ["worktree", "knowledge"])
 def test_registered_worktree_capable_repo_reports_canonical_readiness(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     repo_class: str,
-):
+) -> None:
     knowledge = tmp_path / "knowledge"
     knowledge.mkdir()
     monkeypatch.setattr(
@@ -153,7 +155,7 @@ def test_registered_worktree_capable_repo_reports_canonical_readiness(
     )
     monkeypatch.setattr(bk, "knowledge_default_branch", lambda _path: "main")
 
-    def fake_run(_command, args, **_kwargs):
+    def fake_run(_command: str, args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         if args == ["repos", "list", "--json"]:
             return _completed(
                 args,
@@ -208,8 +210,8 @@ def test_registered_worktree_capable_repo_reports_canonical_readiness(
 
 @pytest.mark.parametrize("native_platform", ["linux", "windows", "wsl"])
 def test_explicit_binding_uses_native_inventory_platform(
-    tmp_path, monkeypatch, native_platform,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_platform: str,
+) -> None:
     monkeypatch.setenv("WSL_DISTRO_NAME", "inherited-transport-environment")
     monkeypatch.setattr(bk, "_current_platform_key", lambda: "legacy-incorrect")
     monkeypatch.setattr(bk, "knowledge_origin", lambda _path: "")
@@ -237,8 +239,8 @@ def test_explicit_binding_uses_native_inventory_platform(
 
 @pytest.mark.parametrize("native_platform", ["", None, {}, ["linux"], True, "container"])
 def test_invalid_native_inventory_platform_refuses_registration(
-    tmp_path, monkeypatch, native_platform,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_platform: object,
+) -> None:
     monkeypatch.setattr(bk, "knowledge_origin", lambda _path: "")
     monkeypatch.setattr(bk, "knowledge_default_branch", lambda _path: "main")
     monkeypatch.setattr(
@@ -254,8 +256,8 @@ def test_invalid_native_inventory_platform_refuses_registration(
 
 def test_unregistered_fallback_is_not_canonical_readiness(
     tmp_path: Path,
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     knowledge = tmp_path / "knowledge"
     knowledge.mkdir()
     monkeypatch.setattr(
@@ -265,7 +267,7 @@ def test_unregistered_fallback_is_not_canonical_readiness(
     )
     monkeypatch.setattr(bk, "knowledge_default_branch", lambda _path: "main")
 
-    def fake_run(_command, args, **_kwargs):
+    def fake_run(_command: str, args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         if args == ["repos", "list", "--json"]:
             return _completed(args, stdout='{"repos":[]}')
         if args == ["repos", "find", "knowledge", "--json"]:
@@ -306,15 +308,15 @@ def test_unregistered_fallback_is_not_canonical_readiness(
 
 def test_registered_path_and_class_mismatch_has_repair_command(
     tmp_path: Path,
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     knowledge = tmp_path / "knowledge"
     knowledge.mkdir()
     wrong = tmp_path / "wrong"
     monkeypatch.setattr(bk, "knowledge_origin", lambda _path: "")
     monkeypatch.setattr(bk, "knowledge_default_branch", lambda _path: "")
 
-    def fake_run(_command, args, **_kwargs):
+    def fake_run(_command: str, args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         assert args == ["repos", "list", "--json"]
         return _completed(
             args,
@@ -360,14 +362,14 @@ def test_registered_path_and_class_mismatch_has_repair_command(
 
 def test_case_only_registry_collision_is_not_ready_or_auto_repaired(
     tmp_path: Path,
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     knowledge = tmp_path / "knowledge"
     knowledge.mkdir()
     monkeypatch.setattr(bk, "knowledge_origin", lambda _path: "")
     monkeypatch.setattr(bk, "knowledge_default_branch", lambda _path: "")
 
-    def fake_run(_command, args, **_kwargs):
+    def fake_run(_command: str, args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         assert args == ["repos", "list", "--json"]
         return _completed(
             args,
@@ -404,11 +406,11 @@ def test_case_only_registry_collision_is_not_ready_or_auto_repaired(
     assert "differs only by case" in registration["reason"]
 
 
-def test_case_collision_tolerates_malformed_paths(monkeypatch):
+def test_case_collision_tolerates_malformed_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(bk, "knowledge_origin", lambda _path: "")
     monkeypatch.setattr(bk, "knowledge_default_branch", lambda _path: "")
 
-    def fake_run(_command, args, **_kwargs):
+    def fake_run(_command: str, args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         return _completed(
             args,
             stdout=json.dumps(
@@ -438,8 +440,8 @@ def test_case_collision_tolerates_malformed_paths(monkeypatch):
 
 def test_stale_default_branch_is_repaired_without_persisting_derived_account(
     tmp_path: Path,
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     knowledge = tmp_path / "knowledge"
     knowledge.mkdir()
     monkeypatch.setattr(
@@ -449,7 +451,7 @@ def test_stale_default_branch_is_repaired_without_persisting_derived_account(
     )
     monkeypatch.setattr(bk, "knowledge_default_branch", lambda _path: "main")
 
-    def fake_run(_command, args, **_kwargs):
+    def fake_run(_command: str, args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         if args == ["repos", "list", "--json"]:
             return _completed(
                 args,
@@ -504,8 +506,8 @@ def test_stale_default_branch_is_repaired_without_persisting_derived_account(
 
 def test_unusable_resolved_account_blocks_registration_readiness(
     tmp_path: Path,
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     knowledge = tmp_path / "knowledge"
     knowledge.mkdir()
     monkeypatch.setattr(
@@ -515,7 +517,7 @@ def test_unusable_resolved_account_blocks_registration_readiness(
     )
     monkeypatch.setattr(bk, "knowledge_default_branch", lambda _path: "main")
 
-    def fake_run(_command, args, **_kwargs):
+    def fake_run(_command: str, args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         if args == ["repos", "list", "--json"]:
             return _completed(
                 args,
@@ -562,8 +564,8 @@ def test_unusable_resolved_account_blocks_registration_readiness(
 
 def test_account_override_repairs_unusable_owner_fallback(
     tmp_path: Path,
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     knowledge = tmp_path / "knowledge"
     knowledge.mkdir()
     account = "contributor"
@@ -575,7 +577,7 @@ def test_account_override_repairs_unusable_owner_fallback(
     )
     monkeypatch.setattr(bk, "knowledge_default_branch", lambda _path: "main")
 
-    def fake_run(_command, args, **_kwargs):
+    def fake_run(_command: str, args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         nonlocal stored_account
         if args == ["repos", "list", "--json"]:
             return _completed(
@@ -630,13 +632,13 @@ def test_account_override_repairs_unusable_owner_fallback(
 
 def test_default_branch_uses_remote_symref_when_origin_head_is_missing(
     tmp_path: Path,
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     knowledge = tmp_path / "knowledge"
     knowledge.mkdir()
     calls = []
 
-    def fake_run(command, **_kwargs):
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append(command)
         if "symbolic-ref" in command:
             return _completed(command, returncode=1)
@@ -655,12 +657,12 @@ def test_default_branch_uses_remote_symref_when_origin_head_is_missing(
 
 def test_default_branch_prefers_remote_and_preserves_slashes(
     tmp_path: Path,
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     knowledge = tmp_path / "knowledge"
     knowledge.mkdir()
 
-    def fake_run(command, **_kwargs):
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         if "ls-remote" in command:
             return _completed(
                 command,
@@ -675,7 +677,7 @@ def test_default_branch_prefers_remote_and_preserves_slashes(
     assert bk.knowledge_default_branch(str(knowledge)) == "release/stable"
 
 
-def test_http_remote_userinfo_is_removed():
+def test_http_remote_userinfo_is_removed() -> None:
     assert bk.sanitize_remote(
         "https://user:secret@example.com/owner/repo.git"
     ) == "https://example.com/owner/repo.git"
@@ -687,7 +689,7 @@ def test_http_remote_userinfo_is_removed():
     ) == "https://example.com/owner/repo.git"
 
 
-def test_windows_powershell_catalog_path_uses_host(monkeypatch):
+def test_windows_powershell_catalog_path_uses_host(monkeypatch: pytest.MonkeyPatch) -> None:
     if bk.os.name != "nt":
         return
     monkeypatch.setattr(
@@ -721,8 +723,8 @@ def test_windows_powershell_catalog_path_uses_host(monkeypatch):
     )
 
 
-def test_ambient_auth_fallback_is_not_account_readiness(monkeypatch):
-    def fake_run(_command, args, **_kwargs):
+def test_ambient_auth_fallback_is_not_account_readiness(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_run(_command: str, args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         return _completed(
             args,
             stdout="example\n",
@@ -741,7 +743,7 @@ def test_ambient_auth_fallback_is_not_account_readiness(monkeypatch):
     assert "ambient auth" in reason
 
 
-def test_registration_without_agent_worktrees_is_unverified(tmp_path: Path):
+def test_registration_without_agent_worktrees_is_unverified(tmp_path: Path) -> None:
     knowledge = tmp_path / "knowledge"
     knowledge.mkdir()
 
@@ -759,8 +761,8 @@ def test_registration_without_agent_worktrees_is_unverified(tmp_path: Path):
 
 def test_register_repairs_then_binds_and_verifies_state_root(
     tmp_path: Path,
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     home = tmp_path / "home"
     harness = tmp_path / "harness"
     harness.mkdir()
@@ -774,7 +776,7 @@ def test_register_repairs_then_binds_and_verifies_state_root(
     )
     monkeypatch.setattr(bk, "knowledge_default_branch", lambda _path: "main")
 
-    def fake_run(_command, args, **_kwargs):
+    def fake_run(_command: str, args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         nonlocal registered
         if args == ["repos", "list", "--json"]:
             repos = []
@@ -845,7 +847,7 @@ def test_register_repairs_then_binds_and_verifies_state_root(
 
 # --- bind assembles the personal-plugin overlay (#955) ------------------------
 
-def test_bind_assembles_plugins_when_paths_known(tmp_path: Path, monkeypatch):
+def test_bind_assembles_plugins_when_paths_known(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     home = tmp_path / "home"
     harness = tmp_path / "harness"
     harness.mkdir()
@@ -871,7 +873,7 @@ def test_bind_assembles_plugins_when_paths_known(tmp_path: Path, monkeypatch):
         "conflicts": {"marketplaces": [], "enabled_plugins": []},
     }
 
-    def fake_run(command, **_kwargs):
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         if command[0] == "git":
             return subprocess.CompletedProcess(command, 2, "", "")
         assert command[1:6] == [
@@ -902,8 +904,8 @@ def test_bind_assembles_plugins_when_paths_known(tmp_path: Path, monkeypatch):
 
 
 def test_bind_threads_agent_worktrees_path_into_assemble(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """bind()'s resolved --agent-worktrees-path must reach assemble()'s
     subprocess call too, not just win over PATH for the direct calls above
     it -- otherwise assembly could silently select a different cell's
@@ -930,7 +932,7 @@ def test_bind_threads_agent_worktrees_path_into_assemble(
     resolved = str(tmp_path / "right-cell" / "agent-worktrees")
     commands = []
 
-    def fake_run(command, **_kwargs):
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         if command[0] == "git":
             return subprocess.CompletedProcess(command, 2, "", "")
         commands.append(command)
@@ -949,7 +951,7 @@ def test_bind_threads_agent_worktrees_path_into_assemble(
     assert all(c[0] == resolved for c in compose_commands), compose_commands
 
 
-def test_bind_skips_assembly_without_harness_path(tmp_path: Path):
+def test_bind_skips_assembly_without_harness_path(tmp_path: Path) -> None:
     home = tmp_path / "home"
     summary = bk.bind("h", "k", "C:/k", home=home)  # no harness_path
     assert "plugins" not in summary
@@ -968,7 +970,7 @@ def _knowledge_repo(path: Path, remote: str | None = None) -> Path:
     return path
 
 
-def test_github_origin_is_a_ready_default_issue_route(tmp_path: Path):
+def test_github_origin_is_a_ready_default_issue_route(tmp_path: Path) -> None:
     knowledge = _knowledge_repo(
         tmp_path / "knowledge",
         "git@github.com:example/private-knowledge.git",
@@ -982,7 +984,7 @@ def test_github_origin_is_a_ready_default_issue_route(tmp_path: Path):
     assert routing["repo"] == "example/private-knowledge"
 
 
-def test_non_github_origin_requires_explicit_issue_routing(tmp_path: Path):
+def test_non_github_origin_requires_explicit_issue_routing(tmp_path: Path) -> None:
     knowledge = _knowledge_repo(
         tmp_path / "knowledge",
         "https://example@dev.azure.com/example/Project/_git/knowledge",
@@ -995,7 +997,7 @@ def test_non_github_origin_requires_explicit_issue_routing(tmp_path: Path):
     assert routing["repo"] == ""
 
 
-def test_explicit_github_route_makes_non_github_origin_ready(tmp_path: Path):
+def test_explicit_github_route_makes_non_github_origin_ready(tmp_path: Path) -> None:
     knowledge = _knowledge_repo(
         tmp_path / "knowledge",
         "https://example.visualstudio.com/Project/_git/knowledge",
@@ -1024,7 +1026,7 @@ def test_explicit_github_route_makes_non_github_origin_ready(tmp_path: Path):
     assert config.read_text(encoding="utf-8") == original
 
 
-def test_commented_issues_header_keeps_nested_route(tmp_path: Path):
+def test_commented_issues_header_keeps_nested_route(tmp_path: Path) -> None:
     knowledge = _knowledge_repo(
         tmp_path / "knowledge",
         "https://example@dev.azure.com/example/Project/_git/knowledge",
@@ -1044,7 +1046,7 @@ def test_commented_issues_header_keeps_nested_route(tmp_path: Path):
     assert routing["repo"] == "example/personal-backlog"
 
 
-def test_empty_issues_mapping_uses_origin_fallback(tmp_path: Path):
+def test_empty_issues_mapping_uses_origin_fallback(tmp_path: Path) -> None:
     knowledge = _knowledge_repo(
         tmp_path / "knowledge",
         "https://github.com/example/private-knowledge.git",
@@ -1060,7 +1062,7 @@ def test_empty_issues_mapping_uses_origin_fallback(tmp_path: Path):
     assert routing["repo"] == "example/private-knowledge"
 
 
-def test_empty_nested_issues_block_uses_origin_fallback(tmp_path: Path):
+def test_empty_nested_issues_block_uses_origin_fallback(tmp_path: Path) -> None:
     knowledge = _knowledge_repo(
         tmp_path / "knowledge",
         "https://github.com/example/private-knowledge.git",
@@ -1075,7 +1077,7 @@ def test_empty_nested_issues_block_uses_origin_fallback(tmp_path: Path):
     assert routing["source"] == "config+origin"
 
 
-def test_hash_inside_quoted_repo_is_not_a_comment(tmp_path: Path):
+def test_hash_inside_quoted_repo_is_not_a_comment(tmp_path: Path) -> None:
     knowledge = _knowledge_repo(tmp_path / "knowledge")
     config = knowledge / ".agent-worktrees" / "config.yaml"
     config.parent.mkdir()
@@ -1090,7 +1092,7 @@ def test_hash_inside_quoted_repo_is_not_a_comment(tmp_path: Path):
     assert routing["repo"] == "example/personal#backlog"
 
 
-def test_inline_unsupported_issue_provider_is_reported(tmp_path: Path):
+def test_inline_unsupported_issue_provider_is_reported(tmp_path: Path) -> None:
     knowledge = _knowledge_repo(tmp_path / "knowledge")
     config = knowledge / ".agent-worktrees" / "config.yaml"
     config.parent.mkdir()
@@ -1105,7 +1107,7 @@ def test_inline_unsupported_issue_provider_is_reported(tmp_path: Path):
     assert routing["provider"] == "azure-devops"
 
 
-def test_nested_issue_mapping_does_not_override_direct_route(tmp_path: Path):
+def test_nested_issue_mapping_does_not_override_direct_route(tmp_path: Path) -> None:
     knowledge = _knowledge_repo(tmp_path / "knowledge")
     config = knowledge / ".agent-worktrees" / "config.yaml"
     config.parent.mkdir()
@@ -1124,7 +1126,7 @@ def test_nested_issue_mapping_does_not_override_direct_route(tmp_path: Path):
     assert routing["repo"] == "example/personal-backlog"
 
 
-def test_invalid_github_repo_shape_requires_routing_fix(tmp_path: Path):
+def test_invalid_github_repo_shape_requires_routing_fix(tmp_path: Path) -> None:
     knowledge = _knowledge_repo(tmp_path / "knowledge")
     config = knowledge / ".agent-worktrees" / "config.yaml"
     config.parent.mkdir()
@@ -1139,7 +1141,7 @@ def test_invalid_github_repo_shape_requires_routing_fix(tmp_path: Path):
     assert routing["reason"] == "GitHub issue repo must use owner/name form"
 
 
-def test_unreadable_issue_config_reports_unknown(tmp_path: Path):
+def test_unreadable_issue_config_reports_unknown(tmp_path: Path) -> None:
     knowledge = _knowledge_repo(tmp_path / "knowledge")
     config = knowledge / ".agent-worktrees" / "config.yaml"
     config.parent.mkdir()
@@ -1151,7 +1153,7 @@ def test_unreadable_issue_config_reports_unknown(tmp_path: Path):
     assert routing["config"] == str(config.resolve())
 
 
-def test_unrecognized_issue_block_reports_unknown(tmp_path: Path):
+def test_unrecognized_issue_block_reports_unknown(tmp_path: Path) -> None:
     knowledge = _knowledge_repo(
         tmp_path / "knowledge",
         "https://github.com/example/private-knowledge.git",
@@ -1171,7 +1173,7 @@ def test_unrecognized_issue_block_reports_unknown(tmp_path: Path):
     assert "malformed" in routing["reason"]
 
 
-def test_missing_origin_requires_explicit_issue_routing(tmp_path: Path):
+def test_missing_origin_requires_explicit_issue_routing(tmp_path: Path) -> None:
     knowledge = _knowledge_repo(tmp_path / "knowledge")
 
     routing = bk.inspect_issue_routing(str(knowledge))
@@ -1180,14 +1182,14 @@ def test_missing_origin_requires_explicit_issue_routing(tmp_path: Path):
     assert routing["origin_provider"] == "missing"
 
 
-def test_missing_knowledge_path_is_not_resolved_from_cwd():
+def test_missing_knowledge_path_is_not_resolved_from_cwd() -> None:
     routing = bk.inspect_issue_routing("")
 
     assert routing["status"] == "unknown"
     assert routing["config"] == ""
 
 
-def test_nested_directory_does_not_inherit_parent_repo_origin(tmp_path: Path):
+def test_nested_directory_does_not_inherit_parent_repo_origin(tmp_path: Path) -> None:
     knowledge = _knowledge_repo(
         tmp_path / "knowledge",
         "https://github.com/example/private-knowledge.git",
@@ -1201,19 +1203,19 @@ def test_nested_directory_does_not_inherit_parent_repo_origin(tmp_path: Path):
     assert routing["origin_provider"] == "missing"
 
 
-def test_azure_devops_ssh_origin_is_classified():
+def test_azure_devops_ssh_origin_is_classified() -> None:
     assert bk.classify_origin(
         "git@ssh.dev.azure.com:v3/example/Project/knowledge"
     ) == ("azure-devops", "")
 
 
-def test_scheme_ssh_github_origin_with_port_is_classified():
+def test_scheme_ssh_github_origin_with_port_is_classified() -> None:
     assert bk.classify_origin(
         "ssh://git@github.com:22/example/private-knowledge.git"
     ) == ("github", "example/private-knowledge")
 
 
-def test_provider_only_config_uses_github_origin_with_mixed_source(tmp_path: Path):
+def test_provider_only_config_uses_github_origin_with_mixed_source(tmp_path: Path) -> None:
     knowledge = _knowledge_repo(
         tmp_path / "knowledge",
         "https://github.com/example/private-knowledge.git",
@@ -1231,7 +1233,7 @@ def test_provider_only_config_uses_github_origin_with_mixed_source(tmp_path: Pat
 
 def test_provider_only_config_without_github_origin_stays_config_sourced(
     tmp_path: Path,
-):
+) -> None:
     knowledge = _knowledge_repo(
         tmp_path / "knowledge",
         "https://example.visualstudio.com/Project/_git/knowledge",
