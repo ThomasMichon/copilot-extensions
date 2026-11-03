@@ -263,16 +263,25 @@ outcomes from agent-recommended research and prioritization mechanics.
   census is 923 whole issues, 194 above 729: four own original-cohort
   departures coexist with one eligible and one excluded metadata-only arrival.
   No technical completion or claim/resource release is inferred.
-- [ ] _(Agent-recommended)_ Deliver the [Transport and Bridge receiving
- relationships](receiving-transport-bridge.md) through normal review,
- actual merge and complete current readback before separate source judgments.
- Seven direct source families under five existing ROOTs retain #84/#954/
- #1460/#1843/#1941/#2860/#2885, including original alternatives, all
- inherited acceptance and every real assignment/token/resource condition.
- #1138 remains an external semantic owner, #4049 retains its finite
- selected-target proof gap and #4050 remains standalone because the
- historical-review ROOT does not fit. No new implementation, technical
- completion, source disposition or claim release is inferred.
+- [x] _(Agent-recommended)_ Deliver the [Transport and Bridge receiving
+  relationships](receiving-transport-bridge.md) through normal review,
+  actual merge and complete current readback before separate source judgments.
+  Seven direct source families under five existing ROOTs retain #84/#954/
+  #1460/#1843/#1941/#2860/#2885, including original alternatives, all
+  inherited acceptance and every real assignment/token/resource condition.
+  #1138 remains an external semantic owner, #4049 retains its finite
+  selected-target proof gap and #4050 remains standalone because the
+  historical-review ROOT does not fit. #9516 actually merged the contracts;
+  all five complete current ROOTs and their strict annexes were read back,
+  followed by separate whole-source and necessary-keeper judgments. Two
+  guarded administrative folds preserve #2860/#2885 work under the same
+  custodians; eight sources retain literal open-token, Draft-fit,
+  assignment or receiving-scope conditions. #84 still expressly names its
+  OPEN canonical token, including in the receiving coordination; document
+  delivery does not revise that condition or impose product completion.
+  The 2026-10-29 05:02:13 UTC census is 920 whole issues, 191 above 729:
+  two own original-cohort folds and one external departure, no arrivals.
+  No technical completion or claim/resource release is inferred.
 - [ ] Refresh live and original-cohort metrics, append journal checkpoints, and
   continue graph-backed consolidation with creation-oldest-first coverage until
   at most 729 issues remain.
