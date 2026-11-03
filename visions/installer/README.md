@@ -158,8 +158,9 @@ compatibility mechanism must not redefine the goal.
   central services and publish their current-version selections and invocation/
   service registrations. Reuse, old-runtime/footprint recovery or migration and
   zero-downtime handoff are best-effort optimizations, not prerequisites.
-  Necessary state-preserving application-data/schema migrations remain part of
-  safe incoming readiness; they do not depend on old-runtime permission.
+  Durable-state compatibility or necessary state-preserving application-data/
+  schema migration is required before admitting incoming mutable serving work
+  and is part of safe readiness; it does not depend on old-runtime permission.
   Missing old monitor
   capabilities, unknown legacy layout/custody/provenance, maintenance banners,
   stale locks, transaction records or queue fences cannot veto this explicit
@@ -708,10 +709,13 @@ a separate path, not a mandatory ceremony before repair. Status distinguishes
 operator-authorized recovery from native-confirmed settlement and preserves
 the prior failure without turning it back into installation authority.
 
-A successful replacement leaves old generations inert: no older managed installer
-or daemon remains serving or able to reactivate itself through stale launch,
-routing or maintenance state. Inert rollback artifacts need not be physically
-erased. The repair preserves application data and unrelated installations;
+A successful installation has all requested incoming readiness and current
+selections. Old generations may still be finishing independent retirement;
+their confirmed exit/cleanup is not that success gate. Current launch, routing
+and maintenance selections prevent stale reactivation. Eventual retirement
+leaves only the incoming central generation serving, without targeting protected
+session processes. Inert rollback artifacts need not be physically erased.
+The repair preserves application data and unrelated installations;
 its approval does not authorize an indiscriminate process kill or data wipe.
 Zero downtime is not guaranteed. Failures remain explicit rather than falsely
 claiming that all old code is retired or the new installation is ready.
