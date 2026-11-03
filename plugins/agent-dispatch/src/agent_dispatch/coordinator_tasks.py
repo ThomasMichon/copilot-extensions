@@ -15,6 +15,7 @@ from . import telemetry
 from .coordinator_auth import _make_control_auth
 from .coordinator_categories import CategorySelection, register_category_routes
 from .coordinator_loops import DrainGate, DrainRequest
+from .coordinator_pool_decline import enrich_task
 from .coordinator_task_models import (
     AbandonBody,
     ActivityBody,
@@ -113,7 +114,7 @@ def _task_with_spawn_dict(queue: TaskQueue, task: Task) -> dict:
     run_waiter = _run_waiter_summary(queue, task.id)
     if run_waiter is not None:
         result["run_waiter"] = run_waiter
-    return result
+    return enrich_task(queue, task.id, result)
 
 
 def _bulk_task_dict(task: Task, draft_scope: dict | None = None) -> dict:

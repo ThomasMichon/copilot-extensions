@@ -4392,7 +4392,7 @@
         "tools/release_controller_shell.py": "4753af55971f20782ace481dd8fb94e2fed53d0deac021b70494c0427b62d96a",
         "tools/release_helper_loaders.py": "1de576109656102302be557a67275ce14e1750386ac0180df5a08ad312d5b879",
         "tools/reuse_promotion_artifacts.py": "06cfd2091623b48d18e0a181f0e8353bf0b07d8b904a9890574af6d530603d4d",
-        "tools/run-promotion-unit-tests.py": "55ca139a83228cb2b2fae3d3423aff7e716203c141c671d2372e866a6a2ef931",
+        "tools/run-promotion-unit-tests.py": "a6f6b6d95ddb71f051999795c64a64f7a1de50a2e9625ff1327cfe8205944d12",
         "tools/runtime_profile.py": "d55ed6a4263e6349d452364e3abb4fb39c232d558efd384e0f1898fffbe080e5",
         "tools/runtime_profile_policy.py": "3534c89ee067231bb75fe6d74eab0816c2a2bed77653b2a66a21ff602426ca22",
         "tools/runtime_profile_release.py": "74807d5cee4a4c6f20ae1dc0e57c28e0afa8c6911cc4ea4649eb9fce82045ce8",

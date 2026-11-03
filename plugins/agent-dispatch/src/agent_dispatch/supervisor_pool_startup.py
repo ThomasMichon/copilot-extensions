@@ -43,6 +43,8 @@ def supervise_pool_startup(
         snapshot = owner.client.pool_startup_snapshot(task["id"])
         if snapshot is None:
             return None
+        if snapshot.get("worker_decline") is not None:
+            return False
         budget, current, assigned = (
             snapshot["budget"], snapshot["reservation"], snapshot["task"],
         )

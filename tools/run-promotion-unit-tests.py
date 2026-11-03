@@ -120,6 +120,7 @@ def main() -> int:
             try:
                 result = pytest.main([
                     "-q", "-x", "--capture=sys", "-c", os.devnull, "-p", "no:cacheprovider",
+                    "-o", "parametrize_long_str_id_strategy=legacy",
                     "--noconftest", "--import-mode=importlib", "--assert=plain",
                     "--log-file", str(Path(temporary) / "pytest.log"),
                     "--rootdir", str(ROOT), "--confcutdir", str(ROOT),
