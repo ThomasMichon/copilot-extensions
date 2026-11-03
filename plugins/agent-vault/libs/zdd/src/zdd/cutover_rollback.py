@@ -52,8 +52,8 @@ def _undrain(self: CutoverOrchestrator, old: Endpoint, result: CutoverResult) ->
                 for name in ("bind", "port", "pid", "version", "process_start_time")
             ):
                 raise CutoverError("restored predecessor ownership changed before undrain")
-            if self.refuse_old is not None:
-                refusal = self.refuse_old(raw)
+            if self.refuse_restoration is not None:
+                refusal = self.refuse_restoration(raw)
                 if refusal:
                     raise CutoverError(refusal)
         response = self.make_client(old.base_url).undrain()
@@ -149,8 +149,8 @@ def _rollback(
                         return None
 
                     def refuse_restoration(active: dict | None) -> str | None:
-                        if self.refuse_old is not None:
-                            refusal = self.refuse_old(old.to_dict())
+                        if self.refuse_restoration is not None:
+                            refusal = self.refuse_restoration(old.to_dict())
                             if refusal:
                                 return refusal
                         return refuse_retraction(active) if retracted else None
@@ -160,7 +160,7 @@ def _rollback(
                         pid=old.pid, version=old.version, demote_existing=True,
                         process_start_time=old.process_start_time,
                         expected_active=current,
-                        **({"refuse_current": refuse_restoration} if retracted or self.refuse_old is not None else {}),
+                        **({"refuse_current": refuse_restoration} if retracted or self.refuse_restoration is not None else {}),
                     )
                 else:
                     self.routing.publish_active(

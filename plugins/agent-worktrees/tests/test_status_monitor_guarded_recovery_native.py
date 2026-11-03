@@ -20,6 +20,7 @@ from agent_worktrees import status_monitor_cutover as control
 from agent_worktrees import status_monitor_recovery_contract as recovery
 
 pytestmark = [
+    pytest.mark.timeout(150),
     pytest.mark.skipif(sys.platform != "win32", reason="Windows Job/native identity proof"),
     pytest.mark.skipif(os.environ.get("AGENT_WORKTREES_NATIVE_RECOVERY") != "1",
                        reason="opt in with AGENT_WORKTREES_NATIVE_RECOVERY=1"),
@@ -52,9 +53,17 @@ def start_provider(tmp_path, mode="normal"):
             ready = tmp_path / "ready.json"
             def started():
                 assert proc.poll() is None, (tmp_path / "provider.log").read_text()
-                return ready.exists()
-            wait_for(started)
-            data = json.loads(ready.read_text())
+                try:
+                    return json.loads(ready.read_text(encoding="utf-8"))
+                except (FileNotFoundError, PermissionError):
+                    return None
+            try:
+                data = wait_for(started, timeout=60)
+            except AssertionError as exc:
+                raise AssertionError(
+                    "isolated receiver startup failed:\n"
+                    + (tmp_path / "provider.log").read_text(encoding="utf-8")
+                ) from exc
             assert data["pid"] == proc.pid and data["start"] == locks.process_start_time(proc.pid)
             route = routing.publish_active(
                 tmp_path, bind="127.0.0.1", port=data["port"], pid=proc.pid,

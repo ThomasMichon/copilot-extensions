@@ -3,12 +3,16 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib
 import json
 import os
+import re
+import subprocess
 import sys
 import time
-from contextlib import nullcontext
+from contextlib import ExitStack, nullcontext
 from dataclasses import dataclass
+from html import escape
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -19,6 +23,7 @@ import bundle_lock
 import local_install_profile as native
 import local_install_source as source_owner
 from core_runtime_profile import _core_manifest, _read, build_core_profile, core_roots
+from installer_engine_process import ChildLaunchError, ChildTimeoutExpired, run_owned
 from installer_wheel_acquisition import AcquisitionLimits, acquire_wheel_inputs
 from installer_wheel_inputs import _check_deadline, _ordinary
 from installer_wheel_snapshot import _digest, _open, _unchanged, retain_wheel_inputs
@@ -32,9 +37,11 @@ from runtime_profile_delivery import (
     _json,
     _material_files,
     _read_json,
+    _unique,
     build_profile_delivery,
 )
 from runtime_source_lock import _wheel_pins
+from runtime_wheel_inspection import inspect_wheel as inspect_pool_wheel
 from standalone_python_artifacts import COMPONENTS
 
 
@@ -104,6 +111,96 @@ def _producer_procutil():
     )
 
 
+def _offline_pool_directory(pool, *, deadline: float) -> Path:
+    _check_deadline(deadline)
+    directories = {path.parent for path in pool.paths.values()}
+    if len(directories) != 1:
+        raise ProfileError("offline wheel pool directory is not a single held set")
+    directory = directories.pop()
+    expected = set(pool.paths)
+    names = set()
+    with os.scandir(directory) as entries:
+        for entry in entries:
+            _check_deadline(deadline)
+            if entry.name not in expected:
+                raise ProfileError("offline wheel pool directory differs from the held set")
+            names.add(entry.name)
+    if names != expected:
+        raise ProfileError("offline wheel pool directory differs from the held set")
+    _check_deadline(deadline)
+    return directory
+
+
+def _compile_offline_pool(transaction, pool, *, deadline: float) -> None:
+    pool.verify()
+    directory = _offline_pool_directory(pool, deadline=deadline)
+    index = directory.parent / "pool-index.html"
+    content = (
+        "<!doctype html>\n"
+        + "\n".join(
+            f'<a href="{escape(native.dependencies._file_uri(path), quote=True)}">{escape(name)}</a>'
+            for name, path in sorted(pool.paths.items())
+        )
+        + "\n"
+    ).encode("ascii")
+    with index.open("xb") as output:
+        output.write(content)
+    index.chmod(0o400)
+    command = [
+        *transaction.argv, "--offline", "--no-index", "--no-cache", "--quiet",
+        "--find-links", native.dependencies._file_uri(index),
+    ]
+    _check_deadline(deadline)
+    with _held(
+        {"index": index},
+        {"index": {"sha256": "sha256:" + hashlib.sha256(content).hexdigest(), "size": len(content)}},
+        deadline,
+    ):
+        procutil = _producer_procutil()
+        try:
+            run_owned(
+                command, cwd=transaction.cwd, env=transaction.environment,
+                timeout=max(0.001, deadline - time.monotonic()), deadline=deadline,
+                procutil=procutil, construction_fd=None,
+            )
+        except ChildTimeoutExpired:
+            raise ProfileError("offline wheel-pool selection timed out") from None
+        except subprocess.CalledProcessError as error:
+            stderr = error.stderr
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode("utf-8", errors="replace")
+            diagnostics = importlib.import_module(procutil.__name__ + ".diagnostics")
+            detail = diagnostics.safe_diagnostic_text(
+                stderr if isinstance(stderr, str) else "", 65536, transaction.environment,
+            )
+            detail = re.sub(r"(?i)\b(?:https?|file)://.*", "[location]", detail)
+            detail = re.sub(r"(?<!\w)(?:[A-Za-z]:[\\/]|\\\\|/(?!/)).*", "[location]", detail)
+            detail = detail[:400] + ("..." if len(detail) > 400 else "")
+            raise ProfileError(
+                f"offline wheel-pool selection failed (exit {error.returncode}): "
+                + (detail or "no diagnostic returned"),
+            ) from None
+        except ChildLaunchError:
+            raise ProfileError("offline wheel-pool selection could not start") from None
+        _check_deadline(deadline)
+        _offline_pool_directory(pool, deadline=deadline)
+        pool.verify()
+
+
+def _inspect_offline_pool(pool, *, limits, deadline: float) -> None:
+    remaining = limits.max_expanded_bytes
+    for filename, archive in pool.archives.items():
+        if remaining <= 0:
+            raise ProfileError("offline wheel pool exceeds its inspection budget")
+        _, size = inspect_pool_wheel(
+            archive, {"filename": filename}, limits=limits, deadline=deadline,
+            max_archive_bytes=limits.max_archive_bytes, max_unpacked_bytes=remaining,
+            max_metadata_bytes=limits.max_metadata_member_bytes,
+        )
+        remaining -= size
+    pool.verify()
+
+
 def _inspect_first_party(snapshot, manifest: dict, source: Path, *, limits, deadline: float) -> None:
     for row in manifest["wheels"]:
         _check_deadline(deadline)
@@ -123,11 +220,13 @@ def _build_from_snapshot(
     source: Path, source_record: dict, manifest_data: bytes, wheel_dir: Path,
     target: dict, *, uv: str, download_origins: tuple[str, ...], materials: dict,
     material_paths: dict, destination: Path, deadline: float, max_bytes: int,
-    native_lock: Path,
+    native_lock: Path | None = None, offline_wheel_pool: Path | None = None,
 ) -> dict:
     """Keep selected lock, wheel and material custody until candidate publication."""
     if type(max_bytes) is not int or max_bytes <= 0:
         raise ProfileError("core delivery requires a positive byte budget")
+    if (native_lock is None) == (offline_wheel_pool is None):
+        raise ProfileError("core delivery requires exactly one native lock or offline wheel pool")
     if (
         not isinstance(materials, dict) or not isinstance(material_paths, dict)
         or any(not isinstance(name, str) for name in materials)
@@ -156,17 +255,32 @@ def _build_from_snapshot(
         raise ProfileError("core first-party wheel filenames collide")
     first_names = {canonicalize_name(row["name"]) for row in manifest["wheels"]}
     first_exclusions = tuple(sorted(first_names))
-    selected_lock = _read_lock(Path(native_lock), deadline)
-    selected_files = _wheel_pins(selected_lock, target, deadline, prefer_target_tags=True)
-    if first_names & {item["name"] for item in selected_files}:
-        raise ProfileError("native core lock overlaps its first-party wheel set")
     held_paths = {"material:" + name: path for name, path in material_paths.items()}
     held_files = {"material:" + name: item for name, item in material_files.items()}
-    held_paths["selected-lock"] = Path(native_lock)
-    held_files["selected-lock"] = {
-        "sha256": "sha256:" + hashlib.sha256(selected_lock).hexdigest(),
-        "size": len(selected_lock),
-    }
+    pool_paths, pool_digests = None, None
+    if native_lock is not None:
+        selected_lock = _read_lock(Path(native_lock), deadline)
+        selected_files = _wheel_pins(selected_lock, target, deadline, prefer_target_tags=True)
+        held_paths["selected-lock"] = Path(native_lock)
+        held_files["selected-lock"] = {
+            "sha256": "sha256:" + hashlib.sha256(selected_lock).hexdigest(),
+            "size": len(selected_lock),
+        }
+    else:
+        pool_manifest = Path(source_owner.native_retained_path(offline_wheel_pool))
+        pool_data = _read_lock(pool_manifest, deadline)
+        pool_digests = json.loads(pool_data, object_pairs_hook=_unique)
+        if not isinstance(pool_digests, dict) or not pool_digests:
+            raise ProfileError("offline wheel pool requires a nonempty filename-to-digest object")
+        pool_paths = {name: pool_manifest.parent / name for name in pool_digests}
+        held_paths["offline-pool"] = pool_manifest
+        held_files["offline-pool"] = {
+            "sha256": "sha256:" + hashlib.sha256(pool_data).hexdigest(),
+            "size": len(pool_data),
+        }
+        selected_files = None
+    if selected_files is not None and first_names & {item["name"] for item in selected_files}:
+        raise ProfileError("native core lock overlaps its first-party wheel set")
     limits = native.wheel_limits()
     with native.dependencies._temporary_inputs(destination.parent) as temporary:
         work = Path(source_owner.native_retained_path(
@@ -180,8 +294,15 @@ def _build_from_snapshot(
             first_paths, first_digests, max_wheels=256,
             max_archive_bytes=limits.max_archive_bytes, max_total_bytes=max_bytes,
             max_snapshot_bytes=4 * max_bytes, deadline=deadline,
-        ) as first:
+        ) as first, ExitStack() as owners:
             _inspect_first_party(first, manifest, source, limits=limits, deadline=deadline)
+            pool = owners.enter_context(retain_wheel_inputs(
+                pool_paths, pool_digests, max_wheels=256,
+                max_archive_bytes=limits.max_archive_bytes, max_total_bytes=max_bytes,
+                max_snapshot_bytes=4 * max_bytes, deadline=deadline,
+            )) if pool_paths is not None else None
+            if pool is not None:
+                _inspect_offline_pool(pool, limits=limits, deadline=deadline)
             projections = []
             with native.dependencies.retain_uv_compile(
                 uv, [
@@ -192,6 +313,25 @@ def _build_from_snapshot(
                 ], cwd=work, env=dict(os.environ), deadline=deadline, native_target=True,
                 excluded_local_packages=first_exclusions, _projection=projections,
             ) as transaction:
+                if pool is not None:
+                    _compile_offline_pool(transaction, pool, deadline=deadline)
+                    selected_lock = _read_lock(lock_file, deadline)
+                    selected_files = _wheel_pins(
+                        selected_lock, target, deadline, prefer_target_tags=True,
+                        local_wheels=pool.paths,
+                    )
+                    if any(pool.digests.get(item["filename"]) != item["sha256"] for item in selected_files):
+                        raise ProfileError("offline selected wheels differ from the held pool")
+                    owners.enter_context(_held(
+                        {"generated-lock": lock_file},
+                        {"generated-lock": {
+                            "sha256": "sha256:" + hashlib.sha256(selected_lock).hexdigest(),
+                            "size": len(selected_lock),
+                        }},
+                        deadline,
+                    ))
+                    if first_names & {item["name"] for item in selected_files}:
+                        raise ProfileError("native core lock overlaps its first-party wheel set")
                 policy, feed = native._profile_feed(
                     selected, transaction, projections, uv=uv,
                     download_origins=download_origins, wheels=selected_files, deadline=deadline,
@@ -268,6 +408,9 @@ def _build_from_snapshot(
                 ):
                     raise ProfileError("core source projection changed during construction")
                 first.verify()
+                if pool is not None:
+                    _offline_pool_directory(pool, deadline=deadline)
+                    pool.verify()
         before = _ordinary(candidate)
         with _open(candidate) as retained:
             opened = _unchanged(candidate, before, retained)
@@ -276,19 +419,24 @@ def _build_from_snapshot(
             _unchanged(candidate, before, retained, opened=opened)
             _check_deadline(deadline)
             os.link(candidate, destination)
-    return result | {"source_commit": identity.source_commit, "approval": "unattested"}
+    return result | {
+        "source_commit": identity.source_commit, "approval": "unattested",
+        **({"selection": "offline-wheel-pool"} if offline_wheel_pool is not None else {}),
+    }
 
 
 def prepare_core_delivery(
     repository: Path, commit: str, main_head: str, manifest: Path, wheel_dir: Path,
     materials: dict, material_paths: dict, destination: Path, *, uv: str,
     download_origins: tuple[str, ...], deadline: float, max_bytes: int,
-    native_lock: Path,
+    native_lock: Path | None = None, offline_wheel_pool: Path | None = None,
 ) -> dict:
     """Compose the selected Main source and prepare one inert native candidate."""
     _check_deadline(deadline)
     if type(max_bytes) is not int or max_bytes <= 0:
         raise ProfileError("core delivery requires a positive byte budget")
+    if (native_lock is None) == (offline_wheel_pool is None):
+        raise ProfileError("core delivery requires exactly one native lock or offline wheel pool")
     destination = Path(os.path.abspath(destination))
     if os.path.lexists(destination):
         raise FileExistsError("core delivery output already exists")
@@ -310,6 +458,7 @@ def prepare_core_delivery(
             snapshot / "source", record, manifest_data, wheel_dir, target, uv=uv,
             download_origins=download_origins, materials=materials, material_paths=material_paths,
             destination=destination, deadline=deadline, max_bytes=max_bytes, native_lock=native_lock,
+            offline_wheel_pool=offline_wheel_pool,
         )
 
 
@@ -324,7 +473,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--material-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--uv", required=True)
-    parser.add_argument("--native-lock", type=Path, required=True)
+    selection = parser.add_mutually_exclusive_group(required=True)
+    selection.add_argument("--native-lock", type=Path)
+    selection.add_argument("--offline-wheel-pool", type=Path)
     parser.add_argument("--download-origin", action="append", default=[])
     parser.add_argument("--timeout", type=float, default=600)
     parser.add_argument("--max-bytes", type=int, default=512 << 20)
@@ -339,6 +490,7 @@ def main(argv: list[str] | None = None) -> int:
             args.wheel_dir, materials, {name: args.material_dir / name for name in materials},
             args.output, uv=args.uv, download_origins=tuple(args.download_origin),
             deadline=deadline, max_bytes=args.max_bytes, native_lock=args.native_lock,
+            offline_wheel_pool=args.offline_wheel_pool,
         )
         print(json.dumps(result, sort_keys=True))
         return 0

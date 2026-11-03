@@ -858,11 +858,21 @@ overlap is preferred; it does not permit duplicate exclusive work ownership.
 If the predecessor cannot self-retire or settle within the bounded handoff,
 the authorized replacement owner may force-terminate that exact attributable
 predecessor using native identity checks and confirmed exit/write exclusion.
-This cold fallback may precede incoming readiness where exclusivity requires it;
-unsupported graceful cutover does not demand another repair flag or veto the
-update. It does not authorize unrelated cleanup or termination of separately
+The incoming owner starts and attempts handoff first. The outgoing owner sees
+that announcement and independently detects that its full generation is stale.
+New installation completion follows verified incoming readiness and authority,
+not old-process exit. After that completion, the outgoing owner attempts drain;
+the incoming owner's existing lifecycle authority waits a bounded grace period
+and force-terminates the exact predecessor if necessary. Exclusive mutations
+remain fenced throughout. Unsupported graceful cutover does not demand another
+repair flag or veto the update. It does not authorize unrelated cleanup or termination of separately
 owned sessions, children or connectivity. Unknown ownership and failed recovery
 remain explicit, never a false readiness claim.
+The replacement authority releases only the outgoing owner's endpoint
+reservations. Failed predecessor cleanup remains explicit; it does not
+restore the old selection or displace a healthy incoming owner. Rollback is for
+failure of the incoming generation itself to start, not failure to recover its
+predecessor. Explicit stop/uninstall retain their separate scopes.
 
 Supersession is identity inequality: an owner is displaced because its full
 generation identity is no longer current, not because another package version,

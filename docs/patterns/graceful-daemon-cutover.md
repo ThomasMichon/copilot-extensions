@@ -30,6 +30,10 @@ fallback below when the predecessor cannot cooperate or settle; it does not
 require another force/repair flag solely for missing graceful support. Report
 the selected path and any interruption rather than silently claiming seamless
 cutover. Broad historical cleanup remains a separate explicit operation.
+Predecessor cleanup is best effort: retain a healthy incoming generation, report
+unconfirmed retirement and release only the displaced owner's endpoint
+reservations. Do not roll back because the predecessor cannot recover; rollback
+is for failure of the incoming generation itself to start.
 Existing adopters converge component by component; historical automatic-cutover
 adoption alone does not prove cold takeover or this newer lifecycle.
 
@@ -58,7 +62,42 @@ This rule concerns daemon replacement, not Copilot context/session succession.
 
 ## The protocol (the shape)
 
-This is the preferred compatible path. The installer triggers it
+### Successor-first replacement target
+
+Ordinary replacement converges on this sequence, independently of whether the
+old wire contract still works:
+
+```text
+START NEW (prepared, not a second exclusive writer)
+  -> NEW attempts handoff / announces the selected replacement to OLD
+  -> OLD observes the announcement and independently recognizes staleness
+  -> NEW becomes ready and authoritative; NEW declares installation complete
+  -> OLD closes admission and attempts drain
+  -> NEW's existing lifecycle owner waits a bounded grace period
+  -> if OLD remains, that owner attempts identity-bound forced retirement
+```
+
+The announcement flows new-to-old; transferred state flows through the owning
+handoff contract. Announcement receipt is not permission to retire before the
+successor is ready, and absence of a receipt is not an installation veto.
+Full current-generation identity, not numeric version ordering, lets the old
+owner recognize supersession even if notification is lost.
+
+Installation completion and predecessor retirement are different outcomes.
+The installer returns after durable new authority and serving readiness; the
+new resident's existing retirement reconciler owns the grace deadline and
+cleanup independently of installer lifetime. Accepted work gets a best-effort
+drain opportunity, not an indefinite veto: expiry may interrupt it and must
+retain truthful recovery/unknown outcomes. Recheck exact route and native birth
+before forcing; retain unconfirmed custody, never kill foreign or separately
+owned processes or roll back a healthy successor.
+
+This is the target architecture, not a claim that every current adopter has
+implemented successor-owned grace-period forced retirement.
+
+### Existing compatible active/passive protocol
+
+The established synchronous path below is triggered by the installer
 **automatically** during activation (see *Wiring* below) —
 cut over **without a stop** by standing the new version up *beside* the old one
 and moving work to it at a safe point:
@@ -105,13 +144,14 @@ preserves the possibly admitted successor and reports failure, never passive
 disposal or rollback. The elected resident reconciles durable predecessor
 records and canonical runtime references, retaining its own demand and displaced
 code until positive native exit. This is not a new daemon or delayed reaper.
-This asynchronous path requires an outgoing runtime that supports
-readiness-gated retirement without grace-forced exit of accepted work. An
-incapable predecessor must instead use bounded cold takeover; it cannot veto
-the update merely by lacking that capability. An unrouted live process needs
-independent owner/identity attribution before any termination, never a guessed
-PID. These are target requirements, not proof that this adopter already
-implements the legacy fallback. The owner reserves canonical execution
+Current compatible outgoing runtimes support readiness-gated retirement without
+grace-forced exit of accepted work; successor-owned bounded grace escalation is
+the target above, not yet a qualification claim for this path. An incompatible or unreachable predecessor
+instead uses the existing cutover owner's bounded native retirement fallback
+after successor serving readiness. Cleanup failure cannot reverse that healthy
+incoming generation. An unrouted or identity-unknown owner still refuses
+installation; wire compatibility is not native ownership proof.
+The owner reserves canonical execution
 protection before persisting retirement intent, cancels exact custody only after proven precommit
 rollback, and keeps a pending dev claim through duplicate release attempts.
 Prepared intent cannot execute a retirement grant. Commitment enables native-exit
@@ -153,10 +193,12 @@ reaper or a parallel update loop:
    primitives, including immediate owner/selection revalidation and exit
    confirmation. Never kill by process name or a bare/reused PID; never sweep
    another installation, the incoming generation, or separately owned workers.
-4. Establish predecessor exit or equivalent write exclusion before the newcomer
-   acquires exclusive resources or resumes mutations. Cold recovery may follow
-   old-owner retirement: health/promotion-before-retire is not a precondition on
-   this fallback. The supervisor follows the selected generation and does not
+4. Start the newcomer before forced retirement; its preparation and control
+   surface do not acquire duplicate exclusive work. Establish predecessor exit
+   or equivalent write exclusion before resuming exclusive mutations. Once the
+   new owner is ready and authoritative, installation completion starts the
+   bounded outgoing drain/grace period; expiry permits the exact forced cleanup.
+   The supervisor follows the selected generation and does not
    resurrect the displaced owner. Retain durable recovery evidence if the
    replacement caller dies, so the same authority can finish recovery.
 5. Reconstruct owned work from durable state, publish the recovered endpoint and
@@ -225,6 +267,14 @@ result = orch.run(health_timeout=60, drain_timeout=300, force=False)
 ```
 
 A consumer owns three things `zdd` cannot know:
+
+The monitor's qualified adapter opts into `retire_failed_predecessor`, retaining
+an exact outgoing endpoint independently of its recovery capability. Drain or
+shutdown failure calls that adapter's native cleanup without failing incoming
+startup; `predecessor_cleanup` reports its separate outcome. Other adopters keep
+their existing ordering and rollback behavior until they explicitly adopt this
+contract. `release_previous_guarded` removes an outgoing fallback route only
+when both the successor and displaced endpoint still match the transition.
 
 For conditionally authorized stale-runtime repair, the shared primitive also
 requires an adopter-owned authoritative effective-runtime snapshot and matching
@@ -322,8 +372,10 @@ narrow "yes":
 Numeric package-version, hash or generation ordering is irrelevant; compatible
 rollback and same-version/different-source replacement must work too. On the
 graceful route, confirmed successor readiness still protects ongoing service.
-On an authorized cold takeover, incoming listening/health is not required
-before the outgoing owner exits. Ambiguous selection or process identity alone
+The target also lets the old owner recognize a selected replacement while it is
+still preparing, but graceful drain follows new readiness/completion. Missing
+cooperation does not defer new startup; bounded forced cleanup follows the
+successor-first sequence above. Ambiguous selection or process identity alone
 never authorizes destructive action. Distinguish this target from legacy
 numeric/routed `is_superseded` helper behavior, whose adopter migration and
 native qualification remain implementation work.
@@ -565,8 +617,8 @@ agent-bridge needs.
    the compatible path, start it beside the incumbent, confirm promotion and
    let the outgoing owner retire. Incompatible, unavailable or non-settling
    predecessors instead permit bounded cold takeover by the same authorized
-   replacement owner, including retirement before incoming readiness when
-   exclusivity requires it. Missing graceful support needs no extra repair flag;
+   replacement owner after incoming startup. Fence exclusive resource acquisition
+   separately from starting the new process. Missing graceful support needs no extra repair flag;
    exclusive work remains fenced on either path.
 3. **Outgoing drain is best effort and bounded.** Prefer the displaced owner's
    admission closure, checkpoint and self-retirement after successor readiness.

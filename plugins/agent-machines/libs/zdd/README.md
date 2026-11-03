@@ -34,10 +34,14 @@ Adopters must qualify the incoming runtime's actual capability before publicatio
 and keep displaced code retained independently of the installing process until
 native exit is positively observed. The library does not supply that retention
 or prove completion of accepted work.
-They must also qualify the outgoing resident's safe retirement protocol before
-changing its selector: supersession waits for a genuinely ready successor, and
-accepted work cannot be discarded on a grace deadline. Unsupported incumbents
-are an explicit refusal, not a silent synchronous downgrade. Recovery records
+Compatible outgoing residents qualify their safe retirement protocol:
+supersession waits for a genuinely ready successor, and accepted work is not
+discarded on a grace deadline. An adopter may instead provide
+`retire_failed_predecessor` for an incompatible or unreachable incumbent.
+In self-retirement mode that bounded cleanup runs only after successor serving
+readiness, without changing publication's irreversible frontier. Cleanup failure
+is reported separately and never rolls back the healthy incoming generation.
+Native identity and exact route custody remain required. Recovery records
 include the full predecessor endpoint so uncertain publication can be reconciled
 against its original native identity. Once a ready successor is observed,
 outgoing retirement must remain latched even if that successor later dies.
@@ -123,6 +127,24 @@ reuses the same port gets mistaken for the real daemon.
 
 Key API: `Endpoint`, `read_active_endpoint`, `publish_active`,
 `clear_if_owner`, `reap_stale_active`, `routing_table_path`.
+
+`release_previous_guarded` releases one superseded endpoint only when the exact
+active successor and previous endpoint still match. It preserves publication
+history and never removes a changed owner's route.
+
+`CutoverOrchestrator` optionally accepts `retire_failed_predecessor` with an
+exact `expected_old` endpoint. This adapter-owned, bounded native cleanup runs
+when graceful drain or shutdown fails, or after a self-retirement successor
+serves when the adapter explicitly supplies that fallback; its `predecessor_cleanup` result is
+separate from incoming readiness. Cleanup failure does not roll back a healthy
+incoming generation. Without that hook, existing cutover behavior is unchanged.
+
+Failed graceful drain records pending cleanup, not native retirement before
+publication. The existing verify-before-retire gate still precedes the cleanup
+attempt. An adopter that cannot negotiate predecessor recovery may set
+`drain_predecessor=False` with its exact-owner retirement hook; the old peer is
+then left undrained until successor serving readiness permits native cleanup.
+Skipping drain without that bounded retirement owner is refused.
 
 Publications for a live PID also record its `process_start_time`, establishing
 the process identity when the route is written rather than sampling a potentially
@@ -317,6 +339,14 @@ shutdown, rollback can restore the predecessor only while `active` is absent
 and `previous` still exactly identifies that successor. Recheck that condition
 inside the publication fence; an unrelated active or previous owner is not
 authority to restore over it.
+An optional `refuse_restoration` callback independently validates the outgoing
+native owner inside the restoration publication fence and before undrain. It
+defaults to `refuse_old` for existing callers; an adopter that tolerates an old
+process's departure during forward publication must supply the stricter check.
+Best-effort-retirement callers select a port distinct from the observed
+predecessor even if its listener has closed, refusing after eight unsuccessful
+selections without spawning or changing custody. Conditional repair retains its
+single same-port refusal.
 
 #### Conditional owner operation (partial lifecycle support)
 

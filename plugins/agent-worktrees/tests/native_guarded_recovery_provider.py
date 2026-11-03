@@ -8,9 +8,11 @@ import threading
 import time
 from pathlib import Path
 
+print("fixture: importing monitor control", flush=True)
 from agent_worktrees import locks
 from agent_worktrees import status_monitor_cutover as control
 from agent_worktrees import status_monitor_recovery_contract as recovery
+print("fixture: monitor control imported", flush=True)
 
 
 def wait_for(path, timeout=15):
@@ -26,7 +28,7 @@ def serve(root: Path, mode: str):
     opened = 0
     health_calls = 0
     candidate = mode.startswith("candidate")
-    draining = not candidate
+    draining = not candidate and mode != "legacy-ready"
     published = not candidate
     shutdown_requested = threading.Event()
     token = "isolated-recovery-fixture"
@@ -49,14 +51,21 @@ def serve(root: Path, mode: str):
         with state_lock:
             if action == "health":
                 health_calls += 1
+                if mode == "health-timeout":
+                    wait_for(root / "release")
                 return {
                     "pid": os.getpid(), "status": "draining" if draining else "ready",
+                    "process_start_time": locks.process_start_time(os.getpid()),
                     "runtime_generation": "fixture-runtime", "opened": opened,
                     "health_calls": health_calls,
                     "published": published,
                     "worktrees": {"status": "ready" if published else "unready"},
                     "repositories": {"admitting": published and not draining},
-                    "capabilities": [] if mode == "old-provider" else [recovery.CAPABILITY],
+                    "capabilities": (
+                        [] if mode in {"old-provider", "legacy-ready", "candidate-legacy"}
+                        else [recovery.CAPABILITY, "status-monitor-async-retirement-v1"]
+                        if candidate else [recovery.CAPABILITY]
+                    ),
                 }
             if action == "promote":
                 (root / "promote-requested").touch()
@@ -78,7 +87,12 @@ def serve(root: Path, mode: str):
                 shutdown_requested.set()
                 return {"shutdown": True}
             if action == "drain":
+                (root / "drain-requested").touch()
                 draining = True
+                if mode == "drain-timeout":
+                    wait_for(root / "release")
+                if mode == "old-provider":
+                    return {"drained": False, "clean": False, "forced": False}
                 return {"drained": True, "clean": True, "forced": False}
             if action == "undrain":
                 return reopen()
@@ -127,7 +141,7 @@ def serve(root: Path, mode: str):
         server.close()
         (root / "listener-closed").touch()
     try:
-        deadline = time.monotonic() + 60
+        deadline = time.monotonic() + 180
         while not shutdown_requested.is_set() and not (root / "stop").exists():
             if time.monotonic() >= deadline:
                 raise TimeoutError("fixture lifetime expired")

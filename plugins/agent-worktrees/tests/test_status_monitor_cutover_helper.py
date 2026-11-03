@@ -546,7 +546,7 @@ def test_async_route_requires_recorded_native_birth_before_health(tmp_path, monk
 
 
 @pytest.mark.parametrize("damage", [None, "generation", "empty-generation", "recovery-capability"])
-def test_async_admission_qualifies_guarded_preparation_recovery(tmp_path, monkeypatch, damage):
+def test_async_admission_keeps_native_custody_without_guarded_preparation_recovery(tmp_path, monkeypatch, damage):
     from agent_worktrees import runtime_monitor_identity as identity
     from agent_worktrees.runtime_monitor_retirements import CAPABILITY
     from agent_worktrees.status_monitor_recovery_contract import CAPABILITY as RECOVERY
@@ -570,11 +570,7 @@ def test_async_admission_qualifies_guarded_preparation_recovery(tmp_path, monkey
         health["capabilities"] = [CAPABILITY]
     monkeypatch.setattr(identity.cutover, "ControlClient", lambda *a, **k: SimpleNamespace(health=lambda: health))
     monkeypatch.setattr(identity.cutover, "load_or_create_control_token", lambda root: "synthetic-token")
-    if damage:
-        with pytest.raises(ValueError):
-            identity.routed_identity(tmp_path, require_async_retirement=True)
-    else:
-        assert identity.routed_identity(tmp_path, require_async_retirement=True) == (101, "1001", None)
+    assert identity.routed_identity(tmp_path, require_async_retirement=True) == (101, "1001", None)
 
 
 @pytest.mark.parametrize("fallback", ["live", "unknown", "prepared", "retiring", "exited"])
@@ -652,6 +648,11 @@ def test_async_predecessor_binds_publication_to_admitted_native_owner(tmp_path, 
     route = routing.Endpoint("127.0.0.1", 61001, 101, "old", 1, "1001")
     monkeypatch.setattr(recovery, "active_endpoint", lambda path: route)
     monkeypatch.setattr(identity.locks, "process_start_time", lambda pid: "1001")
+    monkeypatch.setattr(smc, "ControlClient", lambda *a, **k: SimpleNamespace(health=lambda: {
+        "pid": 101, "capabilities": ["status-monitor-async-retirement-v1", recovery.CAPABILITY],
+        "runtime_generation": "a" * 32,
+    }))
+    monkeypatch.setattr(smc, "load_or_create_control_token", lambda root: "fixture-token")
     predecessor, options = identity.async_predecessor(
         tmp_path, None, observed=(101, "1001", None), incumbent_expected=True,
     )
@@ -716,8 +717,8 @@ def test_async_target_capability_is_not_inferred_from_malformed_metadata(capabil
         check_successor("127.0.0.1", 61001, lambda _url: client, require_async_retirement=True)
 
 
-@pytest.mark.parametrize("capabilities", [None, "status-monitor-async-retirement-v1", {}])
-def test_async_predecessor_capability_requires_a_typed_declaration(tmp_path, monkeypatch, capabilities):
+@pytest.mark.parametrize("capabilities", [None, "status-monitor-async-retirement-v1", {}, [], "timeout"])
+def test_async_predecessor_without_contract_retains_native_custody(tmp_path, monkeypatch, capabilities):
     from agent_worktrees import runtime_monitor_identity as identity
 
     endpoint = routing.Endpoint("127.0.0.1", 61001, 101, "old", 1, "1001")
@@ -726,11 +727,15 @@ def test_async_predecessor_capability_requires_a_typed_declaration(tmp_path, mon
     monkeypatch.setattr("zdd.process_exit.observe_original_exit", lambda pid, start: False)
     monkeypatch.setattr(identity.locks, "process_start_time", lambda pid: "1001")
     monkeypatch.setattr(smc, "load_or_create_control_token", lambda root: "fixture-token")
-    monkeypatch.setattr(smc, "ControlClient", lambda *a, **k: SimpleNamespace(health=lambda: {
-        "pid": 101, "status": "ready", "capabilities": capabilities, "runtime_prefix": str(tmp_path),
-    }))
-    with pytest.raises(ValueError, match="does not support safe asynchronous"):
-        identity.routed_identity(tmp_path, require_async_retirement=True)
+    def health():
+        if capabilities == "timeout":
+            raise TimeoutError("outgoing control unavailable")
+        return {
+            "pid": 101, "status": "ready", "capabilities": capabilities, "runtime_prefix": str(tmp_path),
+        }
+
+    monkeypatch.setattr(smc, "ControlClient", lambda *a, **k: SimpleNamespace(health=health))
+    assert identity.routed_identity(tmp_path, require_async_retirement=True) == (101, "1001", None)
 
 
 def test_lock_renewal_is_fenced_by_the_native_route_owner(tmp_path, monkeypatch):
