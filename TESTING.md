@@ -132,6 +132,13 @@ rollout or expands required unit-only CI.
 The Windows source-cache job has a ten-minute outer guard: its completed
 64-pass packet and action cleanup reached the previous six-minute limit on a
 native runner. Constructor/item deadlines and the Linux job are unchanged.
+The `dependency_compile` selector's existing source-build rows distribute
+ordinary constructor profiles, source-input refusal controls and normal
+constructor/cache reuse across `profiles`, `refusals` and `normal`. Their
+selections preserve all 75 constructor/cache cases; the standalone
+`source_cache` selector still runs the complete selection. The four-row matrix,
+Manager row and six-minute source-build jobs are unchanged. Profile and refusal
+constructor controls use the same hash-pinned real backend as the normal row.
 The Logger Linux fixture explicitly qualifies its daemon-supervision interpreter
 through the shipped custody checks, rather than weakening those checks when a
 hosted toolcache interpreter is writable.
@@ -1293,6 +1300,55 @@ profile/build tools. Real retained UV projections preserve named authentication
 bytes and capture identity, and retain offline, unsafe-index and insecure-TLS
 refusals without an HTTP request. This qualifies the shared capture mechanism,
 not admission-tool installation, normal-consumer enablement or a live feed.
+
+`libs/payload-invocation/tests/test_runtime_admission.py` exercises the actual
+opt-in SDK generator and copied toolkit in an isolated process. Its complete
+entry-module imports, configuration and native-template checks reject repository
+Manager/CLI/publishing adapters and assert payload-local first-party locations.
+`tools/test_runtime_admission_toolkit.py` then exercises real source acquisition,
+canonical preparation, native feed/lock capture, wheel admission, source building,
+offline immutable construction, health and completed-generation reuse using only
+that copied toolkit. A separate witness admits the actual dependency-free
+Packaging seed, imports every toolkit entry in that interpreter and validates
+both a complete profile and an incomplete-closure refusal. Its installed
+distribution inventory contains only the selected Packaging wheel.
+That cold interpreter also imports the toolkit's actual `agent_procutil` and
+executes both canonical aggregate-wheel retention APIs. Exact selected bytes
+survive retention; a changed transport digest or insufficient byte budget
+refuses without changing the caller's input. No alternate extractor or
+fixture-injected process helper supplies those paths.
+These run in the existing source-build profile partition on
+Linux and Windows (`dependency_compile=true`), without a new job, longer timeout
+or required-unit expansion.
+The credential-free fixture retains the existing deterministic opaque-identity
+seam; keyed authentication and credential-key ACLs have independent controls.
+This is fresh toolkit-delivery evidence, not first-tooling admission,
+normal-consumer enablement, production feeds or performance qualification.
+
+`worktree-manager/tests/test_runtime_source.py` copies the actual Manager
+package, process helper and runtime resources into both installed layouts:
+retained slot payloads and wheel-owned `_runtime_assets`. Fresh `-I -S`
+processes resolve a real local source while forbidding the Manager installer
+and CLI imports. A preloaded private retained-runtime alias cannot satisfy
+the public lease import; its actual loaded file must belong to that installed
+layout. Both cases reproduced the missing-helper failure before the lookup
+was routed through the existing read-only resource owner.
+
+The existing Linux/Windows Manager source-build partition now uses the canonical
+owned test boundary and isolated homes rather than bare pytest or a forged
+contained marker. It retains the original admission/reuse files and separately
+runs the source-acquisition file, including both installed layouts. The
+six-minute job limit is unchanged; child packets retain explicit 300/120-second
+bounds and fail on unsettled cleanup or a failing child. Integrity tests retain
+all tamper refusals even when completion rejects changed evidence before the
+detailed input owner. The freeze-deadline witness expires only after a real
+buffered-file copy, not through an unused digest seam.
+The acquisition packet explicitly binds Manager and its declared first-party
+helper sources; validator tooling does not install Manager. A site-free child
+checks the actual module origins through the same owned workflow boundary.
+Acquisition fixtures use the existing compact `src` temporary-directory pattern
+to keep nested local Git paths within Windows limits without changing runtime
+paths, global Git settings, test selection or deadlines.
 
 `tools/test_runtime_profile_bootstrap.py` also runs runtime source-policy and
 actual wheel inspection in a fresh isolated Python process with the Manager

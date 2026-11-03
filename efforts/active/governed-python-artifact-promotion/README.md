@@ -379,6 +379,12 @@ Use the following ordered implementation and acceptance gates:
       executing a fetched repository's tooling. Run semantic profile validation
       under the admitted tooling interpreter, never via ambient `packaging`.
       Keep public first-party artifacts free of third-party dependency bytes.
+      The narrow configuration-root and wheel-inspection owners are separated
+      in #9021; complete first-party packaging remains this unchecked gate.
+      The current candidate adds opt-in SDK packaging with full internal
+      resources, repository-adapter separation, copied-payload native construction
+      and semantic validation under the actually admitted Packaging seed.
+      Required review and both native-platform qualifications remain open.
 - [ ] Connect Worktrees' real installation lifecycle first, preserving its
       `agent-worktrees` owner and runtime root separately from Manager's
       `worktree-manager` component. Carry the actual installed owner through
@@ -641,6 +647,14 @@ verified answer against its actual repository or machine configuration:
 
 ## Validation Plan
 
+- [x] Qualify the narrow admission import owners (#9021). All 1,836 admitted
+      pure units pass under the unchanged effect rules and 300-second bound;
+      30 focused native contracts preserve source acquisition, copied-tool
+      export, materialization and isolated imports with unrelated owners refused.
+      The shared-root fixture correction passes 98 Manager inventory/update/
+      configuration tests. All 29 selected hosted native jobs pass on unchanged
+      production code. This does not qualify complete toolkit packaging or
+      semantic execution under the admitted tooling interpreter.
 - [x] Qualify the restricted dependency-free Packaging seed (#9015).
       All 29 selected native jobs pass,
       including Linux/Windows seed compilation, controlled TLS acquisition,
@@ -910,6 +924,115 @@ far); and a larger plugin than `agent-bridge` to test whether the cold-case
 win grows with build complexity.
 
 ## Journal
+
+### 2026-11-03 - Fresh Manager validation closes first-party source imports
+
+Candidate `c7c4ffe9824536e6bf00c0e31272bf1dbcb74039` completed the canonical
+3,783-unit packet and all enforced strict projects. Its exact native run
+[41566273690](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41566273690)
+completed 31 jobs: 29 succeeded and both Manager jobs failed collection of the
+added acquisition file after their original 97 controls passed. This run is
+not complete qualification and is not retried unchanged.
+
+The acquisition packet now supplies the declared Manager, process, identity,
+update-driver and lease source paths without installing the Manager package.
+Its compact fixture root retains the real local Git operations while avoiding
+Windows path overflow. This is a below-altitude acceptance correction; runtime
+behavior, original cases, integrity refusals and deadlines are unchanged.
+Seven source/cleanup regressions passed, including an actual site-free child.
+All 52 acquisition cases passed in a fresh tooling-only validator in 90.83
+seconds with normal cleanup.
+
+A subsequent local complete workflow hit its original 300-second limit.
+Diagnostic evidence showed progressing native controls and repeated source
+materialization, hashing and installed-health work, not a hung resolver.
+That timeout remains a non-pass. The corrected exact-head complete workflow
+must pass on both native runners, together with required CI and review, before
+the toolkit gate can close. No timeout, test or cleanup gate is waived; the
+parent remains Active with ordinary-consumer, production-feed, release,
+measured-savings and installed-acceptance obligations still open.
+
+### 2026-11-03 - Native follow-through preserves actual containment and refusal
+
+The first current-candidate native run,
+[41558262555](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41558262555),
+selected 31 jobs and failed four; its successful statuses are not substituted
+for complete qualification. Both wheel lanes exposed a stale deadline witness
+that patched a digest no longer used by buffered freezing. Both Manager lanes
+exposed acceptance gaps: Windows ran without the actual contained boundary,
+and Linux observed the legitimate earlier completion-integrity refusal.
+
+The deadline witness now expires after a real copy, retaining source-preservation
+and owned-partial cleanup assertions. The Manager tests retain all three
+corrupt-input refusals, forbidden cold admission and unchanged-marker checks,
+while accepting the two explicit integrity-owning error types. No production
+deadline, admission or integrity guard changed. The hosted Manager step now
+uses the existing owned boundary, retaining its original cases and adding the
+installed-layout acquisition file on both platforms without a new matrix or
+larger job limit.
+
+Five focused deadline/absolute-UV cases passed in 157.95 seconds. All 130
+workflow contracts plus the remaining command-UV case passed together in
+181.94 seconds, with normal cleanup. This also repairs stale metadata
+assertions while preserving both existing immutable-runtime commands and named
+role-construction selection. Final published-head native evidence remains open.
+The independently owned packet-size repair merged in #10129; integrate it and
+qualify the complete bounded candidate before closing the toolkit source gate.
+The parent remains Active and no release or installed rollout is claimed.
+
+### 2026-11-03 - Toolkit candidate reconciled with installed resource layouts
+
+The candidate now uses Manager's existing read-only runtime-resource lookup
+for retained slot payloads and source-free wheel assets, without importing its
+installer. Both fresh-process installed-layout cases reproduced the actual
+missing lease-helper import before correction; all 52 source-acquisition
+controls then passed. Copied toolkit SDK controls passed four cases, and 69
+attestation/profile/publisher controls preserve the pinned identity and existing
+bounded initialization-only verifier retry.
+
+The copied-toolkit source/build/offline-construction/health/reuse witness and
+admitted-Packaging semantic witness both passed with normal cleanup. The latter
+also executes the canonical aggregate-wheel retention APIs and imports the
+actual payload-local process helper with only Packaging installed. Changed
+transport identity and insufficient byte budget refuse. This preserves #9319's
+custody seam and #9631's cold-caller requirement; #9453's producer work stays
+with its existing author.
+
+Current canonical packet and final published-head hosted qualification, review
+and required CI remain pending; earlier 1,836-unit results are historical, not
+proof for this integration. The toolkit gate stays unchecked until those
+outcomes pass. Ordinary promotion also retains #10117's claimed coverage-packet
+size repair as a release prerequisite; no evidence limit is widened here.
+Ordinary installers remain disabled, and the complete parent
+Plan/Validation/Coordination, production feed, measured savings, release and
+installed-acceptance obligations remain open.
+
+### 2026-10-25 - Canonical toolkit candidate and admitted-interpreter witness
+
+- The existing payload-invocation generator now has an inert, required-context
+  `runtimeAdmissionToolkit` option. It delivers first-party code/resources in
+  one self-contained internal layout; no ordinary consumer opts in yet.
+  Packaging remains the exact governed tooling dependency, not vendored bytes.
+- Extracted the repository's Manager lifecycle adapter and the publication-only
+  native exporter. Source acquisition now uses the actual payload-owned lease
+  library without importing its installer. The pinned hosted attestation
+  implementation is shared with publication rather than reimplemented.
+- Windows copied-payload controls pass for all toolkit entry imports, trusted
+  native templates, source configuration, actual source authentication/native
+  admission/building, offline construction, installed health and immutable
+  completed-generation reuse. The separate actual Packaging-seed witness
+  imports every entry and semantically accepts a complete profile while refusing
+  an incomplete closure, with no other installed tooling distributions.
+- The broader regression packet exceeded its existing wall limit and is being
+  split into focused bounded packets; that timeout is not qualification.
+  All 1,836 admitted units pass with coverage inside the unchanged 300-second
+  bound. Focused packets pass 105 owner/acquisition contracts, 31 SDK controls,
+  47 retained-source controls and five export/materialization/acquisition
+  regressions. A complete Manager command-selection witness also passes
+  separately; its measured duration explains why the combined local packet
+  exceeded its cap. Both hosted native platforms, review and merge remain open.
+  Do not close the toolkit or ordinary-consumer gates from these local
+  witnesses. The parent remains **Active**.
 
 ### 2026-10-25 - Explicit source preparation merged; real installation next
 

@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -15,6 +17,111 @@ from worktree_manager import runtime_source as source
 from worktree_manager import runtime_source_config as config
 from worktree_manager import source_config
 from worktree_manager.__main__ import main
+
+
+@pytest.fixture
+def tmp_path(tmp_path_factory):
+    return tmp_path_factory.mktemp("src")
+
+
+def test_acquisition_lease_and_refusal_need_no_manager_installer(tmp_path):
+    script = """
+import importlib.abc, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+sys.path[:0] = [
+    str(root / "worktree-manager" / "src"),
+    str(root / "libs" / "agent-procutil" / "src"),
+]
+class RejectInstaller(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in {"worktree_manager.self_install", "worktree_manager.__main__"}:
+            raise AssertionError("acquisition imported the Manager installer")
+sys.meta_path.insert(0, RejectInstaller())
+from worktree_manager.runtime_source import acquire, SourceAcquisitionError
+from worktree_manager.runtime_source_config import RuntimeSource
+try:
+    with acquire(RuntimeSource("marketplace"), root=pathlib.Path(sys.argv[2])):
+        raise AssertionError("marketplace source acquired an independent checkout")
+except SourceAcquisitionError:
+    pass
+assert "versioned_runtime" in sys.modules
+assert "worktree_manager.self_install" not in sys.modules
+print("acquisition-lease-without-installer-ok")
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", script,
+         str(Path(__file__).resolve().parents[2]), str(tmp_path / "owner")],
+        capture_output=True, text=True, timeout=20, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "acquisition-lease-without-installer-ok"
+
+
+@pytest.mark.parametrize("layout", ["retained-payload", "wheel-resources"])
+def test_installed_source_acquisition_uses_its_own_runtime_resources(
+    repository, tmp_path, layout,
+):
+    repo, release, _development = repository
+    root = Path(__file__).resolve().parents[2]
+    slot = tmp_path / "installation" / "versions" / "1"
+    prefix = slot / ".venv"
+    site = prefix / "site-packages"
+    package = site / "worktree_manager"
+    shutil.copytree(
+        root / "worktree-manager" / "src" / "worktree_manager", package,
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    shutil.copytree(
+        root / "libs" / "agent-procutil" / "src" / "agent_procutil",
+        site / "agent_procutil", ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    scripts = (
+        slot / "payload" / "scripts" if layout == "retained-payload"
+        else package / "_runtime_assets" / "scripts"
+    )
+    shutil.copytree(root / "worktree-manager" / "scripts", scripts)
+    if layout == "retained-payload":
+        shutil.copy(root / "worktree-manager" / "pyproject.toml", scripts.parent)
+    script = """
+import importlib.abc, importlib.util, pathlib, sys, time
+prefix, site, scripts, repo, owner, expected = sys.argv[1:]
+sys.prefix = prefix
+sys.path.insert(0, site)
+class RejectInstaller(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in {"worktree_manager.self_install", "worktree_manager.__main__"}:
+            raise AssertionError("acquisition imported the Manager installer")
+sys.meta_path.insert(0, RejectInstaller())
+spec = importlib.util.spec_from_file_location(
+    "_retained_versioned_runtime", pathlib.Path(scripts) / "versioned_runtime.py",
+)
+retained = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = retained
+spec.loader.exec_module(retained)
+assert "versioned_runtime" not in sys.modules
+from worktree_manager.runtime_source import acquire
+from worktree_manager.runtime_source_config import RuntimeSource
+with acquire(
+    RuntimeSource("main", repo), root=pathlib.Path(owner),
+    deadline=time.monotonic() + 30,
+) as resolved:
+    assert resolved.commit == expected
+    assert resolved.checkout != pathlib.Path(repo)
+    assert (resolved.checkout / "payload.txt").read_text() == "release one"
+assert pathlib.Path(sys.modules["versioned_runtime"].__file__).resolve() == (
+    pathlib.Path(scripts) / "versioned_runtime.py"
+).resolve()
+assert "worktree_manager.self_install" not in sys.modules
+assert "worktree_manager.__main__" not in sys.modules
+print("installed-source-acquisition-without-installer-ok")
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", script, str(prefix), str(site),
+         str(scripts), str(repo), str(tmp_path / "owner"), release],
+        capture_output=True, text=True, timeout=60, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "installed-source-acquisition-without-installer-ok"
 
 
 def git(path: Path, *arguments: str) -> str:
@@ -51,6 +158,48 @@ def repository(tmp_path):
     development = commit(repo, "merged development")
     git(repo, "switch", "-q", "main")
     return repo, first, development
+
+
+@pytest.mark.parametrize("after_denial", ["released", "changed", "destination"])
+def test_checkout_publication_retries_only_unchanged_owned_source(
+    tmp_path, monkeypatch, repository, after_denial,
+):
+    repo, first, _ = repository
+    selection = config.RuntimeSource("main", str(repo))
+    original = Path.rename
+    attempts = []
+    destination = []
+
+    def denied_once(path, target):
+        if path.name == "checkout" and path.parent.name.startswith(".acquire-"):
+            attempts.append(path)
+            destination[:] = [target]
+            if len(attempts) == 1:
+                if after_denial == "changed":
+                    (path / "payload.txt").write_text("changed during publication", encoding="utf-8")
+                elif after_denial == "destination":
+                    target.mkdir()
+                    (target / "foreign.txt").write_text("preserve", encoding="utf-8")
+                error = PermissionError("synthetic Windows directory share lock")
+                error.winerror = 5
+                raise error
+        return original(path, target)
+
+    monkeypatch.setattr(Path, "rename", denied_once)
+    monkeypatch.setattr(source.time, "sleep", lambda seconds: None)
+    if after_denial == "released":
+        with source.acquire(selection, root=tmp_path / "manager") as resolved:
+            assert resolved.commit == first
+            assert (resolved.checkout / "payload.txt").read_text(encoding="utf-8") == "release one"
+        assert len(attempts) == 2
+    else:
+        with pytest.raises(source.SourceAcquisitionError, match="modified|appeared"):
+            with source.acquire(selection, root=tmp_path / "manager"):
+                pytest.fail("changed publication must not become an acquired source")
+        assert len(attempts) == 1
+        if after_denial == "destination":
+            assert (destination[0] / "foreign.txt").read_text(encoding="utf-8") == "preserve"
+    assert not git(repo, "status", "--porcelain")
 
 
 def test_policy_defaults_do_not_inherit_manager_source(tmp_path):

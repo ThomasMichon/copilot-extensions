@@ -618,15 +618,21 @@ def test_freeze_deadline_expiry_during_copy_removes_only_owned_partial_inputs(
     destination = tmp_path / "partial"
     before = (plugin / "pyproject.toml").read_bytes()
     deadline = time.monotonic() + 60
-    digest = engine._digest
+    check_deadline = engine._check_deadline
+    copy_mode = engine.shutil.copymode
     calls = []
 
-    def expired(stream, limit, observed_deadline, destination=None):
-        assert observed_deadline == deadline
-        calls.append(destination)
-        return digest(stream, limit, time.monotonic() - 1, destination=destination)
+    def copied(source, target, **kwargs):
+        result = copy_mode(source, target, **kwargs)
+        calls.append(target)
+        return result
 
-    monkeypatch.setattr(engine, "_digest", expired)
+    def expired(observed_deadline):
+        assert observed_deadline == deadline
+        return check_deadline(time.monotonic() - 1 if calls else observed_deadline)
+
+    monkeypatch.setattr(engine.shutil, "copymode", copied)
+    monkeypatch.setattr(engine, "_check_deadline", expired)
     with pytest.raises(WheelError, match="deadline"):
         engine.freeze_inputs(plugin, destination, deadline=deadline)
     assert calls and not destination.exists()

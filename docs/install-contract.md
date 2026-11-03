@@ -4475,7 +4475,7 @@ separate gates.
 
 ### Explicit Manager source-install integration
 
-The repository caller `runtime_source_build.install_manager_source_runtime`
+The repository caller `runtime_source_manager.install_manager_source_runtime`
 composes that held transaction with the actual Manager `self_install` lifecycle.
 It accepts only the base Manager installation owner, passes the authenticated
 prepared payload and complete first-party/runtime wheel set, and rechecks source
