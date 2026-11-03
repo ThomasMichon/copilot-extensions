@@ -1,0 +1,9 @@
+{
+  "comment": "Add opt-in callable skill-selection binding with live requesting-session source policy and owned-settlement checks.",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}

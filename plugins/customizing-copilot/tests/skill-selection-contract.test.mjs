@@ -125,6 +125,35 @@ test("selection source boundary rejects symlink escapes, encoded absolute paths 
         await assert.rejects(reader.read({ skill: "fixture" }), /encoded data/);
     } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
+test("host source policy runs before body or guide acquisition and is rechecked at validation", async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), "skill-selection-policy-"));
+    try {
+        const path = join(root, "SKILL.md"), guide = join(root, "guide.md");
+        const snapshot = selectionSnapshot([{ name: "fixture", description: "Fixture", enabled: true,
+            source: "project", path }]);
+        let allowed = false;
+        const checked = [];
+        const reader = await selectionReader(snapshot, [root], {
+            authorizeSource: async path => { checked.push(path); return allowed; },
+        });
+        // A nonexistent file must report policy denial, not an attempted filesystem read.
+        await assert.rejects(reader.read({ skill: "fixture" }), /access not admitted/);
+        await fs.writeFile(path, "[Guide](guide.md)");
+        await fs.writeFile(guide, "Declared guide");
+        allowed = true;
+        await reader.read({ skill: "fixture" });
+        const deniedGuide = await selectionReader(snapshot, [root], {
+            authorizeSource: async target => target !== guide,
+        });
+        await assert.rejects(deniedGuide.read({ skill: "fixture", reference: "guide.md" }), /access not admitted/);
+        assert.deepEqual(deniedGuide.receipts(), []);
+        allowed = false;
+        await assert.rejects(reader.validate({ version: 1, catalogDigest: snapshot.digest, status: "selected",
+            recommendations: [{ skill: "fixture", reason: "Owns procedure", confidence: "high", guides: [] }],
+            uncertainties: [] }), /access not admitted/);
+        assert(checked.length >= 4);
+    } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
 test("Markdown declarations exclude examples and preserve balanced and escaped destinations", async () => {
     const root = await fs.mkdtemp(join(tmpdir(), "skill-selection-markdown-"));
     try {
