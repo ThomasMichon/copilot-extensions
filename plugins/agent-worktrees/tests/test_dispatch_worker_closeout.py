@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from dataclasses import replace
 import json
+import os
 from pathlib import Path
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -242,3 +244,55 @@ def test_failed_cli_closeout_is_structured_without_claiming_release(monkeypatch,
     assert result["ok"] is False and result["error"] == "Unmerged source remains"
     assert result["task_release"] is False and result["process_retirement"] is False
     assert "Source validation remains blocked." in captured.err
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Native holds require Linux procfs")
+@pytest.mark.parametrize("state", ["concluded", "handed-off"])
+def test_actual_foreign_hold_blocks_even_without_legacy_lock_or_active_claim(
+    worker, monkeypatch, state,
+) -> None:
+    other = "00000000-0000-4000-8000-000000000002"
+    worker.record.sessions.append(tracking.SessionEntry(
+        session_id=other, started_at="2026-01-01", state=state,
+    ))
+    worker.record.resources.append(tracking.ResourceClaim(
+        kind="session", ref=f"host/project/worker#{other}", state="at-rest",
+    ))
+    root = worker.root / "sessions"
+    directory = root / other
+    directory.mkdir(parents=True)
+    monkeypatch.setattr(sessions, "_session_state_dir", lambda: root)
+    with (directory / f"inuse.{os.getpid()}.hold").open("w"):
+        assert not list(directory.glob("*.lock"))
+        with pytest.raises(ValueError, match="foreign native"):
+            worker.binding.require(worker.record, worker.config)
+    worker.binding.require(worker.record, worker.config)
+
+
+@pytest.mark.parametrize("fault", ["unknown", "session-budget", "file-budget", "hold-budget", "unreadable"])
+def test_foreign_hold_inspection_never_treats_unknown_or_over_budget_as_absence(
+    worker, monkeypatch, fault,
+) -> None:
+    from agent_worktrees import dispatch_worker_sessions as inspection
+
+    other = "00000000-0000-4000-8000-000000000002"
+    worker.record.sessions.append(tracking.SessionEntry(
+        session_id=other, started_at="2026-01-01", state="concluded",
+    ))
+    root = worker.root / "sessions"
+    directory = root / other
+    directory.mkdir(parents=True)
+    (directory / "inuse.123.hold").touch()
+    monkeypatch.setattr(sessions, "_session_state_dir", lambda: root)
+    monkeypatch.setattr(inspection.native_source_context, "process", lambda pid: {"start_time": "1"})
+    monkeypatch.setattr(inspection.session_liveness, "session_process_hold_state", lambda *a: "unknown")
+    if fault.endswith("-budget"):
+        monkeypatch.setattr(inspection, {
+            "session-budget": "MAX_SESSIONS", "file-budget": "MAX_FILES", "hold-budget": "MAX_HOLDS",
+        }[fault], 0)
+    elif fault == "unreadable":
+        def denied(path):
+            raise PermissionError("Unreadable native session directory")
+        monkeypatch.setattr(inspection.os, "scandir", denied)
+    with pytest.raises(ValueError):
+        worker.binding.require(worker.record, worker.config)

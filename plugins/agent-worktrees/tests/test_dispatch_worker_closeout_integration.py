@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from agent_worktrees import dispatch_worker_closeout as closeout
-from agent_worktrees import finalize, finalize_open_pr_gate, tracking
+from agent_worktrees import config as cfg, finalize, finalize_open_pr_gate, tracking
 from test_dispatch_worker_closeout import NATIVE, SOURCE
 from test_resource_producer_finalize import _final_owner_seed as _final_owner_seed
 from test_resource_producer_finalize import final_owner as final_owner
@@ -114,3 +114,53 @@ def test_each_real_finalization_boundary_rechecks_own_worker_before_commit(
         closeout.finalize_own("task", "reservation", NATIVE)
     assert checks == target
     assert tracking.load_record(path).status == "active" and workspace.is_dir()
+
+
+@pytest.mark.parametrize("state", ["merged", "open", "unavailable"])
+def test_normal_reconciliation_settles_only_an_authoritatively_merged_pr_claim(
+    own_checkout, monkeypatch, state,
+) -> None:
+    from agent_worktrees import providers
+    from agent_worktrees.providers import PullResult
+
+    _, path, config, workspace = own_checkout
+    config.repos[config.repo_name] = replace(config.default_repo, pr=cfg.PRConfig(
+        enabled=True, provider="gitea", api_base="https://forge.example",
+    ))
+    record = tracking.load_record(path)
+    sha = _git("rev-parse", "HEAD", cwd=workspace)
+    url = "https://forge.example/example/project/pulls/17"
+    record.prs = [tracking.PRRecord(
+        state="open", number=17, branch=record.branch, provider="gitea",
+        repo="example/project", url=url, head_sha=sha,
+    )]
+    record.resources.append(tracking.ResourceClaim(kind="pr", ref=url))
+    tracking.save_record(record, path)
+    reads = []
+
+    class Provider:
+        name = "gitea"
+
+        def authority_endpoint(self, api_base=""):
+            return api_base
+
+        def get_pull(self, repo, number, **kwargs):
+            reads.append((repo, number))
+            if state == "unavailable":
+                raise RuntimeError("Provider unavailable")
+            return PullResult(
+                number=17, state="closed" if state == "merged" else "open",
+                merged=state == "merged", head_sha=sha, base_ref="base",
+            )
+
+    monkeypatch.setattr(providers, "get_provider", lambda name: Provider())
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *a: None)
+    if state == "merged":
+        assert closeout.finalize_own("task", "reservation", NATIVE)["status"] == "finalized"
+    else:
+        with pytest.raises(ValueError):
+            closeout.finalize_own("task", "reservation", NATIVE)
+    current = tracking.load_record(path)
+    claim = next(claim for claim in current.resources if claim.kind == "pr")
+    assert reads and current.status == ("finalized" if state == "merged" else "active")
+    assert claim.is_unsettled is (state != "merged") and workspace.is_dir()

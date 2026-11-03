@@ -28,7 +28,10 @@ allocation, native process source and head revision.
 Pairing, pending handoff, follow-up, an active effort, active controllers,
 unknown backend metadata, another active recorded/live session, and unsettled
 outbound responsibility block this narrow provider. Only the worker's own
-session claim is exempt from that additional outbound check. Its allocator's
+session claim is exempt from that additional outbound check. PR claims are
+deferred to normal authoritative reconciliation before the unchanged
+obligation/freeze gates; an open or unobservable PR claim still blocks.
+Its allocator's
 inbound ownership does not deadlock closeout. This is not a general permission
 to finalize a paired, shared or remotely controlled workspace.
 
@@ -40,6 +43,15 @@ seal a different session's identity or settle the caller's session claim before
 successful closeout. Normal source, dirty-content, PR, producer, claim-handoff,
 execution-space and runtime-resource gates remain in force. No abandon,
 open-PR override or direct finalized-status write is used.
+
+Foreign native holds are inspected independently of asserted lifecycle state:
+a concluded or handed-off session can still have a real process holding its
+file. Inspection targets only this record's indexed sessions, with limits of
+256 sessions, 4,096 directory entries and 64 native holds per check. Held,
+unreadable, malformed or over-budget observations refuse; a stale unheld file
+does not manufacture a live process. The positive ownership API remains
+boolean-compatible, while this preservation check retains an explicit unknown
+result instead of treating failed corroboration as absence.
 
 Successful finalization retains the checkout and live native session. Before
 returning JSON success, the provider rechecks current ownership and the actual

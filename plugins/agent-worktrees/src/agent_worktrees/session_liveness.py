@@ -99,6 +99,13 @@ def session_process_owns_hold(session_id: str, pid: int, start_time: str) -> boo
     Match the actual open-file inode and process birth, not a stale pathname.
     Unsupported, inaccessible or over-budget observations remain unconfirmed.
     """
+    return session_process_hold_state(session_id, pid, start_time) == "held"
+
+
+def session_process_hold_state(
+    session_id: str, pid: int, start_time: str,
+) -> Literal["held", "absent", "unknown"]:
+    """Keep inconclusive native file inspection distinct from proven absence."""
     if (
         not isinstance(session_id, str) or str(UUID(session_id)) != session_id
         or type(pid) is not int or pid <= 0
@@ -106,15 +113,15 @@ def session_process_owns_hold(session_id: str, pid: int, start_time: str) -> boo
     ):
         raise ValueError("Invalid native session process identity")
     if platform.system() != "Linux":
-        return False
+        return "unknown"
     try:
         directory = sessions._session_state_dir() / session_id
         if not stat.S_ISDIR(directory.lstat().st_mode):
-            return False
+            return "unknown"
         hold = directory / f"inuse.{pid}.hold"
         expected = hold.lstat()
         if not stat.S_ISREG(expected.st_mode) or locks.process_start_time(pid) != start_time:
-            return False
+            return "unknown"
         identity = (expected.st_dev, expected.st_ino)
         with os.scandir(f"/proc/{pid}/fd") as descriptors:
             for index, descriptor in enumerate(descriptors):
@@ -122,7 +129,7 @@ def session_process_owns_hold(session_id: str, pid: int, start_time: str) -> boo
                     logging.getLogger(__name__).warning(
                         "Native session ownership probe exceeded its descriptor budget."
                     )
-                    return False
+                    return "unknown"
                 try:
                     opened = descriptor.stat()
                 except FileNotFoundError:
@@ -133,16 +140,17 @@ def session_process_owns_hold(session_id: str, pid: int, start_time: str) -> boo
                 # closure/reuse while checking the native ownership pathname.
                 fresh_descriptor = os.stat(descriptor.path)
                 fresh_hold = hold.lstat()
-                return (
+                return "held" if (
                     stat.S_ISREG(fresh_hold.st_mode)
                     and (fresh_descriptor.st_dev, fresh_descriptor.st_ino) == identity
                     and (fresh_hold.st_dev, fresh_hold.st_ino) == identity
                     and locks.process_start_time(pid) == start_time
-                )
+                ) else "unknown"
+        return "absent"
     except FileNotFoundError:
-        return False
+        return "absent"
     except OSError as exc:
         logging.getLogger(__name__).warning(
             "Native session ownership could not be corroborated: %s", exc,
         )
-    return False
+    return "unknown"

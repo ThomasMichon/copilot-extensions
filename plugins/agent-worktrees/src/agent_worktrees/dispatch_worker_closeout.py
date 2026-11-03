@@ -11,6 +11,7 @@ from . import config as cfg
 from . import finalized_checkout, finalize, native_lifecycle_source, native_source_context, output, sessions, tracking
 from .execution_spaces import require_record_mutation
 from .record_read import read_workspace_record
+from .dispatch_worker_sessions import require_no_foreign_hold
 
 CONTRACT = "agent-worktrees.dispatch-worker-closeout"
 
@@ -107,10 +108,12 @@ class OwnWorker:
             record.execution_machine, record.repo, record.worktree_id, session=self.native_id,
         )
         if any(
-            claim.is_unsettled and not (claim.kind == "session" and claim.ref == own_ref)
+            claim.is_unsettled and claim.kind != "pr"
+            and not (claim.kind == "session" and claim.ref == own_ref)
             for claim in record.resources
         ):
             raise ValueError("Own-worker closeout retains unsettled outbound responsibility")
+        require_no_foreign_hold(record, self.native_id)
         context = sessions.scan_sessions_fast([record])
         live = context.active_sessions.get(sessions._normalize_path(record.worktree_path), [])
         if any(native != self.native_id for native in live):
