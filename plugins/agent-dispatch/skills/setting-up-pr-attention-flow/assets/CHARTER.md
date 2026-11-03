@@ -30,8 +30,8 @@ implement runtime configuration.
 
 | Responsibility | Actual owner/handle | Supported operation and absence path |
 |----------------|---------------------|--------------------------------------|
-| Coordinator census/lanes/integration | `<owner>` | `<capability or blocker>` |
-| Independent static reviewer | `<naturally bound handle>` | `<capability or blocker>` |
+| Coordinator census/lanes/follow-ups and post-publication audit | `<owner>` | `<audit/normal merge capability or blocker, not verdict relay>` |
+| Independent reviewer: static analysis, bot-thread reconciliation, direct verdict/readback | `<naturally bound handle>` | `<task/owner-bound publication and verified receipt capability or blocker>` |
 | Author PR/worktree/fixes/consent | `<original owner>` | `<capability or blocker>` |
 | Protected candidate/round review write and receipt inspection | `<tool owner>` | `<current fence and original receipt contract or blocker>` |
 | Complete paginated forge evidence | `<provider owner>` | `<scope/completeness or unknown>` |
@@ -39,6 +39,12 @@ implement runtime configuration.
 | Communication/admitted-domain/idempotency | `<transport owner>` | `<capability or unknown>` |
 | Normal policy-allowed merge and any authorized backup | `<existing handler>` | `<actual actor/profile/gates or human handoff>` |
 | State/checkpoint/accepted transfer and owned cleanup | `<owners>` | `<observed obligations and settlement>` |
+
+Bind actual scope, author independence and retained handle once before authorized
+writes. Qualifying rounds proceed directly in the reviewer without mandatory
+per-round coordinator approval/release. Return a verified posted receipt or real
+blocker asynchronously; preserve current fences and no reviewer merge/fix/consent
+or custody authority. A missing-read-field snapshot is an adapter exception.
 
 ## State and policy
 

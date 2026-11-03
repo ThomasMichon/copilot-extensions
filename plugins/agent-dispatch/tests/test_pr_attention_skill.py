@@ -156,6 +156,37 @@ def test_required_refusal_controls_are_present() -> None:
     )
 
 
+def test_reviewer_posts_directly_without_per_round_coordinator_release() -> None:
+    skill = " ".join(_read(SKILL / "SKILL.md").split())
+    coordination = " ".join(_read(
+        SKILL / "references" / "coordination-and-recovery.md"
+    ).split())
+    charter = " ".join(_read(SKILL / "assets" / "CHARTER.md").split())
+    for requirement in (
+        "independent reviewer owns each qualifying round end-to-end",
+        "direct task/owner-bound verdict publication",
+        "author independence and the retained handle once",
+        "do not require a coordinator's per-round approval or release handshake",
+        "asynchronously returns its actual posted, verified receipt or real blocker",
+        "never the normal verdict relay/editor",
+        "after publication",
+        "no author-fix, merge, consent or resource-custody authority",
+    ):
+        assert requirement in skill, requirement
+    for requirement in (
+        "supported addressed bot-thread reconciliation",
+        "neither relays reviewer JSON nor rewrites/posts the verdict",
+        "actual verified posted receipt or real blocker asynchronously",
+        "same reviewer for owner-bound reprepare/delta/full-gate",
+        "Hold/escalate only actual required-input",
+        "adapter exception, not a mandatory per-round middleman",
+        "not transfer custody",
+    ):
+        assert requirement in coordination, requirement
+    assert "without mandatory per-round coordinator approval/release" in charter
+    assert "not verdict relay" in charter
+
+
 @pytest.mark.parametrize("gate", REFUSALS)
 def test_removing_a_refusal_control_is_detected(gate: str) -> None:
     text = _read(SKILL / "references" / "coordination-and-recovery.md")
