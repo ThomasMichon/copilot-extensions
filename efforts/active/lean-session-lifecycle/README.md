@@ -103,6 +103,13 @@ Phase 3 without replacing this effort or taking over adjacent ownership.
 - [x] Land code, tests, documentation, and required changefiles; update this
   effort with the merged outcome.
 
+The Phase 2 continuation reuses #5966's existing bounded retry policy: only
+an attempt that provably created no successor can retry, with the existing
+three-attempt cap and claim-staleness interval. Unknown or possibly started
+successors are not replayed. The remaining idle-path correction is to avoid
+reading requested/attempted history until a durable handoff is armed,
+unconfirmed and has a token; source qualification and merge remain open.
+
 ### Phase 3 - Remove wait-only launch layers
 
 Focused mini-effort: [Picker Launch Handoff](picker-launch-handoff.md).
@@ -311,3 +318,22 @@ two measured forwarding roles, with live process-tree evidence.)_
 - Planning only: no runtime implementation, retained-session migration, process
   termination or installed rollout. The parent Plan and Validation Plan remain
   open; creating this sub-plan is not completion of the launch-reduction work.
+
+### 2026-11-03 - Bounded pending-work continuation
+
+- Reconciled the remaining Phase 2 item with #5966: productive pre-spawn
+  retries already have a three-attempt cap, and ambiguous or possibly started
+  successors remain non-replayable. No new retry interval or policy is needed.
+- The monitor still acquired requested/attempted history before checking its
+  durable record for eligible work. The bounded correction defers both reads
+  until the first armed, unconfirmed, nonempty token, retaining newest-first
+  selection and the existing retry/claim owners.
+- The focused pending-request and bounded-retry packet passes 16 cases,
+  including six idle eligibility cases that forbid history, request-file and
+  claim access. Three older attempt fixtures now explicitly declare their
+  armed state so they continue to exercise attempt suppression rather than
+  passing merely because they are ineligible.
+- Python lint, the complete module-size check and the 13-plugin installation
+  contract pass. Review, required CI, source merge and installed observation
+  remain separate gates. The authorized rollout blockers and selected-runtime
+  query evidence are journaled in the linked Picker mini-effort.
