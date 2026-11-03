@@ -10,6 +10,9 @@ import sys
 import threading
 import time
 import zipfile
+from contextlib import contextmanager
+from dataclasses import replace
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -93,6 +96,8 @@ def test_guarded_feed_selects_the_latest_native_candidate(tmp_path, monkeypatch,
     paths = [path for path, _headers in state["requests"]]
     assert "/simple/fixture/" in paths and "/files/" + newer_name in paths
     assert "/simple/dep/" in paths and "/files/" + dependency_name in paths
+    assert paths.count("/files/" + newer_name) == 1
+    assert paths.count("/files/" + dependency_name) == 1
 
 
 def test_guarded_feed_does_not_bind_the_ephemeral_loopback_endpoint(
@@ -328,9 +333,9 @@ def test_guarded_feed_refuses_case_ambiguous_wheel_names(
     assert not (tmp_path / "guarded-delivery.zip").exists()
 
 
-@pytest.mark.parametrize("stable_calls", [1, 2], ids=["during-resolution", "after-acquisition"])
+@pytest.mark.parametrize("stage", ["after-selection", "after-delivery"])
 def test_guarded_feed_refuses_a_changed_index(
-    tmp_path, monkeypatch, tls_source, stable_calls,  # noqa: F811
+    tmp_path, monkeypatch, tls_source, stage,  # noqa: F811
 ):
     uv = shutil.which("uv")
     if uv is None:
@@ -341,24 +346,32 @@ def test_guarded_feed_refuses_a_changed_index(
     changed["files"][0]["upload-time"] = "2019-01-01T00:00:00Z"
     changed = json.dumps(changed).encode()
     state["routes"]["/files/" + FILENAME] = (200, {}, wheel)
-    calls = []
+    status, headers, _body = state["routes"]["/simple/fixture/"]
+    if stage == "after-selection":
+        compile_guarded = producer.compile_guarded
 
-    def changing(handler):
-        calls.append(True)
-        body = original if len(calls) <= stable_calls else changed
-        handler.send_response(200)
-        handler.send_header("Content-Type", "application/vnd.pypi.simple.v1+json")
-        handler.send_header("Content-Length", str(len(body)))
-        handler.end_headers()
-        handler.wfile.write(body)
+        @contextmanager
+        def mutate_after_selection(*args, **kwargs):
+            with compile_guarded(*args, **kwargs) as result:
+                state["routes"]["/simple/fixture/"] = (status, headers, changed)
+                yield result
 
-    state["routes"]["/simple/fixture/"] = changing
+        monkeypatch.setattr(producer, "compile_guarded", mutate_after_selection)
+    else:
+        build_delivery = producer.build_profile_delivery
+
+        def mutate_after_delivery(*args, **kwargs):
+            result = build_delivery(*args, **kwargs)
+            state["routes"]["/simple/fixture/"] = (status, headers, changed)
+            return result
+
+        monkeypatch.setattr(producer, "build_profile_delivery", mutate_after_delivery)
     _configure_native_tls(tmp_path, monkeypatch, state)
 
     with pytest.raises((ProfileError, ValueError)):
         _resolve(tmp_path, producer, wheels, manifest, uv=uv)
 
-    assert len(calls) > stable_calls
+    assert [path for path, _headers in state["requests"]].count("/simple/fixture/") == 2
     assert not (tmp_path / "guarded-delivery.zip").exists()
 
 
@@ -417,8 +430,9 @@ def test_guarded_feed_rechecks_source_after_final_index_validation(
     assert not (tmp_path / "guarded-delivery.zip").exists()
 
 
-def test_guarded_feed_shares_the_request_budget_with_acquisition(
-    tmp_path, monkeypatch, tls_source,  # noqa: F811
+@pytest.mark.parametrize("maximum", [2, 3])
+def test_guarded_feed_shares_the_request_budget_with_final_verification(
+    tmp_path, monkeypatch, tls_source, maximum,  # noqa: F811
 ):
     uv = shutil.which("uv")
     if uv is None:
@@ -427,16 +441,107 @@ def test_guarded_feed_shares_the_request_budget_with_acquisition(
     original = producer.AcquisitionLimits
     monkeypatch.setattr(
         producer, "AcquisitionLimits",
-        lambda **values: original(**(values | {"max_requests": 4})),
+        lambda **values: original(**(values | {"max_requests": maximum})),
     )
     _configure_native_tls(tmp_path, monkeypatch, state)
 
-    with pytest.raises((ProfileError, ValueError)):
-        _resolve(tmp_path, producer, wheels, manifest, uv=uv)
+    if maximum == 2:
+        with pytest.raises((ProfileError, ValueError)):
+            _resolve(tmp_path, producer, wheels, manifest, uv=uv)
+    else:
+        _result, destination = _resolve(tmp_path, producer, wheels, manifest, uv=uv)
+        assert destination.exists()
 
     paths = [path for path, _headers in state["requests"]]
-    assert len(paths) == 4 and paths[-1] == "/files/" + FILENAME
-    assert "/files/" + FILENAME in paths
+    assert len(paths) == maximum and paths.count("/files/" + FILENAME) == 1
+    if maximum == 2:
+        assert not (tmp_path / "guarded-delivery.zip").exists()
+
+
+@pytest.mark.parametrize("damage", ["contents", "storage-budget"])
+def test_guarded_feed_refuses_damaged_retained_wheels(
+    tmp_path, monkeypatch, tls_source, damage,  # noqa: F811
+):
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("native uv is required")
+    producer, wheels, manifest, state, _wheel, _digest = tls_source
+    compile_guarded = producer.compile_guarded
+
+    @contextmanager
+    def damage_wheels(*args, **kwargs):
+        with compile_guarded(*args, **kwargs) as (witness, directory, budget):
+            if damage == "contents":
+                path = directory / FILENAME
+                path.chmod(0o600)
+                path.write_bytes(b"x" * path.stat().st_size)
+            else:
+                budget = 1
+            yield witness, directory, budget
+
+    monkeypatch.setattr(producer, "compile_guarded", damage_wheels)
+    _configure_native_tls(tmp_path, monkeypatch, state)
+
+    with pytest.raises(ValueError):
+        _resolve(tmp_path, producer, wheels, manifest, uv=uv)
+
+    assert not (tmp_path / "guarded-delivery.zip").exists()
+
+
+@pytest.mark.parametrize("days,allowed", [(1, True), (365 * 20, False)], ids=["still-seasoned", "too-new"])
+def test_guarded_feed_rechecks_the_selected_wheel_against_an_earlier_cutoff(
+    tmp_path, monkeypatch, tls_source, days, allowed,  # noqa: F811
+):
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("native uv is required")
+    producer, wheels, manifest, state, _wheel, _digest = tls_source
+    profile_feed = producer.native._profile_feed
+    calls = []
+
+    def earlier_cutoff(*args, **kwargs):
+        policy, feed = profile_feed(*args, **kwargs)
+        calls.append(True)
+        if len(calls) == 2:
+            feed = replace(feed, cutoffs={
+                name: cutoff - timedelta(days=days) for name, cutoff in feed.cutoffs.items()
+            })
+        return policy, feed
+
+    monkeypatch.setattr(producer.native, "_profile_feed", earlier_cutoff)
+    _configure_native_tls(tmp_path, monkeypatch, state)
+
+    if allowed:
+        _result, destination = _resolve(tmp_path, producer, wheels, manifest, uv=uv)
+        assert destination.exists() and len(calls) == 3
+    else:
+        with pytest.raises(ValueError, match="seasoning"):
+            _resolve(tmp_path, producer, wheels, manifest, uv=uv)
+        assert len(calls) == 2
+        assert not (tmp_path / "guarded-delivery.zip").exists()
+
+
+def test_guarded_feed_preserves_acquisition_input_validation(tmp_path, monkeypatch, tls_source):  # noqa: F811
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("native uv is required")
+    producer, wheels, manifest, state, _wheel, _digest = tls_source
+    profile_feed = producer.native._profile_feed
+    calls = []
+
+    def malformed_feed(*args, **kwargs):
+        policy, feed = profile_feed(*args, **kwargs)
+        calls.append(True)
+        if len(calls) == 2:
+            feed = replace(feed, feeds=(replace(feed.feeds[0], identity="invalid"),))
+        return policy, feed
+
+    monkeypatch.setattr(producer.native, "_profile_feed", malformed_feed)
+    _configure_native_tls(tmp_path, monkeypatch, state)
+
+    with pytest.raises(ValueError, match="captured named-feed inputs"):
+        _resolve(tmp_path, producer, wheels, manifest, uv=uv)
+
     assert not (tmp_path / "guarded-delivery.zip").exists()
 
 

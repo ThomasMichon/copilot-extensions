@@ -1,8 +1,11 @@
 """Pure shared transfer-budget and worker-policy controls; native overlap is separate."""
-from dataclasses import replace
-from pathlib import Path
+import ssl
 import sys
 import time
+from dataclasses import replace
+from datetime import datetime
+from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -17,6 +20,38 @@ def limits(**changes):
         max_total_metadata_bytes=12, max_wheel_bytes=10,
         max_closure_bytes=16, max_temporary_bytes=20,
     ), **changes)
+
+
+@pytest.mark.parametrize("change", ["identity", "headers", "tls", "duplicate", "filename", "policy"])
+def test_acquisition_input_validation_can_be_reused_without_downloading(change):
+    item = {
+        "name": "fixture", "filename": "fixture-1.0-py3-none-any.whl", "sha256": "sha256:" + "a" * 64,
+    }
+    feed = acquisition.WheelFeed("sha256:" + "b" * 64, "https://feed.invalid/simple")
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    options = {
+        "feeds": (feed,), "download_origins": (),
+        "cutoffs": {"fixture": datetime.fromisoformat("2020-01-01T00:00:00+00:00")},
+        "policy_id": "sha256:" + "c" * 64, "limits": limits(),
+        "deadline": time.monotonic() + 5, "ssl_context": context,
+        "proxies": {}, "procutil": ModuleType("test_procutil"),
+    }
+    assert acquisition.validate_acquisition_inputs([item], **options) == ([item], set())
+    if change == "identity":
+        options["feeds"] = (replace(feed, identity="invalid"),)
+    elif change == "headers":
+        options["feeds"] = (replace(feed, headers=(("X-Unsupported", "value"),)),)
+    elif change == "tls":
+        context.check_hostname = False
+    elif change == "duplicate":
+        item = [item, item]
+    elif change == "filename":
+        item = [{**item, "filename": "../fixture.whl"}]
+    else:
+        options["policy_id"] = "invalid"
+    selected = item if isinstance(item, list) else [item]
+    with pytest.raises(acquisition.WheelError):
+        acquisition.validate_acquisition_inputs(selected, **options)
 
 
 @pytest.mark.parametrize("workers", [1, 4, 8])
