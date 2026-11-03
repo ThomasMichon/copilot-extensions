@@ -3195,11 +3195,11 @@ def _monitor_sweep(
                     if segment_cache is None:
                         raise
                     segment_cache.retain_unclaimed_cleanup(project or "", path, error)
-                    segment_value = segment_cache.pending_segment()
+                    segment_value = segment_cache.pending_segment_for_path(path)
                 except git_ops.push_timeout.ObservationCleanupPending:
                     if segment_cache is None:
                         raise
-                    segment_value = segment_cache.pending_segment()
+                    segment_value = segment_cache.pending_segment_for_path(path)
                 except Exception:
                     pass
                 cleanup_blocked = (

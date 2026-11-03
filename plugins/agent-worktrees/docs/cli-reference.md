@@ -4,6 +4,16 @@
 agent-worktrees <subcommand> [options]
 ```
 
+## Explicit status refresh
+
+`worktree-status-bundle --worktree <id> --force-refresh --json` requests fresh
+facts for one exact worktree. If resident Git observation is blocked and its
+liveness fact is unavailable, the resident independently verifies the current
+record's native mux and session locks. Only that fact gains fresh confirmation;
+Git and other unavailable facts stay unconfirmed, and the resident cache is not
+rewritten. A live or inconclusive native verdict still cannot authorize a cold
+prompt. Ordinary cached reads do not perform this extra probe.
+
 ## Repository PR census
 
 `pr-sweep <owner/repository> [--fleet] [--include MACHINE/ENV]

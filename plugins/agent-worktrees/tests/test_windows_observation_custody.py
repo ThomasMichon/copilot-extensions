@@ -15,9 +15,12 @@ from agent_worktrees import __main__ as core, git_ops as go, push_timeout as pt
 
 
 @pytest.fixture
-def owner(monkeypatch):
+def owner(monkeypatch, tmp_path):
+    from agent_worktrees import status_monitor_cutover
+
     monkeypatch.setattr(go, "_windows_observation", lambda: True, raising=False)
     monkeypatch.setattr(core.cfg, "project_name", lambda: "A")
+    monkeypatch.setattr(status_monitor_cutover, "routing_dir", lambda: tmp_path / "routing")
     return core._StatusSegmentCache(15)
 
 
@@ -42,6 +45,29 @@ def test_carrier_gates_aliases_but_independent_anchor_progresses(owner):
     assert owner.run_observation("B", "/independent", "/independent/wt", lambda: "B") == "B"
     assert owner.observation_counts() == (0, 1)
     assert next(iter(owner._observations.values())).cleanup is error
+
+
+def test_active_observation_is_not_reported_as_unsettled_cleanup(owner, monkeypatch):
+    ticket = owner.begin_observation("A", "/repo", "/repo/wt")
+    monkeypatch.setattr(core, "_find_record_for_path", lambda *a: pytest.fail("busy lookup"))
+    assert owner.get("/repo/wt") == "UNKNOWN (Git observation busy)"
+    assert owner.observation_counts() == (1, 0)
+    owner.retain_cleanup(ticket, pt.ObservationCleanupError("retained"))
+    assert owner.get("/repo/wt") == owner.pending_segment()
+    assert owner.observation_counts() == (0, 1)
+
+
+def test_status_reason_follows_only_the_matching_observation_scope(owner):
+    ticket = owner.begin_observation("A", "/repo", "/repo/wt")
+    other = owner.begin_observation("B", "/other", "/other/wt")
+    owner.retain_cleanup(other, pt.ObservationCleanupError("unrelated"))
+    assert owner.pending_segment_for_path("/repo/wt") == "UNKNOWN (Git observation busy)"
+    assert owner.pending_segment_for_path("/other/wt") == owner.pending_segment()
+    assert owner.pending_segment_for_path("/unknown/wt") == "UNKNOWN (Git observation unavailable)"
+    owner.finish_observation(ticket)
+    owner.close_observation_admission()
+    assert owner.pending_segment_for_path("/repo/wt") == "UNKNOWN (observation retiring)"
+    assert owner.observation_counts() == (0, 1)
 
 
 def test_pending_keeps_last_good_bytes_ages_and_survives_invalidation(owner, monkeypatch):
@@ -227,6 +253,33 @@ def test_bundle_request_and_background_preserve_bytes_and_allow_B(owner, monkeyp
     cache.sweep_due(refresh=lambda *a: pytest.fail("pending expiry refresh"))
     assert cache._entries[("A", "wt")] == (old, 1.0, 1.0)
     assert owner.observation_counts() == (0, 1)
+
+
+def test_forced_resident_liveness_progresses_without_releasing_git_custody(
+    owner, monkeypatch,
+):
+    from agent_worktrees import worktree_status_compute, worktree_status_daemon, sessions
+
+    cache = _status_cache(owner, monkeypatch)
+    pending(owner)
+    record = SimpleNamespace(worktree_id="wt")
+    monkeypatch.setattr(worktree_status_compute.cfg, "project_dir", lambda project: Path("unused"))
+    monkeypatch.setattr(
+        worktree_status_compute.tracking, "load_record_by_id",
+        lambda worktree_id, **kwargs: record,
+    )
+    monkeypatch.setattr(
+        sessions, "verify_worktree_active", lambda current: sessions.LiveVerdict(active=False),
+    )
+    compute = worktree_status_daemon.build_cached_compute(
+        cache, lambda *args: pytest.fail("Retained Git cleanup must not be bypassed"),
+    )
+    result = compute("worktree_status", {"project": "A", "worktree_id": "wt", "force": True})
+    assert result["facts"]["liveness"]["confirmed"] is True
+    assert result["facts"]["liveness"]["value"]["active"] is False
+    assert result["facts"]["git_state"]["confirmed"] is False
+    assert owner.observation_counts() == (0, 1)
+    assert cache._entries == {}
 
 
 def test_classify_pending_returns_valid_unknown_without_probes(owner, monkeypatch):
@@ -511,6 +564,15 @@ def test_actual_monitor_shutdown_retains_custody_and_negative_control(
         agenda_counts = worktrees_runtime.WorktreesRuntime.agenda_counts
         agenda_busy = worktrees_runtime.WorktreesRuntime.agenda_busy
 
+        def observation_counts(self, server):
+            return {}
+
+        def observation_busy(self, server):
+            return []
+
+        def observation_wait_closed(self, timeout):
+            pass
+
         def stream(self, *args):
             pytest.fail("shutdown fixture must not start a stream")
 
@@ -645,8 +707,12 @@ def test_actual_monitor_shutdown_retains_custody_and_negative_control(
     monkeypatch.setattr(worktree_status_daemon, "InProcessRuntime", Runtime)
     monkeypatch.setattr(mux_link, "InProcessRuntime", Runtime)
     monkeypatch.setattr(status_monitor_cutover, "ControlServer", Control)
-    monkeypatch.setattr(status_monitor_cutover, "active_generation_for_pid", lambda pid: None)
+    monkeypatch.setattr(
+        status_monitor_cutover, "active_generation_for_pid",
+        lambda pid: 1 if operation in {"undrain", "guarded"} else None,
+    )
     monkeypatch.setattr(status_monitor_cutover, "publish_route", lambda *a, **k: None)
+    monkeypatch.setattr("agent_worktrees.runtime_monitor_identity.publish_lock", lambda *a, **k: True)
     def clear_route(*args):
         assert settled[0], "early native custody release"
 
@@ -838,8 +904,14 @@ def test_interrupted_settlement_preserves_every_ticket(owner, interruption):
     assert owner.settle_pending_once() == 0
 
 
-@pytest.mark.parametrize("path", ["/repo/wt2", "/unresolved/wt"])
-def test_snapshot_gates_sibling_and_unknown_path_before_discovery(owner, monkeypatch, path):
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [("/repo/wt2", "UNKNOWN (cleanup pending)"),
+     ("/unresolved/wt", "UNKNOWN (Git observation unavailable)")],
+)
+def test_snapshot_gates_sibling_and_unknown_path_before_discovery(
+    owner, monkeypatch, path, expected,
+):
     pending(owner)
     monkeypatch.setattr(core, "_hook_payload_cwd", lambda payload: path)
     monkeypatch.setattr(core, "_activate_project_for_path", lambda *a, **k: pytest.fail(
@@ -847,7 +919,7 @@ def test_snapshot_gates_sibling_and_unknown_path_before_discovery(owner, monkeyp
     ))
     assert core._resident_hook_decision(
         "snapshot", {}, segment_cache=owner, policy=object(),
-    ) == {"segment": owner.pending_segment()}
+    ) == {"segment": expected}
     assert owner.observation_counts() == (0, 1)
 
 

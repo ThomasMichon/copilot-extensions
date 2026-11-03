@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import threading
 import time
+from types import SimpleNamespace
 
 from agent_worktrees import worktree_status_daemon
 from agent_worktrees.worktree_status_cache import WorktreeStatusCache
@@ -99,6 +100,51 @@ def test_status_via_daemon_uses_live_daemon_when_reachable():
             fallback=lambda: {"from": "fallback"},
         )
         assert result == {"worktree_id": "wt-a", "state": "CLEAN"}
+    finally:
+        server.close()
+
+
+def test_force_refresh_serves_native_liveness_over_the_existing_transport(monkeypatch, tmp_path):
+    from agent_worktrees import sessions, worktree_status_compute
+
+    record = SimpleNamespace(worktree_id="wt-a")
+    bundle = {
+        "project": "proj", "worktree_id": "wt-a",
+        "facts": {
+            "git_state": {"value": None, "confirmed": False, "observed_at": 0.0},
+            "liveness": {"value": None, "confirmed": False, "observed_at": 0.0},
+        },
+    }
+    calls = []
+    monkeypatch.setattr(worktree_status_compute.cfg, "project_dir", lambda project: tmp_path)
+    monkeypatch.setattr(
+        worktree_status_compute.tracking, "load_record_by_id",
+        lambda worktree_id, **kwargs: record,
+    )
+
+    def verify(current):
+        calls.append(current)
+        return sessions.LiveVerdict(active=False)
+
+    monkeypatch.setattr(sessions, "verify_worktree_active", verify)
+    compute = worktree_status_daemon.build_cached_compute(
+        SimpleNamespace(get_or_refresh=lambda *args, **kwargs: bundle),
+        lambda *args: {"unexpected": "Git computation"},
+    )
+    server = worktree_status_daemon.start_server(compute)
+    server.start()
+    try:
+        result = worktree_status_daemon.status_via_daemon(
+            _endpoint_dict(server),
+            key=worktree_status_daemon.coalescing_key("proj", "wt-a"),
+            payload={"project": "proj", "worktree_id": "wt-a", "force": True},
+            fallback=lambda: {"unexpected": "direct fallback"},
+        )
+        assert result["facts"]["liveness"]["confirmed"] is True
+        assert result["facts"]["liveness"]["value"]["active"] is False
+        assert result["facts"]["git_state"]["confirmed"] is False
+        assert calls == [record]
+        assert bundle["facts"]["liveness"]["confirmed"] is False
     finally:
         server.close()
 

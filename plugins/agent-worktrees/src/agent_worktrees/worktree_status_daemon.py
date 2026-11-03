@@ -160,12 +160,21 @@ def build_cached_compute(
         if not project or not worktree_id:
             raise ValueError("worktree_status request missing project/worktree_id")
         force = bool(payload.get("force"))
-        return cache.get_or_refresh(
+        bundle = cache.get_or_refresh(
             project,
             worktree_id,
             force=force,
             compute=lambda: assemble(project, worktree_id),
         )
+        if force:
+            from .worktree_status_compute import refresh_unconfirmed_liveness
+
+            bundle = validated_refresh(
+                lambda project, worktree_id: refresh_unconfirmed_liveness(
+                    project, worktree_id, bundle,
+                ),
+            )(project, worktree_id)
+        return bundle
 
     return _compute
 

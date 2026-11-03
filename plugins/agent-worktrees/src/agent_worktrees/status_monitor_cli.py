@@ -326,7 +326,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     def _decide(kind: str, payload: dict, deadline: float) -> dict:
         if admission_closed and core.git_ops._windows_observation():
             if kind == "snapshot":
-                return {"segment": segment_cache.pending_segment()}
+                return {"segment": segment_cache.pending_segment_for_path(str(payload.get("cwd") or ""))}
             raise HookUnavailable
         nonlocal lifecycle_count
         is_lifecycle = kind == "sessionStart"

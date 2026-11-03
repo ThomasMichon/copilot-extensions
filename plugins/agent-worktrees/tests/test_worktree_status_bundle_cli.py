@@ -6,13 +6,19 @@ in-process reference consumer).
 from __future__ import annotations
 
 import argparse
+import copy
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 from agent_worktrees import __main__ as cli
 from agent_worktrees import output
 from agent_worktrees import session_tracking_cli
 from agent_worktrees import tracking
 from agent_worktrees import worktree_status_daemon
+from agent_worktrees import worktree_status_compute
+from agent_worktrees.sessions import LiveVerdict
 
 
 def _record() -> tracking.WorktreeRecord:
@@ -113,6 +119,114 @@ def test_force_refresh_flag_propagates_to_payload(monkeypatch, tmp_path):
         argparse.Namespace(worktree_id="wt1", force_refresh=True, json=True)
     )
     assert captured_payload["force"] is True
+
+
+@pytest.mark.parametrize(
+    ("active", "probes_ok"),
+    [(False, True), (True, True), (False, False)],
+)
+def test_force_refresh_confirms_native_liveness_without_repeating_git(
+    monkeypatch, tmp_path, active, probes_ok,
+):
+    record = _wire_record_resolution(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli, "_monitor_lock_path", lambda: tmp_path / "monitor.lock")
+    monkeypatch.setattr(cli, "_status_monitor_enabled", lambda: False)
+    original = {
+        "project": "proj", "worktree_id": "wt1", "as_of": 1.0,
+        "facts": {
+            "git_state": {"value": None, "confirmed": False, "observed_at": 0.0},
+            "liveness": {"value": None, "confirmed": False, "observed_at": 0.0},
+        },
+    }
+    before = copy.deepcopy(original)
+    owner_compute = worktree_status_daemon.build_cached_compute(
+        SimpleNamespace(get_or_refresh=lambda *args, **kwargs: original),
+        lambda *args: pytest.fail("Git observation must not be repeated"),
+    )
+    monkeypatch.setattr(
+        worktree_status_daemon, "status_with_boot",
+        lambda **kwargs: owner_compute("worktree_status", kwargs["payload"]),
+    )
+    monkeypatch.setattr(worktree_status_compute.cfg, "project_dir", lambda project: tmp_path)
+    monkeypatch.setattr(tracking, "load_record_by_id", lambda *args, **kwargs: record)
+    monkeypatch.setattr(
+        cli, "_worktree_status_compute",
+        lambda *args: pytest.fail("Git observation must not be repeated"),
+    )
+    probes = []
+
+    def verify(current):
+        assert current is record
+        probes.append(current)
+        return LiveVerdict(active=active, probes_ok=probes_ok)
+
+    monkeypatch.setattr(session_tracking_cli.sessions, "verify_worktree_active", verify)
+    outputs = []
+    monkeypatch.setattr(output, "_json_output", outputs.append)
+    assert cli.cmd_worktree_status_bundle(
+        argparse.Namespace(worktree_id="wt1", force_refresh=True, json=True),
+    ) == 0
+    fact = outputs[0]["facts"]["liveness"]
+    assert fact["confirmed"] is probes_ok
+    assert (fact["value"]["active"] if probes_ok else fact["value"]) is (
+        active if probes_ok else None
+    )
+    assert outputs[0]["facts"]["git_state"] == before["facts"]["git_state"]
+    assert outputs[0]["as_of"] == 1.0
+    assert len(probes) == 1
+    assert original == before
+
+
+@pytest.mark.parametrize(
+    ("force", "project", "worktree_id", "confirmed"),
+    [(False, "proj", "wt1", False), (True, "other", "wt1", False),
+     (True, "proj", "other", False), (True, "proj", "wt1", True)],
+)
+def test_native_liveness_refresh_requires_explicit_matching_unconfirmed_bundle(
+    monkeypatch, tmp_path, force, project, worktree_id, confirmed,
+):
+    _wire_record_resolution(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli, "_monitor_lock_path", lambda: tmp_path / "monitor.lock")
+    monkeypatch.setattr(cli, "_status_monitor_enabled", lambda: False)
+    bundle = {
+        "project": project, "worktree_id": worktree_id,
+        "facts": {"liveness": {"value": None, "confirmed": confirmed}},
+    }
+    owner_compute = worktree_status_daemon.build_cached_compute(
+        SimpleNamespace(get_or_refresh=lambda *args, **kwargs: bundle),
+        lambda *args: pytest.fail("Unexpected Git observation"),
+    )
+    monkeypatch.setattr(
+        worktree_status_daemon, "status_with_boot",
+        lambda **kwargs: owner_compute("worktree_status", kwargs["payload"]),
+    )
+    monkeypatch.setattr(
+        session_tracking_cli.sessions, "verify_worktree_active",
+        lambda *args: pytest.fail("Unrequested or mismatched native probe"),
+    )
+    outputs = []
+    monkeypatch.setattr(output, "_json_output", outputs.append)
+    assert cli.cmd_worktree_status_bundle(
+        argparse.Namespace(worktree_id="wt1", force_refresh=force, json=True),
+    ) == 0
+    assert outputs == [bundle]
+
+
+def test_native_liveness_refresh_refuses_changed_record_identity(monkeypatch, tmp_path):
+    monkeypatch.setattr(worktree_status_compute.cfg, "project_dir", lambda project: tmp_path)
+    monkeypatch.setattr(
+        tracking, "load_record_by_id", lambda *args, **kwargs: SimpleNamespace(worktree_id="other"),
+    )
+    monkeypatch.setattr(
+        session_tracking_cli.sessions, "verify_worktree_active",
+        lambda *args: pytest.fail("Changed record must not be probed"),
+    )
+    bundle = {
+        "project": "proj", "worktree_id": "wt1",
+        "facts": {"liveness": {"value": None, "confirmed": False}},
+    }
+    with pytest.raises(ValueError, match="identity changed"):
+        worktree_status_compute.refresh_unconfirmed_liveness("proj", "wt1", bundle)
 
 
 def test_falls_back_to_direct_compute_when_daemon_unreachable(monkeypatch, tmp_path):
