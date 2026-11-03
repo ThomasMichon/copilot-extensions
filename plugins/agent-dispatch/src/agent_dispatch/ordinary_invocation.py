@@ -22,6 +22,11 @@ def startup_seed(
         raise BridgeUnavailable("ordinary coordinator reservation read-back is unavailable")
     from .client import DispatchError
     try:
+        if driver == "cli":
+            from .client_pool_placement import _validate_contract
+            _validate_contract(
+                client.pool_placement_contract(), driver=driver, explicit_start=True, initial_start=True,
+            )
         reservation = client.get_reservation(task["spawn_reservation_key"])
     except (DispatchError, TaskError) as exc:
         from .bridge import BridgeCarriedSessionBusy
@@ -32,9 +37,11 @@ def startup_seed(
         if placed is not None:
             from .client_pool_placement import _validate_contract
             from .embody_prompts import pool_worker_prompt
-            _validate_contract(
-                client.pool_placement_contract(), driver=driver, explicit_start=driver == "cli",
-            )
+            if driver == "cli":
+                from .ordinary_pool_startup import require_cli_initial_admission
+                require_cli_initial_admission(reservation)
+            else:
+                _validate_contract(client.pool_placement_contract(), driver=driver)
             return pool_worker_prompt(
                 task["id"], generation=placed["task_generation"], route=route,
                 repo=None if all_repos else task.get("repo"), all_repos=all_repos,

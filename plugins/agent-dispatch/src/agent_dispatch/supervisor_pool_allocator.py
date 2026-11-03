@@ -142,8 +142,13 @@ def prepare_task(
         from .spawn_factories import SpawnPreparationRetained
 
         try:
-            observed = client.get_reservation(reservation["key"])
+            if reservation.get("reservation_pool_bound") is True and driver == "cli":
+                from .client_pool_placement import _validate_contract
+                _validate_contract(
+                    client.pool_placement_contract(), driver=driver, explicit_start=True, initial_start=True,
+                )
             current = client.get(task["id"])
+            observed = client.get_reservation(reservation["key"])
             if reservation.get("reservation_pool_bound") is True and (
                 observed.get("reservation_pool_bound") is not True
                 or observed.get("reservation_pool_assignment") != reservation.get("reservation_pool_assignment")
@@ -168,9 +173,19 @@ def prepare_task(
                     or observed.get("release_requested") or observed.get("startup_fenced")
                 ):
                     raise DispatchError(409, "ordinary allocator claim changed before preparation")
+                if driver == "cli":
+                    from .ordinary_pool_startup import require_cli_initial_admission
+                    from .queue_records import TaskError
+                    try:
+                        require_cli_initial_admission(observed)
+                    except TaskError as exc:
+                        raise DispatchError(409, str(exc)) from exc
                 task = current
         except DispatchError as exc:
             raise SpawnPreparationRetained(
                 f"ordinary allocator preparation retained its claim: {exc}",
             ) from exc
-    return {**task, "spawn_reservation_key": reservation["key"], "_spawn_client": client}
+    return {
+        **task, "spawn_reservation_key": reservation["key"], "_spawn_client": client,
+        "spawn_pool_bound": reservation.get("reservation_pool_bound") is True,
+    }

@@ -131,10 +131,23 @@ and records the workspace with that driver before Bridge acquisition. Its
 first prompt evaluates the existing assignment and uses `start
 --pool-generation`; it never asks for a second evaluation claim. Bridge
 acquisition supplies the actual native identity for that start command.
+`cli_initial_start_versions: [1]` additionally qualifies the existing
+reservation read-back's `cli_initial_start_error` decision. The coordinator
+checks the current startup/decision deadline, assignment and reservation fences
+with its own clock. Managed CLI callers require that support before placement
+and consume the current decision before workspace preparation and again before
+acquisition. A slow workspace return cannot authorize launch from an expired
+local task snapshot. Missing metadata is unavailable admission, not permission
+to guess the provider's clock.
 Provider rollback or lost/conflicting read-back retains the claim without a
 legacy fallback or replacement launch. Unbound explicit placement keeps its
 previous provider compatibility; these stricter requirements govern
 instance-bound CLI placement and its first seed.
+An ambiguous acquisition or refused initial seed returns a retained outcome,
+not legacy `DEFERRED`. The provider also refuses deferring an unowned
+allocator-`CLAIMED` reservation, so pending workspace or older-caller deferrals
+cannot bypass startup supervision. Deadline exhaustion can still requeue the
+task while its `RELEASING` reservation retains unresolved capacity.
 
 Script and restricted backends are not inferred to be qualified CLI workers
 from their workspace interface and remain refused by this caller. Unprojected

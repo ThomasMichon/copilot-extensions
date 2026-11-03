@@ -18,6 +18,7 @@ def _positive_integer(value: object) -> bool:
 
 def _validate_contract(
     result: object, *, explicit_start: bool = False, driver: str = "cli",
+    initial_start: bool = False,
 ) -> dict:
     if not isinstance(result, dict):
         raise DispatchUpgradeRequired("running coordinator returned an invalid pool placement contract")
@@ -38,6 +39,10 @@ def _validate_contract(
         initial = result.get("ordinary_initial_start_versions")
         if not isinstance(initial, list) or not any(type(v) is int and v == 1 for v in initial):
             raise DispatchUpgradeRequired("running coordinator lacks ordinary pool initial-start enforcement")
+    if driver == "cli" and initial_start:
+        versions = result.get("cli_initial_start_versions")
+        if not isinstance(versions, list) or not any(type(v) is int and v == 1 for v in versions):
+            raise DispatchUpgradeRequired("running coordinator lacks CLI pool initial-start enforcement")
     if explicit_start:
         versions = result.get("explicit_start_versions")
         if not isinstance(versions, list) or not any(type(version) is int and version == 1 for version in versions):
@@ -132,6 +137,7 @@ class PoolPlacementClientMixin:
         contract = _validate_contract(
             self.pool_placement_contract(), driver=driver,
             explicit_start=driver == "cli" and expected_instance is not None,
+            initial_start=driver == "cli" and expected_instance is not None,
         )
         extra: dict[str, object] = {}
         if expected_instance is not None or startup_timeout is not None:

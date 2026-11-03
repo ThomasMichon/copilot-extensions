@@ -184,6 +184,10 @@ def _poll(self: Supervisor, *, now: float, trace: SpawnDiagnostics) -> list[str]
                       key, task["id"], diagnostic_text(str(exc), task_trace.secrets))
             continue
         except (DispatchError, EmbodyUnavailable, bridge.BridgeUnavailable) as exc:
+            if reservation.get("reservation_pool_bound") is True:
+                log.error("pool preparation retained reservation %s: %s", key,
+                          diagnostic_text(str(exc), task_trace.secrets))
+                continue
             try:
                 with task_trace.stage("fail_preparation"):
                     self.client.fail_spawn(key, detail=f"reusable worktree preparation failed: {exc}")
@@ -245,7 +249,7 @@ def _poll(self: Supervisor, *, now: float, trace: SpawnDiagnostics) -> list[str]
                 log.info("spawned embody for task %s (%s)", task["id"], key)
             else:
                 detail = handle.get("error", "spawn failed")
-                if handle.get("retained"):
+                if handle.get("retained") or reservation.get("reservation_pool_bound") is True:
                     task_trace.event("bookkeeping", "retained", reason="explicit_repair_required")
                     log.error("spawn reservation %s retained for explicit repair: %s", key,
                               diagnostic_text(str(detail), task_trace.secrets))

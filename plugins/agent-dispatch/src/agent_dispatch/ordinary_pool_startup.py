@@ -5,6 +5,14 @@ from __future__ import annotations
 from .queue_records import TaskError
 
 
+def require_cli_initial_admission(reservation: dict) -> None:
+    """Consume the coordinator's current deadline decision, not a local clock."""
+    if "cli_initial_start_error" not in reservation or reservation["cli_initial_start_error"] is not None:
+        raise TaskError(
+            reservation.get("cli_initial_start_error") or "CLI initial-start admission is unavailable",
+        )
+
+
 def assignment(task: dict, reservation: dict, *, driver: str = "ordinary-bridge") -> dict | None:
     """Keep placed claims separate from the legacy queued/evaluation contract."""
     bound = reservation.get("reservation_pool_bound")

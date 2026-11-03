@@ -672,8 +672,9 @@ def test_cli_seed_refuses_provider_rollback_before_acquisition(q, api, monkeypat
         ok, result = factory({
             **asdict(q.get(requested.id)), "_spawn_client": client,
             "spawn_reservation_key": placed["reservation"]["key"],
+            "spawn_pool_bound": True,
         })
-        assert not ok and result["deferred"] is True
+        assert not ok and result["retained"] is True and "deferred" not in result
     assert q.get(requested.id).status == Status.CLAIMED
     assert len(q.list_reservations(task_id=requested.id)) == 1
 
@@ -693,6 +694,145 @@ def test_managed_cli_requires_live_explicit_start_support_before_placement(q, ap
 
     with controls.connected(api, requests, rewrite=rewrite) as client:
         with pytest.raises(DispatchUpgradeRequired, match="start enforcement"):
+            reserve_for_backend(
+                client, asdict(requested), "worker", ordinary=False, pool_driver="cli",
+                instance=("worker", "host-a", "linux"),
+            )
+    assert all(request.method == "GET" for request in requests)
+    assert q.get(requested.id).status == Status.QUEUED
+
+
+@pytest.mark.parametrize("failure", ["rollback", "readback", "ambiguous", "unavailable", "workspace"])
+def test_actual_cli_cycle_retains_failed_acquisition_then_exhausts_without_losing_capacity(
+    q, api, monkeypatch, failure,
+):
+    from agent_dispatch.bridge import BridgeCarriedSessionBusy, BridgeUnavailable
+    from agent_dispatch.supervisor_pool_startup import supervise_pool_startup
+
+    publish(q, pool())
+    requested = task(q)
+    clock = [100.0]
+    monkeypatch.setattr(q, "_now", lambda now=None: clock[0] if now is None else now)
+    prepared = []
+    fault_active = [True]
+
+    def workspace(*args, **kwargs):
+        prepared.append(True)
+        if failure == "workspace":
+            raise embody.EmbodyUnavailable("workspace preparation unavailable")
+        return {
+            "worktree": "worktree", "path": "/workspace/example", "project": "example",
+            "ownership": "created",
+        }
+
+    def rewrite(request, response):
+        if fault_active[0] and prepared and failure == "rollback" and request.url.path == "/pool-placements/contract":
+            body = response.json()
+            body["explicit_start_versions"] = []
+            return httpx.Response(200, json=body)
+        if fault_active[0] and prepared and failure == "readback" and request.method == "GET" and "/spawn-reservations/" in request.url.path:
+            return httpx.Response(503, json={"detail": "lost readback"})
+        return response
+
+    def acquire(*args, **kwargs):
+        if failure == "unavailable":
+            raise BridgeUnavailable("acquisition executable unavailable")
+        assert failure == "ambiguous"
+        raise BridgeCarriedSessionBusy("acquisition outcome is unknown")
+
+    monkeypatch.setattr(embody, "prepare_reusable_worktree", workspace)
+    monkeypatch.setattr(session_acquisition, "acquire", acquire)
+    with controls.connected(api, [], rewrite=rewrite) as client:
+        owner = cycle_owner(client, monkeypatch, [])
+        owner.spawn_fn = spawn_factories.make_embody_spawn()
+        owner.reserving_timeout = 10
+        assert owner.poll_once(now=100) == []
+        fault_active[0] = False
+        reservation = q.list_reservations(task_id=requested.id)[0]
+        assert reservation.state == "reserving"
+        assert q.get(requested.id).status == Status.CLAIMED
+        with pytest.raises(DispatchError, match="retain its active reservation"):
+            client.defer_spawn(reservation.key, detail="old caller cannot strand a pool claim")
+        clock[0] = 100 + owner.reserving_timeout
+        assert supervise_pool_startup(
+            owner, asdict(reservation), asdict(q.get(requested.id)), now=clock[0],
+        ) is True
+        current = q.get(requested.id)
+        assert current.status == Status.QUEUED and current.generation == 2
+        assert q.get_reservation(reservation.key).state == "releasing"
+        assert q.pool_startup(requested.id).exhaustion_reason == "startup_timeout"
+        with pytest.raises(DispatchError, match="capacity"):
+            reserve_for_backend(
+                client, asdict(task(q)), "worker", ordinary=False, pool_driver="cli",
+                instance=("worker", "host-a", "linux"),
+            )
+    assert len(prepared) == 1
+    assert len(q.list_reservations(task_id=requested.id)) == 1
+
+
+@pytest.mark.parametrize("stage", ["workspace", "task-read", "acquisition"])
+@pytest.mark.parametrize("now", [700.0, 701.0])
+def test_cli_coordinator_deadline_refuses_before_each_initial_effect(q, api, monkeypatch, stage, now):
+    publish(q, pool())
+    requested = task(q)
+    clock = [100.0]
+    monkeypatch.setattr(q, "_now", lambda now=None: clock[0] if now is None else now)
+    calls = []
+
+    def workspace(*args, **kwargs):
+        calls.append("workspace")
+        clock[0] = now
+        return {
+            "worktree": "worktree", "path": "/workspace/example", "project": "example",
+            "ownership": "created",
+        }
+
+    monkeypatch.setattr(embody, "prepare_reusable_worktree", workspace)
+    monkeypatch.setattr(session_acquisition, "acquire", lambda *a, **kw: pytest.fail("native after deadline"))
+
+    def rewrite(request, response):
+        if stage == "task-read" and request.url.path == f"/tasks/{requested.id}":
+            clock[0] = now
+        return response
+
+    with controls.connected(api, [], rewrite=rewrite) as client:
+        placed = reserve_for_backend(
+            client, asdict(requested), "worker", ordinary=False, pool_driver="cli",
+            instance=("worker", "host-a", "linux"), startup_timeout=600,
+        )
+        owner = Supervisor(
+            client, spawn_fn=spawn_factories.make_embody_spawn(), machine="host-a", supervisor_id="worker",
+            pool_instance=("worker", "host-a", "linux"),
+        )
+        if stage != "acquisition":
+            if stage == "workspace":
+                clock[0] = now
+            with pytest.raises(SpawnPreparationRetained, match="deadline expired"):
+                owner._prepare_spawn_task(asdict(requested), placed["reservation"])
+            assert calls == []
+        else:
+            prepared = owner._prepare_spawn_task(asdict(requested), placed["reservation"])
+            ok, result = owner.spawn_fn(prepared)
+            assert not ok and result["retained"] is True
+            assert "deadline expired" in result["error"] and calls == ["workspace"]
+    assert q.get(requested.id).status == Status.CLAIMED
+    assert q.get_reservation(placed["reservation"]["key"]).state == "reserving"
+
+
+def test_prior_cli_initial_admission_provider_refuses_before_claim(q, api):
+    publish(q, pool())
+    requested = task(q)
+    requests = []
+
+    def rewrite(request, response):
+        if request.url.path == "/pool-placements/contract":
+            body = response.json()
+            body.pop("cli_initial_start_versions", None)
+            return httpx.Response(200, json=body)
+        return response
+
+    with controls.connected(api, requests, rewrite=rewrite) as client:
+        with pytest.raises(DispatchUpgradeRequired, match="CLI pool initial-start"):
             reserve_for_backend(
                 client, asdict(requested), "worker", ordinary=False, pool_driver="cli",
                 instance=("worker", "host-a", "linux"),

@@ -588,7 +588,10 @@ def make_embody_spawn(
                 verify_timeout=verify_timeout,
             )
         except bridge.BridgeCarriedSessionBusy as exc:
-            return False, {"error": str(exc), "deferred": True}
+            return False, {
+                "error": str(exc),
+                "retained" if task.get("spawn_pool_bound") is True else "deferred": True,
+            }
         except bridge.BridgeUnavailable as exc:
             return False, {"error": str(exc), "preserve_workspace": True}
         if result.returncode != 0:
