@@ -453,11 +453,14 @@ def test_required_ci_stays_unit_only_and_manual_qualification_is_bounded():
         and "tools/run-coverage-selected-tests.py" not in step.get("run", "")
         for step in job["steps"]
     )
-    manual = yaml.safe_load(
+    manual_jobs = yaml.safe_load(
         (Path(__file__).resolve().parents[1] / ".github/workflows/installation-context-full.yml").read_text(),
-    )["jobs"]["coverage-selection"]
-    assert manual["if"] == "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'coverage-selection'"
-    assert manual["timeout-minutes"] == 12
+    )["jobs"]
+    for platform, runner in (("linux", "ubuntu-latest"), ("windows", "windows-latest")):
+        manual = manual_jobs[f"coverage-selection-{platform}"]
+        assert manual["runs-on"] == runner
+        assert manual["if"] == "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'coverage-selection'"
+        assert manual["timeout-minutes"] == 12
 
 
 def test_cli_missing_suite_cannot_turn_full_fallback_into_a_successful_skip(tmp_path, monkeypatch):
