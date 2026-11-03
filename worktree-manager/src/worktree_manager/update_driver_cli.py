@@ -394,7 +394,9 @@ def cmd_update_request(rest: list[str]) -> int:
         if result.state != "completed" or result.exit_code is None:
             _report(result, as_json=False)
             return 1
-        return result.exit_code
+        from .update_python_path import finish_update
+
+        return finish_update(["update", *rest], result.exit_code)
     except (driver.DriverError, driver.ParticipantError, EngineError, OSError, ValueError) as error:
         print(f"Update driver: {error}", file=sys.stderr)
         if options.json:

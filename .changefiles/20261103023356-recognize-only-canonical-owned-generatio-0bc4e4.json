@@ -1,0 +1,9 @@
+{
+  "comment": "Recognize only canonical owned-generation Python bytecode flags in the Windows Worktrees removal shim proof, preserving exact live request and native controller custody.",
+  "changes": [
+    {
+      "plugin": "libs/installer-engine",
+      "type": "patch"
+    }
+  ]
+}

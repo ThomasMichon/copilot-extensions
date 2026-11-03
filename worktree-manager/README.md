@@ -353,10 +353,12 @@ effects; it does not silently substitute a distribution package route.
 This optional mode alone is not a full adopter readiness or attended-auth claim.
 
 Every Windows bootstrap puts its selected Python directory first on the
-bootstrap process PATH before invoking Manager and nested installers. After a
-successful manual update, it also qualifies the physical Python 3.11+ base
-interpreter, places that directory first on the user PATH and reads the setting
-back. It never publishes a private runtime's venv as the public prerequisite,
+bootstrap process PATH before invoking Manager and nested installers. Both
+bootstrap and the installed update command reconcile PATH after a successful
+waited manual update, even when Manager is already current. They qualify the
+running interpreter's physical Python 3.11+ base, place its directory first on
+the user PATH, read the setting back and notify Windows of the change.
+Neither publishes a private runtime's venv as the public prerequisite,
 removes an older Python, or rewrites machine PATH. Existing parent terminals
 cannot inherit a child's environment changes and must be restarted; machine
 PATH precedence remains administrator-owned. Automatic, detached, targeted or

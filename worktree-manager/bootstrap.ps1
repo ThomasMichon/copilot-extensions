@@ -206,80 +206,6 @@ function Add-BootstrapPythonPath([string]$Path, [string]$Directory) {
     return (@($Directory) + $remaining) -join ';'
 }
 
-# === install-contract:test-persistent-environment -- keep byte-identical across installers ===
-function Get-CopilotPersistentEnvironmentVariable {
-    param(
-        [Parameter(Mandatory)][string]$Name,
-        [Parameter(Mandatory)][ValidateSet('User', 'Machine')][string]$Target
-    )
-    $testMode = $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1' -or [bool]$env:PYTEST_CURRENT_TEST
-    $effectiveTarget = if ($testMode) { 'Process' } else { $Target }
-    return [Environment]::GetEnvironmentVariable($Name, $effectiveTarget)
-}
-
-function Set-CopilotPersistentEnvironmentVariable {
-    param(
-        [Parameter(Mandatory)][string]$Name,
-        [AllowNull()][string]$Value,
-        [Parameter(Mandatory)][ValidateSet('User', 'Machine')][string]$Target
-    )
-    $testMode = $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1' -or [bool]$env:PYTEST_CURRENT_TEST
-    $effectiveTarget = if ($testMode) { 'Process' } else { $Target }
-    [Environment]::SetEnvironmentVariable($Name, $Value, $effectiveTarget)
-}
-# === end install-contract:test-persistent-environment ===
-
-function Test-BootstrapPythonPathPublication([string[]]$Command) {
-    if (-not $Command.Count -or $Command[0] -cne 'update') { return $false }
-    $inspection = @(
-        '--auto', '--detach', '--auth-report', '--request-status', '--recovery-status',
-        '--recover-after-restart', '--recover-for-repair', '--target', '--help', '-h'
-    )
-    return -not @($Command | Where-Object { ($_ -split '=', 2)[0] -cin $inspection }).Count
-}
-
-function Get-BootstrapBasePython([string]$Python) {
-    $start = New-Object Diagnostics.ProcessStartInfo
-    $start.FileName = $Python
-    $start.Arguments = '-I -S -B -c "import json,sys; print(json.dumps({''version'':list(sys.version_info[:2]),''python'':sys._base_executable}))"'
-    $start.UseShellExecute = $false
-    $start.CreateNoWindow = $true
-    $start.RedirectStandardOutput = $true
-    $start.RedirectStandardError = $true
-    $probe = [Diagnostics.Process]::Start($start)
-    try {
-        $output = $probe.StandardOutput.ReadToEndAsync()
-        $diagnostics = $probe.StandardError.ReadToEndAsync()
-        $timedOut = -not $probe.WaitForExit(10000)
-        if ($timedOut) {
-            $probe.Kill()
-            if (-not $probe.WaitForExit(3000)) { throw 'Bootstrap Python probe exit is unconfirmed.' }
-        }
-        if (-not [Threading.Tasks.Task]::WaitAll(@($output, $diagnostics), 3000)) {
-            throw 'Bootstrap Python probe output closure is unconfirmed.'
-        }
-        if ($timedOut) { throw 'Bootstrap Python probe timed out; public Python PATH was not changed.' }
-        if ($probe.ExitCode -ne 0 -or $diagnostics.Result -or $output.Result.Length -gt 16384) {
-            throw 'Bootstrap Python could not report its physical base interpreter.'
-        }
-        $info = $output.Result | ConvertFrom-Json -ErrorAction Stop
-        if ($info.version.Count -ne 2 -or
-            ($info.version[0] -isnot [long] -and $info.version[0] -isnot [int]) -or
-            ($info.version[1] -isnot [long] -and $info.version[1] -isnot [int]) -or
-            $info.version[0] -lt 3 -or ($info.version[0] -eq 3 -and $info.version[1] -lt 11) -or
-            $info.python -isnot [string] -or -not [IO.Path]::IsPathRooted($info.python)) {
-            throw 'Bootstrap Python did not report a supported physical base interpreter.'
-        }
-        $physical = Resolve-BootstrapExecutable $info.python
-        if ($physical -match '[\\/]WindowsApps[\\/]' -or [IO.Path]::GetFileName($physical) -ine 'python.exe') {
-            throw 'Bootstrap Python base cannot supply the public python command.'
-        }
-        return $physical
-    } finally {
-        $probe.Dispose()
-    }
-}
-
 function Find-BootstrapPython([string]$Uv) {
     $ErrorActionPreference = 'Continue'
     $lookup = @(& $Uv python find --no-project '>=3.11' 2>&1)
@@ -548,21 +474,6 @@ try {
 }
 if ($commandExit -ne 0) {
     Write-BootstrapProgress "Manager runtime command failed ($commandExit)." failed
-}
-if ($commandExit -eq 0 -and (Test-BootstrapPythonPathPublication $commandArgs) -and
-    $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1') {
-    $basePython = Get-BootstrapBasePython $Python
-    $directory = [IO.Path]::GetDirectoryName($basePython)
-    $env:PATH = Add-BootstrapPythonPath $env:PATH $directory
-    $userPath = Get-CopilotPersistentEnvironmentVariable -Name PATH -Target User
-    $preferred = Add-BootstrapPythonPath $userPath $directory
-    if ($preferred -cne $userPath) {
-        Set-CopilotPersistentEnvironmentVariable -Name PATH -Value $preferred -Target User
-        if ((Get-CopilotPersistentEnvironmentVariable -Name PATH -Target User) -cne $preferred) {
-            throw 'User Python PATH changed before verification; environment reconciliation is incomplete.'
-        }
-        Write-BootstrapProgress 'Supported Python is on the user PATH. Restart existing terminals to refresh their inherited environment.' warning
-    }
 }
 if ($commandExit -eq 0 -and ($env:PATH -split ';') -notcontains $LocalBin) {
     Write-BootstrapProgress "Add '$LocalBin' to your PATH (uv and the worktree-manager binstub live there), then restart your shell." warning

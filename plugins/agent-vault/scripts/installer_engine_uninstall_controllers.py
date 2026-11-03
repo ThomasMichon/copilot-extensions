@@ -379,6 +379,17 @@ try {
             _plain(current, file=True)
             if path.read_bytes() != current.read_bytes():
                 raise UninstallRefused("Worktrees runner source changed")
+        if (len(arguments) == 9 and arguments[1:3] == ["-I", "-X"]
+                and arguments[3].startswith("pycache_prefix=")):
+            prefix = arguments[3].removeprefix("pycache_prefix=")
+            if prefix.startswith("\\\\?\\UNC\\"):
+                prefix = "\\\\" + prefix[8:]
+            elif prefix.startswith("\\\\?\\"):
+                prefix = prefix[4:]
+            cache = Path(prefix)
+            if (cache.parent == custody.root / "cache" / "python" and ".." not in cache.parts
+                    and re.fullmatch(r"(?:installed-[0-9a-f]{64}|unsealed-[0-9a-f]{32})", cache.name)):
+                arguments = [*arguments[:2], *arguments[4:]]
         if (len(arguments) != 7 or arguments[1] != "-I" or Path(arguments[2]) != runner
                 or Path(arguments[3]) != custody.root or arguments[4] != request.id
                 or arguments[5] != witness or Path(arguments[6]) != procutil):
