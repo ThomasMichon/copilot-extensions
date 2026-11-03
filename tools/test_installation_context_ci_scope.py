@@ -805,7 +805,16 @@ def test_manager_native_step_retains_owned_cleanup_and_child_failure(
     def run(command, *, cwd, env, sandbox, limits):
         assert cwd == tmp_path and sandbox.is_dir()
         assert Path(env["HOME"]).resolve().is_relative_to(sandbox.resolve())
-        assert env["PYTHONPATH"] == str(tmp_path / "tools")
+        source_paths = [str(tmp_path / "tools")]
+        if calls:
+            source_paths.extend([
+                str(tmp_path / "worktree-manager" / "src"),
+                str(tmp_path / "libs" / "agent-procutil" / "src"),
+                str(tmp_path / "libs" / "worktree-identity" / "src"),
+                str(tmp_path / "libs" / "update-driver" / "src"),
+                str(tmp_path / "libs" / "single-instance-lease" / "src"),
+            ])
+        assert env["PYTHONPATH"] == os.pathsep.join(source_paths)
         calls.append((command, sandbox, limits))
         return 23 if failure_at == len(calls) - 1 else 0
 
@@ -829,6 +838,61 @@ def test_manager_native_step_retains_owned_cleanup_and_child_failure(
     if len(calls) == 2:
         assert calls[1][0][4:-2] == ["worktree-manager/tests/test_runtime_source.py"]
     assert job["timeout-minutes"] == 6
+
+
+def test_manager_native_step_loads_first_party_helpers_without_site_packages(monkeypatch) -> None:
+    import plugin_test_containment as containment
+
+    repo = HERE.parent
+    workflow = yaml.safe_load(
+        (repo / ".github/workflows/installation-context-acceptance.yml").read_text()
+    )
+    step = next(
+        step for step in workflow["jobs"]["source-build-linux"]["steps"]
+        if step.get("name") == "Persisted Manager admission and fresh-process offline reuse"
+    )
+    original_run = containment.run_contained
+    calls = []
+    script = """
+import pathlib, sys
+import agent_procutil
+import worktree_identity
+import update_driver
+import single_instance_lease
+from worktree_manager import runtime_source
+repo = pathlib.Path(sys.argv[1])
+assert pathlib.Path(agent_procutil.__file__).resolve() == (
+    repo / "libs" / "agent-procutil" / "src" / "agent_procutil" / "__init__.py"
+).resolve()
+assert pathlib.Path(runtime_source.__file__).resolve() == (
+    repo / "worktree-manager" / "src" / "worktree_manager" / "runtime_source.py"
+).resolve()
+assert pathlib.Path(worktree_identity.__file__).resolve() == (
+    repo / "libs" / "worktree-identity" / "src" / "worktree_identity" / "__init__.py"
+).resolve()
+assert pathlib.Path(update_driver.__file__).resolve() == (
+    repo / "libs" / "update-driver" / "src" / "update_driver" / "__init__.py"
+).resolve()
+assert pathlib.Path(single_instance_lease.__file__).resolve() == (
+    repo / "libs" / "single-instance-lease" / "src" / "single_instance_lease" / "__init__.py"
+).resolve()
+print("manager-source-helpers-without-site-packages-ok")
+"""
+
+    def run(command, **kwargs):
+        calls.append(command)
+        probe = script if len(calls) == 2 else "print('original-admission-path-retained')"
+        return original_run(
+            [sys.executable, "-S", "-c", probe, str(repo)], **kwargs,
+        )
+
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(sys, "path", sys.path.copy())
+    monkeypatch.setattr(containment, "run_contained", run)
+    with pytest.raises(SystemExit) as result:
+        exec(compile(step["run"], "<manager-native-workflow>", "exec"), {})
+    assert result.value.code == 0
+    assert len(calls) == 2
 
 
 def test_real_broker_consumers_retain_native_removal_failures_without_expanding_other_lanes() -> None:

@@ -19,6 +19,11 @@ from worktree_manager import source_config
 from worktree_manager.__main__ import main
 
 
+@pytest.fixture
+def tmp_path(tmp_path_factory):
+    return tmp_path_factory.mktemp("src")
+
+
 def test_acquisition_lease_and_refusal_need_no_manager_installer(tmp_path):
     script = """
 import importlib.abc, pathlib, sys

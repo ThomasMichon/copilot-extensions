@@ -925,6 +925,33 @@ win grows with build complexity.
 
 ## Journal
 
+### 2026-11-03 - Fresh Manager validation closes first-party source imports
+
+Candidate `c7c4ffe9824536e6bf00c0e31272bf1dbcb74039` completed the canonical
+3,783-unit packet and all enforced strict projects. Its exact native run
+[41566273690](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41566273690)
+completed 31 jobs: 29 succeeded and both Manager jobs failed collection of the
+added acquisition file after their original 97 controls passed. This run is
+not complete qualification and is not retried unchanged.
+
+The acquisition packet now supplies the declared Manager, process, identity,
+update-driver and lease source paths without installing the Manager package.
+Its compact fixture root retains the real local Git operations while avoiding
+Windows path overflow. This is a below-altitude acceptance correction; runtime
+behavior, original cases, integrity refusals and deadlines are unchanged.
+Seven source/cleanup regressions passed, including an actual site-free child.
+All 52 acquisition cases passed in a fresh tooling-only validator in 90.83
+seconds with normal cleanup.
+
+A subsequent local complete workflow hit its original 300-second limit.
+Diagnostic evidence showed progressing native controls and repeated source
+materialization, hashing and installed-health work, not a hung resolver.
+That timeout remains a non-pass. The corrected exact-head complete workflow
+must pass on both native runners, together with required CI and review, before
+the toolkit gate can close. No timeout, test or cleanup gate is waived; the
+parent remains Active with ordinary-consumer, production-feed, release,
+measured-savings and installed-acceptance obligations still open.
+
 ### 2026-11-03 - Native follow-through preserves actual containment and refusal
 
 The first current-candidate native run,

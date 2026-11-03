@@ -1310,6 +1310,12 @@ bounds and fail on unsettled cleanup or a failing child. Integrity tests retain
 all tamper refusals even when completion rejects changed evidence before the
 detailed input owner. The freeze-deadline witness expires only after a real
 buffered-file copy, not through an unused digest seam.
+The acquisition packet explicitly binds Manager and its declared first-party
+helper sources; validator tooling does not install Manager. A site-free child
+checks the actual module origins through the same owned workflow boundary.
+Acquisition fixtures use the existing compact `src` temporary-directory pattern
+to keep nested local Git paths within Windows limits without changing runtime
+paths, global Git settings, test selection or deadlines.
 
 `tools/test_runtime_profile_bootstrap.py` also runs runtime source-policy and
 actual wheel inspection in a fresh isolated Python process with the Manager

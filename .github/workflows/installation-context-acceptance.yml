@@ -1680,7 +1680,16 @@ jobs:
               with owner as directory:
                   temporary = Path(directory)
                   environment = isolated_environment(os.environ, temporary)
-                  environment["PYTHONPATH"] = str(repo / "tools")
+                  source_paths = [str(repo / "tools")]
+                  if tests == ["worktree-manager/tests/test_runtime_source.py"]:
+                      source_paths.extend([
+                          str(repo / "worktree-manager" / "src"),
+                          str(repo / "libs" / "agent-procutil" / "src"),
+                          str(repo / "libs" / "worktree-identity" / "src"),
+                          str(repo / "libs" / "update-driver" / "src"),
+                          str(repo / "libs" / "single-instance-lease" / "src"),
+                      ])
+                  environment["PYTHONPATH"] = os.pathsep.join(source_paths)
                   code = run_contained(
                       [sys.executable, "-m", "pytest", "-q", *tests,
                        "--basetemp", str(temporary / "pytest")],
