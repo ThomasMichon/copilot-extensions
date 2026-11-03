@@ -1,5 +1,5 @@
 /** Opt-in callable integration. No connection, registration or inference on import. */
-import { selectionSnapshot, selectionPrompt, validateSelection } from "./skill-selection-contract.mjs";
+import { selectionSnapshot, selectionPrompt, selectionReader } from "./skill-selection-contract.mjs";
 import { selectionSourcePolicy } from "./skill-selection-native.mjs";
 import { collectHistory, safeError } from "./skill-selection-spike.mjs";
 
@@ -76,11 +76,15 @@ export function createSelectionTool({ getSession, run, acquireSources = selectio
                 if (!Array.isArray(sourcePolicy?.trustedRoots) || typeof sourcePolicy.authorizeSource !== "function") {
                     throw new Error("requesting-session source policy is not bound");
                 }
+                const reader = await selectionReader(snapshot, sourcePolicy.trustedRoots, {
+                    maxBytes: 128000, maxReads: 12, authorizeSource: sourcePolicy.authorizeSource,
+                });
                 checkCancelled();
                 const acquisitionMs = Math.round(performance.now() - started);
                 startedRunner = true;
                 const report = await run({ snapshot, request: { ...args, context },
                     trustedRoots: sourcePolicy.trustedRoots, authorizeSource: sourcePolicy.authorizeSource,
+                    sourceReader: reader,
                     signal: invocation.signal });
                 settled = report?.cleanup?.runtimeStopped === true
                     && Array.isArray(report.cleanup.errors) && report.cleanup.errors.length === 0;
@@ -95,10 +99,11 @@ export function createSelectionTool({ getSession, run, acquireSources = selectio
                 }
                 if (selectionSnapshot(afterSkills.skills).digest !== snapshot.digest
                     || report.catalogDigest !== snapshot.digest) throw new Error("native catalog changed during selection");
-                const result = validateSelection(report.result, snapshot, report.receipts);
+                const result = await reader.validate(report.result);
+                checkCancelled();
                 for (const item of result.recommendations) {
                     if (snapshot.catalog.find(skill => skill.name === item.skill)?.path
-                        && !report.receipts?.some(receipt => receipt.skill === item.skill
+                        && !reader.receipts().some(receipt => receipt.skill === item.skill
                             && receipt.reference === undefined && receipt.catalogDigest === snapshot.digest
                             && receipt.bodyDigest && receipt.contentDigest)) {
                         throw new Error("recommended skill body was not read");

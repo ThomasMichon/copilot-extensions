@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { createSelectionTool } from "../scripts/skill-selection-tool.mjs";
 import { selectionSourcePolicy } from "../scripts/skill-selection-native.mjs";
 
@@ -26,7 +28,7 @@ function fixture() {
             uncertainties: [] },
         receipts: [], sourceFailures: [], usage: { calls: [], cost: { unit: "nano-AIU", value: null } }, elapsedMs: 1,
     });
-    const policy = { trustedRoots: [resolve("source")], authorizeSource: async () => true };
+    const policy = { trustedRoots: [], authorizeSource: async () => true };
     const options = { getSession: () => session, acquireSources: async () => policy,
         run: async input => { state.runs++; state.input = input; return report(input); } };
     const invocation = { sessionId: session.sessionId, signal: new AbortController().signal };
@@ -132,6 +134,38 @@ test("source-policy failure before dispatch permits recovery but never invokes a
     assert.equal(f.state.runs, 0);
     failed = false;
     assert.equal((await tool.handler(f.args, f.invocation)).resultType, "success");
+});
+
+test("source access and bytes are revalidated after owned cleanup and final parent checks", async t => {
+    const root = await mkdtemp(join(tmpdir(), "selector-return-policy-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    for (const mode of ["revoked-during-cleanup", "changed-during-cleanup", "revoked-at-final-check"]) {
+        const f = fixture(), path = join(root, `${mode}.md`);
+        await writeFile(path, "Current source");
+        f.state.skills[0].path = path;
+        let allowed = true, modelReads = 0;
+        f.options.acquireSources = async () => ({
+            trustedRoots: [root], authorizeSource: async () => allowed,
+        });
+        if (mode === "revoked-at-final-check") {
+            f.session.rpc.model.getCurrent = async () => {
+                if (++modelReads > 1) allowed = false;
+                return structuredClone(f.state.model);
+            };
+        }
+        f.options.run = async input => {
+            await input.sourceReader.read({ skill: "fixture" });
+            const report = f.report(input);
+            await input.sourceReader.validate(report.result);
+            report.receipts = input.sourceReader.receipts();
+            if (mode === "revoked-during-cleanup") allowed = false;
+            if (mode === "changed-during-cleanup") await writeFile(path, "Changed source");
+            return report;
+        };
+        const output = await createSelectionTool(f.options).handler(f.args, f.invocation);
+        assert.equal(output.resultType, "failure", mode);
+        assert.match(resultOf(output).reason, /access not admitted|source changed before/, mode);
+    }
 });
 
 test("native grants and exclusion checks are independent, current and fail closed", async () => {

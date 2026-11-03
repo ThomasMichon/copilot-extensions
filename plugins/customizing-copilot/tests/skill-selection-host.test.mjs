@@ -207,12 +207,26 @@ async function fixture(t, changes = {}) {
     const report = await runOwnedSelection({
         ...fake, root: join(parent, "decision"), runtimePath: resolve("fixture-runtime"),
         profile, snapshot, trustedRoots: [parent], request, signal: changes.signal?.signal, timeoutMs: 2000,
+        ...(changes.sourceReader ? { sourceReader: changes.sourceReader } : {}),
         ...(changes.strategy ? { strategy: changes.strategy, scenarioHistory: [
             "Superseded intent and irrelevant padding. ".repeat(400), "Current intent: compute seven times six.",
         ] } : {}),
     });
     return { report, observed: fake.observed };
 }
+
+test("owned host uses the caller's retained reader instead of rebuilding a root-only reader", async t => {
+    const sourceReader = {
+        async read() { throw new Error("unexpected fixture source read"); },
+        async validate() { throw new Error("caller-owned source validation refusal"); },
+        receipts: () => [],
+    };
+    const { report, observed } = await fixture(t, { sourceReader });
+    assert.equal(report.status, "unavailable");
+    assert.match(report.error, /caller-owned source validation refusal/);
+    assert.equal(report.cleanup.runtimeStopped, true);
+    assert.equal(observed.stops, 1);
+});
 
 test("owned selector validates its result and records unique usage through graceful stop", async t => {
     const { report, observed } = await fixture(t);

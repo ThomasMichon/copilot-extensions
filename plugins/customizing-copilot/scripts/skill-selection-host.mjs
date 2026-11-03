@@ -120,7 +120,7 @@ export function selectionRequestHandler(Base, { owned, profile, requests, maxReq
  * Host-supplied snapshot/roots/profile are policy, not model arguments. Each decision owns
  * a fresh runtime and state directory; stopping it cannot affect the requesting session.
  */
-export async function runOwnedSelection({ sdk, root, runtimePath, profile, snapshot, trustedRoots, authorizeSource,
+export async function runOwnedSelection({ sdk, root, runtimePath, profile, snapshot, trustedRoots, authorizeSource, sourceReader,
     request, signal, timeoutMs = 180000, maxRequests = 16, live = true,
     strategy = "isolated", scenarioHistory, readWitness = [] }) {
     if (!isAbsolute(root) || !isAbsolute(runtimePath)
@@ -135,7 +135,7 @@ export async function runOwnedSelection({ sdk, root, runtimePath, profile, snaps
     }
     const agent = selectionAgent(profile);
     let prompt = selectionPrompt(snapshot, request);
-    const reader = await selectionReader(snapshot, trustedRoots, {
+    const reader = sourceReader ?? await selectionReader(snapshot, trustedRoots, {
         maxBytes: 128000, maxReads: 12, authorizeSource,
     });
     const started = performance.now(), owned = new Set(), requests = [], seedRequests = [], usage = selectionUsage();

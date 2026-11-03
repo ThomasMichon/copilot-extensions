@@ -631,3 +631,9 @@ owned-session alternative or name the SDK dependency before adopting it.
   Complete-system comparison, broader representative cases, plugin-source
   policy coverage, automatic registration and preference activation remain
   open. The effort stays Active.
+- Source review found a return-time freshness gap across owned cleanup.
+  The factory now retains the actual reader used by the owned runner and
+  revalidates access/content after cleanup and final parent checks, rather
+  than accepting pre-cleanup receipts. Regression controls revoke access or
+  change bytes during cleanup and revoke access during final checks; the
+  bounded packet passes with verified process cleanup.
