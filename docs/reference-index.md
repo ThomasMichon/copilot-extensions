@@ -8,6 +8,8 @@ mechanics. Plugin-local guides and skills own their current commands.
 
 - [Architecture](architecture.md), [configuration](configuration.md), and
   [install contract](install-contract.md).
+- [Installation footprint and repair boundaries](installation-footprint.md):
+  artifact ownership/variants and failed-installer subtask verification.
 - [Harness and knowledge repositories](harness-and-knowledge.md): private-state
   binding, configuration tiers and source ownership.
 - [Harness runbook](harness-runbook.md) and [architecture patterns](patterns/README.md).

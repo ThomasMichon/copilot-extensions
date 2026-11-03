@@ -154,6 +154,11 @@ self-provisioning path remains independent and authoritative.
 
 ## Install topology — marketplace to local paths
 
+For artifact ownership, flat/nested and installation-cell variants, and
+repair-versus-code-patching boundaries, use the
+[installation footprint reference](installation-footprint.md).
+Its inventory routes to existing owners; it is not a claim of complete migration.
+
 ### Replacement lifecycle: target and current adoption
 
 The installer's
