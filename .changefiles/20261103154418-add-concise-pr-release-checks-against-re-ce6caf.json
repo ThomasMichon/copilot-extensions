@@ -1,0 +1,9 @@
+{
+  "comment": "Add concise PR release checks against regenerated main snapshots.",
+  "changes": [
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "patch"
+    }
+  ]
+}
