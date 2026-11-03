@@ -92,8 +92,8 @@ service operation or rollout is authorized by this source refinement.
 
 The source implements two independently confirmed existing controls: the
 default-installation bootstrap KillSwitch and Manager's broader launch-time
-maintenance veto. The first invokes the unchanged canonical shell/PowerShell
-controllers shipped in Manager's own payload; it has no Machines runtime
+maintenance veto. The first invokes the canonical shell/PowerShell controllers
+and shared helper shipped in Manager's own payload; it has no Machines runtime
 dependency or shadow state. Independent cells cannot edit that global hold.
 The second edits only the existing TOML preference with stale-view checks and
 preserved unrelated values/comments. Neither action starts an update or worker.
@@ -166,10 +166,23 @@ Manager refuses a downlevel controller rather than clearing unconditionally.
 Manager source, runtime-source and maintenance writers share a bounded
 per-config lock across reading and atomic publication.
 
-Bounded private-fixture evidence includes real configuration-writer subprocess
-interleavings, replacement of an audit hold between UI validation and actual
-controller execution, and Linux Bash/PowerShell/Python writer-lock
-interoperability. The earlier Windows result belongs to the earlier source,
-not these changed controllers. New source qualification, independent current-head
-review and any separately authorized Windows execution remain pending; no
-native attempt is implied or authorized by this source correction.
+Bounded private-fixture evidence includes 257 coupled Manager/queue/control
+passes with one platform skip, 129 generator/footprint/publication/capability
+passes, and 48 final canonical-controller/Manager passes. These overlapping
+suites include real configuration-writer subprocess interleavings, replacement
+of an audit hold between UI validation and actual controller execution, and
+Linux Bash/PowerShell/Python writer-lock interoperability. All 24 currently
+admitted strict typing projects pass Linux and Windows static views; the 44
+pending projects remain pending.
+
+The corrected source at `3a9d63c82e4a9a77c738b61bf029ec695bcd07b3`
+passed its exact 3,687-case actor-free packet with the same 519 bound sources,
+218 production coverage targets and 300-second limit: 58.93 seconds, coverage
+once and no observed effects. Its source, manifest, proof and coverage were
+independently verified. A separate read-only review of the correction delta
+reported no meaningful high-confidence correctness findings.
+
+The earlier Windows result belongs to the earlier source, not these changed
+controllers. Independent current-head provider review/CI, source merge and any
+separately authorized Windows execution remain pending; no native attempt is
+implied or authorized by this source correction.
