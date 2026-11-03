@@ -593,7 +593,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         restricted = getattr(self.spawn_fn, "restricted_bridge_for", None)
         if (callable(ordinary) and ordinary(task)) or (callable(restricted) and restricted(task)):
             from .supervisor_pool_allocator import prepare_task
-            return prepare_task(self.client, task, reservation, instance=self.pool_instance,
+            return prepare_task(self.client, task, reservation, instance=self.pool_instance if callable(ordinary) and ordinary(task) else None,
                                 supervisor_id=self.supervisor_id)
         if not self._spawn_requires_reusable_worktree(task):
             return task

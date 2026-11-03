@@ -85,7 +85,14 @@ to its same-runtime lane child. The strict parser retains this instance scope
 instead of substituting the child's ambient environment; a different or unknown
 execution host refuses before launch.
 
-The managed caller reads the existing complete catalog and negotiates
+The managed caller first reads the ordinary data-authorized
+`/health.pool_cohort` version-1 revision observation. A positively unprojected
+queue needs no control-token catalog read and retains legacy supervision.
+Configured or unknown state never authorizes that fallback. A cohort projected
+after an unprojected cycle's observation is refused by the transactional legacy
+fence; the caller cannot upgrade to pool placement midway through that cycle.
+
+For configured state, the caller reads the existing complete catalog and negotiates
 `instance_bound_placement_versions: [1]` against the running placement owner.
 It supplies `expected_instance` (`registration_id`, `machine`, `env`) and its
 configured positive finite `startup_timeout` to `POST /pool-placements`.

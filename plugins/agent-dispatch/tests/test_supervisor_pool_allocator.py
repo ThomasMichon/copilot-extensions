@@ -8,9 +8,11 @@ from threading import Barrier
 
 import httpx
 import pytest
+from fastapi.testclient import TestClient
 
 from agent_dispatch import __main__ as cli, identity
 from agent_dispatch.client import DispatchError, DispatchUpgradeRequired
+from agent_dispatch.coordinator import create_app
 from agent_dispatch.ordinary_bridge import reserve_for_backend
 from agent_dispatch.ordinary_invocation import startup_seed
 from agent_dispatch.queue import Status, TaskError
@@ -374,6 +376,89 @@ def test_disabled_allocator_still_reconciles_exact_custody_without_new_placement
         assert owner.poll_once(now=100) == []
     assert reconciled == [True] and not calls
     assert q.get(requested.id).status == Status.QUEUED
+    assert all(request.method == "GET" for request in requests)
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_unprojected_default_control_none_keeps_managed_legacy_cycle(q, monkeypatch, enabled):
+    requested = task(q)
+    calls, reconciled, requests = [], [], []
+    with TestClient(create_app(
+        q, token="data", control_token=None, enable_mcp=False, verification_interval=0,
+    )) as api, controls.connected(api, requests, control=False) as client:
+        owner = cycle_owner(client, monkeypatch, calls)
+        owner.pool_allocation_enabled = enabled
+        monkeypatch.setattr(owner, "reconcile", lambda: reconciled.append(True))
+        monkeypatch.setattr(owner, "_failed_spawn_counts", lambda: {})
+        monkeypatch.setattr(owner, "_active_reservations", lambda: [])
+        monkeypatch.setattr(owner, "_prepare_spawn_task", lambda task, reservation: calls.append(
+            (task["id"], reservation["driver"]),
+        ) or task)
+        owner.spawn_fn = lambda task: (False, {"retained": True, "error": "contained legacy launch"})
+        owner.spawn_fn.ordinary_bridge_for = lambda task: True
+        assert owner.poll_once(now=100) == []
+    assert reconciled == [True] and calls == [(requested.id, "ordinary-bridge")]
+    assert q.get(requested.id).status == Status.QUEUED
+    assert not any(request.url.path.startswith("/pool-") for request in requests)
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_midcycle_projection_cannot_upgrade_legacy_cycle_to_pool_allocation(q, api, monkeypatch, enabled):
+    requested = task(q)
+    calls, requests, published = [], [], []
+
+    def rewrite(request, response):
+        if request.url.path == "/tasks" and not published:
+            published.append(publish(q, pool()))
+        return response
+
+    with controls.connected(api, requests, rewrite=rewrite) as client:
+        owner = cycle_owner(client, monkeypatch, calls)
+        owner.pool_allocation_enabled = enabled
+        monkeypatch.setattr(owner, "_failed_spawn_counts", lambda: {})
+        monkeypatch.setattr(owner, "_active_reservations", lambda: [])
+        assert owner.poll_once(now=100) == []
+    assert published and not calls
+    assert q.get(requested.id).status == Status.QUEUED
+    assert q.task_pool_assignment(requested.id) is None
+    assert q.list_reservations(task_id=requested.id) == []
+    assert not any(request.method == "POST" and request.url.path == "/pool-placements" for request in requests)
+    assert sum(request.url.path == "/spawn-reservations" and request.method == "POST"
+               for request in requests) == 1
+
+
+@pytest.mark.parametrize("observation", [None, {}, {"version": True, "revision": 0},
+                                        {"version": 1, "revision": True}, {"version": 1, "revision": -1}])
+def test_unknown_cohort_without_control_does_not_authorize_legacy_fallback(q, api, monkeypatch, observation):
+    requested = task(q)
+    calls, requests, reconciled = [], [], []
+
+    def rewrite(request, response):
+        if request.url.path == "/health":
+            body = response.json()
+            body["pool_cohort"] = observation
+            return httpx.Response(200, json=body)
+        return response
+
+    with controls.connected(api, requests, control=False, rewrite=rewrite) as client:
+        owner = cycle_owner(client, monkeypatch, calls)
+        monkeypatch.setattr(owner, "reconcile", lambda: reconciled.append(True))
+        assert owner.poll_once(now=100) == []
+    assert not calls and not reconciled
+    assert q.get(requested.id).status == Status.QUEUED
+    assert all(request.method == "GET" for request in requests)
+
+
+def test_configured_cohort_without_control_does_not_fall_back_to_legacy(q, monkeypatch):
+    publish(q, pool())
+    requested = task(q)
+    requests, calls = [], []
+    with TestClient(create_app(
+        q, token="data", control_token=None, enable_mcp=False, verification_interval=0,
+    )) as api, controls.connected(api, requests, control=False) as client:
+        owner = cycle_owner(client, monkeypatch, calls)
+        assert owner.poll_once(now=100) == []
+    assert not calls and q.get(requested.id).status == Status.QUEUED
     assert all(request.method == "GET" for request in requests)
 
 

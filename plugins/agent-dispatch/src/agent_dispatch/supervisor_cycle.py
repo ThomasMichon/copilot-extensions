@@ -147,7 +147,8 @@ def _poll(self: Supervisor, *, now: float, trace: SpawnDiagnostics) -> list[str]
                     self.client, task, self.supervisor_id,
                     ordinary=getattr(self.spawn_fn, "ordinary_bridge_for", lambda _: False)(task),
                     restricted=getattr(self.spawn_fn, "restricted_bridge_for", lambda _: False)(task),
-                    instance=self.pool_instance, startup_timeout=self.reserving_timeout,
+                    instance=self.pool_instance if configured_pool and self.pool_allocation_enabled else None,
+                    startup_timeout=self.reserving_timeout,
                 )
                 reserved["reserved"] = bool(resp.get("reserved"))
         except DispatchError as exc:

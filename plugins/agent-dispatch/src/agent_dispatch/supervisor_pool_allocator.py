@@ -33,11 +33,22 @@ def validate_instance(
 
 
 def configured_catalog(client: DispatchClient) -> dict | None:
+    health = client.health()
+    observation = health.get("pool_cohort") if isinstance(health, dict) else None
+    if not isinstance(observation, dict) or (
+        type(observation.get("version")) is not int or observation["version"] != 1
+        or type(observation.get("revision")) is not int or observation["revision"] < 0
+    ):
+        raise DispatchUpgradeRequired("running coordinator lacks a current pool cohort observation")
+    if observation["revision"] == 0:
+        return None
     catalog = client.pool_catalog_metadata()
     cohort = catalog.get("configured_cohort")
     if not isinstance(cohort, dict) or type(cohort.get("revision")) is not int:
         raise DispatchUpgradeRequired("running coordinator lacks configured pool cohort observations")
-    return catalog if cohort["revision"] > 0 else None
+    if cohort["revision"] < observation["revision"]:
+        raise DispatchUpgradeRequired("configured pool cohort observation moved backwards")
+    return catalog
 
 
 def begin_cycle(supervisor: Supervisor) -> bool:
