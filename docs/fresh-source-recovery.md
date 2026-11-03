@@ -54,6 +54,10 @@ Apply borrows one request-local foreground operation from the native execution
 driver. An occupied or fenced queue refuses admission; recovery neither drains
 another request nor reconciles a foreign foundation operation. The same live
 custody covers Manager construction, engine repair and suite execution.
+Every fenced foundation record, including an owner-lost `running` record,
+refuses request-local admission without alteration. An older supported queue
+schema is migrated by the native owner only after custody and idle/unfenced
+checks, before accepting or executing the new operation.
 Captured engine attribution uses the existing repair owner. Missing or
 unrecognized historical attribution instead selects the native install or
 independent-repair entry under its registered source; it is not retried as a

@@ -83,7 +83,7 @@ def _index_repository(
             [sys.executable, "-I", "-B", str(resolver), "--repo", str(candidate),
              "--machine", machine],
             cwd=payload, env=dict(environment), capture_output=True, text=True,
-            timeout=30, **no_window_kwargs(),
+            timeout=10, **no_window_kwargs(),
         )
         role = result.stdout.strip()
         if result.returncode or role not in {"host", "client", "unconfigured"}:

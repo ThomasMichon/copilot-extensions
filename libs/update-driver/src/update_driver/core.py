@@ -515,7 +515,7 @@ def enqueue(
         _reconcile_lost_owner(root)
     else:
         _exclusive_custody.assert_owned()
-    _assert_foundation_clear(root)
+    _assert_foundation_clear(root, include_running=_exclusive_custody is not None)
     with _database(root, create=True) as db:
         db.execute("BEGIN IMMEDIATE")
         if _exclusive_custody is not None and db.execute(
@@ -600,9 +600,11 @@ def _foundation_operation(root: Path) -> foundation_state.FoundationOperation | 
         raise StateError(str(error)) from error
 
 
-def _assert_foundation_clear(root: Path) -> None:
+def _assert_foundation_clear(root: Path, *, include_running: bool = False) -> None:
     operation = _foundation_operation(root)
-    if operation is not None and operation.state == "interrupted" and operation.fenced:
+    if operation is not None and operation.fenced and (
+        include_running or operation.state == "interrupted"
+    ):
         raise InterruptedError("installation queue fenced by unsettled foundation construction")
 
 
@@ -820,7 +822,7 @@ def drain(
             except OperationLockedError:
                 time.sleep(.05)
     reconcile = _reconcile_foundation if _request_id is None else (
-        lambda root, custody: _assert_foundation_clear(root)
+        lambda root, custody: _assert_foundation_clear(root, include_running=True)
     )
     try:
         if _request_id is None:
@@ -939,12 +941,15 @@ def run_explicit(
     except OperationLockedError as error:
         raise StateError("request-local execution is busy; no request admitted") from error
     try:
-        _assert_foundation_clear(root)
-        with _database(root, create=True) as db:
+        _assert_foundation_clear(root, include_running=True)
+        with _database(root, writable=True) as db:
+            db.execute("BEGIN IMMEDIATE")
             if db.execute(
                 "SELECT 1 FROM requests WHERE state IN ('pending','running') LIMIT 1",
             ).fetchone() is not None or _has_fence(db, root):
                 raise StateError("request-local execution requires an idle, unfenced queue; nothing replayed")
+            _upgrade_schema(db, root, lock)
+            db.commit()
         request = enqueue(spec, runner=runner, root=root, _exclusive_custody=lock)
         try:
             drain(root=root, executor=executor, _request_id=request.id, _custody=lock)

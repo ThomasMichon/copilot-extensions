@@ -14,12 +14,8 @@ sys.path[:0] = [
     *(str(path) for path in sorted((repository / "libs").glob("*/src"))),
 ]
 
-import update_driver
-from agent_worktrees import __main__ as engine
-from agent_worktrees import front_door_cli, update_cli
-
-
 def selected_inputs(scope):
+    from agent_worktrees import __main__ as engine, update_cli
     from agent_worktrees import reconcile, update_acquisition, update_integration, update_runtime
 
     payloads = scope / "payloads"
@@ -57,9 +53,6 @@ def selected_inputs(scope):
 
 def main():
     scope = Path(os.environ["AGENT_HOME"])
-    front_door_cli.inst.read_projects_registry = lambda: {
-        "projects": {"example": {"anchor": str(scope / "anchor")}},
-    }
     if sys.argv[1] == "manager":
         sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "worktree-manager" / "src"))
         from worktree_manager import __main__ as manager, engine_client
@@ -78,6 +71,13 @@ def main():
 
         manager._cmd_update = return_to_engine
         return manager.main(sys.argv[2:])
+    import update_driver
+    from agent_worktrees import __main__ as engine
+    from agent_worktrees import front_door_cli, update_cli
+
+    front_door_cli.inst.read_projects_registry = lambda: {
+        "projects": {"example": {"anchor": str(scope / "anchor")}},
+    }
     if sys.argv[1] == "submit":
         original = update_driver.runtime_command
 
