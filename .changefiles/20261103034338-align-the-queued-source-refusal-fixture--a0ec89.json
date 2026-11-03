@@ -1,0 +1,9 @@
+{
+  "comment": "Align the queued-source refusal fixture with the retained request contract.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
