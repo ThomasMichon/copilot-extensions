@@ -186,3 +186,25 @@ The earlier Windows result belongs to the earlier source, not these changed
 controllers. Independent current-head provider review/CI, source merge and any
 separately authorized Windows execution remain pending; no native attempt is
 implied or authorized by this source correction.
+
+The next review found that a leading `~` override could be expanded by a writer
+but interpreted literally by its shell reader. Both canonical controllers now
+select the same current-user or relative path for `on`, `check`, `status` and
+`off`; capability discovery remains independent of state-path resolution.
+The actual 16-case controller-process packet passed on Linux, including Bash
+and PowerShell controls, and all 13 plugin copies plus standalone Manager were
+regenerated. The MCP producer hash was refreshed without changing its footprint
+contract revision.
+
+After reconciliation with the newer development base, the real handoff fixture
+was updated to register the actual public `update` parser and durable engine
+request path rather than its obsolete launch-only parser. Synthetic installer
+effects remain gated; coalescing, a distinct project and final queue drain are
+still exercised through real process boundaries. Both selected Linux handoff
+controls passed; the two native Windows counterparts were explicitly skipped.
+The complete selected Manager/configuration/queue/controller/generator/footprint
+cohort then passed 377 cases with 26 declared platform skips. All 27 currently
+admitted strict projects pass both static platform views; 41 projects remain
+pending. These results do not renew or consume an earlier exact-source native
+authorization, qualify Windows execution, or close independent source review,
+required CI, merge, rollout or the parent acceptance gate.

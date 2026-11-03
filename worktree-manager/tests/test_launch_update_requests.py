@@ -276,19 +276,22 @@ def test_native_handoffs_precede_real_driver_installer_completion(tmp_path, monk
         "_INVOCATION_CWD=Path.cwd()\n"
         f"Path({str(client_entered)!r}).write_text('entered')\n"
         "from agent_worktrees import config as cfg,update_cli,update_launch_cli as launch\n"
+        "from agent_procutil.owned_process import run_caller_owned\n"
         "argv=sys.argv[1:]; project=None\n"
         "if argv[:1]==['--project']: project=argv[1]; argv=argv[2:]\n"
         "cfg.active_project=lambda:project\n"
         f"cfg.install_dir=lambda:Path({str(home / '.agent-worktrees')!r})\n"
         "update_cli._invocation_update_context=lambda:None\n"
-        "launch.update_stage.stage=lambda:dict(stage_done=True,acquisition_ok=True,plugin_changed=False)\n"
-        "def plan():\n"
-        f" if Path({str(finished)!r}).exists(): return dict(action='continue')\n"
-        f" return dict(action='self-update',updates=[dict(service='fixture-bootstrap',argv=[sys.executable,{str(installer)!r}])])\n"
-        "update_cli._core_helper=lambda name,fallback:plan\n"
+        "def execute(args):\n"
+        " assert args.auto is True\n"
+        f" if Path({str(finished)!r}).exists(): return 0\n"
+        f" return run_caller_owned([sys.executable,{str(installer)!r}],timeout=45,"
+        "max_stdout_bytes=65536,max_stderr_bytes=65536).returncode\n"
+        "update_cli.cmd_update=execute\n"
         "parser=argparse.ArgumentParser(); sub=parser.add_subparsers(dest='verb')\n"
-        "launch.add_parsers(sub); args=parser.parse_args(argv)\n"
-        "if __name__=='__main__': raise SystemExit(launch.cmd_launch_update(args))\n",
+        "update_cli.add_parsers(sub); args=parser.parse_args(argv)\n"
+        "if __name__=='__main__': raise SystemExit("
+        "update_cli.cmd_update_request(args) if args.verb=='update' else launch.cmd_launch_update(args))\n",
     )
     env = dict(os.environ, HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home))
     env["PYTHONPATH"] = os.pathsep.join([
@@ -400,7 +403,8 @@ def test_native_handoffs_precede_real_driver_installer_completion(tmp_path, monk
         assert [request.spec.project for request in requests] == [
             "fixture", "fixture" if followup == "coalesce" else "other-project",
         ]
-        assert all(request.spec.backend == "engine-launch-update" for request in requests)
+        assert all(request.spec.backend == "engine" for request in requests)
+        assert all("--auto" in request.spec.argv for request in requests)
     finally:
         gate.write_text("continue")
         # Canonical drain joins the same execution owner; no fixture worker is left behind.
