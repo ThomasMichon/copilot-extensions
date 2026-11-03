@@ -149,10 +149,21 @@ def _eventually(check, *, processes=(), timeout=20):
 
 
 def _git(source, *arguments):
-    return subprocess.run(
-        ["git", "-C", str(source), *arguments], capture_output=True, text=True,
-        check=True, timeout=15, **agent_procutil.no_window_kwargs(),
-    ).stdout.strip()
+    from agent_procutil.owned_process import run_owned
+
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    environment.update(
+        GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull, GIT_TERMINAL_PROMPT="0",
+    )
+    result = run_owned(
+        [
+            "git", "-c", "core.hooksPath=", "-c", "core.fsmonitor=false",
+            "-c", "core.longpaths=true", "-C", str(source), *arguments,
+        ],
+        env=environment, timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
 
 
 @pytest.fixture
@@ -271,15 +282,17 @@ def bootstrap(tmp_path):
 
     def start(
         *arguments, install_source=None, command_name="update", acquisition_budget=None,
+        direct=False,
     ):
         log = tmp_path / f"caller-{len(callers)}.log"
         stream = log.open("wb")
         streams.append(stream)
         invocation = [*command, command_name, *arguments]
-        if install_source is not None:
+        if install_source is not None or direct:
             invocation = [
                 python, "-I", "-S", "-B", str(scripts / "runtime_install.py"),
-                "--root", str(root), "--install-source", str(install_source),
+                "--root", str(root),
+                *(["--install-source", str(install_source)] if install_source is not None else []),
                 "--", command_name, *arguments,
             ]
         launch_environment = dict(environment)
@@ -325,6 +338,8 @@ def test_native_bootstrap_coalesces_pending_work_and_retains_worker_after_caller
 ):
     root, source, driver, start, effects = bootstrap
     first, first_log = start("--project", "sample")
+    # Durable admission finishes acquisition/retention; observe the next owned stage separately.
+    _eventually(lambda: core.status(root=driver), processes=(first,))
     _eventually(
         lambda: any(row["phase"] == "suite-start" for row in effects()),
         processes=(first,),
@@ -461,7 +476,7 @@ def test_native_auth_report_closes_owned_bootstrap_without_forwarding_witness(bo
 @pytest.mark.skipif(os.name == "nt", reason="source-only POSIX non-update entry")
 def test_native_posix_non_update_resolves_driver_without_creating_a_queue(bootstrap):
     _root, _source, driver, start, effects = bootstrap
-    caller, log = start("--indicator-state", command_name="stage-update")
+    caller, log = start("--indicator-state", command_name="stage-update", direct=True)
     assert caller.wait(timeout=20) == 0, log.read_text(encoding="utf-8")
     assert core.status(root=driver) == () and not driver.exists()
     assert [row["phase"] for row in effects()] == ["manager", "inspection"]
