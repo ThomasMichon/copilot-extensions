@@ -8,7 +8,7 @@ The admitted cohort qualifies the checker code/tests, the complete Bootstrap
 Killswitch, Config Migrate, Configuration Layers, Core Delegation, Docker Resource
 Producer, Dropin Registry,
 Endpoint Rendezvous, Fleet Contracts, Fleet Index/Vault Adapters, Installation
-Context, Installer Readiness, Lazy CLI Dispatch,
+Context, Installer Readiness, Lazy CLI Dispatch, Machine Transport,
 Peer Launch, Process Telemetry, Remote Login Shell, Repository Policy, Session Liveness Probe, Single
 Instance Lease, Update Telemetry, Work
 Coalescing Singleton and Worktree Identity
@@ -39,6 +39,8 @@ python tools/typecheck.py lib-fleet-index-adapter lib-fleet-vault-adapter
 python tools/typecheck.py lib-installation-context
 python tools/typecheck.py lib-installer-readiness
 python tools/typecheck.py lib-lazy-cli-dispatch
+python tools/typecheck.py lib-machine-transport --prepare
+python tools/typecheck.py lib-machine-transport
 python tools/typecheck.py lib-peer-launch
 python tools/typecheck.py lib-process-telemetry --prepare
 python tools/typecheck.py lib-process-telemetry
@@ -138,6 +140,15 @@ while validated JSON events retain explicit dynamic values. Native append/sync,
 fail-open callbacks, no-SDK refusal and diagnostic-only delivery semantics remain
 unchanged. Bridge, Dispatch and Worktree Manager remain independently pending
 consumer projects.
+
+Machine Transport checks all nineteen canonical source/test files strictly on
+both declared targets using the existing YAML checker lock. Branch-local names
+distinguish legacy repository declarations and execution-space selections;
+registry tuples and optional observed hostnames retain explicit types. Positive
+test helpers require a selected entry before attribute access, while absent and
+refusal cases still exercise the original APIs. Parsing, alias precedence,
+transport defaults and platform detection are unchanged. Its five release
+consumers remain independently pending checker projects.
 
 Dropin Registry uses the base checker environment and checks all six canonical
 source/test files strictly on both declared targets. Its native FIFO test skips
