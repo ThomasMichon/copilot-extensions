@@ -5567,8 +5567,15 @@ command surface, not just a package import.
 An optional installed `module:function` construction callable receives JSON
 data under the same owned, isolated candidate interpreter. It runs only for
 fresh construction, before the installed-origin/full-surface health gate and
-immutable completion publication; exact reuse never reruns it. Worktrees uses
-this seam to stamp source provenance, the frozen package version, UTC build
+immutable completion publication; exact reuse never reruns it. It receives
+the `frozen_plugin` field as a pristine, verified source snapshot held by the
+candidate owner through preparation and health. It is separate from UV's
+retained build projection, whose dependency metadata may be rewritten to
+disable editable installation. Payload preparation must not copy that build
+projection into an identity-qualified payload or return to live source inputs.
+Both snapshot content and selected source identity are revalidated around the
+callback; installed-origin checks continue to attest the actual UV build inputs.
+Worktrees uses this seam to stamp source provenance, the frozen package version, UTC build
 time and a distinct `runtime_generation`, and to remove unused unsigned
 Windows `agent-*.exe` console trampolines. POSIX scripts and the signed Windows
 interpreter are preserved. Package-version comparison accounts for normalized

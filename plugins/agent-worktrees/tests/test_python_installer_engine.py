@@ -1547,6 +1547,201 @@ def test_numbered_construction_uses_real_uv_and_remains_frozen_after_source_chan
     assert not candidate.frozen_plugin.exists()
 
 
+@pytest.mark.parametrize("fault", [None, "original-source", "callback-error"])
+def test_preparation_keeps_pristine_source_separate_from_uv_projection(
+    engine, tmp_path, build_inputs, monkeypatch, fault,
+):
+    import tomllib
+    from contextlib import contextmanager
+
+    plugin, uv = build_inputs
+    module = plugin / "src" / "example_module.py"
+    module.write_text(
+        "import json,pathlib,shutil,sys\n"
+        "def prepare(data):\n"
+        "    slot=pathlib.Path(sys.prefix)\n"
+        "    source=pathlib.Path(data['frozen_plugin'])\n"
+        "    shutil.copytree(source,slot/'payload')\n"
+        "    (slot/'preparation-source.json').write_text(json.dumps(str(source)))\n"
+        "    if data['fail']: raise RuntimeError('preparation refused')\n"
+        "def health():\n"
+        "    slot=pathlib.Path(sys.prefix)\n"
+        "    source=pathlib.Path(json.loads((slot/'preparation-source.json').read_text()))\n"
+        "    assert source.is_dir(), 'payload owner ended before health'\n"
+        "    assert (slot/'payload'/'runtime-source.json').is_file()\n",
+        encoding="utf-8",
+    )
+    (plugin / "plugin.json").write_text(json.dumps({"name": "example", "version": "1.0.0"}))
+    digest = engine.runtime_source.assembly_hash(plugin)
+    generation = engine.runtime_source.runtime_version("1.0.0", "a" * 40, digest)
+    (plugin / "runtime-source.json").write_text(json.dumps({
+        "schema": engine.runtime_source.SOURCE_SCHEMA, "version": 1,
+        "plugin": "example", "package_version": "1.0.0",
+        "source_commit": "a" * 40, "source_tree": "b" * 40,
+        "assembly_hash": digest, "runtime_version": generation,
+    }))
+    identity = engine.runtime_source.manifest_fields(
+        engine.runtime_source.read_source_identity(plugin, "1.0.0", plugin="example"),
+    )
+    original = (plugin / "pyproject.toml").read_bytes()
+    preparation = engine._prepare_installed
+    retain = engine.retain_uv_install
+    snapshots = []
+    mirrors = []
+
+    @contextmanager
+    def trace_retention(*args, **kwargs):
+        assert kwargs["non_editable"] is True
+        with retain(*args, **kwargs) as transaction:
+            mirrors.append(transaction.sources[plugin])
+            yield transaction
+
+    def prepare(inputs, slot, python, callable_name, data, descriptor, timeout, payload):
+        snapshots.append(payload.plugin)
+        assert payload.plugin != plugin and payload.plugin != inputs.plugin
+        assert (payload.plugin / "pyproject.toml").read_bytes() == original
+        metadata = tomllib.loads((inputs.plugin / "pyproject.toml").read_text())
+        assert metadata["tool"]["uv"]["sources"]["example-dependency"]["editable"] is False
+        if fault == "original-source":
+            module.write_text("raise RuntimeError('changed original source')\n")
+        return preparation(inputs, slot, python, callable_name, data, descriptor, timeout, payload)
+
+    monkeypatch.setattr(engine, "retain_uv_install", trace_retention)
+    monkeypatch.setattr(engine, "_prepare_installed", prepare)
+    root = tmp_path / "runtime"
+    arguments = dict(
+        plugin=plugin, uv=uv, base_python=Path(sys.executable),
+        health_module="example_module", health_callable="health",
+        construction_callable="example_module:prepare",
+        construction_data={"fail": fault == "callback-error"},
+        expected_source_identity=identity,
+    )
+    if fault:
+        error = subprocess.CalledProcessError if fault == "callback-error" else ValueError
+        message = "preparation refused" if fault == "callback-error" else "Materialized payload bytes"
+        with pytest.raises(error) as failure:
+            with engine.numbered_candidate(root, generation, **arguments):
+                pytest.fail("failed preparation/source validation cannot complete")
+        diagnostic = failure.value.stderr if fault == "callback-error" else str(failure.value)
+        assert message in diagnostic
+        assert not engine.runtime.marker_path(root, generation).exists()
+    else:
+        with engine.numbered_candidate(root, generation, **arguments) as candidate:
+            assert snapshots[0].is_dir()
+            payload = candidate.slot / "payload"
+            assert (payload / "pyproject.toml").read_bytes() == original
+            assert engine.runtime_source.manifest_fields(
+                engine.runtime_source.read_source_identity(payload, "1.0.0", plugin="example"),
+            ) == identity
+            assert candidate.frozen_plugin == mirrors[0]
+            assert engine.runtime.is_complete(root, generation)
+    assert len(snapshots) == len(mirrors) == 1
+    assert not snapshots[0].exists() and not mirrors[0].exists()
+    with engine.runtime.construction_lease(root, generation, timeout=0):
+        pass
+
+
+def test_fresh_callback_snapshot_refuses_at_shorter_closed_wheel_deadline(
+    engine, tmp_path, monkeypatch,
+):
+    from dataclasses import replace
+
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "tools"))
+    import test_installer_closed_wheels as closed
+    from installer_wheel_inputs import WheelDeadlineError
+
+    plugin = closed.plugin.__wrapped__(tmp_path, engine)
+    sentinel = tmp_path / "unrelated.txt"
+    sentinel.write_bytes(b"preserved")
+    freeze = engine.freeze_inputs
+    write = Path.write_bytes
+    snapshots = []
+    completed = []
+    clock = [time.monotonic()]
+
+    def snapshot(*args, **kwargs):
+        destination = args[1]
+        snapshots.append(destination)
+        assert kwargs["deadline"] == wheels.deadline
+        result = freeze(*args, **kwargs)
+        completed.append(result)
+        return result
+
+    def copy_and_expire(path, data):
+        result = write(path, data)
+        if snapshots and Path(engine.runtime._normalize_windows_extended_path(str(path))).is_relative_to(
+            snapshots[0],
+        ):
+            clock[0] = wheels.deadline + 0.001
+        return result
+
+    with closed.snapshot(tmp_path) as retained:
+        wheels = closed.inspected(retained)
+        wheels = replace(wheels, snapshot=replace(wheels.snapshot, _deadline=clock[0] + 1))
+        monkeypatch.setattr(engine.time, "monotonic", lambda: clock[0])
+        monkeypatch.setattr(engine, "freeze_inputs", snapshot)
+        monkeypatch.setattr(Path, "write_bytes", copy_and_expire)
+        monkeypatch.setattr(engine, "_construct", lambda *a, **k: pytest.fail("snapshot refusal built"))
+        monkeypatch.setattr(
+            engine, "_prepare_installed", lambda *a, **k: pytest.fail("snapshot refusal ran callback"),
+        )
+        root = tmp_path / "runtime"
+        with pytest.raises(WheelDeadlineError, match="payload-snapshot deadline exhausted"):
+            with closed.candidate(
+                engine, root, plugin, wheels, construction_callable="demo_pkg:must_not_run",
+            ):
+                pytest.fail("expired snapshot published")
+        assert len(snapshots) == 1 and not completed
+        assert not snapshots[0].parent.parent.exists()
+        assert not engine.runtime.marker_path(root, "1.0.0").exists()
+        assert not (root / "current-version").exists()
+        assert all(path.is_file() for path in retained.paths.values())
+        assert sentinel.read_bytes() == b"preserved" and plugin.is_dir()
+        with engine.runtime.construction_lease(root, "1.0.0", timeout=0):
+            pass
+    assert not any(path.exists() for path in retained.paths.values())
+
+
+def test_successful_application_callback_uses_owned_pristine_snapshot(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "tools"))
+    from test_local_install_source import native_source
+
+    source, snapshot = native_source.__wrapped__(tmp_path, SimpleNamespace(param={"callback": True}))
+    with source.project_inputs(snapshot, "demo-app") as (selected, wheels):
+        selection = source.native_selection(selected, wheels)
+        root = tmp_path / "runtime"
+
+        def validate(slot):
+            assert not source.engine.runtime.marker_path(root, slot.name).exists()
+            source.engine._assert_source_pin(slot / "callback-payload", selection["identity"])
+
+        with source.engine.numbered_candidate(
+            root, selection["runtime_version"], plugin=selected.payload,
+            uv=Path(shutil.which("uv")), base_python=Path(sys.executable),
+            health_module="demo_app", health_callable="snapshot_health",
+            local_packages=tuple(selection["local_packages"]),
+            wheel_inputs=wheels, application=snapshot / selected.project["application"],
+            construction_callable="demo_app:prepare_snapshot",
+            expected_source_identity=selection["identity"], validate_candidate=validate,
+        ) as ready:
+            assert not ready.reused and (ready.slot / "application.json").is_file()
+            pristine = Path(json.loads((ready.slot / "callback-source.json").read_text()))
+            assert pristine.is_dir() and pristine != selected.payload and pristine != ready.frozen_plugin
+            assert (ready.slot / "callback-payload" / "pyproject.toml").read_bytes() == (
+                selected.payload / "pyproject.toml"
+            ).read_bytes()
+            assert source.engine.runtime.is_complete(
+                root, ready.slot.name, expect_hash=ready.payload_hash,
+            )
+            origins = json.loads((ready.slot / ".runtime-input-origins.json").read_text())
+            assert origins["wheel_inputs"] == wheels.receipt()
+        assert not pristine.exists() and not ready.frozen_plugin.exists()
+        assert not (root / "current-version").exists()
+        wheels.verify()
+        with source.engine.runtime.construction_lease(root, ready.slot.name, timeout=0):
+            pass
+
+
 def test_expected_payload_pin_reuses_baseline_but_validates_retained_source(
     engine, tmp_path, build_inputs, monkeypatch,
 ):

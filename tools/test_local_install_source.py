@@ -825,6 +825,25 @@ def native_source(tmp_path, request):
         '[tool.uv.sources]\nagent-procutil={path="' +
         ("../libs/agent-procutil" if sibling else "libs/agent-procutil") + '"}\n',
     )
+    callback = {}
+    if isinstance(options, dict) and options.get("callback"):
+        code = (
+            "VALUE = 1\n"
+            "import json,pathlib,shutil,sys\n"
+            "def prepare_snapshot(data):\n"
+            "    slot=pathlib.Path(sys.prefix).parent\n"
+            "    source=pathlib.Path(data['frozen_plugin'])\n"
+            "    shutil.copytree(source,slot/'callback-payload')\n"
+            "    (slot/'callback-source.json').write_text(json.dumps(str(source)))\n"
+            "def snapshot_health():\n"
+            "    slot=pathlib.Path(sys.prefix).parent\n"
+            "    source=pathlib.Path(json.loads((slot/'callback-source.json').read_text()))\n"
+            "    assert source.is_dir(), 'source owner ended before health'\n"
+            "    assert (slot/'callback-payload'/'pyproject.toml').read_bytes() == "
+            "(source/'pyproject.toml').read_bytes()\n"
+        )
+        (package / "__init__.py").write_text(code, encoding="utf-8")
+        callback["demo_app/__init__.py"] = code.encode("utf-8")
     if not (isinstance(options, dict) and options.get("standalone", False)):
         (payload / "plugin.json").write_text('{"name":"demo-app","version":"1.0.0"}\n')
     scripts = payload / "scripts"
@@ -869,7 +888,7 @@ def native_source(tmp_path, request):
     archive = tmp_path / "demo_app-1.0.0-py3-none-any.whl"
     archive.write_bytes(wheel_bytes(
         name="demo_app", prefix="demo_app-1.0.0.dist-info/",
-        extra={"demo_app/__init__.py": content.encode()},
+        extra={"demo_app/__init__.py": content.encode(), **callback},
         metadata=(
             "Metadata-Version: 2.4\nName: demo-app\nVersion: 1.0.0\n" +
             ("Requires-Dist: counter>=1\n" if dependency else "") + "\n"
