@@ -86,6 +86,17 @@ def test_prepare_runtime_candidate_reports_real_copy_and_inventory_progress(tmp_
     assert (slot / ".manager-artifacts.json").is_file()
     assert not (root / "current-version").exists()
     assert not (slot / adapter.runtime.COMPLETE_MARKER).exists()
+    from types import SimpleNamespace
+
+    assert adapter._finish(
+        SimpleNamespace(install_only=True, root=root, source_digest="fixture"),
+        slot, [],
+    ) == 0
+    receipt = capsys.readouterr()
+    assert not receipt.err
+    record = json.loads((output.err + receipt.out).splitlines()[-1])
+    assert record["schema"] == "copilot-extensions.manager-bootstrap"
+    assert record["slot"] == str(slot)
 
 
 def test_explicit_interpreter_is_forwarded_instead_of_reselected(tmp_path, monkeypatch):

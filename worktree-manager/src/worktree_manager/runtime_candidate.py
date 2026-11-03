@@ -57,6 +57,8 @@ def prepare_runtime_candidate(data: dict) -> None:
         provider=_expected_control_plane_provider_manifest(root=slot.parent.parent),
         on_progress=_completed_progress("inventory"),
     )
+    # The driver shares diagnostic output with the line-delimited bootstrap receipt.
+    print(file=sys.stderr, flush=True)
 
 
 def verify_runtime_candidate() -> None:
