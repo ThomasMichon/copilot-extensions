@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
-- **Current slice:** Process Telemetry (#10083), whose source-only artifact and optional-dependency checker environment are ready for integration. Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
+- **Current slice:** Machine Transport (#10107), followed by Plugin Activation (#10108); both source-only artifacts are reviewed and natively qualified for integration. Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -31,7 +31,7 @@ definition of success.
 
 - **Topology:** Independent per-slice PRs, never a concurrently edited shared staging branch. The lead may integrate non-overlapping test cohorts into one bounded reviewed slice after their isolated validation.
 - **Host (owns PRs):** `lead` owns its PRs and verifies completion of delegated PRs.
-- **Delegates:** The lead owns #10083 integration and checker environment, all shared admission/coverage manifests, global documentation, the effort and full completion judgment. The Process Telemetry source-only worktree retains its completed implementation and explicit optional-SDK prerequisite. Publication remains with the lead. Prior implementation workers are complete.
+- **Delegates:** The lead owns #10107 and #10108 integration, their explicit YAML checker prerequisites, all shared admission/coverage manifests, global documentation, the effort and full completion judgment. Their source-only worktrees retain completed implementations. Publication remains with the lead. Prior implementation workers are complete.
 - **Handoff:** A merged slice returns to the canonical README, updates its Plan/Validation/Journal, then selects the next unresolved item. A continuation retains #9807, this README, the current slice, live PRs and exactly one next action.
 - Existing contributor PRs are reviewed/coordinated, not superseded. Shared-library changes precede dependent activations; unrelated leaf activations may proceed independently.
 
@@ -136,7 +136,9 @@ rewrite.
 - [x] Strictly admit all canonical Installer Readiness source/test modules (#10044).
 - [x] Strictly admit all canonical Docker Resource Producer source/test modules (#10045).
 - [x] Strictly admit all canonical Single Instance Lease source/test modules (#10084).
-- [ ] Strictly admit all canonical Process Telemetry source/test modules with its declared optional-SDK checker environment (#10083).
+- [x] Strictly admit all canonical Process Telemetry source/test modules with its declared optional-SDK checker environment (#10083).
+- [ ] Strictly admit all canonical Machine Transport source/test modules with its declared YAML checker environment (#10107).
+- [ ] Strictly admit all canonical Plugin Activation source/test modules with its declared YAML checker environment (#10108).
 - [ ] Admit near-clean leaf libraries through small annotation/narrowing PRs; activate directly in strict mode when possible.
 - [ ] Admit remaining shared libraries in basic mode, then close their stricter deltas in separate PRs until every shared library is strict.
 - [ ] Replace loose generics and unchecked boundary results with honest callable, protocol and validated data contracts; rerun affected consumer checks/tests.
@@ -1831,3 +1833,71 @@ composition prerequisites, and review/validation rules.
   with zero skips on actual Linux/Python 3.10.21 in 2.41 seconds, matching its
   contained Windows result. Plugin Activation independently preserves its 105
   test names, 333 assertions and 43 parametrizations; integration remains pending.
+
+### 2026-11-02 - Process admission merged; Machine Transport selected
+
+- #10115 merged as `20938a4d5ed5d58f089c26b4a2d4c4101f4c4b82`
+  after exact-head approval, no open review findings and green required CI in
+  [run 41549310660](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41549310660)
+  and the subsequent same-head
+  [run 41549418312](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41549418312).
+  There are now 26 merged strict projects and 42 pending. This Plan and
+  Validation Plan remain active; no installed runtime rollout is claimed.
+- Managed pull-forward auto-aborted a replay conflict. A retained backup,
+  equality of all 24 ordinary published blobs, exact inclusion of the policy
+  paragraph and equality of the sole owned packet digest proved that all own
+  work was merged. Incoming shared-document and packet changes were preserved;
+  managed synchronization then passed. The incoming packet has 3,779 nodes,
+  514 source inputs and the same 300-second budget.
+- Machine Transport is the next admission: all nineteen canonical files pass
+  strict probes on both targets, and all 763 fixtures pass on Windows and actual
+  Linux/Python 3.10.21 without skips. Its existing YAML checker lock is explicit;
+  five release consumers and three changed packet inputs require qualification.
+  There are no physical copies.
+- Plugin Activation's reviewed artifact passes 207 Windows tests and 203 actual
+  Linux/Python 3.10.21 tests with three existing native-Windows skips, in 4.42
+  seconds on Linux. Its conditional surrogate-filename vector is Windows-only.
+  The sole physical copy, nine release consumers and changed source/test packet
+  inputs remain lead-owned integration work.
+
+### 2026-11-02 - Machine Transport admission and consumer qualification
+
+- The lead integrated the reviewed artifact and its explicit existing YAML
+  checker environment, then activated all nineteen canonical files strictly on
+  both targets. All 27 proposed strict projects pass; 41 remain pending, with
+  7,614 physical Python files classified. The original 214 test names, 324
+  assertion ASTs and 134 parametrizations remain exact.
+- Only the three changed canonical runtime input hashes are refreshed.
+  Complete qualification passes all 3,779 current source-bound unit nodes with
+  nineteen existing deselections in 250.203 seconds, including the single
+  coverage collection. Nodes, coverage targets and the 300-second budget are
+  unchanged. There are no physical copies; the changefile names the library
+  and all five release consumers.
+- Focused contained consumer regressions pass Bridge's 83 tests, Machines's
+  169 tests, SSH's 15 tests, Worktrees's 404 tests and Manager's 107 tests.
+  Machines retains one actual-container-root skip on Windows; an explicit
+  isolated Linux check remains before publication.
+- Manager's headless grouping fixture now composes the actual model mixin and
+  initializes its non-live reader state instead of omitting the failure-marker
+  contract. Worktrees's reciprocal-claim test retains the precise execution-space
+  refusal through the real structured diagnostic callback while asserting the
+  sanitized public notice. Both repairs preserve runtime behavior and the
+  meaningful routing/ownership assertions rather than skipping failed cases.
+  Neither fixture file is a source-bound packet input.
+- Ruff, install-contract, documentation and diff checks pass. Native library
+  fixtures already pass all 763 cases without skips on both Windows and actual
+  Linux/Python 3.10.21. No remote host, headed interface, live resource takeover,
+  installed rollout or new CI lane is introduced. Review, required CI and merge
+  remain open gates for #10107.
+
+### 2026-11-02 - Actual-container Machine consumer case verified
+
+- The exact Machines consumer case skipped on Windows now passes in the
+  isolated Linux/Python 3.10.21 environment. Combined execution passes all
+  764 library/consumer cases with zero skips in 1.60 seconds.
+- Its first collection attempt omitted a declared first-party source dependency.
+  The failed container and volume were retained, and the launcher derived the
+  twelve-project local import closure from the actual source declarations.
+  Corrected execution ran in that same container; only after diagnosis and
+  successful verification were the exact container and volume removed.
+  No dependency declaration, runtime code or assertion was changed for this check.
