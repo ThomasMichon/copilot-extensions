@@ -4,8 +4,8 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent managed plan and implementation PRs
 - **Created:** 2026-11-02
-- **Status:** Active
-- **Vision:** [Vault explicit adoption and standalone use](../../../visions/vault/README.md#central-fleet-and-standalone-local)
+- **Status:** Done
+- **Vision:** [Vault explicit adoption and standalone use](../../../../visions/vault/README.md#central-fleet-and-standalone-local)
 - **Umbrella issue:** #2350 (bounded Vault adopter only)
 
 ## Guiding Intent
@@ -66,7 +66,7 @@ those effects.
   installation-cell boundaries and existing service/data custody.
 - [x] Document precedence, opt-in and withdrawal semantics; withdrawal does not
   silently stop a service used by another admitted scope.
-- [ ] Add a Vault changefile and land source through ordinary review and CI.
+- [x] Add a Vault changefile and land source through ordinary review and CI.
 
 ## Validation Plan
 
@@ -78,12 +78,12 @@ those effects.
 - [x] Configured controls reach the existing owned consumer path without
   bypassing its checks; existing Vault tests and touched-Python lint pass.
 - [x] Install-contract checks report zero violations.
-- [ ] Exercise an available isolated external CI lane for platform parity, or
+- [x] Exercise an available isolated external CI lane for platform parity, or
   record the exact unavailable boundary without claiming live qualification.
-- [ ] Qualify provisioned-command withdrawal before backend probing, automatic
+- [x] Qualify provisioned-command withdrawal before backend probing, automatic
   cell selection without inherited routing, and accepted activation selectors
   executed under another worker's environment.
-- [ ] Record merged source and release status separately from unapproved rollout,
+- [x] Record merged source and release status separately from unapproved rollout,
   resolve every checklist item and archive this source effort.
 
 ## Proposal
@@ -172,3 +172,27 @@ remain authoritative for their machine-local custody.
   retaining original arguments for staged re-execution. Six native controls
   cover unknown options and missing values independently of disabled, enabled
   or malformed configuration; final revision qualification remains open.
+
+### 2026-11-03 - Source merged, release pending
+- Implementation #10124 merged to `dev` as `0d994f8857` after an Approved
+  Copilot verdict on `03e78eda01`, zero unresolved threads and all required
+  checks passing (CI run 41568071155).
+- Exact-source native run 41568111267 passed Linux with 216 cases and three
+  platform skips, and Windows with 207 cases and twelve platform skips.
+  Both platforms also passed two actual cross-worker queue controls. Linux
+  executed all six argument-validation regressions.
+- Source implementation and available external qualification are complete.
+  Promotion to `main` remains to be verified before closing this source effort.
+  Installed rollout, service changes and credential migration remain excluded;
+  source merge does not imply any deployed runtime has changed.
+
+### 2026-11-03 - Released and archived
+- Promotion run 41569426311 succeeded. Main's release receipt names the exact
+  implementation merge `0d994f8857` as its source and release identity, with
+  promotion time `2026-11-03T02:59:13Z`. Main contains the activation reader and
+  Agent Vault version `0.1.190-dev1`.
+- Every Plan and Validation Plan item is resolved for this bounded source
+  effort. Runtime activation, configuration precedence, withdrawal and
+  standalone behavior remain documented in Vault's living configuration guide.
+  Archive publication is the remaining repository lifecycle step, not new
+  implementation scope. Installed rollout remains unapproved and excluded.
