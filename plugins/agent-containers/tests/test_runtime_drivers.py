@@ -1413,3 +1413,36 @@ def test_namespace_resolve_of_absent_driver_member_never_queries_other_fleets(
         asyncio.run(resolver.ContainerResolver().resolve_spec("example-99"))
     assert time.monotonic() - started < 15
     assert not slow_root.exists()  # the unrelated driver was never invoked
+
+
+def test_session_host_cleanup_after_fleet_removal_never_reaches_a_same_id_member(
+    fake, no_docker, tmp_path, monkeypatch, capsys,
+):
+    other_root = tmp_path / "other-runtime"
+    config = _two_driver_config(tmp_path, monkeypatch, fake, ["--root", str(other_root)])
+    fleet.reconcile_up(config, "example")
+    fleet.reconcile_up(config, "slow")
+    members = {m.name: m for m in lifecycle.list_containers(config)}
+    shared = members["example-1"].container_id
+    assert members["slow-1"].container_id == shared  # independent runtimes, same id
+
+    # The prepared member's fleet is removed; the other driver still owns ``shared``.
+    (tmp_path / "containers.yaml").write_text(yaml.safe_dump({"fleets": {
+        "slow": {"driver": "other-driver", "size": 1, "relay_enabled": False},
+    }}))
+    lifecycle.list_containers(load_config(strict=True))
+    assert runtime_drivers.owner_of("example-1") is None
+    assert runtime_drivers.owner_of(shared).name == "slow-1"
+
+    def other_calls():
+        return json.loads((other_root / "state.json").read_text())["calls"]
+
+    before = len(other_calls())
+    assert cli.main(["session-host-cleanup", "example-1", "--expected-instance", shared,
+                     "--expected-user", "vscode",
+                     "--remote-env", "/home/vscode/.agent-containers/launch/env"]) != 0
+    assert "no longer routed by its runtime" in capsys.readouterr().err
+    assert cli.main(["session-host-state", "example-1", "--expected-instance", shared]) == 0
+    assert json.loads(capsys.readouterr().out)["state"] == "missing"
+    # Inventory reads aside, nothing is inspected, executed or copied on slow-1.
+    assert [c["verb"] for c in other_calls()[before:] if c["verb"] != "list"] == []

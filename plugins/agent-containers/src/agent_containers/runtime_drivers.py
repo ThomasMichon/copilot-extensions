@@ -923,6 +923,30 @@ def discover(
         _enumerate(config, selected, timeout=timeout)
 
 
+class RetiredIncarnation(RuntimeError):
+    """A prepared member's runtime is gone and its bare id names another member."""
+
+
+def prepared_handle(name: str, instance_id: str) -> str:
+    """The handle for exactly the prepared incarnation ``instance_id`` of ``name``.
+
+    A driver member is addressed by its fleet-qualified handle. When ``name``
+    no longer routes to a driver (for example its fleet was removed) the bare
+    id is used only if no driver claims it -- it is then a Docker container
+    id -- and otherwise refused, so cleanup never reaches another runtime's
+    member that happens to share the instance id.
+    """
+    route = owner_of(name)
+    if route is not None:
+        return f"{route.name}.{instance_id}"
+    if owner_of(instance_id) is not None:
+        raise RetiredIncarnation(
+            f"'{name}' instance {instance_id} is no longer routed by its runtime; "
+            "the id now identifies a different member, refusing to act on it"
+        )
+    return instance_id
+
+
 def inspect_pinned(name: str, instance_id: str | None) -> dict | None:
     """Inspect ``instance_id`` through the driver owning member ``name``.
 

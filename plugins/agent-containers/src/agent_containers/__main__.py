@@ -541,10 +541,12 @@ def _cmd_session_host_state(args: argparse.Namespace) -> int:
     drivers = _runtime_drivers()
     drivers.discover(load_config(), member=args.name)
     try:
-        details = (
-            drivers.inspect_pinned(args.name, args.expected_instance)
-            or inspect_container(args.expected_instance or args.name)
+        details = drivers.inspect_pinned(args.name, args.expected_instance) or inspect_container(
+            drivers.prepared_handle(args.name, args.expected_instance)
+            if args.expected_instance else args.name
         )
+    except drivers.RetiredIncarnation:
+        details = {}  # the prepared member is gone; its id now names another
     except RuntimeError as exc:
         detail = str(exc)
         if "No such object" not in detail and "No such container" not in detail:
@@ -570,10 +572,7 @@ def _cmd_session_host_cleanup(args: argparse.Namespace) -> int:
 
         drivers = _runtime_drivers()
         drivers.discover(load_config(), member=args.name)
-        target = args.expected_instance
-        route = drivers.owner_of(args.name)
-        if route is not None:  # a driver member: its fleet-qualified handle
-            target = f"{route.name}.{args.expected_instance}"
+        target = drivers.prepared_handle(args.name, args.expected_instance)
         user = cleanup_user(args.expected_instance, args.expected_user, target)
     else:
         _config, _fleet, user, _workspace = _trusted_session_host_context(args.name)
