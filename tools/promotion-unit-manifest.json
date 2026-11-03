@@ -3933,7 +3933,14 @@
         "tools/promotion_unit_tests/test_linux_daemon_scope.py::test_missing_native_runner_refuses",
         "tools/promotion_unit_tests/test_linux_daemon_scope.py::test_other_platforms_do_not_read_linux_cgroups",
         "tools/promotion_unit_tests/test_linux_daemon_scope.py::test_relative_runner_search_uses_daemon_cwd_for_probe_and_launch",
-        "tools/promotion_unit_tests/test_linux_daemon_scope.py::test_native_probe_timeout_is_an_admission_refusal"
+        "tools/promotion_unit_tests/test_linux_daemon_scope.py::test_native_probe_timeout_is_an_admission_refusal",
+        "tools/promotion_unit_tests/test_linux_daemon_scope.py::test_host_visible_container_boundary[container-only-unified]",
+        "tools/promotion_unit_tests/test_linux_daemon_scope.py::test_host_visible_container_boundary[container-only-legacy]",
+        "tools/promotion_unit_tests/test_linux_daemon_scope.py::test_host_visible_container_boundary[local-service-unified]",
+        "tools/promotion_unit_tests/test_linux_daemon_scope.py::test_host_visible_container_boundary[local-service-legacy]",
+        "tools/promotion_unit_tests/test_linux_daemon_scope.py::test_host_visible_container_boundary[local-scope-unified]",
+        "tools/promotion_unit_tests/test_linux_daemon_scope.py::test_host_visible_container_boundary[local-scope-legacy]",
+        "tools/promotion_unit_tests/test_linux_daemon_scope.py::test_unrelated_pid_one_scope_does_not_hide_local_unit"
     ],
     "sources": {
         "tools/promotion_unit_tests/test_automatic_update_policy.py": "89bc6b816b365470efaa77c0d15c2c6a546b6c62ed489468a8e8e7b529d14e72",
@@ -4024,9 +4031,9 @@
         "libs/agent-procutil/src/agent_procutil/_windows_job_types.py": "cffa06cd07fd1e6fdf10df1384df356be9ecaa7d8e7bb64a0f1db3095d7e1299",
         "libs/agent-procutil/src/agent_procutil/_windows_parent_job.py": "d59e628dae3016c67df4d0e691407cc9ca3e1f77df576a36b10ca17d7d658277",
         "libs/agent-procutil/src/agent_procutil/daemon.py": "accf01fc7c6c19eb54f0d7f2432649b1ba6d2d00e2a9ac9657b0bcd836ce2606",
-        "libs/agent-procutil/src/agent_procutil/linux_daemon_scope.py": "fd1d0ac01dd7364603df96733489c6eebd4566e7387b993a682601563a6053d8",
-        "libs/agent-procutil/tests/test_linux_daemon_scope.py": "7d3a1f438ac48efc492c97d08c94f9ca7c42c659c460805e0a58960b2d0beabb",
-        "tools/promotion_unit_tests/test_linux_daemon_scope.py": "36c839ad7caebe7dd651641dd7cf4feca8a435e2b46b9c5971285959dd828031",
+        "libs/agent-procutil/src/agent_procutil/linux_daemon_scope.py": "2ba92519d462d56b22ca80fb8d156c5e0339b5d597aebcbd2b2bfc2a4539e61d",
+        "libs/agent-procutil/tests/test_linux_daemon_scope.py": "0a38f8909c6300d7ba82faf246517de87a307f52093b93babef69b64bef07a0b",
+        "tools/promotion_unit_tests/test_linux_daemon_scope.py": "b8fc59ece6341f3876fc091560ed915bd3897376c82c03c93cc7e58449729431",
         "libs/agent-procutil/src/agent_procutil/daemon_broker.py": "4a8034bfa07af5f56a382f93a45f5082e4d5b0f387f58084420d5019bde8f289",
         "libs/agent-procutil/src/agent_procutil/daemon_instances.py": "59fa2d8f1bf612d020e68b4a9674cfbe3ec8b34b46cb5230aa54f743d9907322",
         "libs/agent-procutil/src/agent_procutil/diagnostics.py": "c5e3c4e15f1e853c4da3a2916514dbc50b743272b54223780fae6262bd3dc113",

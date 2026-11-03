@@ -12,6 +12,8 @@ literal argv and log descriptors. Missing or unsupported native admission does
 not fall back to the caller's lifetime; callers still own readiness checks.
 `breakaway=False` and contained test mode retain caller ownership.
 Non-systemd POSIX launches retain their existing session-based behavior.
+Host-visible cgroup ancestors of the current PID namespace's PID 1 are not
+caller-local units; units nested below that boundary still require admission.
 This changes future launches, not existing residents' native ownership.
 
 The explicit Linux user-systemd fixture is

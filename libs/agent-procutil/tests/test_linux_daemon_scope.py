@@ -22,8 +22,53 @@ from agent_procutil.daemon_instances import DaemonInstanceSpec, inspect_instance
 ], ids=["unified-service", "legacy-systemd", "nested-scope", "user-manager", "container", "cpu-only"])
 def test_native_cleanup_boundary(monkeypatch, text, expected):
     monkeypatch.setattr(scope.sys, "platform", "linux")
-    monkeypatch.setattr(scope.Path, "read_text", lambda *a, **k: text)
+    monkeypatch.setattr(
+        scope.Path, "read_text",
+        lambda path, **k: text if str(path) == "/proc/self/cgroup" else "0::/\n1:name=systemd:/\n",
+    )
     assert scope.caller_unit() == expected
+
+
+@pytest.mark.parametrize("hierarchy", ["0:", "1:name=systemd"], ids=["unified", "legacy"])
+@pytest.mark.parametrize("local", [
+    "",
+    "/user.slice/user-1000.slice/user@1000.service/app.slice/caller.service",
+    "/system.slice/caller.scope/child",
+], ids=["container-only", "local-service", "local-scope"])
+def test_host_visible_container_boundary(monkeypatch, hierarchy, local):
+    boundary = "/system.slice/docker-fixture.scope"
+    monkeypatch.setattr(scope.sys, "platform", "linux")
+    monkeypatch.setattr(
+        scope.Path, "read_text",
+        lambda path, **k: hierarchy + ":" + boundary + (
+            local if str(path) == "/proc/self/cgroup" else ""
+        ) + "\n",
+    )
+    expected = "caller.service" if local.endswith(".service") else "caller.scope" if local else None
+    assert scope.caller_unit() == expected
+    if not local:
+        monkeypatch.setattr(
+            scope.shutil, "which", Mock(side_effect=AssertionError("host scope needs no local runner")),
+        )
+        command = ["/runtime/python", "-m", "resident"]
+        assert scope.scope_command(command, "a" * 32, {}, cwd="/runtime") is command
+    else:
+        monkeypatch.setattr(scope.shutil, "which", lambda *a, **k: None)
+        with pytest.raises(RuntimeError, match="requires systemd-run"):
+            scope.scope_command(["/runtime/python"], "a" * 32, {}, cwd="/runtime")
+
+
+def test_unrelated_pid_one_scope_does_not_hide_local_unit(monkeypatch):
+    monkeypatch.setattr(scope.sys, "platform", "linux")
+    monkeypatch.setattr(
+        scope.Path, "read_text",
+        lambda path, **k: "0::/system.slice/" + (
+            "caller.service" if str(path) == "/proc/self/cgroup" else "init.scope"
+        ) + "\n",
+    )
+    monkeypatch.setattr(scope.shutil, "which", lambda *a, **k: None)
+    with pytest.raises(RuntimeError, match="requires systemd-run"):
+        scope.scope_command(["/runtime/python"], "a" * 32, {}, cwd="/runtime")
 
 
 @pytest.mark.parametrize("version,expand", [(253, False), (254, True), (255, True)])

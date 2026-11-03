@@ -11,16 +11,34 @@ import sys
 from collections.abc import Mapping
 
 
-def caller_unit() -> str | None:
-    if sys.platform != "linux":
-        return None
-    for line in Path("/proc/self/cgroup").read_text(encoding="utf-8").splitlines():
+def _native_paths(text: str) -> dict[str, PurePosixPath]:
+    paths = {}
+    for line in text.splitlines():
         hierarchy, controllers, path = line.split(":", 2)
-        if not (hierarchy == "0" and not controllers or "name=systemd" in controllers.split(",")):
+        if hierarchy == "0" and not controllers:
+            key = "unified"
+        elif "name=systemd" in controllers.split(","):
+            key = "systemd"
+        else:
             continue
         if not path.startswith("/"):
             raise ValueError("invalid native caller cgroup")
-        for component in reversed(PurePosixPath(path).parts):
+        paths[key] = PurePosixPath(path)
+    return paths
+
+
+def caller_unit() -> str | None:
+    if sys.platform != "linux":
+        return None
+    paths = _native_paths(Path("/proc/self/cgroup").read_text(encoding="utf-8"))
+    boundaries = _native_paths(Path("/proc/1/cgroup").read_text(encoding="utf-8"))
+    for key, path in paths.items():
+        boundary = boundaries.get(key)
+        # A container's host-visible scope belongs to its PID namespace, not
+        # the caller's service manager. Keep any local units below that boundary.
+        if boundary is not None and path.is_relative_to(boundary):
+            path = path.relative_to(boundary)
+        for component in reversed(path.parts):
             if component.endswith((".service", ".scope")) and not (
                 component.startswith("user@") and component.endswith(".service")
             ):

@@ -13,6 +13,10 @@ sys.modules[spec.name] = original
 spec.loader.exec_module(original)
 
 test_native_cleanup_boundary = original.test_native_cleanup_boundary
+test_host_visible_container_boundary = original.test_host_visible_container_boundary
+test_unrelated_pid_one_scope_does_not_hide_local_unit = (
+    original.test_unrelated_pid_one_scope_does_not_hide_local_unit
+)
 test_scope_preserves_literal_command_and_child_environment = (
     original.test_scope_preserves_literal_command_and_child_environment
 )
