@@ -144,9 +144,11 @@ def test_cold_start_ignores_only_the_native_confirmed_exact_old_discovery(
         )
 
 
-def test_candidate_serving_uses_authenticated_route_not_outgoing_discovery(legacy):
+@pytest.mark.parametrize("native_exit", [False, None])
+def test_candidate_serving_uses_authenticated_route_not_outgoing_discovery(legacy, monkeypatch, native_exit):
     root, _expected, _guard, state = legacy
     state["health"]["published"] = True
+    monkeypatch.setattr(retirements, "_exit_state", lambda record: native_exit)
     assert identity.candidate_serving(root, root / "versions" / "serving") is True
 
 
@@ -170,3 +172,33 @@ def test_candidate_serving_rejects_unbound_or_unready_route(legacy, monkeypatch,
     else:
         state["health"]["published"] = False
     assert identity.candidate_serving(root, root / "versions" / "serving") is False
+
+
+@pytest.mark.parametrize("prefix", [None, "versions/serving"])
+@pytest.mark.parametrize("capabilities", [[], [retirements.CAPABILITY]])
+def test_legacy_retirement_requires_an_absolute_authenticated_prefix(legacy, prefix, capabilities):
+    root, expected, guard, state = legacy
+    state["health"]["runtime_prefix"] = prefix
+    state["health"]["capabilities"] = capabilities
+    with pytest.raises(ValueError, match="runtime prefix is unavailable"):
+        identity.retire_legacy(root, expected, guard=guard)
+    assert state["events"] == []
+
+
+def test_failed_startup_settles_without_querying_a_native_exited_route(legacy, monkeypatch):
+    from agent_worktrees import runtime_monitor_settlement as settlement
+
+    root, expected, _guard, state = legacy
+    monkeypatch.setattr(retirements, "_exit_state", lambda record: record == {
+        "pid": expected[0], "start": expected[1],
+    })
+    monkeypatch.setattr(identity.cutover, "ControlClient", lambda *a, **k: pytest.fail("queried exited listener"))
+    monkeypatch.setattr(settlement.time, "sleep", lambda *_: pytest.fail("dead startup did not settle"))
+    assert identity.locks.process_start_time(expected[0]) == expected[1]
+    assert settlement.settle_monitor(
+        root, root / "versions" / "serving",
+        {"action": "cutover", "result": {"committed": False}}, expected[:2],
+        [SimpleNamespace(poll=lambda: 1)], candidate_serving=identity.candidate_serving,
+        refused=RuntimeError,
+    ) is False
+    assert state["events"] == []

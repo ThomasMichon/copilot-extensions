@@ -28,12 +28,15 @@ def _runtime_slot(root: Path, prefix: str | Path) -> Path:
 
 def candidate_serving(root: Path, slot: Path) -> bool:
     from .runtime_identity import slot_generation
+    from .runtime_monitor_retirements import _exit_state
 
     directory = root / "status-monitor-routing"
     snapshot = routing.read_table(directory, strict=True)
     raw = (snapshot or {}).get("active")
     endpoint = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
     if endpoint is None or endpoint.process_start_time is None:
+        return False
+    if _exit_state({"pid": endpoint.pid, "start": endpoint.process_start_time}) is True:
         return False
     before = locks.process_start_time(endpoint.pid)
     if before is None or before != endpoint.process_start_time:
@@ -115,6 +118,8 @@ def routed_identity(
         slot = path.name if path.parent == (root / "versions").resolve() else None
     identity = pid, before, slot if isinstance(slot, str) else None
     if require_async_retirement:
+        if not isinstance(prefix, str) or not Path(prefix).is_absolute():
+            raise ValueError("Serving monitor runtime prefix is unavailable")
         from .runtime_monitor_retirements import CAPABILITY
         from .status_monitor_recovery_contract import CAPABILITY as RECOVERY_CAPABILITY, ReceiverIdentity
 
@@ -130,9 +135,33 @@ def routed_identity(
         ReceiverIdentity.parse({
             "pid": pid, "processStartTime": before, "runtimeGeneration": health.get("runtime_generation"),
         })
-        if not isinstance(prefix, str) or not Path(prefix).is_absolute():
-            raise ValueError("Serving monitor runtime prefix is unavailable")
     return identity
+
+
+def activation_liveness(
+    monitor_was_live: bool | None, retired: tuple[int, str] | None, *,
+    asynchronous: bool, guard, handles, predecessor: dict | None,
+) -> tuple[bool, bool]:
+    """Ignore retained exited discovery only after exact installer-owned retirement."""
+    from zdd import process_exit
+    from . import status_monitor_runtime as runtime, runtime_monitor_retirements as retirements
+
+    lock_live = cutover._monitor_lock_is_live()
+    monitor_was_live = lock_live if monitor_was_live is None else bool(monitor_was_live)
+    if retired is None:
+        if asynchronous and predecessor is None and retirements.retirement_only(
+            runtime._aw_runtime_home(), locks.read_lock(runtime._monitor_lock_path()),
+        ):
+            return False, False
+        return lock_live, monitor_was_live
+    if not asynchronous or guard is None or handles is None:
+        raise ValueError("Cold startup requires the owning installer and cutover guard")
+    record = locks.read_lock(runtime._monitor_lock_path()) or {}
+    if lock_live and (record.get("pid"), record.get("start_time")) != retired:
+        raise ValueError("A different monitor owns the lock after legacy retirement")
+    if process_exit.observe_original_exit(*retired) is not True:
+        raise ValueError("Legacy predecessor native exit is unconfirmed before startup")
+    return False, False
 
 
 def retire_legacy(root: Path, expected: tuple[int, str, str | None], *, guard) -> dict:

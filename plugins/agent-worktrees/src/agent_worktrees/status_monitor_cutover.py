@@ -657,30 +657,18 @@ def activate_after_update(
         summary.update(action="refused", reason=refusal, result={"ok": False, "error": refusal})
         return summary
     guarded = not asynchronous_retirement and guarded_recovery.enabled()
-    monitor_was_live = _monitor_lock_is_live() if monitor_was_live is None else bool(monitor_was_live)
     restart_arguments = {}
     if runtime_python is not None:
         restart_arguments["runtime_python"] = runtime_python
     if spawned_handles is not None:
         restart_arguments["spawned_handles"] = spawned_handles
-    lock_live = _monitor_lock_is_live()
-    if retired_predecessor is not None:
-        from zdd import process_exit
+    from .runtime_monitor_identity import activation_liveness
 
-        if not asynchronous_retirement or cutover_guard is None or spawned_handles is None:
-            raise ValueError("Cold startup requires the owning installer and cutover guard")
-        record = locks.read_lock(smr._monitor_lock_path()) or {}
-        if lock_live and (record.get("pid"), record.get("start_time")) != retired_predecessor:
-            raise ValueError("A different monitor owns the lock after legacy retirement")
-        if process_exit.observe_original_exit(*retired_predecessor) is not True:
-            raise ValueError("Legacy predecessor native exit is unconfirmed before startup")
-        # A retained exited object can still satisfy the legacy existence probe.
-        lock_live = monitor_was_live = False
+    lock_live, monitor_was_live = activation_liveness(
+        monitor_was_live, retired_predecessor, asynchronous=asynchronous_retirement,
+        guard=cutover_guard, handles=spawned_handles, predecessor=retirement_predecessor,
+    )
     if asynchronous_retirement:
-        if retirement_predecessor is None and retirements.retirement_only(
-            smr._aw_runtime_home(), locks.read_lock(smr._monitor_lock_path()),
-        ):
-            lock_live = monitor_was_live = False
         routed_live = retirement_predecessor is not None or routing.read_active_endpoint(
             routing_dir(), verify_listener=False,
         ) is not None
@@ -903,8 +891,10 @@ def activate_after_update(
         if reserved:
             if not result.committed and not result.publication_uncertain:
                 retirements.cancel(smr._aw_runtime_home(), retirement_predecessor)
-        if reserved and (result.committed or result.publication_uncertain):
-            result.retirement_pending = not retirement_complete
+        if asynchronous_retirement:
+            result.retirement_pending = bool(
+                reserved and (result.committed or result.publication_uncertain) and not retirement_complete
+            )
         summary["action"] = "cutover"
         summary["result"] = result.to_dict()
     finally:
