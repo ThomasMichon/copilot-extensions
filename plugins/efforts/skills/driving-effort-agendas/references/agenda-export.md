@@ -60,6 +60,12 @@ completeness, store version/mode, exact worktree/store/revision/commit time,
 per-table row counts/content hashes and member byte counts/SHA-256.
 Readback verifies the declared schema, identities, complete table content
 and member integrity without executing operations or acquiring authority.
+Stored requests also pass the writer's shared pure envelope, initialization
+and operation-grammar validators, including caller metadata, generated bounds,
+typed evidence, nested fields, enums and declared deferred-time constraints.
+Recomputed transport hashes do not make malformed requests valid.
+This is not operation replay or proof of historical movement, permission,
+productive judgment or external outcome; original provenance remains qualified.
 
 The database/member limit is 1 GiB, with a 120-second cooperative deadline,
 256-page backup steps and 1 MiB hashing chunks. Exceeding a bound refuses

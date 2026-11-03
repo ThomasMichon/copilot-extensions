@@ -45,7 +45,7 @@ def source_bytes(home: Path) -> dict:
     return {item.name: item.read_bytes() for item in home.iterdir() if item.is_file()}
 
 
-def rewrite_member_manifest(target: Path) -> None:
+def rewrite_member_manifest(target: Path, *, tables: bool = False) -> None:
     """Keep the byte checksum honest so semantic corruption must be detected."""
     manifest_path = target / EXPORT.MANIFEST
     manifest = json.loads(manifest_path.read_bytes())
@@ -53,6 +53,9 @@ def rewrite_member_manifest(target: Path) -> None:
     manifest["members"][STORE.DATABASE] = {
         "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest(),
     }
+    if tables:
+        with closing(sqlite3.connect(target / STORE.DATABASE)) as db:
+            manifest["tables"] = EXPORT._table_hashes(db, EXPORT._Budget())
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
 
@@ -276,6 +279,85 @@ def test_verifier_rejects_rehashed_semantic_or_schema_corruption(lane: Path, dam
         EXPORT.export_store(target, refused, **selected)
     assert not (refused / EXPORT.MANIFEST).exists()
     assert source_bytes(target) == corrupt_bytes
+
+
+@POSIX
+@pytest.mark.parametrize("damage", [
+    "init-missing-context", "init-extra-field", "init-invalid-context", "init-request-size",
+    "init-generated-result-size", "outcome-missing-evidence", "outcome-invalid-evidence",
+    "wait-invalid-reason-kind", "defer-not-after-acceptance",
+])
+def test_original_request_must_pass_owner_input_validation(lane: Path, damage: str) -> None:
+    if damage.startswith("outcome-"):
+        outcome(lane)
+    elif damage.startswith("wait-"):
+        frame, item, _ = current(lane)
+        update(lane, {
+            "operation": "wait", "frame_id": frame, "item_id": item, "reason_kind": "external",
+            "reason_ref": "fixture external event", "next_action": "Recheck fixture event",
+            "evidence": proof(),
+        })
+    elif damage.startswith("defer-"):
+        frame, _, _ = current(lane)
+        update(lane, {
+            "operation": "defer", "frame_id": frame, "decision_ref": "fixture pending decision",
+            "decision_packet_ref": "fixture packet",
+            "revisit_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            "evidence": proof(),
+        })
+    selected = selection(lane)
+    target = destination(lane)
+    EXPORT.export_store(lane, target, **selected)
+    revision = 1 if damage.startswith("init-") else 2
+    with closing(sqlite3.connect(target / STORE.DATABASE, isolation_level=None)) as db:
+        request_text, result_text = db.execute(
+            "SELECT request,result FROM operations WHERE revision=?", (revision,),
+        ).fetchone()
+        original = json.loads(request_text)
+        change = original["request"]["change"]
+        if damage == "init-missing-context":
+            change.pop("baseline_context")
+        elif damage == "init-extra-field":
+            change["unsupported"] = True
+        elif damage == "init-invalid-context":
+            change["baseline_context"] = {"facts": []}
+        elif damage == "init-request-size":
+            change["unsupported"] = "x" * 131072
+        elif damage == "init-generated-result-size":
+            change["board"]["items"]["parent"]["action"] = "x" * 50000
+        elif damage == "outcome-missing-evidence":
+            change.pop("evidence")
+        elif damage == "outcome-invalid-evidence":
+            change["evidence"] = "not a structured evidence list"
+        elif damage == "wait-invalid-reason-kind":
+            change["reason_kind"] = "unsupported-reason"
+        else:
+            change["revisit_at"] = json.loads(result_text)["committed_at"]
+        db.execute("UPDATE operations SET request=? WHERE revision=?",
+                   (STORE.encode(original), revision))
+    if damage.startswith("init-"):
+        with pytest.raises(AGENDA.AgendaError):
+            EXPORT.owner.validate_initialization(
+                original["request"], actor=original["identity"]["actor"],
+                session=original["identity"]["session"],
+                initial_store_id=original.get("initial_store_id"),
+            )
+    # Keep every accepted document/result/record untouched and repair only the
+    # transport checksum: owner input validation must independently reject it.
+    rewrite_member_manifest(target, tables=True)
+    before = source_bytes(target)
+    refused = destination(lane, "refused-request")
+    try:
+        unexpected = EXPORT.export_store(target, refused, **selected)
+    except AGENDA.AgendaError:
+        pass
+    else:
+        assert EXPORT.verify_export(refused, **selected) == unexpected
+        pytest.fail("Invalid canonical request was exported AND verified complete")
+    with pytest.raises(AGENDA.AgendaError):
+        EXPORT.verify_export(target, **selected)
+    assert not (refused / EXPORT.MANIFEST).exists()
+    assert source_bytes(target) == before
 
 
 @POSIX

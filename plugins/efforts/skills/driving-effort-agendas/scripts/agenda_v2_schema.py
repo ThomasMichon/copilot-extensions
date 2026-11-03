@@ -13,6 +13,35 @@ STATUSES = {"working", "waiting", "replanning", "complete"}
 ITEM_STATUSES = {"pending", "running", "replanning", "waiting", "completed"}
 
 
+def validate_definition(value: Any) -> None:
+    fields(value, {"source_ref", "scope_ref", "action", "exit", "on", "relevant_subjects"},
+           {"label", "source_aliases"})
+    for key in ("source_ref", "scope_ref", "action"):
+        _text(value[key], key)
+    if "label" in value:
+        _text(value["label"], "item label")
+    for key in ("exit", "relevant_subjects"):
+        values = value[key]
+        if not isinstance(values, list) or not values:
+            raise AgendaError(f"{key} must be a nonempty list")
+        for item in values:
+            _text(item, key)
+        if len(set(values)) != len(values):
+            raise AgendaError(f"duplicate {key}")
+    outcomes = _object(value["on"], "item outcomes")
+    if not outcomes:
+        raise AgendaError("item outcomes must not be empty")
+    for outcome, transition in outcomes.items():
+        _text(outcome, "outcome")
+        if transition not in ("advance", "wait", "replan"):
+            raise AgendaError("item transitions must be advance, wait or replan")
+    if "source_aliases" in value:
+        if not isinstance(value["source_aliases"], list):
+            raise AgendaError("source_aliases must be a list")
+        for alias in value["source_aliases"]:
+            _text(alias, "source alias")
+
+
 def board(value: Any) -> dict[str, Any]:
     fields(value, {"version", "source", "revision", "items", "order"})
     if type(value["version"]) is not int or value["version"] != 2:
@@ -27,32 +56,7 @@ def board(value: Any) -> dict[str, Any]:
         raise AgendaError("board items must not be empty")
     for identity, definition in definitions.items():
         _text(identity, "definition identity")
-        fields(definition, {"source_ref", "scope_ref", "action", "exit", "on", "relevant_subjects"},
-               {"label", "source_aliases"})
-        for key in ("source_ref", "scope_ref", "action"):
-            _text(definition[key], key)
-        if "label" in definition:
-            _text(definition["label"], "item label")
-        for key in ("exit", "relevant_subjects"):
-            values = definition[key]
-            if not isinstance(values, list) or not values:
-                raise AgendaError(f"{key} must be a nonempty list")
-            for item in values:
-                _text(item, key)
-            if len(set(values)) != len(values):
-                raise AgendaError(f"duplicate {key}")
-        outcomes = _object(definition["on"], "item outcomes")
-        if not outcomes:
-            raise AgendaError("item outcomes must not be empty")
-        for outcome, transition in outcomes.items():
-            _text(outcome, "outcome")
-            if transition not in ("advance", "wait", "replan"):
-                raise AgendaError("item transitions must be advance, wait or replan")
-        if "source_aliases" in definition:
-            if not isinstance(definition["source_aliases"], list):
-                raise AgendaError("source_aliases must be a list")
-            for alias in definition["source_aliases"]:
-                _text(alias, "source alias")
+        validate_definition(definition)
     order = value["order"]
     if not isinstance(order, list) or not order or not all(isinstance(item, str) for item in order):
         raise AgendaError("board order must be a nonempty definition queue")

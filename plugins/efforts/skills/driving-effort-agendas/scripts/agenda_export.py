@@ -29,6 +29,7 @@ from agenda_operations import fields
 import agenda_store as store
 import agenda_store_v2 as owner
 from agenda_v2_projection import project
+from agenda_v2_operations import validate_change_shape
 from agenda_v2_schema import MODE, validate
 
 MANIFEST = "manifest.json"
@@ -244,21 +245,28 @@ def _ledger(
         if request.get("initial_store_id") is not None and (
                 revision != 1 or request["initial_store_id"] != source.store_id):
             raise ExportError("accepted initial store identity disagrees with its store")
-        fields(request["request"],
-               {"schema", "version", "mode", "expected_revision", "operation_id", "change"})
-        body = request["request"]
-        change = _object(body["change"], "accepted semantic change")
+        asserted = fields(request["identity"], {"actor", "session", "qualification"})
+        body, prior_revision, request_id, caller, change, canonical = owner._request_parts(
+            request["request"], asserted["actor"], asserted["session"], request.get("initial_store_id"),
+        )
+        if decode(canonical.encode(), limit=262144) != request:
+            raise ExportError("original canonical request differs from owner input validation")
         if (
-            body["schema"] != store.SCHEMA or type(body["version"]) is not int
-            or body["version"] != 2 or body["mode"] != MODE
-            or type(body["expected_revision"]) is not int or body["expected_revision"] != revision - 1
-            or body["operation_id"] != operation or request["identity"] != result["actor"]
+            prior_revision != revision - 1 or request_id != operation or caller != result["actor"]
             or change.get("operation") != result["operation"]
             or (revision == 1) != (result["operation"] == "init")
         ):
             raise ExportError("original accepted request and result identities disagree")
-        if revision == 1 and change.get("worktree") != source.worktree:
-            raise ExportError("initial accepted request names a different worktree")
+        if revision == 1:
+            if change["worktree"] != source.worktree:
+                raise ExportError("initial accepted request names a different worktree")
+            owner.validate_initialization(
+                body, actor=caller["actor"], session=caller["session"],
+                initial_store_id=request.get("initial_store_id"),
+            )
+            budget.check()
+        else:
+            validate_change_shape(change, accepted_at=result["committed_at"])
         for record in result["records"]:
             identity = record["id"]
             if identity in records:
