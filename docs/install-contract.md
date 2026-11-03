@@ -4135,15 +4135,31 @@ approval. The result reports `selection: offline-wheel-pool`. Resolution
 failures report a bounded, redacted diagnostic; timeouts do not expose the
 command or captured output.
 
-Neither mode allows UV to resolve online: native UV redirects are not
-constrained by the wheel acquisition owner's origin allowlist. Both modes
-subsequently reacquire the selected external wheels through the same governed
-feed and origin guard. The source-derived roots and
+Neither of those modes lets UV resolve directly against an online feed:
+native UV redirects are not constrained by the wheel acquisition owner's
+origin allowlist. Alternatively, `--guarded-feed` captures one affirmatively
+trusted native HTTPS feed and runs UV against a private loopback index. The
+existing acquisition owner fetches candidates with its origin, redirect,
+seasoning and resource guards; each requested wheel is inspected from
+immutable bytes and direct dependency URLs are refused before UV sees it.
+Native non-index selection settings and first-party exclusions remain in
+force. The observed project indexes are rechecked after selected-wheel
+acquisition and source validation while the delivery is held; source is
+validated again afterward. The index check is a snapshot, not a lock on
+subsequent feed changes. The mode
+reports `selection: guarded-native-feed`, does not expose feed credentials
+or loopback URLs in the delivery, and fails closed on unsupported native
+source or index settings. Its selection and acquisition share request,
+redirect and metadata budgets. Candidate inspection and final acquisition
+may download the same wheel twice.
+
+All three modes subsequently reacquire the selected external wheels through
+the same governed feed and origin guard. The source-derived roots and
 complete inspected closure still have to agree, and unused or first-party
 registry entries refuse. The existing feed
 owner requires an affirmatively trusted non-public HTTPS index and uses
 system certificates; separately authorized download origins can be supplied with
-`--download-origin` for the subsequent guarded acquisition.
+`--download-origin` for guarded selection and acquisition.
 The selected external wheels, first-party wheels and caller-selected
 source/notice materials are retained and checked through candidate creation.
 An active third-party local source mapping is refused before resolution;
