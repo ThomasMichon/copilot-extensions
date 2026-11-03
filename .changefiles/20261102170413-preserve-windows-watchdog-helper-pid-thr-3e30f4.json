@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve Windows watchdog helper PID through module startup so daemon-instance admission remains valid",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

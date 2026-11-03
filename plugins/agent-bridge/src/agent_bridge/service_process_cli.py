@@ -466,11 +466,17 @@ def _spawn_watchdog_replacement(
     active_port: int | None = None,
 ) -> None:
     """Schedule a fresh daemon after the wedged Windows process releases its lock."""
-    code = (
-        "import os,sys,time;"
-        "time.sleep(float(sys.argv[1]));"
-        "os.execv(sys.executable,[sys.executable,'-m','agent_bridge',*sys.argv[2:]])"
-    )
+    if os.name == "nt":
+        from .service_process_identity import WINDOWS_WATCHDOG_START_CODE
+
+        # Windows CRT exec creates a new PID, invalidating the helper's admission.
+        code = WINDOWS_WATCHDOG_START_CODE
+    else:
+        code = (
+            "import os,sys,time;"
+            "time.sleep(float(sys.argv[1]));"
+            "os.execv(sys.executable,[sys.executable,'-m','agent_bridge',*sys.argv[2:]])"
+        )
     arguments = iter(sys.argv[1:] if start_args is None else start_args)
     original_args = []
     for argument in arguments:
