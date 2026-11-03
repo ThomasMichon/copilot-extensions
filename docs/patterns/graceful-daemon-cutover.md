@@ -163,9 +163,10 @@ Worktrees resident makes a best-effort new-to-old announcement before promotion
 and persists a five-minute grace deadline after serving readiness, separately
 from the legacy retirement custody schema. Its existing reconciliation loop
 attempts expiry through native identity-bound retirement under current route
-and cutover authority; installation does not wait for it. Incompatible or
-unreachable predecessors use that same resident-owned grace path. Cleanup
-failure cannot reverse that healthy
+and cutover authority; installation does not wait for it. When incoming health
+advertises retirement-grace support, incompatible or unreachable predecessors
+use that same resident-owned grace path; retained pre-grace successors keep the
+bounded native cleanup fallback. Cleanup failure cannot reverse that healthy
 incoming generation. This resident-owned grace is an adoption detail, not a
 qualification claim for the target's optional finite central-only fallback.
 Current implementation still refuses an unrouted or identity-unknown owner;
