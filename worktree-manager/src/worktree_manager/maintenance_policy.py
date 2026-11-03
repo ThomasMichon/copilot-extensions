@@ -121,6 +121,7 @@ def update_refusal(arguments: list[str], *, root: Path | None = None) -> str | N
         context["COPILOT_EXTENSIONS_CONTEXT"] = pointer
     return automatic_update_refusal(RequestSpec(
         "manager", tuple(["update", *arguments]), context=tuple(context.items()),
+        cwd=str(Path.cwd()),
         killswitch_path=os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE", ""),
     ))
 

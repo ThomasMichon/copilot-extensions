@@ -359,7 +359,7 @@ def test_borrowed_execution_passes_repair_to_the_canonical_body(queued, monkeypa
     request.spec = SimpleNamespace(
         backend="manager", source=driver._source_key(),
         context=(("AGENT_WORKTREES_PAYLOAD_ROOT", "/registered/native/payload"),),
-        killswitch_path="",
+        killswitch_path="", cwd=str(tmp_path),
     )
 
     class Custody:
@@ -386,21 +386,33 @@ def test_borrowed_execution_passes_repair_to_the_canonical_body(queued, monkeypa
     assert "spec" not in seen
 
 
+@pytest.mark.parametrize("backend", ["manager", "engine"])
+@pytest.mark.parametrize("root_form", ["absolute", "relative", "home"])
 def test_borrowed_execution_rechecks_each_requests_switch_and_restores_worker(
-    queued, monkeypatch, tmp_path,
+    queued, monkeypatch, tmp_path, backend, root_form,
 ):
     import update_driver
     from worktree_manager import __main__ as manager, maintenance_policy
 
     seen, request = queued
     request.state = "running"
-    policy_root = tmp_path / "manager"
-    context = (("WORKTREE_MANAGER_ROOT", str(policy_root)),)
+    caller = tmp_path / "caller"
+    policy_root = caller / "manager"
+    policy_root.mkdir(parents=True)
+    (policy_root / "config.toml").write_text("[maintenance]\nautomatic = true\n", encoding="utf-8")
+    roots = {"absolute": str(policy_root), "relative": "manager", "home": "~/manager"}
+    context = (("WORKTREE_MANAGER_ROOT", roots[root_form]),)
+    worker = tmp_path / "worker"
+    (worker / "manager").mkdir(parents=True)
+    (worker / "manager/config.toml").write_text("[maintenance]\nautomatic = false\n", encoding="utf-8")
+    monkeypatch.chdir(worker)
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", "worker-original")
     held, allowed = tmp_path / "held.json", tmp_path / "allowed.json"
     held.write_text('{"active":true}', encoding="utf-8")
     allowed.write_text('{"active":false}', encoding="utf-8")
-    home = tmp_path / "home"
-    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setattr(Path, "home", lambda: caller)
+    monkeypatch.setenv("HOME", str(caller))
+    monkeypatch.setenv("USERPROFILE", str(caller))
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(held))
 
     class Custody:
@@ -429,11 +441,15 @@ def test_borrowed_execution_rechecks_each_requests_switch_and_restores_worker(
         (str(held), [], 0),
     ):
         request.spec = update_driver.RequestSpec(
-            "manager", tuple(arguments), source=driver._source_key(),
-            context=context, killswitch_path=selected,
+            backend, tuple(arguments), source=driver._source_key(),
+            context=context, killswitch_path=selected, cwd=str(caller),
         )
+        from update_driver.core import automatic_update_refusal
+
+        assert (automatic_update_refusal(request.spec) is not None) is (expected == 3)
         assert driver.cmd_update_request(arguments) == expected
         assert driver.os.environ["BOOTSTRAP_KILLSWITCH_STATE_FILE"] == str(held)
+        assert driver.os.environ["WORKTREE_MANAGER_ROOT"] == "worker-original"
     assert "spec" not in seen
 
 
@@ -482,7 +498,7 @@ def test_source_change_refuses_before_checked_participant_executes(queued, monke
     seen, request = queued
     request.state = "running"
     request.spec = SimpleNamespace(
-        backend="manager", source="different-selection", context=(), killswitch_path="",
+        backend="manager", source="different-selection", context=(), killswitch_path="", cwd=str(tmp_path),
     )
 
     class Custody:

@@ -164,10 +164,22 @@ def request_context() -> dict[str, str]:
 
 
 @contextmanager
-def _request_environment(context, *, killswitch_path: str | None = None):
+def _request_environment(context, *, killswitch_path: str | None = None, cwd: str | None = None):
     values = dict(context)
     if values.keys() - set(_CONTEXT_KEYS):
         raise ValueError("update request contains unsupported execution context")
+    if cwd is not None and values.get("WORKTREE_MANAGER_ROOT"):
+        try:
+            root = Path(values["WORKTREE_MANAGER_ROOT"]).expanduser()
+        except RuntimeError as error:
+            raise ValueError(f"Manager root cannot be expanded: {error}") from error
+        if not root.is_absolute():
+            if not cwd or not Path(cwd).is_absolute():
+                raise ValueError("relative Manager root requires an absolute request cwd")
+            root = Path(cwd) / root
+            if not root.is_absolute():
+                raise ValueError("Manager root cannot resolve against request cwd")
+        values["WORKTREE_MANAGER_ROOT"] = str(root)
     keys = _CONTEXT_KEYS
     if killswitch_path is not None:
         keys = (*keys, "BOOTSTRAP_KILLSWITCH_STATE_FILE")
@@ -316,6 +328,7 @@ def cmd_update_request(rest: list[str]) -> int:
                     raise driver.StateError("Manager does not own the active update request")
                 with _request_environment(
                     request.spec.context, killswitch_path=request.spec.killswitch_path,
+                    cwd=request.spec.cwd,
                 ), _acquisition_environment(
                     options.engine_acquisition_timeout,
                 ):

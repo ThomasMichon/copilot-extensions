@@ -240,6 +240,44 @@ def test_read_only_controls_preserve_defaults_without_creating_state(
     assert not list(policy.home.iterdir())
 
 
+def test_direct_manager_recheck_keeps_its_invocation_directory(
+    policy: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = policy.home / "manager"
+    root.mkdir()
+    path = root / "config.toml"
+    path.write_text("[maintenance]\nautomatic = true\n", encoding="utf-8")
+    monkeypatch.chdir(policy.home)
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", "manager")
+    assert maintenance_policy.update_refusal(["--auto"]) is None
+    path.write_text("[maintenance]\nautomatic = false\n", encoding="utf-8")
+    assert "maintenance.automatic is false" in maintenance_policy.update_refusal(["--auto"])
+    assert maintenance_policy.update_refusal([]) is None
+
+
+@pytest.mark.parametrize("root_form", ["absolute", "relative", "home"])
+def test_borrowed_manager_context_freezes_root_and_restores_worker(
+    policy: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, root_form: str,
+) -> None:
+    from worktree_manager import update_driver_cli
+
+    root = policy.home / "manager"
+    root.mkdir()
+    (root / "config.toml").write_text("[maintenance]\nautomatic = true\n", encoding="utf-8")
+    worker = policy.home / "worker"
+    (worker / "manager").mkdir(parents=True)
+    (worker / "manager/config.toml").write_text("[maintenance]\nautomatic = false\n", encoding="utf-8")
+    monkeypatch.chdir(worker)
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", "worker-original")
+    roots = {"absolute": str(root), "relative": "manager", "home": "~/manager"}
+    with update_driver_cli._request_environment(
+        (("WORKTREE_MANAGER_ROOT", roots[root_form]),), cwd=str(policy.home),
+    ):
+        assert maintenance_policy.update_refusal(["--auto"]) is None
+        assert maintenance_policy.inspect_policy().path == root / "config.toml"
+    assert maintenance_policy.inspect_policy().path == Path("worker-original/config.toml")
+
+
 def test_invalid_local_policy_is_unknown_not_an_enabled_default(policy: SimpleNamespace) -> None:
     root = policy.home / "manager"
     root.mkdir()

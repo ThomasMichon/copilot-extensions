@@ -81,6 +81,9 @@ creation, not an implicit permission migration or a read-only status side effect
   against the retained absolute request cwd, never the worker directory.
   Automatic work with a relative Manager root but no absolute request cwd is
   visibly refused; explicit updates do not consult that automation policy.
+  Borrowed Manager execution freezes that root against the same caller cwd
+  before restoring its scoped environment, so its execution-time policy and
+  configuration reads agree with queue admission rather than the worker cwd.
 - `TrustedRunner(argv, cwd, timeout=7200, env=(), context_keys=())` stores a complete internally
   constructed pinned invocation. Only Python import mapping (`PYTHONPATH`,
   `__PYVENV_LAUNCHER__`) can be persisted as environment metadata. Authentication

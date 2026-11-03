@@ -228,3 +228,17 @@ projects remain pending. The affected canonical copies and unchanged-revision
 MCP footprint digests were regenerated. Exact committed unit qualification,
 independent review/CI and any newly authorized native execution remain separate
 gates; no earlier exact-source native approval is renewed by these corrections.
+
+Independent review confirmed both path-selection findings resolved, then found
+that a borrowed engine request's second Manager policy check lost the retained
+caller cwd. The borrowed environment now freezes its Manager root against that
+directory before any policy/configuration read and restores the worker's
+original selection afterward. Direct Manager checks retain their own invocation
+directory. Both Manager and engine borrowed paths cover absolute, relative and
+current-user-home roots without a worker-policy fallback.
+
+The coupled Manager request/configuration/policy cohort passed 141 cases with
+one explicit Windows-only skip in private Linux fixtures. Earlier controller
+and queue results remain distinct evidence; native Windows execution,
+independent current-head review/CI, source merge and parent acceptance are not
+implied by this correction.

@@ -3219,6 +3219,10 @@ The actor-free automatic-policy controls bind a relative Manager root to the
 retained caller cwd, refuse missing/relative cwd for automatic admission, and
 keep explicit requests exempt. The durable queue counterpart changes policy
 after enqueue and drains from a different directory before synthetic effects.
+Borrowed Manager/engine controls retain the caller directory through the second
+policy check, including absolute, relative and current-user-home roots, while
+restoring the worker's original policy/hold selection afterward. Direct Manager
+checks retain their own invocation directory.
 The retained lifecycle deadline and guardian-pair units substitute their native
 Windows path-owner/file-open boundaries, retaining actual cleanup/deadline and
 byte-reader logic. Native ownership and file-sharing custody are not unit evidence.
