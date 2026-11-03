@@ -1,14 +1,32 @@
-"""Codespaces engine wiring, retry behavior, and standalone payload regressions."""
+"""Codespaces engine wiring, retry behavior, and standalone payload regressions.
+
+Engine contracts cover coherent canonical dev and self-contained release layouts,
+including a real canonical-to-materialized transition from either test input.
+
+The labelled orchestration seam preserves the complete batched source order,
+three-attempt SRE history and fatal short-circuit. Separate per-source integration
+replays each source selected from that captured batch through real admission
+and retention. This is not an all-sources/all-real timing guarantee.
+Seasoning/configuration, private-copy/origin and immutable-byte assertions live
+in the real-admission items; complete order, retry history, final success and
+fatal short-circuit assertions remain in the orchestration items.
+"""
 
 from __future__ import annotations
 
+import ast
+import hashlib
+import inspect
 import json
 import os
 import re
+import runpy
+import shlex
 import shutil
 import subprocess
 import sys
 import tomllib
+import venv
 from pathlib import Path
 
 import pytest
@@ -18,7 +36,9 @@ from agent_procutil.owned_process import run_caller_owned
 from .installer_test_support import (
     assert_installer_isolated,
     guard_installer_payload,
+    installer_functional_timeout,
     isolate_installer_environment,
+    snapshot_tree_manifest,
 )
 
 PLUGIN = Path(__file__).resolve().parents[1]
@@ -36,6 +56,13 @@ PACKAGES = (
     "agent-remote-login-shell",
     "agent-update-driver",
     "agent-codespaces",
+)
+REAL_ADMISSION_CASES = (
+    *((package, "ok") for package in PACKAGES),
+    (PACKAGES[0], "sre"),
+    (PACKAGES[-2], "sre"),
+    (PACKAGES[0], "fatal"),
+    (PACKAGES[-1], "fatal"),
 )
 VARIABLES = (
     "SSH_MGR_DIR",
@@ -61,7 +88,7 @@ PS_VARIABLES = (
     "UpdateDriverDir",
     "PluginDir",
 )
-pytestmark = [pytest.mark.timeout(60), pytest.mark.installer_only]
+pytestmark = [pytest.mark.timeout(installer_functional_timeout(60)), pytest.mark.installer_only]
 
 
 def _env(tmp_path: Path) -> dict[str, str]:
@@ -112,34 +139,58 @@ def _function(ext: str, name: str) -> str:
     return match.group(0) + "\n"
 
 
-def _run(ext: str, script: str, tmp_path: Path, env: dict[str, str], *, timeout=45):
+def _run(ext: str, script: str, tmp_path: Path, env: dict[str, str], *, timeout=None):
     path = tmp_path / f"harness.{ext}"
     path.write_text(script, encoding="utf-8")
     command = ["bash", str(path)] if ext == "sh" else [PWSH, "-NoProfile", "-File", str(path)]
     try:
         return run_caller_owned(
-            command, env=env, cwd=tmp_path, timeout=timeout,
+            command, env=env, cwd=tmp_path,
+            timeout=installer_functional_timeout(45) if timeout is None else timeout,
             max_stdout_bytes=1024 * 1024, max_stderr_bytes=1024 * 1024,
         )
     except subprocess.TimeoutExpired as exc:
         log = tmp_path / "uv.jsonl"
         calls = log.read_text() if log.is_file() else "no UV calls"
-        pytest.fail(f"native fixture timeout; UV calls: {calls}; stdout: {exc.stdout}; stderr: {exc.stderr}")
+        phases = log.with_suffix(".phases.jsonl")
+        timing = phases.read_text() if phases.is_file() else "no UV phases"
+        pytest.fail(
+            f"native fixture timeout; UV calls: {calls}; phases: {timing}; "
+            f"stdout: {exc.stdout}; stderr: {exc.stderr}"
+        )
 
 
-def _fake_uv(tmp_path: Path) -> Path:
+def _fake_uv(tmp_path: Path, engine: Path = ENGINE) -> Path:
+    # Reuse only the SUT's native file-I/O adapter in the fake executable;
+    # importing the entire policy on every fake UV call repeats unrelated work.
+    adapter_module = (engine / "installer_dependency_config.py").read_text(encoding="utf-8")
+    adapter = next(
+        node for node in ast.parse(adapter_module).body
+        if isinstance(node, ast.FunctionDef) and node.name == "native_retained_path"
+    )
+    adapter_source = ast.get_source_segment(adapter_module, adapter)
+    assert adapter_source is not None
+    settings = (
+        "PipInstallSettings { settings: PipSettings {\n"
+        "        index_locations: IndexLocations { indexes: [], flat_index: [], },\n"
+        "        exclude_newer: ExcludeNewer { global: None, "
+        "package: ExcludeNewerPackage({}), },\n"
+        "    }, }"
+    )
     driver = tmp_path / "uv-driver.py"
     driver.write_text(
-        """import json, os, subprocess, sys, tomllib
+        """import json, os, subprocess, sys, time, tomllib
 from pathlib import Path
+__TEST_NATIVE_PATH_ADAPTER__
 args = sys.argv[1:]
+def phase(name):
+    with Path(os.environ["TEST_UV_LOG"]).with_suffix(".phases.jsonl").open("a") as stream:
+        stream.write(json.dumps({"phase": name, "time": time.monotonic(), "operation": args[:2]}) + "\\n")
+phase("entered")
 if args[:2] == ["pip", "install"]:
     assert "--no-editable" not in args and "--editable" not in args
 if "--show-settings" in args:
-    print('''PipInstallSettings { settings: PipSettings {
-        index_locations: IndexLocations { indexes: [], flat_index: [], },
-        exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },
-    }, }''')
+    print(__TEST_UV_SETTINGS__)
     raise SystemExit(0)
 def unseasoned(arguments):
     result = []
@@ -154,39 +205,56 @@ def unseasoned(arguments):
     return result
 expected_sources = json.loads(os.environ.get("TEST_UV_EXPECTED_SOURCES", "{}"))
 if expected_sources and args[:2] == ["pip", "install"]:
+    native_path = native_retained_path
     assert "--no-editable" not in args and "--editable" not in args
     config = Path(args[args.index("--config-file") + 1]).resolve()
     private_root = config.parent
     assert config.is_file() and not config.is_symlink()
     assert private_root.name == "inputs"
+    assert private_root.parent.parent.samefile(Path(os.environ["TEMP"]))
+    assert not any(
+        private_root.resolve().is_relative_to(Path(original).resolve())
+        for original in expected_sources.values()
+    )
     if os.name != "nt":
         assert private_root.stat().st_uid == os.getuid()
         assert private_root.stat().st_mode & 0o077 == 0
+    verified_sources = []
     for index, argument in enumerate(args):
         source = Path(argument)
-        if not source.is_dir() or not (source / "pyproject.toml").is_file():
+        native_source = Path(native_path(source))
+        if not native_source.is_dir() or not (native_source / "pyproject.toml").is_file():
             continue
-        metadata = tomllib.loads((source / "pyproject.toml").read_text())
+        metadata = tomllib.loads((native_source / "pyproject.toml").read_text())
         project = metadata["project"]
+        verified_sources.append(project["name"])
         for entries in metadata.get("tool", {}).get("uv", {}).get("sources", {}).values():
             assert all(entry.get("editable") is not True
                        for entry in (entries if isinstance(entries, list) else [entries]))
         original = Path(expected_sources[project["name"]])
+        native_original = Path(native_path(original))
         assert source.resolve() != original.resolve()
         assert any(parent.samefile(private_root) for parent in source.resolve().parents)
-        assert project == tomllib.loads((original / "pyproject.toml").read_text())["project"]
-        for member in original.rglob("*.py"):
-            assert (source / member.relative_to(original)).read_bytes() == member.read_bytes()
+        original_metadata = tomllib.loads((native_original / "pyproject.toml").read_text())
+        assert project == original_metadata["project"]
+        assert metadata.get("tool", {}).get("setuptools") == original_metadata.get("tool", {}).get("setuptools")
+        for member in native_original.rglob("*.py"):
+            assert (native_source / member.relative_to(native_original)).read_bytes() == member.read_bytes()
         args[index] = str(original)
+    assert verified_sources
+    if os.environ.get("TEST_UV_RETRY_SOURCE"):
+        assert verified_sources == [os.environ["TEST_UV_RETRY_SOURCE"]]
     assert private_root.parent.parent.samefile(Path(os.environ["TEMP"])), (
         str(private_root.parent.parent), os.environ["TEMP"], os.environ.get("TMPDIR"),
     )
     assert not any(private_root.resolve().is_relative_to(Path(value).resolve())
                    for value in expected_sources.values())
+    phase("source-verified")
 log = Path(os.environ["TEST_UV_LOG"])
 history = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
 with log.open("a") as stream:
     stream.write(json.dumps(args) + "\\n")
+phase("logged")
 if args == ["--version"]:
     print("uv test")
     raise SystemExit(int(os.environ.get("TEST_UV_VERSION_EXIT", "0")))
@@ -232,18 +300,35 @@ if args[0] == "venv":
         (root / "pyvenv.cfg").write_text("home = test")
     raise SystemExit(0)
 raise SystemExit(2)
-""",
+""".replace("__TEST_UV_SETTINGS__", repr(settings)).replace(
+            "__TEST_NATIVE_PATH_ADAPTER__", adapter_source,
+        ),
         encoding="utf-8",
     )
+    # Fixed resolver projections need no interpreter startup; real installs
+    # still traverse production admission/retention and the verifying driver.
     if os.name == "nt":
         uv = tmp_path / "uv.cmd"
+        batch_settings = "\n".join(
+            "echo " + line.replace("(", "^(").replace(")", "^)")
+            for line in settings.splitlines()
+        )
         uv.write_text(
-            f'@"{sys.executable}" "{driver}" %*\n@exit /b %ERRORLEVEL%\n',
+            '@echo off\n'
+            'for %%A in (%*) do if "%%~A"=="--show-settings" goto settings\n'
+            f'"{sys.executable}" "{driver}" %*\nexit /b %ERRORLEVEL%\n'
+            f':settings\n{batch_settings}\nexit /b 0\n',
             encoding="utf-8",
         )
     else:
         uv = tmp_path / "uv"
-        uv.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{driver}" "$@"\n', encoding="utf-8")
+        uv.write_text(
+            '#!/bin/sh\nfor arg do\n'
+            f'  if [ "$arg" = "--show-settings" ]; then printf \'%s\\n\' \'{settings}\'; exit 0; fi\n'
+            'done\n'
+            f'exec "{sys.executable}" "{driver}" "$@"\n',
+            encoding="utf-8",
+        )
         uv.chmod(0o755)
     return uv
 
@@ -557,6 +642,25 @@ def _attributed_library_sources(tmp_path: Path, layout: str):
     )
     for name in retained_scripts:
         shutil.copyfile(PLUGIN / "scripts" / name, payload / "scripts" / name)
+    for name in ("installer-engine.sh", "installer-engine.ps1"):
+        source = PLUGIN / "scripts" / name
+        if source.is_file():
+            shutil.copyfile(source, payload / "scripts" / name)
+    # Both input layouts feed the same fixture-owned canonical metadata graph.
+    for pyproject in repository.rglob("pyproject.toml"):
+        project = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+        for spec in project.get("tool", {}).get("uv", {}).get("sources", {}).values():
+            path = spec.get("path", "")
+            if not path.startswith("libs/"):
+                continue
+            lib = Path(path).name
+            assert path == f"libs/{lib}" and uer.is_safe_lib_name(lib)
+            assert (repository / "libs" / lib / "pyproject.toml").is_file()
+            assert uer.can_rewrite_uv_source_to_editable(pyproject, lib)
+            uer.rewrite_uv_source_to_editable(
+                pyproject, lib,
+                uer.uv_editable_relpath(pyproject.parent, lib, libs_dir=repository / "libs"),
+            )
     logs = mm.materialize_uv_editable_refs(repository, canonical_root=repository)
     skipped = [line for line in logs if line.startswith("SKIP")]
     assert not skipped, "\n".join(skipped)
@@ -598,13 +702,21 @@ def _attributed_library_sources(tmp_path: Path, layout: str):
         skipped = [line for line in logs if line.startswith("SKIP")]
         assert not skipped, "\n".join(skipped)
     shutil.copytree(payload / "libs", repository / "libs", dirs_exist_ok=True)
-    # The fixture now owns canonical libraries, regardless of whether its
-    # input was authored with canonical or already-materialized metadata.
-    project_path = payload / "pyproject.toml"
-    project = tomllib.loads(project_path.read_text(encoding="utf-8"))
+    pyproject = payload / "pyproject.toml"
+    project = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    # Reconstruct dev references from the verified materialized graph, not
+    # from a checkout manifest that may itself already use release-local paths.
     for spec in project["tool"]["uv"]["sources"].values():
         lib = Path(spec["path"]).name
-        uer.rewrite_uv_source_to_editable(project_path, lib, f"../../libs/{lib}")
+        assert spec["path"] == f"libs/{lib}" and uer.is_safe_lib_name(lib)
+        assert (payload / spec["path"] / "pyproject.toml").read_bytes() == (
+            repository / "libs" / lib / "pyproject.toml"
+        ).read_bytes()
+        assert uer.can_rewrite_uv_source_to_editable(pyproject, lib)
+        uer.rewrite_uv_source_to_editable(
+            pyproject, lib,
+            uer.uv_editable_relpath(payload, lib, libs_dir=repository / "libs"),
+        )
     shutil.rmtree(payload / "libs")
     engine = repository / "libs" / "installer-engine"
     engine.mkdir(parents=True, exist_ok=True)
@@ -635,14 +747,52 @@ def _attributed_library_sources(tmp_path: Path, layout: str):
         for name in PACKAGES[:-1]
     ] + [payload]
     assert all(source.is_relative_to(repository) for source in sources)
+    for manifest_path in repository.rglob("pyproject.toml"):
+        nested = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
+        for spec in nested.get("tool", {}).get("uv", {}).get("sources", {}).values():
+            dependency = (manifest_path.parent / spec["path"]).resolve()
+            assert dependency.is_relative_to(repository)
+            assert (dependency / "pyproject.toml").is_file()
     return engine, sources
 
 
-@pytest.fixture(scope="module", params=("local", "canonical"))
-def attributed_library_sources(tmp_path_factory, request):
-    return _attributed_library_sources(
-        tmp_path_factory.mktemp(f"codespaces-attributed-{request.param}"), request.param,
-    )
+@pytest.fixture(scope="module")
+def attributed_library_sources(tmp_path_factory):
+    class Sources(dict):
+        def __missing__(self, layout):
+            if layout not in ("local", "canonical"):
+                raise KeyError(layout)
+            value = _attributed_library_sources(tmp_path_factory.mktemp(layout), layout)
+            self[layout] = value
+            return value
+
+    return Sources()
+
+
+def _validate_admission_record(record, expected):
+    """Fail closed at the explicitly spied orchestration/admission seam."""
+    assert record["uv"] == expected["uv"], "incorrect UV executable"
+    assert record["trusted_source_roots"] == expected["trusted_source_roots"], "incorrect trusted roots"
+    assert record["retained_resource_roots"] == [], "unexpected resource roots"
+    assert record["env"] is None and record["cwd"] is None and record["now"] is None
+    assert record["run_options"] == {"stdout": "stdout", "stderr": "stderr"}
+    assert record["non_editable"] is True, "editable installation was admitted"
+    matches = [
+        package for package, arguments in expected["arguments"].items()
+        if record["arguments"] == arguments
+    ]
+    assert len(matches) == 1, f"unknown or incorrect installed source arguments: {record['arguments']!r}"
+    for package, source in expected["sources"].items():
+        project = tomllib.loads((Path(source) / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+        assert project == expected["projects"][package], "changed originating project identity"
+    return matches[0]
+
+
+def _assert_admission_history(records, calls, expected):
+    assert records and len(records) == len(calls), "admission was bypassed"
+    for record, call in zip(records, calls):
+        _validate_admission_record(record, expected)
+        assert call == ["pip", "install", *record["arguments"]], "admission/UV history differs"
 
 
 def _small_attributed_sources(tmp_path, *, editable, canonical=None):
@@ -697,30 +847,99 @@ def _small_attributed_sources(tmp_path, *, editable, canonical=None):
     return engine, sources
 
 
-@pytest.mark.parametrize("ext", ["sh", "ps1"])
-@pytest.mark.parametrize("mode", ["sre", "fatal"])
-@pytest.mark.timeout(120)
-@pytest.mark.parametrize("editable", [False, True])
-def test_codespaces_library_install_order_retry_and_errors(
-    tmp_path, ext, editable, mode,
-):
-    if ext == "ps1" and PWSH is None:
-        pytest.skip("pwsh unavailable")
-    if ext == "sh" and os.name == "nt":
-        pytest.skip("POSIX harness")
+def _run_library_orchestration(tmp_path, ext, editable, mode, attributed_library_sources):
     env = _env(tmp_path)
-    uv = _fake_uv(tmp_path)
     env["TEST_UV_MODE"] = mode
-    engine, sources = _small_attributed_sources(
-        tmp_path, editable=editable, canonical=editable or mode == "sre",
-    )
-    env["TEST_UV_EXPECTED_SOURCES"] = json.dumps({
-        tomllib.loads((source / "pyproject.toml").read_text())["project"]["name"]: str(source)
-        for source in sources
-    })
+    engine, sources = attributed_library_sources["canonical" if editable else "local"]
+    uv = _fake_uv(tmp_path, engine)
     python = Path(sys._base_executable)
+    roots = {sources[-1].resolve()}
+    if editable:
+        pending = list(roots)
+        while pending:
+            project = pending.pop()
+            metadata = tomllib.loads((project / "pyproject.toml").read_text(encoding="utf-8"))
+            for spec in metadata.get("tool", {}).get("uv", {}).get("sources", {}).values():
+                child = (project / spec["path"]).resolve()
+                if child not in roots:
+                    roots.add(child)
+                    pending.append(child)
+    expected = {
+        "uv": str(uv),
+        "policy": str(engine / "installer_dependency_policy.py"),
+        "trusted_source_roots": sorted(str(root) for root in roots),
+        "arguments": {
+            "closure": [
+                "--python", str(python),
+                *(argument for package, source in zip(PACKAGES, sources)
+                  for argument in ("--reinstall-package", package, str(source))),
+                "--quiet", "--link-mode", "copy",
+            ]
+        },
+        "sources": dict(zip(PACKAGES, map(str, sources))),
+        "projects": {
+            package: tomllib.loads((source / "pyproject.toml").read_text())["project"]
+            for package, source in zip(PACKAGES, sources)
+        },
+    }
+    context_inputs = {
+        engine / "installer_dependency_policy.py",
+        engine / "installer_dependency_config.py",
+        sources[-1] / "plugin.json",
+    }
+    for root in roots:
+        context_inputs.update(root.rglob("pyproject.toml"))
+    if editable:
+        context_inputs.add(engine.parents[1] / ".github" / "plugin" / "marketplace.json")
+    expected["context_inputs"] = {
+        str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in context_inputs
+    }
+    env["TEST_ADMISSION_EXPECTED"] = json.dumps(expected)
+    env["TEST_ADMISSION_LOG"] = str(tmp_path / "admission.jsonl")
+    spy = tmp_path / "admission-spy.py"
+    spy.write_text(
+        "import hashlib, inspect, json, os, runpy, subprocess, sys, tomllib\nfrom pathlib import Path\n"
+        + inspect.getsource(_validate_admission_record)
+        + """
+expected = json.loads(os.environ["TEST_ADMISSION_EXPECTED"])
+for name, digest in expected["context_inputs"].items():
+    assert hashlib.sha256(Path(name).read_bytes()).hexdigest() == digest, "admission context changed"
+def forward(record):
+    _validate_admission_record(record, expected)
+    with Path(os.environ["TEST_ADMISSION_LOG"]).open("a") as stream:
+        stream.write(json.dumps(record) + "\\n")
+    return subprocess.run(
+        [record["uv"], "pip", "install", *record["arguments"]],
+        stdout=sys.stdout, stderr=sys.stderr,
+    )
+policy = runpy.run_path(expected["policy"], run_name="orchestration_policy")
+main = policy["main"]
+namespace = main.__globals__
+original = namespace["run_uv_install"]
+def admission_spy(uv, arguments, **kwargs):
+    bound = inspect.signature(original).bind(uv, arguments, **kwargs)
+    bound.apply_defaults()
+    values = bound.arguments
+    assert values["run_options"] == {"stdout": sys.stdout, "stderr": sys.stderr}
+    record = {
+        "uv": uv, "arguments": list(arguments),
+        "trusted_source_roots": sorted(str(path) for path in values["trusted_source_roots"]),
+        "retained_resource_roots": [str(path) for path in values["retained_resource_roots"]],
+        "env": values["env"], "cwd": values["cwd"], "now": values["now"],
+        "run_options": {"stdout": "stdout", "stderr": "stderr"},
+        "non_editable": values["non_editable"],
+    }
+    _validate_admission_record(record, expected)
+    return forward(record)
+namespace["run_uv_install"] = admission_spy
+raise SystemExit(main())
+""",
+        encoding="utf-8",
+    )
     if ext == "sh":
-        script = _prelude(ext, engine) + _function(ext, "_install_package_into")
+        script = _prelude(ext, engine)
+        script += f"\nINSTALLER_ENGINE_DEPENDENCY_POLICY='{spy}'\n"
+        script += _function(ext, "_install_package_into")
         script += f"\nUV_CMD='{uv}'\n"
         script += "".join(f"{var}='{path}'\n" for var, path in zip(VARIABLES, sources))
         script += f"_install_package_into '{python}'\n"
@@ -731,6 +950,7 @@ def test_codespaces_library_install_order_retry_and_errors(
             + "$script:SourceRuntimeIdentity = $null\n"
         )
         script += (
+            f"\n$script:InstallerDependencyPolicy='{spy}'\n"
             f"\n$UvCommand='{uv}'\nfunction Remove-ConsoleTrampolines {{ param($VenvDir) }}\n"
         )
         script += "".join(f"${var}='{path}'\n" for var, path in zip(PS_VARIABLES, sources))
@@ -740,14 +960,42 @@ def test_codespaces_library_install_order_retry_and_errors(
     log = tmp_path / "uv.jsonl"
     assert log.exists(), result.stdout + result.stderr
     calls = [json.loads(line) for line in log.read_text().splitlines()]
+    capture = Path(env["TEST_ADMISSION_LOG"])
+    records = [json.loads(line) for line in capture.read_text().splitlines()] if capture.exists() else []
+    _assert_admission_history(records, calls, expected)
+    return result, calls, records, expected, engine, sources
+
+
+@pytest.fixture(scope="module")
+def orchestration_runs(tmp_path_factory, attributed_library_sources):
+    cache = {}
+
+    def run(ext, editable, mode):
+        if ext == "ps1" and PWSH is None:
+            pytest.skip("pwsh unavailable")
+        if ext == "sh" and os.name == "nt":
+            pytest.skip("POSIX harness")
+        key = ext, editable, mode
+        if key not in cache:
+            directory = tmp_path_factory.mktemp(f"orchestration-{ext}-{editable}-{mode}")
+            cache[key] = _run_library_orchestration(
+                directory, ext, editable, mode, attributed_library_sources,
+            )
+        return cache[key]
+
+    return run
+
+
+@pytest.mark.parametrize("ext", ["sh", "ps1"])
+@pytest.mark.parametrize("editable", [False, True])
+@pytest.mark.parametrize("mode", ["sre", "fatal"])
+def test_codespaces_library_install_order_retry_and_errors(
+    ext, editable, mode, orchestration_runs,
+):
+    result, calls, records, expected, engine, sources = orchestration_runs(ext, editable, mode)
     assert bool(result.returncode) == (mode == "fatal"), result.stdout + result.stderr
-    expected = ["pip", "install", "--python", str(python)]
-    for package, source in zip(PACKAGES, sources):
-        expected.extend(["--reinstall-package", package, str(source)])
-    expected.append("--quiet")
-    assert [_without_policy_arguments(args) for args in calls] == (
-        [expected] * (1 if mode == "fatal" else 3)
-    )
+    expected_call = ["pip", "install", *expected["arguments"]["closure"]]
+    assert calls == [expected_call] * (1 if mode == "fatal" else 3)
     if mode == "fatal":
         assert "permanent failure" in result.stderr
         assert "agent-codespaces closure install failed" in result.stderr
@@ -841,35 +1089,227 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
     assert {source: (source / "pyproject.toml").read_bytes() for source in sources} == original_manifests
 
 
-def test_codespaces_canonical_reference_registration_and_release_materialization(tmp_path):
+@pytest.mark.parametrize("ext", ["sh", "ps1"])
+@pytest.mark.parametrize("editable", [False, True])
+@pytest.mark.parametrize(
+    "package,mode",
+    REAL_ADMISSION_CASES,
+    ids=[f"{'healthy' if mode == 'ok' else mode}-{package}" for package, mode in REAL_ADMISSION_CASES],
+)
+def test_codespaces_real_admission_replays_captured_source(
+    tmp_path, ext, editable, package, mode, orchestration_runs,
+):
+    """Real engine/policy/retention, bounded to one source from the captured batch."""
+    result, calls, records, expected, engine, sources = orchestration_runs(ext, editable, "sre")
+    assert result.returncode == 0, result.stdout + result.stderr
+    _assert_admission_history(records, calls, expected)
+    matches = [record for record in records if _validate_admission_record(record, expected) == "closure"]
+    assert matches and all(record == matches[0] for record in matches)
+    record = dict(matches[0])
+    arguments = record["arguments"]
+    offset = arguments.index(package)
+    record["arguments"] = [*arguments[:2], "--reinstall-package", *arguments[offset:offset + 2], "--quiet"]
+    policy = runpy.run_path(expected["policy"], run_name="real_admission_context")
+    assert sorted(str(path) for path in policy["_anchor_roots"]()) == record["trusted_source_roots"]
+    env = _env(tmp_path)
+    env["TEST_UV_MODE"] = mode
+    env["TEST_UV_EXPECTED_SOURCES"] = json.dumps({
+        name: str(source) for name, source in zip(PACKAGES, sources)
+    })
+    if mode != "ok":
+        env["TEST_UV_RETRY_SOURCE"] = package
+    original_files = {
+        path: path.read_bytes()
+        for root in map(Path, record["trusted_source_roots"])
+        for path in root.rglob("*")
+        if path.is_file() and (path.suffix == ".py" or path.name == "pyproject.toml")
+    }
+    if ext == "sh":
+        invocation = " ".join(map(shlex.quote, [record["uv"], *record["arguments"]]))
+        script = _prelude(ext, engine) + (
+            f"\nif invoke_uv_pip_install_resilient {invocation}; "
+            "then exit 0; else exit $?; fi\n"
+        )
+    else:
+        uv = record["uv"].replace("'", "''")
+        arguments = ",".join("'" + argument.replace("'", "''") + "'" for argument in record["arguments"])
+        script = _prelude(ext, engine) + (
+            f"\n$result = Invoke-UvPipInstallResilient -UvCommand '{uv}' -Arguments @({arguments})\n"
+            "[Console]::Out.WriteLine($result.Output)\nexit $result.ExitCode\n"
+        )
+    result = _run(ext, script, tmp_path, env)
+    assert result.returncode == (23 if mode == "fatal" else 0), result.stdout + result.stderr
+    assert {path: path.read_bytes() for path in original_files} == original_files
+    log = tmp_path / "uv.jsonl"
+    calls = [json.loads(line) for line in log.read_text().splitlines()]
+    assert len(calls) == (3 if mode == "sre" else 1)
+    assert len({call[call.index("--config-file") + 1] for call in calls}) == len(calls)
+    assert [_without_policy_arguments(call) for call in calls] == [
+        ["pip", "install", *record["arguments"]]
+    ] * len(calls)
+    if mode == "fatal":
+        assert "permanent failure" in result.stdout + result.stderr
+    if mode == "sre":
+        assert "retrying in 3s" in result.stderr
+        assert "retrying in 6s" in result.stderr
+
+
+@pytest.mark.parametrize("fault", ["bypassed", "source", "roots", "resources", "editable"])
+def test_codespaces_admission_spy_refuses_incorrect_or_bypassed_calls(fault, orchestration_runs):
+    ext = "ps1" if PWSH else "sh"
+    result, calls, records, expected, _, _ = orchestration_runs(ext, True, "sre")
+    assert result.returncode == 0, result.stdout + result.stderr
+    damaged = json.loads(json.dumps(records))
+    if fault == "bypassed":
+        damaged.clear()
+    elif fault == "source":
+        arguments = damaged[0]["arguments"]
+        arguments[arguments.index(PACKAGES[-1]) + 1] = str(PLUGIN / "unrecognized-source")
+    elif fault == "roots":
+        damaged[0]["trusted_source_roots"] = []
+    elif fault == "editable":
+        damaged[0]["non_editable"] = False
+    else:
+        damaged[0]["retained_resource_roots"] = [str(PLUGIN / "unrecognized-resource")]
+    with pytest.raises(AssertionError):
+        _assert_admission_history(damaged, calls, expected)
+
+
+def _engine_asset_names():
     sys.path.insert(0, str(REPO / "tools"))
     try:
         import installer_engine_ref as ier
-        import materialize_main as mm
+    finally:
+        sys.path.pop(0)
+    return (*ier.FILES, *ier.support_files(ENGINE))
+
+
+def _assert_codespaces_engine_wiring(plugin: Path, *, repo_root: Path = REPO):
+    sys.path.insert(0, str(REPO / "tools"))
+    try:
+        import installer_engine_ref as ier
     finally:
         sys.path.pop(0)
     assert "agent-codespaces" in ier.ADOPTERS
-    layouts = set()
+    canonical = repo_root / "libs" / "installer-engine"
+    assets = (*ier.FILES, *ier.support_files(canonical))
+    materialized = any(
+        (plugin / "scripts" / name).exists() or (plugin / "scripts" / name).is_symlink()
+        for name in ier.FILES
+    )
     for ext in ("sh", "ps1"):
-        ref = ier.find_engine_ref(PLUGIN / "scripts" / f"install.{ext}", ext)
-        assert ref is not None
-        assert ier.source_match_count(PLUGIN / "scripts" / f"install.{ext}", ext) == 1
-        if ier.is_canonical_ref(ref, PLUGIN, repo_root=REPO):
-            layouts.add("canonical")
-            assert not ref.local_path.exists()
+        ref = ier.find_engine_ref(plugin / "scripts" / f"install.{ext}", ext)
+        assert ref is not None, f"expected one engine reference in install.{ext}"
+        assert ier.source_match_count(plugin / "scripts" / f"install.{ext}", ext) == 1
+        if materialized:
+            assert ier.is_local_ref(ref, plugin), f"expected local reference in install.{ext}"
         else:
-            layouts.add("local")
-            assert ier.is_local_ref(ref, PLUGIN)
-        assert ref.resolved().read_bytes() == (ENGINE / ref.file_name).read_bytes()
-        for name in ier.support_files(ENGINE):
-            assert (ref.resolved().parent / name).read_bytes() == (ENGINE / name).read_bytes()
-    assert len(layouts) == 1, "both language variants must select the same layout"
+            assert ier.is_canonical_ref(ref, plugin, repo_root=repo_root), (
+                f"expected canonical reference in install.{ext}"
+            )
+            assert not ref.local_path.exists(), ref.file_name
+    for name in assets:
+        source = canonical / name
+        assert source.is_file() and not source.is_symlink(), f"missing canonical asset: {name}"
+        asset = plugin / "scripts" / name
+        if materialized or asset.exists() or asset.is_symlink():
+            assert asset.is_file() and not asset.is_symlink(), f"missing local asset: {name}"
+            assert asset.read_bytes() == source.read_bytes(), f"changed local asset: {name}"
+
+
+@pytest.fixture(scope="module")
+def codespaces_engine_transition(tmp_path_factory):
+    tmp_path = tmp_path_factory.mktemp("codespaces-engine")
+    sys.path.insert(0, str(REPO / "tools"))
+    try:
+        import installer_engine_ref as ier
+        import materialize_installer_engine as mie
+        import materialize_main as mm
+    finally:
+        sys.path.pop(0)
+    _assert_codespaces_engine_wiring(PLUGIN)
+    originals = {
+        path: path.read_bytes()
+        for path in (
+            PLUGIN / "scripts" / "install.sh",
+            PLUGIN / "scripts" / "install.ps1",
+            PLUGIN / "scripts" / "install.human-output.json",
+            PLUGIN / "pyproject.toml",
+            *(ENGINE / name for name in (*ier.FILES, *ier.support_files(ENGINE))),
+            *(PLUGIN / "scripts" / name for name in (*ier.FILES, *ier.support_files(ENGINE))),
+        )
+        if path.is_file()
+    }
+    # A generated-main checkout still exercises the dev-to-release transition:
+    # normalize only this verified fixture, never the source payload.
+    source_root = tmp_path / "dev"
+    source = source_root / "plugins" / PLUGIN.name
+    shutil.copytree(PLUGIN, source, ignore=shutil.ignore_patterns("tests", "__pycache__"))
+    shutil.copytree(ENGINE, source_root / "libs" / "installer-engine")
+    human_sources = mie.validate_human_output_sources(source_root, consumers=(source,))
+    for ext in ("sh", "ps1"):
+        script = source / "scripts" / f"install.{ext}"
+        ref = ier.find_engine_ref(script, ext)
+        assert ref is not None
+        if ier.is_local_ref(ref, source):
+            text = script.read_text(encoding="utf-8")
+            assert ier.local_line(ext) in text.splitlines()
+            script.write_text(
+                text.replace(ier.local_line(ext), ier.canonical_line(ext)),
+                encoding="utf-8",
+            )
+    for name in (*ier.FILES, *ier.support_files(ENGINE)):
+        if name != ier.HUMAN_HELPER:
+            (source / "scripts" / name).unlink(missing_ok=True)
+    # Use the real declaration owner after normalizing only prevalidated refs.
+    mie.materialize_human_output_declarations(
+        source_root, canonical_root=source_root, human_sources=human_sources,
+    )
+    _assert_codespaces_engine_wiring(source, repo_root=source_root)
+    normalized_inputs = {
+        path: path.read_bytes() for path in source_root.rglob("*") if path.is_file()
+    }
     payload = tmp_path / "release" / "plugins" / PLUGIN.name
-    shutil.copytree(PLUGIN, payload, ignore=shutil.ignore_patterns("tests", "__pycache__"))
+    shutil.copytree(source, payload)
     logs = mm.materialize_uv_editable_refs(tmp_path / "release", canonical_root=REPO)
-    logs += mm.materialize_installer_engine_refs(tmp_path / "release", canonical_root=REPO)
+    logs += mm.materialize_installer_engine_ref_into(
+        source_consumer_dir=source,
+        dest_consumer_dir=payload,
+        canonical_root=source_root,
+        dest_root=tmp_path / "release",
+    )
     skipped = [line for line in logs if line.startswith("SKIP")]
     assert not skipped, "\n".join(skipped)
+    assert sum(line.startswith("OK") and "installer-engine." in line for line in logs) == 2
+    _assert_codespaces_engine_wiring(source, repo_root=source_root)
+    assert {
+        path: path.read_bytes() for path in source_root.rglob("*") if path.is_file()
+    } == normalized_inputs
+    assert {path: path.read_bytes() for path in originals} == originals
+    return payload
+
+
+@pytest.fixture
+def codespaces_engine_scripts(tmp_path, codespaces_engine_transition):
+    import installer_engine_ref as ier
+
+    scripts = tmp_path / PLUGIN.name / "scripts"
+    scripts.mkdir(parents=True)
+    for name in (*ier.INSTALLER_SCRIPTS, *ier.FILES, *ier.support_files(ENGINE)):
+        shutil.copyfile(codespaces_engine_transition / "scripts" / name, scripts / name)
+    return scripts.parent
+
+
+def test_codespaces_canonical_reference_registration_and_release_materialization(
+    codespaces_engine_transition,
+):
+    sys.path.insert(0, str(REPO / "tools"))
+    try:
+        import installer_engine_ref as ier
+    finally:
+        sys.path.pop(0)
+    payload = codespaces_engine_transition
+    _assert_codespaces_engine_wiring(payload)
     for ext in ("sh", "ps1"):
         ref = ier.find_engine_ref(payload / "scripts" / f"install.{ext}", ext)
         assert ref is not None and ier.is_local_ref(ref, payload)
@@ -943,14 +1383,48 @@ def test_codespaces_explicit_canonical_fixture_materializes(tmp_path):
         assert not spec.get("editable", False)
 
 
+@pytest.mark.parametrize("name", _engine_asset_names())
+@pytest.mark.parametrize("damage", ("missing", "modified"))
+def test_codespaces_engine_wiring_refuses_damaged_assets(
+    codespaces_engine_scripts, name, damage,
+):
+    asset = codespaces_engine_scripts / "scripts" / name
+    if damage == "missing":
+        asset.unlink()
+    else:
+        asset.write_bytes(asset.read_bytes() + b"\n# changed fixture\n")
+    with pytest.raises(AssertionError, match=re.escape(name)):
+        _assert_codespaces_engine_wiring(codespaces_engine_scripts)
+
+
+@pytest.mark.parametrize("ext", ("sh", "ps1"))
+@pytest.mark.parametrize("damage", ("mixed", "duplicate", "missing", "noncanonical"))
+def test_codespaces_engine_wiring_refuses_invalid_references(
+    codespaces_engine_scripts, ext, damage,
+):
+    import installer_engine_ref as ier
+
+    script = codespaces_engine_scripts / "scripts" / f"install.{ext}"
+    text = script.read_text(encoding="utf-8")
+    line = ier.local_line(ext)
+    assert line in text.splitlines()
+    replacement = {
+        "mixed": ier.canonical_line(ext),
+        "duplicate": line + "\n" + line,
+        "missing": "",
+        "noncanonical": line.replace("installer-engine.", "other/installer-engine."),
+    }[damage]
+    script.write_text(text.replace(line, replacement), encoding="utf-8")
+    with pytest.raises(AssertionError, match=rf"install\.{ext}"):
+        _assert_codespaces_engine_wiring(codespaces_engine_scripts)
+
 def test_codespaces_stamp_reuses_native_directory_copy():
     materialize = _function("ps1", "Materialize-SnapshotDependencies")
-    assert "Copy-InstallerStageDirectory -Source $source -Destination $destination" in materialize
+    assert "Copy-InstallSnapshotItem -Source $source -Destination $destination" in materialize
     assert "Copy-Item -LiteralPath $source -Destination $destination -Recurse" not in materialize
     assert "$PayloadCopied -and $payloadLibrary" in materialize
     stamp = _function("ps1", "Invoke-Stamp")
-    assert "$_.PSIsContainer" in stamp
-    assert "Copy-InstallerStageDirectory -Source $_.FullName -Destination $destination" in stamp
+    assert "Copy-InstallSnapshotItem -Source $_.FullName" in stamp
     assert "Materialize-SnapshotDependencies -SnapshotDir $snapTmp -PayloadCopied" in stamp
     assert "Remove-Item $snapTmp -Recurse -Force -ErrorAction Stop" in stamp
     assert "New-Item -ItemType Directory -Path $snapTmp -ErrorAction Stop" in stamp
@@ -977,7 +1451,7 @@ function Remove-Item {
     Write-Error 'synthetic stage cleanup blocked'
 }
 function New-Item { throw 'unexpected staging admission' }
-function Copy-InstallerStageDirectory { throw 'unexpected payload copy' }
+function Copy-InstallSnapshotItem { throw 'unexpected payload copy' }
 function Deploy-SelfProvisioningBinstub { throw 'unexpected publication' }
 try { Invoke-Stamp; throw 'missing cleanup refusal' } catch {
     if ($_.Exception.Message -notmatch 'synthetic stage cleanup blocked') { throw }
@@ -1001,6 +1475,15 @@ def codespaces_stamped_snapshot(tmp_path_factory, request):
     stage = tmp_path / "source"
     payload = stage / "plugins" / PLUGIN.name
     shutil.copytree(PLUGIN, payload, ignore=shutil.ignore_patterns("tests", "__pycache__"))
+    roster = stage / ".github" / "plugin" / "marketplace.json"
+    roster.parent.mkdir(parents=True)
+    roster.write_text(
+        json.dumps({
+            "name": "codespaces-snapshot-fixture",
+            "plugins": [{"name": PLUGIN.name, "source": f"plugins/{PLUGIN.name}"}],
+        }),
+        encoding="utf-8",
+    )
     if materialized:
         logs = mm.materialize_uv_editable_refs(stage, canonical_root=REPO)
         logs += mm.materialize_installer_engine_refs(stage, canonical_root=REPO)
@@ -1017,16 +1500,35 @@ def codespaces_stamped_snapshot(tmp_path_factory, request):
             ),
         ):
             shutil.copytree(REPO / "libs" / lib, stage / "libs" / lib)
+    probe = payload / "snapshot-copy-probe"
+    (probe / "nested" / "empty-directory").mkdir(parents=True)
+    (probe / "nested" / ".binary-entry").write_bytes(bytes(range(256)))
+    (probe / "empty-file").write_bytes(b"")
+    probe_before = snapshot_tree_manifest(probe)
+    library_inputs = {}
+    project = tomllib.loads((payload / "pyproject.toml").read_text())
+    for spec in project["tool"]["uv"]["sources"].values():
+        name = Path(spec["path"]).name
+        source = payload / "libs" / name
+        if not (source / "pyproject.toml").is_file():
+            source = stage / "libs" / name
+        before = snapshot_tree_manifest(source)
+        expected = before.copy()
+        normalized = (source / "pyproject.toml").read_bytes().replace(b", editable = true }", b" }")
+        expected["pyproject.toml"] = ("file", hashlib.sha256(normalized).hexdigest())
+        library_inputs[name] = source, before, expected
     env = _env(tmp_path)
-    fake_bin = tmp_path / "fake-bin"
-    fake_bin.mkdir()
-    _fake_uv(fake_bin)
     if os.name == "nt":
-        (fake_bin / "py.cmd").write_text(
-            f'@echo {sys._base_executable}\n@exit /b 0\n', encoding="utf-8",
-        )
+        # The windowless bootstrap consumer needs an executable, not py.cmd.
+        venv.EnvBuilder(with_pip=False, symlinks=False).create(tmp_path)
+        fake_bin = tmp_path / "Scripts"
     else:
+        fake_bin = tmp_path / "fake-bin"
+        fake_bin.mkdir()
+    _fake_uv(fake_bin)
+    if os.name != "nt":
         (fake_bin / "python3").symlink_to(sys._base_executable)
+        (fake_bin / "python").symlink_to(sys._base_executable)
     isolate_installer_environment(env, tmp_path / "home", fake_bin, PWSH)
     env["TEST_UV_MODE"] = "fatal"
     guard_installer_payload(payload)
@@ -1039,7 +1541,7 @@ def codespaces_stamped_snapshot(tmp_path_factory, request):
             ],
             env=env,
             cwd=tmp_path,
-            timeout=45,
+            timeout=installer_functional_timeout(45),
             max_stdout_bytes=1024 * 1024,
             max_stderr_bytes=1024 * 1024,
         )
@@ -1050,6 +1552,15 @@ def codespaces_stamped_snapshot(tmp_path_factory, request):
         )
     assert stamp.returncode == 0, stamp.stdout + stamp.stderr
     snapshot = Path((root / "payload-dir").read_text().strip())
+    receipt = snapshot / "snapshot-provenance.json"
+    assert receipt.is_file(), stamp.stdout + stamp.stderr
+    provenance = json.loads(receipt.read_text(encoding="utf-8"))
+    assert provenance["schema"] == "copilot-extensions.legacy-snapshot-source"
+    assert provenance["resolution"]["pluginId"] == PLUGIN.name
+    assert snapshot_tree_manifest(snapshot / "snapshot-copy-probe") == probe_before
+    for name, (source, before, expected) in library_inputs.items():
+        assert snapshot_tree_manifest(source) == before
+        assert snapshot_tree_manifest(snapshot / "libs" / name) == expected
     for ext in ("sh", "ps1"):
         assert (snapshot / "scripts" / f"installer-engine.{ext}").read_bytes() == (
             ENGINE / f"installer-engine.{ext}"
@@ -1145,7 +1656,7 @@ def test_codespaces_stamp_snapshot_is_standalone(codespaces_stamped_snapshot):
         ],
         env=env,
         cwd=tmp_path,
-        timeout=45,
+        timeout=installer_functional_timeout(45),
         max_stdout_bytes=1024 * 1024,
         max_stderr_bytes=1024 * 1024,
     )

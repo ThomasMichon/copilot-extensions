@@ -10,6 +10,7 @@ import subprocess
 import pytest
 
 
+@pytest.mark.timeout(60)
 def test_model_free_context_helpers():
     node = shutil.which("node")
     if node is None:
@@ -19,10 +20,12 @@ def test_model_free_context_helpers():
         [node, "--test", "--test-reporter=tap",
          str(test_directory / "skill-selection-spike.test.mjs"),
          str(test_directory / "skill-selection-contract.test.mjs"),
-         str(test_directory / "skill-selection-native.test.mjs")],
+         str(test_directory / "skill-selection-native.test.mjs"),
+         str(test_directory / "skill-selection-host.test.mjs")],
         capture_output=True,
         text=True,
-        timeout=30,
+        # Preserve child timeout diagnostics before pytest ends the wrapper.
+        timeout=45,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stdout + result.stderr
