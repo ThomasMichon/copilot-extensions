@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** isolated source branch; managed PR publication
 - **Created:** 2026-11-02
-- **Status:** Active
+- **Status:** Done
 - **Vision:** reviewer `declarative-reviewer-adoption`, `one-review-one-lineage`,
   `revision-driven-resume`, `cooperative-resolution`; PR
   `author-and-reviewer-service-consumers`, `honest-observation-and-partial-effects`
@@ -39,6 +39,11 @@ operational capabilities rather than turning examples into authority.
 - Existing reviewer-module, provider lifecycle, watch and workspace owners
   retain #1734/#7051/#6007/#9535. No runtime implementation or activation is
   transferred by this effort.
+- **Completion boundary:** This records the delivered guidance-only source
+  and proposes its archive. The existing #10205 post-effort source settlement
+  objective retains archive-PR review/merge, issue closure, effort-binding
+  release and actual owned-worktree finalization. This archive is not landed
+  merely because its proposed content says Done.
 
 ## Context
 
@@ -94,10 +99,14 @@ merge/finalize remain completion gates.
 - [x] Obtain coordinator confirmation of the archive-independent test correction.
 
 ### Phase 2 - Reviewed publication and source completion
-- [ ] Publish only after coordinator verification, through a normal PR to `dev`.
-- [ ] Address actual blocking findings/checks and verify the provider merge.
-- [ ] Record merged source outcome, resolve every Plan/Validation item, close
-  the guidance issue, archive this effort and settle/finalize the owned worktree.
+- [x] Publish only after coordinator verification, through a normal PR to `dev`.
+- [x] Address actual blocking findings/checks and verify the provider merge.
+- [x] Record the delivered source outcome and prepare the completed-source
+  archive proposal, retaining explicit post-effort settlement rather than
+  circularly claiming finalization.
+- [x] Deferred to `#10205`: Verify actual review/checks/merge of the archive
+  proposal, close the guidance issue, release the completed effort binding and
+  settle/finalize the owned source worktree through the existing managed gate.
 
 ## Validation Plan
 
@@ -110,14 +119,20 @@ merge/finalize remain completion gates.
   independently repeat the supervised 25-case packet with verified cleanup.
 - [x] Coordinator verifies the final removal of the contribution-effort dependency
   and repeats the targeted packet before authorizing publication.
-- [ ] Actual repository review/checks, merge, issue/effort and owned-resource
-  settlement are verified independently; no rollout is included.
+- [x] Actual initial-source review/checks/merge are independently verified;
+  managed source observation releases that terminal PR claim; no rollout is included.
+- [x] After archival, repeat the 25-case structural packet and validate changed
+  documentation/effort structure to prove no campaign-location dependency remains.
+- [x] Deferred to `#10205`: Verify actual archive-PR review/checks/merge, issue
+  closure and effort/resource/finalization settlement; no rollout is included.
 
 ## Proposal
 
-The approved narrow design passed final source verification and is authorized
-for managed publication to `dev`. New adopter configuration, adapter
-implementation and activation remain outside this effort.
+The guidance-only source landed in #10217. This follow-up proposes its completed
+record and archive; actual archive publication/merge and source settlement remain
+with #10205. New adopter configuration, adapter implementation and activation
+remain outside this effort. Source is merged/pending release; no promotion or
+installed availability is asserted.
 
 ## Journal
 
@@ -175,3 +190,29 @@ implementation and activation remain outside this effort.
   existing watch and authorized normal merge backup; source author retains
   source, fixes and PR/worktree custody. Review/merge and effort closure remain
   open until independently verified terminal evidence.
+
+### 2026-11-03 - Delivered source and archive proposal
+- #10217 merged to `dev` at `8ac275d5920ac5f7eee93d982c74057d809adba7`
+  on 2026-11-03 at 00:54:18 PST (08:54:18 UTC). The approved source head was
+  `1bd34a8796845f036a53ea816d2b7f7987f0b783`.
+- Coordinator independently confirmed current-head, non-dismissed Copilot
+  approval, complete empty review/comment pages and successful required checks.
+  Normal actor-authorized merge did not bypass blocking feedback or CI.
+- Source author observed the terminal PR through managed `pr-status`, which
+  released its own PR claim, then used managed `git sync` to build this
+  follow-up on the real merged `dev` source.
+- Delivered: the portable skill, three focused references, synthetic
+  charter/ledger, README discovery and 25 structural regression cases.
+  These qualify authored guidance only, not runtime, clean-room, live-provider,
+  release promotion, rollout or installed availability.
+- Existing #10205 explicitly retains post-effort source settlement under the
+  source author's actual public codename, including this proposal's real
+  review/merge and subsequent issue/binding/worktree closure. No new issue,
+  ownership transfer or fabricated terminal result is introduced.
+- The completed-source record and dated archive are proposed for a normal
+  follow-up PR. Actual archive merge, issue closure and finalization have not
+  occurred; no unrelated resource, service or installation is changed.
+- After moving the effort to its dated archive, the supervised structural packet
+  passed all 25 cases in 0.17 seconds with verified cleanup. Documentation
+  consistency, effort structure and staged whitespace guards passed. No plugin
+  test requires this effort's active or archived location.
