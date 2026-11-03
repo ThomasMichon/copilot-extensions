@@ -366,7 +366,7 @@ def _native_wheel_lock(**package_changes):
     return package
 
 
-def _wheel_pins(packages, target):
+def _wheel_pins(packages, target, **options):
     # JSON shapes feed the real TOML parser without inventing a second lock format.
     prefix = 'lock-version = "1.0"\ncreated-by = "uv"\nrequires-python = ">=3"\n'
     lines = [prefix]
@@ -384,7 +384,7 @@ def _wheel_pins(packages, target):
                 lines.append(key + "=" + json.dumps(value))
     content = "\n".join(lines).encode()
     assert locks.dependencies._toml_parser().loads(content.decode())
-    return locks._wheel_pins(content, target, time.monotonic() + 10)
+    return locks._wheel_pins(content, target, time.monotonic() + 10, **options)
 
 
 def test_native_exact_witness_carries_actual_filename_without_admitting_url(target):
@@ -392,6 +392,25 @@ def test_native_exact_witness_carries_actual_filename_without_admitting_url(targ
         "name": "fixture", "version": "1.0", "filename": "fixture-1.0-py3-none-any.whl",
         "sha256": "sha256:" + "a" * 64,
     }]
+
+
+def test_native_local_witness_requires_the_exact_held_wheel(target, tmp_path):
+    filename = "fixture-1.0-py3-none-any.whl"
+    held = tmp_path / filename
+    held.write_bytes(b"held")
+    other = tmp_path / "other" / filename
+    other.parent.mkdir()
+    other.write_bytes(b"held")
+    package = _native_wheel_lock()
+    package["wheels"][0]["url"] = held.as_uri()
+    with pytest.raises(ProfileError):
+        _wheel_pins([package], target)
+    assert _wheel_pins([package], target, local_wheels={filename: held})[0]["filename"] == filename
+    for url in (other.as_uri(), held.as_uri() + "?query=1",
+                "https://example.invalid/" + filename):
+        package["wheels"][0]["url"] = url
+        with pytest.raises(ProfileError):
+            _wheel_pins([package], target, local_wheels={filename: held})
 
 
 def test_native_witness_canonicalizes_duplicate_tag_alternatives_before_parsing(target, monkeypatch):

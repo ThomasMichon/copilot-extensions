@@ -4115,10 +4115,25 @@ python tools/core_native_delivery.py --source-checkout <repo> --source-commit <c
 It composes the selected Git source, checks it against the exact core
 manifest and first-party wheels, and projects the applicable core requirements
 for the running interpreter. `--native-lock` selects a bounded existing UV
-`pylock.toml`; its exact bytes remain held and rechecked. The command does not
-run dependency resolution: native UV redirects are not constrained by the wheel
-acquisition owner's origin allowlist. The lock supplies candidate filenames and
-digests, not approval or a download origin. The source-derived roots and
+`pylock.toml`; its exact bytes remain held and rechecked, and that mode does not
+run dependency resolution. The lock supplies candidate filenames and digests,
+not approval or a download origin.
+
+Alternatively, replace `--native-lock` with `--offline-wheel-pool <pool.json>`.
+The JSON object maps each wheel filename to its `sha256:<hex>` digest; the
+files must be alongside the object. The producer retains and inspects this
+bounded pool, then runs the retained native compiler with first-party exclusions
+and `--offline --no-index --no-cache` against a held index listing only that
+pool. Each selected local wheel URL must name the actual retained file and
+digest; those local URLs
+are not included in the output. The selection is only a closed-pool candidate:
+an incomplete pool can hide feed candidates, and it cannot prove upload age or
+approval. The result reports `selection: offline-wheel-pool`.
+
+Neither mode allows UV to resolve online: native UV redirects are not
+constrained by the wheel acquisition owner's origin allowlist. Both modes
+subsequently reacquire the selected external wheels through the same governed
+feed and origin guard. The source-derived roots and
 complete inspected closure still have to agree, and unused or first-party
 registry entries refuse. The existing feed
 owner requires an affirmatively trusted non-public HTTPS index and uses

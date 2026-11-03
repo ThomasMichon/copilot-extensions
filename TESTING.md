@@ -3328,9 +3328,14 @@ existing artifact-set validator; the emitted subject is still not approved.
 retained wheel and material custody, refusal paths and candidate delivery.
 Its native integration uses a disposable Git source, a selected native lock
 and a local TLS acquisition feed, including deep Windows output paths; it
-skips if Git or UV is unavailable.
-Separate controls check that dependency resolution is not invoked, preserve
-first-party exclusions and refuse before an unapproved redirect is contacted.
+skips if Git or UV is unavailable. Separate controls verify that selected-lock
+mode does not resolve, while an inspected held pool resolves only offline and
+then uses the same guarded feed. They exercise the actual pool CLI, altered and
+malformed pool refusal, retained local file identity, first-party exclusions
+and an unapproved redirect that must not be contacted.
+`tools/test_core_native_pool_index.py` injects an unlisted wheel during the
+real offline resolver call and verifies it cannot change the selection; it
+also checks deep Windows pool inputs.
 The fixture excludes inherited Git selectors, and Linux projection refuses
 the active Manager wheel mapping rather than silently changing its origin.
 The fixture feed and source do not qualify a production feed, release or

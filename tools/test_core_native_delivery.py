@@ -409,6 +409,287 @@ def _write_native_lock(path, state, files):
     return path
 
 
+def _write_offline_pool(tmp_path, wheel, digest):
+    pool = tmp_path / "offline-pool"
+    pool.mkdir()
+    (pool / FILENAME).write_bytes(wheel)
+    manifest = pool / "pool.json"
+    manifest.write_text(json.dumps({FILENAME: "sha256:" + digest}), encoding="utf-8")
+    return manifest
+
+
+def _offline_target(producer, deadline):
+    from packaging.tags import sys_tags
+
+    return {
+        "device": "cpu",
+        "environment": producer.native._query_marker_environment(Path(sys.executable), deadline=deadline),
+        "tags": [str(tag) for tag in sys_tags()],
+    }
+
+
+@pytest.mark.parametrize("both", [False, True])
+def test_core_delivery_requires_one_selection_before_source_read(tmp_path, both):
+    import core_native_delivery as producer
+
+    with pytest.raises(ProfileError, match="exactly one"):
+        producer.prepare_core_delivery(
+            tmp_path, "a" * 40, "a" * 40, tmp_path / "missing-manifest", tmp_path,
+            materials={}, material_paths={}, destination=tmp_path / "delivery.zip", uv="unused",
+            download_origins=(), deadline=time.monotonic() + 10, max_bytes=4 << 20,
+            native_lock=tmp_path / "lock" if both else None,
+            offline_wheel_pool=tmp_path / "pool" if both else None,
+        )
+
+
+def test_core_offline_pool_selects_without_network_then_uses_guarded_feed(
+    tmp_path, monkeypatch, tls_source,
+):
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("native uv is required")
+    producer, wheels, manifest, state, wheel, digest = tls_source
+    pool = _write_offline_pool(tmp_path, wheel, digest)
+    _configure_native_tls(tmp_path, monkeypatch, state)
+    original = producer.acquire_wheel_inputs
+
+    def guarded_acquisition(*args, **kwargs):
+        assert not state["requests"], "offline selection contacted the feed"
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(producer, "acquire_wheel_inputs", guarded_acquisition)
+    deadline = time.monotonic() + 120
+    target = _offline_target(producer, deadline)
+    destination = tmp_path / "offline-delivery.zip"
+    result = producer._build_from_snapshot(
+        tmp_path, {"source_commit": "a" * 40, "source_tree": "b" * 40, "main_head": "c" * 40},
+        json.dumps(manifest).encode(), wheels, target, uv=uv, download_origins=(),
+        materials={}, material_paths={}, destination=destination, deadline=deadline, max_bytes=4 << 20,
+        native_lock=None, offline_wheel_pool=pool,
+    )
+    assert result["approval"] == "unattested"
+    assert result["selection"] == "offline-wheel-pool"
+    with zipfile.ZipFile(destination) as delivery:
+        profile = json.loads(delivery.read("profile.json"))
+        assert b"file://" not in delivery.read("profile.json")
+        assert b"file://" not in delivery.read("delivery.json")
+    assert next(row for row in profile["wheels"] if row["name"] == "fixture")["sha256"] == "sha256:" + digest
+    assert [path for path, _ in state["requests"]] == ["/simple/fixture/", "/files/" + FILENAME]
+
+
+def test_core_offline_pool_rejects_changed_bytes_before_feed(tmp_path, monkeypatch, tls_source):
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("native uv is required")
+    producer, wheels, manifest, state, wheel, digest = tls_source
+    pool = _write_offline_pool(tmp_path, wheel, digest)
+    (pool.parent / FILENAME).write_bytes(wheel + b"changed")
+    _configure_native_tls(tmp_path, monkeypatch, state)
+    deadline = time.monotonic() + 120
+    target = _offline_target(producer, deadline)
+    destination = tmp_path / "rejected.zip"
+    with pytest.raises(ValueError, match="digest|size"):
+        producer._build_from_snapshot(
+            tmp_path, {"source_commit": "a" * 40, "source_tree": "b" * 40, "main_head": "c" * 40},
+            json.dumps(manifest).encode(), wheels, target, uv=uv, download_origins=(),
+            materials={}, material_paths={}, destination=destination, deadline=deadline, max_bytes=4 << 20,
+            native_lock=None, offline_wheel_pool=pool,
+        )
+    assert not destination.exists()
+    assert not state["requests"]
+
+
+def test_core_offline_pool_inspects_even_unused_wheels_before_resolving(
+    tmp_path, monkeypatch, tls_source,
+):
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("native uv is required")
+    producer, wheels, manifest, state, wheel, digest = tls_source
+    pool = _write_offline_pool(tmp_path, wheel, digest)
+    invalid = b"not a wheel archive"
+    unused = "unused-1.0-py3-none-any.whl"
+    (pool.parent / unused).write_bytes(invalid)
+    pool.write_text(json.dumps({
+        FILENAME: "sha256:" + digest,
+        unused: "sha256:" + hashlib.sha256(invalid).hexdigest(),
+    }))
+    _configure_native_tls(tmp_path, monkeypatch, state)
+    monkeypatch.setattr(
+        producer, "_compile_offline_pool",
+        lambda *_args, **_kwargs: pytest.fail("uninspected wheel reached the resolver"),
+    )
+    deadline = time.monotonic() + 120
+    target = _offline_target(producer, deadline)
+    with pytest.raises(PromotionArtifactError, match="invalid wheel archive"):
+        producer._build_from_snapshot(
+            tmp_path, {"source_commit": "a" * 40, "source_tree": "b" * 40, "main_head": "c" * 40},
+            json.dumps(manifest).encode(), wheels, target, uv=uv, download_origins=(),
+            materials={}, material_paths={}, destination=tmp_path / "rejected.zip",
+            deadline=deadline, max_bytes=4 << 20, native_lock=None, offline_wheel_pool=pool,
+        )
+    assert not state["requests"]
+
+
+def test_core_offline_pool_refuses_an_ambient_flat_index_before_resolving(
+    tmp_path, monkeypatch, tls_source,
+):
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("native uv is required")
+    producer, wheels, manifest, state, wheel, digest = tls_source
+    pool = _write_offline_pool(tmp_path, wheel, digest)
+    _configure_native_tls(tmp_path, monkeypatch, state)
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    monkeypatch.setenv("UV_FIND_LINKS", str(foreign))
+    monkeypatch.setattr(
+        producer, "_compile_offline_pool",
+        lambda *_args, **_kwargs: pytest.fail("ambient flat index reached the resolver"),
+    )
+    deadline = time.monotonic() + 120
+    target = _offline_target(producer, deadline)
+    with pytest.raises(producer.native.dependencies.DependencyPolicyError, match="flat-index"):
+        producer._build_from_snapshot(
+            tmp_path, {"source_commit": "a" * 40, "source_tree": "b" * 40, "main_head": "c" * 40},
+            json.dumps(manifest).encode(), wheels, target, uv=uv, download_origins=(),
+            materials={}, material_paths={}, destination=tmp_path / "rejected.zip",
+            deadline=deadline, max_bytes=4 << 20, native_lock=None, offline_wheel_pool=pool,
+        )
+    assert not state["requests"]
+
+
+def test_core_offline_pool_refuses_unheld_directory_entries_before_resolving(
+    tmp_path, monkeypatch, tls_source,
+):
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("native uv is required")
+    producer, wheels, manifest, state, wheel, digest = tls_source
+    pool = _write_offline_pool(tmp_path, wheel, digest)
+    _configure_native_tls(tmp_path, monkeypatch, state)
+    original = producer._inspect_offline_pool
+
+    def add_unheld(snapshot, **options):
+        original(snapshot, **options)
+        (next(iter(snapshot.paths.values())).parent / "unheld.whl").write_bytes(b"unheld")
+
+    monkeypatch.setattr(producer, "_inspect_offline_pool", add_unheld)
+    monkeypatch.setattr(
+        producer, "run_owned",
+        lambda *_args, **_kwargs: pytest.fail("unheld pool entry reached the resolver"),
+    )
+    deadline = time.monotonic() + 120
+    target = _offline_target(producer, deadline)
+    with pytest.raises(ProfileError, match="pool directory"):
+        producer._build_from_snapshot(
+            tmp_path, {"source_commit": "a" * 40, "source_tree": "b" * 40, "main_head": "c" * 40},
+            json.dumps(manifest).encode(), wheels, target, uv=uv, download_origins=(),
+            materials={}, material_paths={}, destination=tmp_path / "rejected.zip",
+            deadline=deadline, max_bytes=4 << 20, native_lock=None, offline_wheel_pool=pool,
+        )
+    assert not state["requests"]
+
+
+def test_core_offline_pool_does_not_resolve_missing_wheels_from_feed(
+    tmp_path, monkeypatch, tls_source,
+):
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("native uv is required")
+    producer, wheels, manifest, state, _wheel, _digest = tls_source
+    pool = tmp_path / "offline-pool"
+    pool.mkdir()
+    unused = _wheel_bytes("unused", "1.0")
+    filename = "unused-1.0-py3-none-any.whl"
+    (pool / filename).write_bytes(unused)
+    pool_manifest = pool / "pool.json"
+    pool_manifest.write_text(json.dumps({filename: "sha256:" + hashlib.sha256(unused).hexdigest()}))
+    _configure_native_tls(tmp_path, monkeypatch, state)
+    deadline = time.monotonic() + 120
+    target = _offline_target(producer, deadline)
+    destination = tmp_path / "rejected.zip"
+    with pytest.raises(ProfileError, match="offline wheel-pool selection failed"):
+        producer._build_from_snapshot(
+            tmp_path, {"source_commit": "a" * 40, "source_tree": "b" * 40, "main_head": "c" * 40},
+            json.dumps(manifest).encode(), wheels, target, uv=uv, download_origins=(),
+            materials={}, material_paths={}, destination=destination, deadline=deadline, max_bytes=4 << 20,
+            native_lock=None, offline_wheel_pool=pool_manifest,
+        )
+    assert not destination.exists()
+    assert not state["requests"]
+
+
+def test_core_offline_pool_still_rejects_unapproved_feed_redirect(
+    tmp_path, monkeypatch, tls_source, local_tls_feed,  # noqa: F811
+):
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("native uv is required")
+    producer, wheels, manifest, state, wheel, digest = tls_source
+    pool = _write_offline_pool(tmp_path, wheel, digest)
+    foreign = local_tls_feed(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
+    foreign["routes"]["/foreign.whl"] = (200, {}, wheel)
+    state["routes"]["/files/" + FILENAME] = (
+        302, {"Location": foreign["origin"] + "/foreign.whl"}, b"",
+    )
+    _configure_native_tls(tmp_path, monkeypatch, state)
+    deadline = time.monotonic() + 120
+    target = _offline_target(producer, deadline)
+    destination = tmp_path / "rejected.zip"
+    with pytest.raises(ValueError):
+        producer._build_from_snapshot(
+            tmp_path, {"source_commit": "a" * 40, "source_tree": "b" * 40, "main_head": "c" * 40},
+            json.dumps(manifest).encode(), wheels, target, uv=uv, download_origins=(),
+            materials={}, material_paths={}, destination=destination, deadline=deadline, max_bytes=4 << 20,
+            native_lock=None, offline_wheel_pool=pool,
+        )
+    assert not destination.exists()
+    assert [path for path, _ in state["requests"]] == ["/simple/fixture/", "/files/" + FILENAME]
+    assert not foreign["requests"]
+
+
+def test_core_offline_pool_actual_cli(tmp_path, monkeypatch, tls_source):
+    uv, git = shutil.which("uv"), shutil.which("git")
+    if uv is None or git is None:
+        pytest.skip("native uv and git are required")
+    producer, wheels, manifest, state, wheel, digest = tls_source
+    _fixture_git(tmp_path, git, "init", "-q")
+    _fixture_git(tmp_path, git, "add", "-A")
+    _fixture_git(tmp_path, git, "commit", "-qm", "fixture source")
+    commit = _fixture_git(tmp_path, git, "rev-parse", "HEAD")
+    manifest_path = tmp_path / "selected-core.json"
+    manifest_path.write_bytes(json.dumps(manifest).encode())
+    pool = _write_offline_pool(tmp_path, wheel, digest)
+    _configure_native_tls(tmp_path, monkeypatch, state)
+    home = tmp_path / "isolated-home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("LOCALAPPDATA", str(home / "local"))
+    materials = tmp_path / "materials.json"
+    materials.write_text("{}", encoding="utf-8")
+    destination = tmp_path / "command-pool-delivery.zip"
+    command = [
+        sys.executable, "-I", str(Path(producer.__file__)),
+        "--source-checkout", str(tmp_path), "--source-commit", commit, "--main-head", commit,
+        "--core-manifest", str(manifest_path), "--wheel-dir", str(wheels),
+        "--materials", str(materials), "--material-dir", str(tmp_path),
+        "--offline-wheel-pool", str(pool), "--uv", uv, "--output", str(destination),
+        "--timeout", "120", "--max-bytes", str(4 << 20),
+    ]
+    result = subprocess.run(
+        command, env=dict(os.environ), capture_output=True, text=True, timeout=140, check=False,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["selection"] == "offline-wheel-pool"
+    with zipfile.ZipFile(destination) as delivery:
+        profile = json.loads(delivery.read("profile.json"))
+    assert next(row for row in profile["wheels"] if row["name"] == "fixture")["sha256"] == "sha256:" + digest
+    assert [path for path, _ in state["requests"]] == ["/simple/fixture/", "/files/" + FILENAME]
+
+
 @pytest.mark.parametrize("deep", [False, True])
 def test_core_delivery_uses_selected_native_lock_against_local_tls(
     tmp_path, monkeypatch, tls_source, local_tls_feed, deep,  # noqa: F811
