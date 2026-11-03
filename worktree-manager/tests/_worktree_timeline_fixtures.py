@@ -166,6 +166,13 @@ def main():
         emit(data["follow"])
         current=data["heartbeat"]
         while True:
+            behavior=ROOT/"feed-behavior"
+            mode=behavior.read_text().strip() if behavior.exists() else "normal"
+            if mode=="disconnect":
+                return
+            if mode=="timeout":
+                time.sleep(.05)
+                continue
             delivery=ROOT/"push.json"
             if delivery.exists():
                 value=json.loads(delivery.read_text())

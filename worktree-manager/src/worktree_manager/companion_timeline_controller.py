@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncGenerator, Callable, Mapping
 from functools import partial
 from typing import Protocol
@@ -13,14 +14,19 @@ from .companion_timeline_contract import (
 )
 
 Observation = TimelineSnapshot | LiveDelta | TimelineGap
+logger = logging.getLogger(__name__)
 
 
 class TimelineSourceError(RuntimeError):
     """An admitted source failed without changing another source's authority."""
 
 
+class TimelineCleanupError(TimelineSourceError):
+    """An adapter could not retire an owned resource; replacement must stay fenced."""
+
+
 class TimelineSource(Protocol):
-    """Adapters stop reads cooperatively and await their owned bounded cleanup."""
+    """Adapters report read failures as source errors, retirement failures as cleanup errors."""
 
     def observe(
         self, token: SourceToken, *, stop: asyncio.Event,
@@ -140,13 +146,18 @@ class TimelineController:
                     self._observation(value)
             if self._current(token, revision):
                 self._error(token, "Unavailable: timeline source ended; explicit reconciliation required.")
+        except TimelineCleanupError:
+            raise
         except (TimelineSourceError, TimelineContractError, OSError, TimeoutError) as exc:
             if self._current(token, revision):
                 self._error(token, f"Timeline source error: {exc}")
-            else:
-                raise
         finally:
-            await stream.aclose()
+            try:
+                await stream.aclose()
+            except TimelineCleanupError:
+                raise
+            except (OSError, ValueError, RuntimeError) as exc:
+                raise TimelineCleanupError(f"timeline stream retirement failed: {exc}") from exc
 
     def request_history(self, token: SourceToken, before: SourcePosition) -> bool:
         """Refuse repeated demand while its same-source page is still running."""
@@ -197,11 +208,11 @@ class TimelineController:
                 self._deliver_gap(value)
             else:
                 self._page(value)
+        except TimelineCleanupError:
+            raise
         except (TimelineSourceError, TimelineContractError, OSError, TimeoutError) as exc:
             if self._current(token, revision):
                 self._error(token, f"Timeline history error: {exc}")
-            else:
-                raise
 
     async def _stop(self) -> None:
         if self._teardown is None:
@@ -219,7 +230,7 @@ class TimelineController:
                 break
             except asyncio.CancelledError as exc:
                 if teardown.cancelled():
-                    raise TimelineSourceError("timeline adapter teardown was interrupted") from exc
+                    raise TimelineCleanupError("timeline adapter teardown was interrupted") from exc
                 cancelled = exc
         self._pages.clear()
         self._readers.clear()
@@ -227,8 +238,10 @@ class TimelineController:
         self._reader_stops.clear()
         self._teardown = None
         for outcome in outcomes:
+            if isinstance(outcome, TimelineCleanupError):
+                raise TimelineCleanupError(f"timeline adapter cleanup failed: {outcome}") from outcome
             if isinstance(outcome, BaseException) and not isinstance(outcome, asyncio.CancelledError):
-                raise TimelineSourceError(f"timeline adapter cleanup failed: {outcome}") from outcome
+                logger.error("Retired timeline adapter failed outside resource cleanup: %s", outcome)
         if cancelled is not None:
             raise cancelled
 

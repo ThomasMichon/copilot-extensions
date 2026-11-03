@@ -9,13 +9,16 @@ from textual.widgets import Static
 
 from .agenda_contract import AgendaUnavailable
 from .companion_timeline_contract import (
-    HistoryPage, LiveDelta, Provider, SourceToken,
-    TimelineContractError, TimelineGap, TimelineSnapshot,
+    Availability, HistoryPage, LiveDelta, MAX_WINDOW_BYTES, Provider, SourceToken,
+    TimelineContractError, TimelineEvent, TimelineGap, TimelineSnapshot,
 )
-from .companion_timeline_controller import TimelineController, TimelineSourceError
-from .companion_timeline_model import TimelineWindow
+from .companion_timeline_controller import TimelineCleanupError, TimelineController, TimelineSourceError
+from .companion_timeline_model import MAX_SOURCE_SCOPES, TimelineWindow
 from .companion_timeline_widget import CompanionTimelinePanel, SubwayTimeline
 from .companion_worktree_source import WorktreeTimelineSource
+
+MAX_RETAINED_EVIDENCE_BYTES = 2 * MAX_WINDOW_BYTES
+MAX_RETAINED_WINDOWS = MAX_SOURCE_SCOPES
 
 
 class TimelineAttachment:
@@ -27,6 +30,9 @@ class TimelineAttachment:
         self._lock = asyncio.Lock()
         self._closed = False
         self._cleanup_error: str | None = None
+        self._cleanup_failure: TimelineCleanupError | None = None
+        self._retained_windows: tuple[TimelineWindow, ...] = ()
+        self._retained_bytes = 0
 
     def stop_now(self) -> None:
         self._revision += 1
@@ -57,15 +63,48 @@ class TimelineAttachment:
     def closed(self) -> bool:
         return self._closed
 
-    async def set_selection(self, selection: tuple[str, str, str] | None) -> None:
+    @property
+    def retained_windows(self) -> tuple[TimelineWindow, ...]:
+        """Exhausted viewer evidence retained separately, never used as active facts."""
+        return self._retained_windows
+
+    def _retain_exhausted(self, window: TimelineWindow) -> None:
+        size = window.encoded_size + window._integrity_size()
+        if (
+            len(self._retained_windows) >= MAX_RETAINED_WINDOWS
+            or self._retained_bytes + size > MAX_RETAINED_EVIDENCE_BYTES
+        ):
+            raise TimelineSourceError("Retained evidence budget is full; no evidence or baseline was discarded.")
+        self._retained_windows += (window,)
+        self._retained_bytes += size
+
+    def _validate_retained(self, token: SourceToken, events: tuple[TimelineEvent, ...]) -> None:
+        for event in events:
+            digest = None
+            for window in self._retained_windows:
+                state = window.sources.get(token.identity.source_key)
+                if state is None or state.token.identity != token.identity:
+                    continue
+                known = window._proofs.get(event.ref)
+                if known is not None:
+                    digest = window._digest(event) if digest is None else digest
+                    if known != digest:
+                        raise TimelineSourceError("An immutable event conflicts with retained exhausted-window evidence.")
+
+    async def set_selection(
+        self, selection: tuple[str, str, str] | None, *, reconcile: bool = False,
+    ) -> None:
         self.stop_now()
         revision = self._revision
+        previous_window = self.panel.window
+        viewport = self.panel.capture_viewport() if selection is not None and self._renderable() else None
         async with self._lock:
             if self.controller is not None:
                 try:
                     await self.controller.close()
-                except (TimelineSourceError, OSError) as exc:
+                except TimelineCleanupError as exc:
                     self._cleanup_error = str(exc)
+                    self._cleanup_failure = exc
                     self._error(None, "Owned timeline cleanup failed: " + self._cleanup_error)
                     return
                 self.controller = None
@@ -83,6 +122,26 @@ class TimelineAttachment:
                 initial = await source.prepare(revision, stop=stop)
                 if revision != self._revision or stop.is_set() or not self._renderable():
                     return
+                if (
+                    not isinstance(initial, TimelineSnapshot)
+                    or initial.token.request_epoch != revision
+                    or initial.token.identity.provider is not Provider.WORKTREES
+                    or (initial.token.identity.project, initial.token.identity.worktree_id,
+                        initial.token.identity.head_session_id) != selection
+                ):
+                    raise TimelineContractError("prepared snapshot changed the active selection or request epoch")
+                window = self.panel.window
+                self._validate_retained(initial.token, initial.events)
+                key = initial.token.identity.source_key
+                if reconcile and window.reconciliation_required and initial.availability is not Availability.OBSERVED:
+                    raise TimelineContractError("reconciliation requires fresh observed owner facts")
+                if (
+                    reconcile and key in window.reconciliation_required
+                    and window.sources[key].token.identity == initial.token.identity
+                ):
+                    candidate = window.reconciliation_window(initial)
+                    self._retain_exhausted(window)
+                    self.panel.replace_window(candidate, viewport=viewport)
                 if any(
                     (state.token.identity.project, state.token.identity.worktree_id) != (project, worktree)
                     for state in self.panel.window.sources.values()
@@ -98,6 +157,8 @@ class TimelineAttachment:
                 def observation(value: TimelineSnapshot | LiveDelta | TimelineGap) -> None:
                     if not current():
                         return
+                    if not isinstance(value, TimelineGap):
+                        self._validate_retained(value.token, value.events)
                     result = (
                         self.panel.apply_snapshot(value) if isinstance(value, TimelineSnapshot)
                         else self.panel.apply_delta(value) if isinstance(value, LiveDelta)
@@ -108,6 +169,7 @@ class TimelineAttachment:
 
                 def page(value: HistoryPage) -> None:
                     if current():
+                        self._validate_retained(value.token, value.events)
                         result = self.panel.prepend_page(value)
                         if not result.applied:
                             raise TimelineSourceError(result.reason)
@@ -128,9 +190,24 @@ class TimelineAttachment:
             except asyncio.CancelledError:
                 if not stop.is_set():
                     raise
+            except TimelineCleanupError as exc:
+                self._cleanup_error, self._cleanup_failure = str(exc), exc
+                if revision == self._revision:
+                    self._error(None, "Owned timeline cleanup failed: " + self._cleanup_error)
             except (TimelineSourceError, TimelineContractError, AgendaUnavailable, OSError, ValueError) as exc:
                 if revision == self._revision:
                     self._error(None, str(exc))
+                    if viewport is not None:
+                        saved_viewport = viewport
+
+                        def restore() -> None:
+                            if (
+                                revision == self._revision and self._renderable()
+                                and self.panel.window is previous_window
+                            ):
+                                self.panel.restore_viewport(saved_viewport)
+
+                        self.panel.call_after_refresh(restore)
 
     def history(self, message: SubwayTimeline.HistoryRequested) -> None:
         if self.controller is None:
@@ -151,4 +228,4 @@ class TimelineAttachment:
                 await self.controller.close()
                 self.controller = None
             if self._cleanup_error is not None:
-                raise TimelineSourceError("Owned timeline cleanup failed: " + self._cleanup_error)
+                raise TimelineCleanupError("Owned timeline cleanup failed: " + self._cleanup_error) from self._cleanup_failure

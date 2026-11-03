@@ -510,7 +510,7 @@ class MuxCompanionApp(App):
         self._data.agenda_error = "subscription closed"
 
     @work(exclusive=True)
-    async def _reload(self) -> None:
+    async def _reload(self, *, reconcile_timeline: bool = False) -> None:
         await self._timeline_attachment.set_selection(None)
         self._read_cancel.set()
         self._agenda_cancel.set()
@@ -552,7 +552,7 @@ class MuxCompanionApp(App):
         self._poll_attention(force=True)
         self._start_agenda()
         if self.query_one("#views", TabbedContent).active == "timeline-tab":
-            self._sync_timeline()
+            self._sync_timeline(reconcile=reconcile_timeline)
         if self.query_one("#views", TabbedContent).active == "topology-tab":
             self._load_observations()
 
@@ -630,12 +630,12 @@ class MuxCompanionApp(App):
     def on_subway_timeline_reconciliation_requested(
         self, message: SubwayTimeline.ReconciliationRequested,
     ) -> None:
-        self._timeline_attachment.unavailable(
-            "Explicit owner reconciliation requires Refresh; integrity evidence was retained.",
-        )
+        state = self._timeline_panel.window.sources.get(message.token.identity.source_key)
+        if state is not None and state.token == message.token and state.position == message.position:
+            self.action_refresh()
 
     @work(group="timeline-selection")
-    async def _sync_timeline(self) -> None:
+    async def _sync_timeline(self, *, reconcile: bool = False) -> None:
         if self._timeline_attachment.closed or not self._timeline_panel.query(SubwayTimeline):
             return
         data = self._data
@@ -656,7 +656,7 @@ class MuxCompanionApp(App):
                 self._timeline_attachment.unavailable(
                     "Selected project/worktree and exactly one canonical head are required.",
                 )
-        await self._timeline_attachment.set_selection(selection)
+        await self._timeline_attachment.set_selection(selection, reconcile=reconcile)
 
     @work(exclusive=True, group="session-observations")
     async def _load_observations(self) -> None:
@@ -750,7 +750,7 @@ class MuxCompanionApp(App):
     def action_refresh(self) -> None:
         if not self._loading:
             self._action_message = None
-            self._reload()
+            self._reload(reconcile_timeline=True)
 
     @work(exclusive=True, group="navigation")
     async def _navigate(self) -> None:

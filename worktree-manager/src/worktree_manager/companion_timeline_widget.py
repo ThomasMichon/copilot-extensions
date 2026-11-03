@@ -123,18 +123,22 @@ class SubwayTimeline(ScrollView, can_focus=True):
         self._padding = max(0, self.size.height - self.layout_index.height)
         if anchor_row is not None:
             self._padding = max(self._padding, screen_row - anchor_row)
-        self.virtual_size = Size(
-            max(1, self.size.width), max(self.size.height, self.layout_index.height + self._padding),
-        )
         self._layout_generation += 1
         self._clear_cache()
         self._programmatic = True
         try:
+            self.virtual_size = Size(
+                max(1, self.size.width), max(self.size.height, self.layout_index.height + self._padding),
+            )
             if self.window.follow_live:
                 self.scroll_end(animate=False, immediate=True, x_axis=False)
             elif anchor_row is not None:
                 self.scroll_to(
                     y=max(0, anchor_row + self._padding - screen_row), animate=False, immediate=True,
+                )
+            else:
+                self.scroll_to(
+                    y=min(self.scroll_offset.y, self.max_scroll_y), animate=False, immediate=True,
                 )
         finally:
             self._programmatic = False
@@ -348,13 +352,28 @@ class CompanionTimelinePanel(Vertical):
     def bind_source(self, token: SourceToken) -> WindowResult:
         return self.query_one(SubwayTimeline).bind_source(token)
 
-    def replace_window(self, window: TimelineWindow) -> None:
-        """Replace only for an explicitly different selected worktree."""
-        self.window = window
+    def capture_viewport(self) -> tuple[ViewportAnchor | None, int]:
         timeline = self.query_one(SubwayTimeline)
+        anchor = timeline.capture_anchor()
+        return anchor, timeline._anchor_character_offset
+
+    def restore_viewport(self, viewport: tuple[ViewportAnchor | None, int]) -> None:
+        timeline = self.query_one(SubwayTimeline)
+        anchor, timeline._anchor_character_offset = viewport
+        timeline._reflow(anchor)
+
+    def replace_window(
+        self, window: TimelineWindow, *, viewport: tuple[ViewportAnchor | None, int] | None = None,
+    ) -> None:
+        """Install an admitted window, retaining a browsing anchor when still present."""
+        timeline = self.query_one(SubwayTimeline)
+        anchor, offset = self.capture_viewport() if viewport is None else viewport
+        selected = timeline.selected
+        self.window = window
         timeline.window = window
-        timeline.selected = None
-        timeline._reflow(None)
+        timeline._anchor_character_offset = offset
+        timeline.selected = selected if selected is not None and window.event(selected) is not None else None
+        timeline._reflow(anchor)
         self._update_context()
 
     def apply_snapshot(self, snapshot: TimelineSnapshot) -> WindowResult:

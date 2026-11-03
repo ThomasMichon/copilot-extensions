@@ -64,6 +64,18 @@ reader and pages, and reopening obtains a fresh snapshot. One worktree reader
 fits the controller's three-provider composition; no panel fleet poller, agenda
 or Bridge timeline adapter is added. Source support is not installed/native
 qualification or rollout.
+Integrity-budget exhaustion does not discard evidence on ordinary reconnect or
+tab reopening. With Timeline visible, explicit Refresh or Reconcile source first
+obtains a fresh owner-qualified snapshot and admits a separate bounded observation
+window before replacing the exhausted one. Failed, unqualified, stale or
+conflicting snapshots leave the old proof fence and cached rows intact. A retained
+browsing anchor and unread state carry into the new window where available.
+This replaces ephemeral viewer evidence, not owner history or work/resource budgets.
+Exhausted windows remain separately inspectable on the attachment for the
+observer's lifetime, never as active facts. Retention is bounded to 32 windows
+and 16 MiB of encoded rows plus integrity-evidence accounting; reaching either
+bound refuses another baseline rather than silently evicting evidence. This is
+in-memory viewer retention, not durable archival.
 Within the timeline canvas, arrow/PageUp/PageDown scrolling selects a visible
 event and Enter expands it; mouse selection is highlighted. Home browses the
 oldest loaded event and requests bounded older history. End/Follow returns
@@ -76,6 +88,12 @@ Timeline adapters receive independent request-local stop events. Teardown waits
 for their bounded cleanup, including a naturally completed read already being
 finalized, without canceling adapter tasks or discarding their handles. Cleanup
 errors remain explicit after selection retirement.
+Disconnects, frame deadlines and invalid source replies are read failures:
+after successful resource retirement, Refresh or tab reopening can subscribe
+again. Only a typed failure of owned process/pipe retirement latches cleanup
+and blocks replacement; ordinary transport failures do not poison that gate.
+Adapters normalize read failures into `TimelineSourceError` and tag failed
+owned-resource retirement with `TimelineCleanupError`, including during stop.
 The [implementation and validation plan](../efforts/active/mux-companion-manual-cutover-diagnostics/sidecar-live-timeline.md)
 retains the provider, joined-app, native-client and installed-adoption gates.
 

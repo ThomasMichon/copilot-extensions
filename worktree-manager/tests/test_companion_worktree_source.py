@@ -14,6 +14,7 @@ from textual.widgets import Static, TabbedContent
 
 from worktree_manager import engine_client as ec
 from worktree_manager import mux_companion as companion
+from worktree_manager import agenda_transport
 from worktree_manager.companion_client import cancellable_read_runner
 from worktree_manager.companion_timeline_widget import SubwayTimeline
 from worktree_manager.companion_timeline_contract import (
@@ -403,3 +404,58 @@ def test_actual_record_projection_resident_cli_and_textual_private_join(tmp_path
             assert not any(thread.name.startswith("agenda-feed-") for thread in threads())
 
         asyncio.run(check())
+
+
+@pytest.mark.parametrize("fault", ["disconnect", "timeout"])
+@pytest.mark.parametrize("recovery", ["refresh", "reopen"])
+def test_owned_transport_failure_can_recover_after_reader_retirement(configured, fault, recovery) -> None:
+    root, _calls = configured
+
+    async def check() -> None:
+        app = companion.MuxCompanionApp(cwd=str(root))
+        async with app.run_test(size=(100, 36)) as pilot:
+            await until(pilot, lambda: not app._loading)
+            views = app.query_one("#views", TabbedContent)
+            views.active = "timeline-tab"
+            timeline = app.query_one(SubwayTimeline)
+            await until(pilot, lambda: len(timeline.window.events) == 20 and (root / "feed-pid").exists())
+            controller = app._timeline_attachment.controller
+            assert controller is not None
+            reader = next(iter(controller._readers.values()))
+            old_token = next(iter(timeline.window.sources.values())).token
+            (root / "feed-behavior").write_text(fault, encoding="utf-8")
+            await asyncio.wait_for(
+                asyncio.gather(reader, return_exceptions=True), agenda_transport.IDLE_TIMEOUT + 2,
+            )
+            await pilot.pause()
+            diagnostic = "disconnected" if fault == "disconnect" else "frame deadline"
+            assert diagnostic in status(app)
+            assert not any(thread.name.startswith("agenda-feed-") for thread in threads())
+            assert not_alive(int((root / "feed-pid").read_text()))
+            (root / "feed-behavior").write_text("normal", encoding="utf-8")
+            if recovery == "refresh":
+                assert await pilot.click("#refresh-btn")
+            else:
+                views.active = "summary-tab"
+                await until(pilot, lambda: app._timeline_attachment.controller is None
+                            or app._timeline_attachment._cleanup_error is not None)
+                assert app._data.error is None
+                views.active = "timeline-tab"
+            try:
+                await until(pilot, lambda: (
+                    app._timeline_attachment.controller is not None
+                    and app._timeline_attachment.controller.reader_count == 1
+                    and next(iter(timeline.window.sources.values())).token.request_epoch > old_token.request_epoch
+                    and next(iter(timeline.window.sources.values())).availability is Availability.OBSERVED
+                ))
+            except AssertionError as exc:
+                raise AssertionError({
+                    "fault": fault, "recovery": recovery, "status": status(app),
+                    "cleanup_error": app._timeline_attachment._cleanup_error,
+                }) from exc
+            assert app._timeline_attachment._cleanup_error is None
+            await pilot.press("escape")
+        assert not app.is_running
+        assert not any(thread.name.startswith("agenda-feed-") for thread in threads())
+
+    asyncio.run(check())

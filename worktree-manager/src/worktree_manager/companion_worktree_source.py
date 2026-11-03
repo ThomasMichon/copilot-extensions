@@ -17,7 +17,8 @@ from .companion_timeline_contract import (
     HistoryPage, LiveDelta, SourcePosition, SourceToken, TimelineContractError,
     TimelineGap, TimelineSnapshot, decode_wire_frame,
 )
-from .companion_timeline_controller import Observation
+from .companion_timeline_controller import Observation, TimelineCleanupError
+from .engine_process import EngineCleanupError
 from .companion_worktree_codec import (
     FEED_CAPABILITY, HISTORY_CAPABILITY, OwnerReadError, WorktreeCodec, encoded, generation,
 )
@@ -125,6 +126,8 @@ class OwnerCommands:
         argv = [*base[:-2], "-I", "-B", "-c", _PROBE, self.project, self.worktree, self.session]
         try:
             result = cancellable_read_runner(cancelled, cwd=self.cwd)(argv, transport.STARTUP_TIMEOUT)
+        except EngineCleanupError as exc:
+            raise TimelineCleanupError(str(exc)) from exc
         except (TimeoutError, subprocess.TimeoutExpired) as exc:
             raise OwnerReadError("timeout", "passive observation probe exceeded its deadline") from exc
         if cancelled.is_set():
@@ -187,7 +190,14 @@ class OwnerCommands:
         return args
 
     def frames(self, cancelled: Event, **options: Any) -> Generator[dict, None, None]:
-        return transport.command_frames(self.argv(**options), cancelled=cancelled, cwd=self.cwd)
+        try:
+            yield from transport.command_frames(self.argv(**options), cancelled=cancelled, cwd=self.cwd)
+        except EngineCleanupError as exc:
+            raise TimelineCleanupError(str(exc)) from exc
+        except transport.AgendaUnavailable as exc:
+            raise OwnerReadError(exc.code or "unavailable", str(exc)) from exc
+        except ValueError as exc:
+            raise OwnerReadError("invalid-response", str(exc)) from exc
 
     def point(self, cancelled: Event, **options: Any) -> dict:
         stream = self.frames(cancelled, **options)
@@ -297,6 +307,8 @@ class WorktreeTimelineSource:
                 self._cursor = codec.position(token, cursor)
                 if value["availability"] == "head-changed":
                     return
+        except ValueError as exc:
+            raise OwnerReadError("invalid-response", str(exc)) from exc
         finally:
             cancelled.set()
             await settled(asyncio.create_task(asyncio.to_thread(stream.close)))
@@ -310,10 +322,13 @@ class WorktreeTimelineSource:
         cancelled = Event()
 
         def read() -> HistoryPage | TimelineGap:
-            raw = self.commands.point(
-                cancelled, history=True, source_generation=token.identity.generation, before=before.cursor,
-            )
-            value = codec.decode(encoded(raw).encode("utf-8"))
-            return codec.page(value, token, before)
+            try:
+                raw = self.commands.point(
+                    cancelled, history=True, source_generation=token.identity.generation, before=before.cursor,
+                )
+                value = codec.decode(encoded(raw).encode("utf-8"))
+                return codec.page(value, token, before)
+            except ValueError as exc:
+                raise OwnerReadError("invalid-response", str(exc)) from exc
 
         return await owned(read, stop, cancelled)

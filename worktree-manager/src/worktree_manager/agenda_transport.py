@@ -19,10 +19,10 @@ from agent_procutil import contained_test_mode, detached_kwargs, spawn_sync_in_k
 
 from . import engine_client as ec
 from .companion_client import cancellable_read_runner
-from .agenda_contract import bounded_json
+from .engine_process import EngineCleanupError, cleanup_phase
 from .engine_environment import _engine_environment
 from .engine_posix_process import _OWNER, read_completion_receipt
-from .agenda_contract import AgendaUnavailable, CONTRACT_VERSIONS, MAX_FRAME_BYTES, _TRANSIENT_ERRORS
+from .agenda_contract import AgendaUnavailable, CONTRACT_VERSIONS, MAX_FRAME_BYTES, _TRANSIENT_ERRORS, bounded_json
 
 STARTUP_TIMEOUT = 5.0
 IDLE_TIMEOUT = 5.0
@@ -242,15 +242,16 @@ def _owned_process(argv: list[str], cwd: str):
                 owner.stdout, argv=argv, timeout=None, cancelled=stopped,
             )
         finally:
-            try:
-                os.killpg(owner.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            owner.wait(timeout=5)
-            owner.stdin.close()
-            owner.stdout.close()
-            owner.stderr.close()
-            output.close()
+            with cleanup_phase():
+                try:
+                    os.killpg(owner.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                owner.wait(timeout=5)
+                owner.stdin.close()
+                owner.stdout.close()
+                owner.stderr.close()
+                output.close()
     else:
         process, job = spawn_sync_in_kill_on_close_job(
             argv, require_job=os.name == "nt", allow_breakaway=False,
@@ -270,13 +271,14 @@ def _owned_process(argv: list[str], cwd: str):
 
             yield process.stdout, process.stderr, completion
         finally:
-            if job is not None:
-                job.close()
-            elif process.poll() is None:
-                process.kill()
-            process.wait(timeout=5)
-            process.stdout.close()
-            process.stderr.close()
+            with cleanup_phase():
+                if job is not None:
+                    job.close()
+                elif process.poll() is None:
+                    process.kill()
+                process.wait(timeout=5)
+                process.stdout.close()
+                process.stderr.close()
 
 
 def frames(
@@ -491,7 +493,8 @@ def command_frames(argv: list[str], *, cancelled: Event, cwd: str):
         raise AgendaUnavailable(f"could not read the owned agenda command: {exc}") from exc
     finally:
         stopped.set()
-        for reader in readers:
-            reader.join(timeout=1)
-        if any(reader.is_alive() for reader in readers):
-            raise AgendaUnavailable("agenda pipe reader did not retire")
+        with cleanup_phase():
+            for reader in readers:
+                reader.join(timeout=1)
+            if any(reader.is_alive() for reader in readers):
+                raise EngineCleanupError("agenda pipe reader did not retire")
