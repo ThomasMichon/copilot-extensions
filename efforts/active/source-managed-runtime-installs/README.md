@@ -418,6 +418,12 @@ disposable scope while preserving config and durable data.
 
 ## Plan
 
+- [ ] Qualify and release source-bound HTTPS feed/artifact redirects without
+  mandatory CDN-origin enumeration, preserving explicit destination restrictions,
+  exact file hashes, feed policy, credentials and bounded acquisition custody.
+  The shared acquisition slice is coordinated on #7028 with #4876; it does not
+  take Bridge/MCP application work or authorize host rollout.
+
 ### Phase W — Wheel-first independent suite (proposal extension)
 - [x] Review and merge the [upstream intent checkpoint and W0–W4 plan](wheel-first-transition.md#plan-and-acceptance) before implementing the new direction. #9623 lands the intent; implementation and installation/fleet acceptance remain open.
 - [x] Capture the [ideal sequence, app matrix and contributor handoff](wheel-first-contributors.md), linked to the shared [application support guide](../../../docs/patterns/fast-application-install-and-cutover.md); documentation does not qualify unfinished apps.
@@ -1355,6 +1361,30 @@ independent configuration choice rather than forcing the Manager and suite
 onto one branch.
 
 ## Journal
+
+### 2026-11-03 - Configured-feed redirect acquisition
+
+- The bounded shared acquisition slice in source handle `creaky-gauge` closes
+  the Runtime Assembly vision's approved-source/feed-neutral acquisition intent.
+  It does not introduce another resolver, installer, proxy or trust registry.
+- The candidate follows configured-feed metadata and exact selected artifact
+  HTTPS redirects without a required CDN list. Nonempty destination restrictions
+  remain enforced. Public PyPI metadata substitution, HTTP downgrade and
+  cross-origin credential forwarding remain refused.
+- Native acquisition identity binds the delivery contract and explicit origins,
+  so older policy evidence cannot silently authorize changed retrieval semantics.
+  Canonical helper copies are synchronized through the existing generator.
+- Contained native TLS, acquisition-policy and budget regressions passed
+  140 cases with settled cleanup. A fresh Linux container using a relayed
+  configured feed completed both Manager and Worktrees native profiles and
+  relocated `install.sh --stage` entries without destination enumeration.
+  Exact input identities, installed distribution versions, unchanged UV locks,
+  absent Copilot inventory and no activation were checked; the guest was removed.
+- The first stage fixture incorrectly compared a declared development version
+  with its normalized installed spelling. That failed attempt remains separate;
+  the corrected run compares equivalent package versions, not arbitrary strings.
+  Review, Main release and downstream requalification remain pending. No
+  installed host runtime or production configuration was changed.
 
 ### 2026-11-03 - Automatic-update controls qualified and merged
 

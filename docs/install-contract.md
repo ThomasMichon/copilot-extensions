@@ -3968,9 +3968,12 @@ CPU-first, artifact-preferred, governed-source-permitted baseline. Optional
 `runtimeProfiles` settings in the existing owner-bound deployment policy can
 disable source fallback or explicitly select a capability. Retained capability
 and explicit unprofiled migration remain distinct. Optional exact
-`downloadOrigins` names additional HTTPS file origins through that same owner;
-missing/empty values preserve the baseline, and nonempty values enter its policy
-identity. This is not an index allowlist, profile approval or a new policy file.
+`downloadOrigins` optionally restricts artifact delivery to the selected index
+origin and those exact HTTPS file origins. Missing/empty values use
+configured-feed delegation: the admitted feed's current exact-file metadata
+selects artifact links, with bounded HTTPS redirects and no CDN enumeration.
+Nonempty restrictions enter the acquisition policy identity. This is not an
+index allowlist, profile approval or a new policy file.
 See the
 [library contract](../libs/installation-context/README.md) for fields and
 readiness/refusal behavior. Its owner/effective-policy digest is an invalidation
@@ -4322,6 +4325,16 @@ preserves file upload-time/seasoning and yanked/withdrawn decisions, hashes
 streamed bytes and hands them to the existing exact `WheelSnapshot` owner.
 Index credentials stay on their own origin; receipts contain opaque feed/policy
 identities and origin-chain hashes, not credentials or URLs.
+
+The configured feed may delegate its project metadata and selected file delivery
+through HTTPS redirects. Metadata cannot redirect to a public PyPI index.
+Only a current metadata entry matching the independently selected filename and
+SHA-256 can delegate a wheel link; subsequent streamed bytes must match that
+same lock. Empty destination restrictions do not mean a wildcard source
+allowlist: no alternate feed is selected and no unlisted artifact is requested.
+An explicit nonempty `downloadOrigins` selection retains stricter artifact
+destination enforcement. Native acquisition identity includes this delivery
+contract and the selected restrictions, invalidating older admission evidence.
 
 Callers declare inclusive package/request/redirect/candidate, metadata,
 per-wheel/closure and total temporary file-content budgets and one monotonic deadline.

@@ -26,6 +26,10 @@ from installer_wheel_inputs import WheelError, _check_deadline
 from installer_wheel_snapshot import WheelInstallInputs, WheelSnapshot, retain_wheel_inputs
 import installer_wheel_inputs as _inspection
 import installer_wheel_snapshot as _snapshots
+import installer_feed_policy as _feed_policy
+
+
+DELIVERY_POLICY = "configured-feed-delegation-v1"
 
 
 class AcquisitionUnavailable(WheelError):
@@ -298,12 +302,14 @@ class _Client:
     def wheel_bytes(self):
         return self.budget.current("wheel_bytes")
 
-    def request(self, location, feed, origins, accept):
+    def request(self, location, feed, origins, accept, *, index=False):
         chain = []
         while True:
             self.budget.check()
             location, origin = _url(location)
-            if origin not in origins:
+            if index and _feed_policy._is_public_pypi_url(location):
+                raise WheelError("wheel feed cannot substitute a public package index")
+            if origins is not None and origin not in origins:
                 raise WheelError(f"wheel acquisition location is outside selected source trust: {origin}")
             self.budget.reserve("requests", 1)
             headers = {"Accept": accept, "Accept-Encoding": "identity"}
@@ -454,7 +460,8 @@ def acquire_wheel_inputs(
 
     This mechanism cannot establish feed/profile trust. The existing installation
     adapter supplies captured policy, configuration and independently selected
-    exact records before calling it.
+    exact records before calling it. Empty download_origins delegates HTTPS
+    delivery to that feed; a nonempty tuple restricts artifact destinations.
     """
     import installer_dependency_policy as policy
 
@@ -506,7 +513,7 @@ def _download_one(root, item, feeds, origins, cutoffs, limits, deadline, context
         response = None
         try:
             response, base, chain = client.request(
-                project, feed, {origin}, "application/vnd.pypi.simple.v1+json, text/html",
+                project, feed, None, "application/vnd.pypi.simple.v1+json, text/html", index=True,
             )
         except AcquisitionUnavailable:
             continue
@@ -529,7 +536,7 @@ def _download_one(root, item, feeds, origins, cutoffs, limits, deadline, context
     response = None
     try:
         response, _, downloads = client.request(
-            location, feed, {origin, *origins}, "application/octet-stream",
+            location, feed, {origin, *origins} if origins else None, "application/octet-stream",
         )
         destination = root / item["filename"]
         with destination.open("xb") as output:
@@ -598,7 +605,10 @@ def _tls_context(record):
 
 def _worker_sources():
     result = {}
-    for source in (Path(__file__), Path(_inspection.__file__), Path(_snapshots.__file__)):
+    for source in (
+        Path(__file__), Path(_inspection.__file__), Path(_snapshots.__file__),
+        Path(_feed_policy.__file__),
+    ):
         before = _inspection._ordinary(source)
         if before.st_size > 1 << 20:
             raise WheelError("acquisition worker source protocol budget exceeded")

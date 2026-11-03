@@ -640,6 +640,21 @@ def test_owner_selected_download_origins_survive_native_capture(
     assert state["requests"] == []
 
 
+def test_changed_delivery_contract_invalidates_native_acquisition_reuse(
+    adopter, selected, feeds, tmp_path, monkeypatch,
+):
+    import installer_native_feed as native
+
+    state = feeds()
+    env = environment(adopter, state, tmp_path)
+    with capture(selected, adopter, env) as first:
+        identity = first.policy_id
+    monkeypatch.setattr(native, "DELIVERY_POLICY", native.DELIVERY_POLICY + "-changed")
+    with capture(selected, adopter, env) as changed:
+        assert changed.policy_id != identity
+    assert state["requests"] == []
+
+
 def test_unchanged_native_policy_identity_excludes_retained_paths_and_current_cutoff(
     adopter, selected, feeds, tmp_path,
 ):
