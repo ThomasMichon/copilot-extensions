@@ -2,11 +2,11 @@
   "evidence_family": "http51-shared-asgi-v1",
   "shared_operation_evidence": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/http51-standard-native-send.json",
-    "sha256": "2454517118c9bf6aa7d11594d3ead07e2e40d3af8881e2c96f4b7edcbeaa4038"
+    "sha256": "757332c25ce8bc5f9d5fc82d9fcf17c736001925a00e8788830af2bac54b0fe9"
   },
   "scope": "shared named ASGI portfolio, not an independent capture",
   "captured_from": {
-    "commit": "5699534c62bd8d473f6f9f79b61a6a6b1b842aa4",
+    "commit": "136dd5765604585b2ee0a9c5787f323a8d2e4820",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 51,
     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/live_inbox.py",

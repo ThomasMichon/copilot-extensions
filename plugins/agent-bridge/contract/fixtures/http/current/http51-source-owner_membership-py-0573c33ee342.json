@@ -1,0 +1,16 @@
+{
+  "evidence_family": "http51-shared-asgi-v1",
+  "shared_operation_evidence": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http51-standard-native-send.json",
+    "sha256": "757332c25ce8bc5f9d5fc82d9fcf17c736001925a00e8788830af2bac54b0fe9"
+  },
+  "scope": "shared named ASGI portfolio, not an independent capture",
+  "captured_from": {
+    "commit": "136dd5765604585b2ee0a9c5787f323a8d2e4820",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 51,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/routes/owner_membership.py",
+    "source_git_blob": "0712cbec8d42d747000b4429b5693b2b381156fa",
+    "source_sha256": "4d0f0ca42343f44cb2741a6a657a87556276105c90793ba9d904c5c1c2ce5858"
+  }
+}
