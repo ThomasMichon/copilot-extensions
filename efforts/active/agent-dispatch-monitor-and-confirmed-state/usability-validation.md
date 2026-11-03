@@ -12,11 +12,13 @@ configured-source publication, ordinary first-prompt admission and actual
 allocator-instance binding have merged source coverage through #10182.
 They are foundations, not proof that the ordinary running service is usable.
 
-Ordinary ACP retry/decision integration is in correction. Source review exposed
-an incorrect idle `at_rest` assumption, a stopped-session resume race and a retry
-that did not carry its original routing/charter seed. Corrected source must
-qualify those boundaries, including mixed-version refusal, before this slice
-earns merge or operational acceptance.
+Ordinary ACP retry/decision integration retains the original Bridge/native
+binding and routing/charter seed. It accepts the real idle `at_rest` projection,
+negotiates receiver-side no-resume enforcement under the turn lock, and keeps
+ordinary receipt observation compatible with the previous strict receiver.
+Unknown outcomes permit receipt observation, not replay or replacement.
+Installed/native acceptance, complete cohort adoption and the remaining
+worker-side lifecycle behavior are still unqualified.
 
 The following is an **agent-recommended execution/validation sequence** under
 the existing reviewed five-outcome contract. It does not create an operational
