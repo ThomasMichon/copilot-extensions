@@ -156,7 +156,7 @@ that pattern to this repository.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
-| [PR Attention Setup](2026/11/03%20pr-attention-setup/README.md) | Done for delivered guidance-only source in #10217; archive proposal pending its own normal review/merge | #10205 retains archive-PR, issue/binding and owned-worktree settlement; no activation or rollout |
+| [PR Attention Setup](2026/11/03%20pr-attention-setup/README.md) | Done for delivered guidance-only source in #10217; dated archive and post-effort settlement governed by #10205 | #10205 retains archive-PR, issue/binding and owned-worktree settlement; no activation or rollout |
 | [Vault Configuration Activation](2026/11/03%20vault-configuration-activation/README.md) | Done; strict configuration opt-in merged in #10124, Linux/Windows native qualification passed, released as Vault 0.1.190-dev1 | Bounded #2350 Vault adopter only; existing installer owners retained; no installed rollout |
 | [Context-Qualified Agenda Continuations](2026/11/01%20context-qualified-agenda-continuations/README.md) | Done; explicit queue/stack and context-qualified source, complete raw-input policy and enum/prose/Markdown field contract merged in #9902 after review and required CI | #9897 retains immediate archive/issue/ownership settlement; normal promotion #3336 and authorized adoption separate; #8811 broader custody retained; no rollout |
 | [Agenda CLI and Live Updates](2026/11/01%20agenda-cli-live-updates/README.md) | Done; standalone transactional commands, bounded held resident delivery and connected consumer merged in #9869 after review and required CI | #9855; normal promotion #3336 and authorized adoption separate; #8811 broader custody retained; no rollout |
