@@ -58,6 +58,9 @@ $LauncherSrc = Join-Path $PSScriptRoot 'dtssh-host-launcher.ps1'
 $LauncherDst = Join-Path $InstallDir 'dtssh-host-launcher.ps1'
 $CompanionConfigPath = Join-Path $InstallDir 'dispatch-companion.json'
 $StartupLnk = Join-Path ([Environment]::GetFolderPath('Startup')) 'agent-ssh-dtssh-host.lnk'
+# Task names are machine-wide even when trigger and principal name one user: the SID keeps
+# each account's launcher its own (another account can neither replace nor remove it).
+$LogonTaskName = "agent-ssh-dtssh-host-$([Security.Principal.WindowsIdentity]::GetCurrent().User.Value)"
 $HostStateDir = Join-Path $env:LOCALAPPDATA 'dtssh\host'
 
 function Resolve-DurableHostIdentityRoot {
@@ -655,14 +658,111 @@ function Install-Shortcut {
     # conhost --headless gives the launcher a windowless console (matches the runtime
     # Start-HostLauncher path + the agent-bridge task pattern; windows-launch-hardening #786).
     $conhost = Join-Path $env:SystemRoot 'System32\conhost.exe'
+    $arguments = "--headless `"$pwsh`" " + ($launcherArgs -join ' ')
+    if (Register-LogonTask -Execute $conhost -Argument $arguments) {
+        # One logon trigger: a leftover shortcut would only start a second, later launch.
+        if (Test-Path $StartupLnk) { Remove-Item $StartupLnk -Force }
+        return
+    }
     $ws = New-Object -ComObject WScript.Shell
     $shortcut = $ws.CreateShortcut($StartupLnk)
     $shortcut.TargetPath = $conhost
-    $shortcut.Arguments = "--headless `"$pwsh`" " + ($launcherArgs -join ' ')
+    $shortcut.Arguments = $arguments
     $shortcut.WorkingDirectory = $InstallDir
     $shortcut.WindowStyle = 7
     $shortcut.Description = 'agent-ssh-dtssh host launcher'
     $shortcut.Save()
+}
+
+function Register-LogonTask {
+    <#
+      Start the launcher at this user's logon from a per-user scheduled task.
+      Explorer runs Run-key and Startup-folder entries one after another, waiting
+      on each, so on a busy logon a Startup shortcut can fire many minutes after
+      sign-in -- the host stays unreachable all that time. A logon trigger fires
+      as the session starts. The task runs with the user's interactive token in
+      that session, as the shortcut did. A task whose trigger and principal name
+      this user needs no elevation (an any-user logon trigger does); where
+      policy still refuses it, this returns $false and the caller keeps the
+      Startup shortcut.
+    #>
+    param([Parameter(Mandatory)][string]$Execute, [Parameter(Mandatory)][string]$Argument)
+    try {
+        $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+        $task = @{
+            TaskName  = $LogonTaskName
+            Action    = New-ScheduledTaskAction -Execute $Execute -Argument $Argument -WorkingDirectory $InstallDir
+            Trigger   = New-ScheduledTaskTrigger -AtLogOn -User $user
+            Principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
+            Settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+                -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
+            Description = 'agent-ssh-dtssh host launcher'
+        }
+        Register-ScheduledTask @task -Force -ErrorAction Stop | Out-Null
+        return $true
+    } catch {
+        $reason = $_.Exception.Message.Trim()
+        try {
+            $existing = Get-LogonTask
+        } catch {
+            throw "Could not register the logon task '$LogonTaskName' ($reason). $($_.Exception.Message) Not falling back to the Startup shortcut while an old task may still fire; rerun once Task Scheduler responds."
+        }
+        # Re-registering an identical task can be refused where creating it once was
+        # allowed; the registered one still starts the same launcher, so keep it.
+        if ($existing -and (Test-LogonTaskCurrent -Task $existing -Execute $Execute -Argument $Argument)) {
+            return $true
+        }
+        # A task this install registered before would still fire at logon beside the
+        # shortcut, with whatever alias, port and tunnel it was given then.
+        if ($existing) {
+            try {
+                Unregister-ScheduledTask -TaskName $LogonTaskName -Confirm:$false -ErrorAction Stop
+            } catch {
+                throw "Could not update the logon task '$LogonTaskName' ($reason) or remove it ($($_.Exception.Message.Trim())); remove it, then rerun."
+            }
+        }
+        Write-Warning "Could not register the logon task '$LogonTaskName' ($reason); using the Startup-folder shortcut, which can start late on a busy logon."
+        return $false
+    }
+}
+
+function Test-LogonTaskCurrent {
+    # Whether a registered task already runs exactly this launcher at this user's logon.
+    param([Parameter(Mandatory)]$Task, [Parameter(Mandatory)][string]$Execute, [Parameter(Mandatory)][string]$Argument)
+    $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    # Task Scheduler reports a bare or qualified account name: compare the SIDs they resolve to.
+    $isMe = {
+        param($name)
+        if (-not $name) { return $false }
+        try { return ([Security.Principal.NTAccount]"$name").Translate([Security.Principal.SecurityIdentifier]).Value -eq $sid }
+        catch { return "$name" -eq $sid }
+    }
+    $actions = @($Task.Actions)
+    $triggers = @($Task.Triggers)
+    # A disabled task or trigger never fires: it isn't a working launcher to keep.
+    return $Task.Settings.Enabled -and $triggers.Count -eq 1 -and $triggers[0].Enabled -and
+        $actions.Count -eq 1 -and $actions[0].Execute -eq $Execute -and $actions[0].Arguments -eq $Argument -and
+        $actions[0].WorkingDirectory -eq $InstallDir -and
+        $triggers[0].CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger' -and
+        (& $isMe $triggers[0].UserId) -and (& $isMe $Task.Principal.UserId) -and
+        "$($Task.Principal.LogonType)" -eq 'Interactive'
+}
+
+function Get-LogonTask {
+    # Where the ScheduledTasks module is unavailable, a Startup-only install stays manageable.
+    if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) { return $null }
+    # Only a genuine not-found means "no task"; any other failure leaves it unknown and throws,
+    # so no caller falls back to the shortcut beside a task that may still fire.
+    try {
+        return Get-ScheduledTask -TaskName $LogonTaskName -ErrorAction Stop
+    } catch {
+        if ($_.CategoryInfo.Category -eq 'ObjectNotFound') { return $null }
+        throw "Could not tell whether the logon task '$LogonTaskName' exists: $($_.Exception.Message.Trim())"
+    }
+}
+
+function Unregister-LogonTask {
+    if (Get-LogonTask) { Unregister-ScheduledTask -TaskName $LogonTaskName -Confirm:$false }
 }
 
 function Start-DetachedHostLauncher {
@@ -851,6 +951,9 @@ switch ($Action) {
         if ($DryRun) {
             Write-Host '(dry run -- nothing will be changed)' -ForegroundColor Yellow
             Write-Host '[dry-run] would stop launcher + host launcher'
+            try {
+                if (Get-LogonTask) { Write-Host "[dry-run] would remove logon task: $LogonTaskName" }
+            } catch { Write-Host "[dry-run] would refuse: $($_.Exception.Message)" }
             if (Test-Path $StartupLnk) { Write-Host "[dry-run] would remove Startup shortcut: $StartupLnk" }
             if (Test-Path $CompanionConfigPath) { Write-Host "[dry-run] would remove dispatch companion config: $CompanionConfigPath" }
             Write-Host "[dry-run] existing dtssh tunnel/client state would be left intact"
@@ -858,6 +961,7 @@ switch ($Action) {
         } else {
             Stop-Launcher
             Stop-HostLauncher
+            Unregister-LogonTask
             if (Test-Path $StartupLnk) { Remove-Item $StartupLnk -Force }
             Remove-DispatchCompanionConfig
             Write-Host "Removed launcher. Existing dtssh tunnel/client state is left intact."
@@ -929,10 +1033,16 @@ switch ($Action) {
         } else {
             Write-Warning 'dispatch companion launch config missing'
         }
-        if (Test-Path $StartupLnk) {
-            Write-Host "startup shortcut: $StartupLnk"
+        $logonTask = $null; $logonTaskError = $null
+        try { $logonTask = Get-LogonTask } catch { $logonTaskError = $_.Exception.Message }
+        if ($logonTaskError) {
+            Write-Warning "logon task: unknown ($logonTaskError)"
+        } elseif ($logonTask) {
+            Write-Host "logon task: $LogonTaskName"
+        } elseif (Test-Path $StartupLnk) {
+            Write-Host "startup shortcut: $StartupLnk (can start late on a busy logon; rerun install to switch to a logon task)"
         } else {
-            Write-Warning 'startup shortcut missing (dispatch companion supervision can still restore launcher presence)'
+            Write-Warning 'logon launcher missing (dispatch companion supervision can still restore launcher presence)'
         }
         $backupDirectory = Get-HostIdentityDirectory
         if (Test-Path -LiteralPath $backupDirectory -PathType Container) {

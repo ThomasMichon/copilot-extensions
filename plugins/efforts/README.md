@@ -35,6 +35,12 @@ owns `read`/`next`/`check`/`history` and explicit `init`/semantic `update`/`publ
 The source [passive rich-history reader](skills/driving-effort-agendas/references/agenda-history.md)
 adds negotiated, bounded pages from an explicitly located context-qualified
 store without initializing a lane, publishing state or creating a new runtime.
+The optional [managed placement helper](skills/driving-effort-agendas/references/managed-placement.md)
+composes an explicitly selected worktree allocator with fresh context-qualified
+initialization, preserving standalone use without a sibling runtime.
+The optional [complete export/readback](skills/driving-effort-agendas/references/agenda-export.md)
+preserves the full declared context-qualified ledger at one consistent revision;
+it does not publish an archive or restore execution authority.
 The [field contract](skills/driving-effort-agendas/references/field-contract.md)
 distinguishes exact enums/identifiers from prose/raw JSON and documents literal
 text versus Markdown rendering; accepted string punctuation does not imply a

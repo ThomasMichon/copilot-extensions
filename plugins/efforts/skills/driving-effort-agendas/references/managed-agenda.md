@@ -14,6 +14,12 @@ has Python available. No sibling plugin, installation, Manager, daemon or
 agent-worktrees discovery is needed. An agenda is explicitly adopted; never
 initialize or import another active agent's home automatically.
 
+For explicitly selected new owner-managed homes, the optional
+[placement helper](managed-placement.md) composes allocation and fresh
+context-qualified initialization without changing this standalone interface.
+Use the separate [complete export/readback](agenda-export.md) for a declared
+store snapshot; bounded history pages and rendered summaries are not exports.
+
 ## Execution policy compatibility
 
 The command/request examples and operation table below document legacy request
@@ -40,6 +46,12 @@ as are traversal, noncanonical board paths and shared/hardlinked state files.
 The home must be on a filesystem with SQLite locking and durability support.
 This is cooperative local storage, not protection against a hostile owner
 replacing directories concurrently; directory identity is checked across open.
+That check precedes owner-issued pragmas, transaction setup and canonical
+writes. Detected rebinding refuses rather than continuing against the new
+directory. It is not a directory pin or a guarantee against replacement
+throughout the transaction. The POSIX regression swaps directories immediately
+before and after native SQLite open and preserves both fixture databases and
+the foreign hot journal byte-for-byte.
 
 `read` returns validated documents, generated metadata, a current Snapshot and
 latest delivery status. `next` and `check` return the Snapshot alone.

@@ -165,8 +165,8 @@ def test_frozen_artifact_download_checks_bytes_before_writing(tmp_path, monkeypa
 def test_only_genuine_source_release_absence_allows_build(tmp_path, monkeypatch, case):
     reads = []
     monkeypatch.setattr(
-        reuse.readiness, "_read_release",
-        lambda repository, tag: reads.append((repository, tag)),
+        reuse.discovery, "read_release",
+        lambda repository, tag, **options: reads.append((repository, tag)),
     )
     kwargs = dict(
         repository="../plugins" if case == "bad-repository" else "example/plugins",
@@ -205,8 +205,10 @@ def test_frozen_source_index_requires_exact_composition_and_original_main_admiss
             "id": 3, "name": "other-1.0-" + "e" * 64 + ".zip",
             "state": "uploaded", "size": 100, "digest": "sha256:" + "e" * 64,
         })
-    monkeypatch.setattr(reuse.readiness, "_read_release", lambda *a: {"id": 10})
-    monkeypatch.setattr(reuse.publisher, "_tag_commit", lambda *a: MAIN if case == "misbound-tag" else DEV)
+    monkeypatch.setattr(reuse.discovery, "read_release", lambda *a, **kw: {"id": 10})
+    monkeypatch.setattr(
+        reuse.discovery, "tag_commit", lambda *a, **kw: MAIN if case == "misbound-tag" else DEV,
+    )
     monkeypatch.setattr(promotion, "_is_ancestor", lambda *a, **kw: case != "foreign-main")
     verified = []
 

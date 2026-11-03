@@ -7,18 +7,22 @@
     alive.
 
 .DESCRIPTION
-    Runs as the interactive user (launched by a Startup-folder shortcut at logon,
-    or manually via `install-host.ps1 start`), NOT as a scheduled task or Windows
-    service. This is deliberate on two counts:
+    Runs as the interactive user (started at logon by a per-user scheduled task,
+    falling back to a Startup-folder shortcut where policy refuses the task, or
+    manually via `install-host.ps1 start`), NOT as SYSTEM or a Windows service.
+    This is deliberate on two counts:
 
       1. What we reach is user-side. The psmux sessions and the copilot agents
          inside them only exist within the user's interactive logon and need the
          user's own ADO/GitHub credentials. A headless/SYSTEM host would have
          nothing to attach and none of the user's auth — so binding the host to
-         the interactive session is correct, not a limitation.
-      2. Corp policy blocks non-elevated scheduled-task creation on these Dev
-         Boxes, so a Startup-folder launcher is the reproducible no-admin
-         mechanism.
+         the interactive session is correct, not a limitation. The logon task
+         runs with that interactive token, in that session.
+      2. It needs no elevation: a task whose logon trigger and principal name
+         the current user can be registered without admin rights (an any-user
+         logon trigger cannot). It is preferred over the Startup folder because
+         Explorer starts Run-key and Startup entries one at a time, so on a busy
+         logon a shortcut can fire many minutes after sign-in.
 
     dtssh hosts a dedicated loopback sshd (default port 2222) that authenticates
     THIS interactive Entra user, so a remote `ssh <alias>` lands as the same user

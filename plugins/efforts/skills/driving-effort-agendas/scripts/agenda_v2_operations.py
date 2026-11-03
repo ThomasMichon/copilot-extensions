@@ -5,22 +5,108 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from agenda import AgendaError, _number, _text, _time
+from agenda import AgendaError, _number, _object, _text, _time
 from agenda_operations import fields, evidence
-from agenda_context import context_body, context_policy, qualification
-from agenda_queue import QueueState
-from agenda_v2_schema import definition, record
+from agenda_context import (
+    context_body, context_policy, qualification, validate_context_shape, validate_judgment_shape,
+)
+from agenda_queue import QueueState, validate_item_references
+from agenda_v2_schema import definition, record, validate_definition
 
 
-def _item_fields(change: dict[str, Any], extra: set[str]) -> None:
-    fields(change, {"operation", "frame_id", "item_id", "attempt_id"} | extra)
+_CHANGE_FIELDS = {
+    "assign-root": {"operation", "items", "assignment_ref", "baseline_context", "evidence"},
+    "append": {"operation", "frame_id", "items", "assignment_ref", "evidence"},
+    "outcome": {"operation", "frame_id", "item_id", "attempt_id", "outcome", "evidence"},
+    "expand": {"operation", "frame_id", "item_id", "attempt_id", "items", "continuation", "evidence"},
+    "return": {"operation", "frame_id", "expansion_id", "acceptance_ref", "evidence"},
+    "revisit": {"operation", "frame_id", "item_id", "predecessor_attempt_id", "context", "judgment", "approach"},
+    "wait": {"operation", "frame_id", "item_id", "reason_kind", "reason_ref", "next_action", "evidence"},
+    "defer": {"operation", "frame_id", "decision_ref", "decision_packet_ref", "revisit_at", "evidence"},
+    "recover": {"operation", "deferred_id", "recheck_ref", "acceptance_ref", "attempt_policy", "evidence"},
+    "refine": {"operation", "board_ref", "expected_definition_revision", "patches", "evidence"},
+}
+
+
+def _text_list(value: Any, label: str) -> None:
+    if not isinstance(value, list) or not value:
+        raise AgendaError(f"{label} must be a nonempty list")
+    for item in value:
+        _text(item, label)
+    if len(set(value)) != len(value):
+        raise AgendaError(f"duplicate {label}")
+
+
+def validate_change_shape(change: dict[str, Any], *, accepted_at: str | None = None) -> str:
+    """Validate operation grammar without applying movement or asserting acceptance."""
+    change = _object(change, "semantic change")
+    kind = _text(change.get("operation"), "operation")
+    if kind not in _CHANGE_FIELDS:
+        raise AgendaError(f"unsupported context-qualified operation: {kind}")
+    fields(change, _CHANGE_FIELDS[kind])
+    structured = {
+        "operation", "items", "baseline_context", "evidence", "context", "judgment",
+        "approach", "continuation", "reason_kind", "revisit_at", "attempt_policy",
+        "expected_definition_revision", "patches",
+    }
+    for key in _CHANGE_FIELDS[kind] - structured:
+        _text(change[key], key)
+    if "evidence" in change:
+        evidence(change["evidence"])
+    if "items" in change:
+        validate_item_references(change["items"])
+    if kind == "assign-root":
+        validate_context_shape(change["baseline_context"])
+    elif kind == "expand":
+        fields(change["continuation"], {"parent_item_id", "next_action"})
+        if change["continuation"]["parent_item_id"] != change["item_id"]:
+            raise AgendaError("expansion continuation must preserve the current parent item")
+        _text(change["continuation"]["next_action"], "parent continuation")
+    elif kind == "revisit":
+        fields(change["approach"], {"action"})
+        _text(change["approach"]["action"], "attempt approach")
+        validate_context_shape(change["context"])
+        validate_judgment_shape(change["judgment"])
+    elif kind == "wait":
+        if change["reason_kind"] not in ("permission", "human-decision", "external", "bounded-replan"):
+            raise AgendaError("unsupported wait reason")
+    elif kind == "defer":
+        revisit = _time(change["revisit_at"], "revisit time")
+        if accepted_at is not None and revisit <= _time(accepted_at, "actual time"):
+            raise AgendaError("deferred revisit must follow the actual attempt")
+    elif kind == "recover":
+        if change["attempt_policy"] != "resume-only":
+            raise AgendaError("recovery requires an empty stack and resume-only policy")
+    elif kind == "refine":
+        if change["board_ref"] != "root":
+            raise AgendaError("unknown board reference")
+        _number(change["expected_definition_revision"], "definition revision")
+        patches = change["patches"]
+        if not isinstance(patches, list) or not patches:
+            raise AgendaError("refinement patches must be a nonempty list")
+        for patch in patches:
+            fields(patch, {"definition_id"}, {"action", "label", "exit_append",
+                   "relevant_subjects_append", "source_aliases_append", "add_definition"})
+            _text(patch["definition_id"], "definition identity")
+            if "add_definition" in patch:
+                fields(patch, {"definition_id", "add_definition"})
+                validate_definition(patch["add_definition"])
+            else:
+                if len(patch) == 1:
+                    raise AgendaError("refinement requires a known definition and explicit changes")
+                for key in ("action", "label"):
+                    if key in patch:
+                        _text(patch[key], key)
+                for key in ("exit_append", "relevant_subjects_append", "source_aliases_append"):
+                    if key in patch:
+                        _text_list(patch[key], key)
+    return kind
 
 
 def apply(state: QueueState, change: dict[str, Any]) -> dict[str, Any]:
-    kind = _text(change.get("operation"), "operation")
+    kind = validate_change_shape(change, accepted_at=state.at)
     cursor = state.cursor
     if kind == "assign-root":
-        fields(change, {"operation", "items", "assignment_ref", "baseline_context", "evidence"})
         if cursor["frames"]:
             raise AgendaError("assign-root requires an empty active stack; preserve the current stack first")
         _text(change["assignment_ref"], "root assignment reference")
@@ -43,7 +129,6 @@ def apply(state: QueueState, change: dict[str, Any]) -> dict[str, Any]:
                 "item_id": item_ids[0], "attempt_id": attempt, "context_id": context_id,
                 "record_ids": [assignment]}
     if kind == "append":
-        fields(change, {"operation", "frame_id", "items", "assignment_ref", "evidence"})
         frame = state.frame(change["frame_id"])
         if frame["closed"]:
             raise AgendaError("completed frame cannot be reopened")
@@ -66,7 +151,6 @@ def apply(state: QueueState, change: dict[str, Any]) -> dict[str, Any]:
         return {"decision": "appended", "frame_id": change["frame_id"], "item_ids": ids,
                 "attempt_id": attempt, "record_ids": [event]}
     if kind == "outcome":
-        _item_fields(change, {"outcome", "evidence"})
         item = state.head(change["frame_id"], change["item_id"], change["attempt_id"])
         if state.results(change["attempt_id"]):
             raise AgendaError("attempt already has an immutable outcome")
@@ -101,12 +185,7 @@ def apply(state: QueueState, change: dict[str, Any]) -> dict[str, Any]:
                 "attempt_id": change["attempt_id"], "next_attempt_id": next_attempt,
                 "result_id": result_id, "record_ids": [result_id]}
     if kind == "expand":
-        _item_fields(change, {"items", "continuation", "evidence"})
         item = state.head(change["frame_id"], change["item_id"], change["attempt_id"])
-        fields(change["continuation"], {"parent_item_id", "next_action"})
-        if change["continuation"]["parent_item_id"] != change["item_id"]:
-            raise AgendaError("expansion continuation must preserve the current parent item")
-        _text(change["continuation"]["next_action"], "parent continuation")
         proof = evidence(change["evidence"])
         values = change["items"]
         state.item_references(values)
@@ -134,7 +213,6 @@ def apply(state: QueueState, change: dict[str, Any]) -> dict[str, Any]:
                 "attempt_id": child_attempt, "expansion_id": expansion_id,
                 "parent_item_id": change["item_id"], "record_ids": [expansion_id]}
     if kind == "return":
-        fields(change, {"operation", "frame_id", "expansion_id", "acceptance_ref", "evidence"})
         if not cursor["frames"] or cursor["frames"][-1] != change["frame_id"]:
             raise AgendaError("return requires the active child frame")
         frame = state.frame(change["frame_id"])
@@ -162,12 +240,8 @@ def apply(state: QueueState, change: dict[str, Any]) -> dict[str, Any]:
                 "item_id": link["parent_item_id"], "attempt_id": link["parent_attempt_id"],
                 "next_action": link["next_action"], "record_ids": [event]}
     if kind == "revisit":
-        fields(change, {"operation", "frame_id", "item_id", "predecessor_attempt_id",
-                        "context", "judgment", "approach"})
         item = state.head(change["frame_id"], change["item_id"], change["predecessor_attempt_id"])
         previous = record(state.records, change["predecessor_attempt_id"], "attempt")
-        fields(change["approach"], {"action"})
-        _text(change["approach"]["action"], "attempt approach")
         if previous["item_id"] != change["item_id"] or not state.results(change["predecessor_attempt_id"]):
             raise AgendaError("productive revisit requires an unsuccessful recorded predecessor")
         if any(result["transition"] == "advance" for result in state.results(change["predecessor_attempt_id"])):
@@ -197,11 +271,7 @@ def apply(state: QueueState, change: dict[str, Any]) -> dict[str, Any]:
         return {"decision": "revisit-admitted", "frame_id": change["frame_id"], "item_id": change["item_id"],
                 "attempt_id": attempt_id, "context_id": context_id, "record_ids": [context_id, attempt_id]}
     if kind == "wait":
-        fields(change, {"operation", "frame_id", "item_id", "reason_kind",
-                        "reason_ref", "next_action", "evidence"})
         item = state.head(change["frame_id"], change["item_id"])
-        if change["reason_kind"] not in ("permission", "human-decision", "external", "bounded-replan"):
-            raise AgendaError("unsupported wait reason")
         _text(change["reason_ref"], "wait reason reference")
         _text(change["next_action"], "wait next action")
         event = state.add("wait", {"item_id": change["item_id"], "reason_kind": change["reason_kind"],
@@ -211,13 +281,10 @@ def apply(state: QueueState, change: dict[str, Any]) -> dict[str, Any]:
         item["next_action"] = change["next_action"]
         return {"decision": "waiting", "item_id": change["item_id"], "record_ids": [event]}
     if kind == "defer":
-        fields(change, {"operation", "frame_id", "decision_ref", "decision_packet_ref", "revisit_at", "evidence"})
         if not cursor["frames"] or cursor["frames"][-1] != change["frame_id"]:
             raise AgendaError("defer requires the active top frame")
         _text(change["decision_ref"], "decision reference")
         _text(change["decision_packet_ref"], "decision packet")
-        if _time(change["revisit_at"], "revisit time") <= _time(state.at, "actual time"):
-            raise AgendaError("deferred revisit must follow the actual attempt")
         if len(cursor["deferred"]) >= cursor["resource_caps"]["max_deferred_frames"]:
             return state.replan("deferred-resource-bound")
         identity = state.add("deferred", {"frames": deepcopy(cursor["frames"]),
@@ -233,8 +300,7 @@ def apply(state: QueueState, change: dict[str, Any]) -> dict[str, Any]:
         cursor["status"] = "waiting"
         return {"decision": "deferred", "deferred_id": identity, "record_ids": [identity]}
     if kind == "recover":
-        fields(change, {"operation", "deferred_id", "recheck_ref", "acceptance_ref", "attempt_policy", "evidence"})
-        if cursor["frames"] or change["attempt_policy"] != "resume-only":
+        if cursor["frames"]:
             raise AgendaError("recovery requires an empty stack and resume-only policy")
         _text(change["recheck_ref"], "actual recheck reference")
         _text(change["acceptance_ref"], "current acceptance reference")
@@ -259,27 +325,18 @@ def apply(state: QueueState, change: dict[str, Any]) -> dict[str, Any]:
         return {"decision": "recovered", "frame_ids": list(cursor["frames"]),
                 "attempt_id": current_attempt, "record_ids": [event]}
     if kind == "refine":
-        fields(change, {"operation", "board_ref", "expected_definition_revision", "patches", "evidence"})
-        if change["board_ref"] != "root":
-            raise AgendaError("unknown board reference")
         board = state.documents["boards"]["root"]
-        _number(change["expected_definition_revision"], "definition revision")
         if board["revision"] != change["expected_definition_revision"]:
             raise AgendaError("stale definition revision")
         patches = change["patches"]
-        if not isinstance(patches, list) or not patches:
-            raise AgendaError("refinement patches must be a nonempty list")
         for patch in patches:
-            fields(patch, {"definition_id"}, {"action", "label", "exit_append",
-                   "relevant_subjects_append", "source_aliases_append", "add_definition"})
             identity = _text(patch["definition_id"], "definition identity")
             if "add_definition" in patch:
-                fields(patch, {"definition_id", "add_definition"})
                 if identity in board["items"]:
                     raise AgendaError("original definitions cannot be replaced")
                 board["items"][identity] = deepcopy(patch["add_definition"])
                 continue
-            if identity not in board["items"] or len(patch) == 1:
+            if identity not in board["items"]:
                 raise AgendaError("refinement requires a known definition and explicit changes")
             current = board["items"][identity]
             for key in ("action", "label"):
@@ -288,8 +345,6 @@ def apply(state: QueueState, change: dict[str, Any]) -> dict[str, Any]:
             for source, destination in (("exit_append", "exit"), ("relevant_subjects_append", "relevant_subjects"),
                                         ("source_aliases_append", "source_aliases")):
                 if source in patch:
-                    if not isinstance(patch[source], list) or not patch[source]:
-                        raise AgendaError("refinement additions must be nonempty lists")
                     for value in patch[source]:
                         _text(value, source)
                         if value in current.get(destination, []):

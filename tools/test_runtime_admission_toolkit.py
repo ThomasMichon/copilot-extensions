@@ -46,6 +46,106 @@ def _toolkit(tmp_path):
     return toolkit
 
 
+def test_copied_toolkit_discovers_the_source_bound_channel_without_publishers(tmp_path):
+    toolkit = _toolkit(tmp_path)
+    script = """
+import hashlib, importlib.abc, json, pathlib, subprocess, sys
+root = pathlib.Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(root.parent))
+import _runtime_admission
+_runtime_admission.activate()
+class RejectPublication(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in {
+            "publish_python_artifacts", "promotion_python_artifacts",
+            "promote_release", "promotion_artifact_readiness", "promotion_release_evidence",
+        }:
+            raise AssertionError("discovery imported a publication owner: " + fullname)
+sys.meta_path.insert(0, RejectPublication())
+import artifact_release_discovery as discovery
+assert pathlib.Path(discovery.__file__).resolve().is_relative_to(root)
+dev, main, tree = "a" * 40, "b" * 40, "c" * 40
+tag = "python-artifacts-" + dev
+name = "agent-example-1.0-" + "d" * 64 + ".zip"
+subject = json.dumps({
+    "schema": discovery.INDEX_SCHEMA, "schema_version": 2,
+    "dev_head": dev, "content_tree": tree,
+    "admission": {"signer_digest": main, "source_digest": main, "source_ref": "refs/heads/main"},
+    "artifacts": [{"filename": name, "sha256": "d" * 64}],
+}).encode()
+assets = [
+    {"name": discovery.INDEX_NAME, "id": 2, "state": "uploaded",
+     "digest": "sha256:" + hashlib.sha256(subject).hexdigest(), "size": len(subject)},
+    {"name": name, "id": 3, "state": "uploaded", "digest": "sha256:" + "d" * 64, "size": 1},
+]
+release = {"id": 1, "tag_name": tag, "draft": False, "prerelease": True, "assets": assets}
+calls, verified = [], []
+failure = None
+def runner(argv, **options):
+    calls.append((argv, options))
+    assert argv[0] == "api", "discovery attempted a publication command"
+    endpoint = next(value for value in argv[1:] if value.startswith("repos/"))
+    if endpoint.endswith("/releases/tags/" + tag):
+        if failure in ("absence", "permission"):
+            status = 404 if failure == "absence" else 403
+            return subprocess.CompletedProcess(argv, 1, "", "gh: refused (HTTP " + str(status) + ")")
+        value = release
+    elif endpoint.endswith("/git/ref/tags/" + tag):
+        value = {"object": {"type": "commit", "sha": dev}}
+    elif endpoint.endswith("/releases/1/assets?per_page=100"):
+        value = [assets]
+    elif endpoint.endswith("/releases/assets/2"):
+        assert options == {"verification": True, "binary": True}
+        return subprocess.CompletedProcess(argv, 0, subject if failure != "digest" else b"changed", b"")
+    else:
+        raise AssertionError("unexpected discovery endpoint: " + endpoint)
+    return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
+def verify(path, **identity):
+    assert path.read_bytes() == subject
+    assert identity == {
+        "repository": "example/plugins", "signer_digest": main,
+        "source_digest": main, "source_ref": "refs/heads/main",
+    }
+    verified.append(identity)
+def ancestor(first, second):
+    assert (first, second) == (main, "e" * 40)
+    return failure != "ancestry"
+for failure in (None, "absence", "permission", "digest", "ancestry"):
+    directory = root.parent / ("discovery-" + str(failure))
+    directory.mkdir()
+    before = len(verified)
+    arguments = dict(
+        repository="example/plugins", dev_head=dev, main_before="e" * 40,
+        content_tree=tree, is_ancestor=ancestor, runner=runner, verify_subject=verify,
+    )
+    if failure in ("permission", "digest", "ancestry"):
+        try:
+            discovery.read_admitted_source_index(directory, **arguments)
+        except discovery.PromotionArtifactError:
+            pass
+        else:
+            raise AssertionError("failed evidence was treated as fallback: " + failure)
+        assert len(verified) == before
+    else:
+        selected = discovery.read_admitted_source_index(directory, **arguments)
+        if failure == "absence":
+            assert selected is None and not list(directory.iterdir()) and len(verified) == before
+        else:
+            assert selected == (json.loads(subject), {row["name"]: row for row in assets})
+            assert [path.name for path in directory.iterdir()] == [discovery.INDEX_NAME]
+            assert len(verified) == before + 1
+assert all(not any(value.endswith("/releases/assets/3") for value in argv) for argv, _ in calls)
+print("copied-source-bound-discovery-ok")
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-B", "-c", script, str(toolkit)],
+        cwd=tmp_path, capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "copied-source-bound-discovery-ok"
+
+
 def test_admitted_seed_runs_payload_local_semantic_validation(
     adopter, configured_source, target, feeds, tmp_path, engine, monkeypatch,
 ):

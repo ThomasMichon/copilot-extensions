@@ -10,17 +10,17 @@ import tempfile
 import zipfile
 
 from candidate_qualification_receipt import (
-    MAX_ARCHIVE_BYTES, PACKET_FILES, canonical_digest, regular_bytes,
+    PACKET_FILES, canonical_digest, regular_bytes,
 )
 from promotion_unit_contract import MAX_PACKET_FILE_BYTES, MAX_UNIT_EVIDENCE_FILE_BYTES
+from artifact_release_discovery import (
+    EVIDENCE_PREFIXES as EVIDENCE_PREFIXES,
+    MAX_EVIDENCE_ASSETS as MAX_EVIDENCE_ASSETS,
+    MAX_EVIDENCE_BYTES as MAX_EVIDENCE_BYTES,
+    supplementary_evidence_asset as supplementary_evidence_asset,
+)
 
 _SHA = re.compile(r"[0-9a-f]{40}")
-MAX_EVIDENCE_BYTES = MAX_ARCHIVE_BYTES + MAX_PACKET_FILE_BYTES
-MAX_EVIDENCE_ASSETS = 64
-EVIDENCE_PREFIXES = (
-    "promotion-unit-evidence-", "promotion-complete-source-", "promotion-source-manifest-",
-    "promotion-build-source-", "promotion-build-manifest-",
-)
 
 
 def evidence_name(dev_sha: str, candidate_sha: str, digest: str) -> str:
@@ -30,27 +30,6 @@ def evidence_name(dev_sha: str, candidate_sha: str, digest: str) -> str:
     ):
         raise ValueError("invalid release evidence identity")
     return f"promotion-unit-evidence-{dev_sha}-{candidate_sha}-sha256-{digest}.zip"
-
-
-def supplementary_evidence_asset(asset: dict, dev_sha: str) -> bool:
-    """Admit only bounded auxiliary data; this never qualifies executable artifacts."""
-    name = asset.get("name")
-    match = re.fullmatch(
-        rf"promotion-(unit-evidence|complete-source|source-manifest|build-source|build-manifest)-{re.escape(dev_sha)}"
-        r"-([0-9a-f]{40})-sha256-([0-9a-f]{64})\.(zip|json)",
-        name,
-    ) if isinstance(name, str) and isinstance(dev_sha, str) and _SHA.fullmatch(dev_sha) else None
-    limits = {"unit-evidence": MAX_EVIDENCE_BYTES, "complete-source": 512 << 20,
-              "source-manifest": MAX_PACKET_FILE_BYTES, "build-source": 512 << 20,
-              "build-manifest": MAX_PACKET_FILE_BYTES}
-    limit = limits[match[1]] if match else 0
-    return bool(
-        match and match[4] == ("json" if match[1] in ("source-manifest", "build-manifest") else "zip")
-        and asset.get("digest") == "sha256:" + match[3]
-        and asset.get("state") == "uploaded"
-        and type(asset.get("id")) is int and asset["id"] > 0
-        and type(asset.get("size")) is int and 0 < asset["size"] <= limit
-    )
 
 
 def evidence_archive(

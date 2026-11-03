@@ -19,6 +19,14 @@ def source_aliases(value: dict[str, Any]) -> set[str]:
             for alias in [value["source_ref"], *value.get("source_aliases", [])]}
 
 
+def validate_item_references(values: Any) -> None:
+    if not isinstance(values, list) or not values:
+        raise AgendaError("items must be a nonempty ordered list")
+    for value in values:
+        fields(value, {"definition_ref"})
+        _text(value["definition_ref"], "definition reference")
+
+
 @dataclass
 class QueueState:
     documents: dict[str, Any]
@@ -140,10 +148,8 @@ class QueueState:
         return created
 
     def item_references(self, values: Any) -> None:
-        if not isinstance(values, list) or not values:
-            raise AgendaError("items must be a nonempty ordered list")
+        validate_item_references(values)
         for value in values:
-            fields(value, {"definition_ref"})
             ref = _text(value["definition_ref"], "definition reference")
             if ref not in self.documents["boards"]["root"]["items"]:
                 raise AgendaError("unknown definition reference")

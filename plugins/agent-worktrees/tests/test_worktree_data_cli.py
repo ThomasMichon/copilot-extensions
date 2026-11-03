@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 from pathlib import Path
@@ -111,6 +112,71 @@ def unexpected_cluster():
 main._ensure_cluster_loaded=unexpected_cluster
 sys.exit(main.main(["--project",sys.argv[2],*sys.argv[3:]]))
 """
+
+
+@pytest.mark.parametrize("aliased", [
+    False, pytest.param(True, marks=pytest.mark.skipif(
+        sys.platform == "win32", reason="POSIX project-root alias fixture; native reparse acceptance is separate",
+    )),
+])
+def test_efforts_payload_initializes_the_actual_allocated_store(
+    tmp_path: Path, monkeypatch, capsys, aliased: bool,
+) -> None:
+    project, worktree = "sample-project", "machine-20300101-123456-abcd"
+    nonce, store = "0123456789abcdef", "a" * 32
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(cfg, "_home", lambda: tmp_path)
+    root = cfg.project_dir(project)
+    (root / "worktrees").mkdir(parents=True)
+    (root / "worktrees" / f"{worktree}.yaml").write_text(json.dumps({
+        "worktree_id": worktree, "creation_nonce": nonce, "repo": project,
+        "branch": "worktree/sample", "worktree_path": str(tmp_path / "absent-checkout"),
+        "machine": "sample-machine", "platform": "linux",
+    }), encoding="utf-8")
+    if aliased:
+        physical = tmp_path / "physical-project-data"
+        root.rename(physical)
+        root.symlink_to(physical, target_is_directory=True)
+    skill = Path(__file__).resolve().parents[2] / "efforts" / "skills" / "driving-effort-agendas"
+    monkeypatch.syspath_prepend(str(skill / "scripts"))
+    managed = importlib.import_module("agenda_managed")
+    prefix = (
+        "import os\nfrom pathlib import Path\n"
+        "os.environ.pop('COPILOT_EXTENSIONS_CONTEXT',None)\n"
+        "from agent_worktrees import config as cfg, project_state, __main__ as main\n"
+        f"cfg._home=lambda:Path({str(tmp_path)!r})\n"
+        "project_state._normalized_repository_remote=lambda repo:f'network:example.invalid/{repo}'\n"
+        "def no_cluster():\n    raise AssertionError('placement loaded deferred cluster')\n"
+        "main._ensure_cluster_loaded=no_cluster\n"
+    )
+    monkeypatch.setattr(managed, "PROVIDER", prefix + managed.PROVIDER)
+    request = json.loads((skill / "assets" / "init.context-qualified.example.json").read_text())
+    request["change"]["worktree"] = worktree
+    request_path = tmp_path / "init-request.json"
+    request_path.write_text(json.dumps(request), encoding="utf-8")
+    argv = [
+        "init", "--provider-python", sys.executable, "--project", project,
+        "--worktree", worktree, "--creation-nonce", nonce, "--lane", "main",
+        "--store-id", store, "--request", str(request_path),
+    ]
+    assert managed.main(argv) == 0
+    created = json.loads(capsys.readouterr().out)
+    home = Path(created["placement"]["state_home"])
+    assert home.is_relative_to(root.resolve()) and created["result"]["store_id"] == store
+    independent = run_headless(
+        [sys.executable, "-B", str(skill / "scripts" / "agenda_cli.py"),
+         "read", "--state-home", str(home), "--worktree", worktree],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert independent.returncode == 0, independent.stderr
+    actual = json.loads(independent.stdout)
+    assert actual["store_id"] == store and actual["revision"] == 1
+    assert actual["documents"]["cursor"]["worktree"] == worktree
+    before = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    assert managed.main(argv) == 0
+    retry = json.loads(capsys.readouterr().out)
+    assert retry["accepted"] is False and retry["result"] == created["result"]
+    assert {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()} == before
 
 
 def test_real_root_cli_refuses_cross_project_record_without_allocating(
