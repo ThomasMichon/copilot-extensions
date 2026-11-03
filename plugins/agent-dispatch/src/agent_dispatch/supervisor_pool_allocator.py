@@ -92,8 +92,13 @@ def launch_scope(args: argparse.Namespace) -> tuple[str, str] | None:
         raise ValueError("managed lane requires registration, machine and environment")
     from .bridge_remote import normalize_host
     from .identity import resolve_machine
+    from .remote_dispatch import configured_service_machine
 
-    actual = resolve_machine()
+    try:
+        actual = configured_service_machine(strict=True)
+    except (OSError, UnicodeError) as exc:
+        raise ValueError("managed lane installed machine binding is unreadable") from exc
+    actual = actual or resolve_machine()
     if not actual or normalize_host(actual) != normalize_host(machine):
         raise ValueError("managed lane registration machine differs from its executing host")
     return machine, env
