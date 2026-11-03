@@ -19,7 +19,9 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 
 import installer_dependency_policy as dependencies
 from installer_feed_policy import _is_public_pypi_url
-from installer_wheel_acquisition import AcquisitionUnavailable, WheelFeed, _name, _tls_record, _url
+from installer_wheel_acquisition import (
+    DELIVERY_POLICY, AcquisitionUnavailable, WheelFeed, _name, _tls_record, _url,
+)
 from installer_wheel_inputs import _check_deadline, _ordinary
 from installer_wheel_snapshot import _open, _unchanged
 
@@ -511,6 +513,7 @@ def capture_native_feed_inputs(
     ))
     identity = "sha256:" + opaque_identity(json.dumps({
         "owner_policy": policy["policyId"], "feeds": [feed.identity for feed in feeds],
+        "delivery_policy": DELIVERY_POLICY, "download_origins": origins,
         "transport": transport, "seasoning": _seasoning_identity(original_settings),
         "index_strategy": settings["index_strategy"],
         "dependency_selection": {

@@ -78,7 +78,7 @@ def _file_pointer_source(path: Path) -> str | None:
     return m.group(1) if m else None
 
 
-def find_file_pointers(root: Path) -> list[Path]:
+def find_file_pointers(root: Path, *, candidates: list[Path] | None = None) -> list[Path]:
     """Every vendored *file* pointer under ``root``.
 
     ``root`` may be a whole repo checkout or a single plugin's directory --
@@ -86,11 +86,19 @@ def find_file_pointers(root: Path) -> list[Path]:
     location, a file pointer can live anywhere its marker line is found, so
     callers such as ``preview_release.py`` (which materializes one plugin
     directory, not the whole repo) can reuse this unchanged.
+
+    Only a just-extracted, unchanged archive may supply ``candidates``:
+    extraction inspected every regular file's bytes and retained every
+    possible marker. Arbitrary or mutable trees must use the full scan.
     """
     if not root.is_dir():
         return []
+    if candidates is not None:
+        for path in candidates:
+            if not path.is_relative_to(root) or ".." in path.relative_to(root).parts:
+                raise ValueError("file-pointer candidate is outside the extracted root")
     return sorted(
-        p for p in root.rglob("*")
+        p for p in (root.rglob("*") if candidates is None else candidates)
         if p.is_file() and p.name != POINTER_NAME and _file_pointer_source(p)
     )
 
@@ -518,7 +526,10 @@ def materialize_launch_wrapper_assets(dest: Path, *, canonical_root: Path) -> li
     return mlwa.materialize_all(dest, canonical_root=canonical_root)
 
 
-def materialize(dest: Path, *, canonical_root: Path) -> list[str]:
+def materialize(
+    dest: Path, *, canonical_root: Path,
+    file_pointer_candidates: list[Path] | None = None,
+) -> list[str]:
     """Materialize every still-live dev-only reference found under ``dest``.
 
     ``canonical_root`` is a parameter (not hardcoded to ``REPO``) so a test
@@ -528,7 +539,9 @@ def materialize(dest: Path, *, canonical_root: Path) -> list[str]:
         f"SKIP {pointer_path}: retired directory-pointer kind still present -- refusing"
         for pointer_path in find_retired_directory_pointers(dest)
     ]
-    log.extend(materialize_file_pointers(dest, canonical_root=canonical_root))
+    log.extend(materialize_file_pointers(
+        dest, canonical_root=canonical_root, candidates=file_pointer_candidates,
+    ))
     log.extend(materialize_uv_editable_refs(dest, canonical_root=canonical_root))
     log.extend(materialize_installer_engine_refs(
         dest, canonical_root=canonical_root, human_sources=human_sources,
@@ -641,14 +654,16 @@ def _remove_path(p: Path) -> None:
         p.unlink()
 
 
-def materialize_file_pointers(dest: Path, *, canonical_root: Path) -> list[str]:
+def materialize_file_pointers(
+    dest: Path, *, canonical_root: Path, candidates: list[Path] | None = None,
+) -> list[str]:
     """Expand every file pointer found under ``dest`` from ``canonical_root``.
 
     Unlike a directory/lib pointer, a file pointer *is* the mirrored file:
     there is no separate pointer sidecar to delete, so materializing
     overwrites the stub's content with the canonical file's bytes in place."""
     log: list[str] = []
-    for pointer_path in find_file_pointers(dest):
+    for pointer_path in find_file_pointers(dest, candidates=candidates):
         # find_file_pointers()'s own is_file() check follows a symlink, and
         # pointer_path.write_bytes() below would follow it again -- a
         # symlinked pointer path (or an ancestor between it and dest)

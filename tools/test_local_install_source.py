@@ -1,11 +1,13 @@
 """Local preparation freezes Git inputs without consuming release changefiles."""
 import os
 import hashlib
+import io
 import json
 from pathlib import Path
 import subprocess
 import shutil
 import sys
+import tarfile
 import time
 import tomllib
 from types import SimpleNamespace
@@ -14,6 +16,97 @@ import pytest
 
 import local_install_source as local
 import promote_release
+
+
+@pytest.mark.parametrize("line", [
+    b"<!-- VENDOR_POINTER: source=canonical.txt kind=file -->\n",
+    b"<!-- VENDOR_POINTER: source=canonical.txt kind=file -->\r\n",
+    b"<!-- VENDOR_POINTER: source=canonical.txt kind=file -->\r",
+    b"<!-- VENDOR_POINTER: source=canonical.txt kind=file -->",
+    b"<!--" + b" " * 16384 + b"VENDOR_POINTER: source=canonical.txt kind=file -->\n",
+])
+def test_extraction_candidates_match_full_scan_without_reopening_nonmarkers(
+    tmp_path, monkeypatch, line,
+):
+    archive = tmp_path / "source.tar"
+    contents = {
+        "pointer.unusual": line,
+        "canonical.txt": b"canonical bytes\n",
+        "empty": b"",
+        "ordinary": b"plain text\n",
+        "binary": b"\xff\x00\x01",
+        "bom": b"\xef\xbb\xbf" + line,
+        "later": b"\n" + line,
+        "html": b"<html>not a pointer</html>\n",
+        "invalid": b"<\xff",
+        "VENDOR_POINTER.json": line,
+    }
+    with tarfile.open(archive, "w") as stream:
+        for name, content in contents.items():
+            member = tarfile.TarInfo(name)
+            member.size = len(content)
+            stream.addfile(member, io.BytesIO(content))
+    destination = tmp_path / "source"
+    destination.mkdir()
+    candidates = []
+    local.preparation._extract_archive(
+        archive, destination, file_pointer_candidates=candidates,
+    )
+    expected = local.materialization.find_file_pointers(destination)
+    assert expected == [destination / "pointer.unusual"]
+    reader = local.materialization._file_pointer_source
+    reads = []
+    def observe(path):
+        reads.append(path.name)
+        return reader(path)
+    monkeypatch.setattr(local.materialization, "_file_pointer_source", observe)
+    assert local.materialization.find_file_pointers(
+        destination, candidates=candidates,
+    ) == expected
+    assert sorted(reads) == ["html", "invalid", "pointer.unusual"]
+    assert {path.name: path.read_bytes() for path in destination.iterdir()} == contents
+    log = local.materialization.materialize_file_pointers(
+        destination, canonical_root=destination, candidates=candidates,
+    )
+    assert len(log) == 1 and log[0].startswith("OK")
+    assert (destination / "pointer.unusual").read_bytes() == contents["canonical.txt"]
+
+
+@pytest.mark.parametrize("name,kind", [
+    ("../escape", tarfile.REGTYPE),
+    ("linked", tarfile.SYMTYPE),
+])
+def test_extraction_candidate_collection_still_refuses_unsafe_members(tmp_path, name, kind):
+    archive = tmp_path / "source.tar"
+    with tarfile.open(archive, "w") as stream:
+        member = tarfile.TarInfo(name)
+        member.type = kind
+        member.linkname = "outside"
+        stream.addfile(member)
+    destination = tmp_path / "source"
+    destination.mkdir()
+    candidates = []
+    with pytest.raises(local.preparation.SourcePreparationError):
+        local.preparation._extract_archive(
+            archive, destination, file_pointer_candidates=candidates,
+        )
+    assert candidates == []
+    assert list(destination.iterdir()) == []
+
+
+def test_source_composition_candidates_still_refuse_pointer_escape(repository, tmp_path):
+    repo, _ = repository
+    (repo / "pointer").write_text(
+        "<!-- VENDOR_POINTER: source=../outside.txt kind=file -->\n",
+    )
+    local.preparation._git(repo, "add", "pointer")
+    local.preparation._git(
+        repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "commit", "--quiet", "-m", "Pointer refusal fixture",
+    )
+    commit = local.preparation._git(repo, "rev-parse", "HEAD")
+    with pytest.raises(ValueError, match="escapes the canonical root"):
+        local.compose(repo, commit, None, tmp_path / "refused")
 
 
 def test_cli_refuses_public_age_override_before_governed_source_preparation(
@@ -182,7 +275,7 @@ def test_development_snapshot_materializes_without_seeding_or_consuming_changefi
 
     def materialize(source, **options):
         assert (source / "version.txt").read_text(encoding="utf-8") == "released-version\n"
-        assert options == {"canonical_root": source}
+        assert options == {"canonical_root": source, "file_pointer_candidates": []}
         seen.append("materialization")
         return []
 

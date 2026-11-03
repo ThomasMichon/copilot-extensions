@@ -97,11 +97,18 @@ def compose(
     preparation._archive(repository, commit, archive, deadline=deadline)
     source = output / "source"
     source.mkdir()
-    preparation._extract_archive(archive, source, deadline=deadline)
+    file_pointer_candidates: list[Path] = []
+    preparation._extract_archive(
+        archive, source, deadline=deadline,
+        file_pointer_candidates=file_pointer_candidates,
+    )
     archive.unlink()
     source_tree = preparation._git(repository, "rev-parse", f"{commit}^{{tree}}", deadline=deadline)
     if not finalized_main:
-        log = materialization.materialize(source, canonical_root=source)
+        log = materialization.materialize(
+            source, canonical_root=source,
+            file_pointer_candidates=file_pointer_candidates,
+        )
         refused = [line for line in log if line.startswith("SKIP")]
         if refused:
             raise ValueError("source materialization refused:\n" + "\n".join(refused))
