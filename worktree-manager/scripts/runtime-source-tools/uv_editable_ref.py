@@ -284,7 +284,10 @@ def materialized_local_source_problems(consumer_dir: Path) -> list[str]:
                     continue
                 route = current
                 for component in Path(raw_path).parts:
-                    route /= component
+                    if component == ".." and not route.is_dir():
+                        problems.append(f"{label}: {raw_path!r} has a missing path component")
+                        break
+                    route = route.parent if component == ".." else route / component
                     if escapes_root(route, root):
                         problems.append(f"{label}: {raw_path!r} leaves its owning payload")
                         break
@@ -292,11 +295,11 @@ def materialized_local_source_problems(consumer_dir: Path) -> list[str]:
                         problems.append(f"{label}: {raw_path!r} has a missing path component")
                         break
                 else:
-                    if target.is_file() and target.name.endswith(
+                    if route.is_file() and route.name.endswith(
                         (".whl", ".zip", ".tar.gz", ".tar.bz2", ".tar.xz")
                     ):
                         continue
-                    pending.append(target)
+                    pending.append(route)
     return problems
 
 

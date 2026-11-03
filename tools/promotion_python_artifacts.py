@@ -33,6 +33,7 @@ except ModuleNotFoundError:  # Python 3.10 uses the existing tooling backport.
 
 SCHEMA = "copilot-extensions.promotion-python-artifacts"
 INDEX_NAME = "python-artifacts.json"
+INDEX_LIMIT = 1 << 20
 _BUNDLES_NAME = "wheel-bundles.json"
 _SHA = re.compile(r"[0-9a-f]{40}")
 _DIGEST = re.compile(r"[0-9a-f]{64}")

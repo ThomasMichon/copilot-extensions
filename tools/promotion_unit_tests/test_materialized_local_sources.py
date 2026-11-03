@@ -48,6 +48,12 @@ def test_materialized_closure_refuses_incomplete_sources(tmp_path, kind):
             '[project]\nname = "other"\n',
         )
     assert editable.materialized_local_source_problems(consumer)
+    if kind == "conditional-route":
+        _write(consumer / "libs" / "missing", "not a directory")
+        assert any(
+            "missing path component" in problem
+            for problem in editable.materialized_local_source_problems(consumer)
+        )
 
 
 @pytest.mark.parametrize("nested", [False, True])
@@ -137,7 +143,7 @@ def test_materialized_closure_audits_every_requirement_surface(tmp_path, nested)
 
 
 def test_materialized_closure_accepts_siblings_archives_and_registry_requirements(
-    tmp_path,
+    tmp_path, monkeypatch,
 ):
     consumer = tmp_path / "plugins" / "example"
     _write(
@@ -154,4 +160,9 @@ def test_materialized_closure_accepts_siblings_archives_and_registry_requirement
             f'[tool.uv.sources]\n{dependency} = {{path = "../{dependency}"}}\n',
         )
     _write(consumer / "vendor" / "fixture.whl", "fixture")
+    assert editable.materialized_local_source_problems(consumer) == []
+    exists = Path.exists
+    monkeypatch.setattr(
+        Path, "exists", lambda path: ".." not in path.parts and exists(path),
+    )
     assert editable.materialized_local_source_problems(consumer) == []

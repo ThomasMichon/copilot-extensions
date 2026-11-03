@@ -5,6 +5,7 @@ admission decision or runtime entry point. Source fallback remains independent.
 """
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 import hashlib
 import json
@@ -90,6 +91,52 @@ def validate_release_bindings(index: dict, manifests: dict) -> None:
                 wheel[field] != first_party[field] for field in ("filename", "sha256")
             ):
                 raise ProfileError("release profile omits or changes a first-party wheel")
+
+
+def with_release_profiles(index: dict, records: list[dict], manifests: dict) -> dict:
+    """Compose inert candidate data, preserving all prior source/artifact fields.
+
+    The caller owns index/source admission and supplies already-validated manifest
+    bindings for the additions. Existing profiles are preserved for full-set
+    pre-signing revalidation. This authenticates neither input nor changed subject;
+    existing validation and fresh attestation remain required.
+    """
+    from promotion_python_artifacts import INDEX_LIMIT, SCHEMA as INDEX_SCHEMA
+
+    if (
+        not isinstance(index, dict) or index.get("schema") != INDEX_SCHEMA
+        or type(index.get("schema_version")) is not int or index["schema_version"] not in (1, 2)
+    ):
+        raise ProfileError("unsupported release artifact index")
+    fields = ["dev_head", "content_tree"]
+    if index["schema_version"] == 1:
+        fields.append("main_before")
+    elif "main_before" in index:
+        raise ProfileError("source-owned artifact index must not bind a main container")
+    if any(
+        not isinstance(index.get(field), str) or not re.fullmatch(r"[0-9a-f]{40}", index[field])
+        for field in fields
+    ):
+        raise ProfileError("invalid release artifact source identity")
+    if not isinstance(records, list) or not records:
+        raise ProfileError("release profile addition must be a nonempty list")
+    previous = release_profiles(index)
+    candidate = deepcopy(index)
+    candidate["runtime_profiles"] = {
+        "schema": SCHEMA, "version": 1,
+        "profiles": [validate_profile(record).record() for record in records],
+    }
+    validate_release_bindings(candidate, manifests)
+    candidate["runtime_profiles"]["profiles"] = [
+        *(profile.record() for profile in previous),
+        *candidate["runtime_profiles"]["profiles"],
+    ]
+    release_profiles(candidate)
+    if len(json.dumps(
+        candidate, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False,
+    ).encode("ascii")) > INDEX_LIMIT:
+        raise ProfileError("release profile subject byte budget exceeded")
+    return candidate
 
 
 def _unique_object(pairs):

@@ -320,6 +320,75 @@ def test_preparer_process_is_own_isolated_code_and_receipt_checked(
         assert record == {"payload": str(payload), "identity": {"runtime_source": document, "runtime_version": version}}
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows extended-length paths")
+@pytest.mark.parametrize("location", ["inside", "outside", "traversal"])
+def test_preparer_accepts_only_the_same_native_output_parent(monkeypatch, tmp_path, location):
+    installer = self_install._runtime_installer()
+    source = installer.runtime_source
+    output = tmp_path / "prepared"
+    digest = "c" * 64
+    version = source.runtime_version("1.0.0", "a" * 40, digest)
+    identity = source.SourceIdentity("agent-worktrees", "1.0.0", "a" * 40, "b" * 40, digest, version)
+    parent = output / "agent-worktrees" if location == "inside" else tmp_path / "other"
+    payload = Path(installer.engine._native_retained_path(parent / version))
+    if location == "traversal":
+        payload = (
+            Path(installer.engine._native_retained_path(output))
+            / "other" / ".." / "agent-worktrees" / version
+        )
+    resolved = ResolvedSource(
+        config.RuntimeSource("dev", allow_dev=True), tmp_path / "untrusted",
+        "a" * 40, "b" * 40, "a" * 40,
+    )
+    monkeypatch.setattr(
+        preparation.subprocess, "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=0, stderr="", stdout=json.dumps({
+                "payload": str(payload), "identity": identity.document(),
+            }),
+        ),
+    )
+    monkeypatch.setattr(source, "read_source_identity", lambda *args, **kwargs: identity)
+    if location == "inside":
+        record = preparation.prepare(tmp_path / "tool", resolved, "agent-worktrees", output)
+        assert record["payload"] == str(payload)
+    else:
+        with pytest.raises(ValueError, match="different selection"):
+            preparation.prepare(tmp_path / "tool", resolved, "agent-worktrees", output)
+
+
+def test_preparer_real_process_returns_a_usable_selected_payload(tmp_path):
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+
+    def git(*args):
+        return subprocess.run(
+            ["git", "-C", str(checkout), *args], check=True, capture_output=True, text=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), timeout=20,
+        ).stdout.strip()
+
+    git("init", "-q", "--initial-branch=dev")
+    git("config", "core.autocrlf", "false")
+    plugin = checkout / "plugins" / "agent-fixture"
+    (plugin / "src").mkdir(parents=True)
+    (plugin / "plugin.json").write_text('{"name":"agent-fixture","version":"1.0.0"}')
+    (plugin / "pyproject.toml").write_text('[project]\nname="agent-fixture"\nversion="1.0.0"\n')
+    (plugin / "src" / "example.py").write_text("value = 1\n")
+    git("add", ".")
+    git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "commit", "-qm", "Fixture")
+    commit, tree = git("rev-parse", "HEAD"), git("rev-parse", "HEAD^{tree}")
+    git("update-ref", "refs/remotes/origin/dev", commit)
+    resolved = ResolvedSource(config.RuntimeSource("dev", allow_dev=True), checkout, commit, tree, commit)
+    tool = Path(__file__).resolve().parents[2] / "tools" / "prepare_runtime_source.py"
+    output = tmp_path / "prepared"
+    first = preparation.prepare(tool, resolved, "agent-fixture", output)
+    second = preparation.prepare(tool, resolved, "agent-fixture", output)
+    assert first == second
+    assert (Path(first["payload"]) / "src" / "example.py").read_text() == "value = 1\n"
+    assert first["identity"]["runtime_source"]["source_commit"] == commit
+
+
 def test_installed_preparer_does_not_treat_wheel_assets_as_a_source_payload(tmp_path, monkeypatch):
     scripts = tmp_path / "_runtime_assets" / "scripts"
     tool = scripts / "runtime-source-tools" / "prepare_runtime_source.py"
