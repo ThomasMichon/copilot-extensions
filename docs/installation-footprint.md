@@ -111,13 +111,17 @@ implemented or field-qualified.
 |------------------|----------------|------------------------------------|-----------------------|
 | Selected runtime differs from payload/request, or a slot is incomplete | Runtime/source-profile construction and publication | Admitted complete physical slot and applicable selected-generation records | Check source/profile and completion through the owner; invoke the selected command; prove required incoming serving generation |
 | Missing, shadowed or damaged command/launch asset | Owning binstub/template generator | Canonical platform siblings targeting the resolved installation/current slot | Check exact generated target and attribution, argument/exit forwarding through a harmless consumer; PATH evidence is supplementary |
-| Older Manager lacks a maintenance setter | Manager's configuration writer/schema | Only the intended `[maintenance] automatic` boolean changes in resolved `config.toml` | Preserve unrelated bytes under its configuration lock/recomparison; canonical `automatic_maintenance_enabled()` readback matches the requested choice |
+| Older Manager lacks a maintenance setter | Manager's configuration writer/schema | Only the intended `[maintenance] automatic` boolean changes in resolved `config.toml` | Preserve unrelated bytes under its configuration lock/recomparison; verify the intended TOML boolean is present, strict `load_config(resolved_root)` succeeds and `.maintenance.automatic` matches the requested choice; separately check actual consumer admission |
 | Invalid provider/configuration or doctorable worktree record | Plugin configuration/adoption/state doctor | Schema-valid, minimally repaired addressed record | Canonical reader/doctor plus affected consumer; preserve identities, active claims, repositories, worktrees and sessions |
 | Broken installation junction/root redirect | Owning installation/launcher publisher | Exact owned redirect to the canonical physical target | Recompare redirect/ownership before replacement; resolve the real target and invoke the consumer; never traverse and erase its referent |
 | Stale lock/queue blocks explicit installation | Existing lock recovery and request execution owner | Quarantined proven residue and a normally executable original request | Exclusion/CAS and receipt, then actual requested installation result; stale-queue or dead-PID evidence alone is not success |
 | Central task/unit or provider selects an obsolete generation | Owning service/registration installer | Applicable current registration and authenticated ready incoming service | Verify exact installation/role, native identity and current target; exclude session hosts/keepers, relays/forwards and foreign registrations |
 | Outgoing central daemon remains after selection | Outgoing lifecycle owner; optional finite long-grace fallback | Independent central-only retirement, never a new periodic reaper | Revalidate generation/role/native identity and then-current selection at mutation; report skipped/unfinished retirement separately from incoming success |
 | Real source/feed authentication, privilege, build or health failure | Acquisition/construction/readiness owner | Explicit failed/partial result with intact preserved state | Fix the actual prerequisite within granted scope; never mark a failed candidate healthy or bypass admission |
+
+Fail-closed admission predicates are not strict configuration readback:
+`automatic_maintenance_enabled()` also returns `False` on unreadable/invalid
+configuration. That result alone cannot verify a requested disabled setting.
 
 ## Completion evidence and limits
 
