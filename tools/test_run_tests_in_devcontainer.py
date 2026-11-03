@@ -1621,6 +1621,33 @@ def test_prepare_dependencies_strips_file_selectors_only_from_preparation(tmp_pa
     ]
 
 
+@pytest.mark.parametrize("profile_argument", [
+    ["--test-profile", "busy-host-functional"],
+    ["--test-profile=busy-host-functional"],
+    ["--test-prof", "busy-host-functional"],
+])
+def test_functional_profile_is_only_forwarded_to_offline_test_pass(tmp_path, profile_argument):
+    arguments = [
+        "agent-codespaces", *profile_argument,
+        "--test-file", "tests/test_snapshot_copy_contract.py",
+    ]
+    original = arguments.copy()
+    config = tmp_path / "devcontainer.json"
+    with mock.patch.object(wrapper.shutil, "which", return_value="/usr/bin/devcontainer"), \
+         mock.patch.object(wrapper.subprocess, "run", return_value=mock.Mock(returncode=0)) as run:
+        wrapper._net_scope.prepare_dependencies(
+            "/usr/bin/devcontainer", wrapper.REPO, "abc123",
+            config, arguments, wrapper._canonicalize_flag,
+        )
+        assert run.call_args.args[0][-2:] == ["agent-codespaces", "--prepare-only"]
+        assert wrapper._run_tests(
+            "abc123", config,
+            wrapper._net_scope.strip_reinstall(arguments, wrapper._canonicalize_flag),
+        ) == 0
+        assert run.call_args.args[0][-len(original):] == original
+    assert arguments == original
+
+
 def test_prepare_dependencies_raises_on_nonzero_exit(tmp_path: Path) -> None:
     fake_result = mock.Mock(returncode=1)
     config_path = tmp_path / "devcontainer.json"

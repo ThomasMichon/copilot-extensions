@@ -40,12 +40,94 @@ on:
           - komodo-recovery
           - manager-suite
           - worktrees-git-probes
+          - codespaces-installer
         default: context
 
 permissions:
   contents: read
 
 jobs:
+  codespaces-installer-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'codespaces-installer'
+    name: CodeSpaces canonical and materialized installers (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 125
+    env: &codespaces-installer-env
+      UV_PYTHON: "3.12"
+    steps: &codespaces-installer-steps
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify complete canonical and normally materialized installer contracts
+        shell: python
+        run: |
+          import os
+          import pathlib
+          import sys
+          import tempfile
+          import time
+
+          source = pathlib.Path.cwd()
+          sys.path.insert(0, str(source / "libs" / "agent-procutil" / "src"))
+          from agent_procutil.owned_process import run_caller_owned
+
+          started = time.monotonic()
+          deadline = started + 7200
+          def run(arguments, *, cwd=source, limit):
+              remaining = min(limit, deadline - time.monotonic())
+              if remaining <= 0:
+                  raise TimeoutError("7200-second combined functional envelope exhausted")
+              print(f"START elapsed={time.monotonic() - started:.1f}s argv={arguments}", flush=True)
+              result = run_caller_owned(
+                  arguments, cwd=cwd, timeout=remaining,
+                  max_stdout_bytes=16 * 1024 * 1024, max_stderr_bytes=16 * 1024 * 1024,
+              )
+              print(result.stdout, end="", flush=True)
+              print(result.stderr, end="", file=sys.stderr, flush=True)
+              result.check_returncode()
+              return result.stdout.strip()
+
+          head = run(["git", "rev-parse", "HEAD"], limit=30)
+          assert head == os.environ["GITHUB_SHA"]
+          print(f"qualification-source={head}; profile=busy-host-functional", flush=True)
+          run([
+              sys.executable, "tools/seasoned_uv.py", "--uv", "uv", "--",
+              "--system", "pytest", "pytest-timeout", "packaging", "pyyaml", "coverage>=7.7",
+          ], limit=300)
+          run([
+              sys.executable, "-m", "pytest", "-q", "--timeout=120",
+              "tools/test_materialize_installer_engine.py", "tools/test_run_plugin_tests.py",
+              "tools/test_run_tests_in_devcontainer.py",
+          ], limit=900)
+          runner = [sys.executable, "tools/run-plugin-tests.py", "agent-codespaces",
+                    "--test-profile", "busy-host-functional"]
+          run([*runner, "--test-file", "tests/test_snapshot_copy_contract.py",
+               "--test-file", "tests/test_installer_test_support.py"], limit=2700)
+          run([*runner, "--test-file", "tests/test_installer_engine_adoption.py"], limit=2700)
+          with tempfile.TemporaryDirectory(prefix="codespaces-installer-") as directory:
+              materialized = pathlib.Path(directory) / "materialized"
+              run([sys.executable, "tools/materialize_main.py", "--candidate",
+                   "--dest", str(materialized)], limit=600)
+              run([*runner, "--test-file", "tests/test_installer_engine_adoption.py"],
+                  cwd=materialized, limit=2700)
+          assert not pathlib.Path(directory).exists()
+          assert not run(["git", "status", "--porcelain", "--untracked-files=no"], limit=30)
+          print(f"PASS cleanup=confirmed source={head} elapsed={time.monotonic() - started:.1f}s",
+                flush=True)
+  codespaces-installer-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'codespaces-installer'
+    name: CodeSpaces canonical and materialized installers (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 125
+    env: *codespaces-installer-env
+    steps: *codespaces-installer-steps
   worktrees-git-probes-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'worktrees-git-probes'
     name: Worktrees Git probe packet (Linux)

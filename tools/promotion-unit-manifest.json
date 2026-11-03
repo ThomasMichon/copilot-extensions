@@ -4087,7 +4087,7 @@
         "tools/governed_feed_trust.py": "0dcee2353bb09b65ffe030f4956c92c08a6ade284464ac7389389fad863e0300",
         "tools/installer_engine_ref.py": "bd4b30a5feac04b5c6c231598f23935756363ba8e5fe5edabedaa74f219801c8",
         "tools/launch_wrapper_assets_ref.py": "8b1eb2f5620cf4ba245a8acd992749e16e64694e6ebc08da4874db50c3d8e414",
-        "tools/materialize_installer_engine.py": "d6be73cef05ddbf749600ab909053bfe0a873b913bd3ec9091628745ae53c82a",
+        "tools/materialize_installer_engine.py": "0fbdd8c974257e61f462ca5e6816938054980c399eaa95323eebda5407442e28",
         "tools/materialize_launch_wrapper_assets.py": "c8441a7c7edff2e36ad2019d79942b6160493f3927251b560d43219f9c75d45f",
         "tools/materialize_main.py": "e47b95bdc19d7d6b04a04b304ae7cde169c3d45ae1bb7aca913111c2dc24d8f0",
         "tools/materialized_candidate_inventory.py": "9a8ff5cdc600c7ef83328ddf490981c3c4a31cbab3fc1da6a84e4c1c022bb580",
