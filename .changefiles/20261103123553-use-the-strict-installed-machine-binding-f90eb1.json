@@ -1,0 +1,9 @@
+{
+  "comment": "Use the strict installed machine binding for ordinary pool startup from neutral service directories.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
