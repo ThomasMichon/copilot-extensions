@@ -24,6 +24,7 @@ from update_driver import (
     ensure_worker,
     participant,
     runtime_command,
+    runtime_script_command,
     run_explicit,
     status,
     wait,
@@ -911,6 +912,30 @@ def test_runtime_command_uses_original_bootstrap(area, monkeypatch, nested):
         sys.executable, "-I", "-S", "-B", "-X", "utf8", str(bootstrap),
         "-m", "some.adapter", "update",
     )
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_runtime_script_command_shares_source_and_retained_selection(area, monkeypatch, nested):
+    import agent_procutil
+
+    slot = area / "versions" / "1.2.3" if nested else area
+    slot.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(sys, "prefix", str(slot / ".venv" if nested else slot))
+    monkeypatch.setattr(agent_procutil, "direct_python", lambda exe: (exe, {"selected": "runtime"}))
+    script = area / "script \u03b1 space.py"
+    script.write_text("# controlled script\n", encoding="utf-8")
+    args = ["", "two words", "\u00fc"]
+    argv, env = runtime_script_command(script, args)
+    assert argv == (sys.executable, str(script), *args)
+    bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
+    bootstrap.parent.mkdir()
+    bootstrap.write_text("# controlled fixture", encoding="utf-8")
+    argv, env = runtime_script_command(script, args)
+    assert argv == (
+        sys.executable, "-I", "-S", "-B", "-X", "utf8", str(bootstrap),
+        str(script), *args,
+    )
+    assert env == {"selected": "runtime"}
 
 
 @pytest.mark.parametrize("nested", [False, True])

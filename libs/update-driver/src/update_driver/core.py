@@ -283,10 +283,33 @@ def runtime_command(
     module: str, args: Sequence[str] = (),
 ) -> tuple[tuple[str, ...], dict[str, str]]:
     """Construct this runtime's retained module invocation, not a latest-slot lookup."""
-    from agent_procutil import direct_python
-
     if not isinstance(module, str) or not re.fullmatch(r"[A-Za-z_]\w*(\.[A-Za-z_]\w*)*", module):
         raise InvalidRequestError("runtime module must be an import identifier")
+    return _runtime_command(("-m", module), args)
+
+
+def runtime_script_command(
+    path: str | os.PathLike[str], args: Sequence[str] = (),
+) -> tuple[tuple[str, ...], dict[str, str]]:
+    """Construct this runtime's retained absolute-script invocation."""
+    try:
+        script = os.fspath(path)
+    except TypeError as error:
+        raise InvalidRequestError("runtime script must be an absolute path") from error
+    if (
+        not isinstance(script, str) or not script
+        or any(character in script for character in "\0\r\n")
+        or not Path(script).is_absolute()
+    ):
+        raise InvalidRequestError("runtime script must be an absolute path")
+    return _runtime_command((script,), args)
+
+
+def _runtime_command(
+    entry: tuple[str, ...], args: Sequence[str],
+) -> tuple[tuple[str, ...], dict[str, str]]:
+    from agent_procutil import direct_python
+
     executable, env = direct_python(sys.executable)
     prefix = Path(sys.prefix)
     application = prefix.name == ".venv" and prefix.parent.parent.name == "versions"
@@ -308,12 +331,14 @@ def runtime_command(
             raise StateError("retained runtime bootstrap is linked or unsafe")
     if bootstrap.is_file():
         return (
-            executable, "-I", "-S", "-B", "-X", "utf8", str(bootstrap), "-m", module,
-            *_vector(args),
+            executable, "-I", "-S", "-B", "-X", "utf8", str(bootstrap),
+            *entry, *_vector(args),
         ), env
     if installed:
         raise StateError("installed runtime is missing its retention bootstrap")
-    return (executable, "-m", module, *_vector(args)), env
+    if entry[0] != "-m" and not Path(entry[0]).is_file():
+        raise InvalidRequestError("runtime script must be an absolute script file")
+    return (executable, *entry, *_vector(args)), env
 
 
 def _json(value: object) -> str:

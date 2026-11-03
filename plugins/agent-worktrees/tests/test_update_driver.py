@@ -20,6 +20,17 @@ def _args(**values):
     return argparse.Namespace(**{**fields, **values})
 
 
+@pytest.fixture(autouse=True)
+def _prepared_fixture_import_graph(monkeypatch):
+    import json
+    import sys
+    from pathlib import Path
+
+    monkeypatch.setenv("UPDATE_DRIVER_TEST_IMPORT_PATH", json.dumps([
+        str(Path(path).resolve()) for path in sys.path if path
+    ]))
+
+
 def _run_runtime_owned(monkeypatch, argv, environment, *, timeout=20):
 
     with monkeypatch.context() as selected:
@@ -41,6 +52,8 @@ def _write_fixture_project(scope):
 
 
 def _enqueue_fixture_update(monkeypatch, scope, **values):
+    import json
+    import os
     from pathlib import Path
     import update_driver
     from agent_worktrees import __main__ as engine, project_update_controller
@@ -51,7 +64,12 @@ def _enqueue_fixture_update(monkeypatch, scope, **values):
     def command(module, args=()):
         argv, environment = original(module, args)
         if module == "agent_worktrees":
-            argv = (argv[0], str(fixture.resolve()), "execute", *args)
+            if os.environ.get("UPDATE_DRIVER_TEST_RUNTIME_MODE", "source") == "prepared":
+                prepared = json.loads(Path(os.environ["UPDATE_DRIVER_TEST_PREPARED_RUNTIME"]).read_text(encoding="utf-8"))
+                prefix, environment = prepared["engine"]["script"]
+            else:
+                prefix = [argv[0], str(fixture.resolve())]
+            argv = (*prefix, "execute", *args)
         return argv, environment
 
     with monkeypatch.context() as selected:
@@ -493,9 +511,28 @@ def test_actual_queued_engine_keeps_each_scope_and_original_invocation(tmp_path,
     import importlib.util
     import os
     import subprocess
+    import shutil
+    import time
     from contextlib import nullcontext
     from pathlib import Path
     import update_driver
+
+    mode = os.environ.get("UPDATE_DRIVER_TEST_RUNTIME_MODE", "source")
+    assert mode in {"source", "prepared"}
+    prepared = (
+        json.loads(Path(os.environ["UPDATE_DRIVER_TEST_PREPARED_RUNTIME"]).read_text(encoding="utf-8"))
+        if mode == "prepared" else None
+    )
+    print(f"Routing runtime mode: {mode}; cold-first-touch proof not exercised")
+    phases = tmp_path / "fixture-phases.jsonl"
+    monkeypatch.setenv("UPDATE_DRIVER_TEST_PHASE_LOG", str(phases))
+
+    def worker_phase(phase):
+        with phases.open("a", encoding="utf-8") as logfile:
+            logfile.write(json.dumps({
+                "time": time.monotonic(), "role": "worker-owner",
+                "phase": phase, "pid": os.getpid(),
+            }) + "\n")
 
     home = tmp_path / "home"
     home.mkdir()
@@ -535,11 +572,31 @@ def test_actual_queued_engine_keeps_each_scope_and_original_invocation(tmp_path,
                 ) == 0
             monkeypatch.setenv("AGENT_HOME", str(tmp_path / "first"))
             worker, environment = update_driver.runtime_command("update_driver", ["worker"])
+            if prepared is not None:
+                from agent_procutil import python_cache_args
+
+                worker, environment = prepared["engine"]["worker"]
+                queue_root = home / ".copilot-extensions" / "update-driver"
+                cache = python_cache_args(queue_root, runtime=prepared["engine"]["slot"])
+                target_cache = Path(cache[1].split("=", 1)[1])
+                if not target_cache.exists():
+                    worker_phase("owned-bytecode-copy-start")
+                    shutil.copytree(
+                        Path(prepared["engine"]["cache"][1].split("=", 1)[1]), target_cache,
+                    )
+                    worker_phase("owned-bytecode-copy-completed")
+            worker_phase("starting")
             try:
                 result = _run_runtime_owned(monkeypatch, worker, environment, timeout=40)
             except subprocess.TimeoutExpired as error:
+                worker_phase("timeout")
                 logs = home / ".copilot-extensions" / "update-driver"
-                pytest.fail(f"worker timeout: {[p.read_text() for p in logs.glob('*.log')]}: {error}")
+                pytest.fail(
+                    f"worker timeout: {[p.read_text() for p in logs.glob('*.log')]}; "
+                    f"phases: {phases.read_text(encoding='utf-8')}: {error}"
+                )
+            worker_phase("completed")
+            print("Fixture phases:\n" + phases.read_text(encoding="utf-8"))
             assert result.returncode == 0, result.stderr
             rows = update_driver.status(root=home / ".copilot-extensions" / "update-driver")
             assert rows and all(row.state == "completed" and row.exit_code == 0 for row in rows), [

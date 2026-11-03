@@ -34,11 +34,21 @@ def main() -> None:
         python = runtime.slot_python(root, slot.name)
         if python is None or not Path(sys.prefix).samefile(python.parent.parent):
             raise RuntimeError("Retained runtime interpreter resolved outside its slot")
-        if len(sys.argv) < 3 or sys.argv[1] != "-m":
-            raise ValueError("Runtime retention bootstrap requires a module invocation")
-        module = sys.argv[2]
-        sys.argv = sys.argv[2:]
-        runpy.run_module(module, run_name="__main__", alter_sys=True)
+        if len(sys.argv) >= 3 and sys.argv[1] == "-m":
+            module = sys.argv[2]
+            sys.argv = sys.argv[2:]
+            runpy.run_module(module, run_name="__main__", alter_sys=True)
+        elif len(sys.argv) >= 2:
+            path = sys.argv[1]
+            if (
+                any(character in path for character in "\0\r\n")
+                or not Path(path).is_absolute() or not Path(path).is_file()
+            ):
+                raise ValueError("Runtime retention bootstrap requires an absolute script file")
+            sys.argv = sys.argv[1:]
+            runpy.run_path(path, run_name="__main__")
+        else:
+            raise ValueError("Runtime retention bootstrap requires a module or absolute script")
 
 
 if __name__ == "__main__":
