@@ -42,6 +42,7 @@ def _run_update(
     argv: list[str], *, cwd: Path | None, timeout: float,
     env: Mapping[str, str] | None = None,
     on_settled: Callable[[], None] | None = None,
+    native_write_deadline: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     if not _WINDOWS:
         from agent_procutil.owned_process import OwnedCleanupError, _PreparationTimeout, run_owned
@@ -70,6 +71,7 @@ def _run_update(
     result = installer_run.run_installer(
         argv, cwd=cwd, env=os.environ if env is None else env, deadline_s=timeout,
         log=lines.append, require_tree_exit=True,
+        **({"native_write_deadline": native_write_deadline} if native_write_deadline is not None else {}),
     )
     text = "\n".join(lines)
     if result.rc is None and result.status.startswith("timed out"):
@@ -239,6 +241,8 @@ def _acquire(
                 _run_install(argv, ref, cwd=cwd, timeout=timeout, custody=custody, **environment)
                 if verb == "install" else _auth.run_acquisition(
                     _run_update, argv, context=cwd, cwd=cwd, timeout=timeout, **environment,
+                    **({"native_write_deadline": started + _TOTAL_BUDGET_S - installer_run._REAP_GRACE_S}
+                       if _WINDOWS and installed else {}),
                 )
             )
         except activation_preservation.PluginStateError as error:
@@ -251,6 +255,10 @@ def _acquire(
             return status
         except installer_run.InstallerLaunchError as error:
             status = f"payload launch failed: {update_events.bounded(str(error), 200)}"
+            output.warn(f"{name}: {status}")
+            return status
+        except installer_run.InstallerActivityError as error:
+            status = f"payload activity observation failed: {update_events.bounded(str(error), 200)}"
             output.warn(f"{name}: {status}")
             return status
         except subprocess.TimeoutExpired as error:

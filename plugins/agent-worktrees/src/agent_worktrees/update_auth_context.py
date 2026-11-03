@@ -142,7 +142,7 @@ def child_environment(context: Path | None) -> dict[str, dict[str, str]]:
 
 def run_acquisition(runner, *args, context: Path | None = None, repository: bool = False, **kwargs):
     """Observe a launched child, not environment preparation or a failed spawn."""
-    from .installer_run import InstallerCleanupError
+    from .installer_run import InstallerActivityError, InstallerCleanupError
 
     value = _current.get()
     if value is not None and repository:
@@ -163,7 +163,8 @@ def run_acquisition(runner, *args, context: Path | None = None, repository: bool
 
     try:
         result = runner(*args, **kwargs)
-    except (subprocess.TimeoutExpired, subprocess.CalledProcessError, InstallerCleanupError):
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError,
+            InstallerCleanupError, InstallerActivityError):
         used()
         raise
     used()

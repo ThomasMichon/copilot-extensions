@@ -1,5 +1,16 @@
 # Testing copilot-extensions
 
+The optional `agent-worktrees --test-file tests/test_update_write_activity_native.py
+--allow-explicit-tiers` packet uses private synthetic Windows writers under the
+real strict Job and finite stream owner. It distinguishes useful silent writes,
+a later stall, read-only work, continuous writes at the absolute ceiling and
+accounting failure, retaining native root/descendant handles through confirmed
+exit. Output parity and the unchanged output-only path remain separate controls.
+Actor-free accounting and clock controls are admitted through
+`tools/promotion_unit_tests/test_write_activity.py`; the native packet does not
+enter required unit-only CI. Neither packet proves installed updater adoption
+or a supported consumer-first bootstrap.
+
 Worktrees' focused `tests/test_status_monitor.py` pending-request and bounded-retry
 packet checks that idle, unarmed, confirmed and empty-token queues do not read
 handoff history or claims. Armed requests retain the existing pre-spawn retry
