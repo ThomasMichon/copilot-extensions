@@ -71,7 +71,7 @@ def env_token(owner: str, env: Mapping[str, str], host: str = "github.com") -> s
 
 
 def helper_timeout(env: Mapping[str, str]) -> float:
-    return min(5.0, max(0.01, float(env.get("CE_UPDATE_AUTH_HELPER_TIMEOUT_MS", "5000")) / 1000))
+    return min(30.0, max(0.01, float(env.get("CE_UPDATE_AUTH_HELPER_TIMEOUT_MS", "30000")) / 1000))
 
 
 def _config_key(key: str) -> bool:

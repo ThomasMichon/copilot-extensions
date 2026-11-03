@@ -198,6 +198,31 @@ def _source(owner="team", *, id="marketplace:example", required=True, cwd=None):
     return auth.source(id, f"https://example.test/{owner}/repo", required=required, cwd=cwd)
 
 
+def test_git_probe_allows_working_access_beyond_five_seconds(monkeypatch):
+    elapsed = 0.0
+    waits = 0
+
+    def wait(*, timeout):
+        nonlocal elapsed, waits
+        waits += 1
+        if waits == 1:
+            elapsed += min(12, timeout)
+            if timeout < 12:
+                raise subprocess.TimeoutExpired(["git", "ls-remote"], timeout)
+        return 0
+
+    child = SimpleNamespace(
+        returncode=0, stdin=io.BytesIO(), stdout=io.BytesIO(), stderr=io.BytesIO(),
+        wait=wait,
+    )
+    monkeypatch.setattr(process, "time", SimpleNamespace(monotonic=lambda: elapsed))
+    monkeypatch.setattr(
+        process, "spawn_sync_in_kill_on_close_job",
+        lambda *args, **kwargs: (child, SimpleNamespace(close=lambda: None)),
+    )
+    assert auth._probe(auth.SourceAuth(_source(), []), {}, False, process.run) == "ok"
+
+
 class Probe:
     def __init__(self, anonymous=False, configured=False, *, gh=True, mismatch=False, fill=False):
         self.anonymous, self.configured = anonymous, configured
@@ -397,12 +422,22 @@ def _clean_git_env(monkeypatch, tmp_path):
     return config
 
 
-def test_real_git_router_replays_url_helpers_and_local_reset_without_writes(tmp_path, monkeypatch):
+@pytest.mark.parametrize("helper_delay", [0, 6])
+def test_real_git_router_replays_url_helpers_and_local_reset_without_writes(
+    tmp_path, monkeypatch, helper_delay,
+):
     config = _clean_git_env(monkeypatch, tmp_path)
     checkout = tmp_path / "checkout"
     checkout.mkdir()
     subprocess.run(["git", "init", "-q", str(checkout)], check=True, **no_window_kwargs())
-    helper = "!f() { printf '%s\\n' username=original " + router.SECRET_KEY + "=fixture; }; f"
+    delay = shlex.join([
+        sys.executable.replace("\\", "/"), "-c",
+        f"import time; time.sleep({helper_delay})",
+    ])
+    helper = (
+        "!f() { " + delay + "; printf '%s\\n' username=original "
+        + router.SECRET_KEY + "=fixture; }; f"
+    )
     for key, value in [
         ("credential.helper", "!exit 71"),
         ("credential.https://example.test/working.helper", ""),
@@ -423,7 +458,6 @@ def test_real_git_router_replays_url_helpers_and_local_reset_without_writes(tmp_
         env=env,
         cwd=checkout,
         input="protocol=https\nhost=example.test\npath=working/repo\n\n",
-        timeout=10,
     )
     assert result.status == 0, result.stderr
     answer = router.parse_attributes(result.stdout)
