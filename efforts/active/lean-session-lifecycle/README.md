@@ -89,11 +89,12 @@ Phase 3 without replacing this effort or taking over adjacent ownership.
   and predecessor-retirement transitions against the current host boundary.
 - [x] Persist an idempotent, identity-validated request through the owning
   worktree command, then wake the existing monitor with the affected key.
-- [ ] Process only registered pending work and its bounded retries. (The
+- [x] Process only registered pending work and its bounded retries. (The
   "remove handoff-discovery full-history scans from ordinary monitor ticks"
   half of this item is already satisfied -- see Journal, #5742 -- by a
-  separately-driven, more general fix; the bounded-retry/pending-work half
-  remains open.)
+  separately-driven, more general fix. #5966 supplies bounded pre-spawn retries;
+  #10167 completes idle eligibility before history acquisition. Installed
+  observation remains in Phase 4.)
 - [x] Recover outstanding requests after monitor restart or lost notification
   from durable current state, not replay of machine-global diagnostic history.
   (Already structurally satisfied -- see Journal: the wake is latency-only.)
@@ -106,9 +107,9 @@ Phase 3 without replacing this effort or taking over adjacent ownership.
 The Phase 2 continuation reuses #5966's existing bounded retry policy: only
 an attempt that provably created no successor can retry, with the existing
 three-attempt cap and claim-staleness interval. Unknown or possibly started
-successors are not replayed. The remaining idle-path correction is to avoid
-reading requested/attempted history until a durable handoff is armed,
-unconfirmed and has a token; source qualification and merge remain open.
+successors are not replayed. #10167 defers requested/attempted history until a
+durable handoff is armed, unconfirmed and has a token. These are source
+completion claims, not installed-monitor or complete handoff-validation proof.
 
 ### Phase 3 - Remove wait-only launch layers
 
@@ -129,8 +130,9 @@ Windows foreground preparation and terminal-owned attachment; unchanged
 no-mux, remote, new-window and POSIX paths retain their prior behavior.
 This does not satisfy Phase 4's authorized installed rollout, exhaustive
 transient-process inventory or live shared-daemon singleton proof. The
-mini-effort retains those distinct open gates; Phase 2's bounded-retry work
-and the other tracking issues are unchanged.
+mini-effort retains those distinct open gates. Phase 2's source continuation
+landed separately in #10167; the remaining Validation Plan and tracking issues
+are not closed by either source slice.
 
 ### Phase 4 - Release and measured completion
 
@@ -337,3 +339,24 @@ two measured forwarding roles, with live process-tree evidence.)_
   contract pass. Review, required CI, source merge and installed observation
   remain separate gates. The authorized rollout blockers and selected-runtime
   query evidence are journaled in the linked Picker mini-effort.
+
+### 2026-11-03 - Idle-path correction merged
+
+- #10167 merged at `776a70b9ed289d6fbfec1827467cb497633c9c9f` after
+  exact-head Copilot approval, the resolved journal-placement correction and
+  green required CI `41577893454`. The managed merge used the normal
+  repository-authorized review exception, not a CI bypass.
+- Re-read the parent Plan/Validation Plan and linked mini-effort after merge.
+  Phase 2's remaining source item now has explicit credit to #5966 and #10167.
+  The combined handoff-validation items, release/adoption, exhaustive transient
+  inventory and live singleton measurements remain open.
+- Pull-forward encountered the already-squashed local commits and aborted
+  without altering the branch. After verifying the provider's merge and exact
+  equality of all four affected source/effort files, retained a backup and
+  advanced the branch without replaying the merged commits. No content was
+  discarded to guess a conflict resolution.
+- The next bounded prerequisite is the opaque native payload-copy progress
+  contract in #10159; the existing Manager preparation owner retains #10126.
+  Coordinate readiness with the installed-acceptance owner before any new
+  update. A source merge does not release those operational gates or complete
+  this effort.

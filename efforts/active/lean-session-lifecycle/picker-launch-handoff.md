@@ -54,6 +54,19 @@ constructor-metadata implementation, installed rollout, live-session changes
 or a deployment-hold change. The admission amendment cleared source review in
 #9943 before further protocol implementation.
 
+For the acquisition prerequisite on 2026-11-03 (UTC), the operator selected:
+
+> consumer
+
+The selected form label was "Repair suite-side progress observation
+(recommended)". The choice was between recognizing completed writes from the
+already-owned Windows Job, preserving the existing inactivity allowance, total
+budget and cleanup gates, and retaining output-only observation while pursuing
+a separate native CLI producer contribution. This selects the consumer-side
+source direction. It does not waive source review, native qualification,
+bootstrap admission, existing update coordination or the separate rollout
+and live-session limits.
+
 ## Context
 
 - `agent_worktrees.manager_launch_cli._exec_worktree_manager` waits on
@@ -164,6 +177,47 @@ reviewed admission revision is implemented and qualified.
 - [x] Journal the bounded outcome in the parent and retain its unrelated open
   Plan/Validation items and #5579's remaining launcher-depth acceptance.
 
+### Slice 4 - Qualify the acquisition prerequisite
+
+- [ ] Review the operator-selected consumer proposal below before implementation.
+- [ ] Add opt-in held-Job write activity to the existing finite stream owner,
+  retaining original output behavior, explicit failures and the absolute budget.
+- [ ] Use it only for Windows installed-payload updates under strict Job custody;
+  preserve installation activation recovery, retry admission and POSIX behavior.
+- [ ] Qualify useful silent writes, a later stall, read-only work, the absolute
+  ceiling, output parity and exact owned-descendant cleanup with isolated tests.
+- [ ] Land through normal review/release, then qualify a supported bootstrap
+  and normal updater before claiming installed adoption or returning to live
+  launch/singleton measurements.
+
+The following is the **agent-recommended implementation proposal**, subject to
+the source review gate. Sample strictly increasing completed write-byte
+accounting from the already-held native containment Job, not a PID lookup,
+filesystem scan or private Copilot staging convention. The optional activity
+callback extends the existing finite observer; it does not create another
+watcher, thread, daemon, Job or timer heartbeat. Default output-only callers
+remain unchanged.
+
+A positive native write delta may renew inactivity. CPU use, reads, a timer and
+an unchanged counter may not. Missing/closed ownership, failed native accounting
+or a decreasing counter is an explicit operation failure followed by the same
+strict settlement path, never a successful fallback. Accounting is activity
+evidence only: it does not validate copy content, publication or service health.
+
+Keep the current quiet allowance and acquisition target budget, reserving their
+existing cleanup/activation-settlement portions. Supply an absolute deadline
+to the finite observer so continued writes cannot extend that target budget.
+Do not change source admission, candidate validation, descendant custody,
+activation preservation or the conditions licensing a second attempt.
+Synchronize dependent source closures and document the optional library seam.
+
+Native controls use private synthetic writers under the real owner, not a live
+service or package stage. Unit tests cover counter/deadline/error decisions;
+the Windows lane proves actual silent file writes, bounded stalls and retained
+native exits. The installed-acceptance owner has no already-qualified path that
+adopts a newer Worktrees consumer before the failing acquisition; bootstrap
+qualification therefore remains an explicit gate, not an assumed workaround.
+
 ## Validation Plan
 
 - [x] Actual selected-runtime support, not latest-payload metadata, gates the
@@ -193,6 +247,8 @@ reviewed admission revision is implemented and qualified.
   per-session PSMux servers and actual Copilot processes remain permitted.
 - [ ] Source tests, native evidence, promotion and authorized installed proof
   remain distinct; skipped lanes have explicit reasons and tracked follow-up.
+- [ ] Native write activity preserves quiet and absolute limits, strict
+  settlement and truthful publication/health outcomes for opaque acquisition.
 
 ## Journal
 
@@ -680,3 +736,45 @@ reviewed admission revision is implemented and qualified.
   tracked blockers. The parent's bounded pending-work/retry slice remains an
   independent authorized avenue; no existing session needs to be terminated
   or migrated to pursue it.
+
+### 2026-11-03 - Acquisition progress decision prepared
+
+- The independent idle-path source correction merged in #10167; its parent
+  journal records the exact review/CI outcome and remaining live gates.
+- #10159's opaque native copy has no captured completed-unit diagnostics.
+  The current finite stream owner supports both inactivity and absolute
+  deadlines, and Windows exposes write accounting on the already-held
+  containment Job. Neither observation is an implemented correction.
+- **Agent-recommended proposal; operator decision pending:** admit strictly
+  increasing completed native write-byte counts from that exact owned Job as
+  activity for Windows payload acquisition, while retaining the existing quiet
+  allowance, acquisition target budget, strict child-tree settlement, source
+  admission and publication checks. Do not renew from a clock, CPU use,
+  read-only activity or an unchanged counter; accounting failure must remain
+  explicit. Native tests must cover useful silent writes, a subsequent stall,
+  read-only work, the absolute ceiling and descendant cleanup.
+- The alternative is to retain output-only observation and pursue completed
+  copy diagnostics in the native Copilot producer. That is a separate upstream
+  contribution boundary, not permission to redirect this report or file an
+  unreviewed upstream issue.
+- A consumer-side correction also needs a qualified bootstrap/adoption path:
+  no fix is live merely because its source is released, and the incumbent must
+  not be monkey-patched to acquire its own replacement. The existing update
+  owner was asked only about already-established bootstrap readiness, with no
+  new update, recovery, patch or ownership transfer requested.
+
+### 2026-11-03 - Consumer direction selected
+
+- Captured the operator's exact `consumer` response and selected label in Scope
+  Approvals. Slice 4 proposes the bounded consumer correction and native
+  validation before implementation; it has not yet cleared source review.
+- The installed-acceptance owner reports no already-qualified consumer-first
+  bootstrap: the known unified path acquires payloads before runtime installation.
+  No alternate bootstrap, incumbent patch or acquisition replay is qualified.
+  Both owners have no update or recovery in flight or pending. The source plan
+  preserves this adoption gap instead of presenting the proposed observer as
+  an immediately deployable repair.
+- A later operator direction assigns one new normal update, after read-only
+  admission, to the existing installed-acceptance owner. This source driver
+  will not run a concurrent update. That attempt's outcome is unobserved and
+  remains separate from the proposed correction.
