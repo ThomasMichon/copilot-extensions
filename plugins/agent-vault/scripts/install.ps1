@@ -1197,8 +1197,23 @@ function Invoke-Start {
         Write-Fail "agent-vault runtime not installed -- run: install.ps1 -Action install"
         exit 1
     }
-    & $LinkPython -m agent_vault start
-    exit $LASTEXITCODE
+    $project = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
+        $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT
+    } else { (Get-Location).ProviderPath }
+    $previousDirectory = [IO.Directory]::GetCurrentDirectory()
+    $previousPreference = $ErrorActionPreference
+    Push-Location -LiteralPath $project
+    try {
+        [IO.Directory]::SetCurrentDirectory($project)
+        $ErrorActionPreference = 'Continue'
+        & $LinkPython -m agent_vault start
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousPreference
+        Pop-Location
+        [IO.Directory]::SetCurrentDirectory($previousDirectory)
+    }
+    exit $code
 }
 
 function Invoke-Stop {

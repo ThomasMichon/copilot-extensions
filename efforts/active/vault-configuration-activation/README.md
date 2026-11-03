@@ -140,3 +140,18 @@ remain authoritative for their machine-local custody.
   explicitly forbidden. Two durable request controls pass against a different
   worker environment, including absent selectors. Final external revision and
   review acceptance remain open.
+- Required CI and both native jobs passed on the reconciled `db826c9421`
+  source. Subsequent review identified relative native configuration after
+  self-staging, the preserved project for a no-task start, and use of prepared
+  Python by activation. The revision now anchors relative selectors to the
+  invoking project, retains both provider/native CWD for the CLI fallback, and
+  passes the read-only selected interpreter to activation.
+- Four new native controls pass, including actual marketplace self-staging.
+  Windows' unchanged installation-context caller requires Python on PATH before
+  installation selection; its no-global-Python control therefore qualifies the
+  activation reader with owned Python, not unsupported whole-frontdoor behavior.
+  POSIX retains a full payload no-global-Python control.
+- The final local seven-file packet passes 207 cases with six platform skips in
+  four bounded sub-suites. An earlier combined run exceeded its 300-second
+  group budget; splitting at two files preserves the existing item/group and
+  overall limits rather than increasing deadlines.

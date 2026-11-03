@@ -52,6 +52,15 @@ checks; it does not install, start or unlock anything. The hook's 30-second
 budget accommodates the existing configuration owner's bounded 20-second read.
 Installer re-execution retains the invoking project through the existing
 `COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT` context, not its staging directory.
+Relative native configuration-file selectors resolve against that invoking
+project, even after the installer self-stages in HOME. The Windows no-task
+start fallback also executes the CLI from the preserved project.
+Activation accepts the selected completed runtime's interpreter and uses
+ambient Python discovery only for a cold payload. This does not bypass the
+canonical installation-context owner's independent bootstrap prerequisites;
+its current Windows front door still requires Python on PATH before resolving
+an installation. The POSIX payload control qualifies the full no-global-Python
+path; Windows separately qualifies the activation reader with owned Python.
 
 Removing opt-in or setting `enabled: false` withdraws this scope's automatic
 participation; it does not stop a shared service, delete data, uninstall

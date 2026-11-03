@@ -13,6 +13,7 @@ from agent_procutil import no_window_kwargs
 from .test_bootstrap_check_reconcile_always_on import _clean_env, _make_fake_plugin
 from .test_bootstrap_driver import native_bootstrap
 from .test_identity_payload_gate import prepare_payload, invoke
+from .test_install_snapshot_ps1 import _isolated_install_env, _stage_payload
 
 PLUGIN = Path(__file__).resolve().parents[1]
 
@@ -108,6 +109,69 @@ def test_actual_payload_reader_uses_bundled_sdk_without_site_packages(tmp_path):
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout)["state"] == "configured"
+
+
+def test_relative_config_reader_retains_project_after_staging_to_home(tmp_path):
+    home, project = tmp_path / "home", tmp_path / "project"
+    home.mkdir()
+    project.mkdir()
+    payload = _make_fake_plugin(tmp_path, "agent-vault")
+    (tmp_path / ".agent-vault.json").unlink()
+    (project / "activation.json").write_text('{"enabled":true}', encoding="utf-8")
+    env = _clean_env({
+        "HOME": str(home), "USERPROFILE": str(home),
+        "AGENT_VAULT_CONFIG": "activation.json",
+    })
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", str(payload / "scripts" / "runtime-activation.py"),
+         "--cwd", str(project)], env=env, cwd=home, capture_output=True,
+        text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout)["state"] == "configured"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows marketplace self-staging")
+@pytest.mark.timeout(90)
+def test_relative_config_survives_actual_marketplace_self_staging(tmp_path):
+    import runpy
+
+    prepared = _stage_payload(tmp_path / "prepared")
+    previous_path = sys.path[:]
+    try:
+        release = runpy.run_path(str(PLUGIN.parents[1] / "tools" / "materialize_main.py"))
+        changes = release["materialize_installer_engine_ref_into"](
+            source_consumer_dir=PLUGIN, dest_consumer_dir=prepared,
+            canonical_root=PLUGIN.parents[1],
+        )
+    finally:
+        sys.path[:] = previous_path
+    assert not any(line.startswith("SKIP ") for line in changes), changes
+    home, project = tmp_path / "home", tmp_path / "project"
+    project.mkdir()
+    env = _isolated_install_env(home)
+    payload = home / ".copilot" / "installed-plugins" / "example" / "agent-vault"
+    shutil.copytree(prepared, payload)
+    (home / ".copilot" / "settings.json").write_text(json.dumps({
+        "extraKnownMarketplaces": {
+            "example": {"source": {"source": "github", "repo": "Example/Plugins"}},
+        },
+    }), encoding="utf-8")
+    (project / "activation.json").write_text('{"enabled":true}', encoding="utf-8")
+    env.update(AGENT_VAULT_CONFIG="activation.json", COPILOT_PLUGIN_ROOT=str(payload))
+    env.pop("COPILOT_PLUGIN_STAGED_FROM", None)
+    shell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+    result = subprocess.run(
+        [str(shell), "-NoProfile", "-NonInteractive", "-File",
+         str(payload / "scripts" / "install.ps1"), "-Action", "stamp",
+         "-InstallDir", str(home / ".agent-vault")],
+        cwd=project, env=env, capture_output=True, text=True, timeout=60, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    runtime = home / ".agent-vault"
+    assert (runtime / "payload-dir").is_file(), result.stdout + result.stderr
+    assert not (runtime / "current-version").exists()
+    assert not (runtime / "service.ps1").exists()
 
 
 def test_automatic_cell_selection_supplies_qualified_activation_owner(tmp_path):

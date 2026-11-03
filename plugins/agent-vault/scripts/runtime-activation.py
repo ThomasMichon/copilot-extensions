@@ -21,7 +21,7 @@ def main() -> int:
         str(payload / "scripts" / "configuration-layers" / "src"),
     ]
     try:
-        from agent_vault.config import home_dir
+        from agent_vault.config import _global_config_path, home_dir
         from agent_vault.configuration import runtime_enabled
 
         context = args.context if args.context is not None else os.environ.get("COPILOT_EXTENSIONS_CONTEXT")
@@ -35,6 +35,9 @@ def main() -> int:
         )
         os.environ["AGENT_RT_ROOT"] = runtime
         os.environ["AGENT_VAULT_HOME"] = runtime
+        selected = _global_config_path()
+        if not selected.is_absolute():
+            os.environ["AGENT_VAULT_CONFIG"] = os.path.abspath(os.path.join(args.cwd, selected))
         enabled = runtime_enabled(args.cwd)
         state = "configured" if enabled else "configuration-empty"
         detail = (

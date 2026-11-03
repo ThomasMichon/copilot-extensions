@@ -821,3 +821,102 @@ def test_provisioned_management_command_cannot_start_after_withdrawal(provisione
     assert result.returncode != 0, result.stdout + result.stderr
     assert "inactive" in result.stderr
     assert not (state.home / ".agent-vault" / "service-stdio.log").exists()
+
+
+@pytest.mark.timeout(90)
+def test_activation_uses_completed_runtime_without_global_python(provisioned_snapshot):
+    state = provisioned_snapshot
+    tools = state.fixture_root / "no-global-python"
+    tools.mkdir()
+    if os.name != "nt":
+        for name in (
+            "bash", "sh", "awk", "basename", "dirname", "cat", "cut", "date", "find",
+            "grep", "head", "tail", "tr", "sed", "sort", "stat", "wc", "cksum",
+            "sha256sum", "readlink", "realpath", "id", "uname", "od", "ls", "env",
+            "mkdir", "rmdir", "mktemp", "rm", "cp", "mv", "chmod", "cmp", "touch",
+            "ln", "flock", "hostname", "timeout",
+        ):
+            executable = shutil.which(name)
+            if executable:
+                (tools / name).symlink_to(executable)
+    env = {**state.env, "PATH": str(tools)}
+    assert shutil.which("python", path=env["PATH"]) is None
+    assert shutil.which("python3", path=env["PATH"]) is None
+    if os.name == "nt":
+        runner = state.fixture_root / "activation-reader.ps1"
+        runner.write_text(
+            "param($Helper,$Python,$Root,$Project)\n"
+            ". $Helper\n"
+            "Get-VaultRuntimeActivation -Python $Python -RuntimeRoot $Root -Context '' -Project $Project | ConvertTo-Json -Compress\n",
+            encoding="utf-8",
+        )
+        root = state.home / ".agent-vault"
+        command = [
+            state.pwsh, "-NoProfile", "-NonInteractive", "-File", str(runner),
+            str(state.snapshot / "scripts" / "runtime-activation.ps1"),
+            str(root / "versions" / state.version / "Scripts" / "python.exe"),
+            str(root), str(state.home),
+        ]
+    else:
+        command = [str(state.snapshot / "bin" / "agent-vault"), "--version"]
+    result = subprocess.run(
+        command, cwd=state.home, env=env, capture_output=True, text=True,
+        timeout=30, **agent_procutil.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    if os.name == "nt":
+        assert json.loads(result.stdout)["state"] == "configured"
+    else:
+        assert f"agent-vault {state.expected_version}" in result.stdout
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native PowerShell staged start fallback")
+@pytest.mark.timeout(90)
+def test_staged_start_fallback_uses_preserved_project(provisioned_snapshot):
+    state = provisioned_snapshot
+    project = state.fixture_root / "start-project"
+    project.mkdir()
+    (project / ".agent-vault.json").write_text('{"enabled":true}', encoding="utf-8")
+    env = {**state.env, "AGENT_VAULT_CONFIG": str(project / "absent-machine.json")}
+    slot = state.home / ".agent-vault" / "versions" / state.version
+    guard = slot / "Lib" / "site-packages" / "sitecustomize.py"
+    previous_guard = guard.read_bytes() if guard.exists() else None
+    guard.write_text(
+        "from pathlib import Path\n"
+        "import os\n"
+        "from agent_vault import cli\n"
+        "def ping(*args, **kwargs):\n"
+        "    assert Path.cwd().samefile(os.environ['COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT'])\n"
+        "    return {'ok':True,'pid':7,'cli':'locked'}\n"
+        "cli.send_command = ping\n", encoding="utf-8",
+    )
+    runner = state.fixture_root / "staged-start.ps1"
+    runner.write_text(
+        "param($Installer,$Python,$Project)\n"
+        "$ErrorActionPreference='Stop'\n"
+        "$LinkPython=$Python;$TaskName='fixture'\n"
+        "$env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT=$Project\n"
+        "function Get-ScheduledTask {}\n"
+        "function Start-ScheduledTask {throw 'unexpected task mutation'}\n"
+        "$tokens=$null;$errors=$null\n"
+        "$ast=[System.Management.Automation.Language.Parser]::ParseFile($Installer,[ref]$tokens,[ref]$errors)\n"
+        "if($errors.Count){throw 'Installer parse failed'}\n"
+        "$function=$ast.Find({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Invoke-Start'},$false)\n"
+        ". ([scriptblock]::Create($function.Extent.Text))\n"
+        "Invoke-Start\n", encoding="utf-8",
+    )
+    try:
+        result = subprocess.run(
+            [state.pwsh, "-NoProfile", "-NonInteractive", "-File", str(runner),
+             str(state.snapshot / "scripts" / "install.ps1"),
+             str(slot / "Scripts" / "python.exe"), str(project)],
+            cwd=state.home, env=env, capture_output=True, text=True,
+            timeout=30, **agent_procutil.no_window_kwargs(),
+        )
+    finally:
+        if previous_guard is None:
+            guard.unlink()
+        else:
+            guard.write_bytes(previous_guard)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Already running - PID 7" in result.stdout

@@ -54,8 +54,11 @@ while that work is pending. Healthy, cell-scoped and killswitch-paused hooks
 remain no-ops; no-self-provision and pinned reads explicitly defer publication.
 Missing/older driver support refuses without an inline installer.
 The POSIX hook retains its existing metadata-Python prerequisite and no-Python
-no-op. Activation reads use the payload's bundled configuration SDK and an
-available Python interpreter, without installing Vault or any backend. Cold
+no-op. Activation reads use the payload's bundled configuration SDK and the
+selected completed runtime interpreter when available, retaining ambient
+Python discovery for cold payloads. The canonical installation-context
+bootstrap keeps its independent platform prerequisites (currently Python
+on PATH on Windows). No Vault runtime or backend is installed for this read. Cold
 bootstrap requires the qualified Windows or Linux native driver, not stock
 legacy Bash/macOS. The independent session-guidance writer is unchanged.
 Explicit installer entry points remain separate, unadopted callers.

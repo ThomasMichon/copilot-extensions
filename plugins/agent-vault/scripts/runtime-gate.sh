@@ -190,10 +190,11 @@ if [[ -z "$CONTEXT" ]]; then
     fi
 fi
 
+resolve_runtime
 if [[ -z "${AGENT_VAULT_PINNED_CONTEXT+x}" ]]; then
     . "$SCRIPT_DIR/runtime-activation.sh"
     activation_code=0
-    activation="$(vault_runtime_activation "$PROJECT_ROOT" "--runtime-root=$RUNTIME_ROOT" "--context=$CONTEXT")" || activation_code=$?
+    activation="$(vault_runtime_activation "$PROJECT_ROOT" "$AGENT_RT_PY" "--runtime-root=$RUNTIME_ROOT" "--context=$CONTEXT")" || activation_code=$?
     if [[ "$activation_code" == 2 ]]; then
         if [[ "${1:-}" == installer-readiness ]]; then
             printf '%s\n' "$activation"
@@ -211,7 +212,6 @@ if [[ -z "${AGENT_VAULT_PINNED_CONTEXT+x}" ]]; then
     fi
 fi
 
-resolve_runtime
 if [[ -n "$AGENT_RT_PY" ]]; then
     run_runtime "$@"
 fi
