@@ -55,7 +55,10 @@ retirement/preparation/legacy custody and grace/handover/completion controls.
 These include early predecessor exit and retryable fallback-route release;
 custody remains until guarded route cleanup settles.
 Direct cleanup after route-release failure and exit between resident passes
-exercise the same canonical gate. Incoming preparation-health controls
+exercise the same canonical gate. Reconcile-before-arm controls cover direct
+and resident cleanup, failed writes, route races, missing active selection and
+an unrelated fallback without fabricating a grace record or sending a signal.
+Incoming preparation-health controls
 distinguish grace support from asynchronous retirement alone.
 Windows additionally runs the eight finite Job/native-identity grace and
 asynchronous-installer cases; Linux native expiry is exercised by the real

@@ -122,6 +122,17 @@ def settle_exited(root: Path, predecessor: dict) -> None:
     path = _path(root, predecessor)
     grace = _read(path)
     if grace is None:
+        table = routing.read_table(root / "status-monitor-routing", strict=True) or {}
+        routing._validate_endpoint_rows(table)
+        old = _endpoint(table.get("previous"))
+        if old is None or (
+            old.pid, old.process_start_time
+        ) != (predecessor["pid"], predecessor["start"]):
+            return
+        successor = _endpoint(table.get("active"))
+        if successor is None or successor.pid == old.pid:
+            raise RuntimeError("Monitor retirement fallback release remains pending")
+        _release_previous(root, {"old": old.to_dict(), "successor": successor.to_dict()})
         return
     if (
         predecessor["state"] != "retiring"

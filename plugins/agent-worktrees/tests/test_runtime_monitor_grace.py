@@ -221,6 +221,71 @@ def test_exit_between_resident_passes_keeps_custody_until_route_cleanup(retireme
     assert "previous" not in routing.read_table(r.directory) and r.calls == []
 
 
+@pytest.mark.parametrize("resident", [False, True])
+def test_pre_arm_exit_releases_fallback_before_custody(retirement, resident):
+    r = retirement
+    r.exited.add(r.old.pid)
+    if resident:
+        owner = retirements.ResidentRetirements(r.root)
+        owner.refresh()
+        assert not owner.pending and owner.error is None
+    else:
+        assert not retirements.reconcile(r.root)
+    assert not retirements._records(r.root)
+    assert routing.read_table(r.directory)["active"] == r.new.to_dict()
+    assert "previous" not in routing.read_table(r.directory)
+    grace.arm(r.root, ready=lambda: True)
+    assert not grace._path(r.root, r.predecessor).exists() and r.calls == []
+
+
+@pytest.mark.parametrize("failure", ["write", "route-race"])
+def test_pre_arm_exit_retains_custody_until_fallback_release_retries(retirement, monkeypatch, failure):
+    r = retirement
+    r.exited.add(r.old.pid)
+    release = routing.release_previous_guarded
+
+    def failed(*a, **kw):
+        if failure == "write":
+            raise OSError("fixture route release failed")
+        changed = routing.Endpoint("127.0.0.1", 41003, 303, generation=3, process_start_time="3003")
+        r.route_path.write_text(json.dumps({"active": changed.to_dict(), "previous": r.old.to_dict()}))
+        return release(*a, **kw)
+
+    monkeypatch.setattr(routing, "release_previous_guarded", failed)
+    with pytest.raises((OSError, RuntimeError), match="(route release failed|fallback release remains pending)"):
+        retirements.reconcile(r.root)
+    assert retirements._records(r.root) and routing.read_table(r.directory)["previous"] == r.old.to_dict()
+    assert not grace._path(r.root, r.predecessor).exists()
+    active = routing.read_table(r.directory)["active"]
+    monkeypatch.setattr(routing, "release_previous_guarded", release)
+    assert not retirements.reconcile(r.root)
+    assert not retirements._records(r.root)
+    assert routing.read_table(r.directory)["active"] == active
+    assert "previous" not in routing.read_table(r.directory) and r.calls == []
+
+
+def test_pre_arm_exit_without_active_selection_keeps_custody(retirement):
+    r = retirement
+    r.exited.add(r.old.pid)
+    table = {"previous": r.old.to_dict()}
+    r.route_path.write_text(json.dumps(table))
+    with pytest.raises(RuntimeError, match="fallback release remains pending"):
+        retirements.reconcile(r.root)
+    assert retirements._records(r.root) and routing.read_table(r.directory) == table
+    assert not grace._path(r.root, r.predecessor).exists() and r.calls == []
+
+
+def test_pre_arm_exit_never_releases_another_predecessor(retirement):
+    r = retirement
+    r.exited.add(r.old.pid)
+    other = routing.Endpoint("127.0.0.1", 41003, 303, generation=3, process_start_time="3003")
+    table = {"active": r.new.to_dict(), "previous": other.to_dict()}
+    r.route_path.write_text(json.dumps(table))
+    assert not retirements.reconcile(r.root)
+    assert not retirements._records(r.root) and routing.read_table(r.directory) == table
+    assert not grace._path(r.root, r.predecessor).exists() and r.calls == []
+
+
 @pytest.mark.parametrize("supported", [False, True])
 def test_incoming_health_selects_grace_or_bounded_legacy_cleanup(retirement, monkeypatch, supported):
     from agent_worktrees import status_monitor_health as health

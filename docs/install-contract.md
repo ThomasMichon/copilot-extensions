@@ -5307,6 +5307,10 @@ stays authoritative; canonical runtime references and dev claims remain with
 the existing retirement reconciler until positive native exit and matching
 grace-route cleanup. That canonical settlement gate applies to direct installer
 callers as well as the resident loop, including exit between reconciliation passes.
+If the predecessor exits before the first grace record is armed, the same gate
+compare-releases its exact fallback under the observed active selection before
+settling custody. A missing active selection or failed route cleanup retains
+custody for retry; no grace record or force permission is fabricated.
 An unrouted, identity-unknown or changed owner remains an explicit refusal.
 This fallback does not weaken the incoming runtime's preparation contract.
 The existing explicit cold-retirement helper retains its held cutover guard,
