@@ -3604,6 +3604,14 @@ or phase rejects the result. One pytest directory collector visits only admitted
 files, once each in manifest order, without repeated sibling-directory scans.
 An exact node whitelist deselects other cases before execution and restores manifest
 order. Missing or duplicate admitted nodes reject collection before execution.
+Nine execution-acquisition controls in `test_related_acquisition.py` exercise
+the original selection and absence paths, fatal source/presence failures,
+suppressed registry failures, self-restoring callbacks and argument-time
+rebinding, including an opaque absent-registry fallback with a self-restoring
+resolver. Synthetic source, resolver and registry boundaries retain probe
+order and call counts without actor effects. Full reports keep their opaque
+execution-owner frontier; these controls do not qualify machine-registry
+acquisition completeness, reuse or installed behavior.
 The runner selects pytest's `parametrize_long_str_id_strategy=legacy` to
 preserve the manifest's full-value parameter IDs across pytest 9.1 and 9.2.
 This keeps exact node admission; it does not truncate, rename or omit long

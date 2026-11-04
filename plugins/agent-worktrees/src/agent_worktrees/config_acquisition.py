@@ -185,10 +185,10 @@ def _load_config_d_report(config_d: Path, *, project_name="", warn=False) -> Acq
     return AcquisitionReport("config-dropins", value, tuple(observations))
 
 
-def owner_call(callback, original, *args, source="knowledge-preferences"):
+def owner_call(callback, original, *args, source="knowledge-preferences", **kwargs):
     """Qualify the selected callable, including replacements that restore themselves."""
     try:
-        return callback(*args)
+        return callback(*args, **kwargs)
     finally:
         if callback is not original:
             failed(current_observations(), source, source,
@@ -208,3 +208,81 @@ def owner_outcome(start: int | None, source: str) -> None:
 
 
 knowledge_call = owner_call
+
+
+def execution_config(config, configured_machine, machine_raw, global_raw):
+    """Observe the original execution selection without certifying child inputs."""
+    from dataclasses import replace
+
+    from . import config as cfg
+
+    source = "execution-machine"
+    start = registry_call_started()
+    try:
+        try:
+            repo = config.default_repo
+        except KeyError:
+            repo = None
+        anchors = [repo.anchor] if repo is not None and repo.anchor else []
+        if repo is not None and repo.anchor:
+            from . import state_root
+
+            anchors = [
+                item.anchor for item in state_root.config_source_anchors(
+                    config, base_anchor=repo.anchor, family="registry",
+                )
+            ]
+        for anchor in anchors:
+            root = Path(anchor)
+            if any(_execution_file(root / rel) for rel in (
+                Path(cfg.INREPO_CONFIG_DIRNAME) / "machines.yaml", Path("machines.yaml"),
+            )):
+                from . import machine_identity
+
+                registry = machine_identity.load_execution_registry
+                resolver = machine_identity.resolve_execution_machine
+                config = replace(config, machine=owner_call(
+                    resolver, machine_identity._EXECUTION_MACHINE_OWNER,
+                    configured_machine if configured_machine else cfg.socket.gethostname(),
+                    guest=cfg.detect_platform() == "wsl", configured=bool(configured_machine),
+                    load_entries=lambda: _execution_registry(registry, anchor, config),
+                    preserve_native_hostname=True, source=source,
+                ))
+                break
+        else:
+            if machine_raw.get("machine") or global_raw.get("machine"):
+                failed(current_observations(), source, source, "owner-coverage-unavailable",
+                       "fallback resolver does not expose selected callback provenance")
+                config = replace(config, machine=cfg.detect_machine(value=config.machine))
+    except Exception as exc:
+        failed(current_observations(), source, source, "execution-machine-failed", type(exc).__name__)
+        raise
+    owner_outcome(start, source)
+    return config
+
+
+def _execution_file(path):
+    present = path.is_file()
+    if present:
+        observe(current_observations(), str(path), "execution-candidate", ScanAuthority.COMPLETE)
+    else:
+        failed(current_observations(), str(path), "execution-candidate",
+               "presence-provenance-unavailable", "legacy presence result does not expose a raw stat outcome")
+    return present
+
+
+def _execution_registry(callback, anchor, config):
+    from . import machine_identity
+
+    try:
+        return owner_call(
+            callback, machine_identity._EXECUTION_REGISTRY_OWNER, anchor,
+            config=config, source="execution-machine",
+        )
+    except Exception as exc:
+        failed(current_observations(), "execution-machine", "execution-machine",
+               "execution-registry-failed", type(exc).__name__)
+        raise
+
+
+EXECUTION_CONFIG_OWNER = execution_config

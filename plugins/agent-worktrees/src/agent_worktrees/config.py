@@ -1146,38 +1146,10 @@ def _load_config_uncached(
         ),
         copilot_identity_switch_enabled=bool(machine_raw.get("copilot_identity_switch_enabled", global_raw.get("copilot_identity_switch_enabled", False))),
     )
-    # Resolve after the config-source binding is available, without calling
-    # load_machines_yaml's overlay fallback (which loads this config recursively).
-    try:
-        repo = config.default_repo
-    except KeyError:
-        repo = None
-    identity_anchors = [repo.anchor] if repo is not None and repo.anchor else []
-    if repo is not None and repo.anchor:
-        from . import state_root
-
-        identity_anchors = [
-            source.anchor for source in state_root.config_source_anchors(
-                config, base_anchor=repo.anchor, family="registry",
-            )
-        ]
-    for anchor in identity_anchors:
-        root = Path(anchor)
-        if any((root / rel).is_file() for rel in (
-            Path(INREPO_CONFIG_DIRNAME) / "machines.yaml", Path("machines.yaml"),
-        )):
-            from .machine_identity import load_execution_registry, resolve_execution_machine
-
-            config = replace(config, machine=resolve_execution_machine(
-                configured_machine if configured_machine else socket.gethostname(),
-                guest=detect_platform() == "wsl", configured=bool(configured_machine),
-                load_entries=lambda: load_execution_registry(anchor, config=config),
-                preserve_native_hostname=True,
-            ))
-            break
-    else:
-        if machine_raw.get("machine") or global_raw.get("machine"):
-            config = replace(config, machine=detect_machine(value=config.machine))
+    config = config_acquisition.owner_call(
+        config_acquisition.execution_config, config_acquisition.EXECUTION_CONFIG_OWNER,
+        config, configured_machine, machine_raw, global_raw, source="execution-machine",
+    )
     from .config_sources import apply_scoped_preferences, compose_ordinary_preferences
 
     scoped = compose_ordinary_preferences(

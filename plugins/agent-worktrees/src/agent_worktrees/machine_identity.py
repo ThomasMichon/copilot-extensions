@@ -200,6 +200,10 @@ def repository_config(repo_dir: Path) -> cfg.Config | None:
     return None
 
 
+_EXECUTION_MACHINE_OWNER = resolve_execution_machine
+_EXECUTION_REGISTRY_OWNER = load_execution_registry
+
+
 def is_local_machine(name: str, config: cfg.Config) -> bool:
     """True when ``name`` (a machine key, alias, ``hostname`` field, or
     display_name) refers to the CURRENT machine.
