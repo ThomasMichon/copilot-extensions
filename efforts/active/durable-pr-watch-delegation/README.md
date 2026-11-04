@@ -37,6 +37,7 @@ native/fleet switch alone does not deliver this service intake model.
 | Delegation driver | Proposal, implementation, validation, PR stewardship, deployment | This effort's source worktree and linked issue |
 | PR-service plan steward | First-class plugin/service and fleet-consumer scope amendment, review and integration | Separate managed planning worktree; #7188 |
 | Author-publication plan steward | Bounded author-publication proposal and vision amendment only | Public coordination issue #6007; existing runtime owners retained |
+| PR-perspectives steward | Author/Reviewer domain amendment, bounded inert attention source and isolated qualification; no live activation | #6007 and the Author/Reviewer perspectives plan |
 
 ## Coordination
 
@@ -102,6 +103,13 @@ The [author-publication amendment](author-publication.md) refines the existing
 checkout-free/client-convergence lane. Its steward owns planning only; Worktrees
 publication/claim, #7051 conformance and #7188 service custody remain unchanged.
 
+The [Author/Reviewer amendment](author-reviewer-perspectives.md) extends this
+same canonical effort with role-aware attention, a bounded live conversation
+journal, terminal tombstones, CLI/API convergence and three-driver acceptance.
+The PR-perspectives steward may realize a reviewed, finite inert domain slice;
+existing source reservations, provider, workspace, Dispatch and operational
+custody remain unchanged. No production review, merge or deployment is granted.
+
 ## Context
 
 The delegation implementation was split out of #5701 after review identified
@@ -134,6 +142,12 @@ existing PR-watch service; it does not introduce a parallel watch owner,
 fleet controller or credential issuer.
 
 ## Request
+
+The 2026-11-03 direction expanding the service into Author and Reviewer
+perspectives is captured in public-safe form in
+[author-reviewer-perspectives.md#direction-and-scope](author-reviewer-perspectives.md#direction-and-scope).
+Its proposed implementation and validation are agent-recommended, with
+operational effects separately gated.
 
 The additional author-publication request is captured in public-safe form in
 [the bounded amendment](author-publication.md#request-and-authority).
@@ -244,6 +258,23 @@ discovery pollers. The selection grammar and admission mechanics are design
 details, not additional operator quotations or live deployment authority.
 
 ## Plan
+
+### Author/Reviewer service perspectives
+
+_Operator-required outcome; agent-recommended slices and validation._
+
+- [ ] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence).
+- [ ] Complete P1 normalized candidate/conversation/cursor and inert attention
+  foundation, then P2 existing-owner central intake, bounded journal and
+  terminal tombstone recovery.
+- [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
+  integration, preserving exact legacy semantics and source/resource custody.
+- [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
+- [ ] Complete P5 isolated container/service and separately authorized read-only
+  shadow qualification; no shadow-triggered mutations.
+- [ ] Complete P6 optional policy-gated automation, thin presentation and staged
+  legacy retirement only after compatibility and consumer-dependency proof.
+
 ### Governed watch-owner cutover prerequisite
 
 _Agent-recommended design and validation, explicitly selected for review._
@@ -776,6 +807,13 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [ ] Resolve the Author/Reviewer amendment's full
+  [validation matrix](author-reviewer-perspectives.md#validation-matrix):
+  normalized provider facts, event/cursor semantics, fair role-aware attention,
+  bounded retention/tombstone/reopen recovery, shared IO, actual CLI/HTTP parity,
+  protected effects and separate container/native/provider/live evidence.
+  Existing parent, workspace and conformance acceptance remains open.
+
 - [ ] Complete the author-publication amendment's
   [validation matrix](author-publication.md#validation-agent-recommended):
   caller/target isolation, delegated evidence and source races, exact metadata,
@@ -859,6 +897,18 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-03 - Propose Author/Reviewer service perspectives
+
+- Extend the existing service and caller-driven subscription campaign rather
+  than introducing another daemon, forge implementation or execution queue.
+- Capture a bounded live-conversation model, explicit terminal tombstones,
+  role-aware attention/fairness, CLI/HTTP parity and three-driver acceptance.
+  Gitea's public PR/review/comment models are conceptual references, not a
+  copied database or newly selected runtime dependency.
+- Preserve every prior Plan/Validation row and existing operational hold.
+  Reviewed intent precedes finite source realization; no live reviewer,
+  backend enrollment, credential, service or deployment changed.
 
 ### 2026-11-03 - Propose bounded author-publication convergence
 
