@@ -231,6 +231,15 @@ checkpoint nor author eligibility, holds, requirements or source/resource custod
 
 ### Phase 2 - Continuing reconciliation
 
+The [attention/history study](attention-history-cohort.md) retains five whole
+originals/two refinements and fifteen message-level comparisons. Eight complete
+home/prior-art documents distinguish the Active cross-entity inbox, archived
+attention baseline, exact AHP migration, truthful transport-loss state and
+retrospective CLI-session review from these newer individual observation gaps.
+Two current CLI functions confirm finite deadline/outcome/position gaps,
+not a repair or whole-file/native acceptance. All five sources remain OPEN;
+no receiver, specific buy-in condition, Done state or custody is changed.
+
 The [native timeout/lifetime study](native-timeout-cohort.md) preserves seven
 whole contracts and sixteen bounded completed-work comparisons, with two whole
 messages withheld. One assigned finite source repair is actually complete;
@@ -241,6 +250,22 @@ common-cause finding, reviewed delivery, new native programme or implementation
 assignment. Their thirty local Plan/Validation and six actual ROOT global
 Validation rows remain unchecked; current readback and separate source
 judgments follow normal review and actual merge.
+
+That actual proposal merged in #10516 after genuine current-head approval,
+zero findings and successful required CI. All eight current blobs match the
+reviewed head. Complete post-merge portfolio readback covers 2,124 lines and
+four unchanged whole-read annexes/history; fresh source and #1303 metadata
+and the complete eleven-member roster support six separate source judgments.
+#6662 stays unchanged OPEN under its explicit live-tracker condition.
+#6663/#6690/#6900/#9442/#9815 are individually verified NOT_PLANNED tracking
+supersessions, not causal fixes. All 36 receiver rows remain unchecked;
+original evidence, deadlines, reporter custody and broader service duties remain.
+
+Two equal complete eleven-page metadata-only scans at 14:30 PST count
+1,010 whole open, 281 above the fixed 729 target: 735 eligible, 275 excluded,
+674 original-cohort and 336 inflow. These five departures are three
+original-cohort and two inflow tracking folds, with no arrivals or external
+departures. Campaign closure credit totals 770; the parent remains Active.
 
 The [interpreter/construction study](interpreter-construction-cohort.md)
 retains six whole originals/five refinements and seventeen bounded
