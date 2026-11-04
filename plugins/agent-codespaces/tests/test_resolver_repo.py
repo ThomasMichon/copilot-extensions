@@ -48,7 +48,7 @@ from agent_codespaces._invoke import dispatch_argv
 from agent_codespaces.hosting_policy import guarded_launch
 from agent_codespaces.resolver import CodespaceResolver
 
-_COPILOT = "copilot --acp --stdio --allow-all --experimental"
+_COPILOT = "copilot --acp --stdio --experimental"
 _CS_REPO = "example-org/example-web-codespaces"
 
 
@@ -108,31 +108,59 @@ class TestResolveCrossRepo:
     """#174: resolve(<name>, repo=..., repo_remote=...) builds the launch cmd."""
 
     @pytest.mark.asyncio
-    async def test_other_repo_clone_if_missing(self, _patched):
+    @pytest.mark.parametrize("shell", ["bash", "sh", "dash", "zsh"])
+    async def test_shell_named_checkout_is_not_a_shell_wrapper(self, shell, _patched):
+        workspace = f"/workspaces/{shell}"
+        _patched(CodespacesConfig(workspace_folder=workspace))
+
+        target = await CodespaceResolver().resolve_spec("cs-1")
+
+        assert target["codespace"]["workspace_folder"] == workspace
+        assert target["codespace"]["acp_command"] == guarded_launch(
+            f"cd {workspace} && {_COPILOT}", workspace,
+        )
+
+    @pytest.mark.asyncio
+    async def test_changed_config_is_rechecked_before_writing_launch(self, _patched, monkeypatch, tmp_path):
+        from agent_codespaces import resolver
+
+        dispatch = tmp_path / "dispatch"
+        monkeypatch.setattr(resolver, "_DISPATCH_DIR", dispatch)
+        config = CodespacesConfig(acp_command="copilot --acp --stdio")
+        _patched(config)
+        await CodespaceResolver().resolve_spec("cs-1")
+        original = {path.name: path.read_bytes() for path in dispatch.iterdir()}
+
+        config.acp_command = "copilot --acp --stdio --allow-all"
+        with pytest.raises(ValueError, match="permission-bypassing"):
+            await CodespaceResolver().resolve_spec("cs-1")
+
+        assert {path.name: path.read_bytes() for path in dispatch.iterdir()} == original
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("repo", ["example-marketplace", "bash", "sh", "dash", "zsh"])
+    async def test_other_repo_clone_if_missing(self, repo, _patched):
         _patched(CodespacesConfig())
-        remote = "https://your-org.visualstudio.com/your-org/_git/example-marketplace"
+        remote = f"https://example.com/example-org/{repo}"
+        workspace = f"/workspaces/{repo}"
         target = await CodespaceResolver().resolve(
-            "cs-1", repo="example-marketplace", repo_remote=remote,
+            "cs-1", repo=repo, repo_remote=remote,
         )
         cmd = _remote_cmd(target.spawn_command)
         provision = (
-            f"[ -e /workspaces/example-marketplace/.git ] || "
-            f"git clone -- {remote} /workspaces/example-marketplace"
+            f"[ -e {workspace}/.git ] || "
+            f"git clone -- {remote} {workspace}"
         )
         assert cmd == guarded_launch(
-            f"[ -e /workspaces/example-marketplace/.git ] || "
-            f"git clone -- {remote} /workspaces/example-marketplace && "
-            f"cd /workspaces/example-marketplace && {_COPILOT}",
-            "/workspaces/example-marketplace",
+            f"{provision} && cd {workspace} && {_COPILOT}",
+            workspace,
             provision=provision,
         )
         assert target.codespace["name"] == "cs-1"
         assert target.codespace["checkout_provision_command"] == provision
         assert cmd.index(provision) < cmd.index("agent-policy check") < cmd.index(_COPILOT)
-        assert target.codespace["repo"] == "example-marketplace"
-        assert target.codespace["workspace_folder"] == (
-            "/workspaces/example-marketplace"
-        )
+        assert target.codespace["repo"] == repo
+        assert target.codespace["workspace_folder"] == workspace
 
     @pytest.mark.asyncio
     async def test_disabled_related_selection_survives_metadata_and_cli(self, _patched):

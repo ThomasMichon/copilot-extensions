@@ -253,7 +253,7 @@ no generated intermediate file.
 #### `workspace_folder`
 
 The absolute path to the repo checkout on the CodeSpace. When set, the remote
-agent command becomes `cd <workspace_folder> && copilot --acp --stdio --allow-all --experimental`, which
+agent command becomes `cd <workspace_folder> && copilot --acp --stdio --experimental`, which
 ensures Copilot starts in the right directory even when a cold-started
 CodeSpace's workspace volume isn't mounted by the time the SSH login profile
 runs. Without it, convention resolves the folder on the CodeSpace at launch
@@ -268,8 +268,21 @@ Explicit override for the entire remote command; takes priority over
 ```yaml
 defaults:
   # acp_command: "/workspaces/my-wrapper.sh"     # custom wrapper
-  # acp_command: "copilot --acp --stdio --allow-all --experimental"  # bare (no cd prefix)
+  # acp_command: "copilot --acp --stdio --experimental"  # bare (no cd prefix)
 ```
+
+Namespace dispatch rejects known blanket permission or sandbox-bypass options
+before persisting the launch payload. It never silently removes them. Remove
+such grants from an owned override through its normal configuration workflow;
+do not replace shared configuration merely to get a launch through.
+The check decodes POSIX quoting/escaping and literal `sh`/`bash`/`dash`/`zsh`
+`-c`, `-lc` and `-cl` payloads, up to eight nested wrappers. Malformed quoting,
+opaque shell invocations, dynamic nested payloads and backslash-newline
+continuations are refused. Literal command-position `cd` operands remain
+directory paths even when named after a shell; `env -C cd` is not that exception.
+Arbitrary custom executables or computed behavior cannot be established by this
+check. ACP permission requests still require the client's explicit correlated answer;
+headless operation is not approval.
 
 ### `credentials`
 

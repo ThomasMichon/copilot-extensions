@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve normal permissions in ACP namespace launches and refuse blanket grants before dispatch",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

@@ -624,8 +624,8 @@ class TestPermissionCallback:
         assert resp.outcome.outcome == "selected"
 
     @pytest.mark.asyncio
-    async def test_make_permission_callback_auto_approves_without_conn(self, bridge_agent):
-        # No connection set
+    async def test_make_permission_callback_cancels_without_conn(self, bridge_agent, caplog):
         cb = bridge_agent._make_permission_callback()
         resp = await cb("session-1", [], MagicMock())
-        assert resp.outcome.option_id == "allow_always"
+        assert resp.outcome.outcome == "cancelled"
+        assert "upstream client is unavailable" in caplog.text

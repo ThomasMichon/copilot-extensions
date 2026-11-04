@@ -266,7 +266,9 @@ def test_unsupported_frontend_boundaries_refuse(
             elif case == "prompt":
                 client._prompt_in_flight = True
             elif case == "permission":
-                client._pending_permission_future = asyncio.get_running_loop().create_future()
+                client._pending_permissions["pending"] = (
+                    asyncio.get_running_loop().create_future(), {"allow"},
+                )
             elif case == "elicitation":
                 client._pending_ask_user_meta = {"pending": {"secret": "fixture-sensitive"}}
             elif case == "timer":
