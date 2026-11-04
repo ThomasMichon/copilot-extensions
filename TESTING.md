@@ -1,5 +1,12 @@
 # Testing copilot-extensions
 
+The opt-in Manager `tests/test_companion_visual.py` packet compares actual
+Textual timeline renders against synthetic live-following and history-browsing
+SVG baselines. It preserves current captures as JUnit properties for inspection
+without silently updating the expected screens. See
+`worktree-manager/tests/visual_baselines/README.md` for the bounded invocation,
+baseline-review procedure and rendered-fixture versus native-client limits.
+
 Generated application staging materializes the known POSIX Python interpreter
 aliases as regular files before inventory preparation or stage completion.
 Only links to the running interpreter may be converted; foreign targets,
