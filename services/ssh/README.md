@@ -101,6 +101,14 @@ previously unhandled entries; orphaned handled files never disable new control
 work and remain under requester custody. Shutdown cancels and drains control
 operations, then joins the native-control thread without blocking its event
 loop; discovery is removed only after that worker has settled.
+Control-cell and launch I/O use the admitted data directory's physical path,
+while configuration bytes, credential references and fence/configuration
+identity retain the original admitted spelling.
+Activation retains its disk worker through cancellation before removing native
+registration. Withdrawal marks the lifecycle stopped, and the original writer
+guard checks stopped/closed state at both claim and precommit. A retired incoming
+worker cannot later claim a healthy predecessor's fence. This does not undo a
+transaction that had already committed before withdrawal.
 ZDD `RuntimePreparation` is not serving readiness. Activation initializes the
 actual directory service, and health requires its current writer fence, a real
 store transaction and the existing connector's attached event. Discovery records

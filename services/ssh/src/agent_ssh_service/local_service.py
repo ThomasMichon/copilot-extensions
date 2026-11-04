@@ -48,7 +48,7 @@ def start(binding: Any, policy_path: Path, config: ServiceConfig) -> Document:
     def call(record: Document, operation: str) -> Document:
         return request(config, record, operation, timeout=deadline - time.monotonic())
 
-    data = Path(config.to_dict()["data_dir"])
+    data = Path(config.to_dict()["data_dir"]).resolve()
     private_directory(data)
     existing = _matching(binding, config)
     for record in existing:

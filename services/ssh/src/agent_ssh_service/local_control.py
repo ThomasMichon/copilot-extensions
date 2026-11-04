@@ -56,7 +56,7 @@ def writer_identity(peer: Document, identity: str) -> str:
 
 
 def cell_directory(config: ServiceConfig) -> Path:
-    return Path(config.to_dict()["data_dir"]) / ".local-service"
+    return absolute(config.to_dict()["data_dir"]).resolve() / ".local-service"
 
 
 def publish_new(path: Path, value: Document) -> None:
@@ -192,6 +192,7 @@ class LocalControl:
         self.peer = current_peer()
         self.identity = config_identity(binding, config)
         self.closed = threading.Event()
+        self.stop = asyncio.Event()
         self.thread: threading.Thread | None = None
         self.record: Path | None = None
         self.handled: set[str] = set()
@@ -199,9 +200,11 @@ class LocalControl:
         self.pending: Future[Document] | None = None
         self.operations: set[asyncio.Task[Document]] = set()
         owner = writer_identity(asdict(self.peer), self.identity)
-        self.writer = FencedWriter(
-            config, owner, selected=lambda: (selected or ensure_selected)(binding),
-        )
+        def selected_writer() -> None:
+            check(not self.closed.is_set() and not self.stop.is_set(), "local-service-stopping")
+            (selected or ensure_selected)(binding)
+            check(not self.closed.is_set() and not self.stop.is_set(), "local-service-stopping")
+        self.writer = FencedWriter(config, owner, selected=selected_writer)
         self.service: SSHService | None = None
         self.connector: ServiceConnector | None = None
         self.relay: NativeRelay | None = None

@@ -187,7 +187,13 @@ async def run(config: ServiceConfig, *, stop: asyncio.Event | None = None,
             await lifecycle.prepare(stop=stop, lease=lease)
             if not await lifecycle.wait_activation():
                 return
-            store = await asyncio.to_thread(lifecycle.writer.activate)
+            activation = asyncio.create_task(asyncio.to_thread(lifecycle.writer.activate))
+            try:
+                store = await asyncio.shield(activation)
+            except asyncio.CancelledError:
+                stop.set()
+                await _drain(activation)
+                raise
             original_access = credentials.access_token
 
             async def current_access() -> str:

@@ -217,6 +217,34 @@ async def test_control_shutdown_drains_owned_disk_work_without_blocking_loop(
     assert not control.operations
 
 
+@pytest.mark.parametrize("phase", ["claim", "precommit"])
+@pytest.mark.parametrize("withdrawal", ["stop", "closed"])
+def test_withdrawn_control_cannot_claim_or_commit_old_owner_fence(
+    config: ServiceConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    phase: str, withdrawal: str,
+) -> None:
+    from agent_ssh_service.writer import FencedWriter
+    from agent_ssh_service.store import DirectoryStore
+
+    outgoing = FencedWriter(config, "outgoing")
+    store = outgoing.activate()
+    before = store.snapshot()
+    incoming = local_control.LocalControl(binding(tmp_path / "runtime"), config, selected=lambda _: None)
+    incoming.stop = asyncio.Event()
+    flag = incoming.stop if withdrawal == "stop" else incoming.closed
+    if phase == "claim":
+        flag.set()
+    else:
+        original = DirectoryStore._accept_configuration
+        def accepted(candidate: DirectoryStore, db: Any) -> None:
+            original(candidate, db)
+            flag.set()
+        monkeypatch.setattr(DirectoryStore, "_accept_configuration", accepted)
+    with pytest.raises(ValueError, match="stopping"):
+        incoming.writer.activate()
+    assert outgoing.current() and store.snapshot() == before
+
+
 def test_explicit_stop_waits_for_exact_native_exit(
     config: ServiceConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -232,9 +260,17 @@ def test_explicit_stop_waits_for_exact_native_exit(
     assert calls == [(config, record, "stop", {"wait_exit": True})]
 
 
+@pytest.mark.parametrize("data_alias", [False, True])
 def test_new_owner_launches_native_source_qualified_interpreter_not_alternate(
     config: ServiceConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    data_alias: bool,
 ) -> None:
+    if data_alias:
+        (tmp_path / "existing").mkdir()
+        document = config.to_dict()
+        document["data_dir"] = str(tmp_path / "existing" / ".." / "state")
+        config = ServiceConfig.from_dict(document)
+    original_config = config.encoded
     selected = binding(tmp_path / "runtime")
     candidate = SimpleNamespace(pid=456, poll=lambda: None)
     launched: list[list[str]] = []
@@ -258,8 +294,11 @@ def test_new_owner_launches_native_source_qualified_interpreter_not_alternate(
     ))
     monkeypatch.setattr(local_service, "records", lambda _: [owner] if launched else [])
 
-    def spawn(command: list[str], **_: Any) -> SimpleNamespace:
+    def spawn(command: list[str], **options: Any) -> SimpleNamespace:
         assert command[0] == native, "Source-qualified native spelling was not forwarded"
+        assert options["cwd"] == Path(config.to_dict()["data_dir"]).resolve()
+        assert options["instance"].runtime_root == Path(config.to_dict()["data_dir"]).resolve()
+        assert config.encoded == original_config
         launched.append(command)
         return candidate
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from concurrent.futures import ThreadPoolExecutor
 import json
 import secrets
 import os
@@ -258,9 +259,12 @@ async def prepare(self, **kwargs):
             pathlib.Path(sys.argv[5]).write_text('handled')
         asyncio.create_task(observed())
 local_control.LocalControl.prepare = prepare
-if mode == 'initializing':
+if mode in ('initializing', 'activation-cancel'):
     original_activate = FencedWriter.activate
     def failed_initialization(self):
+        if mode == 'activation-cancel':
+            pathlib.Path(sys.argv[5]).with_name('activation-worker-entered').write_text('entered')
+            return original_activate(self)
         original_activate(self)
         raise RuntimeError('fixture-initialization-interrupted')
     FencedWriter.activate = failed_initialization
@@ -275,7 +279,21 @@ async def connected(connector, stop):
     finally:
         connector.connected.clear()
 hosting.ServiceConnector.run = connected
-raise SystemExit(asyncio.run(local_service.serve(binding, config)))
+async def foreground():
+    task = asyncio.create_task(local_service.serve(binding, config))
+    if mode == 'activation-cancel':
+        marker = pathlib.Path(sys.argv[5])
+        while not marker.with_name('activation-worker-entered').exists():
+            await asyncio.sleep(.01)
+        marker.with_name('activation-cancel-requested').write_text('cancel')
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+    else:
+        await task
+raise SystemExit(asyncio.run(foreground()))
 """
 
 
@@ -292,7 +310,7 @@ def recovery_child(
          json.dumps(asdict(local_control.current_peer())), str(tmp_path / "handled")],
         cwd=Path(config.to_dict()["data_dir"]), log_path=log, env=environment,
         instance=DaemonInstanceSpec(
-            "agent-ssh-service", Path(config.to_dict()["data_dir"]), Path(entry.__file__)),
+            "agent-ssh-service", Path(config.to_dict()["data_dir"]).resolve(), Path(entry.__file__)),
     )
     return process, log
 
@@ -367,6 +385,85 @@ def test_shutdown_during_native_activation_settles_control_work(
             assert "fixture-initialization-interrupted" in text
         assert status == (1 if stage == "initializing" else 0), text
         assert list(local_control.cell_directory(config).glob("owner-*.json")) == []
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=6)
+
+
+def test_cancelled_native_activation_drains_guard_waiter_without_fencing_old_owner(
+    config: ServiceConfig, tmp_path: Path, native_environment: dict[str, str],
+) -> None:
+    from agent_ssh_service.writer import FencedWriter
+
+    outgoing = FencedWriter(config, "retained-outgoing")
+    store = outgoing.activate()
+    before = store.snapshot()
+    process = None
+    with ThreadPoolExecutor(max_workers=1) as callers:
+        try:
+            with outgoing.guard():
+                process, log = recovery_child(config, tmp_path, native_environment, "activation-cancel")
+                record = wait_record(config, process)
+                activation = callers.submit(request, config, record, "activate")
+                deadline = time.monotonic() + 3
+                while not (tmp_path / "activation-cancel-requested").exists() and time.monotonic() < deadline:
+                    time.sleep(.01)
+                assert (tmp_path / "activation-cancel-requested").exists()
+                time.sleep(.15)
+                retained = bool(list(local_control.cell_directory(config).glob("owner-*.json")))
+                assert process.poll() is None, "queued activation lost native custody"
+            with pytest.raises(Exception):
+                activation.result(timeout=10)
+            assert process.wait(timeout=6) == 0, log.read_text()
+            assert retained, "incoming registration removed before activation worker settled"
+            assert outgoing.current(), "cancelled incoming fenced the healthy outgoing owner"
+            assert store.snapshot() == before
+            assert records(config) == []
+        finally:
+            if process is not None:
+                if process.poll() is None:
+                    process.terminate()
+                process.wait(timeout=6)
+
+
+def test_admitted_external_dotdot_native_startup_reuse_keeps_config_and_fence_identity(
+    config: ServiceConfig, tmp_path: Path, native_environment: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+    from agent_ssh_service import local_service, source_start
+    from fleet_manager.private_state import create_private_file
+
+    (tmp_path / "existing").mkdir()
+    document = config.to_dict()
+    document["data_dir"] = str(tmp_path / "existing" / ".." / "state")
+    admitted = ServiceConfig.from_dict(document)
+    policy = tmp_path / "admitted.json"
+    with os.fdopen(create_private_file(policy), "wb") as stream:
+        stream.write(json.dumps(document).encode())
+    encoded, policy_bytes = admitted.encoded, policy.read_bytes()
+    selected = source_start.selected_policy(policy, SimpleNamespace(root=tmp_path / "runtime"))
+    assert selected.encoded == encoded
+    process, log = recovery_child(selected, tmp_path, native_environment, "serve")
+    try:
+        owner = wait_record(selected, process)
+        assert request(selected, owner, "activate")["ready"]
+        binding = SimpleNamespace(
+            root=Path(owner["root"]), slot=Path(owner["root"]) / "versions" / owner["slot"],
+            identity=SimpleNamespace(document=lambda: {"fixture": "service-source"}),
+        )
+        monkeypatch.setattr(source_start, "ensure_selected", lambda _: None)
+        assert local_service.start(binding, policy, selected) == {"state": "ready", "reused": True}
+        assert owner["config_identity"] == local_control.config_identity(binding, selected)
+        with sqlite3.connect(Path(config.to_dict()["data_dir"]) / "directory.sqlite3") as db:
+            assert db.execute("SELECT owner FROM service_writer").fetchone()[0] == local_control.writer_identity(
+                owner["peer"], owner["config_identity"])
+        assert selected.encoded == encoded and policy.read_bytes() == policy_bytes
+        assert selected.to_dict()["proof_key_file"] == document["proof_key_file"]
+        assert ".." not in local_control.cell_directory(selected).parts
+        request(selected, owner, "stop", wait_exit=True)
+        assert process.wait(timeout=5) == 0, log.read_text()
     finally:
         if process.poll() is None:
             process.terminate()
