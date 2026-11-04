@@ -91,6 +91,23 @@ def test_only_original_worker_unbound_unassignment_proves_retirement(assigned):
     assert verify(queue, task_id, envelope)["relationship_verification"]["retired"]
 
 
+@pytest.mark.parametrize("machine,worktree", [
+    ("machine:slot", "worktree"), ("machine:slot", "nested/worktree"),
+])
+def test_qualified_owner_aliases_preserve_exact_worktrees_worker_identity(assigned, machine, worktree):
+    queue, task_id, envelope = assigned
+    queue.yield_task(task_id, "machine/worktree")
+    worker = f"{machine}/{worktree}"
+    queue.claim_one(worker, task_id=task_id)
+    envelope["creator"] = f"{machine}/project/{worktree}"
+    assignment = read_snapshot(queue, task_id)["assignment"]
+    envelope["identity"] = {
+        "assignment_event_id": assignment["event_id"], "worker_id": worker,
+    }
+    queue.yield_task(task_id, worker)
+    assert verify(queue, task_id, envelope)["relationship_verification"]["retired"]
+
+
 @pytest.mark.parametrize("state", ["suspended", "abandoned", "dead_letter", "unknown"])
 def test_other_states_never_retire_task_responsibility(assigned, state):
     queue, task_id, envelope = assigned
@@ -228,7 +245,7 @@ def test_assignment_lookup_is_indexed_and_old_snapshot_shape_remains_valid(assig
     with queue._connect() as conn:
         plan = conn.execute(
             "EXPLAIN QUERY PLAN SELECT id, worker FROM task_events"
-            " WHERE task_id=? AND to_status='claimed' AND from_status IS NOT to_status"
+            " WHERE task_id=? AND to_status='claimed' AND note='claim' AND from_status IS NOT to_status"
             " ORDER BY id DESC LIMIT 1", (task_id,),
         ).fetchall()
     assert any("USING INDEX idx_task_events_assignment" in row[3] for row in plan)
@@ -275,3 +292,25 @@ def test_invalid_authority_or_subject_never_constructs_client(assigned, monkeypa
     assert core.main([*flags, "claim-status", encoded(envelope)]) == 1
     result = capsys.readouterr()
     assert not result.out and ("refused" in result.err or "explicit" in result.err)
+
+
+def test_allocator_placement_actor_is_not_a_confirmed_worktree_assignment(assigned):
+    queue, _, envelope = assigned
+    from tests.test_pool_worker_decline import prepared_worker
+
+    task_id, binding = prepared_worker(queue)
+    with queue._connect() as conn:
+        event = conn.execute(
+            "SELECT id FROM task_events WHERE task_id=? AND to_status='claimed' ORDER BY id DESC LIMIT 1",
+            (task_id,),
+        ).fetchone()
+    value = read_snapshot(queue, task_id, assignment_event_id=event["id"])
+    assert value["assignment"] is None
+    envelope["recovery"]["task_id"] = task_id
+    envelope["identity"] = {
+        "assignment_event_id": event["id"], "worker_id": binding["worker_id"],
+    }
+    host, worktree = binding["worker_id"].split("/")
+    envelope["creator"] = f"{host}/project/{worktree}"
+    with pytest.raises(DispatchError, match="unconfirmed"):
+        subject(envelope).verification({"task_obligation": value})

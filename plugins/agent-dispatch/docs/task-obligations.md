@@ -23,7 +23,7 @@ The object contains:
 |---|---|
 | `task_id`, `generation`, `state` | Current task incarnation and lifecycle state |
 | `queue_identity` | Durable identity of the original queue, independent of endpoint configuration |
-| `assignment` | Exact event id and worker from an audited transition into claimed; otherwise null |
+| `assignment` | Exact event id and worker from an audited direct worker claim; otherwise null |
 | `bindings` | Boolean presence of task owner, native owner, explicit target worktree, hard worktree requirement, unreleased pool assignment and unresolved spawn binding |
 | `held` | Any retained task hold field |
 | `unassignment` | Latest transition from claimed, started or suspended to queued, with its event id, separately recorded former worker id and prior state; otherwise null |
@@ -122,6 +122,11 @@ SQLite snapshot. Another task's event, another queue at the same endpoint,
 an unaudited assignment, malformed data or missing provider support cannot
 produce retirement. The latest assignment is returned when the query is absent;
 older snapshot readers may ignore the two additive fields.
+This event form covers the direct worker claim operation (`note="claim"`).
+An allocator's earlier pool-placement actor is not the eventual worktree
+worker and cannot qualify it. Actual allocator workspace binding remains a
+separate original-owner integration prerequisite; missing direct-claim evidence
+is not permission to substitute a supervisor's identity.
 
 An exact `relationship_verification` proves retirement only for `completed`,
 or for current unbound `unassigned_queued` whose later disposition names that

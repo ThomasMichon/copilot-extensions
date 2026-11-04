@@ -12,7 +12,6 @@ from .task_obligations import valid_snapshot
 
 SCHEMA = "dispatch-task-assignment"
 VERSION = 1
-_SEGMENT = re.compile(r"[A-Za-z0-9_.-]+\Z")
 
 
 def _unique(pairs: list[tuple[str, object]]) -> dict:
@@ -88,11 +87,9 @@ class AssignmentSubject:
             ):
                 raise ValueError("invalid original task assignment")
             creator = envelope["creator"]
-            parts = creator.split("/") if isinstance(creator, str) else []
+            parts = creator.split("/", 2) if isinstance(creator, str) and "#" not in creator else []
             if (
-                len(parts) != 3 or any(
-                    not _SEGMENT.fullmatch(part) or part in {".", ".."} for part in parts
-                )
+                len(parts) != 3 or not all(parts)
                 or identity["worker_id"] != f"{parts[0]}/{parts[2]}"
             ):
                 raise ValueError("task relationship creator does not match its assigned worker")

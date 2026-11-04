@@ -65,7 +65,7 @@ def read_snapshot(
             (task_id,),
         ).fetchone()
         assigned = conn.execute(
-            "SELECT id, worker FROM task_events WHERE task_id=? AND to_status='claimed'"
+            "SELECT id, worker FROM task_events WHERE task_id=? AND to_status='claimed' AND note='claim'"
             " AND from_status IS NOT to_status"
             + (" AND id=?" if assignment_event_id is not None else "")
             + " ORDER BY id DESC LIMIT 1",
