@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 from typing import Any
@@ -28,6 +29,7 @@ from agent_logger.sync.worktree_state import (
 from agent_logger.sync.worktree_state_archive import (
     collect_worktree_state, readback_worktree_state,
 )
+from agent_logger.sync.protection import ProtectionSettings
 
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="POSIX collection adapter")
 REPOSITORY = "github.com/example/project"
@@ -402,8 +404,9 @@ print(json.dumps(export_store(home,destination,worktree=worktree,store_id=store_
 """
 
 
+@pytest.mark.parametrize("redacted", [False, True])
 def test_actual_efforts_export_round_trips_complete_ledger_without_owner_import(
-    packet: Packet,
+    packet: Packet, redacted: bool,
 ) -> None:
     cfg, target, plan, source = packet
     scripts = Path(__file__).resolve().parents[2] / "efforts/skills/driving-effort-agendas/scripts"
@@ -445,3 +448,22 @@ def test_actual_efforts_export_round_trips_complete_ledger_without_owner_import(
                         expected_revision=5) == manifest
     assert readback_worktree_state(cfg, target, plan, identity, owner_verify) == receipt
     assert (home / "agenda.sqlite3").exists()
+
+    legacy = target._root() / "worker/session-state/old"
+    legacy.mkdir(parents=True)
+    shutil.copytree(target._root() / "worktree-state", legacy / "worktree-state")
+    retained = legacy / identity.relative_directory / "export"
+    assert owner_verify(retained, worktree=identity.worktree, store_id=identity.store_id,
+                        expected_revision=5) == manifest
+    paths_before = {path.relative_to(legacy) for path in legacy.rglob("*")}
+    source = source.parent / "unmarked-source"
+    replacement = source / "session-state/old" / retained.relative_to(legacy) / "newdir/file"
+    replacement.parent.mkdir(parents=True)
+    replacement.write_bytes(b"{}")
+    if redacted:
+        target.protection = ProtectionSettings(redact_secrets=True)
+    result = target.push(source, "worker")
+    assert not result.ok and "worktree-state" in result.detail
+    assert {path.relative_to(legacy) for path in legacy.rglob("*")} == paths_before
+    assert owner_verify(retained, worktree=identity.worktree, store_id=identity.store_id,
+                        expected_revision=5) == manifest

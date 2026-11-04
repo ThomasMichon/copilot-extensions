@@ -20,6 +20,8 @@ or reclamation. See [the collection boundary](plugins/agent-logger/docs/worktree
 The preservation cases exercise actually eligible old sessions and a verified
 ordinary archive containing no worktree collection; neither justifies erasing
 marked nested evidence.
+Raw and redacted copy refusals compare directory membership as well as file
+bytes, and the real efforts owner verifies the retained export afterward.
 
 The opt-in Manager `tests/test_companion_visual.py` packet compares actual
 Textual timeline renders against synthetic live-following and history-browsing

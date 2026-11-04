@@ -79,9 +79,7 @@ from agent_logger.sync.targets.base import (
 from agent_logger.sync.targets.hub_sessions import _parse_iso, compact_hub_sessions
 from agent_logger.sync.targets.fleet_health import FleetScanLimits, read_fleet_status
 from agent_logger.sync.worktree_state_namespace import namespace_overlap, ordinary_publication
-from agent_logger.sync.worktree_state_preservation import (
-    require_disposable_tree, refuse_collection_destination, refuse_collection_at,
-)
+from agent_logger.sync import worktree_state_preservation as preservation
 
 #: Excluded from sync: legacy lock names, ``.lock``/``.tmp`` suffixes, and ``.hold`` (Copilot's restrictive-ACL ``inuse.<pid>.hold`` marker).
 _EXCLUDE_NAMES, _EXCLUDE_SUFFIXES = frozenset({".lock", "lock"}), (".lock", ".tmp", ".hold")
@@ -324,7 +322,7 @@ def _copy_stream_replace(
 
 def _copy_replace(src: Path, dst: Path) -> None:
     """Copy one regular source without following links."""
-    refuse_collection_destination(dst)
+    preservation.refuse_collection_destination(dst)
     try:
         source = open_regular_no_follow(src)
     except OSError as exc:
@@ -785,6 +783,7 @@ def _validate_relative_path(relative: Path) -> None:
 def _ensure_relative_directory(root: Path, relative: Path, *, durable: bool = False) -> Path:
     """Create a descendant directory chain without accepting symlinked leaves."""
     _validate_relative_path(relative)
+    preservation.refuse_collection_ancestors(root / relative)
     safe_root = _ensure_real_directory(root, durable=durable)
     current = safe_root
     for part in relative.parts:
@@ -858,7 +857,7 @@ def _session_files(
     pending = [root]
     while pending:
         directory = pending.pop()
-        refuse_collection_at(directory)
+        preservation.refuse_collection_at(directory)
         with os.scandir(_windows_extended_path(directory)) as entries:
             for entry in entries:
                 path = directory / entry.name
@@ -892,7 +891,7 @@ def _iter_regular_source_files(
     pending = [root]
     while pending:
         directory = pending.pop()
-        refuse_collection_at(directory)
+        preservation.refuse_collection_at(directory)
         with os.scandir(_windows_extended_path(directory)) as entries:
             for entry in entries:
                 path = directory / entry.name
@@ -1494,7 +1493,7 @@ def _replace_selected_sessions(
             had_destination = _path_exists(destination)
             if had_destination:
                 if _is_real_directory(destination):
-                    require_disposable_tree(destination)
+                    preservation.require_disposable_tree(destination)
                 _ensure_relative_directory(
                     transaction,
                     backup.parent.relative_to(transaction),
@@ -1556,7 +1555,7 @@ def _remove_tree_checked(path: Path, *, allow_nonempty: bool = False) -> None:
                     return
             raise
         return
-    require_disposable_tree(path)
+    preservation.require_disposable_tree(path)
     directories = [path]
     pending = [path]
     while pending:
@@ -2058,7 +2057,7 @@ class FilesystemTarget(Target):
                 default=d.stat().st_mtime,
             )
             if newest < cutoff and snapshots is not None:
-                require_disposable_tree(snapshots / rescue_session_key(d.name))
+                preservation.require_disposable_tree(snapshots / rescue_session_key(d.name))
             if newest < cutoff and sessions.force_rmtree(d):
                 if provenance is not None:
                     (provenance / f"{d.name}.json").unlink(missing_ok=True)
@@ -2133,7 +2132,7 @@ class FilesystemTarget(Target):
             if not sessions.verify_archive(ref):
                 continue
             if dry_run:
-                require_disposable_tree(live)
+                preservation.require_disposable_tree(live)
             if dry_run or sessions.force_rmtree(live):
                 # Count successful removes only; OneDrive placeholders can defeat rmtree.
                 removed_ids.add(sid)

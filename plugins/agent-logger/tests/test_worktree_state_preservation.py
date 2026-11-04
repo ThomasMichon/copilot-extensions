@@ -136,12 +136,16 @@ def test_ordinary_session_transfer_never_copies_typed_namespace_payloads(packet:
 
 
 @pytest.mark.parametrize("redacted", [False, True])
+@pytest.mark.parametrize("missing_parent", [False, True])
 def test_ordinary_transfer_cannot_overwrite_an_existing_collection_member(
-    packet: Packet, redacted: bool,
+    packet: Packet, redacted: bool, missing_parent: bool,
 ) -> None:
     target, live = legacy_collection(packet)
     victim = next((live / "worktree-state").rglob("manifest.json"))
+    if missing_parent:
+        victim = victim.parent / "newdir/file"
     before = files(live)
+    paths_before = {path.relative_to(live) for path in live.rglob("*")}
     source = live.parents[3] / "unmarked-source"
     replacement = source / "session-state/old" / victim.relative_to(live)
     replacement.parent.mkdir(parents=True)
@@ -151,6 +155,7 @@ def test_ordinary_transfer_cannot_overwrite_an_existing_collection_member(
     result = target.push(source, "worker")
     assert not result.ok and "worktree-state" in result.detail
     assert files(live) == before
+    assert {path.relative_to(live) for path in live.rglob("*")} == paths_before
 
 
 def test_generic_session_archiver_cannot_publish_inside_a_collection(packet: Packet) -> None:

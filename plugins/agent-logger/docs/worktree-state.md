@@ -114,7 +114,8 @@ operations before recursive deletion or permission changes. A verified ordinary
 session archive does not authorize removal of a nested worktree collection.
 Session-copy walkers refuse a marked subtree instead of publishing its database
 under a session identity.
-Raw and redacted copies also refuse overwriting an existing collection member;
+Raw and redacted copies also refuse entering an existing collection before
+creating destination directories, including missing parents below its export;
 the generic session archiver participates in destination namespace admission.
 Recursive removal does not change permissions through external symbolic links.
 
