@@ -319,7 +319,10 @@
         "libs/versioned-runtime"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "pending",
+      "additional_python_versions": [
+        "3.11"
+      ]
     },
     {
       "name": "lib-work-coalescing-singleton",

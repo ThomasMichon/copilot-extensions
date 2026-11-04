@@ -5,6 +5,7 @@ import argparse
 from collections import Counter
 from dataclasses import dataclass
 import hashlib
+from itertools import product
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -41,6 +42,7 @@ class Project:
     python_version: str
     platforms: tuple[str, ...]
     requirements: str
+    additional_python_versions: tuple[str, ...] = ()
     import_roots: tuple[str, ...] = ()
 
     def owns(self, path: str) -> bool:
@@ -104,7 +106,7 @@ def load_projects(root: Path = ROOT) -> tuple[Project, ...]:
     defaults = {key: manifest[key] for key in ("python_version", "platforms", "requirements")}
     for value in rows:
         row = _object(value)
-        if not required <= set(row) <= required | set(defaults) | {"import_roots"}:
+        if not required <= set(row) <= required | set(defaults) | {"additional_python_versions", "import_roots"}:
             raise TypecheckError("Invalid project fields")
         row = {**defaults, **row}
         name, level, python_version, requirements = (
@@ -116,6 +118,14 @@ def load_projects(root: Path = ROOT) -> tuple[Project, ...]:
             raise TypecheckError(f"{name}: invalid admission level")
         if not isinstance(python_version, str) or not re.fullmatch(r"3\.[0-9]+", python_version):
             raise TypecheckError(f"{name}: invalid Python version")
+        additional = _strings(
+            row.get("additional_python_versions", []), "additional_python_versions", allow_empty=True,
+        )
+        for version in additional:
+            if not re.fullmatch(r"3\.(?:0|[1-9][0-9]*)", version):
+                raise TypecheckError(f"{name}: invalid additional Python version")
+            if tuple(map(int, version.split("."))) <= tuple(map(int, python_version.split("."))):
+                raise TypecheckError(f"{name}: additional Python versions must exceed the minimum")
         if not isinstance(requirements, str):
             raise TypecheckError(f"{name}: invalid requirements path")
         include = tuple(_relative(path) for path in _strings(row["include"], "include"))
@@ -130,7 +140,7 @@ def load_projects(root: Path = ROOT) -> tuple[Project, ...]:
             raise TypecheckError(f"{name}: unsupported platform")
         projects.append(Project(
             name, include, exclude, cast(Level, level), python_version, platforms,
-            _relative(requirements),
+            _relative(requirements), additional,
             import_roots=import_roots,
         ))
     if len({project.name for project in projects}) != len(projects) or not projects:
@@ -435,15 +445,17 @@ def check_project(
         targets.write_text("\n".join(files) + "\n", encoding="utf-8")
         config = path / "typecheck-mypy.ini"
         config.write_text("[mypy]\n", encoding="utf-8")
-        for platform in project.platforms:
+        failure = 0
+        versions = (project.python_version, *project.additional_python_versions)
+        for version, platform in product(versions, project.platforms):
             argv = [
                 str(python), "-I", "-X", "utf8", "-m", "mypy", "--config-file", str(config),
-                "--python-version", project.python_version, "--platform", platform,
+                "--python-version", version, "--platform", platform,
                 "--explicit-package-bases", "--follow-imports", "silent",
                 "--check-untyped-defs", "--show-error-codes", "--no-pretty",
                 "--cache-dir", (
                     os.devnull if project.import_roots
-                    else str(path / "mypy-cache" / project.name / platform)
+                    else str(path / "mypy-cache" / project.name / platform / version)
                 ),
             ]
             if strict or project.level == "strict":
@@ -458,12 +470,14 @@ def check_project(
                     import_inputs.verify(root)
             if view is not None:
                 view.verify(root)
-            print(f"[{project.level}] {project.name} ({platform}, {physical_count} physical files, {len(files)} targets)")
+            print(f"[{project.level}] {project.name} (Python {version}, {platform}, {physical_count} physical files, {len(files)} targets)")
             print(view.diagnostics(result.stdout, root) if view is not None else result.stdout, end="")
             print(result.stderr, end="", file=sys.stderr)
             if result.returncode:
-                return result.returncode
-        return 0
+                if not project.additional_python_versions:
+                    return result.returncode
+                failure = failure or result.returncode
+        return failure
     finally:
         try:
             if view is not None:

@@ -274,6 +274,31 @@ result. Exact files/directory prefixes are matched once; unknown or overlapping
 ownership and missing/out-of-repository source fail visibly. New non-ignored
 untracked Python files are included for local pre-validation.
 
+## Interpreter qualification versions
+
+Each project's `python_version` remains its authoritative minimum analysis
+target. A project may additionally declare `"additional_python_versions":
+["3.11"]`. Omission or an empty list retains the single-version policy.
+Additional values must be unique canonical `3.<minor>` strings strictly above
+the minimum; they never replace it or change runtime requirements.
+
+The checker runs the minimum and every additional version against every
+declared platform. An additional-version matrix finishes all cells even after
+diagnostics and returns the first failing status; single-version projects retain
+their existing fail-fast behavior. Every result names its Python version and
+platform, and MyPy caches are separated by project, platform and analysis
+version. Source views are verified after every invocation. The prepared
+dependency environment remains keyed by its actual host interpreter/platform
+and captured lock bytes; analysis targets do not select a different interpreter
+or install another runtime.
+
+This is one project and one physical-file inventory, not additional ownership
+per version. Local, source-PR and frozen-candidate `--enforced` commands all read
+the same project declaration. A version guard that excludes code at the minimum
+cannot qualify that code by itself: an additional declared version must strictly
+check the supported branch. Native minimum-interpreter and consumer/copy
+qualification remain separate evidence.
+
 ## Migration diagnostics
 
 ```text
@@ -314,6 +339,9 @@ project dependency contexts remain subsequent slices.
 
 A project may append an optional ordered `import_roots` list of repository-relative
 directories. Omission or `[]` preserves the existing seven-field project defaults.
+The optional eighth constructor argument is `additional_python_versions`;
+`import_roots` is optional ninth and is normally passed by keyword. Both empty
+defaults preserve existing seven-argument callers.
 For example, `["tools", "plugins/agent-worktrees/scripts"]` exposes those ordinary
 first-party helper directories after the existing checker import roots. These
 are real source directories, not module aliases, stubs or arbitrary MyPy options.
@@ -332,7 +360,7 @@ are refused. Third-party SDK stubs outside these roots are unchanged.
 Windows extension aliases such as `.PYI` count when the native lowercase lookup
 resolves to that same file. Ordinary `.PY` aliases retain their inventoried
 `.py` ownership spelling; POSIX case-distinct data is not reclassified.
-The ephemeral capture is verified before and after each platform analysis and
+The ephemeral capture is verified before and after each version/platform analysis and
 again after checker-file cleanup, before releasing the environment lease.
 Changed or replaced roots/members and added/missing sources cannot credit a
 result, including when MyPy itself fails or times out.
