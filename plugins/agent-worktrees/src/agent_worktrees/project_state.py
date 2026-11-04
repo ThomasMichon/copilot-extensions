@@ -282,9 +282,23 @@ def project_state_root(project: str, legacy_root: Path) -> Path:
     """Return exact legacy state or one validated cell-local project root."""
     if not namespaced():
         return legacy_root
+    return _cell_state_root(project)
+
+
+def _cell_state_root(project: str, *, allow_missing: bool = False) -> Path:
+    """Resolve the receipt-qualified cell root without creating missing state."""
     identity = _identity(project)
     _validate_receipt(identity)
-    if not identity.state_root.is_dir() or _is_link_or_reparse(identity.state_root):
+    try:
+        metadata = identity.state_root.lstat()
+    except FileNotFoundError:
+        if allow_missing:
+            return identity.state_root
+        metadata = None
+    if (
+        metadata is None or not stat.S_ISDIR(metadata.st_mode)
+        or _is_link_or_reparse(identity.state_root)
+    ):
         raise ValueError(
             f"agent-worktrees project state root is unavailable: "
             f"{identity.state_root}"

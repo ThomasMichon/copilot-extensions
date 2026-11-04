@@ -97,7 +97,7 @@ def read_project_worktree_data(project: str) -> ProjectWorktreeDataInventory:
     No locks, initialization, store-content reads, or filesystem fallback.
     """
     try:
-        root, root_metadata = owner._project_root(project)
+        root, root_metadata = owner._project_root(project, allow_missing=True)
         repository = project_state._normalized_repository_remote(project)
         scope = (
             owner._scope(project, project, root_metadata) if root_metadata is not None else None
@@ -135,7 +135,7 @@ def read_project_worktree_data(project: str) -> ProjectWorktreeDataInventory:
         for value, (before, lanes) in zip(results, fences):
             _recheck(root, value, before, lanes)
         _unchanged(base_stamp, _stamp(owner._directory(base, optional=True)))
-        final_root, final_metadata = owner._project_root(project)
+        final_root, final_metadata = owner._project_root(project, allow_missing=True)
         _unchanged(
             (root, _stamp(root_metadata, contents=False)),
             (final_root, _stamp(final_metadata, contents=False)),

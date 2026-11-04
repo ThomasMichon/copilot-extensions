@@ -181,6 +181,43 @@ def test_empty_project_inventory_is_passive_and_owner_qualified(
     assert failed.value.code == "owner-unavailable"
 
 
+@pytest.mark.parametrize("receipt", ["valid", "missing", "foreign", "corrupt"])
+def test_missing_cell_state_inventory_preserves_identity_validation_without_creation(
+    owner: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, receipt: str,
+) -> None:
+    from agent_worktrees.worktree_data_inventory import read_project_worktree_data
+
+    context = {"cellRoot": str(tmp_path / "cell"), "marketplaceId": "sample-marketplace"}
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "synthetic-context.json"))
+    monkeypatch.setattr(registry_paths, "installation_context", lambda: context.copy())
+    identity = project_state._identity(PROJECT)
+    identity.repository_root.mkdir(parents=True)
+    path = identity.repository_root / "identity.json"
+    if receipt != "missing":
+        value = project_state._receipt(identity)
+        if receipt == "foreign":
+            value["marketplaceId"] = "other-marketplace"
+        path.write_text("{" if receipt == "corrupt" else json.dumps(value), encoding="utf-8")
+    before = _snapshot(tmp_path)
+    monkeypatch.setattr(
+        project_state, "ensure_project_state", lambda *_a: pytest.fail("read initialized"),
+    )
+    if receipt == "valid":
+        result = read_project_worktree_data(PROJECT)
+        assert result.worktrees == () and result.scope is None
+        assert result.repository_identity == identity.normalized_remote
+    else:
+        with pytest.raises(WorktreeDataError) as failed:
+            read_project_worktree_data(PROJECT)
+        assert failed.value.code == "owner-unavailable"
+    assert not identity.state_root.exists()
+    assert _snapshot(tmp_path) == before
+    # The original point-read contract still requires the selected cell root.
+    with pytest.raises(WorktreeDataError) as failed:
+        store.read_worktree_data(PROJECT, WORKTREE)
+    assert failed.value.code == "owner-unavailable"
+
+
 @pytest.mark.parametrize("damage", ["partial", "alias", "incarnation", "foreign", "bad-name"])
 def test_project_inventory_refuses_incomplete_or_foreign_members(
     owner: Path, damage: str,

@@ -71,6 +71,10 @@ Invalid, unsafe, partial or unreadable registrations likewise refuse the
 whole inventory; an empty list means no registered descriptors were observed,
 not that failed entries were omitted. A missing project-data root yields an
 empty inventory with `scope: null`, still requiring a resolvable repository.
+In an installation cell, the repository identity receipt must also validate
+before an absent state root can be reported as empty. Missing, corrupt or
+foreign receipts remain errors; this read does not enroll or create the root.
+The original exact-read operation still requires its admitted cell state root.
 
 Root, repository/installation scope, namespace membership, descriptor and
 canonical-record metadata, and lane directory identities are rechecked before
