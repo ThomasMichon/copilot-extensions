@@ -3,6 +3,7 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-04 - Twenty-five Fleet contracts, existing receiving homes and two partial completed-work matches](<journal/2026/11.04 fleet-core-contracts.md>)
 - [2026-11-04 - Nine native fixture/runner contracts; finite guard-fixture completion and explicit match-admission correction](<journal/2026/11.04 native-fixture-cohort.md>)
 - [2026-11-04 - Picker/provider whole-contract study; four routed families and independent acceptance retained](<journal/2026/11.04 picker-provider-contracts.md>)
 - [2026-11-04 - Weighted graph, stable effort cohorts and first verified completed-work match](<journal/2026/11.04 semantic-theme-graph.md>)

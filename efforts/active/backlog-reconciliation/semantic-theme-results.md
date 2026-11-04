@@ -75,6 +75,27 @@ acceptance are **not** claimed from a graph, title, list or link.
 | group-018: attention and history readers | 5 | [Operator Attention](../operator-attention-contract/README.md), actual Bridge reader owners | Keep wait/deadline, history paging and event coverage separate; an attention home does not automatically receive the complete history contract. |
 | group-021: head succession | 4 | [Head Succession](../worktree-head-succession-hardening/README.md) | The home remains Draft; #84's OPEN canonical and #912's actual claim conditions survive. No automatic transfer or session operation. |
 
+### Fleet core
+
+#951, #2680, #3442, #4309, #5767, #5789, #5861, #5877, #5940,
+#6030, #6236, #6283, #6383, #6424, #6443, #6617, #6681, #6804,
+#7122, #7192, #7206, #7257, #8551, #8729 and #9493.
+
+The [whole 25-contract study](fleet-core-cohort.md) reads 240 original/
+discussion texts after complete metadata qualification, including a separate
+fresh admission of changed #6424/#6681 rather than reuse of their old bodies.
+Existing current ROOTs and necessary contracts separate actual direct scope
+from residual gaps, navigation and source-specific owner conditions.
+
+The existing Linux role hierarchy can receive #5861's complete finite generic
+named-operation matrix through ordinary reviewed direct intake. That is a
+receiving candidate, not an already accepted transfer. Other canonical,
+claimed, independent or Draft sources retain their conditions. Current
+completed-work comparison credits #9620's external-driver foundation without
+calling it capability-to-host selection or actual FleetSpawner task placement;
+the two graph edges retain their scores with explicit partial-match outcomes.
+No new closure, implementation, native proof or resource transfer is claimed.
+
 ### Picker/provider cohort
 
 #542, #1193, #1239, #2801, #3657, #4117, #4118, #4175, #4182,
