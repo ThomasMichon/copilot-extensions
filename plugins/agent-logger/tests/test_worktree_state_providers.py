@@ -81,7 +81,6 @@ def inventory(tmp_path: Path) -> dict[str, Any]:
 
 def transport(monkeypatch: pytest.MonkeyPatch, reply: dict[str, Any]) -> list[list[str]]:
     calls = []
-    native_run = subprocess.run
     prefix, environment = [sys.executable, "-m", "agent_worktrees"], {"selected": "owner"}
     monkeypatch.setattr(
         configuration_layers,
@@ -95,8 +94,6 @@ def transport(monkeypatch: pytest.MonkeyPatch, reply: dict[str, Any]) -> list[li
     )
 
     def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
-        if argv[0] == "git":
-            return native_run(argv, **kwargs)
         calls.append(argv)
         assert kwargs["env"] == environment
         assert kwargs["cwd"].name == "checkout"
@@ -114,7 +111,7 @@ def transport(monkeypatch: pytest.MonkeyPatch, reply: dict[str, Any]) -> list[li
         )
         return subprocess.CompletedProcess(argv, 0, json.dumps(value).encode(), b"")
 
-    monkeypatch.setattr(providers.subprocess, "run", run)
+    monkeypatch.setattr(providers, "run_caller_owned", run)
     return calls
 
 
@@ -257,7 +254,7 @@ def test_inventory_capability_is_negotiated_before_new_syntax(
             b"unsupported",
         )
 
-    monkeypatch.setattr(providers.subprocess, "run", run)
+    monkeypatch.setattr(providers, "run_caller_owned", run)
     with pytest.raises(WorktreeStateError):
         providers.read_project_inventory(admission(tmp_path), tmp_path / "logger")
     assert len(calls) == 1
@@ -347,7 +344,7 @@ def test_same_cell_inventory_reuses_existing_native_peer_launch(
         )
         return subprocess.CompletedProcess(argv, 0, json.dumps(value).encode(), b"")
 
-    monkeypatch.setattr(providers.subprocess, "run", run)
+    monkeypatch.setattr(providers, "run_caller_owned", run)
     assert len(providers.read_project_inventory(admission(tmp_path), home).placements) == 1
     assert len(calls) == 2
 
@@ -577,8 +574,8 @@ def test_efforts_selection_never_uses_another_scope_or_first_provider(
     if kind != "malformed-settings":
         _json(settings, value)
     monkeypatch.setattr(
-        providers.subprocess,
-        "run",
+        providers,
+        "run_caller_owned",
         lambda *args, **kwargs: pytest.fail("unselected provider executed"),
     )
     with pytest.raises(WorktreeStateError):

@@ -84,6 +84,13 @@ without changing original v1 calls. The
 isolated cases, including negotiated owner-process joins. Actual selected-provider
 discovery and existing-tick integration remain open; D4 is not complete.
 
+#10503 merged as `3690c993d9e519b8d065d29853e11eff38bdfaa5`, delivering explicit
+passive exact-repository retained-inventory and effective Efforts-provider
+discovery. The [source readback](journal/2026/11.04-sidecar-logger-provider-discovery.md)
+records 120 isolated controls, the corrected lossless origin-identity boundary
+and actual reviewed merge. Automatic export/collection and existing-tick
+orchestration remain open; this does not complete D4 or authorize live effects.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than
