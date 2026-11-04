@@ -48,6 +48,13 @@ more work within the original grant, explicit operator/host limits and budgets.
 Record a work/capacity shortage rather than manufacturing reviews, retrying
 admission indefinitely or launching new resources.
 
+Account for other active worktrees, coordinators and actual shared-host pressure
+before expanding. A per-worktree target is not a machine-wide capacity grant.
+Leave headroom, pause additional activations under pressure and retain pending
+work; a known instability threshold is not a usable capacity allowance. Do not
+equate retained Task handles with independent process capacity or terminate
+another owner's sessions to meet a target.
+
 Unrelated PRs get independent fresh contexts. A genuine PR update returns to
 the original reviewer through its retained context/actual task and naturally
 returned handle. Suspension releases active execution capacity while preserving

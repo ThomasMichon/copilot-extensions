@@ -65,6 +65,8 @@ under that repository's existing planning convention. Capture:
   Refill promptly and use additional available capacity when authorized.
   Preserve explicit operator/host limits and budgets; record a genuine
   work/capacity shortage rather than launching dummy reviews or new resources.
+  Per-worktree targets share machine capacity: leave headroom for other active
+  worktrees and coordinators rather than multiplying the target blindly.
 - Continuous mode or finite drain, with a concrete stop criterion and owner.
   An empty continuous census is not completion; finite drain requires a fresh,
   complete terminal census and settlement of the charter's obligations.
