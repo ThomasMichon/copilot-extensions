@@ -67,7 +67,15 @@ owner-discovery/orchestration, archival, rescue and native gates.
 project-wide retained-descriptor inventory through the existing Worktrees owner.
 The [source readback](journal/2026/11.04-sidecar-retained-inventory.md) records
 166 coupled controls and the unchanged admitted unit packet. Contributor
-provenance and existing-tick integration remain open; D4 is not complete.
+consumption and existing-tick integration remain open; D4 is not complete.
+
+#10495 merged as `becc1eae724aeb717e4aba941704a71f0c6b406a`, delivering
+Efforts-owned complete contributor provenance from the same verified export
+snapshot while preserving the original manifest and export/readback contracts.
+The [source readback](journal/2026/11.04-sidecar-export-contributors.md) records
+49 owner controls and the existing independent Logger client's compatibility
+packet. Logger provenance consumption and automatic discovery/orchestration
+remain open; no actual collection or native/installed acceptance is implied.
 
 ## Guiding intent
 

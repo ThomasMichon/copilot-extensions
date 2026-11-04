@@ -371,6 +371,7 @@ import agenda_store as owner
 from agenda_export import export_store
 home,destination=Path(sys.argv[2]),Path(sys.argv[3])
 worktree,store_id=sys.argv[4:6]
+rich=sys.argv[6:] == ["rich"]
 definition={"source_ref":"fixture/task","scope_ref":"fixture","action":"Run fixture",
     "exit":["fixture recorded"],"on":{"done":"advance","blocked":"wait","no-progress":"replan"},
     "relevant_subjects":["dataset"]}
@@ -380,7 +381,10 @@ def apply(change):
     revision=owner.read(home)["revision"] if (home/"agenda.sqlite3").exists() else 0
     request={"schema":"efforts.agenda-request","version":2,"mode":"context-qualified",
         "expected_revision":revision,"operation_id":f"op-{revision}","change":change}
-    owner.mutate(home,request,session="session-1" if revision==0 else "session-2",
+    actor = "writer/\u975eASCII" if rich and revision else None
+    session = (None if revision==0 else "../arbitrary session") if rich else (
+        "session-1" if revision==0 else "session-2")
+    owner.mutate(home,request,session=session,actor=actor,
         initial_store_id=store_id if revision==0 else None)
 apply({"operation":"init","worktree":worktree,"board":{"version":2,
     "source":{"kind":"task","ref":"fixture"},"revision":1,"items":{"one":definition},"order":["one"]},
@@ -405,8 +409,9 @@ print(json.dumps(export_store(home,destination,worktree=worktree,store_id=store_
 
 
 @pytest.mark.parametrize("redacted", [False, True])
+@pytest.mark.parametrize("provenance", [False, True])
 def test_actual_efforts_export_round_trips_complete_ledger_without_owner_import(
-    packet: Packet, redacted: bool,
+    packet: Packet, redacted: bool, provenance: bool,
 ) -> None:
     cfg, target, plan, source = packet
     scripts = Path(__file__).resolve().parents[2] / "efforts/skills/driving-effort-agendas/scripts"
@@ -415,7 +420,7 @@ def test_actual_efforts_export_round_trips_complete_ledger_without_owner_import(
     exported.mkdir(mode=0o700)
     produced = subprocess.run(
         [sys.executable, "-I", "-B", "-c", _PRODUCE, str(scripts), str(home), str(exported),
-         IDENTITY.worktree, IDENTITY.store_id],
+         IDENTITY.worktree, IDENTITY.store_id, *(["rich"] if provenance else [])],
         capture_output=True, text=True, timeout=30, check=True,
     )
     manifest = json.loads(produced.stdout)
@@ -423,30 +428,55 @@ def test_actual_efforts_export_round_trips_complete_ledger_without_owner_import(
     assert manifest["tables"]["agenda_records"]["rows"] > 5
     identity = replace(IDENTITY, revision=5)
 
-    def owner_verify(directory: Path, **selection: Any) -> dict:
+    def owner_command(command: str, directory: Path, **selection: Any) -> dict:
+        arguments = [] if command == "info" else [
+            "--destination", str(directory), "--worktree", selection["worktree"],
+            "--store-id", selection["store_id"],
+            "--expected-revision", str(selection["expected_revision"]), "--contract-version", "1",
+        ]
         result = subprocess.run([
             sys.executable, "-I", "-B", "-c",
             "import runpy,sys; from pathlib import Path; script=sys.argv.pop(1); "
             "sys.path.insert(0,str(Path(script).parent)); runpy.run_path(script,run_name='__main__')",
-            str(scripts / "agenda_export_cli.py"), "verify",
-            "--destination", str(directory), "--worktree", selection["worktree"],
-            "--store-id", selection["store_id"],
-            "--expected-revision", str(selection["expected_revision"]), "--contract-version", "1",
+            str(scripts / "agenda_export_cli.py"), command, *arguments,
         ], capture_output=True, text=True, timeout=30, check=False)
         assert result.returncode == 0, result.stderr
         value = json.loads(result.stdout)
         assert value["schema"] == "efforts.agenda-export-cli" and value["version"] == 1
         assert value["ok"] is True
-        return value["manifest"]
+        return value
 
+    def owner_verify(directory: Path, **selection: Any) -> dict:
+        return owner_command("verify", directory, **selection)["manifest"]
+
+    negotiated = False
+    if provenance:
+        info = owner_command("info", exported)
+        assert info["capabilities"] == ["agenda-complete-export-v1"]
+        assert "agenda-export-contributors-v1" in info["optional_capabilities"]
+        negotiated = True
+
+    def owner_contributors(directory: Path, **selection: Any) -> dict:
+        assert negotiated
+        return owner_command("contributors", directory, **selection)["contributors"]
+
+    reader = owner_contributors if provenance else None
     receipt = collect_worktree_state(
-        cfg, target, plan, exported, identity, ("session-1", "session-2"), owner_verify,
+        cfg, target, plan, exported, identity, () if provenance else ("session-1", "session-2"),
+        owner_verify, contributors=reader,
     )
     retained = target._root() / identity.relative_directory / "export"
     assert (retained / "agenda.sqlite3").read_bytes() == (exported / "agenda.sqlite3").read_bytes()
     assert owner_verify(retained, worktree=identity.worktree, store_id=identity.store_id,
                         expected_revision=5) == manifest
-    assert readback_worktree_state(cfg, target, plan, identity, owner_verify) == receipt
+    assert readback_worktree_state(
+        cfg, target, plan, identity, owner_verify, contributors=reader,
+    ) == receipt
+    if provenance:
+        actual = json.loads((retained.parent / "contributors.json").read_bytes())["contributors"]
+        assert [(entry["actor"], entry["session"], entry["operations"]) for entry in actual] == [
+            (None, None, 1), ("writer/\u975eASCII", "../arbitrary session", 4),
+        ]
     assert (home / "agenda.sqlite3").exists()
 
     legacy = target._root() / "worker/session-state/old"

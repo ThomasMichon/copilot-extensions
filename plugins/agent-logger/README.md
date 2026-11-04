@@ -33,7 +33,8 @@ session-to-log pipeline out of any single bespoke service:
   the `session-sync-setup` skill; deploy as a 4-hourly Scheduled Task (Windows)
   or systemd user timer (Linux).
   The provider-first [typed worktree-state collection library](docs/worktree-state.md)
-  separately supports explicitly admitted owner exports and local readback;
+  separately supports explicitly admitted owner exports, optional complete
+  contributor provenance and fresh local readback;
   scheduled discovery/collection and remote archive acknowledgment remain open.
 - **Background chronicling core** (`agent_logger.chronicle`) — an optional
   `agent-logger chronicle status | scan | tick` pass over a *synced* corpus. It
