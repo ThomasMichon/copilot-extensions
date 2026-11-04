@@ -475,6 +475,8 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       selected-session Bridge event/history consumer and lifecycle controls.
       #10447 delivers D4's policy-gated local collection/readback library and
       namespace/retention fencing, not owner discovery or scheduled collection.
+      #10488 delivers passive project-wide retained-descriptor inventory at the
+      Worktrees owner; contributor discovery and existing-tick integration remain open.
       Current answerability/PRE qualification, archival/rescue, native durability and
       whole S2-S5 and original root gates remain open.
 
@@ -553,6 +555,7 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+- [2026-11-04 - Retained inventory merged; contributor discovery next](journal/2026/11.04-sidecar-retained-inventory.md)
 - [2026-11-04 - Typed collection library merged; owner orchestration remains open](journal/2026/11.04-sidecar-collection-library.md)
 - [2026-11-04 - Selected-session Bridge consumer merged; archival and qualification next](journal/2026/11.04-sidecar-known-session-consumer.md)
 - [2026-11-04 - Bridge membership consumer merged; known-session observations next](journal/2026/11.04-sidecar-bridge-membership-consumer.md)

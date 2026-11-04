@@ -7,7 +7,8 @@ Standing intent: [worktree data](../../../visions/plugins/agent-worktrees/worktr
 **Status: design reviewed in #10199; D1 placement/discovery source merged in
 #10224; D2 managed initialization/export source merged in #10238; D3 Manager
 consumer source merged in #10251; D4's explicit collection/readback library
-merged in #10447.** Native durability and complete D4-D5 remain open.
+merged in #10447; passive project retained-inventory source merged in #10488.**
+Native durability and complete D4-D5 remain open.
 No source merge performs a live data move,
 export, collection, cleanup or rollout. The
 [D1 readback](journal/2026/11.03-sidecar-durable-placement.md) and
@@ -46,8 +47,10 @@ records allocation and filesystem refusal semantics. #10238 composes explicit
 new managed initialization with complete consistent context-qualified export
 and local readback. #10251 connects Manager to that discovery and the owning rich reader,
 using the existing single permanent Agenda subscription. #10447 supplies
-Logger's explicit local collection/readback library; automatic owner discovery,
-existing-tick orchestration and legacy rescue remain unfinished integrations.
+Logger's explicit local collection/readback library. #10488 supplies passive
+project-wide retained inventory at the Worktrees owner. Contributor discovery,
+automatic consumer discovery, existing-tick orchestration and legacy rescue
+remain unfinished integrations.
 
 Existing cleanup can remove a checkout while retaining a lifecycle tombstone.
 That tombstone does not preserve arbitrary checkout-local agenda bytes.
@@ -176,14 +179,19 @@ not consequences of a reviewed design.
   worktree state under its actual repository/privacy/destination policy. Retain
   the existing Session Sync/accounting owners; no parallel scheduler or service.
   #10447 supplies the policy-qualified local library and namespace/preservation
-  fencing. Negotiated owner inventory, contributor discovery and existing-tick
-  orchestration remain open; see the [source readback](journal/2026/11.04-sidecar-collection-library.md).
+  fencing. #10488 supplies negotiated owner project inventory, including
+  descriptors without canonical records. Contributor discovery and existing-tick
+  orchestration remain open; see the [inventory readback](journal/2026/11.04-sidecar-retained-inventory.md).
 - [ ] D5. Qualify legacy rescue and the separation of checkout removal from data
   reclamation. Actual relocation, collection, deletion and rollout need their
   own concrete authorization and evidence.
 
 ## Validation Plan
 
+- [x] Qualify provider-only project inventory across retained descriptors,
+  missing canonical records, actual repository/cell identity, finite bounds and
+  no-write/error behavior. #10488 supplies isolated source/process evidence,
+  not automatic consumer discovery, collection or native Windows qualification.
 - [x] The actual allocation owner and independently invoked readers resolve the
   same store without a checkout, session, consumer-local map or manual path flag.
   Qualified in isolated real CLI processes in #10224, not installed adoption.
