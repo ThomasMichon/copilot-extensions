@@ -1,14 +1,17 @@
 """Exact cohort reuse and independent local lifecycle outcomes."""
 import sys
+import asyncio
+import threading
+from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
-from agent_ssh_service import local_service
+from agent_ssh_service import local_control, local_service
 from agent_ssh_service.local_control import config_identity
-from agent_ssh_service.config import Document, ServiceConfig
+from agent_ssh_service.config import Document, ServiceConfig, decode
 
 
 @pytest.fixture(autouse=True)
@@ -85,6 +88,133 @@ def test_different_source_owner_is_preserved_without_control(
     monkeypatch.setattr(local_service, "spawn_daemon", lambda *a, **k: candidate)
     with pytest.raises(local_service.LocalStartupUncertain):
         local_service.start(selected, tmp_path / "policy.json", config)
+
+
+@pytest.mark.parametrize("old_root", ["missing", "unrelated", "inaccessible"])
+def test_stale_root_record_does_not_veto_current_data_owner(
+    config: ServiceConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, old_root: str,
+) -> None:
+    selected = binding(tmp_path / "runtime")
+    current = owner_record(selected, config)
+    stale = dict(current, root=str(tmp_path / old_root))
+    if old_root == "unrelated":
+        (tmp_path / old_root).mkdir()
+    if old_root == "inaccessible":
+        original = Path.samefile
+        def samefile(path: Path, other: Any) -> bool:
+            if path == tmp_path / old_root:
+                raise PermissionError("fixture root uninspectable")
+            return original(path, other)
+        monkeypatch.setattr(Path, "samefile", samefile)
+    monkeypatch.setattr(local_service, "records", lambda _: [stale, current])
+    monkeypatch.setattr(local_service, "spawn_daemon", lambda *a, **k: pytest.fail("spawned"))
+    monkeypatch.setattr(local_service, "request", lambda *a, **k: {"ready": True})
+    assert local_service.start(selected, tmp_path / "policy.json", config)["reused"]
+    assert stale["root"] == str(tmp_path / old_root)
+
+
+@pytest.mark.parametrize("uninspectable", [False, True])
+def test_native_live_or_uninspectable_record_is_never_reclaimed(
+    config: ServiceConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    uninspectable: bool,
+) -> None:
+    from fleet_manager.private_state import private_directory
+    import zdd.diagnostics as diagnostics
+
+    record = owner_record(binding(tmp_path / "runtime"), config)
+    record["peer"] = asdict(local_control.current_peer())
+    cell = local_control.cell_directory(config)
+    private_directory(cell)
+    path = cell / "owner-retained.json"
+    local_control.publish_new(path, record)
+    if uninspectable:
+        monkeypatch.setattr(diagnostics, "_pid_alive", lambda _: True)
+        monkeypatch.setattr(diagnostics, "process_start_time", lambda _: None)
+    assert local_control.records(config) == [record]
+    assert path.exists()
+
+
+def test_changed_owner_file_cannot_be_removed_as_old_dead_identity(
+    config: ServiceConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_manager.private_state import private_directory
+
+    record = owner_record(binding(tmp_path / "runtime"), config)
+    cell = local_control.cell_directory(config)
+    private_directory(cell)
+    path = cell / "owner-replaced.json"
+    local_control.publish_new(path, record)
+    replacement = dict(record, peer=asdict(local_control.current_peer()))
+    def replaced(_: Document) -> bool:
+        path.unlink()
+        local_control.publish_new(path, replacement)
+        return False
+    monkeypatch.setattr(local_control, "lock_data_is_live", replaced)
+    with pytest.raises(ValueError, match="record-changed"):
+        local_control.records(config)
+    assert decode(path.read_bytes()) == replacement
+
+
+def test_33_live_records_keep_bound_and_preserve_every_owner(
+    config: ServiceConfig, tmp_path: Path,
+) -> None:
+    from fleet_manager.private_state import private_directory
+
+    record = owner_record(binding(tmp_path / "runtime"), config)
+    record["peer"] = asdict(local_control.current_peer())
+    cell = local_control.cell_directory(config)
+    private_directory(cell)
+    for index in range(33):
+        local_control.publish_new(cell / f"owner-live-{index}.json", record)
+    with pytest.raises(ValueError, match="inventory-limit"):
+        local_control.records(config)
+    assert len(list(cell.glob("owner-*.json"))) == 33
+
+
+@pytest.mark.asyncio
+async def test_control_shutdown_drains_owned_disk_work_without_blocking_loop(
+    config: ServiceConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_ssh_service.gateway import SSHService
+
+    control = local_control.LocalControl(binding(tmp_path / "runtime"), config, selected=lambda _: None)
+    store = control.writer.activate()
+    entered, release = threading.Event(), threading.Event()
+    original = store.snapshot
+    def snapshot() -> Document:
+        with store._transaction():
+            entered.set()
+            assert release.wait(5), "fixture disk worker release missing"
+        return original()
+    monkeypatch.setattr(store, "snapshot", snapshot)
+    ready = asyncio.Event()
+    ready.set()
+    service = SSHService(store)
+    control.initialized = asyncio.Event()
+    control.stop = asyncio.Event()
+    control.attach(
+        store=store, service=service, connector=cast(Any, SimpleNamespace(connected=ready)),
+        relay=None, stop=control.stop, lease=cast(Any, None),
+    )
+    health = asyncio.create_task(control._operate("health"))
+    closing = None
+    try:
+        assert await asyncio.to_thread(entered.wait, 3)
+        closing = asyncio.create_task(control.close())
+        await asyncio.sleep(.05)
+        assert not closing.done(), "control released ownership before disk work settled"
+        assert control.operations
+    finally:
+        release.set()
+        if closing is not None:
+            await closing
+        else:
+            health.cancel()
+            await control.close()
+        with pytest.raises(asyncio.CancelledError):
+            await health
+        await service.close()
+    assert not control.operations
 
 
 def test_explicit_stop_waits_for_exact_native_exit(

@@ -29,6 +29,7 @@ def owners(config: ServiceConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatc
                         lambda _: lambda: selected[0], raising=False)
     peers = iter([PeerIdentity(100, "1000", "fixture"), PeerIdentity(200, "2000", "fixture")])
     monkeypatch.setattr(local_control, "current_peer", lambda: next(peers))
+    monkeypatch.setattr(local_control, "lock_data_is_live", lambda _: True)
 
     def binding(version: str) -> SimpleNamespace:
         slot = root / "versions" / version
@@ -84,7 +85,8 @@ def owners(config: ServiceConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     )
 
 
-def test_ready_successor_eventually_stops_only_outgoing_and_preserves_successor(
+@pytest.mark.asyncio
+async def test_ready_successor_eventually_stops_only_outgoing_and_preserves_successor(
     owners: SimpleNamespace,
 ) -> None:
     before = owners.store.snapshot()
@@ -95,7 +97,7 @@ def test_ready_successor_eventually_stops_only_outgoing_and_preserves_successor(
     owners.queued.pop()()
     assert owners.outgoing.stop.is_set()
     assert owners.incoming.writer.current()
-    owners.outgoing.close()
+    await owners.outgoing.close()
     assert owners.candidate_path.read_bytes() == registration
     assert owners.store.snapshot() == before
 

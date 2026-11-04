@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 import json
+import secrets
 import os
 from pathlib import Path
 import sqlite3
@@ -221,3 +222,152 @@ raise SystemExit(asyncio.run(local_service.serve(binding, config)))
             if process.poll() is None:
                 process.terminate()
             process.wait(timeout=5)
+
+
+_RECOVERY_CHILD = r"""
+import asyncio, json, os, pathlib, sys
+from types import SimpleNamespace
+from agent_ssh_service import hosting, local_service, source_start, local_control
+from agent_ssh_service.config import ServiceConfig
+from agent_ssh_service.writer import FencedWriter
+config = ServiceConfig.load(pathlib.Path(sys.argv[1]))
+slot, mode = pathlib.Path(sys.argv[2]), sys.argv[3]
+binding = SimpleNamespace(root=slot.parent.parent, slot=slot,
+    identity=SimpleNamespace(document=lambda: {'fixture':'service-source'}))
+async def no_access():
+    raise AssertionError('no credential may be acquired')
+hosting.load_service_credentials = lambda **_: SimpleNamespace(access_token=no_access, proof_key=None)
+source_start.ensure_selected = lambda _: None
+source_start.selection_reader = lambda _: lambda: None
+original_prepare = local_control.LocalControl.prepare
+async def prepare(self, **kwargs):
+    await original_prepare(self, **kwargs)
+    if mode == 'crash':
+        for index in range(32):
+            local_control.publish_new(self.cell / ('owner-crashed-' + str(index) + '.json'), self.record_data)
+        os._exit(23)
+    if mode == 'stale-requests':
+        other = json.loads(sys.argv[4])
+        for index in range(33):
+            local_control.publish_new(self.cell / ('request-stale-' + str(index) + '.json'), {
+                'peer': other, 'target': other, 'operation': 'health',
+                'address': 'unused', 'config_identity': self.identity})
+        async def observed():
+            while len(self.handled) < 33:
+                await asyncio.sleep(.01)
+            pathlib.Path(sys.argv[5]).write_text('handled')
+        asyncio.create_task(observed())
+local_control.LocalControl.prepare = prepare
+if mode == 'initializing':
+    original_activate = FencedWriter.activate
+    def failed_initialization(self):
+        original_activate(self)
+        raise RuntimeError('fixture-initialization-interrupted')
+    FencedWriter.activate = failed_initialization
+async def connected(connector, stop):
+    if mode == 'connecting':
+        await asyncio.sleep(.1)
+        stop.set()
+        return
+    connector.connected.set()
+    try:
+        await stop.wait()
+    finally:
+        connector.connected.clear()
+hosting.ServiceConnector.run = connected
+raise SystemExit(asyncio.run(local_service.serve(binding, config)))
+"""
+
+
+def recovery_child(
+    config: ServiceConfig, tmp_path: Path, environment: dict[str, str], mode: str,
+) -> tuple[Any, Path]:
+    slot = tmp_path / "runtime" / "versions" / ("fixture-" + secrets.token_hex(4))
+    slot.mkdir(parents=True)
+    policy = tmp_path / "policy.json"
+    policy.write_text(json.dumps(config.to_dict()))
+    log = tmp_path / (slot.name + ".log")
+    process = spawn_daemon(
+        [sys.executable, "-I", "-B", "-c", _RECOVERY_CHILD, str(policy), str(slot), mode,
+         json.dumps(asdict(local_control.current_peer())), str(tmp_path / "handled")],
+        cwd=Path(config.to_dict()["data_dir"]), log_path=log, env=environment,
+        instance=DaemonInstanceSpec(
+            "agent-ssh-service", Path(config.to_dict()["data_dir"]), Path(entry.__file__)),
+    )
+    return process, log
+
+
+def wait_record(config: ServiceConfig, process: Any) -> Document:
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and process.poll() is None:
+        found = [record for record in records(config) if record["peer"]["pid"] == process.pid]
+        if found:
+            return found[0]
+        time.sleep(.02)
+    pytest.fail("native owner registration missing")
+
+
+def test_abrupt_native_exit_reconciles_33_records_before_restart(
+    config: ServiceConfig, tmp_path: Path, native_environment: dict[str, str],
+) -> None:
+    crashed, _ = recovery_child(config, tmp_path, native_environment, "crash")
+    assert crashed.wait(timeout=10) == 23
+    assert len(list(local_control.cell_directory(config).glob("owner-*.json"))) == 33
+    assert records(config) == []
+    restarted, log = recovery_child(config, tmp_path, native_environment, "serve")
+    try:
+        record = wait_record(config, restarted)
+        assert request(config, record, "prepare")["prepared"]
+        assert request(config, record, "activate")["ready"]
+        request(config, record, "stop", wait_exit=True)
+        assert restarted.wait(timeout=5) == 0, log.read_text()
+        assert records(config) == []
+    finally:
+        if restarted.poll() is None:
+            restarted.terminate()
+        restarted.wait(timeout=5)
+
+
+def test_33_handled_stale_requests_do_not_disable_native_control(
+    config: ServiceConfig, tmp_path: Path, native_environment: dict[str, str],
+) -> None:
+    process, log = recovery_child(config, tmp_path, native_environment, "stale-requests")
+    try:
+        record = wait_record(config, process)
+        deadline = time.monotonic() + 3
+        while not (tmp_path / "handled").exists() and time.monotonic() < deadline:
+            time.sleep(.02)
+        assert (tmp_path / "handled").exists(), "old request files blocked all new work"
+        assert request(config, record, "prepare")["prepared"]
+        assert request(config, record, "activate")["ready"]
+        assert request(config, record, "health")["ready"]
+        assert len(list(local_control.cell_directory(config).glob("request-stale-*.json"))) == 33
+        request(config, record, "stop", wait_exit=True)
+        assert process.wait(timeout=5) == 0, log.read_text()
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=5)
+
+
+@pytest.mark.parametrize("stage", ["initializing", "connecting"])
+def test_shutdown_during_native_activation_settles_control_work(
+    config: ServiceConfig, tmp_path: Path, native_environment: dict[str, str], stage: str,
+) -> None:
+    process, log = recovery_child(config, tmp_path, native_environment, stage)
+    try:
+        record = wait_record(config, process)
+        assert request(config, record, "prepare")["prepared"]
+        with pytest.raises(Exception):
+            request(config, record, "activate")
+        status = process.wait(timeout=4)
+        text = log.read_text()
+        assert "local-control-cleanup-unconfirmed" not in text
+        if stage == "initializing":
+            assert "fixture-initialization-interrupted" in text
+        assert status == (1 if stage == "initializing" else 0), text
+        assert list(local_control.cell_directory(config).glob("owner-*.json")) == []
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=6)

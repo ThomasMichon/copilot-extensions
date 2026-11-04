@@ -93,6 +93,14 @@ Containment uses resolved physical paths, including native spelling aliases,
 without rewriting the admitted installation-root or configuration spelling.
 
 Managed startup prepares a service-local authenticated native control worker.
+Discovery reconciles only positively dead or birth-reused native owners before
+applying the 32-live/uninspectable-owner bound. Changed records and uninspectable
+peers are retained. Missing, inaccessible or unrelated runtime roots are
+nonmatches, not authority to delete an owner. Request sweeps handle at most 32
+previously unhandled entries; orphaned handled files never disable new control
+work and remain under requester custody. Shutdown cancels and drains control
+operations, then joins the native-control thread without blocking its event
+loop; discovery is removed only after that worker has settled.
 ZDD `RuntimePreparation` is not serving readiness. Activation initializes the
 actual directory service, and health requires its current writer fence, a real
 store transaction and the existing connector's attached event. Discovery records

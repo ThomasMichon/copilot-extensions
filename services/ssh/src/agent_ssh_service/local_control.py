@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import asdict
+from concurrent.futures import Future
 import hashlib
 import logging
 import os
@@ -15,7 +16,7 @@ from typing import Any, TYPE_CHECKING, cast
 
 from fleet_manager.private_state import create_private_file, private_directory, read_private_file
 from zdd.conditional import RuntimeAttestation, RuntimePreparation
-from zdd.diagnostics import process_start_time
+from zdd.diagnostics import lock_data_is_live, process_start_time
 from zdd.private_protocol import Channel, Deadline, PeerIdentity, read_frame as read_frame, write_frame
 
 from .config import Document, ServiceConfig, absolute, canonical, check, decode
@@ -79,15 +80,31 @@ def records(config: ServiceConfig) -> list[Document]:
         return []
     private_directory(cell)
     paths = sorted(cell.glob("owner-*.json"))
-    check(len(paths) <= 32, "local-owner-inventory-limit")
     result = []
     for path in paths:
-        value = decode(read_private_file(path, MAX_CONTROL))
+        try:
+            identity = path.lstat()
+            content = read_private_file(path, MAX_CONTROL)
+        except FileNotFoundError:
+            continue
+        value = decode(content)
         check(isinstance(value, dict) and set(value) == {
             "peer", "root", "slot", "source", "config_identity",
         }, "invalid-local-owner-record")
         PeerIdentity(**value["peer"])
+        if not lock_data_is_live(value["peer"]):
+            try:
+                observed = path.lstat()
+                check((observed.st_dev, observed.st_ino, observed.st_size, observed.st_mtime_ns)
+                      == (identity.st_dev, identity.st_ino, identity.st_size, identity.st_mtime_ns)
+                      and read_private_file(path, MAX_CONTROL) == content,
+                      "local-owner-record-changed")
+                path.unlink()
+            except FileNotFoundError:
+                pass
+            continue
         result.append(value)
+        check(len(result) <= 32, "local-owner-inventory-limit")
     return result
 
 
@@ -178,6 +195,9 @@ class LocalControl:
         self.thread: threading.Thread | None = None
         self.record: Path | None = None
         self.handled: set[str] = set()
+        self.work_lock = threading.Lock()
+        self.pending: Future[Document] | None = None
+        self.operations: set[asyncio.Task[Document]] = set()
         owner = writer_identity(asdict(self.peer), self.identity)
         self.writer = FencedWriter(
             config, owner, selected=lambda: (selected or ensure_selected)(binding),
@@ -234,7 +254,13 @@ class LocalControl:
             from .config import SSHServiceError
 
             try:
-                await asyncio.to_thread(self.store.snapshot)
+                from .gateway import _drain
+
+                result, interrupted = await _drain(asyncio.create_task(asyncio.to_thread(self.store.snapshot)))
+                if interrupted:
+                    raise asyncio.CancelledError
+                if isinstance(result[0], BaseException):
+                    raise result[0]
             except SSHServiceError:
                 ready = False
         return asdict(RuntimeAttestation(
@@ -242,6 +268,16 @@ class LocalControl:
         ))
 
     async def _operate(self, operation: str) -> Document:
+        if self.closed.is_set():
+            raise asyncio.CancelledError
+        task = cast(asyncio.Task[Document], asyncio.current_task())
+        self.operations.add(task)
+        try:
+            return await self._operation(operation)
+        finally:
+            self.operations.discard(task)
+
+    async def _operation(self, operation: str) -> Document:
         if operation == "prepare":
             return asdict(RuntimePreparation(
                 self.peer.pid, self.peer.start_time, self.binding.slot.name,
@@ -312,11 +348,13 @@ class LocalControl:
             self._observe_supersession()
             paths = sorted(self.cell.glob("request-*.json"))
             self.handled.intersection_update(path.name for path in paths)
-            if len(paths) > 32:
-                continue
+            remaining = 32
             for path in paths:
+                if self.closed.is_set() or not remaining:
+                    break
                 if path.name in self.handled:
                     continue
+                remaining -= 1
                 self.handled.add(path.name)
                 channel: Channel | None = None
                 try:
@@ -331,23 +369,32 @@ class LocalControl:
                     expected = PeerIdentity(**value["peer"])
                     check(expected.principal == self.peer.principal, "local-principal-mismatch")
                     deadline = Deadline(14 if value["operation"] == "activate" else 2)
+                    transport_deadline = Deadline(min(2, deadline.remaining()))
                     if os.name == "nt":
                         from zdd.private_windows import connect as windows_connect
-                        channel = windows_connect(value["address"], expected, deadline)
+                        channel = windows_connect(value["address"], expected, transport_deadline)
                     else:
                         from zdd.private_unix import connect as unix_connect
-                        channel = unix_connect(Path(value["address"]), expected, deadline)
-                    frame = read_frame(channel, deadline)
+                        channel = unix_connect(Path(value["address"]), expected, transport_deadline)
+                    frame = read_frame(channel, transport_deadline)
                     check(frame == {"operation": value["operation"]}, "local-operation-mismatch")
-                    pending = asyncio.run_coroutine_threadsafe(
-                        self._operate(value["operation"]), self.loop,
-                    )
+                    with self.work_lock:
+                        if self.closed.is_set():
+                            break
+                        pending = asyncio.run_coroutine_threadsafe(
+                            self._operate(value["operation"]), self.loop,
+                        )
+                        self.pending = pending
                     try:
                         result = pending.result(timeout=deadline.remaining())
                     finally:
                         if not pending.done():
                             pending.cancel()
-                    write_frame(channel, result, deadline)
+                        with self.work_lock:
+                            self.pending = None
+                    if self.closed.is_set():
+                        break
+                    write_frame(channel, result, Deadline(min(2, deadline.remaining())))
                     if value["operation"] == "stop":
                         self.loop.call_soon_threadsafe(self.stop.set)
                 except Exception as error:
@@ -359,12 +406,26 @@ class LocalControl:
                     if channel is not None:
                         channel.close()
 
-    def close(self) -> None:
-        self.closed.set()
+    async def close(self) -> None:
+        from .gateway import _drain
+
+        with self.work_lock:
+            self.closed.set()
+            if self.pending is not None:
+                self.pending.cancel()
+        operations = tuple(self.operations)
+        for task in operations:
+            task.cancel()
+        _, interrupted = await _drain(*operations)
         if self.thread is not None:
-            self.thread.join(5)
+            _, joining_interrupted = await _drain(asyncio.create_task(
+                asyncio.to_thread(self.thread.join, 5),
+            ))
+            interrupted |= joining_interrupted
             check(not self.thread.is_alive(), "local-control-cleanup-unconfirmed")
         if self.record is not None:
             if decode(read_private_file(self.record, MAX_CONTROL)) != self.record_data:
                 raise RuntimeError("local-owner-record-changed")
             self.record.unlink()
+        if interrupted:
+            raise asyncio.CancelledError

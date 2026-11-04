@@ -26,7 +26,11 @@ def _matching(binding: Any, config: ServiceConfig) -> list[Document]:
     expected = config_identity(binding, config)
     matches = []
     for record in records(config):
-        check(Path(record["root"]).samefile(binding.root), "foreign-local-owner-preserved")
+        try:
+            if not Path(record["root"]).samefile(binding.root):
+                continue
+        except OSError:
+            continue
         if (record["slot"] == binding.slot.name
                 and record["source"] == binding.identity.document()
                 and record["config_identity"] == expected):
@@ -104,4 +108,4 @@ async def serve(binding: Any, config: ServiceConfig) -> int:
     try:
         return await _foreground(config, lifecycle=control)
     finally:
-        control.close()
+        await control.close()
