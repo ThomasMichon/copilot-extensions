@@ -1,0 +1,9 @@
+{
+  "comment": "Keep pinned Gateway image inputs complete for current Fleet contracts and process runtime modules",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}
