@@ -1275,8 +1275,8 @@ def _open_via_provider(
     # The PR opened, but a required label (auto-merge / source:<machine>) may
     # have failed to apply. Surface it rather than swallowing -- the merge gate
     # and source attribution depend on these labels.
-    if getattr(pull, "label_error", ""):
-        result["pr_label_error"] = pull.label_error
+    from .pr_metadata import include_publication_metadata
+    include_publication_metadata(result, pull)
 
     # Draft PRs never carry a live review verdict worth checking -- skip the
     # read rather than reporting a note for a state the PR isn't even in yet.

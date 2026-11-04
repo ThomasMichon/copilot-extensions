@@ -3825,6 +3825,7 @@ class TestAzureDevOpsCapabilities:
 
     def test_get_comment_threads_uses_aad_when_no_pat(self, monkeypatch):
         azure, prov = self._prov()
+        monkeypatch.delenv("AZURE_DEVOPS_EXT_PAT", raising=False)
         payload = {"value": [{"id": 1, "status": "active",
                               "comments": [{"author": {"displayName": "R"},
                                             "content": "x", "commentType": "text"}]}]}
@@ -3843,11 +3844,12 @@ class TestAzureDevOpsCapabilities:
         azure, prov = self._prov()
         calls = []
         monkeypatch.setattr(azure, "run_cli",
-                            lambda args, **kw: (calls.append(args), _proc(stdout="\n200"))[1])
+                            lambda args, **kw: (calls.append((args, kw)), _proc(stdout="\n200"))[1])
         err = prov.resolve_threads("proj/repo", 5, api_base=self.ORG, token="pat",
                                    thread_ids=(11, 12))
         assert err == "" and len(calls) == 2
-        payload = json.loads(calls[0][calls[0].index("-d") + 1])
+        assert "--data-binary" in calls[0][0]
+        payload = json.loads(calls[0][1]["input_text"])
         assert payload == {"status": "closed"}
 
 

@@ -1,0 +1,13 @@
+{
+  "comment": "Add capability-directed Azure DevOps author metadata and admitted source publication",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

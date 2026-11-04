@@ -49,7 +49,7 @@ The ``agent-worktrees`` prefix is stripped for SSH compatibility
 from __future__ import annotations
 
 import sys
-from . import terminal_launch as _terminal_launch
+from . import pr_author_commands, terminal_launch as _terminal_launch
 
 if __name__ == "__main__":
     _terminal_launch.exit_for_query()
@@ -5340,6 +5340,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'create': ('worktree_ops_cli', 'cmd_create'),
     'create-pr': ('finalize_cli', 'cmd_create_pr'),
     'pr-publication-labels': ('finalize_cli', 'cmd_publication_labels'),
+    **pr_author_commands.LAZY_DISPATCH,
     'deploy-instructions': ('context_cli', 'cmd_deploy_instructions'),
     'deregister-session': ('session_binding_cli', 'cmd_deregister_session'),
     'dev': ('maintenance_cli', 'cmd_dev'),
@@ -6035,6 +6036,7 @@ def _load_full_command_surface() -> None:
         "push-changes": cmd_push_changes,
         "create-pr": cmd_create_pr,
         "pr-publication-labels": finalize_cli.cmd_publication_labels,
+        **pr_author_commands.handlers(),
         "pr-create": cmd_create_pr,  # pr-* family alias (also rewritten pre-argparse)
         "attribution-audit": cmd_attribution_audit,
         "attribution-prepare": __import__(f"{__package__}.attribution_prepare_cli", fromlist=["cmd_attribution_prepare"]).cmd_attribution_prepare,
