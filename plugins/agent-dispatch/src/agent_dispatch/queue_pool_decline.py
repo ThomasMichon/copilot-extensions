@@ -27,6 +27,12 @@ class PoolWorkerDecline:
     blocker: str | None
 
 
+@dataclass(frozen=True)
+class PoolDeclineCloseout:
+    receipt: dict
+    applied: bool
+
+
 class _QueueOwner(Protocol):
     def _connect(self) -> sqlite3.Connection: ...
     def _fetch(self, conn: sqlite3.Connection, task_id: str) -> Task | None: ...
@@ -49,6 +55,10 @@ def migrate_pool_decline(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_pool_worker_decline_task"
         " ON pool_worker_declines(task_id)"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS pool_worker_decline_closeouts ("
+        " reservation_key TEXT PRIMARY KEY, receipt TEXT NOT NULL)"
     )
 
 
@@ -87,6 +97,18 @@ def _text(value: object, name: str) -> str:
 
 
 class PoolDeclineMixin:
+    def close_pool_decline(
+        self: _QueueOwner, task_id: str, worker_id: str, *, native_id: str,
+        generation: int, startup_revision: int, reservation_key: str,
+        now: float | None = None,
+    ) -> PoolDeclineCloseout:
+        """Observe through the owner runtime; never accept a caller's finalized JSON."""
+        from .queue_pool_decline_closeout import close
+        return close(
+            self, task_id, worker_id=worker_id, native_id=native_id, generation=generation,
+            startup_revision=startup_revision, reservation_key=reservation_key, now=now,
+        )
+
     def pool_worker_decline(
         self: _QueueOwner, task_id: str,
     ) -> PoolWorkerDecline | None:

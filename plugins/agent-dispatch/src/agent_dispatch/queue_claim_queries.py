@@ -90,7 +90,7 @@ class QueueClaimQueriesMixin:
                 if repo is not None and row["repo"] != repo:
                     continue
                 from .queue_pool_placement import pool_assignment
-                if pool_assignment(conn, row["id"]) is not None:
+                if pool_assignment(conn, row["id"], include_released=True) is not None:
                     if task_id is not None:
                         raise TaskError("retained pool assignment requires allocator placement")
                     continue

@@ -42,6 +42,7 @@ def _budget(value: object, task_id: str) -> dict:
         )
         or value.get("exhaustion_reason") not in (
             None, "startup_timeout", "decision_timeout", "startup_attempts_exhausted",
+            "worker_declined",
         )
         or value.get("outcome_kind") not in (
             None, "startup_failed", "startup_rejected", "startup_unknown",
