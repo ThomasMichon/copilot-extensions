@@ -1,0 +1,9 @@
+{
+  "comment": "Keep legacy migration tests aligned with the current schema",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
