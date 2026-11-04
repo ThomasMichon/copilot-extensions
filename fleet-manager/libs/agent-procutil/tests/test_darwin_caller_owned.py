@@ -308,7 +308,7 @@ def test_darwin_public_dispatch_uses_guard_and_caller_pid(monkeypatch):
     assert result.returncode == 7 and result.stdout == "ok"
     assert probes == [True]
     argv, options = invocations[0]
-    assert argv[-1] == "40" and argv[5] == protocol._BOOTSTRAP
+    assert argv[-1] == "40" and argv[argv.index("-c") + 1] == protocol._BOOTSTRAP
     assert options["confirm_posix_group"] is True
     assert options["pass_fds"] == (int(argv[-2]),)
 

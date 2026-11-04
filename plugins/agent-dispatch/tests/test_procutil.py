@@ -481,6 +481,8 @@ def _codespaces_adapter(monkeypatch):
 
 
 def test_containers_config_validates_owner_before_optional_peer(tmp_path, monkeypatch):
+    from configuration_layers import ConfigurationError
+
     source = Path(__file__).resolve().parents[2] / "agent-containers" / "src"
     monkeypatch.syspath_prepend(str(source))
     from agent_containers import config
@@ -506,12 +508,12 @@ def test_containers_config_validates_owner_before_optional_peer(tmp_path, monkey
     maintenance.unlink()
     peer = cell / "plugins" / "agent-worktrees"
     peer.mkdir()
-    with pytest.raises(config._peer_launch.ContextRefused):
+    with pytest.raises(ConfigurationError, match="configuration owner refused"):
         config.load_config()
     _make_live_peer(cell, "agent-worktrees", "1.0.0-dev1")
     peer_activation = peer / "installation-activation.json"
     peer_activation.write_text("{", encoding="utf-8")
-    with pytest.raises(config._peer_launch.ContextRefused, match="activation-invalid"):
+    with pytest.raises(ConfigurationError, match="configuration owner refused"):
         config.load_config()
 
 

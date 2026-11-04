@@ -1,5 +1,13 @@
 # Testing copilot-extensions
 
+Procutil's explicit `tests/test_caller_owned_native.py -k
+controller_imports_do_not_write_bytecode` packet copies the package into a
+disposable source tree and executes the real POSIX controller. It checks that
+parent `-B`/environment settings do not substitute for controller-owned bytecode
+suppression, while the requested command retains its own interpreter flags.
+This source-boundary control does not expand required unit-only CI or qualify
+an installed rollout.
+
 The opt-in Manager `tests/test_companion_visual.py` packet compares actual
 Textual timeline renders against synthetic live-following and history-browsing
 SVG baselines, plus a selected-session view with visibly paused membership and
@@ -2187,6 +2195,21 @@ These Windows source controls do not qualify live service registration,
 CodeSpace connectivity, POSIX execution or installed rollout, and do not enter
 the required unit-only CI packet.
 
+The on-demand Worktrees `tests/test_update_codespaces_recovery.py` packet joins
+the normal collected update orchestration, real currentness probe, bounded
+installer process/receipt owner and guarded Codespaces producer. Run
+`python tools/run-plugin-tests.py agent-worktrees --test-file
+tests/test_update_codespaces_recovery.py --allow-explicit-tiers` on Windows.
+A matching manifest with an incomplete selected slot must produce a usable
+repair and generated command; repeat must skip the now-current runtime without
+dependency writes. Failed incoming preparation must preserve the prior slot,
+configuration and selectors. Machine participation, acquisition, the unrelated
+engine and final host integration are synthetic boundaries. The test reuses
+the Codespaces private-profile/fake-UV fixture and real disposable venvs, not a
+mock successful installer. It does not qualify repository-shell fresh bootstrap,
+real feeds, services, other portfolio members or installed rollout, and does
+not add native cases or increase budgets in required unit-only CI.
+
 `tests/test_installer_generation_shell.py` executes the real POSIX selection
 and activation functions under Bash nounset, checking absent/present source
 receipts, argument boundaries and GC with no keep arguments. It uses Git Bash
@@ -3091,6 +3114,19 @@ integration family. The disabled Windows rotation stays disabled; local
 contained Windows evidence is recorded separately. Required PR CI and promotion
 retain their existing unit-only policy.
 
+The Worktrees selection also includes `test_standalone_provisioning.py`.
+It checks zero foreground optional-planner work, both opt-outs, unchanged
+default preview and resident scheduling, and return while a real finite
+reconciliation child remains blocked. That child is a synthetic downstream
+worker, not an installer or serving runtime. The packet does not establish
+full cold-start latency, installed adoption or Windows/Linux interchangeability.
+
+The native launcher status packet submits the current canonical `update --auto`
+request twice within one launch and requires exactly one child invocation.
+Missing, error, legacy-lock, in-progress and completed legacy staging observations
+remain byte-for-byte unchanged; they are not update-admission or completion
+authority. Windows shells and native Bash exercise their own launcher bodies.
+
 ## Construction-source inventory
 
 With Python 3.11 or newer, `python tools/construction_inventory.py` reads the
@@ -3635,6 +3671,12 @@ one-download selected wheels, tampered retained bytes, shared budgets and Window
 owned-worker timeout cleanup. Actor-free projection,
 candidate-witness and recheck controls live in
 `tools/promotion_unit_tests/test_guarded_core_contract.py`.
+`tools/test_core_public_feed_native.py` compares real local-TLS producer outputs
+across separate machine-local keyed identities and source containers, and checks
+that credentials or a mismatched feed are refused before any feed request.
+Actor-free controls in `tools/promotion_unit_tests/test_core_public_feed.py`
+cover stable anonymous inputs and refusal of credentials, unsafe URLs and
+changed source policy.
 The fixture excludes inherited Git selectors, and Linux projection refuses
 the active Manager wheel mapping rather than silently changing its origin.
 The fixture feed and source do not qualify a production feed, release or

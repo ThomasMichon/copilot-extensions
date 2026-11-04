@@ -13,6 +13,10 @@ if TYPE_CHECKING:
 
 SCHEMA = "dispatch-task-obligation"
 VERSION = 1
+ASSIGNMENT_PREDICATE = (
+    "((to_status='claimed' AND note='claim' AND from_status IS NOT to_status)"
+    " OR (note='worktree assignment' AND task_relationship IS NOT NULL))"
+)
 _BINDINGS = {
     "owner", "native", "target_worktree", "worktree_requirement", "pool_assignment", "spawn_reservation",
 }
@@ -65,8 +69,8 @@ def read_snapshot(
             (task_id,),
         ).fetchone()
         assigned = conn.execute(
-            "SELECT id, worker FROM task_events WHERE task_id=? AND to_status='claimed' AND note='claim'"
-            " AND from_status IS NOT to_status"
+            "SELECT id, worker, task_relationship FROM task_events WHERE task_id=? AND "
+            + ASSIGNMENT_PREDICATE
             + (" AND id=?" if assignment_event_id is not None else "")
             + " ORDER BY id DESC LIMIT 1",
             (task_id, assignment_event_id) if assignment_event_id is not None else (task_id,),
@@ -99,6 +103,8 @@ def read_snapshot(
             "held": any(task[key] is not None for key in ("hold_reason", "hold_actor", "hold_at")),
             "unassignment": unassignment,
         }
+        if assigned is not None and assigned["task_relationship"] is not None:
+            result["relationship"] = json.loads(assigned["task_relationship"])["request"]
         return {**result, "release_outcome": _release_outcome(result)}
     finally:
         conn.rollback()

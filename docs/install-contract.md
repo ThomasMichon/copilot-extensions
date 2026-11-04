@@ -4339,6 +4339,18 @@ then reapplies file-admission rules against the selected wheel's actual upload
 time and rechecked seasoning cutoff. Selection and the final index recheck share
 request, redirect and metadata budgets.
 
+For a reproducible producer profile, the caller may explicitly supply
+`--nonsecret-feed-url` with `--guarded-feed`. The value must be the exact
+affirmatively trusted HTTPS index and must be nonsecret throughout, including
+its path: the resulting identity is publicly reproducible rather than keyed.
+This mode refuses query/userinfo, credentials, multiple indexes and explicit
+download-origin restrictions before guarded feed requests. The existing keyed
+feed owner still performs acquisition and late revalidation; a separate capture
+records the stable anonymous policy in the candidate profile. This is not feed approval,
+attestation, publication or permission to expose a confidential URL. The
+portable identity binds core content rather than the enclosing source commit;
+the caller must still authenticate the currently selected source on every run.
+
 The selected-lock and offline-pool modes reacquire their selected external
 wheels through the same governed feed and origin guard. The source-derived roots and
 complete inspected closure still have to agree, and unused or first-party

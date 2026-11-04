@@ -119,7 +119,9 @@ def test_mcp_endpoint_lists_tools(coord):
     names = sorted(t.name for t in tools)
     assert "dispatch_create" in names
     assert "dispatch_claim" in names
-    assert len(names) == 29
+    claim_schema = next(tool.input_schema for tool in tools if tool.name == "dispatch_claim")
+    assert "assignment_workspace" in claim_schema["properties"]
+    assert "assignment_workspace" not in claim_schema.get("required", [])
     assert {"dispatch_suspend", "dispatch_resume", "dispatch_release"} <= set(
         names
     )

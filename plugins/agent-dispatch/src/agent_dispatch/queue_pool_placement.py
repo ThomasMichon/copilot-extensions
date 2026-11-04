@@ -464,6 +464,8 @@ def require_pool_start(
     assignment = pool_assignment(conn, task.id)
     if assignment is None:
         return False
+    from .queue_task_relationships import require_relationship
+    require_relationship(conn, task.id)
     if not declining:
         from .queue_pool_decline import require_no_pool_decline
         require_no_pool_decline(conn, task.id)

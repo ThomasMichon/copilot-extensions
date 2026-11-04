@@ -453,6 +453,8 @@ restoration of historical terminal enums follows.
       owners. Then qualify submission readiness, preserved rejected results,
       same-workspace/native recovery and permanent finalization at their
       respective source and installed/native boundaries.
+      The [actual-assignment source packet](journal/2026/11.04-assignment-relationships.md)
+      is under validation; ordinary writer/cohort activation remains disabled.
 - [x] Land read-only [task-obligation provider evidence](journal/2026/11.03-task-obligation-provider.md)
       in [#10365](https://github.com/ThomasMichon/copilot-extensions/pull/10365),
       merged as `e9c3c3f9bd` after exact-head approval and required CI.
@@ -466,7 +468,9 @@ restoration of historical terminal enums follows.
       Preserve original queue identity and audited direct-assignment continuity;
       allocator placement actors are not actual worktree assignments.
       Provider proof is not ordinary assignment admission or live claim migration.
-- [ ] Land [incarnation-bound relationship writer support](journal/2026/11.04-relationship-writer-incarnation.md):
+- [x] Land [incarnation-bound relationship writer support](journal/2026/11.04-relationship-writer-incarnation.md)
+      in [#10393](https://github.com/ThomasMichon/copilot-extensions/pull/10393),
+      merged as `d23b87d76f` after exact-head approval and required CI:
       locked expected workspace identity, executing-handler receipts and actual
       resident serializer declarations. Qualify participating writers separately;
       this expansion does not enable ordinary assignment claims or readiness.

@@ -120,6 +120,8 @@ from .queue_spawn_reservations import (  # noqa: F401 -- re-exported for existin
 )
 from .queue_storage import QueueStorageMixin
 from .queue_task_recovery import TaskRecoveryMixin
+from .queue_task_relationships import QueueTaskRelationshipsMixin
+from .assignment_workspace import RelationshipWriter
 from .queue_steering import QueueSteeringMixin
 from .queue_suspend import QueueSuspendMixin
 from .queue_submission_rejection import QueueSubmissionRejectionMixin
@@ -161,6 +163,7 @@ class _ClosingConnection(sqlite3.Connection):
 
 
 class TaskQueue(
+    QueueTaskRelationshipsMixin,
     PoolDeclineMixin,
     TaskRecoveryMixin,
     QueuePoolCatalogMixin,
@@ -228,6 +231,8 @@ class TaskQueue(
         blob_threshold: int = DEFAULT_BLOB_THRESHOLD,
         result_max_bytes: int = DEFAULT_RESULT_MAX_BYTES,
         worker_admission: Callable[[], None] | None = None,
+        relationship_writer: RelationshipWriter | None = None,
+        relationship_authority: str | None = None,
     ):
         self.db_path = str(db_path)
         self.lease_seconds = lease_seconds
@@ -236,6 +241,10 @@ class TaskQueue(
         self.blob_threshold = blob_threshold
         self.result_max_bytes = result_max_bytes
         self._worker_admission = worker_admission
+        self._relationship_writer = relationship_writer
+        self._relationship_authority = relationship_authority
+        if relationship_writer is not None and relationship_authority not in {"local", "central"}:
+            raise ValueError("relationship writer requires its original local or central queue authority")
         self._wake_notifier: Callable[[], None] | None = None
         self._owned_transition_notifier: Callable[[], None] | None = None
         self._run_waiter_prepare_notifier: Callable[[], None] | None = None
@@ -288,6 +297,8 @@ class TaskQueue(
             self._migrate_execution_wakes(conn)
             self._migrate_task_recovery(conn)
             self._migrate_pool_catalog(conn)
+            from .queue_relationship_schema import migrate_relationships
+            migrate_relationships(conn)
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS coordinator_fencing ("
                 " singleton INTEGER PRIMARY KEY CHECK (singleton = 1),"

@@ -328,7 +328,7 @@ def run(
         try:
             result = _run_owned(
                 [
-                    sys.executable, "-I", "-S", "-u", "-c", _BOOTSTRAP,
+                    sys.executable, "-I", "-B", "-S", "-u", "-c", _BOOTSTRAP,
                     str(Path(__file__).resolve().parents[1]), str(reader),
                     *([str(os.getpid())] if sys.platform == "darwin" else []),
                 ],
