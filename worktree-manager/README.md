@@ -30,6 +30,11 @@ An independent successful liveness probe can confirm a cold target even while
 Git status observations await cleanup; it does not release that cleanup custody
 or mark the other status facts confirmed.
 
+Worktree/session launch does not restore global Copilot settings. Session model,
+effort, and context choices remain CLI arguments, and folder pretrust remains
+available. Explicit machine setup/restore and configured background maintenance
+can still update global settings; ordinary runtime-readiness hooks are unchanged.
+
 ## Optional historical cleanup
 
 `worktree-manager cleanup capabilities --json` describes the optional cleanup

@@ -52,7 +52,7 @@ def _bundle(case: str) -> str:
 @pytest.mark.parametrize("pending", [False, True])
 @pytest.mark.parametrize("seeded,case,no_mux", [
     (True, "mux", False), (True, "bare", True),
-    (True, "cold", False), (True, "cold", True),
+    (True, "cold", False), (True, "cold", True), (True, "warning", False),
     (True, "unknown", True), (True, "malformed", True),
     (True, "pending", False), (True, "error", False),
     (True, "failed", False), (True, "known", False),
@@ -65,6 +65,7 @@ def test_real_powershell_guard_rejects_live_even_without_mux(tmp_path, seeded, c
     engine = tmp_path / "engine.ps1"
     engine.write_text(
         "if ($args -notcontains '--force-refresh') { exit 99 }\n"
+        + ("[Console]::Error.WriteLine('Nonfatal status warning')\n" if case == "warning" else "")
         + ("[Console]::Error.WriteLine('Git status timed out'); exit 7\n"
            if case == "failed" else f"Write-Output '{_bundle(case)}'\nexit 0\n"),
         encoding="utf-8",
@@ -85,7 +86,7 @@ def test_real_powershell_guard_rejects_live_even_without_mux(tmp_path, seeded, c
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         timeout=20,
     )
-    rejected = bool(seeded and case != "cold")
+    rejected = bool(seeded and case not in ("cold", "warning"))
     assert proc.returncode == (3 if rejected else 0), proc.stderr
     assert ("LAUNCH" in proc.stdout) is not rejected
     if rejected:
@@ -97,12 +98,14 @@ def test_real_powershell_guard_rejects_live_even_without_mux(tmp_path, seeded, c
             "failed": "Git status timed out", "pending": "project cleanup pending",
         }.get(case, "Could not verify cold launch target")
         assert expected in proc.stderr
+    if case == "warning":
+        assert "Nonfatal status warning" in proc.stderr
 
 
 @pytest.mark.skipif(BASH is None, reason="Native POSIX bash unavailable")
 @pytest.mark.parametrize("pending", [False, True])
 @pytest.mark.parametrize("seeded,case", [
-    (1, "mux"), (1, "bare"), (1, "cold"), (1, "unknown"),
+    (1, "mux"), (1, "bare"), (1, "cold"), (1, "warning"), (1, "unknown"),
     (1, "malformed"), (1, "pending"), (1, "error"), (1, "failed"),
     (1, "known"), (0, "bare"),
 ])
@@ -117,6 +120,7 @@ def test_real_bash_guard_rejects_live_and_uncertain(tmp_path, seeded, case, pend
         "aw_test_python() {\n"
         "if [[ \"$1\" == -m ]]; then\n"
         "[[ \"$*\" == *--force-refresh* ]] || return 99\n"
+        + ("echo 'Nonfatal status warning' >&2\n" if case == "warning" else "")
         + ("echo 'Git status timed out' >&2; return 7\n"
            if case == "failed" else f"printf '%s' '{_bundle(case)}'\n")
         + "else\n"
@@ -128,7 +132,7 @@ def test_real_bash_guard_rejects_live_and_uncertain(tmp_path, seeded, case, pend
         [BASH, "-c", script], capture_output=True, text=True, timeout=20,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
-    rejected = bool(seeded and case != "cold")
+    rejected = bool(seeded and case not in ("cold", "warning"))
     assert proc.returncode == (3 if rejected else 0), proc.stderr
     assert ("LAUNCH" in proc.stdout) is not rejected
     if rejected:
@@ -139,6 +143,8 @@ def test_real_bash_guard_rejects_live_and_uncertain(tmp_path, seeded, case, pend
             "failed": "Git status timed out", "pending": "project cleanup pending",
         }.get(case, "Could not verify cold launch target")
         assert expected in proc.stderr
+    if case == "warning":
+        assert "Nonfatal status warning" in proc.stderr
 
 
 def test_guards_cover_final_join_and_pre_create_without_live_delivery():

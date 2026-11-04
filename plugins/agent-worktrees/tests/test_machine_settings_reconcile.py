@@ -1,4 +1,4 @@
-"""Optional agent-machines reconciliation at Copilot launch."""
+"""Explicit settings reconciliation stays outside session launch."""
 
 from __future__ import annotations
 
@@ -12,9 +12,13 @@ import pytest
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = PLUGIN_ROOT / "scripts"
+BASH = (
+    shutil.which("bash", path=r"C:\Program Files\Git\usr\bin")
+    or (shutil.which("bash") if os.name != "nt" else None)
+)
 
 
-def test_launch_layers_share_machine_settings_reconciler():
+def test_launch_layers_do_not_restore_machine_settings():
     ps_helper = (SCRIPTS / "reconcile-machine-settings.ps1").read_text(
         encoding="utf-8"
     )
@@ -47,15 +51,11 @@ def test_launch_layers_share_machine_settings_reconciler():
         assert "--json" in text
 
     assert "reconcile-machine-settings.ps1" not in ps_launch
-    assert "reconcile-machine-settings.ps1" in ps_setup
+    assert "reconcile-machine-settings.ps1" not in ps_setup
     assert "reconcile-machine-settings.sh" not in sh_launch
-    assert "reconcile-machine-settings.sh" in sh_setup
-    assert "reconcile-machine-settings.ps1" in ps_wrapper
-    assert "reconcile-machine-settings.sh" in sh_wrapper
-    assert "Remove-Item Env:AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED" in ps_setup
-    assert "unset AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED" in sh_setup
-    assert "-Recovery:$Recovery" in ps_setup
-    assert "--recovery" in sh_setup
+    assert "reconcile-machine-settings.sh" not in sh_setup
+    assert "reconcile-machine-settings.ps1" not in ps_wrapper
+    assert "reconcile-machine-settings.sh" not in sh_wrapper
 
 
 def test_all_installers_deploy_machine_settings_reconciler():
@@ -70,6 +70,62 @@ def test_all_installers_deploy_machine_settings_reconciler():
         assert "launch-command.sh" in text
         assert "reconcile-machine-settings.ps1" in text
         assert "reconcile-machine-settings.sh" in text
+
+
+@pytest.mark.skipif(BASH is None, reason="Native Bash unavailable")
+@pytest.mark.parametrize("direct_setup", [False, True])
+@pytest.mark.parametrize("recovery", [False, True])
+def test_bash_session_launch_preserves_flags_without_global_restore(
+    tmp_path, direct_setup, recovery,
+):
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    for name in ("default-setup.sh", "launch-command.sh", "reconcile-machine-settings.sh"):
+        shutil.copy2(SCRIPTS / name, scripts / name)
+    calls = tmp_path / "restore-calls"
+    captured = tmp_path / "arguments"
+    provider = tmp_path / "agent-machines"
+    provider.write_text(
+        '#!/usr/bin/env bash\nprintf called > "$RESTORE_CALLS"\nexit 23\n',
+        encoding="utf-8", newline="\n",
+    )
+    backend = tmp_path / "backend"
+    backend.write_text(
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$CHILD_MARKER"\nexit 7\n',
+        encoding="utf-8", newline="\n",
+    )
+    provider.chmod(0o755)
+    backend.chmod(0o755)
+    preferences = ["--model", "example-model", "--reasoning-effort", "low", "--context", "200k"]
+    if direct_setup:
+        command = [
+            BASH, str(scripts / "default-setup.sh"),
+            *(["--recovery"] if recovery else []),
+            "--copilot-path", str(backend), *preferences,
+        ]
+    else:
+        command = [
+            BASH, str(scripts / "launch-command.sh"),
+            *(["--recovery"] if recovery else []),
+            "--", str(backend), *preferences,
+        ]
+    env = os.environ.copy()
+    env.pop("AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED", None)
+    home = tmp_path / "home"
+    home.mkdir()
+    env.update(
+        HOME=str(home), AW_PY="", RUNTIME_PYTHON="",
+        AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT=str(home / "no-runtime"),
+        PATH=os.pathsep.join((str(tmp_path), str(Path(BASH).parent), env["PATH"])),
+        RESTORE_CALLS=str(calls), CHILD_MARKER=str(captured),
+    )
+    result = subprocess.run(
+        command, cwd=tmp_path, env=env, capture_output=True, text=True, timeout=20,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 7, result.stdout + result.stderr
+    assert captured.read_text().splitlines() == preferences
+    assert not calls.exists()
 
 
 def test_reconciler_noops_when_agent_machines_is_absent(tmp_path):
@@ -115,7 +171,7 @@ def test_reconciler_noops_when_agent_machines_is_absent(tmp_path):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="PowerShell behavior is Windows-specific")
-def test_powershell_launch_wrapper_reconciles_before_child(tmp_path):
+def test_powershell_launch_wrapper_does_not_restore_even_with_broken_provider(tmp_path):
     pwsh = shutil.which("pwsh")
     if not pwsh:
         pytest.skip("pwsh is unavailable")
@@ -128,7 +184,7 @@ def test_powershell_launch_wrapper_reconciles_before_child(tmp_path):
     fake.write_text(
         "@echo off\r\n"
         'echo %*>>"%AGENT_MACHINES_MARKER%"\r\n'
-        "exit /b 0\r\n",
+        "exit /b 23\r\n",
         encoding="ascii",
     )
     target.write_text(
@@ -137,6 +193,7 @@ def test_powershell_launch_wrapper_reconciles_before_child(tmp_path):
         encoding="ascii",
     )
     env = os.environ.copy()
+    env.pop("AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED", None)
     env["PATH"] = str(tmp_path)
     env["AGENT_MACHINES_MARKER"] = str(calls)
     env["CHILD_MARKER"] = str(child)
@@ -160,14 +217,11 @@ def test_powershell_launch_wrapper_reconciles_before_child(tmp_path):
     )
 
     assert result.returncode == 0, result.stderr
-    assert calls.read_text(encoding="utf-8").strip() == (
-        "restore --all-projects --only copilot.settings --apply --json"
-    )
+    assert not calls.exists()
     child_output = child.read_text(encoding="utf-8").strip()
     assert child_output.startswith("alpha ")
     assert child_output.endswith("default-setup.ps1")
 
-    calls.unlink()
     child.unlink()
     nested = tmp_path / "nested.cmd"
     final = tmp_path / "final.cmd"
@@ -193,7 +247,7 @@ def test_powershell_launch_wrapper_reconciles_before_child(tmp_path):
         check=False,
     )
     assert nested_result.returncode == 0, nested_result.stderr
-    assert len(calls.read_text(encoding="utf-8").splitlines()) == 2
+    assert not calls.exists()
     assert child.read_text(encoding="utf-8").strip() == "alpha"
 
 
@@ -347,7 +401,7 @@ def test_posix_reconciler_can_execute_directly(tmp_path):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX shell behavior is non-Windows")
-def test_posix_launch_wrapper_reconciles_before_child(tmp_path):
+def test_posix_launch_wrapper_does_not_restore_even_with_broken_provider(tmp_path):
     bash = shutil.which("bash")
     if not bash:
         pytest.skip("bash is unavailable")
@@ -359,7 +413,7 @@ def test_posix_launch_wrapper_reconciles_before_child(tmp_path):
     target = tmp_path / "target"
     fake.write_text(
         "#!/usr/bin/env bash\n"
-        'printf "%s\\n" "$*" >> "$AGENT_MACHINES_MARKER"\n',
+        'printf "%s\\n" "$*" >> "$AGENT_MACHINES_MARKER"\nexit 23\n',
         encoding="ascii",
     )
     target.write_text(
@@ -371,6 +425,7 @@ def test_posix_launch_wrapper_reconciles_before_child(tmp_path):
     fake.chmod(0o755)
     target.chmod(0o755)
     env = os.environ.copy()
+    env.pop("AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED", None)
     env["PATH"] = f"{tmp_path}{os.pathsep}{env['PATH']}"
     env["AGENT_MACHINES_MARKER"] = str(calls)
     env["CHILD_MARKER"] = str(child)
@@ -385,14 +440,11 @@ def test_posix_launch_wrapper_reconciles_before_child(tmp_path):
     )
 
     assert result.returncode == 0, result.stderr
-    assert calls.read_text(encoding="utf-8").strip() == (
-        "restore --all-projects --only copilot.settings --apply --json"
-    )
+    assert not calls.exists()
     child_output = child.read_text(encoding="utf-8").strip()
     assert child_output.startswith("alpha ")
     assert child_output.endswith("default-setup.sh")
 
-    calls.unlink()
     child.unlink()
     nested = tmp_path / "nested"
     final = tmp_path / "final"
@@ -420,7 +472,7 @@ def test_posix_launch_wrapper_reconciles_before_child(tmp_path):
         check=False,
     )
     assert nested_result.returncode == 0, nested_result.stderr
-    assert len(calls.read_text(encoding="utf-8").splitlines()) == 2
+    assert not calls.exists()
     assert child.read_text(encoding="utf-8").strip() == "alpha"
 
 
@@ -452,9 +504,7 @@ def _fake_resolver_and_runtime(home: Path, activity_marker: Path) -> None:
 
 
 def _fake_agent_machines(bin_dir: Path) -> None:
-    """A no-op ``agent-machines`` so the wrapper's reconcile step succeeds
-    without a real install (same pattern as the reconcile-before-child test
-    above)."""
+    """Provide an unrelated sibling without a real install."""
     bin_dir.mkdir(parents=True, exist_ok=True)
     fake = bin_dir / "agent-machines"
     fake.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="ascii")

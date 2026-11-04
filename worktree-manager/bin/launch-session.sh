@@ -807,7 +807,7 @@ aw_assert_cold_resume() {
         [[ -z "$LAUNCH_PROJECT" ]] || check_args+=(--project "$LAUNCH_PROJECT")
         check_args+=(worktree-status-bundle --worktree "$_SEEDED_WORKTREE_ID" --force-refresh --json)
         local bundle detail probe_exit=0
-        if bundle=$("$PYTHON" "${check_args[@]}" 2>&1); then
+        if bundle=$("$PYTHON" "${check_args[@]}"); then
             detail=$(printf '%s' "$bundle" | "$PYTHON" -c '
 import json,sys
 try:

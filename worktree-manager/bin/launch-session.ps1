@@ -1015,7 +1015,7 @@ function Assert-AwColdResume {
         if ($script:LaunchProject) { $checkArgs += @('--project', $script:LaunchProject) }
         $checkArgs += @('worktree-status-bundle', '--worktree', $plan.worktree_id, '--force-refresh', '--json')
         try {
-            $rawBundle = & $VenvPython @checkArgs 2>&1
+            $rawBundle = & $VenvPython @checkArgs
             $checkExit = $LASTEXITCODE
             if ($checkExit -ne 0) {
                 throw "Status probe exited with code ${checkExit}: $($rawBundle -join "`n")"

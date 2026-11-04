@@ -1,5 +1,5 @@
 {
-  "comment": "Preserve staged launch prerequisite diagnostics and report pending status observations",
+  "comment": "Preserve staged launch prerequisite diagnostics and keep global settings restore outside session startup",
   "changes": [
     {
       "plugin": "agent-worktrees",
