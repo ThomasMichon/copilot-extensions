@@ -148,3 +148,62 @@ def test_task_only_credentials_do_not_gain_preacceptance_decline(caller):
     with pytest.raises(DispatchError, match="outside the projected task authority"):
         run_task_worker(args, TaskWorker("task-secret", task_id, "http://example.test", "host-a/worktree"))
     assert not requests and not commands
+
+
+@pytest.mark.parametrize("operation", ["record", "finalize"])
+def test_capture_none_records_blocker_for_discovery_and_finalization(q, caller, monkeypatch, operation):
+    args, task_id, _, requests, commands, *_ = caller
+    original = worker.procutil.run_background_capture
+
+    def unavailable(argv, **kwargs):
+        if operation in argv:
+            commands.append((argv, kwargs))
+            return None
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(worker.procutil, "run_background_capture", unavailable)
+    with pytest.raises(DispatchError, match="timed out or failed to launch"):
+        args.func(args)
+    assert q.pool_worker_decline(task_id).blocker
+    assert q.get(task_id).status == Status.CLAIMED
+    assert requests[-1].url.path.endswith("/pool-decline/blocker")
+    assert len(commands) == (1 if operation == "record" else 2)
+
+
+@pytest.mark.parametrize("scope", ["worktree", "machine"])
+def test_host_case_variants_decline_with_exact_assignment_exclusion(q, caller, monkeypatch, scope):
+    args, task_id, _, _, _, *_ = caller
+    monkeypatch.setattr(cli, "_identity", lambda args: ("HOST-A", "worktree"))
+    args.exclude_self = scope
+    with q._connect() as conn:
+        conn.execute("UPDATE task_pool_assignments SET machine='Host-A' WHERE task_id=?", (task_id,))
+    assert args.func(args) == 0
+    decline = q.pool_worker_decline(task_id)
+    assert decline.worker_id == "HOST-A/worktree"
+    assert decline.exclusions == (f"{scope}:{'Host-A' if scope == 'machine' else 'worktree'}",)
+
+
+@pytest.mark.parametrize("change", ["absent", "host", "reservation"])
+def test_machine_self_exclusion_refuses_unavailable_or_changed_assignment(
+    q, api, caller, monkeypatch, change,
+):
+    args, task_id, _, requests, commands, *_ = caller
+    args.exclude_self = "machine"
+
+    def rewrite(request, response):
+        if request.url.path == f"/tasks/{task_id}":
+            value = response.json()
+            if change == "absent":
+                value.pop("pool_assignment")
+            else:
+                field = "machine" if change == "host" else "reservation_key"
+                value["pool_assignment"][field] = "foreign"
+            return httpx.Response(200, json=value)
+        return response
+
+    monkeypatch.setattr(cli, "_client",
+                        lambda *a, **k: controls.connected(api, requests, control=False, rewrite=rewrite))
+    with pytest.raises(DispatchUpgradeRequired, match="retained pool assignment"):
+        args.func(args)
+    assert q.pool_worker_decline(task_id) is None
+    assert not commands and all(r.method == "GET" for r in requests)

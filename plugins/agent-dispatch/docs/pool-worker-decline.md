@@ -15,6 +15,8 @@ The ordinary `decline` command requires `--pool-generation`,
 `--owner-session-id`, a meaningful `--note`, and either repeatable exact
 `--exclude` scopes or `--exclude-self worktree|machine`. It resolves its own
 machine/worktree and requires the actual current native session environment.
+Host comparison uses existing normalization; machine self-exclusions retain
+the exact pool-assignment machine from task detail, not the caller's spelling.
 It reads the original coordinator's current task/reservation, negotiates
 preparation and records the decision before attempting its own closeout.
 Task-only credentials remain outside this pre-acceptance operation.
@@ -32,10 +34,12 @@ A lost preparation response never starts finalization or automatically repeats
 the decision POST.
 
 Successful worker output reports `workspace_closeout: finalized`, not task
-release or native retirement. Initial prompts, same-native retries and decision
+release or native retirement. Initial prompts and decision
 nudges describe this explicit decline path, including routing preservation.
-Older retained ordinary prompts stay intact; current retry/nudge guidance
-adds the decline operation without replacing their original charter or routing.
+Version-1 same-native retry invocations remain byte-for-byte compatible with
+retained invocations and independently updated peers. Decline guidance stays
+outside that immutable retry template; retained ordinary charters and routing
+remain intact.
 
 The existing allocator supervisor consumes a pending decline before startup
 retry/nudge/exhaustion logic. Only its owning supervisor, outside observe-only

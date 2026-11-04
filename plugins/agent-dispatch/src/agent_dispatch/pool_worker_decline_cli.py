@@ -8,6 +8,7 @@ import os
 import subprocess
 
 from . import procutil
+from .bridge_remote import normalize_host
 from .client_errors import DispatchError, DispatchUpgradeRequired
 from .loop_commands import _resolve_cli_module
 
@@ -24,6 +25,8 @@ def _finalize(binding: dict, worktree: str) -> None:
         result = procutil.run_background_capture(
             [*prefix, *arguments], timeout=timeout, env=environment,
         )
+        if result is None:
+            raise DispatchError(502, "own-workspace closeout timed out or failed to launch; custody retained")
         try:
             value = json.loads(result.stdout)
         except ValueError as exc:
@@ -77,9 +80,6 @@ def cmd_decline(args: argparse.Namespace) -> int:
     machine, worktree = core._identity(args)
     if not machine or not worktree:
         raise DispatchError(409, "decline requires the invoking worker's own machine/worktree")
-    exclusions = args.exclude
-    if args.exclude_self:
-        exclusions = [f"{args.exclude_self}:{worktree if args.exclude_self == 'worktree' else machine}"]
     with core._client(args, allow_ssh_failover=False) as client:
         task = client.get(args.task_id)
         reservation = task.get("spawn_reservation")
@@ -88,10 +88,24 @@ def cmd_decline(args: argparse.Namespace) -> int:
             or task.get("owner") is not None or task.get("generation") != args.pool_generation
             or type(task.get("generation")) is not int
             or not isinstance(reservation, dict) or reservation.get("worktree") != worktree
-            or reservation.get("execution_machine") != machine
+            or not isinstance(reservation.get("execution_machine"), str)
+            or normalize_host(reservation["execution_machine"]) != normalize_host(machine)
             or reservation.get("driver") not in {"cli", "ordinary-bridge"}
         ):
             raise DispatchError(409, "decline requires its unchanged allocator assignment")
+        exclusions = args.exclude
+        if args.exclude_self == "worktree":
+            exclusions = [f"worktree:{worktree}"]
+        elif args.exclude_self == "machine":
+            assignment = task.get("pool_assignment")
+            if (
+                not isinstance(assignment, dict)
+                or assignment.get("reservation_key") != reservation.get("key")
+                or not isinstance(assignment.get("machine"), str)
+                or normalize_host(assignment["machine"]) != normalize_host(machine)
+            ):
+                raise DispatchUpgradeRequired("machine self-exclusion requires the retained pool assignment")
+            exclusions = [f"machine:{assignment['machine']}"]
         binding = {
             "native_id": native, "generation": args.pool_generation,
             "startup_revision": reservation.get("startup_revision"),

@@ -73,15 +73,12 @@ def retry_invocation(binding: dict, revision: int, *, reservation: dict | None =
             "under the existing task contract. Prompt delivery is not acceptance."
         ),
     }
-    guidance = decline_guidance(binding["task_id"], binding["generation"], binding["native_id"])
-    result["prompt"] += guidance
     if binding.get("driver") == "ordinary-bridge":
         result["prompt"] = (
             f"Retry the allocator's current assignment {binding['task_id']} in this same native "
             f"and worktree only if it remains unowned CLAIMED at generation {binding['generation']}. "
             "Do not acquire another claim or replace this conversation. "
-            + guidance
-            + "\n\nThe original self-contained assignment instructions follow; prompt delivery is not acceptance.\n\n"
+            "The original self-contained assignment instructions follow; prompt delivery is not acceptance.\n\n"
             + ordinary_prompt(binding, reservation)
         )
     return result

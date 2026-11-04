@@ -1,5 +1,8 @@
 """Real transaction/HTTP controls for exact same-native startup retry custody."""
 
+from __future__ import annotations
+
+import json
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 
@@ -13,6 +16,60 @@ from tests.test_pool_placement import pool, publish, record_native, task
 
 q = controls.q
 api = controls.api
+
+
+def legacy_v1_retry(binding: dict, revision: int, *, reservation: dict | None = None) -> dict:
+    """Freeze the released wire bytes independently of the current builder."""
+    prompt = (
+        f"Re-read your allocator-assigned task {binding['task_id']} in this same native conversation "
+        "and worktree. Use its original coordinator routing flags for every command. "
+        f"If it is still CLAIMED, unowned and at generation {binding['generation']}, "
+        "evaluate the assigned worker contract and explicitly decide whether to accept. "
+        f"Acceptance uses `agent-dispatch start {binding['task_id']} "
+        f"--pool-generation {binding['generation']} --owner-session-id {binding['native_id']}`. "
+        "Do not run claim --evaluation, acquire another claim, create a replacement or "
+        "release another owner's assignment. If it changed or you cannot decide, report a blocker "
+        "under the existing task contract. Prompt delivery is not acceptance."
+    )
+    if binding.get("driver") == "ordinary-bridge":
+        assert reservation is not None
+        prompt = (
+            f"Retry the allocator's current assignment {binding['task_id']} in this same native "
+            f"and worktree only if it remains unowned CLAIMED at generation {binding['generation']}. "
+            "Do not acquire another claim or replace this conversation. "
+            "The original self-contained assignment instructions follow; prompt delivery is not acceptance.\n\n"
+            + reservation["agent_info"]["startup_invocation"]["prompt"]
+        )
+    return {
+        **binding, "startup_revision": revision,
+        "idempotency_key": f"pool-startup:{binding['reservation_key']}:{binding['generation']}:{revision}:retry",
+        "prompt": prompt,
+    }
+
+
+def legacy_peer(monkeypatch: pytest.MonkeyPatch, peer: str) -> None:
+    from agent_dispatch import client_pool_startup_retry, queue_pool_startup_retry
+    target = client_pool_startup_retry if peer == "client" else queue_pool_startup_retry
+    monkeypatch.setattr(target, "retry_invocation", legacy_v1_retry)
+
+
+@pytest.mark.parametrize("peer", ["client", "server"])
+def test_v1_mixed_peer_retry_snapshot_and_retained_completion(q, api, monkeypatch, peer):
+    t, r, _ = failed(q, api, monkeypatch)
+    legacy_peer(monkeypatch, peer)
+    with controls.connected(api, []) as client:
+        pending = client.retry_pool_startup(t.id, r.key, **arguments(t))
+        binding = {name: value for name, value in pending["invocation"].items()
+                   if name not in {"idempotency_key", "prompt"}}
+        legacy = legacy_v1_retry(binding, 2)
+        assert pending["invocation"] == legacy
+        with q._connect() as conn:
+            conn.execute("UPDATE task_pool_assignments SET retry_invocation=? WHERE task_id=?",
+                         (json.dumps(legacy), t.id))
+        assert client.pool_startup_snapshot(t.id)["budget"]["retry_invocation"] == legacy
+        assert complete(client, t, r)["invocation"] == legacy
+    assert q.get(t.id).status == Status.CLAIMED
+    assert q.get_reservation(r.key).startup_complete
 
 
 def failed(q, api, monkeypatch):
