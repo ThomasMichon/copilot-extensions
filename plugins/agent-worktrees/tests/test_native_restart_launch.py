@@ -593,7 +593,9 @@ def test_acknowledgement_is_explicit_durable_and_bound_to_resumed_process(resume
     "old-source", "pruned-source", "ended", "paused", "task", "owner-ref",
     "pending-seed", "opaque-claim", "wrong-worktree-incarnation", "no-hold", "intentional-end",
 ])
-def test_ack_refuses_unproven_or_changed_native_owner(resumed, capfd, monkeypatch, damage):
+def test_ack_refuses_unproven_or_changed_native_owner(
+    resumed, capfd, monkeypatch, damage, overwrite_record_nonce,
+):
     from agent_worktrees import native_hosting_evidence, native_restart_receipt
 
     before = native_restart_receipt._path(resumed.path).read_bytes()
@@ -635,10 +637,11 @@ def test_ack_refuses_unproven_or_changed_native_owner(resumed, capfd, monkeypatc
     elif damage == "opaque-claim":
         record.resources[0].metadata_opaque = True
     elif damage == "wrong-worktree-incarnation":
-        record.creation_nonce = "fedcba9876543210"
+        overwrite_record_nonce(resumed.path, "fedcba9876543210")
     else:
         monkeypatch.setattr(native_hosting_evidence, "session_process_owns_hold", lambda *a: False)
-    tracking.save_record(record, resumed.path)
+    if damage != "wrong-worktree-incarnation":
+        tracking.save_record(record, resumed.path)
     rc, result = acknowledge(resumed, capfd)
     assert rc != 0 and result["error"]
     assert native_restart_receipt._path(resumed.path).read_bytes() == before

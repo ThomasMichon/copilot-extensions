@@ -542,7 +542,7 @@ class TestResolveRootCodename:
         )
 
     def test_legacy_record_without_creation_nonce_is_backfilled_and_freezes(
-        self, tmp_path, monkeypatch,
+        self, tmp_path, monkeypatch, overwrite_record_nonce,
     ):
         # A record predating `creation_nonce` must NOT be permanently
         # excluded from the freeze guarantee -- that would silently reopen
@@ -557,8 +557,7 @@ class TestResolveRootCodename:
             owner_ref="anomalous-potato/harness/wt-root#s1",
         )
         tdir = tmp_path / ".ext" / "worktrees"
-        child.creation_nonce = ""
-        tracking.save_record(child, tdir / "wt-child.yaml")
+        child = overwrite_record_nonce(tdir / "wt-child.yaml", None)
         assert root_chain.resolve_root_codename(child, project="ext") == (
             "amber-thicket"
         )
@@ -571,7 +570,7 @@ class TestResolveRootCodename:
         assert reloaded.creation_nonce
 
     def test_legacy_root_without_creation_nonce_is_backfilled_too(
-        self, tmp_path, monkeypatch,
+        self, tmp_path, monkeypatch, overwrite_record_nonce,
     ):
         # Backfill applies to EVERY hop touched during the walk, not just
         # the leaf -- a legacy ROOT (or any intermediate ancestor) must
@@ -583,9 +582,7 @@ class TestResolveRootCodename:
             owner_ref="anomalous-potato/harness/wt-root#s1",
         )
         root_dir = tmp_path / ".harness" / "worktrees"
-        root_rec = tracking.load_record(root_dir / "wt-root.yaml")
-        root_rec.creation_nonce = ""
-        tracking.save_record(root_rec, root_dir / "wt-root.yaml")
+        overwrite_record_nonce(root_dir / "wt-root.yaml", None)
         assert root_chain.resolve_root_codename(child, project="ext") == (
             "amber-thicket"
         )

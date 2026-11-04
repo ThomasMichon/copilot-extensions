@@ -192,7 +192,9 @@ def test_resident_never_uses_ambient_execution_hint(case, monkeypatch):
 
 
 @pytest.mark.parametrize("damage", ["hint", "source", "registration", "nonce", "hold", "epoch"])
-def test_hint_alone_is_not_native_ownership_or_canonical_registration(case, monkeypatch, capsys, damage):
+def test_hint_alone_is_not_native_ownership_or_canonical_registration(
+    case, monkeypatch, capsys, damage, overwrite_record_nonce,
+):
     if damage == "hint":
         case.payload["_agentWorktrees"]["environment"][execution.NATIVE_HINT_ENV] = '{"prompt":"private fixture"}'
     elif damage == "source":
@@ -202,9 +204,7 @@ def test_hint_alone_is_not_native_ownership_or_canonical_registration(case, monk
         record.sessions = []
         tracking.save_record(record, case.path)
     elif damage == "nonce":
-        record = tracking.load_record(case.path)
-        record.creation_nonce = "replacement"
-        tracking.save_record(record, case.path)
+        overwrite_record_nonce(case.path, "replacement")
     elif damage == "hold":
         monkeypatch.setattr(source, "session_process_owns_hold", lambda *a: False)
     else:

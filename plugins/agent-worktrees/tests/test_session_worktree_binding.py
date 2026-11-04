@@ -169,7 +169,7 @@ def test_trusted_binding_accepts_exact_pending_candidate(qualified_binding):
     "session", "removed-association", "missing-nonce", "legacy",
 ])
 def test_trusted_binding_invalid_or_legacy_rewrite_removes_stale_fields(
-    qualified_binding, invalid,
+    qualified_binding, invalid, overwrite_record_nonce,
 ):
     record_path, snapshot, session_dir = qualified_binding
     binding_path = session_dir / "worktree-binding.json"
@@ -190,9 +190,7 @@ def test_trusted_binding_invalid_or_legacy_rewrite_removes_stale_fields(
         ]
         save_record(current, record_path)
     elif invalid == "missing-nonce":
-        current = tracking._load_record_uncached(record_path)
-        current.creation_nonce = ""
-        save_record(current, record_path)
+        overwrite_record_nonce(record_path, None)
     else:
         snapshot = None
     result = handoff_diagnostics.stamp_session_state_worktree_binding(
