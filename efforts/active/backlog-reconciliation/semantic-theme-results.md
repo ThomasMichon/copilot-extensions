@@ -75,6 +75,25 @@ acceptance are **not** claimed from a graph, title, list or link.
 | group-018: attention and history readers | 5 | [Operator Attention](../operator-attention-contract/README.md), actual Bridge reader owners | Keep wait/deadline, history paging and event coverage separate; an attention home does not automatically receive the complete history contract. |
 | group-021: head succession | 4 | [Head Succession](../worktree-head-succession-hardening/README.md) | The home remains Draft; #84's OPEN canonical and #912's actual claim conditions survive. No automatic transfer or session operation. |
 
+### PR-workflow core
+
+#1734, #2847, #2887, #2908, #3582, #5352, #6818, #7051, #9233 and #9809.
+
+The [whole ten-contract study](pr-workflow-cohort.md) reads 26 unchanged
+metadata-qualified texts and current existing-home contracts. Changed #9535
+is withheld; the parked-home #5183/#5211 pair and departed #10364 issue text
+are excluded. No parked ROOT is researched or amended.
+
+Keep reviewer discovery/lineage, configured review-flow consumption, provider
+conformance, read-only wait planning, effort-record truth, publication cadence,
+historical mining, installed-host conformance, model-guided selection and
+Bridge guidance distinct. Eight qualified merged descriptions supply bounded
+attention-guidance, callable-source or planning credit. Fourteen corresponding
+graph edges retain their scores with explicit partial/different-contract
+comparisons, not newly verified whole completion. A complete finite #6818
+direct intake is the receiving candidate; canonical OPEN, actual assignment,
+Draft and independent source conditions remain.
+
 ### Fleet core
 
 #951, #2680, #3442, #4309, #5767, #5789, #5861, #5877, #5940,
