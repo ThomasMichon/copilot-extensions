@@ -193,7 +193,7 @@ def discover_plugin_dir(home: Path | None = None) -> tuple[Path | None, str]:
     return None, ""
 
 
-def fingerprint(plugin_dir: Path) -> str:
+def fingerprint(plugin_dir: Path, *, construction_inputs: bool = False) -> str:
     """Hash the version/launcher/installer files plus the actual application
     source (#2609) to detect a real change.
 
@@ -221,6 +221,10 @@ def fingerprint(plugin_dir: Path) -> str:
     every platform ``sha256sum`` already is. Those two independently hash a
     different file set for a different purpose (a persisted, cross-run
     completion-marker comparison) and are unaffected by this choice.
+
+    ``construction_inputs`` captures the whole payload for cached installer
+    actions, excluding generated environments, caches and build output.
+    Ordinary staging retains its existing curated staleness fingerprint.
     """
     import hashlib
 
@@ -231,33 +235,53 @@ def fingerprint(plugin_dir: Path) -> str:
             try:
                 h.update(fp.read_bytes())
             except Exception:
+                if construction_inputs:
+                    raise
                 h.update(b"<unreadable>")
         h.update(b"\x00")
 
-    source_roots = [plugin_dir / "src"]
-    libs_dir = plugin_dir / "libs"
-    if libs_dir.is_dir():
-        for lib in sorted(p for p in libs_dir.iterdir() if p.is_dir()):
-            candidate = lib / "src"
-            if candidate.is_dir():
-                source_roots.append(candidate)
-    for root in source_roots:
-        if not root.is_dir():
+    files = []
+    if construction_inputs:
+        def scan_error(error):
+            raise error
+
+        generated = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache"}
+        for directory, directories, names in os.walk(plugin_dir, onerror=scan_error):
+            project = (Path(directory) / "pyproject.toml").is_file()
+            directories[:] = [
+                name for name in directories
+                if name not in generated and not name.endswith((".egg-info", ".dist-info"))
+                and not (project and name in {"build", "dist"})
+            ]
+            files.extend(Path(directory) / name for name in names)
+        files.sort()
+    else:
+        source_roots = [plugin_dir / "src"]
+        libs_dir = plugin_dir / "libs"
+        if libs_dir.is_dir():
+            for lib in sorted(p for p in libs_dir.iterdir() if p.is_dir()):
+                candidate = lib / "src"
+                if candidate.is_dir():
+                    source_roots.append(candidate)
+        for root in source_roots:
+            if root.is_dir():
+                files.extend(sorted(root.rglob("*")))
+    for fp in files:
+        relative = fp.relative_to(plugin_dir)
+        if (
+            not fp.is_file() or fp.suffix in (".pyc", ".pyo")
+            or "__pycache__" in relative.parts
+            or any(part.endswith((".egg-info", ".dist-info")) for part in relative.parts)
+        ):
             continue
-        for fp in sorted(root.rglob("*")):
-            relative = fp.relative_to(plugin_dir)
-            if (
-                not fp.is_file() or fp.suffix in (".pyc", ".pyo")
-                or "__pycache__" in relative.parts
-                or any(part.endswith((".egg-info", ".dist-info")) for part in relative.parts)
-            ):
-                continue
-            h.update(str(relative).replace("\\", "/").encode("utf-8"))
-            try:
-                h.update(fp.read_bytes())
-            except Exception:
-                h.update(b"<unreadable>")
-            h.update(b"\x00")
+        h.update(str(relative).replace("\\", "/").encode("utf-8"))
+        try:
+            h.update(fp.read_bytes())
+        except Exception:
+            if construction_inputs:
+                raise
+            h.update(b"<unreadable>")
+        h.update(b"\x00")
     return h.hexdigest()
 
 

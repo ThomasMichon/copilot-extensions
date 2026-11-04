@@ -1700,12 +1700,26 @@ Older standalone manifests that predate source-kind metadata retain their
 version-guarded compatibility path; a present invalid source kind or lost
 selected-runtime manifest does not qualify as that legacy case.
 
-Newly prepared actions retain their payload manifest/content fingerprint,
-runtime source receipt, deployment manifest, selector and relevant serving
-identity facts. Execution re-reads those facts and rejects a changed decision
-before invoking the installer. Older cached actions without that snapshot still
-undergo the current source/freshness decision. Publication policy, installation
-scope and the installer's construction/activation admission remain independent.
+Newly prepared actions retain their payload manifest, complete construction-input
+fingerprint, runtime source receipt, deployment manifest, selector and relevant
+serving identity facts. Generated environments/caches/build output are excluded;
+ordinary staging keeps its existing curated staleness fingerprint. Versioned
+roots additionally use the owning payload's canonical `resolve-python` primitive
+to observe current, last-known-good or newest-complete selection. Its caller-owned
+read-only child has a fifteen-second deadline and 64 KiB per-stream limit;
+unversioned legacy roots need no extra child. Named and packaged primitives retain
+the exactly-one-resource contract.
+
+Selected package/profile/source facts must agree with the deployment manifest.
+Only canonical generated source/repair suffixes are removed for package-version
+comparison; raw source and generation identities remain separate. Execution
+re-reads the captured facts and rejects a changed decision before invoking the
+installer. After its own successful payload acquisition, the reconciler defers
+that service's runtime action to the next available normal planning pass instead
+of reporting the expected acquisition change as an execution failure.
+Older cached actions without a snapshot still undergo the current source/freshness
+decision. Publication policy, installation scope and the installer's
+construction/activation admission remain independent.
 These automatic-action guards do not constrain explicit `update` or its
 authoritative recovery path, disable marketplace content refresh, or suppress
 unrelated hooks. They do not prove installed service convergence.

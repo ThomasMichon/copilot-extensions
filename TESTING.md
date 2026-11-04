@@ -45,6 +45,17 @@ substitute only file/source observations and belong to the unit-only promotion
 packet. Neither lane qualifies an installed service, external rollout or every
 first-use adapter; #7030 retains those acceptance boundaries.
 
+The same focused packet separately exercises preexisting selector/manifest
+disagreement, actual canonical last-known-good/newest-complete recovery, named
+and packaged helper layouts, unchanged valid-current selection despite a newer
+unselected slot, constructor/helper-only changes and same-package repair serving.
+Completion/interpreter records in these lookup fixtures are synthetic observations;
+the real canonical resolver is executed, not the selected fixture interpreter.
+They do not certify package health or installed serving. Own successful acquisition
+is replanned through the ordinary next pass; genuinely stale external actions
+still refuse. Runtime package normalization is checked against the canonical
+source/repair identity function, preserving profile and other package qualifiers.
+
 The manual `windows-coverage-rotation.yml` selector `post_tool_fallback=true`
 runs only Worktrees' post-tool shell, status/bind reminder, late-guidance and
 guard-publication consumer packet through the canonical hardened Linux container. Supply `ref`

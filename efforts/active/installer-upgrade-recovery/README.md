@@ -709,3 +709,39 @@ decision's behavior. The module-size guard, Python lint and all eighteen new
 consumer controls pass after that correction. Current-head review and complete
 required CI still precede merge; the successful old-head unit job is not the
 new head's gate.
+
+### 2026-11-04 - Launch-freshness review corrections qualified locally
+
+Eight regressions reproduced all four substantive findings from #10508 before
+correction: preexisting selector/manifest disagreement, successful owned
+acquisition invalidating its own planned runtime action, omitted constructor
+inputs, and comparison of a repair slot with a package version. The revision
+uses the existing canonical selection primitive for versioned roots, retains
+source/profile and exact package consistency, fingerprints owned construction
+inputs separately, and defers successful acquisitions to the next normal
+planning pass. Explicit update/recovery remains unchanged.
+
+All 149 isolated consumer controls pass: forty new cases and 109 retained
+cases, run in bounded disjoint groups. The retained inventory includes three
+additional namespaced execution controls. Independent namespaced planning and
+execution contracts now run separately; intentionally malformed JSON avoids
+an unused lookup. Item and aggregate deadlines are unchanged. Earlier combined
+and per-item timeout attempts remain failures, not successful evidence.
+The final staging/monotonic compatibility packet passes 75 cases; all seventeen
+actor-free units pass and their three admitted source hashes match. Python
+F/E9 lint, six-source module caps, thirteen-plugin install contract,
+documentation consistency, tracking/headless/daemon/asyncio source guards and
+whitespace checks pass. The forty admitted strict projects' earlier Linux and
+Windows type-target results still apply to unchanged admitted source; pending
+projects are not newly admitted.
+
+The canonical lookup is an actual read-only caller-owned subprocess, bounded
+to fifteen seconds and 64 KiB per stream. Fixture completion/interpreter
+observations are synthetic: the selected fixture interpreter is never run.
+This proves selection and protocol behavior, not installed runtime health,
+native lifecycle activation or whole-launch latency. No host rollout, external
+venue or shared installation was changed. The previous failed local aggregate
+unit runs and initial-head hosted success remain separate evidence.
+Current-head hosted CI and a fresh review must qualify this revision before
+merge; containing release is still due. #7030, #7028 and this parent remain
+open with their existing native and construction owners.
