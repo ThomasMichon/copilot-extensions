@@ -75,9 +75,31 @@ acceptance are **not** claimed from a graph, title, list or link.
 | group-011: common venue/runtime adapters | 7 historical; 5 admitted | Existing venue, assigned protocol and restricted runtime/custody owners; whole current receivers unqualified | [Five-contract study](venue-runtime-cohort.md); two inherited-held members excluded, fourteen bounded completed-work comparisons and one withheld description. Specific wrapper mapping conditions and all incumbent claims remain. |
 | group-013: interpreter and construction inputs | 7 | [Vendored Installer](../vendored-installer-engine/README.md), [Feed Construction](../feed-construction-release-gate/README.md) | Separate interpreter selection, native argument handling and source materialization. Preserve every original platform/feed/source and existing #7028 boundary. |
 | group-014: native CI timeout evidence | 7 | [Test Portfolio](../test-portfolio-rationalization/README.md), existing release/fixture owners | Match actual failed boundaries and unchanged budgets before repair or duplicate judgments; neither an isolated retry nor broad CI success proves the finite cause. |
-| group-015: session intelligence and accounting | 6 | [Session Intelligence](../session-intelligence-and-accounting/README.md), [Large-Corpus Sync](../large-corpus-session-sync/README.md) | Preserve the canonical backend, independently claimed daily adoption and #4976's remaining-home question. Do not equate related data paths with completed accounting or retirement. |
+| group-015: session intelligence and accounting | 6 historical; 5 admitted | Existing Session Intelligence and Large-Corpus Sync owners; five whole receiving documents read without a source/resource transfer | [Five-contract study](session-intelligence-cohort.md); eighteen whole texts, fifteen bounded comparisons and eleven complete source functions. CLOSED historical issue stays metadata-only, not an invented reference STOP. Two same-owner phase-tracking proposals have unchecked direct retention, pending reviewed delivery and separate judgments. |
 | group-018: attention and history readers | 5 | [Operator Attention](../operator-attention-contract/README.md), actual Bridge reader owners | Keep wait/deadline, history paging and event coverage separate; an attention home does not automatically receive the complete history contract. |
 | group-021: head succession | 4 | [Head Succession](../worktree-head-succession-hardening/README.md) | The home remains Draft; #84's OPEN canonical and #912's actual claim conditions survive. No automatic transfer or session operation. |
+
+### Session-intelligence core
+
+#4976, #5665, #5677, #5678 and #8735.
+
+The [five-contract study](session-intelligence-cohort.md) reads eighteen whole
+original/discussion texts. The historical sixth member is CLOSED metadata-only,
+without new text, reopening or campaign credit. Six whole messages supply nine
+relations; five new whole actual merged descriptions and one explicitly reused
+earlier description supply six more. All scores and prior invalidations remain.
+
+Preserve all seven sync follow-ups, complete portable intelligence/accounting,
+claimed catalog/daily/adoption phases and bounded installed scheduled accounting.
+Historical primitives, source-seam release and actual owner retentions are not
+whole programme completion or live-cutover permission. Five whole current
+receiving documents supply actual same-owner phase mapping; eleven complete
+functions credit selected-directory pruning and preserve tenant/signature/
+incremental-batching residuals without performance or test acceptance.
+A merely closed member's issue-body exclusion is not a new operator reference
+hold. Both tracking candidates have unchecked direct canonical retention,
+pending reviewed delivery and separate judgments. All five sources remain OPEN without new native or
+source/resource effects.
 
 ### Measurement/preservation core
 

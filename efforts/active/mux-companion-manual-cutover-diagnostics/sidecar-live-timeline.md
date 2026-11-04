@@ -77,6 +77,13 @@ The [source readback](journal/2026/11.04-sidecar-export-contributors.md) records
 packet. Logger provenance consumption and automatic discovery/orchestration
 remain open; no actual collection or native/installed acceptance is implied.
 
+#10500 merged as `2bdc57d5119bf331a5b265daeacca6e613a32d54`, delivering Logger's
+optional complete provenance retention and revision-bound fresh local readback
+without changing original v1 calls. The
+[source readback](journal/2026/11.04-sidecar-logger-contributors.md) records 62
+isolated cases, including negotiated owner-process joins. Actual selected-provider
+discovery and existing-tick integration remain open; D4 is not complete.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than
