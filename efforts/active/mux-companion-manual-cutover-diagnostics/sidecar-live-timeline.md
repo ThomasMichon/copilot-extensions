@@ -47,8 +47,15 @@ passive Bridge membership consumption, independent source admission and the
 first isolated three-owner demonstration. The
 [source readback](journal/2026/11.04-sidecar-bridge-membership-consumer.md)
 records 296 coupled controls and synthetic visual baselines. Known-session
-event/history consumption, logger/rescue, native and original parent gates
-remain open.
+event/history consumption follows in #10435 below; logger/rescue, native and
+original parent gates remain open.
+
+#10435 merged as `03548e10d689419f3e887b0ac625c1df3c5669df`, delivering
+the supported selected-session semantic consumer, independent backward/live
+positions and selected-head/reader retirement controls. The
+[source readback](journal/2026/11.04-sidecar-known-session-consumer.md) records
+174 coupled cases and the final 41-case pending-admission correction without
+claiming current answerability, qualified PRE, installed or native acceptance.
 
 ## Guiding intent
 
@@ -331,8 +338,8 @@ publication and installed support retain their separate qualification.
   stale/head/source replacement and cancellation.
   The selected worktree and rich Agenda adapters are delivered, including their
   real isolated process/Textual joins in #10131/#10251. #10392 adds passive
-  membership and the first three-owner join; known-session Bridge consumption
-  and complete source coverage remain open.
+  membership and the first three-owner join; #10435 adds supported known-session
+  consumption. Complete source coverage and the full joined acceptance remain open.
 
 ### S3 - Bridge relationships and problem evidence
 
@@ -340,9 +347,12 @@ publication and installed support retain their separate qualification.
   passive owning CLI. #10131 preserves existing local, represented and locally
   hosted remote evidence bounds; arbitrary federated handles, canonical head,
   current answerability and active pre-window capacity remain unqualified.
-- [ ] Integrate known-session observation/history with independent observer
+- [x] Integrate known-session observation/history with independent observer
   audiences and the existing local/remote/represented boundaries.
-  The owner provider is delivered; Manager consumption remains open.
+  #10435 delivers the selected owning-CLI consumer for admitted owned/represented
+  sources, preserving locally hosted transport metadata and weaker represented
+  evidence. Arbitrary federated acquisition, concurrent per-delegate readers,
+  installed/native qualification and current answerability are not implied.
 - [x] Add owner-qualified membership snapshot/deltas and retirement semantics,
   retaining relationship/custody authority and remote unknowns.
   #10199 delivers the HTTP-52 provider and passive owning CLI. This is source
@@ -387,7 +397,13 @@ publication and installed support retain their separate qualification.
 - [x] Qualify the first Worktrees/rich-Agenda/Bridge-membership source join,
   including blocked optional bootstrap, actual Refresh, independent live
   updates and simultaneous evidence reconciliation. #10392's final packet
-  passes 296 cases; known-session, native and full source coverage remain open.
+  passes 296 cases; selected-session evidence follows below, while native and
+  full source coverage remain open.
+- [x] Qualify the supported selected-session semantic CLI/Manager consumer,
+  independent history/live positions, real first-event continuity, exact page
+  ends, hidden/visible Refresh and active/pending selected-head retirement.
+  #10435's 174 coupled controls and final 41-case affected lifecycle packet are
+  source/private-process/Textual evidence, not installed or native acceptance.
 - [ ] Exact field/enumeration, numeric/boolean, cursor/generation/identity,
   duplicate and malformed-source tests; no render-path I/O or inferred custody.
 - [ ] History/live splice and gap tests: coalescing is current state, not lost

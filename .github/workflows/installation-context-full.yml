@@ -43,12 +43,104 @@ on:
           - manager-suite
           - worktrees-git-probes
           - codespaces-installer
+          - fleet-client-generations
         default: context
 
 permissions:
   contents: read
 
 jobs:
+  fleet-client-generations-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'fleet-client-generations'
+    name: Fleet client generation consumers (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env: &fleet-client-generations-env
+      UV_PYTHON: "3.12"
+    steps: &fleet-client-generations-steps
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify exact installed client consumers in separate bounded requests
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          import shlex
+          import sys
+          import xml.etree.ElementTree as ET
+
+          source = Path.cwd()
+          sys.path.insert(0, str(source / "libs/agent-procutil/src"))
+          from agent_procutil.owned_process import run_caller_owned
+
+          def run(arguments, *, env=None, timeout):
+              result = run_caller_owned(
+                  arguments, cwd=source, env=env, timeout=timeout,
+                  max_stdout_bytes=16 * 1024 * 1024, max_stderr_bytes=16 * 1024 * 1024,
+              )
+              print(result.stdout, end="", flush=True)
+              print(result.stderr, end="", file=sys.stderr, flush=True)
+              result.check_returncode()
+              return result.stdout.strip()
+
+          head = run(["git", "rev-parse", "HEAD"], timeout=30)
+          assert head == os.environ["GITHUB_SHA"]
+          print(f"qualification-source={head}; native-platform={sys.platform}", flush=True)
+          reports = source / ".test-venvs/fleet-client-consumers"
+          reports.mkdir(parents=True)
+          retained = {"test_artifact_staging.py", "test_client_generation_cli.py"}
+          ignored = [
+              "--ignore=" + str(path)
+              for path in sorted((source / "fleet-manager/tests").glob("test_*.py"))
+              if path.name not in retained
+          ]
+          runner = [sys.executable, "tools/run-standalone-tests.py", "fleet-manager", "--timeout", "120"]
+
+          def environment(arguments):
+              return {**os.environ, "PYTEST_ADDOPTS": shlex.join([*ignored, *arguments])}
+
+          run([*runner, "--prepare"], env=environment(["--collect-only"]), timeout=300)
+          groups = {
+              "admission": "fresh_installed_console_admission or missing_packaged_resource",
+              "construct": "actual_installed_console_generation_transitions and construct",
+              "register": "actual_installed_console_generation_transitions and register-commands and not unregister-commands",
+              "unregister": "actual_installed_console_generation_transitions and unregister-commands",
+              "remove": "actual_installed_console_generation_transitions and remove-runtime",
+          }
+          combined = ET.Element("testsuites")
+          for name, expression in groups.items():
+              report = reports / (name + ".xml")
+              if report.exists():
+                  raise RuntimeError("native qualification refuses a retained consumer report")
+              run(runner, env=environment(["-k", expression, "--junitxml", str(report)]), timeout=180)
+              combined.extend(ET.parse(report).getroot().findall("testsuite"))
+          report = reports / "consumer.xml"
+          ET.ElementTree(combined).write(report, encoding="utf-8")
+          run([
+              sys.executable, "-I",
+              "tools/clean-room/scenarios/fleet-manager-client-admission/verify.py", str(report),
+          ], timeout=30)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fleet-client-consumers-${{ runner.os }}
+          path: .test-venvs/fleet-client-consumers/*.xml
+          include-hidden-files: true
+  fleet-client-generations-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'fleet-client-generations'
+    name: Fleet client generation consumers (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env: *fleet-client-generations-env
+    steps: *fleet-client-generations-steps
   coverage-selection-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'coverage-selection'
     name: Coverage auditability selection (Linux)

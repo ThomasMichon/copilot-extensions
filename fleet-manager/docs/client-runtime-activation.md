@@ -201,7 +201,14 @@ candidate, completion and physical tree. Files retain identity, mode, size,
 mtime and SHA-256; directories retain identity/mode and exact child names.
 POSIX links retain their own identity and target, never target traversal.
 Windows refuses reparse entries and pins ordinary objects with native
-no-share-delete handles. POSIX traversal is descriptor-relative and no-follow;
+no-share-delete handles. Runtime directories must pass the canonical native
+current-user/enabled-owner-group proof already used for runtime files, as well
+as the existing private grant allowlist, both against the held handle.
+This accommodates directories created by an elevated native toolchain without
+accepting arbitrary administrator-owned or publicly readable directories.
+Installation roots, admission state and ownership metadata still require
+TokenUser ownership; no owner or ACL is repaired during removal.
+POSIX traversal is descriptor-relative and no-follow;
 the root and each member are first claimed by rename into a private,
 identity-bound `client-runtime-removals/<id>/claims/` namespace, then validated
 and deleted there. An object that wins the source-name race is preserved in

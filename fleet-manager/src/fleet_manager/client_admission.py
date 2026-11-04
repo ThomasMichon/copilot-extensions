@@ -12,6 +12,7 @@ import time
 
 from . import artifact_staging
 from .planning import MAX_BYTES, PlanError, canonical, decode, identifier, integer, record
+from .private_state import create_private_file, private_directory
 from .private_state import windows_private as _windows_private
 from .release_selection import ReleaseSelection
 from .staging_cleanup import _windows_handle
@@ -154,6 +155,16 @@ def _check_database_header(path, expected, *, initializing):
         raise PlanError("client admission database header is invalid")
     if header[18:20] != b"\1\1":
         raise PlanError("client admission refuses unsupported WAL database header")
+
+
+def _begin_write(connection, root):
+    if os.name == "nt":
+        # Even BEGIN can create an empty database's journal with the default owner.
+        journal = root / (DATABASE + "-journal")
+        if not os.path.lexists(journal):
+            os.close(create_private_file(journal))
+        _ordinary_file(journal, sqlite_state=True)
+    connection.execute("BEGIN IMMEDIATE")
 
 
 @contextmanager
@@ -355,13 +366,13 @@ def _initialize(root, identity, *, tables=None, schema_version=SCHEMA_VERSION,
             if (path / initialization).exists():
                 _clear_initialization(path / initialization)
             candidate = database_root / initialization
-            candidate.mkdir(mode=0o700)
-            descriptor = os.open(candidate / DATABASE, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+            private_directory(candidate)
+            descriptor = create_private_file(candidate / DATABASE)
             os.close(descriptor)
             with _connection(
                 path / initialization, database_root=candidate, readonly=False, initializing=True,
             ) as connection:
-                connection.execute("BEGIN IMMEDIATE")
+                _begin_write(connection, path / initialization)
                 for sql in tables.values():
                     connection.execute(sql)
                 connection.execute("PRAGMA application_id = " + str(APPLICATION_ID))
@@ -415,7 +426,7 @@ def recover_client_admission(root, identity):
             unchanged()
         with _owned(root) as (path, database_root, unchanged):
             with _connection(path, database_root=database_root, readonly=False) as connection:
-                connection.execute("BEGIN IMMEDIATE")
+                _begin_write(connection, path)
                 _read_state(connection, identity)
                 unchanged()
     except (OSError, sqlite3.Error, subprocess.SubprocessError):
@@ -468,7 +479,7 @@ def admit_client_release(root, identity, selection, staged, policy, *, clock=lam
     try:
         with _owned(root) as (path, database_root, unchanged):
             with _connection(path, database_root=database_root, readonly=False) as connection:
-                connection.execute("BEGIN IMMEDIATE")
+                _begin_write(connection, path)
                 previous = _read_state(connection, identity)
                 receipt = _selected_receipt(
                     identity, selection, staged, policy, previous, clock,

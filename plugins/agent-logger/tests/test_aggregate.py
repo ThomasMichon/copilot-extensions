@@ -1088,7 +1088,7 @@ def test_cli_machine_identity_uses_bounded_platform_and_role(
         encoding="utf-8",
     )
     monkeypatch.setenv("AGENT_LOGGER_HOME", str(tmp_path))
-    monkeypatch.setattr(cli_module.platform, "system", lambda: "Windows")
+    monkeypatch.setattr("agent_logger.aggregate_machine.platform.system", lambda: "Windows")
 
     assert cli_module.main(["config", "--resolved", "--json"]) == 0
 

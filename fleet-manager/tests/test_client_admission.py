@@ -17,6 +17,7 @@ import pytest
 
 import fleet_manager.client_admission as admission
 from fleet_manager.planning import PlanError, canonical
+from fleet_manager.private_state import create_private_file, private_directory
 from fleet_manager.release_selection import ReleaseSelection
 from test_artifact_staging import primitive as primitive, stage
 from test_client_distribution import FLAGS, run
@@ -35,7 +36,7 @@ def identity():
 
 def root_at(tmp_path):
     root = tmp_path / "private-client"
-    root.mkdir(mode=0o700)
+    private_directory(root)
     return root
 
 
@@ -53,7 +54,7 @@ def selection(fixture):
 @contextmanager
 def retained(fixture, tmp_path):
     parent = tmp_path / "private-stage"
-    parent.mkdir(mode=0o700, exist_ok=True)
+    private_directory(parent)
     context, trusted = stage(fixture, parent)
     with context as frozen:
         yield frozen, trusted
@@ -246,7 +247,7 @@ def test_shared_native_root_refuses_initialization_without_permission_repair(
         assert root.stat().st_mode & 0o777 == 0o750
 
 
-@pytest.mark.parametrize("state_file", ["database", "lease"])
+@pytest.mark.parametrize("state_file", ["database", "lease", "journal"])
 def test_shared_native_state_refuses_admission_without_permission_repair(
     tmp_path, primitive, state_file,
 ):
@@ -254,8 +255,11 @@ def test_shared_native_state_refuses_admission_without_permission_repair(
     fixture = artifact_fixture(tmp_path)
     admission.initialize_client_admission(root, identity())
     before = database_bytes(root)
+    if state_file == "journal":
+        os.close(create_private_file(root / (admission.DATABASE + "-journal")))
     path = (
-        root / admission.DATABASE if state_file == "database"
+        root / (admission.DATABASE + "-journal") if state_file == "journal"
+        else root / admission.DATABASE if state_file == "database"
         else next((root / ".construction-leases").iterdir())
     )
     if os.name == "nt":

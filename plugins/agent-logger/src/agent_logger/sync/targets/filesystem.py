@@ -19,10 +19,9 @@ import os
 import shutil
 import stat
 import time
-from collections.abc import Callable
-from contextlib import ExitStack
-from datetime import datetime, timezone
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from collections.abc import Callable, Iterator
+from contextlib import ExitStack, contextmanager
+from pathlib import Path
 from typing import BinaryIO
 
 from agent_logger import sessions
@@ -66,6 +65,7 @@ from agent_logger.sync.provenance import (
 from agent_logger.sync.provenance import (
     windows_extended_path as _windows_extended_path,
 )
+from agent_logger.sync.provenance import validate_relative_path as _validate_relative_path
 from agent_logger.sync.targets import protected_publication, publication_admission
 from agent_logger.sync.targets.base import (
     SESSION_INDEX_NAMES,
@@ -77,11 +77,10 @@ from agent_logger.sync.targets.base import (
     Target,
     is_session_path_included,
 )
-from agent_logger.sync.targets.hub_sessions import (
-    _hub_session_age_days,
-    _hub_session_cwd,
-    _parse_iso,
-)
+from agent_logger.sync.targets.hub_sessions import _parse_iso, compact_hub_sessions
+from agent_logger.sync.targets.fleet_health import FleetScanLimits, read_fleet_status
+from agent_logger.sync.worktree_state_namespace import namespace_overlap, ordinary_publication
+from agent_logger.sync import worktree_state_preservation as preservation
 
 #: Excluded from sync: legacy lock names, ``.lock``/``.tmp`` suffixes, and ``.hold`` (Copilot's restrictive-ACL ``inuse.<pid>.hold`` marker).
 _EXCLUDE_NAMES, _EXCLUDE_SUFFIXES = frozenset({".lock", "lock"}), (".lock", ".tmp", ".hold")
@@ -118,12 +117,9 @@ class _SourceChangedDuringCopy(OSError):
     next pass, never a push failure."""
 
 
-class _FleetScanLimitError(OSError):
-    pass
-
-
 def _rmdir_replace_target(path: Path) -> None:
     """Remove an empty directory, clearing Windows read-only if needed."""
+    preservation.refuse_collection_destination(path)
     io_path = _windows_extended_path(path)
     try:
         os.rmdir(io_path)
@@ -142,6 +138,7 @@ def _rmdir_replace_target(path: Path) -> None:
 
 def _unlink_replace_target(path: Path) -> None:
     """Remove a destination before replacement, clearing read-only if needed."""
+    preservation.refuse_collection_destination(path)
     io_path = _windows_extended_path(path)
     try:
         os.unlink(io_path)
@@ -159,6 +156,7 @@ def _unlink_replace_target(path: Path) -> None:
 
 
 def _write_bytes_fsync(path: Path, payload: bytes) -> None:
+    preservation.refuse_collection_destination(path)
     with open(_windows_extended_path(path), "xb") as stream:
         stream.write(payload)
         stream.flush()
@@ -328,6 +326,7 @@ def _copy_stream_replace(
 
 def _copy_replace(src: Path, dst: Path) -> None:
     """Copy one regular source without following links."""
+    preservation.refuse_collection_destination(dst)
     try:
         source = open_regular_no_follow(src)
     except OSError as exc:
@@ -416,6 +415,7 @@ def _copy_process_logs(
             source_identity.st_dev, source_identity.st_ino,
         ) != (opened.st_dev, opened.st_ino):
             raise _SourceChangedDuringCopy("process-log source root changed before opening")
+        preservation.refuse_collection_ancestors(dest)
         destination = stack.enter_context(publication_directory(dest))
         return _copy_process_logs_pinned(directory, destination, opened)
 
@@ -766,28 +766,10 @@ def _existing_real_directory_identity(path: Path) -> tuple[Path, os.stat_result]
     return absolute, identity
 
 
-def _validate_relative_path(relative: Path) -> None:
-    """Reject POSIX and Windows absolute/rooted/traversing relative paths."""
-    windows = PureWindowsPath(str(relative))
-    posix = PurePosixPath(str(relative))
-    if (
-        relative.is_absolute()
-        or relative.anchor
-        or relative.drive
-        or windows.anchor
-        or windows.drive
-        or windows.root
-        or posix.is_absolute()
-        or ".." in relative.parts
-        or ".." in windows.parts
-        or ".." in posix.parts
-    ):
-        raise OSError(f"unsafe destination path: {relative}")
-
-
 def _ensure_relative_directory(root: Path, relative: Path, *, durable: bool = False) -> Path:
     """Create a descendant directory chain without accepting symlinked leaves."""
     _validate_relative_path(relative)
+    preservation.refuse_collection_ancestors(root / relative)
     safe_root = _ensure_real_directory(root, durable=durable)
     current = safe_root
     for part in relative.parts:
@@ -816,6 +798,7 @@ def _ensure_relative_directory(root: Path, relative: Path, *, durable: bool = Fa
 def _existing_relative_directory(root: Path, relative: Path) -> Path | None:
     """Resolve an existing descendant directory without following symlink leaves."""
     _validate_relative_path(relative)
+    preservation.refuse_collection_ancestors(root / relative)
     safe_root = _existing_real_directory(root)
     if safe_root is None:
         return None
@@ -861,6 +844,7 @@ def _session_files(
     pending = [root]
     while pending:
         directory = pending.pop()
+        preservation.refuse_collection_at(directory)
         with os.scandir(_windows_extended_path(directory)) as entries:
             for entry in entries:
                 path = directory / entry.name
@@ -894,6 +878,7 @@ def _iter_regular_source_files(
     pending = [root]
     while pending:
         directory = pending.pop()
+        preservation.refuse_collection_at(directory)
         with os.scandir(_windows_extended_path(directory)) as entries:
             for entry in entries:
                 path = directory / entry.name
@@ -1494,6 +1479,8 @@ def _replace_selected_sessions(
             )
             had_destination = _path_exists(destination)
             if had_destination:
+                if _is_real_directory(destination):
+                    preservation.require_disposable_tree(destination)
                 _ensure_relative_directory(
                     transaction,
                     backup.parent.relative_to(transaction),
@@ -1555,6 +1542,7 @@ def _remove_tree_checked(path: Path, *, allow_nonempty: bool = False) -> None:
                     return
             raise
         return
+    preservation.require_disposable_tree(path)
     directories = [path]
     pending = [path]
     while pending:
@@ -1611,6 +1599,21 @@ class FilesystemTarget(Target):
     def _root(self) -> Path:  # pragma: no cover - abstract-ish
         raise NotImplementedError
 
+    @contextmanager
+    def _machine_publication(
+        self, machine: str, *, root: Path | None = None, readonly: bool = False,
+    ) -> Iterator[Path]:
+        root = self._root() if root is None else root
+        if readonly:
+            if namespace_overlap(root, machine):
+                raise OSError("machine path overlaps the typed-state namespace")
+            yield root
+            return
+        with ordinary_publication(root, machine) as admitted:
+            if admitted is None:
+                raise OSError("machine path overlaps the typed-state namespace")
+            yield admitted
+
     def push(
         self, source: Path, machine: str, include_sessions: set[str] | None = None,
         *, batch_mode: bool = False, source_identity: SourceIdentityLike | None = None,
@@ -1621,13 +1624,24 @@ class FilesystemTarget(Target):
             return PushResult(ok=False, detail=f"unsafe source: {exc}")
         if safe_source is None:
             return PushResult(ok=False, detail=f"source not found: {source}")
-        source = safe_source
+        try:
+            with self._machine_publication(machine) as root:
+                return self._push_sessions(
+                    safe_source, machine, include_sessions, root=root,
+                    batch_mode=batch_mode, source_identity=source_identity,
+                )
+        except OSError as exc:
+            return PushResult(ok=False, detail=f"publication domain admission failed: {exc}")
+
+    def _push_sessions(
+        self, source: Path, machine: str, include_sessions: set[str] | None = None,
+        *, root: Path, batch_mode: bool = False, source_identity: SourceIdentityLike | None = None,
+    ) -> PushResult:
         try:
             detritus = discover_session_detritus(source, include_sessions)
         except OSError as exc:
             return PushResult(ok=False, detail=f"detritus discovery failed: {exc}")
         try:
-            root = self._root()
             dest = _ensure_relative_directory(root, Path(machine), durable=source_identity is not None)
         except OSError as exc:
             return PushResult(
@@ -1851,11 +1865,13 @@ class FilesystemTarget(Target):
 
     def _record_process_log_health(
         self, machine: str, status: str, deferred_files: tuple[str, ...] = (),
-        *, reason: str | None = None,
+        *, reason: str | None = None, root: Path | None = None,
     ) -> None:
         """Update only the process-log leg under existing machine metadata."""
         try:
-            machine_root = _existing_relative_directory(self._root(), Path(machine))
+            machine_root = _existing_relative_directory(
+                self._root() if root is None else root, Path(machine),
+            )
         except OSError as exc:
             logging.getLogger("agent-logger.sync-meta").warning(
                 "cannot locate process-log sync metadata for %s: %s", machine, exc,
@@ -1866,6 +1882,14 @@ class FilesystemTarget(Target):
         write_process_log_meta(machine_root, status, deferred_files, reason=reason)
 
     def push_process_logs(self, log_root: Path, machine: str) -> PushResult:
+        """Publish process logs only within an admitted ordinary machine domain."""
+        try:
+            with self._machine_publication(machine) as root:
+                return self._push_process_logs(log_root, machine, root)
+        except OSError as exc:
+            return PushResult(ok=False, detail=f"publication domain admission failed: {exc}")
+
+    def _push_process_logs(self, log_root: Path, machine: str, root: Path) -> PushResult:
         """Publish logs with pinned source/destination ancestry, including creation.
 
         Health metadata and session-state remain outside this boundary (#5727).
@@ -1886,18 +1910,23 @@ class FilesystemTarget(Target):
                 reason = "symlink/reparse" if redirected else "not a directory"
                 raise OSError(f"process-log source must be a real directory: {log_root} ({reason})")
         except OSError as exc:
-            self._record_process_log_health(machine, "partial", reason="unsafe process-log source")
+            self._record_process_log_health(
+                machine, "partial", reason="unsafe process-log source", root=root,
+            )
             return PushResult(ok=False, detail=f"unsafe process-log source: {exc}")
         if source_identity is None:
-            self._record_process_log_health(machine, "partial", reason="no process-log source")
+            self._record_process_log_health(
+                machine, "partial", reason="no process-log source", root=root,
+            )
             return PushResult(ok=True, detail="no process-log source")
         try:
-            root = self._root()
             relative = Path(machine) / "logs"
             _validate_relative_path(relative)
             dest = _anchored_path(root) / relative
         except OSError as exc:
-            self._record_process_log_health(machine, "partial", reason="unsafe process-log destination")
+            self._record_process_log_health(
+                machine, "partial", reason="unsafe process-log destination", root=root,
+            )
             return PushResult(
                 ok=False,
                 detail=f"cannot create safe destination for {machine}/logs: {exc}",
@@ -1910,7 +1939,9 @@ class FilesystemTarget(Target):
             # between this method's own validation above and the copy) --
             # a genuinely unsafe root, not the benign per-file skip
             # `_copy_process_logs` already handles internally.
-            self._record_process_log_health(machine, "partial", reason="process-log copy failed")
+            self._record_process_log_health(
+                machine, "partial", reason="process-log copy failed", root=root,
+            )
             return PushResult(ok=False, detail=f"process-log copy failed: {exc}")
         detail = f"-> {dest}"
         if locked_paths:
@@ -1921,7 +1952,7 @@ class FilesystemTarget(Target):
             # health must reflect that, exactly like an outright failure.
         self._record_process_log_health(
             machine, "partial" if locked_paths else "ok",
-            tuple(path.name for path in locked_paths),
+            tuple(path.name for path in locked_paths), root=root,
         )
         return PushResult(ok=True, detail=detail, file_count=copied, byte_count=nbytes,
                           process_logs_complete=not locked_paths)
@@ -1950,12 +1981,15 @@ class FilesystemTarget(Target):
         empty directory and masking that its sessions are actually gone.
         """
         try:
-            dest = _existing_relative_directory(self._root(), Path(machine))
+            root = self._root()
+            if _existing_relative_directory(root, Path(machine)) is None:
+                return
+            with self._machine_publication(machine, root=root) as admitted:
+                dest = _existing_relative_directory(admitted, Path(machine))
+                if dest is not None:
+                    heartbeat_sync_meta(dest, machine, self.name, _count_sessions(dest))
         except OSError:
             return
-        if dest is None:
-            return
-        heartbeat_sync_meta(dest, machine, self.name, _count_sessions(dest))
 
     def fleet_sync_status(self) -> FleetSyncStatus:
         """Read bounded per-machine metadata without entering session payloads."""
@@ -1963,112 +1997,21 @@ class FilesystemTarget(Target):
             root = _existing_real_directory(self._root())
             if root is None:
                 return FleetSyncStatus(supported=True)
-            machines: dict[str, SyncStatus] = {}
-            pending = [(root, Path())]
-            visited_directories = 0
-            visited_entries = 0
-            while pending:
-                directory, relative = pending.pop()
-                visited_directories += 1
-                if visited_directories > _MAX_FLEET_DIRECTORIES:
-                    raise _FleetScanLimitError(
-                        f"fleet scan exceeds {_MAX_FLEET_DIRECTORIES} directories"
-                    )
-                metadata_path = directory / "sync-meta.json"
-                try:
-                    metadata_mode = os.lstat(
-                        _windows_extended_path(metadata_path)
-                    ).st_mode
-                except FileNotFoundError:
-                    metadata_mode = None
-                except OSError as exc:
-                    if not relative.parts:
-                        raise
-                    machines[relative.as_posix()] = SyncStatus(
-                        supported=True,
-                        error=str(exc),
-                    )
-                    if len(machines) > _MAX_FLEET_MACHINES:
-                        raise OSError(
-                            f"fleet metadata exceeds {_MAX_FLEET_MACHINES} machines"
-                        )
-                    continue
-                if relative.parts and metadata_mode is not None and (
-                    stat.S_ISREG(metadata_mode)
-                    and not is_link_or_reparse(metadata_path, metadata_mode)
-                ):
-                    machine = relative.as_posix()
-                    try:
-                        metadata = read_sync_meta(directory)
-                        machines[machine] = SyncStatus(
-                            supported=True,
-                            metadata=metadata,
-                        )
-                    except OSError as exc:
-                        machines[machine] = SyncStatus(
-                            supported=True,
-                            error=str(exc),
-                        )
-                    if len(machines) > _MAX_FLEET_MACHINES:
-                        raise OSError(
-                            f"fleet metadata exceeds {_MAX_FLEET_MACHINES} machines"
-                        )
-                    continue
-                if len(relative.parts) >= _MAX_FLEET_MACHINE_DEPTH:
-                    continue
-                children: list[tuple[str, int]] = []
-                try:
-                    with os.scandir(_windows_extended_path(directory)) as entries:
-                        for entry in entries:
-                            visited_entries += 1
-                            if visited_entries > _MAX_FLEET_ENTRIES:
-                                raise _FleetScanLimitError(
-                                    f"fleet scan exceeds {_MAX_FLEET_ENTRIES} entries"
-                                )
-                            try:
-                                mode = entry.stat(follow_symlinks=False).st_mode
-                            except OSError:
-                                continue
-                            children.append((entry.name, mode))
-                except _FleetScanLimitError:
-                    raise
-                except OSError as exc:
-                    if not relative.parts:
-                        raise
-                    machines[relative.as_posix()] = SyncStatus(
-                        supported=True,
-                        error=str(exc),
-                    )
-                    if len(machines) > _MAX_FLEET_MACHINES:
-                        raise OSError(
-                            f"fleet metadata exceeds {_MAX_FLEET_MACHINES} machines"
-                        )
-                    continue
-                if relative and any(
-                    name in {"session-state", "provenance", "archived"}
-                    for name, _mode in children
-                ):
-                    machines[relative.as_posix()] = SyncStatus(
-                        supported=True,
-                        metadata=None,
-                    )
-                    if len(machines) > _MAX_FLEET_MACHINES:
-                        raise OSError(
-                            f"fleet metadata exceeds {_MAX_FLEET_MACHINES} machines"
-                        )
-                    continue
-                for name, mode in children:
-                    path = directory / name
-                    if stat.S_ISDIR(mode) and not is_link_or_reparse(path, mode):
-                        pending.append((path, relative / name))
-            return FleetSyncStatus(supported=True, machines=machines)
+            return read_fleet_status(root, FleetScanLimits(
+                _MAX_FLEET_MACHINE_DEPTH, _MAX_FLEET_MACHINES,
+                _MAX_FLEET_DIRECTORIES, _MAX_FLEET_ENTRIES,
+            ))
         except OSError as exc:
             return FleetSyncStatus(supported=True, error=str(exc))
 
     def prune(self, machine: str, retention_days: int | None) -> int:
         if not isinstance(retention_days, (int, float)) or retention_days <= 0:
             return 0
-        machine_root = _existing_relative_directory(self._root(), Path(machine))
+        with self._machine_publication(machine) as root:
+            return self._prune(root, machine, retention_days)
+
+    def _prune(self, root: Path, machine: str, retention_days: int | float) -> int:
+        machine_root = _existing_relative_directory(root, Path(machine))
         if machine_root is None:
             return 0
         base = _existing_relative_directory(machine_root, Path("session-state"))
@@ -2100,6 +2043,8 @@ class FilesystemTarget(Target):
                 ),
                 default=d.stat().st_mtime,
             )
+            if newest < cutoff and snapshots is not None:
+                preservation.require_disposable_tree(snapshots / rescue_session_key(d.name))
             if newest < cutoff and sessions.force_rmtree(d):
                 if provenance is not None:
                     (provenance / f"{d.name}.json").unlink(missing_ok=True)
@@ -2113,11 +2058,18 @@ class FilesystemTarget(Target):
         return removed
 
     def push_archives(self, archive_root: Path, machine: str) -> PushResult:
+        try:
+            with self._machine_publication(machine) as root:
+                return self._push_archives(root, archive_root, machine)
+        except OSError as exc:
+            return PushResult(ok=False, detail=f"publication domain admission failed: {exc}")
+
+    def _push_archives(self, root: Path, archive_root: Path, machine: str) -> PushResult:
         if not archive_root.is_dir():
             return PushResult(ok=True, detail="no local archive store", file_count=0)
         try:
             dest = _ensure_relative_directory(
-                self._root(),
+                root,
                 Path(machine) / "archived",
             )
         except OSError as exc:
@@ -2142,7 +2094,11 @@ class FilesystemTarget(Target):
 
     def reconcile_hub(self, machine: str, *, dry_run: bool = False) -> int:
         """Remove uncompressed hub sessions whose verified archive has landed."""
-        base = _existing_relative_directory(self._root(), Path(machine))
+        with self._machine_publication(machine, readonly=dry_run) as root:
+            return self._reconcile_hub(root, machine, dry_run=dry_run)
+
+    def _reconcile_hub(self, root: Path, machine: str, *, dry_run: bool) -> int:
+        base = _existing_relative_directory(root, Path(machine))
         if base is None:
             return 0
         archived = _existing_relative_directory(base, Path("archived"))
@@ -2162,6 +2118,8 @@ class FilesystemTarget(Target):
             ref = SessionRef(id=sid, kind="archive", path=arc, store=archived)
             if not sessions.verify_archive(ref):
                 continue
+            if dry_run:
+                preservation.require_disposable_tree(live)
             if dry_run or sessions.force_rmtree(live):
                 # Count successful removes only; OneDrive placeholders can defeat rmtree.
                 removed_ids.add(sid)
@@ -2176,6 +2134,16 @@ class FilesystemTarget(Target):
         tracked_paths: set[str] | None = None,
         dry_run: bool = False,
     ) -> int:
+        """Compact cold ordinary sessions without entering a typed collection."""
+        with self._machine_publication(machine, readonly=dry_run) as root:
+            return self._compact_backlog(
+                root, machine, min_age_days, codec, tracked_paths=tracked_paths, dry_run=dry_run,
+            )
+
+    def _compact_backlog(
+        self, root: Path, machine: str, min_age_days: int, codec: str,
+        *, tracked_paths: set[str] | None, dry_run: bool,
+    ) -> int:
         """Compact cold hub-only sessions in place under ``{machine}/archived/``.
 
         ``tracked_paths`` (when provided, for the running machine's own
@@ -2183,36 +2151,19 @@ class FilesystemTarget(Target):
         so a hub copy of a live, picker-visible session is never archived even
         if it is old.
         """
-        base = _existing_relative_directory(self._root(), Path(machine))
+        base = _existing_relative_directory(root, Path(machine))
         if base is None:
             return 0
         state = _existing_relative_directory(base, Path("session-state"))
         if state is None:
             return 0
-        archived = _ensure_relative_directory(base, Path("archived"))
-        now = datetime.now(timezone.utc)
-        compacted = 0
-        for d in state.iterdir():
-            if not d.is_dir() or not (d / sessions.EVENTS_MEMBER).exists():
-                continue
-            if sessions.is_archived(d.name, archived, codec):
-                continue
-            if tracked_paths is not None:
-                cwd = _hub_session_cwd(d)
-                if cwd and cwd in tracked_paths:
-                    continue
-            age = _hub_session_age_days(d, now)
-            if age is None or age < min_age_days:
-                continue
-            if dry_run:
-                compacted += 1
-                continue
-            ref = sessions.archive_session(d, archived, codec=codec)
-            if sessions.verify_archive(ref):
-                compacted += 1
-            else:
-                sessions.remove_archive(ref)
-        return compacted
+        archived = (
+            _existing_relative_directory(base, Path("archived")) or base / "archived"
+            if dry_run else _ensure_relative_directory(base, Path("archived"))
+        )
+        return compact_hub_sessions(
+            state, archived, min_age_days, codec, tracked_paths=tracked_paths, dry_run=dry_run,
+        )
 
     def doctor(self) -> DoctorResult:
         result = DoctorResult(ok=True)
@@ -2235,6 +2186,10 @@ class LocalTarget(FilesystemTarget):
     """Publish to a dotfolder under ``$HOME`` (default) or an explicit path."""
 
     name = "local"
+
+    def worktree_state_root(self) -> Path:
+        """Local stored bytes are not a cloud/remote archival acknowledgment."""
+        return self._root()
 
     def _root(self) -> Path:
         path = self.options.get("path")

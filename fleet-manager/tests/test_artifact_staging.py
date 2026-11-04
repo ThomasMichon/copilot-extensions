@@ -879,8 +879,10 @@ def test_fresh_installed_console_admission_and_durable_reopen_without_hosting(tm
         path.write_bytes(canonical(value))
         files[name] = path
     root, parent, outside = (tmp_path / name for name in ("private-client", "private-stage", "outside"))
+    from fleet_manager.private_state import private_directory
+
     for directory in (root, parent, outside):
-        directory.mkdir(mode=0o700)
+        private_directory(directory)
     import cryptography
 
     crypto_site = Path(cryptography.__file__).resolve().parent.parent
@@ -909,20 +911,34 @@ raise SystemExit(entry.load()())
 
     initialized = client("initialize")
     assert initialized.returncode == 0, initialized.stderr
+    hot_writer = """
+import pathlib, sys, time
+sys.path[:0] = sys.argv[1:3]
+from fleet_manager import client_admission as admission
+root = pathlib.Path(sys.argv[3])
+with admission._owned(root) as (path, database_root, unchanged):
+    with admission._connection(path, database_root=database_root, readonly=False) as c:
+        c.execute('PRAGMA cache_size=1')
+        c.execute('PRAGMA cache_spill=ON')
+        admission._begin_write(c, root)
+        c.execute("UPDATE installation SET identity=identity||' '")
+        c.execute('UPDATE installation SET identity=rtrim(identity)')
+        admission._commit(c)
+        assert not (root / (admission.DATABASE + '-journal')).exists()
+        admission._begin_write(c, root)
+        c.execute('UPDATE installation SET identity=?', ('x'*1000000,))
+        admission._ordinary_file(root / (admission.DATABASE + '-journal'), sqlite_state=True)
+        print('HOT_JOURNAL', flush=True)
+        time.sleep(30)
+"""
     hot = subprocess.Popen(
-        [sys.executable, "-I", "-c",
-         "import sqlite3,sys,time; "
-         "c=sqlite3.connect(sys.argv[1]); "
-         "c.execute('PRAGMA cache_size=1'); c.execute('PRAGMA cache_spill=ON'); "
-         "c.execute('PRAGMA synchronous=FULL'); c.execute('BEGIN IMMEDIATE'); "
-         "c.execute('UPDATE installation SET identity=?', ('x'*1000000,)); "
-         "print('HOT_JOURNAL',flush=True); time.sleep(30)",
-         str(root / "client-admission.sqlite3")],
+        [sys.executable, "-I", "-S", "-B", "-c", hot_writer,
+         str(target), str(crypto_site), str(root)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )
     try:
-        assert hot.stdout.readline().strip() == "HOT_JOURNAL"
+        assert hot.stdout.readline().strip() == "HOT_JOURNAL", hot.stderr.read()
         hot.kill()
         assert hot.wait(timeout=10) != 0
     finally:

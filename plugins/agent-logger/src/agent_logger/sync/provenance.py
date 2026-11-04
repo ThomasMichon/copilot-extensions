@@ -8,7 +8,7 @@ import os
 import platform
 import stat
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, BinaryIO
 
 SCHEMA_VERSION = 1
@@ -265,6 +265,25 @@ def existing_real_directory(path: Path) -> Path | None:
         if is_link_or_reparse(current, mode) or not stat.S_ISDIR(mode):
             return None
     return absolute
+
+
+def validate_relative_path(relative: Path) -> None:
+    """Reject POSIX and Windows absolute/rooted/traversing relative paths."""
+    windows = PureWindowsPath(str(relative))
+    posix = PurePosixPath(str(relative))
+    if (
+        relative.is_absolute()
+        or relative.anchor
+        or relative.drive
+        or windows.anchor
+        or windows.drive
+        or windows.root
+        or posix.is_absolute()
+        or ".." in relative.parts
+        or ".." in windows.parts
+        or ".." in posix.parts
+    ):
+        raise OSError(f"unsafe destination path: {relative}")
 
 
 def ensure_real_directory(path: Path, *, durable: bool = False) -> Path:

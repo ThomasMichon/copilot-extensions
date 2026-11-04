@@ -360,7 +360,7 @@ def test_deleted_root_and_interrupted_outcome_settlement_retry(owned, monkeypatc
 @pytest.mark.parametrize("partial", [b"", b'{"schema":'])
 def test_empty_or_truncated_native_outcome_write_does_not_poison_retry(owned, monkeypatch, partial):
     _root, _fixture, _staged, _trusted, namespace, slot = owned
-    original_open, original_write = os.open, os.write
+    original_open, original_write = construction.create_private_file, os.write
     writing = set()
 
     def open_attempt(path, *args, **kwargs):
@@ -377,7 +377,7 @@ def test_empty_or_truncated_native_outcome_write_does_not_poison_retry(owned, mo
         return original_write(descriptor, content)
 
     with monkeypatch.context() as patch:
-        patch.setattr(os, "open", open_attempt)
+        patch.setattr(construction, "create_private_file", open_attempt)
         patch.setattr(os, "write", write_partial)
         with pytest.raises(PlanError, match="outcome is unknown"):
             remove(owned)

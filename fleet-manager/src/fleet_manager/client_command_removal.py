@@ -98,7 +98,7 @@ def unregister_client_frontdoor(root, identity, *, command_directory):
         ):
             if directory.is_relative_to(path) or path.is_relative_to(directory):
                 raise PlanError("client commands require a separate explicit private directory")
-            connection.execute("BEGIN IMMEDIATE")
+            client_admission._begin_write(connection, path)
             admitted = client_admission._read_state(connection, identity)
             namespace = path / construction.NAMESPACE
             artifact_staging._directory(namespace)

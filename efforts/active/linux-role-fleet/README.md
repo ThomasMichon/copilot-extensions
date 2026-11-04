@@ -404,9 +404,13 @@ Implementation sequencing below is **agent-recommended**:
   and focused Windows/Linux qualification merged in #8185. The accepted floor
   remains unchanged. The operator-directed
   [forward-first generation contract](client-lifecycle-admission.md#forward-first-installation-generations)
-  is proposed next: replacement construction/start must not wait for old
-  retirement, cleanup or graceful handoff. Generation/floor fencing and a
-  complete managed installer remain open.
+  has source primitives merged in #10439: independent construction/start,
+  generation/floor fencing, explicit incoming default-command publication and
+  separate exact-generation withdrawal/removal. Native Windows lifecycle
+  qualification and Linux/Windows artifact installation are recorded in the
+  [incoming-selection journal](journal/2026/11.04-client-incoming-selection.md).
+  Full native Linux generation qualification and a complete managed installer
+  remain open; artifact installation alone is not that lifecycle proof.
   Its [authoritative replacement reconciliation](client-lifecycle-admission.md#authoritative-replacement-reconciliation)
   keeps incoming readiness plus complete current launcher/registration selection
   as the completion gate. Retained generation work is not complete installation
@@ -672,6 +676,15 @@ Runtime package/API details belong to the implementation contract after review,
 not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
+
+### 2026-11-04 - Incoming client generation source accepted
+
+#10439 merged at `b83b688711334b62e2b9b9fd7a4c0c57f0ceb323` after exact-head
+review, all required CI and isolated Linux/Windows artifact installation passed.
+The [source qualification journal](journal/2026/11.04-client-incoming-selection.md)
+retains the native Windows consumer evidence and remaining native Linux,
+managed-installer, clean-room, release and adopter gates. No broad Plan or
+Validation checkbox closes, and no deployment follows from this merge.
 
 ### 2026-11-04 - Direct retained named reconciliation tracking
 

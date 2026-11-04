@@ -19,8 +19,9 @@ and [complete export/readback](../../../plugins/efforts/skills/driving-effort-ag
 contracts. #10251 connects Manager discovery, rich reads and the existing coarse
 push subscription without changing that observation wire. #10392 adds passive
 Bridge membership consumption and the first isolated three-owner demonstration.
-Known-session consumption, logger, complete source coverage, installed and native
-acceptance remain open.
+#10435 adds the supported selected-session semantic consumer and its independent
+history/live and lifecycle fences. Logger, complete source coverage, qualified
+current answerability/PRE, installed and native acceptance remain open.
 Providers advertise actual running support before independently installed
 callers use new syntax. Existing roster, agenda-v1/v2 and raw Bridge event
 contracts remain unchanged.

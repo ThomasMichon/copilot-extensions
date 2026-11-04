@@ -291,8 +291,40 @@ persisted SQLite guard prevents older completion code from bypassing that
 refusal. Prepared audit requests cannot be rewritten or deleted. Unprepared
 baseline tasks retain their previous completion behavior.
 
-Authoritative nonfinalizing Worktrees readiness, independent observation,
-guarded advancement, negotiated caller migration and repeated rejected attempts
-remain unimplemented. Ordinary callers must not activate preparation until
-those provider and integration gates are qualified; no remote finalization,
-task-claim settlement or execution-slot release is introduced here.
+### Internal independent readiness observation
+
+`observe_submission_readiness` reads the retained proposal and its original
+bound task relationship from the queue, not from caller-supplied receipts.
+It requires the current managed pool/native binding and the allocator's
+original created-workspace provenance. Manual assignments without that
+allocation remain explicitly unsupported by this source-only path.
+
+The local coordinator resolves the selected Worktrees command prefix once
+per observation and uses its scrubbed environment for discovery, workspace
+metadata and readiness. It negotiates the separate
+[readiness version-1 contract](../../agent-worktrees/docs/dispatch-worker-closeout.md#selected-runtime-readiness-transport)
+before sending readiness syntax. Missing, prior or rolled-back support refuses
+without a finalized-closeout fallback. Remote allocations refuse before local
+runtime resolution or launch.
+
+The actual workspace record supplies the native head revision. Readiness is
+pinned to that revision, original workspace incarnation, original allocation
+and exact retained claim reference. Result identity and nonfinalizing,
+nonreleasing effects must agree; worker-provided success JSON is not input.
+External observation runs outside the SQLite transaction. A fresh locked
+queue read rechecks the proposal, task/native incarnation, relationship,
+allocation, holds and execution admission before returning evidence.
+Lease renewal, liveness/activity bookkeeping and progress updates do not change
+that binding. Other task changes, including result, goal, review policy,
+ownership or holds, still invalidate it. Normal Worktrees metadata may express
+the managed-checkout default as null; explicit false or invalid values refuse,
+and the readiness owner independently enforces actual managed custody.
+
+This method neither persists a readiness permission nor advances the task.
+Every invocation reacquires evidence; later advancement still needs its own
+fresh observation and atomic checks. Both the existing completion refusal and
+its rollback-resistant SQLite guard remain unchanged. The task claim,
+workspace, result proposal and native capacity remain retained.
+Guarded advancement, negotiated ordinary caller migration, manual/absent-workspace
+applicability and repeated rejected attempts remain unimplemented. Ordinary
+callers and assignment writers stay disabled pending those qualification gates.

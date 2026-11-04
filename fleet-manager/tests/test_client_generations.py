@@ -13,6 +13,7 @@ import pytest
 
 from fleet_manager import client_admission as admission, client_generations as generations
 from fleet_manager.planning import PlanError, canonical
+from fleet_manager.private_state import private_directory
 from test_artifact_staging import primitive as primitive  # noqa: F401 - pytest fixture
 from test_client_admission import (
     database_bytes, identity, independently_signed_variants as independently_signed_variants,
@@ -29,7 +30,7 @@ SECOND = "2" * 32
 
 def lineage_at(tmp_path):
     root = tmp_path / "private-lineage"
-    root.mkdir(mode=0o700)
+    private_directory(root)
     return root
 
 
