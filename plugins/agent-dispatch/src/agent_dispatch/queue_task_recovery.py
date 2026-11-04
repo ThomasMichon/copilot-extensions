@@ -50,6 +50,7 @@ def _captured(queue, conn: sqlite3.Connection, task_id: str) -> dict:
         "sends": _history(conn, "execution_send_custody", task_id),
         "waiters": _history(conn, "run_waiters", task_id),
         "acquisitions": _history(conn, "acquisition_receipts", task_id),
+        "pool_assignments": _history(conn, "task_pool_assignments", task_id),
     }
 
 
@@ -64,6 +65,13 @@ def _blockers(conn: sqlite3.Connection, captured: dict) -> list[str]:
         reasons.append("retained history exceeds the bounded recovery view; inspect owning history")
     if task["hold_reason"] is not None:
         reasons.append("task is held; clear the independent hold explicitly")
+    if task["status"] in Status.OWNED and any(
+        not row["assignment_released"] for row in captured["pool_assignments"]
+    ):
+        reasons.append(
+            "logical pool assignment remains bound; its pool owner must resolve "
+            "unassignment before agent recovery"
+        )
     if any(row["state"] in {"preparing", "active"} for row in captured["waiters"]):
         reasons.append("retained run waiter remains active; settle it through its owner")
     try:

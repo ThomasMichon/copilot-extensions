@@ -376,3 +376,41 @@ def test_retired_agent_detachment_does_not_readmit_execution_or_release_submitte
         assert next(iter(owner.claims.values()))["phase"] == "bound"
         queue.confirm(task.id)
     assert queue.reconcile_task_relationship(task.id)["state"] == "closed"
+
+
+@pytest.mark.parametrize("suspended", [False, True])
+def test_nonterminal_recovery_cannot_orphan_the_logical_pool_assignment(assignment, suspended):
+    queue, owner, workspace, task = assignment
+    publish(queue, pool())
+    reservation, _ = place(queue, task)
+    queue.record_spawn_worktree(
+        reservation.key, workspace.worktree, ownership="created",
+        execution_machine=workspace.machine, allocation_project=workspace.project,
+        worktree_path=workspace.path, driver="cli", creation_nonce=workspace.creation_nonce,
+    )
+    queue.record_spawn(
+        reservation.key, session_handle="native", worktree=workspace.worktree,
+        startup_complete=True, startup_revision=reservation.startup_revision,
+    )
+    queue.start(
+        task.id, workspace.worker_id, owner_session_id="native",
+        expected_generation=queue.get(task.id).generation,
+    )
+    if suspended:
+        queue.suspend(task.id, workspace.worker_id, reason="external", cooldown_seconds=None)
+    queue.request_spawn_release(reservation.key, disposition="settled")
+    queue.retire_spawn(reservation.key, exact_absence=True)
+    before = queue.get(task.id), copy.deepcopy(queue.task_relationship(task.id))
+    placement = queue.task_pool_assignment(task.id)
+    assert placement is not None
+    snapshot = queue.task_diagnostics(task.id)
+    assert not snapshot["actions"]["detach_agent"]["allowed"]
+    for operation in ("detach_agent", "reset_queued", "reset_proposed"):
+        with pytest.raises(TaskError, match="logical pool assignment"):
+            queue.recover_task(
+                task.id, operation=operation, expected_revision=snapshot["revision"],
+                request_id=operation, actor="operator", reason="qualified native retirement",
+            )
+    assert (queue.get(task.id), queue.task_relationship(task.id)) == before
+    assert queue.task_pool_assignment(task.id) == placement
+    assert not any(operation == "close" for operation, _ in owner.calls)

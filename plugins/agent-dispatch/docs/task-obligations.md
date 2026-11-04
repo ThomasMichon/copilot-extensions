@@ -233,6 +233,12 @@ complete it without readmitting execution. Reopening execution still requires
 current-generation protection. The replacement guard installs before its
 stricter predecessors are removed.
 
+For nonterminal owned work, native retirement alone does not unassign its
+logical pool placement. Administrative recovery refuses before mutation while
+that assignment remains bound, with an explicit pool-owner disposition blocker.
+Its recovery revision includes the logical assignment. Detachment cannot
+silently queue replacement work while stranding the original pool claim.
+
 With a qualified writer enabled, atomic `create(..., claim_as=...)` refuses
 before creating new work; create queued work and use the protected claim path
 with its original workspace instead. A queue without support skips governed
