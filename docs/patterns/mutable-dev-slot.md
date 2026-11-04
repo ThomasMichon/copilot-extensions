@@ -164,3 +164,13 @@ Out-of-slot reconciliation still runs on true reuse.
 The payload fingerprint covers every runtime install input, including source,
 vendored libraries and selected sibling packages. `--force` never authorizes
 rewriting a completed numbered or development generation.
+
+CodeSpaces' native install/update/provision adapter handles that refusal before
+construction by selecting a fresh repair generation. It may reuse only a
+matching completed generation whose isolated CLI launch succeeds. The existing
+construction, completion and activation primitives still own that candidate;
+the original slot remains unchanged. Its strict source receipt retains the
+base identity, while the deployment manifest records the actual repair
+generation. This is adopter-local implementation of
+[authoritative replacement](../../visions/installer/README.md#authoritative-runtime-replacement),
+not a change to shared admission or permission to reconstruct in place.

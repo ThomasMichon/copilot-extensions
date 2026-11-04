@@ -1,0 +1,9 @@
+{
+  "comment": "Recover incompatible native install targets in fresh immutable generations and reuse healthy repairs.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

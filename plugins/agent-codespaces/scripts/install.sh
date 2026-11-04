@@ -263,7 +263,7 @@ VENV_BIN="$VENV_DIR/bin/agent-codespaces"
 
 _codespaces_runtime_healthy() {
     local py="$1"
-    [[ -x "$py" ]] && "$py" -I -m agent_codespaces --help >/dev/null 2>&1
+    [[ -x "$py" ]] && "$py" -I -B -m agent_codespaces --help >/dev/null 2>&1
 }
 
 _versioned_activate() {
@@ -297,11 +297,10 @@ _versioned_activate() {
         return 1
     fi
     _ok "Runtime version $SRC_VERSION active (marker-only; versions/$SRC_VERSION)"
-    if [[ -n "$prev" ]]; then
-        "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids --keep "$prev" 2>&1 | sed 's/^/  gc: /' || true
-    else
-        "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids 2>&1 | sed 's/^/  gc: /' || true
-    fi
+    local gc_args=(gc --protect-pids)
+    [[ -z "$prev" ]] || gc_args+=(--keep "$prev")
+    [[ "$SRC_VERSION" == "$SOURCE_VERSION" ]] || gc_args+=(--keep "$SOURCE_VERSION")
+    "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" "${gc_args[@]}" 2>&1 | sed 's/^/  gc: /' || true
     return 0
 }
 # === end install-contract:v3 versioned-venv ===
@@ -611,6 +610,20 @@ _ensure_uv_index() {
     fi
 }
 
+_select_install_runtime_generation() {
+    _assert_source_runtime || return 1
+    local py
+    py="$(_bootstrap_python)" || return 1
+    local generation_args=(-I -B "$SCRIPT_DIR/runtime-generation.py" --root "$INSTALL_DIR"
+        --version "$SOURCE_VERSION" --payload-hash "$(_payload_hash)")
+    [[ -z "${SOURCE_RUNTIME_IDENTITY:-}" ]] || generation_args+=(--source-identity "$SOURCE_RUNTIME_IDENTITY")
+    SRC_VERSION="$("$py" "${generation_args[@]}")" || return 1
+    VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
+    VENV_PYTHON="$VENV_DIR/bin/python"
+    LINK_PYTHON="$VENV_PYTHON"
+    VENV_BIN="$VENV_DIR/bin/agent-codespaces"
+}
+
 deploy_venv() {
     _assert_source_runtime || return 1
     if [[ -e "$VENV_DIR/.install-complete.json" ]] && ! _codespaces_runtime_healthy "$VENV_PYTHON"; then
@@ -883,23 +896,20 @@ STUB
 _write_codespaces_deploy_manifest() {
     if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
         (
+            local py fields
+            py="$(_bootstrap_python)" || return 1
+            fields="$("$py" -I -c 'import json,sys; d=json.loads(sys.argv[1]); d["runtime_version"]=sys.argv[2]; print(json.dumps(d)[1:-1])' \
+                "$SOURCE_RUNTIME_IDENTITY" "$SRC_VERSION")" || return 1
             _payload_hash() { printf '%s\n' "$SOURCE_MANIFEST_HASH"; }
             _git_info() { printf '%s\n' "$SOURCE_MANIFEST_GIT"; }
             write_deploy_manifest "agent-codespaces" "agent-codespaces" \
-                "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" \
-                "${SOURCE_RUNTIME_IDENTITY:1:${#SOURCE_RUNTIME_IDENTITY}-2}" \
+                "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" "$fields" \
                 "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" "$PACKAGE_VERSION"
         )
         return $?
     fi
     _assert_source_runtime || return 1
-    local fields="" py
-    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
-        py="$(_bootstrap_python)" || return 1
-        fields="$("$py" -I -B "$SCRIPT_DIR/versioned_runtime_source.py" \
-            --payload "$PLUGIN_DIR" --package-version "$PACKAGE_VERSION" \
-            --plugin agent-codespaces --expected-runtime-version "$SRC_VERSION" --format shell-fields)" || return 1
-    fi
+    local fields="\"runtime_version\": \"$SRC_VERSION\""
     write_deploy_manifest "agent-codespaces" "agent-codespaces" \
         "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" "$fields" "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" "$PACKAGE_VERSION"
 }
@@ -999,6 +1009,7 @@ EOF
 }
 
 do_install() {
+    _select_install_runtime_generation || return 1
     _step 'agent-codespaces install'
 
     # Create directories
@@ -1150,6 +1161,7 @@ do_status() {
 }
 
 do_update() {
+    _select_install_runtime_generation || return 1
     _step 'agent-codespaces update'
 
     if [[ ! -d "$INSTALL_DIR" ]]; then
@@ -1213,6 +1225,7 @@ do_stamp() {
 # rewriting the binstub -- this is what the self-provisioning binstub invokes on
 # first use, so it must not touch the running shim.
 do_provision() {
+    _select_install_runtime_generation || return 1
     _step 'agent-codespaces provision'
     mkdir -p "$INSTALL_DIR"
     deploy_venv || return 1
