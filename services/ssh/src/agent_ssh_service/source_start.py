@@ -66,14 +66,23 @@ def selected_source() -> Any:
     )
 
 
+def _contains(parent: Path, child: Path) -> bool:
+    if child.is_relative_to(parent):
+        return True
+    return parent.exists() and any(
+        candidate.exists() and candidate.samefile(parent) for candidate in (child, *child.parents)
+    )
+
+
 def selected_policy(path: Path, binding: Any) -> ServiceConfig:
     """Read an explicit private policy without adopting or repairing state."""
     path = absolute(str(path))
     config = ServiceConfig.from_dict(decode(read_private_file(path, 1024 * 1024)))
     root = binding.root.resolve()
     data = absolute(config.to_dict()["data_dir"])
-    check(not path.is_relative_to(root), "configuration-must-be-outside-runtime")
-    check(not data.is_relative_to(root) and not root.is_relative_to(data),
+    resolved_data = data.resolve()
+    check(not _contains(root, path.resolve()), "configuration-must-be-outside-runtime")
+    check(not _contains(root, resolved_data) and not _contains(resolved_data, root),
           "service-data-must-be-outside-runtime")
     if data.exists():
         private_directory(data)

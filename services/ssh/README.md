@@ -89,6 +89,8 @@ Supply the private policy with `--config <absolute-path>` or explicitly set
 dedicated data remain outside the application root. Existing roots are validated,
 never ACL-repaired or silently adopted. Ordinary `--config` foreground execution
 retains its legacy lifetime writer guard.
+Containment uses resolved physical paths, including native spelling aliases,
+without rewriting the admitted installation-root or configuration spelling.
 
 Managed startup prepares a service-local authenticated native control worker.
 ZDD `RuntimePreparation` is not serving readiness. Activation initializes the
@@ -109,6 +111,9 @@ first; subsequent old-owner work refuses before committing. Invalid authority,
 revision rollback or moved selection rolls back activation without adopting a
 new owner. A lost activation reply remains uncertain; retries attest the same
 owner instead of rewinding a newer fence or selector.
+Fresh database creation and initialization use that same writer guard. Failed
+initialization removes only its own identity-matching, empty rolled-back file;
+existing, replaced, committed or unprovable files are never deleted or reset.
 
 Incoming activation does not require the previous process to stop, drain or
 acknowledge. The existing Gateway replaces attached generations; a service-local

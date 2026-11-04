@@ -99,6 +99,77 @@ def test_private_policy_cannot_relocate_state_into_runtime(
         source.selected_policy(policy, SimpleNamespace(root=root))
 
 
+@pytest.mark.parametrize("location", ["configuration", "data"])
+def test_policy_containment_canonical_dotdot(
+    config: ServiceConfig, tmp_path: Path, location: str,
+) -> None:
+    from agent_ssh_service import source_start
+
+    root = tmp_path / "runtime"
+    root.mkdir()
+    (tmp_path / "other").mkdir()
+    alias = tmp_path / "other" / ".." / "runtime"
+    value = config.to_dict()
+    if location == "data":
+        value["data_dir"] = str(alias / "state")
+    policy = (alias if location == "configuration" else tmp_path) / "policy.json"
+    private_policy(policy, ServiceConfig.from_dict(value))
+    with pytest.raises(ValueError, match="outside-runtime|private input"):
+        source_start.selected_policy(policy, SimpleNamespace(root=root))
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native extended path alias")
+def test_policy_containment_canonical_native_alias(
+    config: ServiceConfig, tmp_path: Path,
+) -> None:
+    from agent_ssh_service import source_start
+
+    root = tmp_path / "runtime"
+    root.mkdir()
+    value = config.to_dict()
+    value["data_dir"] = "\\\\?\\" + str(root / "state")
+    policy = tmp_path / "policy.json"
+    private_policy(policy, ServiceConfig.from_dict(value))
+    with pytest.raises(ValueError, match="outside-runtime"):
+        source_start.selected_policy(policy, SimpleNamespace(root=root))
+
+
+def test_policy_external_dotdot_preserves_declared_spelling(
+    config: ServiceConfig, tmp_path: Path,
+) -> None:
+    from agent_ssh_service import source_start
+
+    root = tmp_path / "runtime"
+    root.mkdir()
+    (tmp_path / "other").mkdir()
+    value = config.to_dict()
+    value["data_dir"] = str(tmp_path / "other" / ".." / "external-state")
+    policy = tmp_path / "policy.json"
+    private_policy(policy, ServiceConfig.from_dict(value))
+    selected = source_start.selected_policy(policy, SimpleNamespace(root=root))
+    assert selected.to_dict()["data_dir"] == value["data_dir"]
+
+
+def test_policy_relative_path_and_linked_data_are_not_adopted(
+    config: ServiceConfig, tmp_path: Path,
+) -> None:
+    from agent_ssh_service import source_start
+
+    root = tmp_path / "runtime"
+    root.mkdir()
+    with pytest.raises(ValueError, match="absolute-path-required"):
+        source_start.selected_policy(Path("relative.json"), SimpleNamespace(root=root))
+    alias = tmp_path / "linked-state"
+    try:
+        alias.symlink_to(root, target_is_directory=True)
+    except OSError:
+        pytest.skip("user-mode symlink creation unavailable")
+    value = config.to_dict()
+    value["data_dir"] = str(alias / "state")
+    with pytest.raises(ValueError, match="linked-path-refused"):
+        ServiceConfig.from_dict(value)
+
+
 def test_cli_preserves_precise_unsupported_provider_diagnostic(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:

@@ -6,6 +6,7 @@ from contextlib import contextmanager, nullcontext
 from collections.abc import Callable, Iterator
 import os
 import sqlite3
+import stat
 from typing import TYPE_CHECKING
 
 from fleet_manager.gateway_ssh_provider import directory_snapshot
@@ -30,17 +31,7 @@ class DirectoryStore:
         self.root = absolute(config.to_dict()["data_dir"])
         check(self.root.is_dir(), "service-data-directory-unavailable")
         self.path = self.root / "directory.sqlite3"
-        created = False
-        try:
-            descriptor = create_private_file(self.path)
-        except FileExistsError:
-            absolute(str(self.path))
-            check(self.path.is_file() and self.path.stat().st_nlink == 1,
-                  "invalid-directory-store")
-        else:
-            os.close(descriptor)
-            created = True
-        with self._transaction(activate=activate) as db:
+        with self._initialization(activate=activate) as (db, created):
             if created:
                 for statement in (
                     """CREATE TABLE metadata (id INTEGER PRIMARY KEY CHECK(id=1),
@@ -79,6 +70,55 @@ class DirectoryStore:
         from .approval import PeerApproval
 
         self.approval = PeerApproval(self)
+
+    @contextmanager
+    def _initialization(self, *, activate: bool) -> Iterator[tuple[sqlite3.Connection, bool]]:
+        with self.writer.guard() if self.writer is not None else nullcontext():
+            identity = None
+            try:
+                descriptor = create_private_file(self.path)
+            except FileExistsError:
+                absolute(str(self.path))
+                check(self.path.is_file() and self.path.stat().st_nlink == 1,
+                      "invalid-directory-store")
+            else:
+                try:
+                    identity = os.fstat(descriptor)
+                finally:
+                    os.close(descriptor)
+            completed = False
+            try:
+                with self._guarded_transaction(activate=activate) as db:
+                    yield db, identity is not None
+                completed = True
+            finally:
+                if identity is not None and not completed:
+                    self._discard_empty_creation(identity)
+
+    def _discard_empty_creation(self, identity: os.stat_result) -> None:
+        """Only this guard's failed fresh file, never preexisting or committed data."""
+        try:
+            current = self.path.lstat()
+            if (
+                not stat.S_ISREG(current.st_mode) or current.st_nlink != 1
+                or getattr(current, "st_file_attributes", 0) & 0x400
+                or (current.st_dev, current.st_ino) != (identity.st_dev, identity.st_ino)
+            ):
+                return
+            if current.st_size:
+                db = sqlite3.connect(self.path.as_uri() + "?mode=ro", uri=True)
+                try:
+                    if db.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchone() is not None:
+                        return
+                finally:
+                    db.close()
+            current = self.path.lstat()
+            if (current.st_dev, current.st_ino, current.st_nlink) == (
+                identity.st_dev, identity.st_ino, 1,
+            ) and stat.S_ISREG(current.st_mode) and not getattr(current, "st_file_attributes", 0) & 0x400:
+                self.path.unlink()
+        except (OSError, sqlite3.Error):
+            return
 
     @contextmanager
     def _transaction(self, *, activate: bool = False) -> Iterator[sqlite3.Connection]:
