@@ -8,6 +8,120 @@ from _promotion_workflow_test_support import source_workflow
 from test_run_standalone_tests import SCRIPT, runner
 
 
+def test_fleet_client_portfolio_is_manual_exact_source_and_native_only():
+    workflow = source_workflow(SCRIPT.parent.parent, "installation-context-full.yml")
+    trigger = workflow.get("on", workflow.get(True))
+    portfolio = trigger["workflow_dispatch"]["inputs"]["portfolio"]
+    assert portfolio["default"] == "context" and "fleet-client-generations" in portfolio["options"]
+    selected = {
+        name for name, job in workflow["jobs"].items()
+        if "inputs.portfolio == 'fleet-client-generations'" in job["if"]
+    }
+    assert selected == {"fleet-client-generations-linux", "fleet-client-generations-windows"}
+    for suffix, host in (("linux", "ubuntu-latest"), ("windows", "windows-latest")):
+        job = workflow["jobs"]["fleet-client-generations-" + suffix]
+        assert job["if"] == (
+            "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'fleet-client-generations'"
+        )
+        assert job["runs-on"] == host and not job.get("continue-on-error") and "strategy" not in job
+        checkout = next(step for step in job["steps"] if step.get("uses") == "actions/checkout@v4")
+        assert checkout["with"] == {"ref": "${{ github.sha }}", "persist-credentials": False}
+    assert workflow["permissions"] == {"contents": "read"}
+
+
+@pytest.mark.parametrize("fault", [None, "source", "consumer", "skipped"])
+def test_fleet_client_requests_preserve_bounds_and_require_complete_native_reports(
+    tmp_path, monkeypatch, capsys, fault,
+):
+    import os
+    import runpy
+    import shlex
+    import subprocess
+    import sys
+    from types import SimpleNamespace
+    import xml.etree.ElementTree as ET
+
+    from _pytest.mark.expression import Expression
+
+    workflow = source_workflow(SCRIPT.parent.parent, "installation-context-full.yml")
+    step = next(step for step in workflow["jobs"]["fleet-client-generations-linux"]["steps"] if "run" in step)
+    assert step["shell"] == "python"
+    tests = tmp_path / "fleet-manager/tests"
+    tests.mkdir(parents=True)
+    for name in ("test_artifact_staging.py", "test_client_generation_cli.py", "test_unrelated.py"):
+        (tests / name).touch()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "path", sys.path.copy())
+    monkeypatch.setenv("GITHUB_SHA", "a" * 40)
+    monkeypatch.setenv("PYTEST_ADDOPTS", "--unsafe-inherited-selection")
+    original = dict(os.environ)
+    cases = [
+        "test_fresh_installed_console_admission_and_durable_reopen_without_hosting",
+        "test_missing_packaged_resource_is_not_replaced_by_repository_helper",
+        *[
+            f"test_actual_installed_console_generation_transitions[{transition}]"
+            for transition in ("construct", "register-commands", "unregister-commands", "remove-runtime")
+        ],
+    ]
+    calls = []
+
+    def run(command, *, cwd, timeout, max_stdout_bytes, max_stderr_bytes, env=None):
+        assert cwd == tmp_path and max_stdout_bytes == max_stderr_bytes == 16 * 1024 * 1024
+        calls.append(command)
+        output = ""
+        if command[0] == "git":
+            assert timeout == 30
+            output = ("b" if fault == "source" else "a") * 40
+        elif command[1] == "tools/run-standalone-tests.py":
+            assert command[:6] == [
+                sys.executable, "tools/run-standalone-tests.py", "fleet-manager", "--timeout", "120",
+                *(["--prepare"] if "--prepare" in command else []),
+            ]
+            arguments = shlex.split(env["PYTEST_ADDOPTS"])
+            assert "--unsafe-inherited-selection" not in arguments
+            assert arguments[0] == "--ignore=" + str(tests / "test_unrelated.py")
+            if "--prepare" in command:
+                assert timeout == 300 and arguments[1:] == ["--collect-only"]
+            else:
+                assert timeout == 180
+                if fault == "consumer":
+                    raise subprocess.CalledProcessError(1, command)
+                expression = Expression.compile(arguments[arguments.index("-k") + 1])
+                suite = ET.Element("testsuite")
+                for name in cases:
+                    if expression.evaluate(lambda value: value.lower() in name.lower()):
+                        case = ET.SubElement(suite, "testcase", name=name)
+                        if fault == "skipped" and "remove-runtime" in name:
+                            ET.SubElement(case, "skipped")
+                root = ET.Element("testsuites")
+                root.append(suite)
+                ET.ElementTree(root).write(arguments[arguments.index("--junitxml") + 1])
+        else:
+            assert command[1:3] == [
+                "-I", "tools/clean-room/scenarios/fleet-manager-client-admission/verify.py",
+            ] and timeout == 30
+            verifier = SCRIPT.parent / "clean-room/scenarios/fleet-manager-client-admission/verify.py"
+            with monkeypatch.context() as context:
+                context.setattr(sys, "argv", [str(verifier), command[-1]])
+                runpy.run_path(str(verifier), run_name="__main__")
+        return SimpleNamespace(stdout=output, stderr="", check_returncode=lambda: None)
+
+    monkeypatch.setitem(sys.modules, "agent_procutil.owned_process", SimpleNamespace(run_caller_owned=run))
+    body = compile(step["run"], "<fleet-client-workflow>", "exec")
+    if fault:
+        expected = subprocess.CalledProcessError if fault == "consumer" else AssertionError
+        with pytest.raises(expected):
+            exec(body, {})
+        assert "INSTALLED_CLIENT_ADMISSION_AND_EXACT_GENERATION_LIFECYCLE_PASS" not in capsys.readouterr().out
+    else:
+        exec(body, {})
+        assert len(calls) == 8
+        assert "INSTALLED_CLIENT_ADMISSION_AND_EXACT_GENERATION_LIFECYCLE_PASS" in capsys.readouterr().out
+        report = tmp_path / ".test-venvs/fleet-client-consumers/consumer.xml"
+        assert len(list(ET.parse(report).getroot().iter("testcase"))) == 6
+    assert dict(os.environ) == original
+
+
 def test_bridge_contracts_portfolio_keeps_existing_budgets_and_explicit_scope():
     workflow = source_workflow(SCRIPT.parent.parent, "installation-context-full.yml")
     triggers = workflow["on"] if "on" in workflow else workflow[True]
@@ -36,11 +150,15 @@ def test_pane_argv_portfolio_is_manual_pinned_and_keeps_work_scoped():
     assert inputs["portfolio"]["default"] == "context"
     job = workflow["jobs"]["pane-argv-windows"]
     assert job["if"] == (
-        "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'pane-argv'"
+        "github.event_name == 'workflow_dispatch' && "
+        "(inputs.portfolio == 'pane-argv' || inputs.portfolio == 'mux-companion')"
     )
     assert job["runs-on"] == "windows-latest"
     assert job["timeout-minutes"] == 10 and not job.get("strategy")
-    prepare, qualify = [step for step in job["steps"] if "run" in step]
+    prepare, qualify = [
+        step for step in job["steps"]
+        if "run" in step and step.get("if") != "inputs.portfolio == 'mux-companion'"
+    ]
     assert "/v3.3.6/psmux-v3.3.6-windows-x64.zip" in prepare["run"]
     assert "Get-FileHash" in prepare["run"] and "SHA256" in prepare["run"]
     assert "a56a890ea0829567818b9a368f16dcbd39c087f27328573df17c10dd39618947" in prepare["run"]

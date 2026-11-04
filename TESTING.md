@@ -3539,6 +3539,16 @@ whole-installation retirement or live rollout.
 Each native case uses a short factory-owned root to avoid pip's separate Win32
 command-token limit; this is not arbitrary long-executable-path qualification.
 
+The manually selected `fleet-client-generations` portfolio in
+`installation-context-full.yml` runs these consumers on native Linux and Windows
+at the exact dispatch SHA. Admission and each of the four generation transitions
+use separate canonical standalone-runner invocations with the existing
+120-second caller, 90-second item and 45-second child bounds. The existing
+strict six-consumer oracle checks the combined reports, refusing missing,
+duplicate, skipped, errored or failed cases. Reports are retained per platform.
+This optional portfolio does not expand required unit CI or qualify a complete
+installer, fresh-OS scenario, controller or live adopter.
+
 The agent-free `fleet-manager-client-admission` clean-room scenario includes
 those four actual generation consumers alongside admission/revocation/reopen
 and missing-resource refusal. Its strict six-case JUnit oracle rejects missing,
