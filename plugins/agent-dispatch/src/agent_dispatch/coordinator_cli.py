@@ -345,12 +345,23 @@ def _add_cutover_flags(p: argparse.ArgumentParser) -> None:
 def _cmd_cutover(
     args: argparse.Namespace, *, conditional: ConditionalCutover | None = None,
     routing_dir: Path | None = None, install_root: Path | None = None,
+    source_replacement: bool = False,
+    source_environment: dict[str, str] | None = None,
 ) -> int:
     """Zero-downtime graceful cutover -- shared by ``deploy`` and ``_cutover``."""
     from zdd import breadcrumb
     from zdd.cutover import CutoverOrchestrator
     from .action_controls import action_decision
     from .install_paths import INSTALL_DIR_ENV, install_dir
+    if source_replacement:
+        from .source_start import require_selected_source
+
+        require_selected_source()
+        if (
+            conditional is not None or install_root is not None or routing_dir is not None
+            or getattr(args, "force", False) or getattr(args, "recover", False)
+        ):
+            raise ValueError("Source startup cannot force or redirect replacement")
 
     def refusal(message: str) -> int:
         print(f"[FAIL] {message}", file=sys.stderr)
@@ -418,8 +429,9 @@ def _cmd_cutover(
     from .install_paths import apply_service_env_overlay
     runtime_root = policy_root
     captured_routing_dir = _config.routing_dir()
-    effective_env = dict(os.environ)
-    apply_service_env_overlay(effective_env, runtime_root)
+    effective_env = dict(os.environ if source_environment is None else source_environment)
+    if source_environment is None:
+        apply_service_env_overlay(effective_env, runtime_root)
     proposed_root = effective_env.get(INSTALL_DIR_ENV)
     if proposed_root != os.environ.get(INSTALL_DIR_ENV) and (
         not proposed_root or Path(proposed_root).expanduser() != policy_root
@@ -568,6 +580,16 @@ def _cmd_cutover(
     try:
         if not admitted():
             return 3
+        if source_replacement:
+            from .source_start import run_coordinator
+
+            result = run_coordinator(
+                cfg, captured_routing_dir, token=token,
+                spawn_passive=spawn_passive, pick_free_port=pick_free_port,
+                timeout=args.health_timeout,
+            )
+            _emit(result)
+            return 0 if result.get("ok") is True else 1
         _pre_recovery_breadcrumb = breadcrumb.read_breadcrumb(captured_routing_dir)
         recovery = breadcrumb.recover_stale_cutover(
             captured_routing_dir, make_client, health_check=liveness_check

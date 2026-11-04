@@ -14,6 +14,34 @@ import time
 from typing import Any
 
 MAX_LOG_BYTES = 4 * 1024 * 1024
+_ACTIVATION_PROBE = r"""
+import json, os, runpy, sys
+from pathlib import Path
+reader, project = sys.argv[1:]
+prefix = os.path.normcase(str(Path(reader).parents[1])) + os.sep
+events = []
+def trace(frame, event, arguments):
+    if event == "exception" and os.path.normcase(
+        frame.f_code.co_filename
+    ).startswith(prefix):
+        error = arguments[1]
+        row = dict(function=frame.f_code.co_name, line=frame.f_lineno,
+                   type=type(error).__name__, detail=str(error)[:1024])
+        result = frame.f_locals.get("result")
+        if frame.f_code.co_name == "read_owner_context" and result is not None:
+            row["peer_returncode"] = result.returncode
+            row["peer_stderr"] = result.stderr[:4096].decode("utf-8", errors="replace")
+        events.append(row)
+        del events[:-32]
+    return trace
+sys.argv = [reader, "--cwd", project]
+sys.settrace(trace)
+try:
+    runpy.run_path(reader, run_name="__main__")
+finally:
+    sys.settrace(None)
+    print(json.dumps({"activation_exceptions": events}), file=sys.stderr)
+"""
 # Observer capabilities, NOT the applicable portfolio. The installed planner
 # chooses that portfolio. Unknown/new residents refuse acceptance.
 MARKERS = {
@@ -266,6 +294,42 @@ def retain_driver_logs(case: Path, output: str) -> None:
         )
     except OSError as error:
         print(f"Driver diagnostic write failed: {error}", file=sys.stderr)
+
+
+def activation_probe(case: Path, environment: dict[str, str]) -> dict[str, Any]:
+    """Read the retained fixture payload; never change activation or the failure."""
+    from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
+
+    started = settled = False
+
+    def on_settled() -> None:
+        nonlocal settled
+        settled = True
+
+    try:
+        setup = json.loads((case / "setup.json").read_text(encoding="utf-8"))
+        reader = (
+            case / "h" / ".copilot" / "installed-plugins" / "copilot-extensions"
+            / "agent-vault" / "scripts" / "runtime-activation.py"
+        )
+        if not reader.resolve(strict=True).is_relative_to(case.resolve()):
+            raise ValueError("Activation diagnostic reader escapes the owned fixture")
+        started = True
+        result = run_caller_owned(
+            [setup["base"], "-I", "-B", "-X", "utf8", "-c", _ACTIVATION_PROBE,
+             str(reader), str(case / "project")],
+            cwd=case / "project", env=environment, timeout=30,
+            max_stdout_bytes=64 * 1024, max_stderr_bytes=64 * 1024,
+            on_settled=on_settled,
+        )
+    except Exception as error:
+        if isinstance(error, OwnedCleanupError) or (started and not settled):
+            raise
+        return {"activation_probe_error": f"{type(error).__name__}: {str(error)[:1024]}"}
+    return {
+        "activation_probe_returncode": result.returncode,
+        "stdout": result.stdout, "stderr": result.stderr,
+    }
 
 
 def retain_resident_logs(case: Path, *, incumbent: bool = False) -> None:

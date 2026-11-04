@@ -36,7 +36,7 @@ function Get-VaultRuntimeActivation {
     } finally { $ErrorActionPreference = $previousPreference }
     $result = ($output -join "`n") | ConvertFrom-Json -ErrorAction Stop
     if ($code -notin @(0, 2) -or $result.state -notin @('configured', 'configuration-empty')) {
-        throw 'Agent Vault activation configuration could not be resolved; correct its configuration, binding or payload.'
+        throw "Agent Vault activation configuration could not be resolved; correct its configuration, binding or payload. Reader exit: $code; state: $($result.state). $($result.detail)"
     }
     return $result
 }

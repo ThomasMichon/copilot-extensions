@@ -41,6 +41,7 @@ from manager_suite_artifacts import (
 from manager_suite_artifacts import _runtime_process_trace_script as _runtime_process_trace_script
 from manager_suite_diagnostics import (
     MARKERS, _consumer_demand, _engine_probe, _record, _resident_probe, _snapshot, _snapshot_difference,
+    activation_probe,
     retain_driver_logs,
     retain_resident_logs,
 )
@@ -93,6 +94,8 @@ def _run(
         }) + "\n")
     if result.returncode:
         retain_driver_logs(case, "\n".join((result.stdout, result.stderr)))
+        if "Agent Vault activation configuration could not be resolved" in result.stdout + result.stderr:
+            print(json.dumps(activation_probe(case, _env(case))), flush=True)
         if check:
             raise AssertionError(f"{argv}: {result.returncode}\n{result.stdout}\n{result.stderr}")
     return result

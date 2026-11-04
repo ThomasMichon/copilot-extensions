@@ -7,6 +7,7 @@ from collections.abc import Callable
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.responses import JSONResponse
 
 from .control_token import scoped_control_token  # noqa: F401 -- compatible public export
 from .task_scope import TASK_SCOPE_HEADER, TaskScopeTokenError, verify_task_scope_token
@@ -22,6 +23,28 @@ TASK_SCOPE_ROUTES = frozenset({
     ("POST", "/tasks/{task_id}/complete"),
     ("POST", "/tasks/{task_id}/abandon"),
 })
+
+
+def install_scope_boundary(app, is_active):
+    @app.middleware("http")
+    async def deny_scoped_non_task_surfaces(request: Request, call_next):
+        # Mounted apps and generated documentation bypass APIRoute dependencies.
+        path = request.url.path
+        if is_active is not None and path not in {"/health", "/drain", "/undrain", "/shutdown"}:
+            from .coordinator_loops import _route_active
+
+            if not await _route_active(is_active):
+                return JSONResponse(
+                    status_code=503, content={"detail": "coordinator does not own the active route"},
+                )
+        if TASK_SCOPE_HEADER in request.headers and (
+            path == "/mcp" or path.startswith("/mcp/")
+            or path in {app.docs_url, app.redoc_url, app.openapi_url, "/docs/oauth2-redirect"}
+        ):
+            return JSONResponse(
+                status_code=403, content={"detail": "route does not accept task authority"},
+            )
+        return await call_next(request)
 
 
 def _make_auth(token: str | None, control_token: str | None):

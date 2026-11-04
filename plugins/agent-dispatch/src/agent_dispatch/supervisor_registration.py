@@ -34,6 +34,18 @@ class UnsupportedKind(RuntimeError):
     """A registration whose kind the daemon cannot yet run in a subprocess."""
 
 
+def registration_scope(args):
+    """Resolve the existing pool override or the master's machine/environment."""
+    from .supervisor_pool_allocator import launch_scope
+    from . import remote_dispatch
+
+    if scope := launch_scope(args):
+        return scope
+    machine = getattr(args, "machine", None) or remote_dispatch.local_machine()
+    env = getattr(args, "env", None) or os.environ.get("AGENT_DISPATCH_ENV") or "default"
+    return machine, env
+
+
 def _is_connection_error(exc: BaseException) -> bool:
     """True if ``exc`` is a network-level failure reaching the coordinator.
 

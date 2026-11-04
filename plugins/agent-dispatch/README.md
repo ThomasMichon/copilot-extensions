@@ -187,6 +187,124 @@ slot. Current-version, last-known-good and complete-slot fallback order is
 unchanged. UTF-8 markers may include a Windows BOM; redirected slots and
 environment directories are refused. This does not change daemon cutover.
 
+Source identity also recognizes nested `.venv` environments and their exact
+profile/repair suffixes. An installed standalone wrapper supplies the package
+version only when its own physical Source slot matches; unrelated wrapper
+metadata cannot override the plugin version. A Dispatch process loaded from a
+physical application environment selects relaunches from that application's
+`current-version`, not from a separately configured data root. Missing selection
+refuses rather than silently choosing last-known-good or another installation.
+These identity/selection controls do not establish application staging,
+installed readiness, coordinator replacement or release acceptance.
+
+Passive coordinators leave rendezvous and running-version records with the
+incumbent until they observe active-route ownership. Before ownership, their
+HTTP surface admits only health and cutover lifecycle controls; queue requests
+return 503. Liveness, orphan, handoff and worktree-status reconciliation also
+recheck ownership before mutation, including between GC subpasses. These
+source controls do not qualify native replacement or installer startup.
+
+Generated application startup now has a strict `__source-start` receiver.
+It requires the selected, complete physical Source slot and uses the existing
+guarded cutover owner, authenticated application health, native process birth
+and effective database/configuration identity. A healthy unchanged owner is
+reused. Supervisor startup goes through the existing singleton/cohort owner
+and requires its selected native runtime status; unknown declaration sources,
+classic-mode migrations and unconfirmed readiness fail rather than report
+installation success. A committed cutover with an unsettled startup result is
+not proof that the incumbent or selectors were restored.
+
+Source validation compares the actual installation identity and normalizes
+equivalent Windows extended-path spellings without relaxing module containment
+or redirected-slot refusal. Supervisor intent is captured before coordinator
+publication: foreign scopes, unknown declarations, classic child profiles and
+invalid poll intervals fail before replacement. A modern cohort does not
+implicitly opt into the legacy environment bridge.
+Unreadable, malformed or wrong-type supervisor configuration also refuses
+preflight; only genuinely missing optional files/directories count as absent.
+
+An enabled user-mode Source supervisor prepares independently before it takes
+the original singleton scope. Its existing status format is published at an
+instance-specific path under SDK artifact custody only after selected-slot,
+cohort, governance and authenticated data-access checks. It does not reconcile
+or claim work before singleton admission. The outgoing supervisor retains its
+lock while preparation, units, futures or native executor workers remain
+unsettled; a process PID or SDK `running` record alone is not readiness.
+Currentness also requires a completed cycle from the selected native owner.
+Unconfirmed legacy declaration sources and native-service-owned transitions
+remain explicit holds rather than an invented readiness or service manager.
+Selection changes settle the exact owned candidate and local retirement work
+before retargeting or resuming the original owner. Unknown creation outcomes
+remain held; discovered peers are never terminated as owned children.
+Managed uncertainty continues normal reconciliation before withdrawal.
+Confirmed-dead/reused preparation records do not hide a later healthy candidate,
+but unavailable identity observations still refuse readiness without deleting
+unowned artifacts.
+Owned live candidates are cancelled through native identity checks before SDK
+settlement; ordinary production cleanup alone is not cancellation. Candidate
+exit restores the original owner's admission only after local work settles,
+including when selection has not changed. Confirmed non-starts with settled
+reservations retry under normal cooldown; unknown outcomes retain their identity.
+An update hold at either preparation or pre-release settles only an owned
+candidate and local retirement work, then restores the same original owner's
+admission/reconciliation without releasing its singleton. A discovered live peer
+is retained, never terminated to implement the hold. Native supervisor and child
+identities are both preflighted before any cancellation signal.
+Retained unknown-launch receipts are re-observed through the SDK. Verified native
+exit plus SDK settlement permits clearing the attempt and starting its existing
+cooldown; pending, unavailable, foreign or reused identities remain held. Receipt
+absence alone is not settlement and the application never deletes that evidence.
+The passive application lane requires a profiled nested `.venv`; ordinary Source
+layouts retain their existing handoff. Preparation attests machine/environment,
+interval and legacy-source mode, which startup must match to its captured plan.
+Startup strictly captures `service.env` before planning either service and reuses
+that snapshot. A confirmed-dead/reused same-generation coordinator can be withdrawn
+through guarded routing CAS; unavailable identity, a cutover breadcrumb or existing
+previous-generation custody still requires owner-led recovery.
+Native exit is checked separately from creation time: a retained Windows process
+handle can keep the original birth token queryable after the process has exited.
+Unavailable mutable status reads retain custody and retry only within the existing
+readiness deadline. Persistent I/O reports its reason at expiry; malformed status
+still refuses immediately, and no retry treats an unknown observation as absence.
+
+The opt-in Windows `test_supervisor_source_faults_native.py -k installed_supervisor`
+lane uses the same canonical profile/native-root inputs as the enabled-master
+fixture. A finite controller imports the constructed old slot's code, holds the
+real scope singleton, and drives actual prepared successor processes through
+withdrawal, selection flap and admission restoration. Test-only worker/cancellation
+gates call the original owner methods; production code and immutable slots stay
+unchanged. A native creation refusal uses the SDK's process-factory seam and its
+real reservation cancellation before a successful normal candidate retry.
+The unknown-outcome control is a real leased no-preparation sentinel with an
+injected lost reply, not an operating-system permission-denial qualification.
+Its continuation follows the same original receipt through natural exit and SDK
+settlement, then requires cooldown before a normal prepared-candidate retry.
+The fixture also injects update holds at preparation and pre-release after local
+withdrawal starts, verifies same-owner reconciliation resumes, and retains an
+independently prepared live peer without subject termination.
+These controls require qualification against the actual built Source under test;
+older live-sentinel-only evidence does not establish that continuation.
+`DISPATCH_NATIVE_REMAINING_ONLY=1` skips the already-completed selection/exit cases
+when resuming that bounded fixture. Ordinary nonprofile installation remains a
+separate native lane; these profiled applications are not reshaped to impersonate it.
+
+`tests/test_source_start_native.py` consumes an explicitly prepared canonical
+Source/profile snapshot; it never rebuilds one. Its opt-in generated-frontdoor
+checks use private roots and renewed daemon leases. The repair-generation
+matrix is distinct from a two-Source update: it exercises the same admitted
+wheel/profile closure under canonical repair slots. Preparation time, each
+frontdoor's 300-second deadline, native exit and cleanup outcomes remain
+separate evidence.
+`tests/test_source_caller_job_native.py` separately exercises nested caller-Job
+closure, an admitted bounded control and a restrictive outer-Job negative.
+Its full installed-owner survival checks require a matching admitted artifact;
+the bounded control alone is not application lifetime qualification.
+`tests/test_source_ab_native.py` consumes two distinct admitted Git snapshots
+for forward/reverse selection, native outgoing exit, held work and data
+preservation, construction-failure retry and root-unset global frontdoors.
+Pre-startup construction retry is separate from an unknown startup outcome;
+the latter is observed and retained without automatic rollback or replay.
+
 Supervisor transitions have a [structured lifecycle audit](docs/supervisor-lifecycle.md)
 that separates runtime-slot readiness from service reconciliation and preserves
 observed native disablement without guessing its author.

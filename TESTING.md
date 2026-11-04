@@ -122,6 +122,9 @@ user and attributable PowerShell entry scripts, generated Manager CMD/PowerShell
 entries and standalone Manager channel creation. Engine discovery, runtime
 selection answers and the selected interactive command remain synthetic;
 the production launcher's refusal path is exercised separately.
+The generated CMD entry is also exercised with project and resident-picker
+arguments, not only an empty invocation; both preparation interpreters must
+exit before the selected terminal command is attached.
 Return-path checks restore process-environment additions, removals and changed
 values before a caller reuses its PowerShell session, including callers with
 inherited native-error-as-exception preferences.
@@ -5968,6 +5971,19 @@ constructing the fresh Manager first. Controlled acquisition replaces only exter
 delivery and credentials; the planner, constructors, launchers and scheduled
 registrations remain real. Missing prerequisite or resident-attribution evidence
 fails acceptance rather than reducing the portfolio.
+The disposable project explicitly opts Vault into runtime participation with
+`enabled: true`; plugin visibility alone is not activation. This does not alter
+the default inactive behavior or any operator configuration.
+
+If baseline preparation reports a Vault activation refusal, the fixture also
+runs the retained payload's read-only activation reader under a bounded native
+owner. Caught payload exceptions and a refused configuration owner's bounded
+stderr become diagnostics without changing the reader, opt-in, original
+failure or settlement requirements.
+Missing payloads and settled probe timeouts/output-limit failures are secondary
+diagnostics: the original assertion or `check=False` result remains intact.
+Unconfirmed execution or cleanup still propagates with its exact process/Job
+custody rather than being reduced to a diagnostic result.
 
 The Index host role is written as YAML readable by both native and
 dependency-free role resolvers. Preparation explicitly provisions its full

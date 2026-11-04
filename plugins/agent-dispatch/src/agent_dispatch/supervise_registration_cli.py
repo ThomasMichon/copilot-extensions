@@ -106,6 +106,7 @@ def register_supervise_commands(sub) -> None:
     rp.add_argument("--no-single-instance", action="store_true")
     rp.add_argument("--no-declared", action="store_true")
     rp.add_argument("--legacy-env", action="store_true")
+    rp.add_argument("--source-candidate", help=argparse.SUPPRESS)
     rp.set_defaults(func=_resolve_cli_module()._cmd_supervise)
     rp = sup_sub.add_parser("daemon-status", help="show whether a supervisor daemon holds this (machine, env) scope and the registrations it would run")
     rp.add_argument("--machine")

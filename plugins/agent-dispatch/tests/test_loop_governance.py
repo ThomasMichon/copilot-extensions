@@ -30,6 +30,83 @@ class _Governance:
         return next(self._states)
 
 
+@pytest.mark.parametrize("loop_name", [
+    "_gc_loop", "_orphan_reap_loop", "_handoff_fallback_loop", "_worktree_status_relay_loop",
+])
+@pytest.mark.parametrize("unavailable", [False, True])
+def test_passive_reconcile_loops_preserve_queue_before_ownership(
+    monkeypatch, tmp_path, loop_name, unavailable,
+):
+    queue = TaskQueue(tmp_path / "tasks.db")
+    task = queue.create("unfinished", repo=TEST_REPO)
+    reservation, _ = queue.reserve_spawn(task.id)
+    before = queue.get(task.id)
+    bus = _Bus()
+    sleeps = []
+    runs = []
+
+    def is_active():
+        if unavailable:
+            raise OSError("routing unavailable")
+        return False
+
+    async def sleep(delay):
+        sleeps.append(delay)
+        if len(sleeps) == 2:
+            raise asyncio.CancelledError
+
+    async def run_cycle(*_args, **_kwargs):
+        runs.append("unexpected mutation")
+        return {}
+
+    monkeypatch.setattr(coordinator_module.asyncio, "sleep", sleep)
+    monkeypatch.setattr(coordinator_module, "_run_supervised_cycle", run_cycle)
+    options = {}
+    if loop_name == "_worktree_status_relay_loop":
+        from agent_dispatch.worktree_status_relay import WorktreeStatusRelayStore
+
+        relay = WorktreeStatusRelayStore(tmp_path / "relay.db")
+        monkeypatch.setattr(relay, "prune", lambda **_kwargs: pytest.fail("passive relay mutation"))
+        options = {"relay": relay, "signal": asyncio.Queue()}
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(getattr(coordinator_module, loop_name)(
+            queue, 0.01, bus,
+            health=coordinator_module.LoopHealth(name=loop_name, base_interval=0.01),
+            is_active=is_active, **options,
+        ))
+    assert runs == []
+    assert bus.events == []
+    assert queue.get(task.id) == before
+    assert queue.latest_reservation(task.id).key == reservation.key
+
+
+def test_gc_demoted_mid_iteration_does_not_reconcile_cooldowns(monkeypatch, tmp_path):
+    queue = TaskQueue(tmp_path / "tasks.db")
+    ownership = iter([True, True, False])
+    calls = []
+    sleeps = []
+
+    async def sleep(_delay):
+        sleeps.append(None)
+        if len(sleeps) == 2:
+            raise asyncio.CancelledError
+
+    async def run_cycle(_health, operation, **_kwargs):
+        calls.append(operation)
+        return {}
+
+    monkeypatch.setattr(coordinator_module.asyncio, "sleep", sleep)
+    monkeypatch.setattr(coordinator_module, "_run_supervised_cycle", run_cycle)
+    monkeypatch.setattr(queue, "reconcile_cooldowns", lambda: pytest.fail("demoted mutation"))
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(coordinator_module._gc_loop(
+            queue, 0.01, _Bus(),
+            health=coordinator_module.LoopHealth(name="gc", base_interval=0.01),
+            is_active=lambda: next(ownership),
+        ))
+    assert calls == [queue.reconcile_liveness]
+
+
 def test_gc_loop_backs_off_at_iteration_boundary_without_mutating(monkeypatch):
     health = coordinator_module.LoopHealth(name="gc", base_interval=30.0)
     governance = _Governance([
