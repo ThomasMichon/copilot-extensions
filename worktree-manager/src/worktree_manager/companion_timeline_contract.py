@@ -321,7 +321,7 @@ class TimelineEvent:
     actor: TimelineActor
     kind: TimelineKind
     evidence_kind: EvidenceKind
-    observed_at: datetime
+    observed_at: datetime | None
     summary: str
     occurred_at: datetime | None = None
     details: str = ""
@@ -340,7 +340,7 @@ class TimelineEvent:
             raise TimelineContractError("event actor/kind must be typed observer values")
         if not isinstance(self.evidence_kind, EvidenceKind) or not isinstance(self.durability, Durability):
             raise TimelineContractError("event evidence/durability must be exact enums")
-        aware_time(self.observed_at, "observed_at")
+        aware_time(self.observed_at, "observed_at", optional=True)
         aware_time(self.occurred_at, "occurred_at", optional=True)
         text(self.summary, "event summary")
         text(self.details, "event details", empty=True)
@@ -366,7 +366,8 @@ class TimelineEvent:
         return {
             "source": asdict(self.source), "position": asdict(self.position), "event_id": self.event_id,
             "actor": asdict(self.actor), "kind": self.kind.value, "evidence_kind": self.evidence_kind.value,
-            "observed_at": self.observed_at.isoformat(), "occurred_at": self.occurred_at.isoformat() if self.occurred_at else None,
+            "observed_at": self.observed_at.isoformat() if self.observed_at else None,
+            "occurred_at": self.occurred_at.isoformat() if self.occurred_at else None,
             "summary": self.summary, "details": self.details, "relations": [asdict(item) for item in self.relations],
             "payload_ref": self.payload_ref, "reported_phase": self.reported_phase,
             "durability": self.durability.value, "data_json": self.data_json,

@@ -259,9 +259,10 @@ class TimelineWindow:
         source_rows[key] = deque(ordered)
         rows: list[TimelineEvent] = []
         while any(source_rows.values()):
-            candidates = [(items[0].occurred_at or items[0].observed_at, source_key)
+            candidates = [((items[0].occurred_at or items[0].observed_at) is None,
+                           items[0].occurred_at or items[0].observed_at, source_key)
                           for source_key, items in source_rows.items() if items]
-            _, source_key = min(candidates)
+            _, _, source_key = min(candidates)
             rows.append(source_rows[source_key].popleft())
         removed = 0
         size = sum(event.encoded_size for event in rows)

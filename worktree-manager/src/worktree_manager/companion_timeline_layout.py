@@ -78,6 +78,8 @@ class TimelineLayout:
     @staticmethod
     def _time(event: TimelineEvent, now: datetime | None) -> str:
         stamp = event.occurred_at or event.observed_at
+        if stamp is None:
+            return "time unknown"
         qualifier = "" if event.occurred_at is not None else "observed "
         value = qualifier + stamp.isoformat(timespec="seconds")
         if now is not None:

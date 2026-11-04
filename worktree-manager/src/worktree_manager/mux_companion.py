@@ -41,7 +41,7 @@ from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, VerticalScroll
 from textual.widgets import (
-    Button, DataTable, Footer, Header, Static, TabbedContent, TabPane,
+    Button, DataTable, Footer, Header, Select, Static, TabbedContent, TabPane,
 )
 
 from . import engine_client as ec
@@ -54,8 +54,8 @@ from .companion_agenda import agenda_text, subscribe
 from .companion_timeline_widget import CompanionTimelinePanel, SubwayTimeline
 from .companion_timeline_attachment import TimelineAttachment, selected_head
 from .companion_agenda_attachment import AgendaTimelineAttachment
-from .companion_bridge_source import BridgeMembershipSource
-from .companion_timeline_contract import Availability, Provider
+from .companion_bridge_attachment import BridgeTimelineAttachment
+from .companion_timeline_contract import Provider
 from .companion_summary import _claims_view, _fact, _summary_text, bridge_status
 
 #: Blocker code (from the closure descriptor's ``blockers`` list) -> a short,
@@ -382,13 +382,11 @@ class MuxCompanionApp(App):
             validate_events=self._timeline_attachment.validate_events,
             head_changed=lambda selection: self._bridge_attachment.invalidate_head(selection),
         )
-        self._bridge_attachment = TimelineAttachment(
-            self._timeline_panel, cwd=self._cwd or os.getcwd(), provider=Provider.BRIDGE,
+        self._bridge_attachment = BridgeTimelineAttachment(
+            self._timeline_panel, cwd=self._cwd or os.getcwd(),
             head_current=lambda selection: self._rich_agenda_attachment.head_current(selection),
-            source_factory=lambda selection: BridgeMembershipSource(
-                *selection, owner_ref=(_fact(self._data, "claims")[0] or {}).get("owner_ref"),
-                cwd=self._cwd or os.getcwd(), project_root=self._data.worktree.get("path") or "",
-            ),
+            owner_ref=lambda: (_fact(self._data, "claims")[0] or {}).get("owner_ref"),
+            project_root=lambda: self._data.worktree.get("path") or "",
             status=self._bridge_status, evidence_owner=self._timeline_attachment,
         )
 
@@ -403,6 +401,8 @@ class MuxCompanionApp(App):
             with TabPane("Timeline", id="timeline-tab"):
                 yield Static("Rich Agenda: awaiting selected owner publication", id="timeline-agenda-status")
                 yield Static("Bridge: awaiting selected owner", id="timeline-bridge-status")
+                yield Select([("Bridge feed: membership (discover delegates)", "membership")],
+                             value="membership", allow_blank=False, id="bridge-feed")
                 yield self._timeline_panel
             with TabPane("Claims", id="claims-tab"):
                 yield Static(id="claims-evidence")
@@ -508,7 +508,7 @@ class MuxCompanionApp(App):
         self._bridge_attachment.stop_now()
         await self._rich_agenda_attachment.set_selection(None)
         await self._timeline_attachment.set_selection(None)
-        await self._bridge_attachment.set_selection(None)
+        await self._bridge_attachment.set_selection(None, reconcile=reconcile_timeline)
         self._read_cancel.set()
         self._agenda_cancel.set()
         self._agenda_generation += 1
@@ -638,11 +638,7 @@ class MuxCompanionApp(App):
             self._timeline_attachment.history(message)
 
     def on_subway_timeline_changed(self, message: SubwayTimeline.Changed) -> None:
-        if not self._bridge_attachment.cleanup_failed and any(
-            state.token.identity.provider is Provider.BRIDGE
-            and state.availability is Availability.HEAD_CHANGED
-            for state in self._timeline_panel.window.sources.values()
-        ):
+        if not self._bridge_attachment.cleanup_failed and self._bridge_attachment.head_changed():
             self._bridge_status("head changed; retained membership is not current; Refresh required")
             if self._bridge_attachment.controller is not None:
                 self._sync_timeline()
@@ -702,6 +698,12 @@ class MuxCompanionApp(App):
             self.query_one("#timeline-bridge-status", Static).update(
                 bridge_status(self._timeline_panel.window, message),
             )
+            self._bridge_attachment.update_choices(self.query_one("#bridge-feed", Select))
+
+    @work(group="bridge-feed-selection")
+    async def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "bridge-feed" and isinstance(event.value, str):
+            await self._bridge_attachment.choose(event.value)
 
     @work(exclusive=True, group="session-observations")
     async def _load_observations(self) -> None:

@@ -75,17 +75,20 @@ class MembershipCommands:
         self.base: list[str] | None = None
 
     def frames(self, cancelled: Event, *, follow: bool = False, after: str | None = None) -> Generator[dict, None, None]:
+        yield from self.command([
+            "observe-owner", "--owner-ref", self.owner, "--contract-version", "1", "--json",
+            *(["--follow"] if follow else []), *(["--after", after] if after is not None else []),
+        ], cancelled)
+
+    def command(self, arguments: list[str], cancelled: Event) -> Generator[dict, None, None]:
+        """Use the selected owner's bounded passive CLI pipe for one operation."""
         if self.base is None:
             self.base = bridge_command(self.project_root)
-        argv = [
-            *self.base, "observe-owner", "--owner-ref", self.owner, "--contract-version", "1", "--json",
-            *(["--follow"] if follow else []), *(["--after", after] if after is not None else []),
-        ]
         try:
             # The owning CLI negotiates the running capability before opening
             # its read. The overlay also fences older payload first-use paths.
             yield from transport.command_frames(
-                argv, cancelled=cancelled, cwd=self.cwd,
+                [*self.base, *arguments], cancelled=cancelled, cwd=self.cwd,
                 environment={
                     "AGENT_BRIDGE_NO_SELFPROVISION": "1",
                     # The selected payload's gate resolves and validates its own

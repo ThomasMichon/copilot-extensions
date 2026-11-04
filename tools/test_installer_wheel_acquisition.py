@@ -16,6 +16,7 @@ import subprocess
 import sys
 import threading
 import time
+from urllib.error import URLError
 
 import pytest
 
@@ -171,6 +172,36 @@ def test_real_tls_acquisition_retains_exact_bytes_and_policy_facts(feeds, certif
         assert b"127.0.0.1" not in result.evidence_json
     assert all(not path.exists() for path in paths)
     assert [path for path, _ in state["requests"]] == ["/simple/fixture/", "/files/" + FILENAME]
+
+
+def test_real_tls_request_recovers_from_one_reset_before_headers(feeds, monkeypatch):
+    state = feeds()
+    metadata = project(state)
+    feed = acquisition.WheelFeed(IDENTITY, state["origin"] + "/simple")
+    client = acquisition._Client(
+        limits(), time.monotonic() + 10, ssl.create_default_context(cafile=str(CERTIFICATE)), {},
+    )
+    actual_open = client.opener.open
+    calls = []
+
+    def open_request(request, *, timeout):
+        calls.append(request.full_url)
+        if len(calls) == 1:
+            raise URLError(ConnectionResetError(10054, "fixture reset"))
+        return actual_open(request, timeout=timeout)
+
+    monkeypatch.setattr(client.opener, "open", open_request)
+    response, _location, chain = client.request(
+        state["origin"] + "/simple/fixture/", feed, None, "application/json", index=True,
+    )
+    try:
+        content, _digest, size = client.read(response, 4096)
+    finally:
+        response.close()
+    assert content == metadata and size == len(metadata)
+    assert calls == [calls[0], calls[0]]
+    assert client.requests == 2 and len(chain) == 1
+    assert [path for path, _ in state["requests"]] == ["/simple/fixture/"]
 
 
 def parallel_projects(state, count=2):

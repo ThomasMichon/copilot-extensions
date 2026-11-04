@@ -1,4 +1,5 @@
 """Pure shared transfer-budget and worker-policy controls; native overlap is separate."""
+import hashlib
 import ssl
 import sys
 import time
@@ -6,6 +7,7 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from types import ModuleType
+from urllib.error import HTTPError, URLError
 
 import pytest
 
@@ -106,6 +108,112 @@ def test_peer_failure_while_waiting_for_budget_lock_cannot_admit_another_request
     with pytest.raises(acquisition.WheelError, match="cancelled"):
         budget.reserve("requests", 1)
     assert budget.counts["requests"] == 0
+
+
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_reset_retry_charges_budget_without_changing_the_origin_chain(wrapped):
+    feed = acquisition.WheelFeed("sha256:" + "b" * 64, "https://feed.invalid/simple")
+    client = acquisition._Client(limits(), time.monotonic() + 5, ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT), {})
+    response = object()
+    calls = []
+
+    def open_request(request, *, timeout):
+        calls.append((request.full_url, timeout))
+        if len(calls) == 1:
+            error = ConnectionResetError(10054, "fixture reset")
+            raise URLError(error) if wrapped else error
+        return response
+
+    client.opener.open = open_request
+    result, location, chain = client.request(
+        "https://feed.invalid/simple/fixture/", feed, None, "application/json", index=True,
+    )
+    assert result is response and location == calls[0][0] == calls[1][0]
+    assert chain == [hashlib.sha256(b"https://feed.invalid").hexdigest()]
+    assert client.requests == 2 and client.redirects == 0
+
+
+@pytest.mark.parametrize("failure,maximum,expected_calls", [
+    ("reset", 4, 2), ("reset", 1, 1), ("tls", 4, 1), ("http", 4, 1), ("missing", 4, 1),
+])
+def test_retry_is_bounded_and_does_not_retry_other_failures(failure, maximum, expected_calls):
+    feed = acquisition.WheelFeed("sha256:" + "b" * 64, "https://feed.invalid/simple")
+    client = acquisition._Client(
+        limits(max_requests=maximum), time.monotonic() + 5, ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT), {},
+    )
+    calls = []
+
+    def open_request(request, *, timeout):
+        calls.append(request.full_url)
+        if failure == "reset":
+            raise URLError(ConnectionResetError(10054, "fixture reset"))
+        if failure == "tls":
+            raise URLError(ssl.SSLError("fixture TLS failure"))
+        raise HTTPError(request.full_url, 404 if failure == "missing" else 500, "fixture error", {}, None)
+
+    client.opener.open = open_request
+    message = (
+        "request budget" if maximum == 1 else
+        "unavailable" if failure == "missing" else "wheel feed request failed"
+    )
+    expected_error = acquisition.AcquisitionUnavailable if failure == "missing" else acquisition.WheelError
+    with pytest.raises(expected_error, match=message) as raised:
+        client.request("https://feed.invalid/simple/fixture/", feed, None, "application/json", index=True)
+    assert isinstance(raised.value, acquisition.AcquisitionUnavailable) is (failure == "missing")
+    assert len(calls) == expected_calls
+    assert client.requests == expected_calls
+
+
+@pytest.mark.parametrize("boundary", ["deadline", "peer-failure"])
+def test_reset_retry_rechecks_the_shared_execution_boundary(boundary):
+    feed = acquisition.WheelFeed("sha256:" + "b" * 64, "https://feed.invalid/simple")
+    client = acquisition._Client(limits(), time.monotonic() + 5, ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT), {})
+    calls = []
+
+    def open_request(request, *, timeout):
+        calls.append(request.full_url)
+        if boundary == "deadline":
+            client.budget.deadline = time.monotonic() - 1
+        else:
+            client.budget.fail(acquisition.WheelError("fixture peer failed"))
+        raise URLError(ConnectionResetError(10054, "fixture reset"))
+
+    client.opener.open = open_request
+    with pytest.raises(acquisition.WheelError, match="deadline|cancelled"):
+        client.request("https://feed.invalid/simple/fixture/", feed, None, "application/json", index=True)
+    assert len(calls) == 1 and client.requests == 1
+
+
+def test_redirected_reset_retry_does_not_forward_feed_headers():
+    feed = acquisition.WheelFeed(
+        "sha256:" + "b" * 64, "https://feed.invalid/simple", (("X-Fixture", "value"),),
+    )
+    client = acquisition._Client(limits(), time.monotonic() + 5, ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT), {})
+    response = object()
+    calls = []
+
+    def open_request(request, *, timeout):
+        calls.append((request.full_url, dict(request.header_items())))
+        if len(calls) == 1:
+            raise URLError(ConnectionResetError(10054, "fixture reset"))
+        if len(calls) == 2:
+            raise HTTPError(request.full_url, 302, "redirect", {"Location": "https://other.invalid/file"}, None)
+        if len(calls) == 3:
+            raise URLError(ConnectionResetError(10054, "fixture reset"))
+        return response
+
+    client.opener.open = open_request
+    result, location, chain = client.request(
+        "https://feed.invalid/simple/fixture/", feed, None, "application/json", index=True,
+    )
+    assert result is response and location == "https://other.invalid/file"
+    assert chain == [
+        hashlib.sha256(b"https://feed.invalid").hexdigest(),
+        hashlib.sha256(b"https://other.invalid").hexdigest(),
+    ]
+    assert all(headers.get("X-fixture") == "value" for _, headers in calls[:2])
+    assert all("X-fixture" not in headers for _, headers in calls[2:])
+    assert client.requests == 4 and client.redirects == 1
 
 
 @pytest.mark.parametrize("workers,count,parallel", [(1, 3, False), (8, 1, False), (8, 3, True)])
