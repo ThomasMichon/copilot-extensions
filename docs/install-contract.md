@@ -1501,9 +1501,18 @@ manifest, and service restart (see "What NOT to Do" and "Deploying: one command
 — `<repo> update`" in `CONTRIBUTING.md`).
 
 > **Runtime reconcile is version-keyed; `--force` overrides it.** `update` runs a
-> plugin's runtime installer only when its deployed runtime version differs from
-> the freshly-refreshed payload version (an equal version is assumed current and
-> skipped for speed). `--force` re-runs every enabled plugin's runtime installer
+> plugin's runtime installer when its deployed runtime version differs from
+> the freshly-refreshed payload version, or a matching manifest lacks its
+> selected completed runtime and interpreter. Equal versions retain the quick
+> skip only after the owning payload's read-only generation/completion helpers
+> confirm that footprint. A fallback slot cannot stand in for a broken current
+> selector; selector-free real legacy venv directories remain supported, but
+> symlinks and Windows junctions cannot certify that fallback. An unavailable or
+> unsuccessful footprint probe reaches the normal installer rather than
+> certifying currentness or requiring a separate recovery command. This is
+> footprint validation, not a package-import or service-health guarantee.
+> Bridge always reaches its serving-reconciliation installer, even when its
+> build is current. `--force` re-runs every enabled plugin's runtime installer
 > regardless — the escape hatch for a same-version content drift (a dev checkout,
 > or a marketplace artifact whose version stamp lagged the code). This covers
 > **every** enabled runtime plugin, not just agent-worktrees and the
@@ -1513,6 +1522,11 @@ manifest, and service restart (see "What NOT to Do" and "Deploying: one command
 > (`check-changefile-presence.py`) makes the same-version-drift case rare in
 > the first place, so `--force` stays a last resort.
 
+Containers' marketplace `base` and `provider-exec` generations use their owning
+profile selector rather than the generic unprofiled package-version rule.
+Changed desired profile still reaches its installer; prepared-source profile
+qualification remains separate.
+
 The explicit updater collects the engine, selected modules and other required
 registered runtime commands once after payload acquisition. Before launching
 any runtime installer, its `runtime_preflight` checks the whole selected set's
@@ -1521,6 +1535,9 @@ and interpreter availability, and effective deadline. Execution uses those
 collected arguments, environment snapshots and roots rather than repeating
 discovery after the engine has already changed. Required preflight failures
 name their targets and stop all runtime installation and local integration.
+Read-only installation inventory reports version/support facts without these
+footprint probes; its `updatable` field is not runtime-readiness evidence.
+Actual targeted updates validate the footprint before and after acquisition.
 Intentional exclusions and already-current runtimes do not require unused
 installers; existing module update/install fallback and cell-specific invocation
 contracts remain intact.

@@ -1,0 +1,9 @@
+{
+  "comment": "Require a selected complete runtime and interpreter before skipping matching-version updates",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

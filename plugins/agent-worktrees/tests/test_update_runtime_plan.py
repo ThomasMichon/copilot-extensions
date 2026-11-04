@@ -552,6 +552,7 @@ def test_current_runtime_does_not_require_an_unused_installer(portfolio, monkeyp
     engine, peer, calls = portfolio
     (peer / "scripts" / "install.sh").unlink()
     monkeypatch.setattr(reconcile, "runtime_deployed_version", lambda *a, **k: "2")
+    monkeypatch.setattr(update_runtime_plan, "_runtime_footprint_current", lambda step: True)
     if kind == "module":
         step = update_runtime_plan.plan_module(peer.name, peer, "linux", force=False)
     else:
