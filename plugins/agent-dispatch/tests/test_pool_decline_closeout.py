@@ -4,7 +4,8 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 import json
 import subprocess
-from threading import Barrier
+from dataclasses import asdict
+from threading import Barrier, Event
 
 import pytest
 
@@ -12,6 +13,7 @@ from agent_dispatch import pool_decline_observation as observation
 from agent_dispatch.queue import TaskError, TaskQueue
 from agent_dispatch.queue_records import SpawnState, Status
 from tests import test_pool_placement_client as controls
+from tests import test_pool_worker_decline as worker_controls
 from tests.test_pool_placement import place, pool, task
 from tests.test_pool_worker_decline import prepared_worker, snapshot
 
@@ -20,7 +22,11 @@ api = controls.api
 
 
 @pytest.fixture
-def ready(q, monkeypatch):
+def ready(q, monkeypatch, request):
+    if getattr(request, "param", None):
+        monkeypatch.setattr(
+            worker_controls, "task", lambda queue, **kwargs: task(queue, dedup_key=request.param, **kwargs),
+        )
     task_id, binding = prepared_worker(q)
     q.prepare_pool_decline(task_id, **binding)
     with q._connect() as conn:
@@ -102,6 +108,15 @@ def test_unqualified_owner_reply_never_changes_claim_or_routing(q, ready, change
     assert snapshot(q, task_id) == before
 
 
+def test_observed_allocation_driver_must_match_retained_owner(q, ready):
+    task_id, binding, value, _ = ready
+    value["allocation"]["driver"] = "ordinary-bridge"
+    before = snapshot(q, task_id)
+    with pytest.raises(TaskError, match="changed its allocation"):
+        q.close_pool_decline(task_id, **binding)
+    assert snapshot(q, task_id) == before
+
+
 @pytest.mark.parametrize("kind", ["remote", "missing-host", "unsupported", "timeout", "malformed"])
 def test_missing_or_old_owner_never_falls_back_to_copied_worker_json(q, ready, monkeypatch, kind):
     task_id, binding, _, calls = ready
@@ -178,8 +193,11 @@ def test_later_due_time_and_cooldown_stage_survive_decline(q, ready):
     assert q.pool_startup(task_id).cooldown_stage == 4
 
 
-def test_retired_decline_can_select_another_pool_without_reusing_finalized_workspace(q, ready):
+def test_retired_decline_can_select_another_pool_without_reusing_finalized_workspace(q, ready, monkeypatch):
+    from agent_dispatch import embody
+
     task_id, binding, _, _ = ready
+    original = q.get_reservation(binding["reservation_key"])
     q.close_pool_decline(task_id, **binding)
     q.retire_spawn(binding["reservation_key"], exact_absence=True, conclusion_state="skipped")
     q.publish_pool_catalog_scope(
@@ -194,10 +212,38 @@ def test_retired_decline_can_select_another_pool_without_reusing_finalized_works
     assert reserved and reservation.key != binding["reservation_key"]
     assert reservation.worktree is None and reservation.session_handle is None
     assert reservation.allocation_reservation_key == reservation.key
+    assert reservation.allocation_revision == original.allocation_revision + 1
+    assert reservation.creation_key != original.creation_key
     assert q.task_pool_assignment(task_id).registration_id == "other"
     assert q.pool_startup(task_id).cooldown_stage == 1
     assert q.pool_startup(task_id).startup_attempts == 2
     assert q.pool_startup(task_id).episode_start_attempt == 1
+    replay, admitted = TaskQueue(q.db_path).reserve_spawn(
+        task_id, reserved_by="allocator", driver="cli",
+        pool_catalog_revision=q.pool_catalog_snapshot().revision, now=4001,
+    )
+    assert not admitted and replay.creation_key == reservation.creation_key
+    assert q.get_reservation(original.key).creation_key == original.creation_key
+    calls = []
+
+    def create(argv, **kwargs):
+        key = argv[argv.index("--creation-key") + 1]
+        assert key != original.creation_key
+        assert argv[argv.index("--dispatch-reservation-key") + 1] == reservation.key
+        calls.append(key)
+        return subprocess.CompletedProcess(argv, 0, json.dumps({
+            "worktree": {"id": "replacement", "path": "/replacement", "repo": "example"},
+            "creation": {"version": 1, "status": "complete", "replayed": len(calls) > 1},
+        }), "")
+
+    monkeypatch.setattr(embody, "_agent_worktrees_launch_prefix", lambda: ["worktrees"])
+    monkeypatch.setattr(embody.subprocess, "run", create)
+    for current in (reservation, replay):
+        prepared = embody.prepare_reusable_worktree(
+            asdict(q.get(task_id)), asdict(current), interface="cli", driver="cli", supervisor="allocator",
+        )
+        assert prepared["worktree"] == "replacement" and prepared["created"]
+    assert calls == [reservation.creation_key] * 2
 
 
 @pytest.mark.parametrize("required", [False, True])
@@ -224,6 +270,25 @@ def test_decline_does_not_unpin_an_explicit_or_required_workspace(q, ready, requ
     assert snapshot(q, task_id) == before
 
 
+@pytest.mark.parametrize("ready", ["logical-work"], indirect=True)
+def test_distinct_logical_successor_does_not_replay_finalized_predecessor(q, ready):
+    task_id, binding, _, _ = ready
+    original = q.get_reservation(binding["reservation_key"])
+    q.close_pool_decline(task_id, **binding)
+    q.retire_spawn(original.key, exact_absence=True, conclusion_state="skipped")
+    q.abandon(task_id, permitted=True, reason="Explicit terminal disposition")
+    successor = task(q, dedup_key="logical-work")
+    replacement, admitted = q.reserve_spawn(
+        successor.id, reserved_by="allocator", driver="cli",
+        pool_catalog_revision=q.pool_catalog_snapshot().revision,
+    )
+    assert admitted and replacement.worktree is None
+    assert replacement.allocation_revision == original.allocation_revision + 1
+    assert replacement.creation_key != original.creation_key
+    assert replacement.allocation_reservation_key == replacement.key
+    assert q.get_reservation(original.key).worktree == original.worktree
+
+
 def test_only_control_can_request_coordinator_observation_and_no_receipt_is_accepted(q, api, ready):
     task_id, binding, _, _ = ready
     url = f"/tasks/{task_id}/pool-decline/closeout"
@@ -247,6 +312,61 @@ def test_failed_owner_read_records_a_visible_closeout_blocker(q, api, ready, mon
     assert result.status_code == 409
     assert q.get(task_id).status == Status.CLAIMED
     assert "remote custody retained" in q.pool_worker_decline(task_id).blocker
+    assert api.app.state.drain_gate.claims == 0
+
+
+def test_draining_refuses_closeout_before_observation_or_blocker(q, api, ready):
+    from tests.test_pool_placement import headers
+
+    task_id, binding, _, calls = ready
+    before = snapshot(q, task_id)
+    assert api.post("/drain", headers=headers("data"), json={"timeout": 1, "poll": .05}).json()["drained"]
+    result = api.post(f"/tasks/{task_id}/pool-decline/closeout", headers=headers(),
+                      json={"version": 1, **binding})
+    assert result.status_code == 409 and "draining" in result.json()["detail"]
+    assert not calls and snapshot(q, task_id) == before
+    assert api.app.state.drain_gate.claims == 0
+
+
+def test_drain_waits_for_observation_and_closeout_commit(q, api, ready, monkeypatch):
+    from tests.test_pool_placement import headers
+
+    task_id, binding, value, _ = ready
+    entered, finish, draining = Event(), Event(), Event()
+    gate = api.app.state.drain_gate
+    set_draining = gate.set_draining
+
+    def observed(*args):
+        entered.set()
+        assert finish.wait(5)
+        assert gate.claims == 1
+        return value
+
+    def observe_drain(value):
+        set_draining(value)
+        if value:
+            draining.set()
+
+    monkeypatch.setattr(observation, "observe", observed)
+    monkeypatch.setattr(gate, "set_draining", observe_drain)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        closeout = executor.submit(
+            api.post, f"/tasks/{task_id}/pool-decline/closeout", headers=headers(),
+            json={"version": 1, **binding},
+        )
+        try:
+            assert entered.wait(5)
+            drain = executor.submit(
+                api.post, "/drain", headers=headers("data"), json={"timeout": 5, "poll": .05},
+            )
+            assert draining.wait(5)
+            assert gate.claims == 1 and not drain.done()
+            assert q.get(task_id).status == Status.CLAIMED
+        finally:
+            finish.set()
+        assert closeout.result(timeout=5).status_code == 200
+        assert drain.result(timeout=5).json()["drained"]
+    assert gate.claims == 0 and q.get(task_id).status == Status.QUEUED
 
 
 def test_historical_api_replay_does_not_announce_a_later_task_as_queued(q, api, ready, monkeypatch):

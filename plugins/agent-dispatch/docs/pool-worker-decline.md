@@ -70,6 +70,10 @@ The coordinator consumes the selected Worktrees runtime's read-only
 One bounded invocation with the explicit project observes the exact
 task/reservation/worktree/native. That read's own versioned response establishes
 support before the queue mutation; there is no per-call preflight subprocess.
+The observation must retain the reservation's allocation driver as well as its
+task, attempt, supervisor and workspace. The full observation/commit operation
+participates in coordinator drain accounting; new closeouts refuse while
+draining, before either observation or blocker mutation.
 No queue lock spans the external read. The final SQLite transaction rechecks the entire original task,
 assignment, reservation and immutable decline, including holds, steering,
 native identity, startup revision, routing and closeout blocker. Changed or
@@ -95,6 +99,11 @@ retirement, allocator placement can select another eligible pool while
 retaining counters and the original capacity history. Optional finalized
 workspaces are not carried into the next attempt; explicit/required workspace
 targets remain visible, unsatisfiable constraints rather than being unpinned.
+An optional replacement advances the durable allocation revision and keyed
+creation identity only after the prior revision's native custody has settled.
+The finalized predecessor and its creation journal remain intact; replacement
+replay retains the new key rather than retrying the predecessor's creation.
+An explicitly pinned old allocation revision is not silently advanced.
 
 ## Remaining integration
 

@@ -520,13 +520,23 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
             declined = carried_worktree is not None and conn.execute(
                 "SELECT 1 FROM pool_worker_decline_closeouts c"
                 " JOIN spawn_reservations s ON s.key=c.reservation_key"
-                " WHERE s.task_id=? AND s.worktree=? LIMIT 1", (task_id, carried_worktree),
+                " WHERE s.creation_key=? AND s.worktree=? LIMIT 1", (creation_key, carried_worktree),
             ).fetchone()
             if declined:
                 if task.target_worktree is not None or f"worktree:{carried_worktree}" in task.requires:
                     raise TaskError("declined finalized workspace remains an unsatisfiable explicit target")
+                if allocation_revision is not None:
+                    raise TaskError("declined finalized workspace cannot reuse a pinned allocation revision")
+                if revision >= 2**63 - 1 or any(
+                    row["state"] in SpawnState.ACTIVE or row["native_release_pending"]
+                    for row in (allocation_rows or rows)
+                    if row["allocation_revision"] == revision
+                ):
+                    raise TaskError("declined allocation revision is not qualified for replacement")
+                revision += 1
+                creation_key = creation_prefix + str(revision)
                 carried_worktree = carried_session = None
-                carried_path = carried_host = carried_execution_machine = None
+                carried_path = carried_host = carried_driver = carried_execution_machine = None
                 worktree_ownership = None
                 conversation_retired = False
                 agent_info = None

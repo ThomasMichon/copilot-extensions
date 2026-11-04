@@ -20,7 +20,9 @@ The [own-worker Worktrees provider slice](journal/2026/11.03-own-worker-closeout
 adds exact local-native admission around normal finalization without task release.
 Its source merged in [#10306](https://github.com/ThomasMichon/copilot-extensions/pull/10306).
 The [local coordinator observation and atomic routing/requeue slice](journal/2026/11.03-local-decline-closeout.md)
-has source controls passing and is awaiting publication/review.
+is published in [#10319](https://github.com/ThomasMichon/copilot-extensions/pull/10319).
+Its drain, allocation-driver and replacement-creation review corrections have
+focused source controls passing; the revised review/merge gate remains open.
 Ordinary/remote decline integration and installed/native
 qualification remain open.
 

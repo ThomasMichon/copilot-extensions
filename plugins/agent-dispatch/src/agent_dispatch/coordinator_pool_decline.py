@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Callable
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from .events import EventBus
@@ -67,16 +67,20 @@ def register(app: FastAPI, queue: TaskQueue, bus: EventBus, control_auth: Callab
         return {"protocol": POOL_DECLINE_PROTOCOL, "version": 1, "decline": asdict(result)}
 
     @app.post("/tasks/{task_id}/pool-decline/closeout", dependencies=[Depends(control_auth)])
-    def closeout(task_id: str, body: DeclineBindingBody) -> dict:
+    def closeout(task_id: str, body: DeclineBindingBody, request: Request) -> dict:
         arguments = body.model_dump(exclude={"version"})
-        try:
-            result = queue.close_pool_decline(task_id, **arguments)
-        except TaskError as exc:
+        gate = request.app.state.drain_gate
+        with gate.track_claim():
+            if gate.draining:
+                raise HTTPException(409, detail="worker decline closeout is inhibited while draining")
             try:
-                queue.record_pool_decline_blocker(task_id, **arguments, detail=str(exc)[:4096])
-            except TaskError:
-                pass
-            raise HTTPException(409, detail=str(exc)) from exc
+                result = queue.close_pool_decline(task_id, **arguments)
+            except TaskError as exc:
+                try:
+                    queue.record_pool_decline_blocker(task_id, **arguments, detail=str(exc)[:4096])
+                except TaskError:
+                    pass
+                raise HTTPException(409, detail=str(exc)) from exc
         if result.applied:
             bus.publish({"type": "task.queued", "task_id": task_id})
             bus.publish({"type": "spawn.release_requested", "reservation_key": body.reservation_key})

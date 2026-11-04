@@ -70,6 +70,7 @@ def observe(task: dict, reservation: dict, decline: dict) -> dict:
         or allocation.get("reservation_key") != reservation["key"]
         or type(allocation.get("attempt")) is not int or allocation["attempt"] != reservation["attempt"]
         or allocation.get("supervisor") != reservation["reserved_by"]
+        or allocation.get("driver") != reservation["driver"]
         or allocation.get("ownership") != "created"
         or not isinstance(allocation.get("creator_machine"), str)
         or normalize_host(allocation["creator_machine"]) != normalize_host(machine)
