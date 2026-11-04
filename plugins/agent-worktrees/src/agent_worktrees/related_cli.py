@@ -124,7 +124,7 @@ def _related_current_topology(
         if not candidate:
             continue
         try:
-            entries = cfg.load_machines_yaml(candidate)
+            entries = cfg.load_machines_yaml(candidate, config=config)
         except FileNotFoundError:
             continue
         if first_readable is None:
@@ -154,11 +154,14 @@ def _related_machine_entry(entries: dict[str, cfg.MachineEntry], name: str) -> c
     )
 
 
-def _related_machine_matcher(anchors: list[str], base_anchor: str) -> MachineMatch:
+def _related_machine_matcher(
+    anchors: list[str], base_anchor: str, *,
+    topology: tuple[str, dict[str, cfg.MachineEntry] | None] | None = None,
+) -> MachineMatch:
     """Resolve topology equivalence for availability, never ownership migration."""
     from . import related
 
-    _, selected = _related_current_topology(anchors, base_anchor)
+    _, selected = topology if topology is not None else _related_current_topology(anchors, base_anchor)
     entries = selected or {}
 
     def matches(key: str, current: str) -> bool:
@@ -680,9 +683,13 @@ def cmd_related_dispatch(argv: list[str]) -> int:
         from . import doctor
 
         explicit_name = rest[0] if rest and not rest[0].startswith("-") else None
-        anchors = _related_config_source_anchors(anchor)
-        name = explicit_name or related.get_primary_grafted(anchors)
-        via_cp = False
+        if explicit_name:
+            name = explicit_name
+            anchors, via_cp = _related_lookup_anchors(rest, anchor, name)
+        else:
+            anchors = _related_config_source_anchors(anchor)
+            name = related.get_primary_grafted(anchors)
+            via_cp = False
         if not name and not _related_opt(rest, "--repo"):
             cp = related.find_control_plane_anchor()
             if cp and os.path.abspath(cp) != os.path.abspath(anchor):
@@ -693,14 +700,13 @@ def cmd_related_dispatch(argv: list[str]) -> int:
         if not name:
             output.err("Usage: related resolve <name>  (or set a primary first)")
             return 1
-        if explicit_name:
-            anchors, via_cp = _related_lookup_anchors(rest, anchor, name)
         entry = related.get_related_grafted(anchors, name)
         if entry is None:
             output.err(f"'{name}' is not a related repo.")
             return 1
         reg = repos.find_repo(name)
-        current_machine = _related_current_machine(anchors, anchor)
+        topology = _related_current_topology(anchors, anchor)
+        current_machine = topology[0]
         try:
             projects = doctor._read_projects()
         except Exception:
@@ -714,7 +720,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
             repo_path=(reg.local_path() if reg else None),
             adopted=adopted,
             base_repo=base_repo,
-            machine_match=_related_machine_matcher(anchors, anchor),
+            machine_match=_related_machine_matcher(anchors, anchor, topology=topology),
         )
         _gh_slug = repos.github_slug(reg.remote) if (reg and reg.remote) else None
         if json_out:

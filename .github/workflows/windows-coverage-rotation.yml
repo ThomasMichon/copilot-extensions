@@ -44,6 +44,11 @@ on:
         required: false
         type: boolean
         default: false
+      related_resolution:
+        description: "Run only contained Worktrees related-resolution consumers (Linux only)."
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   # A scheduled run and a manually dispatched run could otherwise overlap;
@@ -82,8 +87,13 @@ jobs:
           INPUT_REF: ${{ inputs.ref }}
           LAUNCH_MAINTENANCE: ${{ inputs.launch_maintenance }}
           POST_TOOL_FALLBACK: ${{ inputs.post_tool_fallback }}
+          RELATED_RESOLUTION: ${{ inputs.related_resolution }}
         run: |
-          if [ "$LAUNCH_MAINTENANCE" = true ] && [ "$POST_TOOL_FALLBACK" = true ]; then
+          selected=0
+          for scope in "$LAUNCH_MAINTENANCE" "$POST_TOOL_FALLBACK" "$RELATED_RESOLUTION"; do
+            if [ "$scope" = true ]; then selected=$((selected + 1)); fi
+          done
+          if [ "$selected" -gt 1 ]; then
             echo "::error::select only one focused qualification scope" >&2
             exit 1
           fi
@@ -166,7 +176,7 @@ jobs:
         run: python tools/run-plugin-tests.py ${{ matrix.plugin }}
 
   linux-full:
-    name: ${{ inputs.post_tool_fallback && 'post-tool fallback' || inputs.launch_maintenance && 'launch maintenance' || 'full' }} (Linux isolated) - ${{ matrix.plugin }}
+    name: ${{ inputs.related_resolution && 'related resolution' || inputs.post_tool_fallback && 'post-tool fallback' || inputs.launch_maintenance && 'launch maintenance' || 'full' }} (Linux isolated) - ${{ matrix.plugin }}
     needs: select
     if: needs.select.outputs.sha != ''
     runs-on: ubuntu-latest
@@ -174,10 +184,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        plugin: ${{ fromJSON(inputs.post_tool_fallback && '["agent-worktrees"]' || inputs.launch_maintenance && '["agent-worktrees","worktree-manager","update-driver"]' || '["agent-bridge","agent-codespaces","agent-containers","agent-dispatch","agent-logger","agent-mcp","agent-ssh","agent-vault","agent-worktrees"]') }}
+        plugin: ${{ fromJSON(inputs.related_resolution && '["agent-worktrees"]' || inputs.post_tool_fallback && '["agent-worktrees"]' || inputs.launch_maintenance && '["agent-worktrees","worktree-manager","update-driver"]' || '["agent-bridge","agent-codespaces","agent-containers","agent-dispatch","agent-logger","agent-mcp","agent-ssh","agent-vault","agent-worktrees"]') }}
     env:
       POST_TOOL_FALLBACK: ${{ inputs.post_tool_fallback }}
-      TEST_SELECTOR: ${{ inputs.post_tool_fallback && 'test_post_tool_shell or test_nudge_status or test_bind_nudge_script or test_late_worker_completion_reaches_actual_post_tool_hook or test_inrepo_completion_keeps_optional_absence_publishable' || inputs.launch_maintenance && (matrix.plugin == 'update-driver' && 'test_core or test_participant_transport or test_real_product_exit_cannot_hide_abandoned_execution_custody' || 'test_update_launch_cli or test_update_driver_json or test_update_stage or test_reconcile_status or test_launch_update_requests or test_launch_preparation_progress or test_launch_session_unwrap or test_standalone_provisioning') || '' }}
+      RELATED_RESOLUTION: ${{ inputs.related_resolution }}
+      TEST_SELECTOR: ${{ inputs.related_resolution && 'test_config_graft_e2e or test_related_execution_context' || inputs.post_tool_fallback && 'test_post_tool_shell or test_nudge_status or test_bind_nudge_script or test_late_worker_completion_reaches_actual_post_tool_hook or test_inrepo_completion_keeps_optional_absence_publishable' || inputs.launch_maintenance && (matrix.plugin == 'update-driver' && 'test_core or test_participant_transport or test_real_product_exit_cannot_hide_abandoned_execution_custody' || 'test_update_launch_cli or test_update_driver_json or test_update_stage or test_reconcile_status or test_launch_update_requests or test_launch_preparation_progress or test_launch_session_unwrap or test_standalone_provisioning') || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -290,6 +301,7 @@ jobs:
           exit_code = directory / "exit-code"
           selector = os.environ.get("TEST_SELECTOR", "")
           post_tool = os.environ.get("POST_TOOL_FALLBACK") == "true"
+          related = os.environ.get("RELATED_RESOLUTION") == "true"
           command = ["python", "tools/run_tests_in_devcontainer.py", os.environ["PLUGIN"]]
           if selector:
               command += ["-k", selector]
@@ -299,6 +311,8 @@ jobs:
               "tested_sha": os.environ["TESTED_SHA"],
               "platform": "linux",
               "qualification_scope": (
+                  "Linux targeted related-resolution consumers only; no installed runtime, Windows or throughput qualification"
+                  if related else
                   "Linux post-tool and guard-publication consumers only; no native host, Windows or throughput qualification"
                   if post_tool else
                   "Linux launch-maintenance selection only; no Windows or broker qualification"
@@ -313,12 +327,15 @@ jobs:
               "inventory": str(inventory),
               "inventory_sha256": hashlib.sha256(inventory.read_bytes()).hexdigest() if inventory.is_file() else None,
               "scope": (
+                  "selected related configuration-graft and execution-context consumers; explicit-tier/environment-gated skips are not passes"
+                  if related else
                   "selected post-tool, late-guidance and guard-publication consumers; explicit-tier/environment-gated skips are not passes"
                   if post_tool else
                   "selected launch-maintenance tests; explicit-tier/environment-gated skips are not passes"
                   if selector else "default full plugin invocation; explicit-tier/environment-gated skips are not passes"
               ),
               "failure_owner": (
+                  "Targeted related resolution #7961" if related else
                   "Post-tool fallback discovery #6086" if post_tool else
                   "Coordinated Launch Maintenance #7694" if selector
                   else "Test Portfolio Rationalization #1303"
@@ -351,7 +368,7 @@ jobs:
     # about `dev`'s own health, and must not pollute that issue.
     if: >-
       always() && (needs.select.result == 'failure' || needs.test.result == 'failure' || needs.linux-full.result == 'failure') &&
-      (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.launch_maintenance && !inputs.post_tool_fallback && (inputs.ref == '' || inputs.ref == 'dev')))
+      (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.launch_maintenance && !inputs.post_tool_fallback && !inputs.related_resolution && (inputs.ref == '' || inputs.ref == 'dev')))
     runs-on: ubuntu-latest
     permissions:
       contents: read

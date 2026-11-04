@@ -24,6 +24,15 @@ plus two descriptor-membership scans per worktree, without traversing domain
 contents. These isolated source controls do not qualify installed collection,
 native Windows inventory, remote latency or durable archive acknowledgment.
 
+The manual `windows-coverage-rotation.yml` selector `related_resolution=true`
+runs Worktrees' configuration-graft and execution-context consumers through the
+canonical hardened Linux container. Supply `ref` for the published candidate;
+execution records its immutable checkout, selector, container profile and actual
+outcome. Focused selectors are mutually exclusive. This packet checks targeted
+source/topology work counts, configuration forwarding, precedence, failure and
+separate-invocation freshness. It neither expands required unit-only CI nor
+qualifies installed runtime, native Windows, ACP or whole-hook throughput.
+
 The manual `windows-coverage-rotation.yml` selector `post_tool_fallback=true`
 runs only Worktrees' post-tool shell, status/bind reminder, late-guidance and
 guard-publication consumer packet through the canonical hardened Linux container. Supply `ref`
