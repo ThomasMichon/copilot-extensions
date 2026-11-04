@@ -21,6 +21,72 @@ def _container() -> DockerContainerInfo:
     )
 
 
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        ("{}\n", 0),
+        ("fleets:\n  example:\n    image: example/image\n", 0),
+        ("fleets: [", 1),
+        ("fleets: []\n", 1),
+    ],
+)
+@pytest.mark.parametrize("command", ["__source-setup", "__source-start"])
+def test_source_callback_validates_configuration_without_operational_effects(
+    tmp_path, monkeypatch, capsys, content, expected, command,
+):
+    from agent_containers import plugin_config
+
+    path = tmp_path / "containers.yaml"
+    path.write_text(content, encoding="utf-8")
+    bridge = tmp_path / "bridge"
+    providers = bridge / "providers.d"
+    providers.mkdir(parents=True)
+    (providers / "foreign.json").write_bytes(b"foreign provider\n")
+    (tmp_path / "leases.json").write_bytes(b"foreign lease\n")
+    (tmp_path / "connection.json").write_bytes(b"foreign connection\n")
+    (tmp_path / "claims.json").write_bytes(b"foreign claim\n")
+    monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(path))
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(bridge))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.delenv("AGENT_BRIDGE_PROVIDERS_DIR", raising=False)
+    monkeypatch.setattr(plugin_config, "discover_plugin_fragments", lambda **_: [])
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("configuration admission must not invoke an operational child")
+
+    monkeypatch.setattr(cli.subprocess, "run", forbidden)
+    monkeypatch.setattr(cli.subprocess, "Popen", forbidden)
+    before = {
+        entry.relative_to(tmp_path): (entry.read_bytes(), entry.stat().st_mtime_ns)
+        for entry in tmp_path.rglob("*") if entry.is_file()
+    }
+    assert cli.main([command]) == expected
+    if expected == 0:
+        first = {
+            entry.relative_to(tmp_path): (entry.read_bytes(), entry.stat().st_mtime_ns)
+            for entry in tmp_path.rglob("*") if entry.is_file()
+        }
+        assert cli.main([command]) == 0
+        assert {
+            entry.relative_to(tmp_path): (entry.read_bytes(), entry.stat().st_mtime_ns)
+            for entry in tmp_path.rglob("*") if entry.is_file()
+        } == first
+    after = {
+        entry.relative_to(tmp_path): (entry.read_bytes(), entry.stat().st_mtime_ns)
+        for entry in tmp_path.rglob("*") if entry.is_file()
+    }
+    if command == "__source-setup" and expected == 0:
+        from agent_containers.application_provider import MANIFEST_NAME
+
+        assert (providers / MANIFEST_NAME).is_file()
+        del after[(providers / MANIFEST_NAME).relative_to(tmp_path)]
+    assert after == before
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert bool(captured.err) == bool(expected)
+
+
 def test_valid_empty_configuration_is_explicit(capsys):
     result = evaluate(ContainersConfig(), [], [])
 

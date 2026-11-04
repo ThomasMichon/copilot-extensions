@@ -132,6 +132,8 @@ def contract(monkeypatch: pytest.MonkeyPatch, capsys: Any) -> NamespaceContract:
         "plugin_config": ["add_subparsers"],
     }.items():
         module(f"{provider}.{child}", **dict.fromkeys(names, lambda parser: None))
+    module(f"{provider}.application_provider",
+           add_install_parsers=lambda parser, **_kwargs: None)
     cli = load(provider, "__main__", "agent-containers")
 
     common = load(bridge, "agent_registry_common", "agent-bridge")

@@ -1,0 +1,9 @@
+{
+  "comment": "Register the installed application as a separate plain Bridge provider with ordinary registry-root admission, complete peer JSON classification, explicit I/O refusal and preserved namespace ownership",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}
