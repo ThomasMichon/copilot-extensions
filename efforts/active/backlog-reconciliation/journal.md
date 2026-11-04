@@ -3,6 +3,10 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-04 - Five qualification/cache contracts, fifteen comparisons and one independently verified finite expectation correction](<journal/2026/11.04 qualification-cache-contracts.md>)
+
+- [2026-11-04 - Five native-supervisor contracts, fifteen comparisons and two actual whole-body tracking folds](<journal/2026/11.04 supervisor-reconciliation-contracts.md>)
+
 - [2026-11-04 - Five attention/history contracts, fifteen comparisons and eight whole home/prior-art distinctions](<journal/2026/11.04 attention-history-contracts.md>)
 
 - [2026-11-04 - Seven native timeout/lifetime contracts, sixteen comparisons, five verified tracking folds and retained completion symptom](<journal/2026/11.04 native-timeout-contracts.md>)
