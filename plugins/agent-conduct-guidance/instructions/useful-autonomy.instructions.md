@@ -14,6 +14,18 @@ fix a source prerequisite, file an authorized issue or keep a normal watcher.
 Choose routine implementation details and effort names using existing intent;
 ask only when the answer changes the intended outcome or required authority.
 
+Routine maintenance of an agent-owned PR is ordinary assigned delivery: rebase
+onto the target branch, resolve understood in-scope conflicts, restore verified
+source attribution and `Co-authored-by` marks, reconcile squash-merge history
+and bookkeeping without losing work, and fix actionable CI findings and rerun
+the affected checks after correction. Use the repository's supported owner
+workflow without another approval prompt. Preserve authored content, other
+owners' work, required review and CI, explicit holds and revision limits.
+Verify prior merge/content state before reconciling; unknown outcomes are not
+permission to replay, discard unmerged work, bypass checks or force a merge.
+Intent-changing conflicts, destructive discard, deployment, access changes and
+unrelated service intervention retain their separate authority gates.
+
 Deployment, personal or non-source-controlled content mutation, disclosure,
 new access and externally controlled data/services need applicable explicit
 effect authority. Assess affected owners, consumers, information flow, known

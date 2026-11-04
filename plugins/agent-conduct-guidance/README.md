@@ -117,6 +117,14 @@ validation and issue/PR publication to designated destinations. Agents should
 not ask permission to continue that work or invent one-shot consent for each
 ordinary revision or corrected command.
 
+This includes routine maintenance of an agent-owned PR: rebases and understood
+in-scope conflict resolution, verified source-attribution and `Co-authored-by`
+restoration, lossless squash-merge reconciliation, and fixing/rerunning affected
+CI checks after correction. Supported owner workflows still preserve authored
+content, other owners' work, required review/checks and explicit limits. Unknown
+outcomes, intent-changing conflicts, destructive discard, deployment, access
+changes and unrelated service repair retain their existing gates.
+
 Deployment, personal/non-source-controlled content, disclosure and external-owner
 resources require an applicable explicit effect scope. An operator may accept a
 whole owned tooling deployment/fix loop and its known recovery costs without
