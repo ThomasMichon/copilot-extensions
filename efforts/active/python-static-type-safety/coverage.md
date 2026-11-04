@@ -8,12 +8,12 @@ not a second checker configuration.
 ## Snapshot and counting rules
 
 Snapshot: **2026-11-03**, merged Dev policy
-`628738bf021f2bcbadd8e1e06bd940a398843997`, reconciled with
+`b8ce3c01bc36dfe1dcdccaf5318bd4ab0ca3f5fd`, reconciled with
 `python tools/typecheck.py --inventory --json`.
 
-- **38 / 68 checker projects (55.9%)** have merged strict admission.
-- **351 / 7,816 physical Python files (4.5%)** belong to those strict scopes.
-- **30 projects remain pending; none are basic.**
+- **39 / 68 checker projects (57.4%)** have merged strict admission.
+- **377 / 7,816 physical Python files (4.8%)** belong to those strict scopes.
+- **29 projects remain pending; none are basic.**
 - All 7,816 tracked physical Python paths are classified. Classification,
   annotations, passing consumer tests and a prepared implementation do not
   count as strict enforcement.
@@ -40,6 +40,9 @@ Snapshot: **2026-11-03**, merged Dev policy
   both targets, actual Python 3.10 native/installed-copy qualification and
   fresh exact-input source CI. The latest refresh adds ten pending files:
   five in Dispatch and five in repository tools.
+- SSH service's complete 26-file scope is included after #10348 merged with
+  both targets, actual Python 3.10 Linux/Windows native qualification and
+  fresh exact-input source CI. Its plugin and consumer copies remain pending.
 
 Project percentages are not code-volume or runtime-test percentages. Small
 shared-library projects and large plugins have very different sizes. Physical
@@ -51,9 +54,9 @@ owned files; the manifest remains authoritative for their exact boundaries.
 |------|-----------------:|-----------------------:|----------------------:|------------------------------:|
 | Shared libraries | 37 | 30 | 726 | 282 |
 | Plugins | 20 | 3 | 5,467 | 20 |
-| Services and managers | 7 | 3 | 946 | 42 |
+| Services and managers | 7 | 4 | 946 | 68 |
 | Tools and support | 4 | 2 | 677 | 7 |
-| **Total** | **68** | **38** | **7,816** | **351** |
+| **Total** | **68** | **39** | **7,816** | **377** |
 
 **Locked** means the complete declared project scope is admitted to strict
 MyPy on both declared analysis targets through a merged, reviewed change and
@@ -148,7 +151,7 @@ cross-cutting qualification gate below.
 | `service-dispatch` | 6 | **Locked** | #10184 / merged #10189; both targets, complete unchanged source and native fixture qualification |
 | `service-index` | 27 | **Locked** | #10206 / merged #10327; both targets, Python 3.10 native/copy qualification and exact-input CI |
 | `service-pr` | 9 | **Locked** | #10204 / merged #10332; both targets, Python 3.10 native/installed-copy qualification and exact-input CI |
-| `service-ssh` | 26 | Pending | Transport/service/native boundaries and tests |
+| `service-ssh` | 26 | **Locked** | #10211 / merged #10348; both targets, Python 3.10 Linux/Windows native qualification and exact-input CI |
 | `worktree-manager` | 632 | Pending | Model/picker/control/entrypoint subsystems and fixtures |
 
 ## Tools and support
