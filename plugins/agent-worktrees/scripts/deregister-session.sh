@@ -1,32 +1,38 @@
 #!/usr/bin/env bash
-# Mark a Copilot session as ended on the current worktree.
-# Called from hooks.json on sessionEnd.
-
 set -euo pipefail
 
-_LOG="${WORKTREE_SETUP_LOG:-/dev/null}"
-_log() { printf '[%s] [%s] deregister-session: %s\n' "$(date '+%H:%M:%S')" "$1" "$2" >> "$_LOG" 2>/dev/null || true; }
-
-# The stdin payload is authoritative for session id/cwd. Environment values are
-# compatibility hints when the hook exports them.
-wt_id="${WORKTREE_ID:-}"
-
-_awresolve="$HOME/.agent-worktrees/bin/resolve-runtime.sh"
-[ -f "$_awresolve" ] && . "$_awresolve"
-PYTHON="${AW_PY:-}"
-if [[ ! -x "$PYTHON" ]]; then
-    _log SKIP "venv python not found"
+unavailable() {
+    printf '%s\n' '[agent-worktrees] SessionEnd client unavailable; closure is unconfirmed.' >&2
     exit 0
+}
+scripts="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || unavailable
+runtime_root="$HOME/.agent-worktrees"
+if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
+    owner="${AGENT_WORKTREES_PAYLOAD_ROOT:-${COPILOT_PLUGIN_ROOT:-${scripts%/*}}}"
+    durable_home="$COPILOT_EXTENSIONS_CONTEXT"
+    for _part in 1 2 3 4 5; do durable_home="$(dirname -- "$durable_home")"; done
+    validation="$(bash "$scripts/installation-context/installation-context.sh" validate \
+        --context "$COPILOT_EXTENSIONS_CONTEXT" --durable-home "$durable_home" \
+        --expected-plugin-id agent-worktrees --expected-payload-root "$owner")" || unavailable
+    runtime_root="$(LC_ALL=C awk -f "$scripts/installation-context/json-query.awk" \
+        -v mode=get -v query_path=pluginRoot <<<"$validation")" || unavailable
+    [[ "$runtime_root" == /* ]] || unavailable
 fi
-
-args=(-m agent_worktrees deregister-session --stdin)
-[[ -n "$wt_id" ]] && args+=(--worktree-id "$wt_id")
-
-export PYTHONPATH=""  # package is installed in the venv (no lib/ shadow)
-if PYTHONPATH="" "$PYTHON" "${args[@]}" 2>/dev/null; then
-    _log OK "recorded payload session end on wt=${wt_id:-<resolved>}"
-else
-    _log WARN "deregister-session failed (exit $?) for payload session wt=${wt_id:-<resolved>}"
+[[ -f "$scripts/resolve-runtime.sh" && -f "$scripts/hook_client.py" ]] || unavailable
+AGENT_RT_ROOT="$runtime_root"
+AGENT_RT_RESOLVE_TRACE_MODE=read-only
+. "$scripts/resolve-runtime.sh"
+[[ -x "${AW_PY:-}" ]] || unavailable
+cache="$runtime_root/cache/python/unsealed-session-end-$$-$RANDOM"
+if command -v cygpath >/dev/null 2>&1; then
+    cache="$(cygpath -aw "$cache")"
 fi
-
+selected_cache="$("$AW_PY" -I -S -B -X utf8 -X "pycache_prefix=$cache" -c '
+import runpy,sys
+from pathlib import Path
+helper = runpy.run_path(sys.argv[1])
+print(helper["python_cache_arguments"](Path(sys.executable))[1].split("=", 1)[1])
+' "$scripts/hook_runtime.py")" || unavailable
+[[ -n "$selected_cache" ]] || unavailable
+PYTHONPATH="" "$AW_PY" -I -X utf8 -X "pycache_prefix=$selected_cache" "$scripts/hook_client.py" sessionEnd || unavailable
 exit 0

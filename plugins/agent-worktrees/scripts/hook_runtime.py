@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import importlib.util
 import math
 import os
 import re
@@ -11,8 +12,10 @@ import struct
 import sys
 import tempfile
 import time
+import uuid
 from contextlib import contextmanager
 from collections.abc import Callable
+from functools import cache
 from pathlib import Path
 
 
@@ -205,23 +208,31 @@ def resident_started(runtime: Path, launch_key: str) -> bool:
     )
 
 
-def complete_runtime_python(runtime: Path, version: str) -> Path | None:
-    if not version or "\\" in version or "/" in version:
-        return None
-    slot = runtime / "versions" / version
+def _load_runtime_file(path: Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Runtime helper unavailable: {path.name}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    previous = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
     try:
-        marker = json.loads(
-            (slot / ".install-complete.json").read_text(encoding="utf-8")
-        )
-    except (OSError, UnicodeError, ValueError, TypeError):
-        return None
-    if not isinstance(marker, dict) or marker.get("version") != version:
-        return None
-    for relative in (Path("Scripts") / "python.exe", Path("bin") / "python"):
-        executable = slot / relative
-        if executable.is_file():
-            return executable
-    return None
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = previous
+    return module
+
+
+@cache
+def _versioned_runtime():
+    return _load_runtime_file(
+        Path(__file__).with_name("versioned_runtime.py"), "_hook_versioned_runtime",
+    )
+
+
+def complete_runtime_python(runtime: Path, version: str) -> Path | None:
+    helper = _versioned_runtime()
+    return helper.slot_python(runtime, version) if helper.is_complete(runtime, version) else None
 
 
 def version_key(version: str) -> tuple:
@@ -233,27 +244,60 @@ def version_key(version: str) -> tuple:
 
 
 def runtime_python(runtime: Path) -> Path | None:
-    for marker_name in ("current-version", "last-known-good"):
-        try:
-            version = (runtime / marker_name).read_text("utf-8").strip()
-        except (OSError, UnicodeError):
-            continue
-        executable = complete_runtime_python(runtime, version)
-        if executable is not None:
-            return executable
-    try:
-        versions = sorted(
-            (path.name for path in (runtime / "versions").iterdir() if path.is_dir()),
-            key=version_key,
-            reverse=True,
-        )
-    except OSError:
+    return _versioned_runtime().resolve_python(runtime)
+
+
+def _site_packages(python: Path) -> list[Path]:
+    environment = python.parent.parent
+    return [
+        environment / "Lib" / "site-packages",
+        *sorted((environment / "lib").glob("python*/site-packages")),
+    ]
+
+
+def lifecycle_capabilities(python: Path) -> list[str] | None:
+    """Read the selected provider's packaged declaration, never the payload's."""
+    declarations = [
+        directory / "agent_worktrees" / "_runtime_assets" / "scripts" / "hook-runtime-contract.json"
+        for directory in _site_packages(python)
+    ]
+    present = [path for path in declarations if os.path.lexists(path)]
+    if not present:
         return None
-    for version in versions:
-        executable = complete_runtime_python(runtime, version)
-        if executable is not None:
-            return executable
-    return None
+    if len(present) != 1:
+        return []
+    try:
+        value = json.loads(read_bounded_text(present[0], limit=4096) or "")
+        capabilities = value["capabilities"]
+        if (
+            value.get("schema") != "agent-worktrees.hook-runtime"
+            or type(value.get("version")) is not int or value["version"] != 1
+            or not isinstance(capabilities, list)
+            or any(not isinstance(item, str) for item in capabilities)
+        ):
+            return []
+        return capabilities
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return []
+
+
+def python_cache_arguments(python: Path) -> list[str]:
+    """Use the installed cache owner, with the existing unsealed legacy fallback."""
+    environment = python.parent.parent
+    slot = environment.parent if environment.name == ".venv" else environment
+    root = slot.parent.parent
+    if slot.parent.name != "versions" or not python.is_absolute():
+        raise ValueError("Hook runtime must be selected from a version slot")
+    for directory in _site_packages(python):
+        helper = directory / "agent_procutil" / "python_cache.py"
+        if helper.is_file():
+            return _load_runtime_file(helper, "_hook_python_cache").cache_arguments(
+                root, runtime=python,
+            )
+    prefix = os.path.abspath(root / "cache" / "python" / ("unsealed-" + uuid.uuid4().hex))
+    if os.name == "nt" and not prefix.startswith("\\\\?\\"):
+        prefix = "\\\\?\\UNC\\" + prefix[2:] if prefix.startswith("\\\\") else "\\\\?\\" + prefix
+    return ["-X", "pycache_prefix=" + prefix]
 
 
 def session_launch_key(payload: dict) -> str:

@@ -17,7 +17,8 @@
 # present, resolvable marker) is unchanged: last-known-good is read only when the
 # marker fails.
 #
-# Compatible with PowerShell 5.1+ and pwsh 7+.
+# Application slots contain a physical .venv; historical direct-slot
+# environments remain supported. Compatible with PowerShell 5.1+ and pwsh 7+.
 param([ValidateSet('normal', 'read-only', 'ready')][string]$TraceMode = 'normal')
 
 $AwPy = $null
@@ -140,9 +141,15 @@ function _Aw-TrySlot([string]$ver) {
   if (-not $ver) { return $null }
   $slot = Join-Path $_awr ("versions\$ver")
   if (-not (_Aw-MarkerValid $slot $ver)) { return $null }
-  foreach ($sub in @('Scripts\python.exe', 'bin\python')) {
-    $p = Join-Path $slot $sub
-    if (Test-Path -LiteralPath $p) { return $p }
+  $nested = Get-Item -LiteralPath (Join-Path $slot '.venv') -Force -ErrorAction SilentlyContinue
+  if ($nested -and ($nested.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+    return $null
+  }
+  foreach ($environment in @((Join-Path $slot '.venv'), $slot)) {
+    foreach ($sub in @('Scripts\python.exe', 'bin\python')) {
+      $p = Join-Path $environment $sub
+      if (Test-Path -LiteralPath $p -PathType Leaf) { return $p }
+    }
   }
   return $null
 }

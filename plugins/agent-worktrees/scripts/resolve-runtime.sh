@@ -18,9 +18,8 @@
 # The hot path (a present, resolvable marker) is unchanged: last-known-good is
 # read only when the marker fails.
 #
-# Handles both slot layouts so it also works under git-bash on Windows (the git
-# pre-commit/pre-push shims run there): POSIX slots keep python at bin/python,
-# Windows slots at Scripts/python.exe.
+# Application slots contain a physical .venv; historical direct-slot
+# environments remain supported, including Windows slots under git-bash.
 AW_PY=""
 _aw_trace_buffer=""
 _awr="${AGENT_RT_ROOT:-$HOME/.agent-worktrees}"
@@ -163,8 +162,11 @@ _aw_marker_valid() {
 _aw_try_slot() {
   [ -n "$1" ] || return 1
   _aw_marker_valid "$1" || return 1
-  for _sub in bin/python Scripts/python.exe; do
-    if [ -x "$_awr/versions/$1/$_sub" ]; then AW_PY="$_awr/versions/$1/$_sub"; return 0; fi
+  [ ! -L "$_awr/versions/$1/.venv" ] || return 1
+  for _aw_environment in "$_awr/versions/$1/.venv" "$_awr/versions/$1"; do
+    for _sub in bin/python Scripts/python.exe; do
+      if [ -x "$_aw_environment/$_sub" ]; then AW_PY="$_aw_environment/$_sub"; return 0; fi
+    done
   done
   return 1
 }
@@ -201,7 +203,7 @@ _aw_version_key() {
 # Tier 1: the `current-version` marker (source of truth; atomically written).
 _aw_boot_trace resolver-marker-start resolver current-version
 [ -f "$_awr/current-version" ] && _awv=$(tr -d ' \t\r\n' < "$_awr/current-version" 2>/dev/null)
-[ -n "$_awv" ] && _aw_try_slot "$_awv"
+if [ -n "$_awv" ]; then _aw_try_slot "$_awv" || true; fi
 if [ -n "$AW_PY" ]; then
   _aw_trace_source="current-version"
   _aw_trace_version="$_awv"
@@ -216,7 +218,7 @@ fi
 if [ -z "$AW_PY" ] && [ -f "$_awr/last-known-good" ]; then
   _aw_boot_trace resolver-marker-start resolver last-known-good
   _awlkg=$(tr -d ' \t\r\n' < "$_awr/last-known-good" 2>/dev/null)
-  _aw_try_slot "$_awlkg"
+  _aw_try_slot "$_awlkg" || true
   if [ -n "$AW_PY" ]; then
     _aw_trace_source="last-known-good"
     _aw_trace_version="$_awlkg"
@@ -263,7 +265,7 @@ if [ "${AGENT_RT_RESOLVE_TRACE_MODE:-}" = ready ] &&
     { printf '%s' "$_aw_trace_buffer" >> "$_aw_bt_log_path"; } 2>/dev/null || true
   fi
 fi
-unset _awr _awv _awlkg _sub _slot _aw_source_present _aw_trace_source _aw_trace_version \
+unset _awr _awv _awlkg _sub _slot _aw_environment _aw_source_present _aw_trace_source _aw_trace_version \
   _aw_trace_buffer \
   _aw_bt_raw _aw_bt_plugin _aw_bt_extra _aw_bt_log_path _aw_bt_log_dir \
   _aw_bt_line _aw_bt_iso _aw_phase _aw_now_ms _aw_emitter \

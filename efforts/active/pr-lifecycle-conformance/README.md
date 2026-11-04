@@ -294,7 +294,126 @@ target resolution or a new lifecycle/credential authority.
   Keep ROOT Active and #7051 OPEN; no publication, credentials, runtime or resource
   action is authorized by this checklist.
 
+<!-- backlog-reconciliation:7556:transfer:6818:to:efforts/active/pr-lifecycle-conformance/README.md -->
+
+### Direct finite policy-aware wait-planning acceptance from #6818
+
+Retain the COMPLETE broader repository/provider wait-planning contract directly
+in this EXISTING Active ROOT's Plan, own Validation, actual global Validation
+Plan and continuing Coordination/Journal. This is not an ADO-only gate-observation
+row and does not appoint or replace the actual wait-planner, consumer, provider,
+source, resource or shared-observation owners.
+
+Credit existing PR profiles, latency hints, status/watch classifications and
+central ADO observation/stewardship. Existing providers already expose useful
+build, review and policy evidence; do not describe them as missing CI drivers.
+Reuse existing PR operations and watching owners rather than adding another
+watchdog, lifecycle, policy store or consumer polling program. Separate
+checkout-free coverage is not absorbed into this finite contract.
+
+#### Plan
+
+- [ ] P1: Expose discoverable policy-aware PR wait planning through the existing
+  agent-worktrees / agent-pull-requests status/watch guidance and
+  provider/configuration contracts. Repository/provider configuration can
+  describe expected build/review latency without treating an estimate as a
+  deadline, passing result or merge permission.
+- [ ] P2: Status separates active/running CI, stale evaluations or a superseded
+  source iteration, author-actionable feedback, human-only policy gates and
+  unknown/unavailable evidence. Identify which condition the worker can act on
+  and which requires a human or an explicit ownership transfer. Unknown evidence
+  must remain unknown rather than being classified as success or human-only.
+- [ ] P3: Guidance selects a short bounded shell/foreground wait for near-term
+  work and a proportionate scheduled or existing driver-owned watch for longer
+  waits. An authorized scheduled follow-up is a choice through its existing
+  owner, not timer creation by the read-only calculation.
+- [ ] P4: A worker's publication or green checkpoint does not silently end an
+  objective that requires an actual merge. Remaining stewardship has a named,
+  retained responsible owner and explicit continuation. Any transfer must be
+  explicitly accepted through the existing ownership boundary; suggesting a
+  follow-up or naming a recipient does not itself transfer custody.
+- [ ] P5: Source changes invalidate stale evidence; actual required checks and
+  review policies remain authoritative. Recurring follow-up is an authorized
+  objective/driver choice, not compulsory startup behavior for every session.
+- [ ] P6: Provide the complete five-case synthetic matrix below. Show that the
+  wait plan neither clears a gate nor loses the responsible owner. Keep
+  deployment, timer creation and provider mutations outside a read-only status
+  calculation. No new universal live-forge/native/adopter qualification or
+  completion of every unrelated #7051 phase is a prerequisite for resolving
+  this finite row.
+
+#### Own Validation
+
+- [ ] V1: Demonstrate configurable repository/provider expected build/review
+  latencies and the discoverable wait decision. Verify estimates cannot become
+  deadlines, passing results, review/check waivers or merge permission.
+- [ ] V2: Exercise ALL five synthetic provider cases through the existing
+  contracts, recording classification, proposed wait/follow-up, decisive gate
+  evidence and retained responsible owner:
+  - running CI;
+  - a superseded source iteration with stale evidence invalidated;
+  - human-only approval/presence-style gates;
+  - an unavailable provider with explicit unknown/unavailable evidence;
+  - an actual terminal PR, distinguished from publication, a green checkpoint,
+    consent or an accepted asynchronous completion request.
+  Across this matrix, distinguish author-actionable feedback from external or
+  human-only gates and unknown evidence; never clear a gate by calculating a
+  wait plan.
+- [ ] V3: Verify bounded foreground versus proportionate existing-driver or
+  authorized scheduled follow-up selection without losing stewardship.
+  Continuation names the retained owner; transfer is not reported complete
+  without actual acceptance through the existing ownership boundary. Verify
+  recurring follow-up remains opt-in at the objective/driver level.
+- [ ] V4: Verify source changes invalidate stale evidence and actual review
+  policies/required checks remain decisive. Verify the status calculation is
+  read-only: it performs no timer creation, provider mutation or deployment.
+  Credit existing profiles, latency hints and ADO observation without treating
+  them as proof of the complete broader planner.
+- [ ] V5: BEFORE any administrative supersession of #6818, obtain a NEW normal
+  reviewed ACTUAL merge containing this COMPLETE direct ROOT Plan, own
+  Validation, Continuing Coordination, actual-global-Validation row and dated
+  Journal entry. Then read back the FULL CURRENT ROOT and complete linked
+  history, preserving incumbent checkstates, status, participants, alternatives,
+  owners, claims and holds. Freshly qualify #6818 and #7051, including current
+  OPEN/unlocked eligibility and complete creator/editor/history/comment
+  qualification, and compare their whole current contracts for unchanged
+  compatibility. Perform a separate literal supersession judgment. A proposal,
+  link, old planning merge or partial source delivery is not that judgment.
+  Retain #6818 OPEN if any required condition or custody remains unresolved.
+
+#### Continuing Coordination
+
+- [ ] C1: Continue through this SAME Active ROOT and OPEN #7051 while preserving
+  #6818's broader wait-planning ownership and every actual planner, consumer,
+  provider, source, resource and observation custodian. Central ADO stewardship
+  remains additive, not a replacement owner or complete receiver of this
+  broader contract. Intake supplies no appointment, claim release, custody
+  transfer, effect authority or permission to create timers.
+- [ ] C2: Preserve all existing #7051 phases and inherited acceptance, including
+  the independent #1735/#2060 policy/identity obligations. This finite intake
+  neither fills nor discharges those gaps, and does not require every #7051
+  phase to finish before crediting #6818's finite outcome.
+- [ ] C3: Journal the reviewed intake and full current readback, credit existing
+  profiles/latency hints/ADO observation, retain the exact broader planner and
+  five-case residual, and name the next unfinished bounded item through its
+  existing owner. Keep ROOT Active and #7051 OPEN. Keep #6818 OPEN until V5's
+  separate literal judgment; documentary intake is not implementation
+  completion or authority for runtime, provider, credential or resource work.
+
 ## Validation Plan
+
+- [ ] G3: Resolve EVERY directly retained #6818 original/refined wait-planning
+  Plan, own Validation and Continuing Coordination clause at its finite,
+  read-only tier: configurable estimates without deadline/result/merge
+  authority; running/stale/actionable/human-only/unknown distinctions; bounded
+  foreground versus proportionate existing-driver/authorized-scheduled choice;
+  named retained stewardship or explicitly accepted transfer; source-change
+  invalidation and authoritative checks/review; opt-in recurring follow-up;
+  all five synthetic cases; and no timer/provider/deployment effects.
+  Preserve broader planner ownership, credit existing profiles/latency hints
+  and ADO observation, and apply V5 before administrative supersession.
+  This row neither resolves #7051's independent inherited policy/identity
+  gaps nor makes all its phases prerequisites for this finite acceptance.
 
 - [ ] G2: Resolve EVERY directly retained #4358 original/refined target-repository Plan,
   own Validation and continuing Coordination clause at its original finite tier,
@@ -355,6 +474,25 @@ No live test writes, credential configuration, service lifecycle or deployed
 host changes are authorized by the plan.
 
 ## Journal
+
+### 2026-11-04 - Direct finite wait-planning acceptance from #6818
+
+- Retain the complete broader #6818 contract directly in this existing Active
+  ROOT's Plan, own and actual global Validation, and Continuing Coordination.
+  Product acceptance remains unchecked; documentary intake is not completion.
+- Credit existing profiles, latency hints and central ADO observation.
+  Remaining finite work is discoverable estimate-based wait planning,
+  proportionate follow-up selection, retained stewardship and the complete
+  five-case read-only matrix - not another watchdog or an ADO-only replacement.
+- Preserve all incumbent rows, histories, participants, claims, holds and
+  planner/consumer/provider/source/resource owners. Independent #7051
+  lifecycle and inherited #1735/#2060 policy/identity acceptance remain intact.
+- Next: carry the finite residual through its existing owner's separately
+  admitted bounded lane. Before any administrative supersession, satisfy V5's
+  new reviewed actual merge, full current ROOT/history readback, fresh
+  #6818/#7051 qualification and separate literal judgment. #6818 remains OPEN
+  until then. This intake grants no appointment, custody, timer, provider,
+  deployment or other effect authority.
 
 - [2026-10-24 - Direct retained acceptance from #4358](<journal/2026/10.24 backlog-intake-90.md>)
 
