@@ -5927,6 +5927,12 @@ delivery and credentials; the planner, constructors, launchers and scheduled
 registrations remain real. Missing prerequisite or resident-attribution evidence
 fails acceptance rather than reducing the portfolio.
 
+If baseline preparation reports a Vault activation refusal, the fixture also
+runs the retained payload's read-only activation reader under a bounded native
+owner. Caught payload exceptions and a refused configuration owner's bounded
+stderr become diagnostics without changing the reader, opt-in, original
+failure or settlement requirements.
+
 The Index host role is written as YAML readable by both native and
 dependency-free role resolvers. Preparation explicitly provisions its full
 independent engine through the native installer; ordinary Manager updates
