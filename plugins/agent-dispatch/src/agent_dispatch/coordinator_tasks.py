@@ -410,7 +410,11 @@ def register_task_routes(
             if policy is None:
                 raise HTTPException(status_code=404, detail="no such task")
             return {"exists": True, "native_restart_policy": policy}
-        return _task_with_spawn_dict(queue, _require(queue.get(task_id)))
+        from .task_obligations import read_snapshot
+
+        result = _task_with_spawn_dict(queue, _require(queue.get(task_id)))
+        result["task_obligation"] = read_snapshot(queue, task_id)
+        return result
 
     @app.get("/tasks/{task_id}/result")
     def get_result(task_id: str) -> dict:

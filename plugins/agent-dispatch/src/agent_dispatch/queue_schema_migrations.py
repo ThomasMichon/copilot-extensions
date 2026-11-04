@@ -103,6 +103,10 @@ def run_queue_schema_migrations(conn: sqlite3.Connection, *, now_fn) -> None:
         ")"
     )
     conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_events_transition ON task_events(task_id, id)"
+        " WHERE from_status IS NOT to_status"
+    )
+    conn.execute(
         "CREATE TABLE IF NOT EXISTS queue_migrations ("
         "  name TEXT PRIMARY KEY,"
         "  applied_at REAL NOT NULL"
