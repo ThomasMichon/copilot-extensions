@@ -3,6 +3,7 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-10-30 - Fifteen successive contracts, four proposals and eleven retentions](<journal/2026/10.30 successive-contract-qualification.md>)
 - [2026-10-30 - Fifteen following contracts, six proposals and nine retentions](<journal/2026/10.30 following-contract-qualification.md>)
 - [2026-10-30 - Sixteen frontier contracts, five finite proposals and eleven retentions](<journal/2026/10.30 frontier-contract-qualification.md>)
 - [2026-10-30 - Fifteen further contracts, four proposals and eleven retentions](<journal/2026/10.30 tail-contract-qualification.md>)

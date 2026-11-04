@@ -28,6 +28,16 @@ before declaring the capability delivered.
 
 ## Coordination
 
+The proposed finite #5574 native restart-loop case retains the SAME shared
+implementation, Linux validation and lifecycle/installed-rollout custodians.
+Credit #6148's selected source repair; #6137 attribution and Windows/non-native
+handoffs remain separate. Preserve every incumbent row, #4022/#876 condition
+and actual hold. Complete normal reviewed direct Plan/local AND actual global
+Validation/Coordination/Journal delivery and permitted whole-current
+source/receiver/custody readback precede any separate administrative judgment.
+This proposal grants no restart, native fixture, rollout, reassignment or
+resource release; no generic ACK or unrelated whole-parent gate is added.
+
 The proposed finite #5035 selected-service/temporary-fallback family stays
 with existing installer/service/runtime/Bridge and native custodians through
 this ROOT's consumer-integration and reviewed serial process. Preserve
@@ -386,6 +396,37 @@ credit is not a claim of native service adoption.)_
   drain authority. No TTL kill, foreign adoption, stale-route termination
   or silent privilege change follows from this tracking proposal.
 
+### Proposed finite native restart-loop acceptance from #5574
+
+_(Agent-recommended direct tracking under existing Phase C; all rows unchecked.)_
+
+- [ ] **P5574-1:** Credit #6148's identity-confirmed Linux ownership repair:
+  drain/release and exit42 WITHOUT a competing pre-spawn, using the stable
+  installed-current-complete-slot launcher. Deliberately do NOT add
+  `SuccessExitStatus=42`, which would suppress the chosen restart. Preserve
+  identity-read warning/deferral BEFORE mutation, disabled/masked policy and
+  overrides, and separate Windows/non-native behavior.
+- [ ] **P5574-2:** Qualify the accepted FULL ISOLATED native
+  `Restart=on-failure` cycle: selected complete generation, real MainPID/cgroup
+  and restart/failure accounting remain coherent through intentional
+  continuation and genuine crash, without an untracked or competing child.
+- [ ] **P5574-3:** Keep the real `Restart=no` exit0/42 cgroup-cleanup witness
+  and mocked/source launcher/identity regressions as delivered credit, NOT
+  full-loop proof. Preserve separately authorized installed-rollout acceptance
+  with its actual lifecycle owner; no historical restart storm or #6137
+  disable-requester cause is asserted.
+
+#### Local Validation - #5574
+
+- [ ] **V5574-1:** Through the existing isolated Linux/native validation
+  owner, qualify the actual selected restart policy, exit42/no-pre-spawn,
+  complete-slot resolution, MainPID/cgroup/accounting, and identity-unknown/
+  disabled-policy controls. This tracking amendment runs no service fixture.
+- [ ] **V5574-2:** Record source/mock, real `Restart=no`, full isolated
+  restart-loop and authorized installed-rollout evidence separately. Preserve
+  original finite tiers, Windows/non-native and #6137 separation; no universal
+  every-host or unrelated whole-Singleton prerequisite is introduced.
+
 ## Validation Plan
 
 - [ ] Complete EVERY directly retained #4022 P1-P8, V1-V7 and C1-C4 clause above at its
@@ -503,6 +544,13 @@ credit is not a claim of native service adoption.)_
   containing-release, installed/native and resource gates. Documentary
   intake is not technical completion or an execution/custody grant.
 
+- [ ] **G5574:** Resolve EVERY P5574/local Validation/continuing Coordination
+  clause at its accepted finite Linux native-loop AND authorized installed
+  tier. Credit #6148 and the nonmatching cleanup/source witnesses without
+  reopening delivered work or treating42 as success. Preserve same lifecycle/
+  native custodians, original alternatives, all incumbent gates and holds.
+  Documentary intake is not a native pass, rollout or source/resource release.
+
 ## Proposal
 
 Serial Linux-first delivery, followed by native Windows implementation and
@@ -511,6 +559,16 @@ above are **agent-recommended implementation hardening**, not new operator
 requirements or permission to weaken the existing vision.
 
 ## Journal
+
+### 2026-10-30 - Proposed accepted native restart-loop residual
+
+Added unchecked direct #5574 Plan/local and ACTUAL global Validation with
+continuing same-owner coordination after complete current-contract and fixed
+primary-document research. Credit the selected #6148 exit42/no-pre-spawn
+repair; full isolated restart cycling and authorized installed acceptance
+remain open. No source, native service, rollout, custody or source-disposition
+effect occurred. Normal review, actual complete delivery and full current
+readback remain outstanding.
 
 ### 2026-10-30 - Proposed selected-service and fallback reconciliation
 
