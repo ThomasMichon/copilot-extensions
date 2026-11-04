@@ -17,7 +17,7 @@ from agent_logger.sync.targets import filesystem
 from agent_logger.sync.targets.filesystem import LocalTarget
 from agent_logger.sync import worktree_state_preservation as preservation
 from agent_logger.sync.worktree_state import WorktreeStateError
-from agent_logger.sync.protection import ProtectionSettings
+from agent_logger.sync.protection import ProtectionSettings, RECEIPT_DIR
 from agent_logger.sync.worktree_state_archive import collect_worktree_state
 from .test_worktree_state import IDENTITY, Packet, collect, packet as packet, plan_for
 
@@ -112,6 +112,68 @@ def test_recursive_cleanup_checks_preservation_before_deleting_any_member(packet
     with pytest.raises(OSError, match="worktree-state"):
         filesystem._remove_tree_checked(live)
     assert files(live) == before
+
+
+@pytest.mark.parametrize("operation", ["force", "archive", "tree", "file", "empty", "write"])
+def test_disposal_from_below_a_marked_ancestor_preserves_retained_evidence(
+    packet: Packet, operation: str,
+) -> None:
+    _, live = legacy_collection(packet)
+    member = next((live / "worktree-state").rglob("agenda.sqlite3"))
+    exported = member.parent
+    empty = exported / "retained-empty"
+    empty.mkdir()
+    if operation == "force":
+        exported.chmod(0o500)
+    before = files(live)
+    paths_before = {path.relative_to(live) for path in live.rglob("*")}
+    mode_before = stat.S_IMODE(exported.stat().st_mode)
+    if operation == "force":
+        assert not sessions.force_rmtree(exported)
+    else:
+        with pytest.raises(OSError, match="worktree-state"):
+            if operation == "archive":
+                sessions.archive_session(exported, live.parents[3] / "ordinary-archive")
+            elif operation == "tree":
+                filesystem._remove_tree_checked(exported)
+            elif operation == "file":
+                filesystem._remove_path_checked(member)
+            elif operation == "write":
+                filesystem._write_bytes_fsync(exported / "unexpected.json", b"{}")
+            else:
+                filesystem._rmdir_replace_target(empty)
+    assert files(live) == before
+    assert {path.relative_to(live) for path in live.rglob("*")} == paths_before
+    assert stat.S_IMODE(exported.stat().st_mode) == mode_before
+
+
+def test_process_logs_cannot_enter_a_marked_log_destination(packet: Packet) -> None:
+    target, live = legacy_collection(packet)
+    logs = (live / "worktree-state").rename(target._root() / "worker/logs")
+    before = files(logs)
+    paths_before = {path.relative_to(logs) for path in logs.rglob("*")}
+    source = live.parents[3] / "producer-logs"
+    source.mkdir(mode=0o700)
+    (source / "process-101-1.log").write_bytes(b"synthetic producer log\n")
+    result = target.push_process_logs(source, "worker")
+    assert not result.ok and "worktree-state" in result.detail
+    assert files(logs) == before
+    assert {path.relative_to(logs) for path in logs.rglob("*")} == paths_before
+
+
+def test_prune_refuses_a_marked_receipt_directory_before_removing_the_session(packet: Packet) -> None:
+    target, live = legacy_collection(packet)
+    receipts = (live / "worktree-state").rename(target._root() / "worker" / RECEIPT_DIR)
+    (receipts / "old.json").write_bytes(b"retained collection metadata")
+    old = time.time() - 20 * 86400
+    for path in (live, *live.rglob("*")):
+        os.utime(path, (old, old))
+    before = files(target._root())
+    paths_before = set(target._root().rglob("*"))
+    with pytest.raises(OSError, match="worktree-state"):
+        target.prune("worker", 1)
+    assert files(target._root()) == before
+    assert set(target._root().rglob("*")) == paths_before
 
 
 def test_filtered_session_replacement_does_not_move_or_erase_nested_collections(packet: Packet) -> None:

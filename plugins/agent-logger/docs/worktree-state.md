@@ -117,12 +117,17 @@ or erase a marked collection hidden below a session or replacement candidate.
 Marker presence, including partial or unsupported metadata, blocks those
 operations before recursive deletion or permission changes. A verified ordinary
 session archive does not authorize removal of a nested worktree collection.
+Candidates beneath a marked ancestor are also protected, including direct file
+replacement/removal and empty-directory cleanup; scanning only their descendants
+would miss the containing collection.
 Session-copy walkers refuse a marked subtree instead of publishing its database
 under a session identity.
 Raw and redacted copies also refuse entering an existing collection before
 creating destination directories, including missing parents below its export;
 the generic session archiver participates in destination namespace admission.
 Renaming a marked directory does not remove its preservation or discovery boundary.
+Process-log publication checks its actual `logs/` destination, not only the
+machine root, before entering or creating that directory.
 Recursive removal does not change permissions through external symbolic links.
 
 Preservation checks read directory metadata only, never ledger contents. Their

@@ -110,7 +110,7 @@ def test_process_log_destination_payload_operations_are_directory_bound(
         directory: PublicationDirectory, *args: object, **kwargs: object,
     ) -> object:
         nonlocal swapped
-        if not swapped:
+        if not swapped and (phase != "stat" or args and args[0] == NAME):
             root.rename(parked)
             root.symlink_to(outside, target_is_directory=True)
             swapped = True

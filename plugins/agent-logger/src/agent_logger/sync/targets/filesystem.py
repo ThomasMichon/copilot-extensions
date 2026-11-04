@@ -21,7 +21,7 @@ import stat
 import time
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path
 from typing import BinaryIO
 
 from agent_logger import sessions
@@ -65,6 +65,7 @@ from agent_logger.sync.provenance import (
 from agent_logger.sync.provenance import (
     windows_extended_path as _windows_extended_path,
 )
+from agent_logger.sync.provenance import validate_relative_path as _validate_relative_path
 from agent_logger.sync.targets import protected_publication, publication_admission
 from agent_logger.sync.targets.base import (
     SESSION_INDEX_NAMES,
@@ -118,6 +119,7 @@ class _SourceChangedDuringCopy(OSError):
 
 def _rmdir_replace_target(path: Path) -> None:
     """Remove an empty directory, clearing Windows read-only if needed."""
+    preservation.refuse_collection_destination(path)
     io_path = _windows_extended_path(path)
     try:
         os.rmdir(io_path)
@@ -136,6 +138,7 @@ def _rmdir_replace_target(path: Path) -> None:
 
 def _unlink_replace_target(path: Path) -> None:
     """Remove a destination before replacement, clearing read-only if needed."""
+    preservation.refuse_collection_destination(path)
     io_path = _windows_extended_path(path)
     try:
         os.unlink(io_path)
@@ -153,6 +156,7 @@ def _unlink_replace_target(path: Path) -> None:
 
 
 def _write_bytes_fsync(path: Path, payload: bytes) -> None:
+    preservation.refuse_collection_destination(path)
     with open(_windows_extended_path(path), "xb") as stream:
         stream.write(payload)
         stream.flush()
@@ -411,6 +415,7 @@ def _copy_process_logs(
             source_identity.st_dev, source_identity.st_ino,
         ) != (opened.st_dev, opened.st_ino):
             raise _SourceChangedDuringCopy("process-log source root changed before opening")
+        preservation.refuse_collection_ancestors(dest)
         destination = stack.enter_context(publication_directory(dest))
         return _copy_process_logs_pinned(directory, destination, opened)
 
@@ -761,25 +766,6 @@ def _existing_real_directory_identity(path: Path) -> tuple[Path, os.stat_result]
     return absolute, identity
 
 
-def _validate_relative_path(relative: Path) -> None:
-    """Reject POSIX and Windows absolute/rooted/traversing relative paths."""
-    windows = PureWindowsPath(str(relative))
-    posix = PurePosixPath(str(relative))
-    if (
-        relative.is_absolute()
-        or relative.anchor
-        or relative.drive
-        or windows.anchor
-        or windows.drive
-        or windows.root
-        or posix.is_absolute()
-        or ".." in relative.parts
-        or ".." in windows.parts
-        or ".." in posix.parts
-    ):
-        raise OSError(f"unsafe destination path: {relative}")
-
-
 def _ensure_relative_directory(root: Path, relative: Path, *, durable: bool = False) -> Path:
     """Create a descendant directory chain without accepting symlinked leaves."""
     _validate_relative_path(relative)
@@ -812,6 +798,7 @@ def _ensure_relative_directory(root: Path, relative: Path, *, durable: bool = Fa
 def _existing_relative_directory(root: Path, relative: Path) -> Path | None:
     """Resolve an existing descendant directory without following symlink leaves."""
     _validate_relative_path(relative)
+    preservation.refuse_collection_ancestors(root / relative)
     safe_root = _existing_real_directory(root)
     if safe_root is None:
         return None

@@ -24,6 +24,8 @@ Raw and redacted copy refusals compare directory membership as well as file
 bytes, and the real efforts owner verifies the retained export afterward.
 Renamed markers remain protected, and deterministic interleavings qualify both
 claim-first and ordinary-publication-first namespace locking.
+Disposal beginning below a retained marker preserves bytes, directories and
+permissions; a marked `logs/` destination refuses ordinary process-log writes.
 
 The opt-in Manager `tests/test_companion_visual.py` packet compares actual
 Textual timeline renders against synthetic live-following and history-browsing

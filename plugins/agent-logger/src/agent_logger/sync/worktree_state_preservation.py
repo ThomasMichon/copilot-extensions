@@ -69,6 +69,7 @@ def require_disposable_tree(root: Path) -> None:
     The disposal owner must exclude concurrent writers. Marker absence is not
     deletion authority or a recursive lease.
     """
+    refuse_collection_ancestors(root)
     try:
         info = root.lstat()
     except FileNotFoundError:
