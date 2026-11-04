@@ -1923,30 +1923,20 @@ Skip with `--no-update` or `WORKTREE_NO_UPDATE=1`. The Picker reports
 **Updates paused** for that launch and suppresses the refresh action, regardless
 of a shared staged-update status written by another launch.
 
-### Optional Machine Settings Reconciliation
+### Session Preferences and Machine Settings
 
-Before a fresh Copilot process starts, the launch wrapper opportunistically
-resolves the public `agent-machines` command. When available, it runs:
+Launching or resuming a worktree does not run `agent-machines restore` or
+rewrite global Copilot settings. This applies to the pre-exec wrappers, custom
+launch commands, normalized setup scripts, direct agent-bridge setup entry, and
+recovery. Model, effort, and context preferences are applied only to the session
+through CLI arguments; explicit arguments retain precedence over read-only
+persisted defaults. Launch-time folder pretrust remains supported.
 
-```text
-agent-machines restore --all-projects --only copilot.settings --apply --json
-```
-
-This restores the machine-wide union of adopted Copilot settings immediately
-before Copilot reads them, including model, effort, and context preferences
-that the CLI may periodically clear. The sibling plugin remains optional:
-launch proceeds unchanged when `agent-machines` is not installed. A present
-provider that fails aborts launch rather than silently starting with drifted
-settings.
-
-Every resolved command is prefixed by an installed pre-exec wrapper, so
-explicit templates, legacy setup scripts, normalized launches, interactive
-sessions, and direct agent-bridge launches share the same seam. The normalized
-default setup also sources the helper for callers that invoke it directly. A
-process-scoped marker inherited by child processes prevents duplicate
-reconciliation. Reattaching to an existing mux session does not execute the
-command and therefore does not reconcile. Recovery mode bypasses
-reconciliation so a broken sibling provider cannot lock out repair sessions.
+Explicit machine restore/setup and configured background maintenance retain
+their settings-writing authority. The installed `reconcile-machine-settings.*`
+helpers remain available to explicit callers, but are not part of launch.
+Machines' `sessionStart` bootstrap reconciles runtime readiness, not declared
+machine settings, and remains unchanged.
 
 During an interactive launch the join + apply prints a **status line at each
 waiting step** (joining the background download — the up-to-90s step most

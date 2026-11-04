@@ -13,6 +13,12 @@ record's native mux and session locks. Only that fact gains fresh confirmation;
 Git and other unavailable facts stay unconfirmed, and the resident cache is not
 rewritten. A live or inconclusive native verdict still cannot authorize a cold
 prompt. Ordinary cached reads do not perform this extra probe.
+Bundles withheld by the resident Git observation scope include optional
+`availability: {"status": "pending", "reason": "..."}` metadata distinguishing
+cleanup pending, busy, retiring, and unavailable observations. The metadata
+explains missing or last-known facts; it does not confirm liveness or identify a
+specific worktree as the cause of project-wide cleanup. Consumers of older
+responses without this metadata must still require explicit fact confirmation.
 Forced and ordinary work are separated by the resident's coalescing boundary,
 including callers that use the legacy shared request key. Authoritative native
 liveness requires a successful, well-formed mux listing or a confirmed native

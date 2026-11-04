@@ -31,11 +31,15 @@ def _function(text: str, name: str, *, powershell: bool) -> str:
 
 
 def _bundle(case: str) -> str:
+    if case == "error":
+        return json.dumps({"error": "Required launch payload is missing"})
     return json.dumps({
         "worktree_id": "wt-a",
+        **({"availability": {"status": "pending", "reason": "project cleanup pending"}}
+           if case == "pending" else {}),
         "facts": {"liveness": {
-            "confirmed": case != "unknown",
-            "value": {
+            "confirmed": case not in ("unknown", "pending"),
+            "value": None if case == "pending" else {
                 "active": "False" if case == "malformed" else case in ("mux", "bare"),
                 "mux_live": case == "mux",
                 "bare": case == "bare",
@@ -45,30 +49,36 @@ def _bundle(case: str) -> str:
 
 
 @pytest.mark.skipif(PWSH is None, reason="PowerShell unavailable")
+@pytest.mark.parametrize("pending", [False, True])
 @pytest.mark.parametrize("seeded,case,no_mux", [
     (True, "mux", False), (True, "bare", True),
-    (True, "cold", False), (True, "cold", True),
+    (True, "cold", False), (True, "cold", True), (True, "warning", False),
     (True, "unknown", True), (True, "malformed", True),
+    (True, "pending", False), (True, "error", False),
+    (True, "failed", False), (True, "known", False),
     (False, "bare", False),
 ])
-def test_real_powershell_guard_rejects_live_even_without_mux(tmp_path, seeded, case, no_mux):
+def test_real_powershell_guard_rejects_live_even_without_mux(tmp_path, seeded, case, no_mux, pending):
     text = (BIN / "launch-session.ps1").read_text(encoding="utf-8")
     guard = _function(text, "Assert-AwColdResume", powershell=True)
     boolean = lambda value: "$true" if value else "$false"
     engine = tmp_path / "engine.ps1"
     engine.write_text(
         "if ($args -notcontains '--force-refresh') { exit 99 }\n"
-        f"Write-Output '{_bundle(case)}'\nexit 0\n",
+        + ("[Console]::Error.WriteLine('Nonfatal status warning')\n" if case == "warning" else "")
+        + ("[Console]::Error.WriteLine('Git status timed out'); exit 7\n"
+           if case == "failed" else f"Write-Output '{_bundle(case)}'\nexit 0\n"),
         encoding="utf-8",
     )
     script = tmp_path / "guard.ps1"
     script.write_text(
         "$ErrorActionPreference = 'Stop'\n"
-        f"$plan = [pscustomobject]@{{worktree_id='wt-a'; seed_claimed={boolean(seeded)}; no_mux={boolean(no_mux)}}}\n"
+        f"$plan = [pscustomobject]@{{worktree_id='wt-a'; seed_claimed={boolean(seeded and not pending)}; "
+        f"seed_pending={boolean(seeded and pending)}; no_mux={boolean(no_mux)}}}\n"
         "$CopilotArgs = @()\n"
         f"$VenvPython = '{engine}'\n$script:LaunchProject = 'demo'\n"
         "function Write-SetupLog { param($Message,$Level) }\n"
-        f"{guard}\nAssert-AwColdResume\nWrite-Output 'LAUNCH'\n",
+        f"{guard}\nAssert-AwColdResume {'-LiveSessionKnown' if case == 'known' else ''}\nWrite-Output 'LAUNCH'\n",
         encoding="utf-8",
     )
     proc = subprocess.run(
@@ -76,41 +86,65 @@ def test_real_powershell_guard_rejects_live_even_without_mux(tmp_path, seeded, c
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         timeout=20,
     )
-    rejected = bool(seeded and case != "cold")
+    rejected = bool(seeded and case not in ("cold", "warning"))
     assert proc.returncode == (3 if rejected else 0), proc.stderr
     assert ("LAUNCH" in proc.stdout) is not rejected
     if rejected:
         assert "seed remains staged" in proc.stderr
+        assert "confirmed cold target" not in proc.stderr
+        expected = {
+            "mux": "a live session appeared", "bare": "a live session appeared",
+            "known": "a live session appeared", "error": "Required launch payload is missing",
+            "failed": "Git status timed out", "pending": "project cleanup pending",
+        }.get(case, "Could not verify cold launch target")
+        assert expected in proc.stderr
+    if case == "warning":
+        assert "Nonfatal status warning" in proc.stderr
 
 
 @pytest.mark.skipif(BASH is None, reason="Native POSIX bash unavailable")
+@pytest.mark.parametrize("pending", [False, True])
 @pytest.mark.parametrize("seeded,case", [
-    (1, "mux"), (1, "bare"), (1, "cold"), (1, "unknown"),
-    (1, "malformed"), (0, "bare"),
+    (1, "mux"), (1, "bare"), (1, "cold"), (1, "warning"), (1, "unknown"),
+    (1, "malformed"), (1, "pending"), (1, "error"), (1, "failed"),
+    (1, "known"), (0, "bare"),
 ])
-def test_real_bash_guard_rejects_live_and_uncertain(tmp_path, seeded, case):
+def test_real_bash_guard_rejects_live_and_uncertain(tmp_path, seeded, case, pending):
     text = (BIN / "launch-session.sh").read_text(encoding="utf-8")
     guard = _function(text, "aw_assert_cold_resume", powershell=False)
     script = (
         f"_SEEDED_LAUNCH={seeded}\n"
+        f"_PENDING_NEW_SEED={int(pending)}\n"
         "_SEEDED_WORKTREE_ID=wt-a\nLAUNCH_PROJECT=demo\nPYTHON=aw_test_python\n"
         "setup_log() { :; }\n"
         "aw_test_python() {\n"
         "if [[ \"$1\" == -m ]]; then\n"
         "[[ \"$*\" == *--force-refresh* ]] || return 99\n"
-        f"printf '%s' '{_bundle(case)}'\n"
-        "else\n"
+        + ("echo 'Nonfatal status warning' >&2\n" if case == "warning" else "")
+        + ("echo 'Git status timed out' >&2; return 7\n"
+           if case == "failed" else f"printf '%s' '{_bundle(case)}'\n")
+        + "else\n"
         f"'{sys.executable}' \"$@\"\n"
         "fi\n}\n"
-        f"{guard}\naw_assert_cold_resume\necho LAUNCH\n"
+        f"{guard}\naw_assert_cold_resume {'live-known' if case == 'known' else ''}\necho LAUNCH\n"
     )
     proc = subprocess.run(
         [BASH, "-c", script], capture_output=True, text=True, timeout=20,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
-    rejected = bool(seeded and case != "cold")
+    rejected = bool(seeded and case not in ("cold", "warning"))
     assert proc.returncode == (3 if rejected else 0), proc.stderr
     assert ("LAUNCH" in proc.stdout) is not rejected
+    if rejected:
+        assert "confirmed cold target" not in proc.stderr
+        expected = {
+            "mux": "a live session appeared", "bare": "a live session appeared",
+            "known": "a live session appeared", "error": "Required launch payload is missing",
+            "failed": "Git status timed out", "pending": "project cleanup pending",
+        }.get(case, "Could not verify cold launch target")
+        assert expected in proc.stderr
+    if case == "warning":
+        assert "Nonfatal status warning" in proc.stderr
 
 
 def test_guards_cover_final_join_and_pre_create_without_live_delivery():
