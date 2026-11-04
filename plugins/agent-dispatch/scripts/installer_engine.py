@@ -763,6 +763,7 @@ def _candidate(
         installed = {name for name, _version, _filename, _digest in wheel_inputs.distributions}
         if not selected <= installed or (included - selected) & installed:
             raise ValueError("Inspected wheels differ from the selected local dependency graph")
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
     (root / ".installer-inputs").mkdir(parents=True, exist_ok=True)
     with _source_phase("source-selection", child_timeout, {}) as progress:
         def selected() -> None:

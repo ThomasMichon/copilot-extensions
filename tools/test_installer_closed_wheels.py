@@ -92,6 +92,68 @@ def candidate(engine, root, plugin, wheels, **options):
     )
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Actual single-thread POSIX umask022 child")
+def test_fresh_private_runtime_root_under_standard_posix_umask(tmp_path):
+    """Integration, not eligible-unit CI: no controller umask mutation."""
+    repository = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(repository / "libs/agent-procutil/src"))
+    from agent_procutil.owned_process import run_caller_owned
+    script = r"""
+import os
+os.umask(0o022)
+import site
+site.main()
+import importlib.util,json,pathlib,stat,sys,threading
+from contextlib import contextmanager
+assert threading.active_count()==1
+repository,base=map(pathlib.Path,sys.argv[1:])
+sys.path[:0]=[str(repository/'libs/installer-engine'),str(repository/'libs/versioned-runtime'),
+              str(repository/'fleet-manager/src')]
+import installer_engine as engine
+from fleet_manager.private_state import private_directory
+engine._assert_source_pin=lambda *args:None
+engine._selected_extras=lambda *args:()
+engine._package_roots=lambda path:(path,)
+engine._selected_local_packages=lambda *args:()
+root=base/'fresh-engine'
+class SourceReached(Exception):pass
+@contextmanager
+def phase(*args):
+    assert stat.S_IMODE(root.stat().st_mode)==0o700
+    private_directory(root)
+    raise SourceReached()
+    yield
+engine._source_phase=phase
+try:
+    with engine.numbered_candidate(root,'1.0',plugin=base,uv=pathlib.Path(sys.executable),
+                                   base_python=pathlib.Path(sys.executable),health_module='fixture'):pass
+except SourceReached:pass
+leases=engine.runtime._runtime_component('versioned_runtime_leases')
+for kind in ('construction','retention'):
+    path=base/kind
+    with leases._kernel_lease(path,'fixture',kind=kind,shared=kind=='retention',timeout=1):
+        private_directory(path)
+        assert stat.S_IMODE(path.stat().st_mode)==0o700
+existing=base/'existing'
+existing.mkdir(mode=0o755)
+before=existing.stat()
+with leases._kernel_lease(existing,'fixture',kind='construction',shared=False,timeout=1):pass
+try:private_directory(existing)
+except ValueError:pass
+else:raise AssertionError('existing broad root was accepted')
+after=existing.stat()
+assert (before.st_ino,before.st_uid,before.st_mode)==(after.st_ino,after.st_uid,after.st_mode)
+assert threading.active_count()==1
+print(json.dumps({'actual_POSIX_umask':'022','fresh_root_modes':'0700',
+                  'existing0755_refused_unchanged':True,'single_threaded_child':True}))
+"""
+    response = run_caller_owned(
+        [sys.executable, "-I", "-S", "-B", "-c", script, str(repository), str(tmp_path)],
+        cwd=repository, timeout=20, max_stdout_bytes=65536, max_stderr_bytes=65536)
+    assert response.returncode == 0, response.stderr
+    assert json.loads(response.stdout)["existing0755_refused_unchanged"]
+
+
 def snapshot(tmp_path, *, closure=False, version="1.0", transport="loose"):
     path = tmp_path / "demo_pkg-1.0-py3-none-any.whl"
     if not path.exists():

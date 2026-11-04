@@ -112,9 +112,11 @@ authentication and the strict socket-parent checks remain unchanged. Only the
 listener's own socket inode and an empty identity-matching directory are
 removed; unexpected entries/replacements are preserved with a cleanup refusal.
 An overlong configured temporary base still reports a socket-path limit.
-POSIX first provisioning also requires a private runtime root: the installed
-receiver never repairs a pre-existing broadly accessible root. Data/control
-roots and private runtime-root provisioning are separate requirements.
+Canonical first provisioning requests the runtime root itself as `0700` before
+installer-input or lease descendants can implicitly create it under the umask.
+Existing modes/ownership are never repaired; the installed receiver still
+refuses a broadly accessible runtime root. Data/control roots retain their
+separate strict private-creation and admission requirements.
 Activation retains its disk worker through cancellation before removing native
 registration. Withdrawal marks the lifecycle stopped, and the original writer
 guard checks stopped/closed state at both claim and precommit. A retired incoming

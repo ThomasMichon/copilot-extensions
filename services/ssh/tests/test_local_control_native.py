@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import json
 import secrets
+import stat
+import tempfile
 import os
 from pathlib import Path
 import sqlite3
@@ -498,3 +501,58 @@ def test_native_long_data_root_is_not_a_CreateProcess_current_directory(
         if process.poll() is None:
             process.terminate()
         process.wait(timeout=6)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Actual Linux SO_PEERPIDFD/private Unix IPC")
+@pytest.mark.asyncio
+async def test_linux_short_control_socket_keeps_actual_peer_and_private_directory(
+    config: ServiceConfig, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+    created: list[Path] = []
+    def temporary(*, prefix: str) -> str:
+        path = Path(tempfile.mkdtemp(prefix=prefix, dir=tmp_path_factory.getbasetemp()))
+        assert stat.S_IMODE(path.stat().st_mode) == 0o700
+        created.append(path)
+        return str(path)
+    monkeypatch.setattr(local_control, "mkdtemp", temporary)
+    slot = tmp_path / "runtime/versions/fixture"
+    slot.mkdir(parents=True)
+    binding = SimpleNamespace(root=slot.parent.parent, slot=slot,
+                              identity=SimpleNamespace(document=lambda: {"fixture": "service-source"}))
+    control = local_control.LocalControl(binding, config, selected=lambda _: None)
+    await control.prepare(stop=asyncio.Event(), lease=cast(Any, None))
+    try:
+        result = await asyncio.to_thread(request, config, control.record_data, "prepare")
+        assert result["prepared"]
+        assert (result["pid"], result["process_start_time"]) == (control.peer.pid, control.peer.start_time)
+        assert created and all(not path.exists() for path in created)
+    finally:
+        await control.close()
+    assert control.thread is not None and not control.thread.is_alive()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Actual Linux Unix socket custody")
+def test_linux_socket_cleanup_preserves_unexpected_entry(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created: list[Path] = []
+    def temporary(*, prefix: str) -> str:
+        path = Path(tempfile.mkdtemp(prefix=prefix, dir=tmp_path_factory.getbasetemp()))
+        assert stat.S_IMODE(path.stat().st_mode) == 0o700
+        created.append(path)
+        return str(path)
+    monkeypatch.setattr(local_control, "mkdtemp", temporary)
+    try:
+        with pytest.raises(OSError):
+            with local_control._request_listener("fixture") as (_listener, address):
+                socket_path = Path(address)
+                assert stat.S_ISSOCK(socket_path.lstat().st_mode)
+                assert stat.S_IMODE(socket_path.lstat().st_mode) == 0o600
+                (socket_path.parent / "unexpected").write_bytes(b"retained")
+        assert (created[0] / "unexpected").read_bytes() == b"retained"
+    finally:
+        for path in created:
+            (path / "unexpected").unlink(missing_ok=True)
+            path.rmdir()

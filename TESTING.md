@@ -488,6 +488,26 @@ is replanned through the ordinary next pass; genuinely stale external actions
 still refuse. Runtime package normalization is checked against the canonical
 source/repair identity function, preserving profile and other package qualifiers.
 
+Fresh application-root privacy is covered by the six explicitly admitted
+`test_windows_lease_acl.py` root-creation cases in the ordinary promotion-unit
+packet. Portable controls observe both canonical call boundaries; on POSIX the
+same packet takes actual construction/retention kernel leases, checks `0700`
+and the strict SSH private-state owner, and refuses an unchanged existing
+`0755` root. These tests never change the controller's umask; the actual Linux
+mask is recorded from `/proc/self/status` (an observed `0022` in Linux CI is
+evidence, not a local Windows projection or an assumed result).
+
+`tools/test_installer_closed_wheels.py -k standard_posix_umask` is a separate
+integration case: a bounded caller-owned, single-threaded child sets its own
+umask to `022` before imports/threads and exercises the actual first-touch
+filesystem and kernel-lease paths. It is not admitted as an eligible unit,
+because that packet deliberately forbids child-process effects. Likewise the
+Linux-only `services/ssh/tests/test_local_control_native.py -k linux_` cases use
+actual private Unix sockets and native peer-pidfd authentication and preserve
+unexpected directory entries. They require the existing standalone/native lane,
+not the unit packet; Windows skips are not native Linux proof. No classification
+exemption or unit budget is widened to run these integration controls.
+
 The manual `windows-coverage-rotation.yml` selector `post_tool_fallback=true`
 runs only Worktrees' post-tool shell, status/bind reminder, late-guidance and
 guard-publication consumers plus ordinary pre/post-hook idle-retention and
