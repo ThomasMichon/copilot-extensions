@@ -456,6 +456,38 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                         # attempt has.
                         conversation_retired = bool(prior["conversation_retired"])
                     worktree_ownership = "reused"
+            declined_worktree = carried_worktree or (prior["worktree"] if prior is not None else None)
+            declined = declined_worktree is not None and conn.execute(
+                "SELECT 1 FROM pool_worker_decline_closeouts c"
+                " JOIN spawn_reservations s ON s.key=c.reservation_key"
+                " WHERE s.creation_key=? AND s.worktree=? LIMIT 1", (creation_key, declined_worktree),
+            ).fetchone()
+            if declined:
+                if task.target_worktree is not None or f"worktree:{declined_worktree}" in task.requires:
+                    raise TaskError("declined finalized workspace remains an unsatisfiable explicit target")
+                if allocation_revision is not None:
+                    raise TaskError("declined finalized workspace cannot reuse a pinned allocation revision")
+                if revision >= 2**63 - 1 or any(
+                    row["state"] in SpawnState.ACTIVE or row["native_release_pending"]
+                    for row in (allocation_rows or rows)
+                    if row["allocation_revision"] == revision
+                ):
+                    raise TaskError("declined allocation revision is not qualified for replacement")
+                if task.affinity.get("worktree") == declined_worktree:
+                    task = replace(task, affinity={
+                        name: value for name, value in task.affinity.items() if name != "worktree"
+                    })
+                    conn.execute(
+                        "UPDATE tasks SET affinity=? WHERE id=?", (json.dumps(task.affinity), task_id),
+                    )
+                revision += 1
+                creation_key = creation_prefix + str(revision)
+                new_allocation = True
+                carried_worktree = carried_session = None
+                carried_path = carried_host = carried_driver = carried_execution_machine = None
+                worktree_ownership = None
+                conversation_retired = False
+                allocation_reservation_key = key
             if carried_worktree is not None:
                 cleanup_claims = conn.execute(
                     "SELECT key, task_id, creation_key FROM spawn_reservations "
@@ -517,31 +549,6 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                     allocation_reservation_key = prior["allocation_reservation_key"] or prior["key"]
                 else:
                     carried_execution_machine = None
-            declined_worktree = carried_worktree or (prior["worktree"] if prior is not None else None)
-            declined = declined_worktree is not None and conn.execute(
-                "SELECT 1 FROM pool_worker_decline_closeouts c"
-                " JOIN spawn_reservations s ON s.key=c.reservation_key"
-                " WHERE s.creation_key=? AND s.worktree=? LIMIT 1", (creation_key, declined_worktree),
-            ).fetchone()
-            if declined:
-                if task.target_worktree is not None or f"worktree:{declined_worktree}" in task.requires:
-                    raise TaskError("declined finalized workspace remains an unsatisfiable explicit target")
-                if allocation_revision is not None:
-                    raise TaskError("declined finalized workspace cannot reuse a pinned allocation revision")
-                if revision >= 2**63 - 1 or any(
-                    row["state"] in SpawnState.ACTIVE or row["native_release_pending"]
-                    for row in (allocation_rows or rows)
-                    if row["allocation_revision"] == revision
-                ):
-                    raise TaskError("declined allocation revision is not qualified for replacement")
-                revision += 1
-                creation_key = creation_prefix + str(revision)
-                carried_worktree = carried_session = None
-                carried_path = carried_host = carried_driver = carried_execution_machine = None
-                worktree_ownership = None
-                conversation_retired = False
-                agent_info = None
-                allocation_reservation_key = key
             if pool_catalog_revision is not None:
                 resolved_task = replace(
                     task, target_worktree=carried_worktree,

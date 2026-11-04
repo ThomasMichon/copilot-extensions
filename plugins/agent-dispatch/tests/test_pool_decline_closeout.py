@@ -215,8 +215,13 @@ def test_retired_decline_can_select_another_pool_without_reusing_finalized_works
             )
         value["allocation"]["driver"] = original_driver
     original = q.get_reservation(binding["reservation_key"])
+    with q._connect() as conn:
+        conn.execute(
+            "UPDATE tasks SET affinity=? WHERE id=?",
+            (json.dumps({"worktree": "worktree", "machine": "host-a", "topic": "preserved"}), task_id),
+        )
     q.close_pool_decline(task_id, **binding)
-    q.retire_spawn(binding["reservation_key"], exact_absence=True, conclusion_state="skipped")
+    q.retire_spawn(binding["reservation_key"], exact_absence=True)
     q.publish_pool_catalog_scope(
         "host-a", "linux", "publisher-0", generation=1, expected_revision=1,
         registration_revision=q.pool_registration_revision(), expected_cohort_revision=1,
@@ -235,6 +240,8 @@ def test_retired_decline_can_select_another_pool_without_reusing_finalized_works
     assert q.pool_startup(task_id).cooldown_stage == 1
     assert q.pool_startup(task_id).startup_attempts == 2
     assert q.pool_startup(task_id).episode_start_attempt == 1
+    assert q.get(task_id).affinity == {"machine": "host-a", "topic": "preserved"}
+    assert q.get_reservation(original.key).conclusion_state == "pending"
     replay, admitted = TaskQueue(q.db_path).reserve_spawn(
         task_id, reserved_by="allocator", driver="cli",
         pool_catalog_revision=q.pool_catalog_snapshot().revision, now=4001,
@@ -261,6 +268,33 @@ def test_retired_decline_can_select_another_pool_without_reusing_finalized_works
         )
         assert prepared["worktree"] == "replacement" and prepared["created"]
     assert calls == [reservation.creation_key] * 2
+    q.record_spawn_worktree(
+        reservation.key, "replacement", ownership="created", allocation_project="example",
+        worktree_path="/replacement", creating_host="host-a", execution_machine="host-a", driver="cli",
+    )
+    q.record_spawn(
+        reservation.key, session_handle="native-2", worktree="replacement",
+        startup_complete=True, startup_revision=reservation.startup_revision,
+    )
+    budget = q.pool_startup(task_id)
+    queued = q.exhaust_pool_startup(
+        reservation.key, generation=q.get(task_id).generation,
+        startup_revision=reservation.startup_revision, now=budget.startup_deadline + 1,
+    )
+    q.retire_spawn(reservation.key, exact_absence=True, conclusion_state="skipped")
+    q.publish_pool_catalog_scope(
+        "host-a", "linux", "publisher-0", generation=1, expected_revision=2,
+        registration_revision=q.pool_registration_revision(), expected_cohort_revision=1,
+        input_revision="retry-pool", definitions=(pool(), pool("other")), now=queued.not_before,
+    )
+    retry, admitted = TaskQueue(q.db_path).reserve_spawn(
+        task_id, reserved_by="allocator", driver="cli",
+        pool_catalog_revision=q.pool_catalog_snapshot().revision, now=queued.not_before,
+    )
+    assert admitted and retry.worktree == "replacement"
+    assert retry.creation_key == reservation.creation_key
+    assert q.get(task_id).affinity == {"machine": "host-a", "topic": "preserved"}
+    assert q.get_reservation(original.key).conclusion_state == "pending"
 
 
 @pytest.mark.parametrize("required", [False, True])
