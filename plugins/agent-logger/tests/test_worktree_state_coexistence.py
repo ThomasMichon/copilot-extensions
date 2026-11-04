@@ -15,6 +15,7 @@ import pytest
 
 from agent_logger.sync import worktree_state_namespace as namespace
 from agent_logger import source_roots
+from agent_logger.corpus_inventory import inventory_corpus
 from agent_logger.source_roots import iter_archive_sources
 from agent_logger.sync.meta import write_sync_meta
 from agent_logger.sync.targets import filesystem
@@ -441,6 +442,52 @@ def test_renamed_collection_is_excluded_before_provider_group_expansion(
     (target._root() / "worker" / "session-state").mkdir(parents=True)
     monkeypatch.setattr(source_roots, "MAX_SOURCE_ENTRIES", 2)
     assert [item.key for item in iter_archive_sources(target._root())] == ["worker"]
+
+
+@pytest.mark.parametrize("name", ["host.containers", "host.codespaces",
+                                ".codespaces", ".codespaces-live"])
+@pytest.mark.parametrize("kind", ["empty", "directory", "symlink", "future"])
+def test_invalid_provider_group_marker_reports_the_entry_and_keeps_healthy_peers(
+    packet: Packet, name: str, kind: str,
+) -> None:
+    _, target, _, source = packet
+    group = target._root() / name
+    group.mkdir(parents=True)
+    marker = group / ".collection-namespace.json"
+    if kind == "directory":
+        marker.mkdir()
+    elif kind == "symlink":
+        marker.symlink_to(source / "manifest.json")
+    else:
+        marker.write_bytes(b"" if kind == "empty" else b'{"version":2}')
+    (target._root() / "worker" / "session-state").mkdir(parents=True)
+    errors: list[str] = []
+    assert [item.key for item in iter_archive_sources(
+        target._root(), on_error=lambda key, error: errors.append(key),
+    )] == ["worker"]
+    assert errors == [name]
+    with pytest.raises(OSError, match="namespace"):
+        list(iter_archive_sources(target._root()))
+    inventory = inventory_corpus(target._root())
+    assert not inventory["complete"]
+    rows = {row["source_key"]: row for row in inventory["sources"]}
+    assert set(rows) == {name, "worker"}
+    assert rows[name]["error"] and rows["worker"]["error"] is None
+
+
+def test_provider_group_enumeration_budget_still_aborts_with_an_error_callback(
+    packet: Packet, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, target, _, _ = packet
+    for number in range(3):
+        (target._root() / "host.containers" / f"worker-{number}").mkdir(parents=True)
+    monkeypatch.setattr(source_roots, "MAX_SOURCE_ENTRIES", 2)
+    errors: list[str] = []
+    with pytest.raises(source_roots.SourceLayoutError, match="entry budget"):
+        list(iter_archive_sources(
+            target._root(), on_error=lambda key, error: errors.append(key),
+        ))
+    assert errors == []
 
 
 @pytest.mark.parametrize("kind", ["empty", "directory", "symlink", "future"])

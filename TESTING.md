@@ -28,6 +28,8 @@ Disposal beginning below a retained marker preserves bytes, directories and
 permissions; a marked `logs/` destination refuses ordinary process-log writes.
 Collections renamed to qualified or legacy provider-group names are excluded
 before expansion, preserving the source-discovery budget for ordinary peers.
+Invalid group markers report per-entry failures while preserving healthy inventory
+peers; actual group-enumeration budget failures still abort traversal.
 
 The opt-in Manager `tests/test_companion_visual.py` packet compares actual
 Textual timeline renders against synthetic live-following and history-browsing

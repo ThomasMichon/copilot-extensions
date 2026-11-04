@@ -68,6 +68,8 @@ The session-shaped archive-source enumerator also excludes that positively
 identified namespace instead of reporting it as an empty unknown machine.
 It checks markers before expanding provider groups, including renamed collections,
 so retained revisions do not consume the source-discovery budget.
+An invalid group marker is reported through the optional per-entry error callback
+without dropping healthy peers; group-enumeration and budget failures remain fatal.
 Namespace claiming and potentially overlapping ordinary publication share a
 domain guard held through session, process-log and archive publication as well
 as heartbeat and mutating retention/compaction operations. Read-only maintenance
