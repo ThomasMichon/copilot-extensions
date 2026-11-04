@@ -19,6 +19,7 @@ from agent_procutil.owned_budget import OwnedExecutionBudget
 from agent_procutil.owned_process import OwnedCleanupError, _communicate_windows_bounded
 
 from agent_dispatch import assignment_relationship_owner as module
+from agent_dispatch import procutil
 from agent_dispatch.assignment_workspace import AssignmentWorkspace
 from agent_dispatch.queue_records import TaskError
 from agent_dispatch.queue_task_relationships import WRITER
@@ -75,6 +76,71 @@ def test_selected_prefix_and_authoritative_record_keep_original_identity(monkeyp
     assert admitted == [workspace] and len(calls) == 3
     assert all(call[0][:3] == ["/selected/python", "-m", "agent_worktrees"] for call in calls)
     assert calls[-1][0][-3:] == ["--owner-ref", workspace.owner_ref, "--json"]
+
+
+@pytest.mark.parametrize("probe", ["capabilities", "record"])
+def test_payload_free_probes_use_owned_windows_capture_and_retain_cleanup(
+    monkeypatch, tmp_path, probe,
+):
+    workspace = AssignmentWorkspace("host", "project", "worktree", str(tmp_path), "original")
+    calls = []
+    cleanup_allowed = False
+    fail_probe = True
+
+    def cleanup(deadline):
+        assert deadline > time.monotonic()
+        if not cleanup_allowed:
+            raise TimeoutError("probe descendant exit is unconfirmed")
+
+    failure = OwnedCleanupError(object(), object(), cleanup_retry=cleanup)
+
+    def run_owned(argv, **kwargs):
+        nonlocal fail_probe
+        calls.append((argv, kwargs))
+        if "capabilities" in argv or "record" in argv:
+            assert kwargs["input_text"] == ""
+        else:
+            assert json.loads(kwargs["input_text"]) == {"expected_creation_nonce": "original"}
+        if probe in argv and fail_probe:
+            fail_probe = False
+            raise failure
+        value = support() if "capabilities" in argv else {
+            "ok": True, "worktree": {
+                "id": workspace.worktree, "repo": workspace.project,
+                "path": workspace.path, "creation_nonce": workspace.creation_nonce,
+            },
+        }
+        return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
+
+    monkeypatch.setattr(procutil, "sys", SimpleNamespace(platform="win32", maxsize=2**63 - 1))
+    monkeypatch.setattr(procutil, "_run_owned", run_owned)
+
+    def make_writer():
+        return module.WorktreeRelationshipWriter(
+            ["selected"], admit_workspace=lambda workspace: None,
+        )
+
+    writer = None if probe == "capabilities" else make_writer()
+
+    def invoke():
+        if writer is None:
+            return make_writer()
+        return writer(workspace, "reserve", {"expected_creation_nonce": "original"})
+
+    with pytest.raises(TaskError, match="custody retained") as caught:
+        invoke()
+    assert caught.value.__cause__ is failure and module._pending_cleanup == [failure]
+    captured = len(calls)
+    with pytest.raises(TaskError, match="custody retained"):
+        invoke()
+    assert len(calls) == captured
+    cleanup_allowed = True
+    result = invoke()
+    if writer is None:
+        result(workspace, "reserve", {"expected_creation_nonce": "original"})
+    assert module._pending_cleanup == []
+    assert any("record" in argv for argv, _ in calls)
+    assert any("reserve" in argv for argv, _ in calls)
 
 
 @pytest.mark.parametrize("change", ["old", "new_payload", "missing_nonce", "unknown"])

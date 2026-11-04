@@ -187,6 +187,8 @@ Subsequent adapter calls first attempt bounded settlement of those exact
 resources within the same call deadline. They cannot launch another capture
 while cleanup remains unconfirmed. Cleanup without a complete supported retry
 operation stays retained; an exception cause alone is not custody.
+Payload-free capability and record probes supply empty input explicitly, so
+they use the same owned Windows Job capture as relationship writes.
 
 Recovery version 2 adds `assignment_event_id` and `worker_id` to the version-1
 recovery object. Those facts also bind pending subjects, permitting exact

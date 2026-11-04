@@ -70,7 +70,7 @@ class WorktreeRelationshipWriter:
                     ) from exc
                 _pending_cleanup.remove(failure)
             try:
-                input_text = json.dumps(payload) if payload is not None else None
+                input_text = json.dumps(payload) if payload is not None else ""
                 env = agent_worktrees_environment()
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
