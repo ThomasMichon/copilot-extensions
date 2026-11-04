@@ -85,6 +85,16 @@ it does not implement fixes, change product behavior, or declare deployment.
 
 ## Context
 
+The [six-issue session-data adjudication](receiving-session-data-cohort.md)
+turns one stable semantic core into three actual outcome lanes, not six
+duplicates. All nineteen qualified texts and the current receiving ROOTs/
+mandatory contracts were read. Complete direct #4976 and #5678 safety
+amendments retain existing custodians and independent phase tokens.
+#8682's finite SQLite batching correction was verified against merged #8688
+and closed as completed; #8735's broader installed-consumer gates remain open.
+Reviewed receiving readback and separate source judgments are still required
+for any further consolidation.
+
 The initial oldest batch is #12, #14, #22, #24, #40, #48, #54, #55, #58,
 #60, #63, #67, #68, #69, #70, #78, #82, #83, #84 and #85.
 

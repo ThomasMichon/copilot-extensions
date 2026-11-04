@@ -38,6 +38,15 @@ current receiving/source/custody readback precede a separate source judgment.
 This amendment grants no sync, corpus, publication, retirement or rollout
 authority and appoints no replacement implementer.
 
+The [session-data cohort adjudication](../backlog-reconciliation/receiving-session-data-cohort.md)
+adds the complete seven-clause #4976 review-follow-up contract below and
+#5678's specific active-call safety boundary. Existing review-follow-up,
+engine/CLI/targets/locks/backend/accounting and synthetic-compatibility
+custodians retain their lanes. This is tracking intake, not an implementation
+appointment or owner reassignment. #5665 remains substantive OPEN;
+#5677 and #5678 remain independently claimed OPEN phase tokens. #5676's
+separate final-OPEN/handoff condition is not satisfied by this cohort.
+
 - **Topology:** Serial independently reviewable phase PRs; shared contracts stay
   coordinator-owned, and implementation delegates receive disjoint scopes.
 - **Host (owns PRs):** Primary contributor.
@@ -212,6 +221,62 @@ validation gates are in [process-log reclamation](process-log-reclamation.md).
 - [ ] Verify released runtime adoption and complete every validation obligation
   before marking Done and archiving this effort.
 
+#### Seven review-follow-up clauses from #4976
+
+**Agent-recommended receiving amendment.** The original and additive discussion
+are one finite contract, not seven opportunities to drop unmatched details.
+These unchecked obligations retain the existing follow-up custodian:
+
+- [ ] **P4976-1:** Aggregate partial/deferred status, deferred-file details and
+  partial streak across every filesystem batch in one pass-level metadata
+  publication. A later clean batch cannot turn an incomplete pass into
+  `fresh_complete`; preserve independent transfer-leg health.
+- [ ] **P4976-2:** Forward tenant-aware full reconciliation through the actual
+  tenant orchestration, namespaced tracker and target. The legacy single-config
+  `run --full` path is not a substitute.
+- [ ] **P4976-3:** Restrict batch/repository-selected traversal to selected
+  session roots without weakening index or repository isolation. Credit the
+  later #8752 pruning delivery recorded by Large-Corpus Session Sync; qualify
+  the remaining original paths rather than replay the obsolete blanket claim
+  that all traversal still walks the whole tree.
+- [ ] **P4976-4:** Include entry type, symlink target text and permission bits
+  through `lstat`-based signatures, covering retargeted/dangling links and mode
+  changes for transports that preserve them. Equal-size/equal-mtime CONTENT
+  changes remain the expressly accepted stat-only blind spot; no content
+  hashing requirement is introduced.
+- [ ] **P4976-5:** Bound incremental changed-session pushes as well as full
+  passes, retaining signatures after each successful batch and honest deferred
+  progress after failure. Historical timeout/module ceilings are context, not
+  new thresholds.
+- [ ] **P4976-6:** Supply tenant-aware recovery support OR explicitly document
+  the recovery gap in the setup guidance. This literal alternative does not
+  waive P4976-2's tenant orchestration requirement.
+- [ ] **P4976-7:** Add or identify DIRECT `rsync_session_filters` coverage:
+  batch mode includes `session-store.db`, `.db-wal` and `.db-shm` while
+  excluding sessions outside the batch; genuine repository scope excludes all
+  three index files. Engine/LocalTarget tests alone do not satisfy this clause.
+
+##### Local Validation for #4976
+
+- [ ] **V4976:** Map all seven clauses to actual delivered or unresolved
+  outcomes. Verify an early deferred/later clean pass, real tenant namespace
+  recovery, selected traversal and index isolation, symlink/mode signature
+  changes, successful incremental progress across a later failed batch, the
+  chosen recovery alternative, and the direct three-index filter cases.
+  Keep the original stat-only tradeoff, transport/tenant/source authority
+  and existing custodian; do not require unrelated accounting/daily completion
+  before this finite residual can finish.
+
+#### Active-call safety within #5678's daily/adoption lane
+
+- [ ] **P5678-A:** Preserve legitimate same-holder retry and manifest
+  preparation while preventing one failing active invocation from releasing
+  another still-active invocation's responsibility. Reuse the external host's
+  scheduling/single-flight/fencing authority or equivalent safe active-call
+  semantics, not a competing lease scheme. Default `ManifestWriter` prepares
+  a deterministic manifest and returns no rendered-log paths: two calls are
+  not evidence of duplicate rendered or landed logs.
+
 #### Finite three-finding ancestor and health contract from #5727
 
 **Agent-recommended tracking amendment.** Credit delivered findings and
@@ -292,6 +357,17 @@ retain only the actual unfinished boundary; documentation is not remediation.
 - [ ] Reviewed PRs merge; released code is adopted and behavior verified, not
   merely committed or primed for deployment.
 
+- [ ] **G4976:** Resolve every P4976/V4976 clause with its existing custodian,
+  retaining partial delivery credit, tenant/transport boundaries, the explicit
+  recovery OR and direct filter proof. Reviewed tracking intake is not source
+  repair, native qualification, live sync or source/resource release.
+- [ ] **G5678-A:** Use synthetic concurrent-call interleaving and injected I/O
+  failure to prove a failing call cannot silently release another active
+  call's responsibility, while ordinary same-holder retries remain valid.
+  Manifest-only preparation and single-caller failure tests do not establish
+  this safety property or duplicate landed logs. This stays within the
+  independently claimed daily/adoption lane and its original platform gates.
+
 - [ ] **G5727:** Resolve EVERY direct #5727 Plan/local Validation and
   Coordination clause: ALL THREE finding dispositions with delivered
   health/streak/source/payload credit, actual remaining ancestor paths AND
@@ -305,6 +381,21 @@ retain only the actual unfinished boundary; documentation is not remediation.
 Reviewed and merged in #5671. Implementation is authorized against this plan.
 
 ## Journal
+
+### 2026-11-04 - Session-data cohort retains three distinct lanes
+
+- Adjudicated the complete six-issue cohort against this current README,
+  implementation/usage/reclamation contracts and Large-Corpus Session Sync.
+  The backend/catalog, daily/adoption and installed-sync outcomes are related,
+  not duplicate requirements or interchangeable implementation appointments.
+- Added all seven #4976 follow-ups directly to Plan/local/global Validation
+  and coordination, including the recovery alternative and stat-only exclusion.
+  Added #5678's actual shared-holder failure interleaving rather than claim
+  a duplicate-log incident. Existing owners and every incumbent gate remain.
+- #8682's finite row-limit correction was independently verified against
+  merged #8688 and closed as completed. Broader transcript/time/release and
+  two-cycle scheduled-consumer gates remain with #8735; no live corpus,
+  accounting store, sync, rollout, retirement or test was run by this intake.
 
 ### 2026-10-30 - Complete three-finding ancestor contract retained
 

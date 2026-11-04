@@ -93,6 +93,12 @@ research group, not proof that #4976 has an accepted home or that #5678's
 independently claimed daily/adoption work can be absorbed. Preserve #5676's
 separate final-OPEN handoff condition even though it falls in another core.
 
+The [whole-contract adjudication](receiving-session-data-cohort.md) separates
+backend/catalog, daily/adoption and installed-sync lanes. It proposes complete
+direct #4976 receiving clauses and #5678's active-call boundary while retaining
+the independently claimed tokens. #8682 is separately verified completed by
+#8688; that finite closure is not completion of #8735 or either whole effort.
+
 ### Native fixture/runner cohort
 
 #7243, #7643, #8521, #9436, #9460, #9467, #9614, #9699 and #10225.
