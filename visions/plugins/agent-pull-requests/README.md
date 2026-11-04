@@ -43,6 +43,14 @@ supported role and stateful activation boundary. One operator owns the whole
 fleet; sharing a watcher does not introduce another operator's state or
 credentials into it.
 
+### Two perspectives on one live conversation
+
+Author and Reviewer are perspectives on the same PR, not independent stores or
+forge clients. The PR is a collaborative conversation around a current code
+candidate; provider-native facts, participant relationships and action-specific
+authority remain explicit. Human participants and multiple reviewers remain
+first-class even when two agents drive the main exchange.
+
 ## Features
 
 ### first-class-provider-neutral-pr-surface
@@ -132,6 +140,57 @@ submission intent/receipts have distinct recovery and retention semantics.
 
 ## Behaviors
 
+### cli-through-one-service-contract
+
+Agents use the PR CLI for both perspectives; its HTTP service contract supplies
+the same current model, event cursor and action semantics. Local standalone
+hosting and optional Gateway coordinator hosting are realizations of one core.
+An optional web UX is a consumer, never the source of domain or merge authority.
+Existing Worktrees PR verbs retire only after complete semantic equivalence,
+supported compatibility and consumer migration; source publication and resource
+obligations remain with their rightful owner.
+
+### role-aware-fair-attention
+
+Reviewer subscriptions identify actionable PRs for repository Maintainers,
+path-scoped Codeowners and interested Subject Matter Experts. Initial review,
+follow-up conversation, merge nudges, rebase needs, CI recovery and final-round
+completion remain distinguishable. Confirmed feedback returns handled work to
+the back of the line without swallowing newer events; priority and aging keep
+other admitted PRs moving. Assignment lineage belongs to the task owner, and
+an interest or cached recommendation never grants mutation authority.
+
+### bounded-conversation-and-terminal-tombstones
+
+Current commits, comments, per-file threads, CI gates, reviews and participants
+have a normalized, provider-faithful representation. Push and polling reconcile
+into the same bounded event model, with independent consumer cursors and
+explicit gaps when retained history no longer covers a cursor.
+
+The service is not a full diff or chat archive. At authoritative merge it
+compacts the live PR into a tombstone: existence, original author, other
+reviewers, our author/reviewer/merger relationships, final verdict and compact
+round/count/timing statistics. Closed-unmerged and abandonment remain distinct
+terminal outcomes. Body-bearing caches, events and duplicate payloads do not
+silently become another archive. Minimal unresolved effect identity remains
+reconcilable without indefinite conversation retention; reopening begins a new
+live observation epoch rather than reviving old messages.
+
+### optional-policy-gated-automation-and-statistics
+
+Mechanical actions and auto-merge are explicit options subject to fresh
+candidate, independent review, required checks, consent, holds and actual
+repository authority. The reusable core reports round and throughput statistics
+without preserving full conversations. Read-only shadowing can compare
+attention and outcomes without triggering tasks or provider effects.
+
+### three-provider-native-meaning
+
+ADO, GitHub and Gitea are supported drivers of the same domain contract.
+Native votes, reviews, thread anchors and CI/policy states retain their meaning;
+unsupported or incomplete evidence is explicit rather than coerced into another
+provider's passing result.
+
 ### one-operator-with-separated-scopes
 
 All fleet-hosted PR state and credentials belong to the fleet's sole operator.
@@ -201,6 +260,8 @@ description storage, complete work-item relations or an accepted publication.
 - No arbitrary remote shell, callback-command or destination forwarding.
 - No required fleet adoption for useful standalone PR commands and watches.
 - No fixed host inventory, ports, wire schema or packaging recipe in this vision.
+- No indefinite chat-message archive, historical patch archive, or persona
+  requirement in the portable service core.
 
 ## See Also
 
