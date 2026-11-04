@@ -41,6 +41,7 @@ agent-pull-requests workspace source --request request.json
 agent-pull-requests workspace source-read --request request.json
 agent-pull-requests workspace submit --request request.json
 agent-pull-requests workspace inspect --request request.json
+agent-pull-requests workspace events --request request.json
 ```
 
 An actual Python embedding supplies `workspace_host=host` to the existing
@@ -67,6 +68,7 @@ Original host cancellation/authority and retained unknown effects remain separat
 | source-read | source fields plus source_attachment, path, side |
 | submit | number, intent, source_attachment, budget_seconds |
 | inspect | number, operation_id |
+| events (optional) | number, after (null or epoch/sequence), limit (1-16) |
 
 Unknown fields cannot supply workspace paths, credentials or source authority.
 Load/sync/materialize/submit/inspect retain the
@@ -74,6 +76,11 @@ Load/sync/materialize/submit/inspect retain the
 scope, immutable generation/CAS/framing, original observation intervals and
 durable intent/in-flight/native-ID/unknown outcomes. No policy/rubric, unconditional
 CI/merge-readiness requirement, compensation or automatic replay is introduced.
+
+The optional [conversation event reader](conversation-journal.md) needs explicit
+owner-v3 storage and serving adoption. It is read-only and capability-selected;
+unbound/prior hosts remain usable for their existing operations. A returned
+cursor is not an ACK or a handled-review baseline.
 
 ## Exact local source adapter
 

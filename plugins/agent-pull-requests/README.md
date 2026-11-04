@@ -124,6 +124,12 @@ candidate/cursor projections and bounded fair ordering for later service
 adoption. It performs no IO, policy authorization, persistence or effects;
 it adds no CLI/HTTP operation.
 
+The optional [conversation metadata journal](docs/conversation-journal.md)
+adds bounded durable cursors and a read-only workspace `events` extension.
+It requires explicit owner-v3 adoption and embedding opt-in; default hosts and
+legacy verbs are unchanged. Journal tombstones do not compact other caches
+or pending effect receipts.
+
 Source embeddings additionally expose the finite
 [workspace service/client API](docs/workspace-integration.md) through the
 existing PR owner. These library interfaces do not install a writer, acquire
