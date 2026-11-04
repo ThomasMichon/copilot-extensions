@@ -4263,7 +4263,9 @@ trusted native HTTPS feed and runs UV against a private loopback index. The
 existing acquisition owner fetches candidates with its origin, redirect,
 seasoning and resource guards; each requested wheel is inspected from
 immutable bytes and direct dependency URLs are refused before UV sees it.
-Withdrawn files are not advertised as candidates.
+Withdrawn files and wheel records with syntactically invalid tag components
+are not advertised as candidates. Unsafe filenames, mismatched projects and
+over-budget tag expansions still refuse the index.
 Configured HTTPS feed redirects use that same owner's metadata and artifact
 delivery policy, including public-index refusal and cross-origin credential
 isolation. Explicit nonempty download-origin restrictions still constrain

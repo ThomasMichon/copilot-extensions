@@ -103,6 +103,44 @@ def test_guarded_feed_selects_the_latest_native_candidate(tmp_path, monkeypatch,
     assert paths.count("/files/" + dependency_name) == 1
 
 
+@pytest.mark.parametrize("bad_tag", ["py36+-none-any", "py3-none-any+", "py3..py2-none-any"])
+def test_guarded_feed_ignores_legacy_invalid_tag_like_native_uv(
+    tmp_path, monkeypatch, tls_source, bad_tag,  # noqa: F811
+):
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("native uv is required")
+    producer, wheels, manifest, state, wheel, digest = tls_source
+    invalid = f"fixture-9.0-{bad_tag}.whl"
+    project(state, [
+        listed(filename=invalid, url="/files/" + invalid, hashes={"sha256": "c" * 64}),
+        listed(hashes={"sha256": digest}, size=len(wheel)),
+    ])
+    state["routes"]["/files/" + FILENAME] = (200, {}, wheel)
+    _configure_native_tls(tmp_path, monkeypatch, state)
+    requirements = tmp_path / "native.in"
+    requirements.write_text("fixture>=1\n", encoding="utf-8")
+    lock = tmp_path / "pylock.toml"
+    native = subprocess.run(
+        [uv, "pip", "compile", str(requirements), "--python", sys.executable, "--only-binary", ":all:",
+         "--no-python-downloads", "--no-cache", "--format", "pylock.toml", "--output-file", str(lock)],
+        cwd=tmp_path, env=dict(os.environ), capture_output=True, text=True, timeout=90,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert native.returncode == 0, native.stderr
+    assert 'version = "1.0"' in lock.read_text()
+    assert "/files/" + invalid not in [path for path, _headers in state["requests"]]
+    state["requests"].clear()
+
+    _result, destination = _resolve(tmp_path, producer, wheels, manifest, uv=uv)
+
+    with zipfile.ZipFile(destination) as delivery:
+        profile = json.loads(delivery.read("profile.json"))
+    selected = next(row for row in profile["wheels"] if row["name"] == "fixture")
+    assert (selected["version"], selected["sha256"]) == ("1.0", "sha256:" + digest)
+    assert "/files/" + invalid not in [path for path, _headers in state["requests"]]
+
+
 def test_guarded_feed_does_not_bind_the_ephemeral_loopback_endpoint(
     tmp_path, monkeypatch, tls_source,  # noqa: F811
 ):
