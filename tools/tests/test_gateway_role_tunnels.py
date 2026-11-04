@@ -131,6 +131,8 @@ def tree(override: tuple[str, str] | None = None, extra: str | None = None) -> b
 @pytest.mark.parametrize("listing", [
     b"", tree(("fleet-manager/setup.py", "120000")),
     tree(extra="fleet-manager/src/fleet_manager/unknown.py"),
+    tree(extra="fleet-manager/src/fleet_manager/unknown-contract.json"),
+    tree(extra="libs/agent-procutil/src/agent_procutil/unknown.py"),
 ])
 def test_incomplete_linked_or_unknown_source_closure_refuses(
     tmp_path: Path, listing: bytes,

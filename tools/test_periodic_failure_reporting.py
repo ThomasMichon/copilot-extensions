@@ -146,6 +146,7 @@ def test_targeted_post_tool_scope_never_files_the_shared_portfolio_issue(ref):
         "test_post_tool_shell", "test_nudge_status", "test_bind_nudge_script",
         "test_late_worker_completion_reaches_actual_post_tool_hook",
         "test_inrepo_completion_keeps_optional_absence_publishable",
+        "test_idle_exit_retains_recent_completed_tool_hooks_then_expires",
     ):
         assert name in linux["env"]["TEST_SELECTOR"]
     evidence = next(

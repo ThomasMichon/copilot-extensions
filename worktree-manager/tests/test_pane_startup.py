@@ -85,7 +85,7 @@ def test_picker_startup_handoff_reaches_real_copied_reader(tmp_path, direct):
     )
     assert result.returncode == 17, result.stderr
     assert json.loads(capture.read_text("utf-8")) == expected
-    assert reconcile.read_text("utf-8").splitlines() == [str(direct)]
+    assert not reconcile.exists()
     assert not manifest.exists()
 
 

@@ -231,6 +231,46 @@ checkpoint nor author eligibility, holds, requirements or source/resource custod
 
 ### Phase 2 - Continuing reconciliation
 
+The [native timeout/lifetime study](native-timeout-cohort.md) preserves seven
+whole contracts and sixteen bounded completed-work comparisons, with two whole
+messages withheld. One assigned finite source repair is actually complete;
+six different timeout contracts retain their original bounds, failed evidence
+and unknown causes. Whole current portfolio reading and unchanged custody
+support six authored direct tracking families under existing waves, not a
+common-cause finding, reviewed delivery, new native programme or implementation
+assignment. Their thirty local Plan/Validation and six actual ROOT global
+Validation rows remain unchecked; current readback and separate source
+judgments follow normal review and actual merge.
+
+The [interpreter/construction study](interpreter-construction-cohort.md)
+retains six whole originals/five refinements and seventeen bounded
+completed-work comparisons, with inherited-held material and two descriptions
+withheld. Four complete Vendored Installer documents support a finite #5955
+direct tracking proposal, not resumed adopters or source disposition.
+The other constructor, actual-child, urgent UV, diagnostic and public-update
+contracts remain distinct OPEN owner lanes; the feed receiver stays wholly
+withheld. Existing parent check states and every operational gate remain.
+
+That exact eight-document delta now merged in #10510 after genuine current-head
+approval with no findings and successful CI. Actual merged/current blobs equal
+the reviewed head; only its independent publication child finalized, retained.
+The [delivery journal](<journal/2026/11.04 interpreter-construction-contracts.md>)
+keeps full current receiving readback and separate #5955 source judgment OPEN.
+No issue was closed; the complete 21:23 UTC / 13:23 PST census remains 1,016
+whole open, 287 above 729. The next seven-contract timeout core is wholly read,
+with actual merged-source candidates and unresolved review boundaries retained,
+not new implementation or custody.
+
+Complete current installer readback and a separate fresh #5955 source judgment
+now support its administrative NOT_PLANNED tracking supersession; all three
+new acceptance rows stay unchecked under the same custodians and pause.
+Separately, actual #7836 delivery and whole current connection/test comparison
+support #7820's same-owner finite SOURCE completion, preserving its assignment,
+the unresolved broader startup review and all resource duties. The complete
+13:45 PST census is 1,014 whole open, 285 above 729: one original-cohort
+tracking fold and one inflow source completion, with no external departures
+or arrivals. The parent remains Active; no runtime or native result is added.
+
 The current research priority is the
 [weighted semantic consolidation method](semantic-density-consolidation.md):
 complete eligible-node coverage, ranked dense themes, effort-sized receiving
@@ -789,6 +829,20 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [native timeout/lifetime study](native-timeout-cohort.md) distinguishes
+#7820's verified finite source completion from the unresolved broader startup
+review and six retained native contracts. Whole current receiving fit is not
+reviewed complete delivery or a source-specific administrative judgment;
+unchanged deadlines, quiescence, evidence tiers and actual custody remain.
+
+The [interpreter/construction study](interpreter-construction-cohort.md)
+distinguishes all six literal contracts, eleven whole texts, seventeen bounded
+relations and two withheld descriptions. The complete four-document installer
+read supports only the proposed finite #5955 intake; reviewed actual delivery,
+current readback and fresh source/actor judgment remain mandatory before
+disposition. Existing native/consumer/public-environment and custody gates are
+not converted into completed work or new whole-parent prerequisites.
 
 The [session-intelligence study](session-intelligence-cohort.md) preserves
 five whole contracts, all refinements, literal alternatives, historical partial

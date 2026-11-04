@@ -44,7 +44,7 @@ on:
         type: boolean
         default: false
       pr_artifacts:
-        description: Build and verify first-party PR/Fleet artifacts and install them offline
+        description: Verify first-party PR/Fleet artifacts and the isolated pinned Gateway image
         type: boolean
         default: false
       dependency_compile:
@@ -1568,6 +1568,37 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 6
     steps: *pr-artifacts-steps
+
+  gateway-role-tunnels:
+    if: ${{ inputs.pr_artifacts }}
+    name: Pinned Gateway image and role tunnels (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Allocate private disposable witness results
+        shell: bash
+        run: |
+          results="$(mktemp -d "$RUNNER_TEMP/gateway-role.XXXXXXXX")"
+          printf 'GATEWAY_RESULTS_ROOT=%s\n' "$results" >> "$GITHUB_ENV"
+      - name: Build and exercise the exact committed Gateway
+        run: >-
+          python tools/clean-room/gateway-role-tunnels/run.py
+          --source-commit "${{ github.sha }}"
+          --results-root "$GATEWAY_RESULTS_ROOT"
+      - name: Retain reports without synthetic credentials or container logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-role-reports
+          path: |
+            ${{ env.GATEWAY_RESULTS_ROOT }}/*/cr-report.json
+            ${{ env.GATEWAY_RESULTS_ROOT }}/*/receipt.json
+            ${{ env.GATEWAY_RESULTS_ROOT }}/*/source-manifest.json
+          if-no-files-found: warn
 
   pr-service-windows:
     if: ${{ inputs.pr_service }}

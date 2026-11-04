@@ -134,7 +134,7 @@ def test_non_inert_inner_host_options_keep_original_spawn_semantics(startup):
 
 
 @pytest.mark.parametrize("recovery", [False, True])
-def test_direct_setup_retains_reconciliation_policy_with_marker_unset(startup, recovery):
+def test_direct_setup_never_restores_global_settings(startup, recovery):
     record, runtime, prepared = startup
     backend = runtime.with_name("backend.ps1")
     backend.write_text("[Console]::WriteLine('backend-started')\nexit 7\n", encoding="utf-8")
@@ -167,10 +167,10 @@ def test_direct_setup_retains_reconciliation_policy_with_marker_unset(startup, r
     assert result.returncode == baseline.returncode, result.stdout + result.stderr
     assert result.stdout == baseline.stdout
     assert result.stderr == baseline.stderr
-    assert (baseline_calls.read_text().splitlines() if baseline_calls.exists() else []) == (
-        [] if recovery else ["called"]
-    )
-    assert (calls.read_text().splitlines() if calls.exists() else []) == ([] if recovery else ["called"])
+    assert result.returncode == 7
+    assert "backend-started" in result.stdout
+    assert not baseline_calls.exists()
+    assert not calls.exists()
     assert not Path(compact[-1]).exists()
 
 

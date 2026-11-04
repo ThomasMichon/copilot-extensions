@@ -176,7 +176,9 @@ The explicit `client-generation install` composition connects these owners for
 first install and forward update, requiring the supplied release decision and
 `--replace-commands` for its addressed private command family. It retains the
 original target observation across retries and only reports success after real
-direct and default-command health. `uninstall` composes exact withdrawal and
+direct and default-command health. Optional `install --legacy-root` composes the
+existing exact legacy-floor import; provided retries check the saved origin
+without requiring predecessor availability. `uninstall` composes exact withdrawal and
 runtime removal, preserving the lineage, admitted floor and user configuration.
 Read-only `inspect` remains distinct from current runtime health. These commands
 do not supply release acquisition, whole-install retirement, a host bootstrap,

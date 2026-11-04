@@ -11,9 +11,12 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 from typing import Any
 
 import pytest
+
+from agent_procutil.owned_budget import OwnedExecutionBudget
 
 from agent_logger.aggregate import (
     Admission, AggregateInputs, Claim, DiscoveredDeclaration, ExecutionMode,
@@ -25,6 +28,7 @@ from agent_logger.aggregate_machine import default_machine_identity
 from agent_logger.sync.targets.filesystem import LocalTarget, OneDriveTarget
 from agent_logger.sync.worktree_state import (
     WorktreeStateError, WorktreeStateReceipt, WorktreeStateRevision, canonical_bytes,
+    admit_repository_collection,
 )
 from agent_logger.sync.worktree_state_archive import (
     collect_worktree_state, readback_worktree_state,
@@ -132,6 +136,64 @@ def test_actual_privacy_and_legacy_scope_refuse_before_owner_read_or_write(
     with pytest.raises(WorktreeStateError):
         collect_worktree_state(cfg, target, plan, source, IDENTITY, ("session-1",), forbidden)
     assert not target._root().exists()
+
+
+def test_repository_admission_requires_no_export_or_revision(packet: Packet) -> None:
+    cfg, target, plan, _ = packet
+    assert admit_repository_collection(cfg, target, plan, REPOSITORY) == target._root()
+    assert not target._root().exists()
+
+
+@pytest.mark.parametrize("change", [
+    "privacy", "legacy-filter", "observe", "passive", "unauthorized", "wrong-machine",
+    "wrong-source", "duplicate", "unready", "profile", "landing", "retention", "mutation",
+    "stale-target", "wrong-destination", "case-distinct-destination", "unsupported-target",
+])
+def test_repository_admission_refuses_before_export_staging(
+    packet: Packet, change: str,
+) -> None:
+    cfg, target, plan, source = packet
+    root = target._root()
+    if change == "privacy":
+        cfg._data["sync"]["redact_secrets"] = True
+    elif change == "legacy-filter":
+        cfg._data["sync"]["require_repo_opt_in"] = True
+    elif change == "observe":
+        plan.mode = ExecutionMode.OBSERVE
+    elif change == "passive":
+        plan.passive = True
+    elif change == "unauthorized":
+        plan.authorized = False
+    elif change == "wrong-machine":
+        plan.machine = replace(plan.machine, role="different-role")
+    elif change == "duplicate":
+        plan.claims = [*plan.claims, plan.claims[0]]
+    elif change == "stale-target":
+        cfg._data["sync"]["targets"]["local"]["path"] = str(source.parent / "other")
+    elif change == "unsupported-target":
+        cfg._data["sync"]["target"] = "onedrive"
+        target = OneDriveTarget({"root": str(source.parent / "cloud")})
+    else:
+        claim = plan.claims[0]
+        if change == "wrong-source":
+            claim = replace(claim, sources=SourceSet(
+                repositories=frozenset({"github.com/example/other"}),
+            ))
+        elif change == "unready":
+            claim = replace(claim, resource=replace(claim.resource, ready=False))
+        elif change in ("wrong-destination", "case-distinct-destination"):
+            destination = root.with_name(
+                root.name.upper() if change == "case-distinct-destination" else "other",
+            )
+            claim = replace(claim, resource=ResourceBinding("filesystem", str(destination)))
+        else:
+            claim = replace(claim, **{change: "unsupported"})
+        plan.claims = [claim]
+    with pytest.raises(WorktreeStateError):
+        admit_repository_collection(cfg, target, plan, REPOSITORY)
+    assert not root.exists()
+    assert not (source.parent / "other").exists()
+    assert not (source.parent / "cloud").exists()
 
 
 @pytest.mark.parametrize("change", ["observe", "passive", "unauthorized", "wrong-source",
@@ -292,6 +354,18 @@ def test_source_changes_after_owner_verification_never_issue_a_receipt(packet: P
     with pytest.raises(WorktreeStateError, match="changed"):
         collect_worktree_state(cfg, target, plan, source, IDENTITY, ("session-1",), changed)
     assert not list(target._root().rglob("receipt.json"))
+
+
+def test_complete_copy_does_not_renew_an_exhausted_caller_budget(packet: Packet) -> None:
+    cfg, target, plan, source = packet
+    before = (source / "agenda.sqlite3").read_bytes()
+    with pytest.raises(WorktreeStateError, match="shared time budget"):
+        collect_worktree_state(
+            cfg, target, plan, source, IDENTITY, ("session-1",), fake_owner,
+            budget=OwnedExecutionBudget(time.monotonic() - 1, cleanup_reserve=1),
+        )
+    assert not list(target._root().rglob("receipt.json"))
+    assert (source / "agenda.sqlite3").read_bytes() == before
 
 
 def test_changed_privacy_rejects_receipt_readback_before_the_owner(packet: Packet) -> None:

@@ -48,7 +48,7 @@ def _installation_targets(root, identity, reservation, staged, *, command_direct
 
 
 def install_client_generation(root, identity, selection, staged, *, generation, request,
-                              command_directory, replace_commands=False,
+                              command_directory, replace_commands=False, legacy_root=None,
                               current_policy, current_target, clock=lambda: int(time.time())):
     """Realize supplied explicit intent; never choose a release or recover a predecessor."""
     if replace_commands is not True:
@@ -61,8 +61,8 @@ def install_client_generation(root, identity, selection, staged, *, generation, 
     identifier(request, "forward installation request")
     try:
         root = Path(root)
-        if not os.path.lexists(root / admission.DATABASE):
-            generations._initialize_lineage(root, identity)
+        if legacy_root is not None or not os.path.lexists(root / admission.DATABASE):
+            generations._initialize_lineage(root, identity, legacy_root=legacy_root)
         constructed = generations.construct_client_generation(
             root, identity, selection, staged, generation=generation, request=request,
             current_policy=current_policy, current_target=current_target, clock=clock,

@@ -833,6 +833,10 @@ An explicit `--model`, `--reasoning-effort`, or `--context` already present
 never duplicates or overrides it, bare or `=`-form. No
 `~/.copilot/settings.json`, or none of the three keys set, means no flags are
 injected; the launch falls back to Copilot's own default resolution.
+Launch reads those defaults without restoring or rewriting global settings.
+Settings changes belong to explicit machine setup/restore or configured
+background maintenance, not per-worktree or per-session startup. Folder pretrust
+is independent and remains enabled.
 
 **Not applied to ACP sessions** (`--acp`): Copilot CLI ignores these CLI
 flags in ACP mode. `agent-bridge`'s ACP client carries model/effort through

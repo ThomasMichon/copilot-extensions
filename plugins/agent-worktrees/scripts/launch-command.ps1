@@ -53,10 +53,8 @@ if ($args.Count -ge 1 -and $args[0] -eq '--startup-manifest') {
     }
 }
 
-$recovery = $false
 $offset = 0
 if ($args.Count -gt $offset -and $args[$offset] -eq '--recovery') {
-    $recovery = $true
     $offset++
 }
 if ($args.Count -gt $offset -and $args[$offset] -eq '--') {
@@ -65,11 +63,6 @@ if ($args.Count -gt $offset -and $args[$offset] -eq '--') {
 if ($args.Count -le $offset) {
     [Console]::Error.WriteLine('ERROR: launch-command.ps1 requires a command.')
     exit 2
-}
-
-$machineSettingsHelper = Join-Path $PSScriptRoot 'reconcile-machine-settings.ps1'
-if (Test-Path -LiteralPath $machineSettingsHelper) {
-    . $machineSettingsHelper -Recovery:$recovery
 }
 
 $executable = [string]$args[$offset]
@@ -214,7 +207,6 @@ if ($usesDefaultSetup) {
     exit $LASTEXITCODE
 }
 
-Remove-Item Env:AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED -ErrorAction SilentlyContinue
 # Stage 3 (copilot_invoked): the config-driven launch-template and legacy
 # tools/setup/setup.ps1 paths never reach default-setup.ps1's own precise
 # exec-point emitter, so this wrapper -- the one seam EVERY resolved

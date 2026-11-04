@@ -29,24 +29,14 @@ from .self_install import default_root
 
 
 def _cmdline_for_pid(pid: int) -> str:
-    """Best-effort cmdline text for an already-identified mux-daemon pid.
-
-    Approximate by design: this is used only to recover the ``--listen-port``
-    a resident daemon was started with, for a purely observational report --
-    never for an identity-sensitive decision (those stay routed through
-    ``mux_daemon_cutover``'s own, more careful root-matching helpers).
-    """
+    """Command line for diagnostic root/port matching, not mutation authority."""
     if os.name == "nt":
-        argv = [
-            "powershell",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "Get-CimInstance Win32_Process -Filter \"ProcessId=%d\" | "
-            "ForEach-Object { $_.CommandLine }" % pid,
-        ]
-        out = subprocess.run(argv, capture_output=True, text=True, timeout=10, check=False)  # noqa: S603
-        return (out.stdout or "").strip()
+        from .windows_daemon_observation import process_command_line
+
+        try:
+            return process_command_line(pid)
+        except OSError:
+            return ""
     proc_cmdline = Path(f"/proc/{pid}/cmdline")
     if proc_cmdline.is_file():
         try:
@@ -78,7 +68,7 @@ def _parse_listen_port(cmdline: str) -> int | None:
 
 
 def _current_user_sid() -> str | None:
-    """The current OS user's Windows SID, via ``WindowsIdentity.GetCurrent()``.
+    """The current OS user's Windows SID, read from its native process token.
 
     Never derived from ``USERDOMAIN``/``USERNAME``: those are ordinary
     environment variables, trivially overridable by whatever spawned this
@@ -86,19 +76,12 @@ def _current_user_sid() -> str | None:
     matching value and defeat the ownership check entirely. A SID is the
     OS's own non-spoofable identity primitive.
     """
-    argv = [
-        "powershell",
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        "[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value",
-    ]
+    from .windows_daemon_observation import current_user_sid
+
     try:
-        out = subprocess.run(argv, capture_output=True, text=True, timeout=10, check=False)  # noqa: S603
-    except (subprocess.TimeoutExpired, OSError):
+        return current_user_sid() or None
+    except OSError:
         return None
-    sid = (out.stdout or "").strip()
-    return sid or None
 
 
 def _pid_owned_by_current_user(pid: int, *, current_sid: str | None = "") -> bool:
@@ -113,29 +96,19 @@ def _pid_owned_by_current_user(pid: int, *, current_sid: str | None = "") -> boo
     timed-out probe itself) is reported without a connection attempt.
 
     ``current_sid`` (Windows only) lets a caller checking many pids in one
-    pass (:func:`daemon_statuses`) resolve the caller's own SID once and
-    reuse it, instead of re-spawning a PowerShell process per candidate.
+    pass (:func:`daemon_statuses`) resolve the caller's own token SID once
+    and reuse it.
     The default sentinel (``""``, never a real SID) means "resolve it fresh
     for this one call" -- so a direct caller never has to know about this
     parameter at all.
     """
     if os.name == "nt":
-        argv = [
-            "powershell",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "$p = Get-CimInstance Win32_Process -Filter \"ProcessId=%d\"; "
-            "if ($p) { $o = Invoke-CimMethod -InputObject $p -MethodName GetOwnerSid; "
-            "if ($o.ReturnValue -eq 0) { Write-Output $o.Sid } }" % pid,
-        ]
+        from .windows_daemon_observation import process_user_sid
+
         try:
-            out = subprocess.run(  # noqa: S603
-                argv, capture_output=True, text=True, timeout=10, check=False
-            )
-        except (subprocess.TimeoutExpired, OSError):
+            owner_sid = process_user_sid(pid)
+        except OSError:
             return False
-        owner_sid = (out.stdout or "").strip()
         resolved_sid = current_sid if current_sid != "" else _current_user_sid()
         # Both sides are required to be genuinely non-empty: a failed
         # lookup on either side must never compare equal to another failed
@@ -168,8 +141,7 @@ def _pid_owned_by_current_user(pid: int, *, current_sid: str | None = "") -> boo
 
 
 def _process_start_time(pid: int) -> str | None:
-    """``zdd.diagnostics.process_start_time()`` plus a local macOS/BSD
-    fallback for this module's own identity re-check.
+    """Native Windows birth, or the shared helper plus a macOS/BSD fallback.
 
     The shared ``zdd`` helper only implements Windows (``GetProcessTimes``)
     and Linux (``/proc/<pid>/stat``) -- it returns ``None`` on macOS and
@@ -184,6 +156,13 @@ def _process_start_time(pid: int) -> str | None:
     macOS implementation is out of scope here (it has several other
     consumers); this stays a local, narrowly-scoped supplement.
     """
+    if os.name == "nt":
+        from .windows_daemon_observation import process_start_time as native_start_time
+
+        try:
+            return native_start_time(pid)
+        except OSError:
+            return None
     token = process_start_time(pid)
     if token is not None or os.name == "nt" or Path(f"/proc/{pid}").is_dir():
         return token
@@ -199,6 +178,27 @@ def _process_start_time(pid: int) -> str | None:
         return None
     value = (out.stdout or "").strip()
     return value or None
+
+
+def _iter_status_pids() -> set[int]:
+    if os.name == "nt":
+        from .windows_daemon_observation import mux_daemon_pids
+
+        return mux_daemon_pids()
+    return mux_daemon_cutover._iter_mux_daemon_pids()
+
+
+def _status_pid_matches_root(pid: int, *, root: Path) -> bool:
+    if os.name != "nt":
+        return mux_daemon_cutover._pid_matches_root(pid, root=root)
+    command = _cmdline_for_pid(pid)
+    if not command:
+        return False
+    recorded = mux_daemon_cutover._cmdline_root(command)
+    resolved = root.expanduser().resolve()
+    return recorded == resolved or (
+        recorded is None and resolved == default_root().expanduser().resolve()
+    )
 
 
 def daemon_statuses(root: Path | None = None) -> list[dict[str, Any]]:
@@ -221,15 +221,12 @@ def daemon_statuses(root: Path | None = None) -> list[dict[str, Any]]:
     active_endpoint = (
         routing.Endpoint.from_dict(active_raw) if isinstance(active_raw, dict) else None
     )
-    # Resolved once per call (Windows only; unused elsewhere) rather than
-    # once per candidate pid -- the caller's own SID never changes within a
-    # single daemon_statuses() pass, so re-spawning a PowerShell process per
-    # pid to re-derive it would be pure waste.
+    # Current-user identity is stable within this observation pass.
     current_sid = _current_user_sid() if os.name == "nt" else None
 
     results: list[dict[str, Any]] = []
-    for pid in sorted(mux_daemon_cutover._iter_mux_daemon_pids()):
-        if not mux_daemon_cutover._pid_matches_root(pid, root=resolved_root):
+    for pid in sorted(_iter_status_pids()):
+        if not _status_pid_matches_root(pid, root=resolved_root):
             continue
         cmdline = _cmdline_for_pid(pid)
         port = _parse_listen_port(cmdline)
@@ -283,8 +280,8 @@ def daemon_statuses(root: Path | None = None) -> list[dict[str, Any]]:
         # ControlClient caller (drain/undrain/shutdown/adopt too), not just
         # this read-only surface; tracked as follow-on work under #5001.
         try:
-            still_live = pid in mux_daemon_cutover._iter_mux_daemon_pids()
-            still_matches_root = still_live and mux_daemon_cutover._pid_matches_root(
+            still_live = pid in _iter_status_pids()
+            still_matches_root = still_live and _status_pid_matches_root(
                 pid, root=resolved_root
             )
             start_time_after = _process_start_time(pid) if still_matches_root else None

@@ -145,6 +145,14 @@ def admit_collection(
     cfg: Config, target: Target, plan: ResolvedPlan, identity: WorktreeStateRevision,
 ) -> Path:
     """Resolve the actual target only after all supported policies admit effects."""
+    return admit_repository_collection(cfg, target, plan, identity.repository)
+
+
+def admit_repository_collection(
+    cfg: Config, target: Target, plan: ResolvedPlan, repository: str,
+) -> Path:
+    """Admit a repository before exporting any revision or creating staging."""
+    repository = canonical_repository_identity(repository)
     if plan.mode != ExecutionMode.ENFORCE or not plan.authorized or plan.passive:
         raise WorktreeStateError("worktree collection requires a nonpassive authorized enforce plan")
     if plan.machine != resolve_machine_identity(cfg):
@@ -174,8 +182,8 @@ def admit_collection(
         claim for claim in plan.claims
         if claim.dimension == OwnershipDimension.COLLECTION
         and (
-            identity.repository in claim.sources.repositories
-            or claim.sources.wildcard and identity.repository not in claim.sources.exclusions
+            repository in claim.sources.repositories
+            or (claim.sources.wildcard and repository not in claim.sources.exclusions)
         )
     ]
     if len(matches) != 1:

@@ -1,6 +1,20 @@
 {
     "profile": "copilot-extensions.promotion-units/v1",
     "nodes": [
+        "tools/promotion_unit_tests/test_hook_demand.py::test_completed_hook_response_retains_demand_until_monotonic_expiry[preToolUse]",
+        "tools/promotion_unit_tests/test_hook_demand.py::test_completed_hook_response_retains_demand_until_monotonic_expiry[postToolUse]",
+        "tools/promotion_unit_tests/test_hook_demand.py::test_rejected_or_uncompleted_requests_do_not_retain_hook_demand[token]",
+        "tools/promotion_unit_tests/test_hook_demand.py::test_rejected_or_uncompleted_requests_do_not_retain_hook_demand[version]",
+        "tools/promotion_unit_tests/test_hook_demand.py::test_rejected_or_uncompleted_requests_do_not_retain_hook_demand[payload]",
+        "tools/promotion_unit_tests/test_hook_demand.py::test_rejected_or_uncompleted_requests_do_not_retain_hook_demand[kind]",
+        "tools/promotion_unit_tests/test_hook_demand.py::test_rejected_or_uncompleted_requests_do_not_retain_hook_demand[expired]",
+        "tools/promotion_unit_tests/test_hook_demand.py::test_rejected_or_uncompleted_requests_do_not_retain_hook_demand[closed]",
+        "tools/promotion_unit_tests/test_hook_demand.py::test_rejected_or_uncompleted_requests_do_not_retain_hook_demand[failed]",
+        "tools/promotion_unit_tests/test_hook_demand.py::test_rejected_or_uncompleted_requests_do_not_retain_hook_demand[unavailable]",
+        "tools/promotion_unit_tests/test_hook_demand.py::test_rejected_or_uncompleted_requests_do_not_retain_hook_demand[late]",
+        "tools/promotion_unit_tests/test_hook_demand.py::test_rejected_or_uncompleted_requests_do_not_retain_hook_demand[result]",
+        "tools/promotion_unit_tests/test_hook_demand.py::test_rejected_or_uncompleted_requests_do_not_retain_hook_demand[serialization]",
+        "tools/promotion_unit_tests/test_hook_demand.py::test_rejected_or_uncompleted_requests_do_not_retain_hook_demand[write]",
         "tools/promotion_unit_tests/test_automatic_update_policy.py::test_relative_manager_policy_uses_retained_request_directory",
         "tools/promotion_unit_tests/test_automatic_update_policy.py::test_relative_manager_policy_requires_absolute_request_directory[]",
         "tools/promotion_unit_tests/test_automatic_update_policy.py::test_relative_manager_policy_requires_absolute_request_directory[relative-caller]",
@@ -4079,6 +4093,9 @@
         "tools/promotion_unit_tests/test_linux_daemon_scope.py::test_unrelated_pid_one_scope_does_not_hide_local_unit"
     ],
     "sources": {
+        "plugins/agent-worktrees/src/agent_worktrees/hook_ipc.py": "9e52031f16398fb445a4a73272cf2f826f2da3148702805f7bfb6681b20e76af",
+        "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py": "9e863be3c5e6adcba6073dd82b0becba44f0e1d352f28544453af4a55b28de0f",
+        "tools/promotion_unit_tests/test_hook_demand.py": "1d089f1f78b4240e889922edd2e732fdb7352aafbc9dd8393e4f5966eedd65d9",
         "tools/promotion_unit_tests/test_automatic_update_policy.py": "89bc6b816b365470efaa77c0d15c2c6a546b6c62ed489468a8e8e7b529d14e72",
         "worktree-manager/scripts/runtime_install.py": "68e889585e93227feea18e7fa9b7e8c5926ecb05adbcaec26de1bd9c69ee14c4",
         "worktree-manager/src/worktree_manager/update_driver_cli.py": "53844758f6538d0aba80d480226f131b5bc922f9d957d7b094be36d1bd6ffafa",
@@ -4660,6 +4677,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/update_runtime.py": "7bc1629ace4a5ac4db4cbae1472be2c49f00753abba3243fdd7931cdbb0d18a5"
     },
     "coverage_targets": [
+        "plugins/agent-worktrees/src/agent_worktrees/hook_ipc.py",
         "libs/configuration-layers/src/configuration_context/runtime.py",
         "libs/update-driver/src/update_driver/core.py",
         "worktree-manager/src/worktree_manager/manager_config.py",

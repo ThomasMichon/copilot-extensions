@@ -4,9 +4,15 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from zdd import routing
 
 from worktree_manager import daemons_status
+
+
+@pytest.fixture(autouse=True)
+def _platform_independent_status_logic(monkeypatch):
+    monkeypatch.setattr(daemons_status, "os", SimpleNamespace(name="posix"))
 
 
 class _FakeControlClient:
@@ -374,13 +380,10 @@ def test_pid_owned_by_current_user_windows_matches_and_mismatches(monkeypatch):
     monkeypatch.setattr(daemons_status, "os", SimpleNamespace(name="nt"))
     current_sid = "S-1-5-21-1111111111-2222222222-3333333333-1001"
     owner_sid = current_sid
+    from worktree_manager import windows_daemon_observation
 
-    def _fake_run(argv, **kwargs):
-        if "WindowsIdentity" in argv[-1]:
-            return subprocess.CompletedProcess(argv, 0, stdout=current_sid + "\n")
-        return subprocess.CompletedProcess(argv, 0, stdout=owner_sid + "\n")
-
-    monkeypatch.setattr(subprocess, "run", _fake_run)
+    monkeypatch.setattr(windows_daemon_observation, "current_user_sid", lambda: current_sid)
+    monkeypatch.setattr(windows_daemon_observation, "process_user_sid", lambda pid: owner_sid)
     assert daemons_status._pid_owned_by_current_user(123) is True
 
     owner_sid = "S-1-5-21-9999999999-8888888888-7777777777-1002"
@@ -450,17 +453,14 @@ def test_pid_owned_by_current_user_posix_procfs_matches_and_mismatches(monkeypat
     assert not ps_called
 
 
-def test_pid_owned_by_current_user_handles_a_timed_out_probe(monkeypatch):
-    """A probe that times out or can't start must never crash the whole
-    status report (``check=False`` on ``subprocess.run`` does not suppress
-    these) -- it must be treated the same as any other unverifiable
-    ownership: ``False``, not a propagated exception."""
+def test_pid_owned_by_current_user_handles_an_unavailable_native_probe(monkeypatch):
     monkeypatch.setattr(daemons_status, "os", SimpleNamespace(name="nt"))
+    from worktree_manager import windows_daemon_observation
 
-    def _raise(argv, **kwargs):
-        raise subprocess.TimeoutExpired(argv, 10)
+    def _raise(pid):
+        raise OSError("native identity unavailable")
 
-    monkeypatch.setattr(subprocess, "run", _raise)
+    monkeypatch.setattr(windows_daemon_observation, "process_user_sid", _raise)
     assert daemons_status._pid_owned_by_current_user(123) is False
 
 

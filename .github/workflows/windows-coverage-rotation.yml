@@ -188,7 +188,7 @@ jobs:
     env:
       POST_TOOL_FALLBACK: ${{ inputs.post_tool_fallback }}
       RELATED_RESOLUTION: ${{ inputs.related_resolution }}
-      TEST_SELECTOR: ${{ inputs.related_resolution && 'test_config_graft_e2e or test_related_execution_context' || inputs.post_tool_fallback && 'test_post_tool_shell or test_nudge_status or test_bind_nudge_script or test_late_worker_completion_reaches_actual_post_tool_hook or test_inrepo_completion_keeps_optional_absence_publishable' || inputs.launch_maintenance && (matrix.plugin == 'update-driver' && 'test_core or test_participant_transport or test_real_product_exit_cannot_hide_abandoned_execution_custody' || 'test_update_launch_cli or test_update_driver_json or test_update_stage or test_reconcile_status or test_launch_update_requests or test_launch_preparation_progress or test_launch_session_unwrap or test_standalone_provisioning') || '' }}
+      TEST_SELECTOR: ${{ inputs.related_resolution && 'test_config_graft_e2e or test_related_execution_context' || inputs.post_tool_fallback && 'test_post_tool_shell or test_nudge_status or test_bind_nudge_script or test_late_worker_completion_reaches_actual_post_tool_hook or test_inrepo_completion_keeps_optional_absence_publishable or test_idle_exit_retains_recent_completed_tool_hooks_then_expires' || inputs.launch_maintenance && (matrix.plugin == 'update-driver' && 'test_core or test_participant_transport or test_real_product_exit_cannot_hide_abandoned_execution_custody' || 'test_update_launch_cli or test_update_driver_json or test_update_stage or test_reconcile_status or test_launch_update_requests or test_launch_preparation_progress or test_launch_session_unwrap or test_standalone_provisioning') || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -313,7 +313,7 @@ jobs:
               "qualification_scope": (
                   "Linux targeted related-resolution consumers only; no installed runtime, Windows or throughput qualification"
                   if related else
-                  "Linux post-tool and guard-publication consumers only; no native host, Windows or throughput qualification"
+                  "Linux pre/post-tool retention and guard-publication consumers only; no native host, Windows or throughput qualification"
                   if post_tool else
                   "Linux launch-maintenance selection only; no Windows or broker qualification"
                   if selector else "Linux default-full only; Windows execution unavailable and not validated"
@@ -329,14 +329,14 @@ jobs:
               "scope": (
                   "selected related configuration-graft and execution-context consumers; explicit-tier/environment-gated skips are not passes"
                   if related else
-                  "selected post-tool, late-guidance and guard-publication consumers; explicit-tier/environment-gated skips are not passes"
+                  "selected pre/post-tool retention, late-guidance and guard-publication consumers; explicit-tier/environment-gated skips are not passes"
                   if post_tool else
                   "selected launch-maintenance tests; explicit-tier/environment-gated skips are not passes"
                   if selector else "default full plugin invocation; explicit-tier/environment-gated skips are not passes"
               ),
               "failure_owner": (
                   "Targeted related resolution #7961" if related else
-                  "Post-tool fallback discovery #6086" if post_tool else
+                  "Post-tool fallback discovery #6086 and ordinary-hook retention #3761" if post_tool else
                   "Coordinated Launch Maintenance #7694" if selector
                   else "Test Portfolio Rationalization #1303"
               ),
