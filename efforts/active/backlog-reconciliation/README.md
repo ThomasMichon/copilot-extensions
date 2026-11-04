@@ -257,6 +257,34 @@ The 2026-11-04 12:59:20 UTC / 04:59:20 PST complete census is 1,032 whole
 open, 303 above the fixed 729 checkpoint. No new closure, implementation
 appointment, rollout or held-lane recovery follows.
 
+The [native fixture/runner study](native-fixture-cohort.md) reads all nine
+originals and twelve comments, separating four families under their existing
+fixture, runner and production owners. Eight eligible merged descriptions
+provide bounded comparison, not whole-history proof. A qualified-reference
+admission error is preserved: one protected-scope description was wrongly
+read once, excluded, and its seven existing match edges invalidated; no
+further source study or retroactive credit follows. The actual merged/current
+#9623 fixture, genuine final review and complete CI metadata independently
+support #9699's finite completion, not the broader effort.
+
+The existing Active Test Portfolio ROOT now carries complete unchecked
+#7243/#9436/#9614/#10225 Plan/local AND actual global Validation,
+Coordination and Journal proposals within its existing Phase 4/5/7 ownership.
+All eight remaining sources are still OPEN pending actual reviewed receiving
+delivery, full current readback and separate literal source judgments.
+#7643 stays independently OPEN, #8521 retains its explicit diagnostic/cache
+residual and #9460/#9467 retain claimed fixture/production boundaries.
+
+Separate whole-current Tasks and Manager receiving judgments verified the
+actual #10339/#10349 complete intakes before administratively superseding
+#2801/#4117. Their unfinished work and same custodians remain, including
+#2453 native acceptance, standalone engine/allocator authority and valid
+existing previews. These are not technical completions. The subsequent
+2026-11-04 13:55:29 UTC / 05:55:29 PST complete census is 1,030 whole open,
+301 above 729: #9699's verified inflow completion is offset by metadata-only
+arrival #10451. No new arrival text, implementation, rollout, source/resource
+release or recovery of the held session-data publication is claimed.
+
 - [x] Holistically sweep the initial eligible backlog and build an issue/effort
   relationship graph; use alignment and theme to identify consolidation groups.
   The [initial graph snapshot](graph-overview.md) accounts for all 695 assigned

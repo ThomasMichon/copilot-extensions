@@ -55,6 +55,25 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
+The four finite fixture/runner contracts below use the SAME primary
+maintainer and existing Phase 4 Logger/shared-fixture waves (#7243/#9614),
+Phase 5 owning runner/cache/disposal work (#9436/#10225), and Phase 7
+deduplication/domain-Plan review. Preserve OPEN #1303, its entire inherited
+acceptance and actual source/audit/cohort/periodic-failure/native/release
+claims, all incumbent rows and the historical Journal. An empty assignee
+does not release custody. This is documentary tracking, not an implementation
+appointment, common-cause finding, execution enrollment or cleanup grant.
+#7643 remains independently OPEN; #8521's explicit diagnostic/private-cache
+residual and #9460/#9467's claimed fixture/production ownership remain
+separate. No #9375/#10239 supported-uninstall scope is acquired.
+
+Normal review and actual complete Plan/local AND global Validation/
+Coordination/Journal delivery, followed by permitted whole-current source,
+receiver, history and custody readback, precede separate source judgments.
+If any clause, original alternative, current owner or condition is uncertain,
+KEEP the source OPEN. Documentary supersession is not a repaired test,
+native/installed PASS, parent completion or source/resource release.
+
 The proposed finite #5245 family continues through Phase7 migration-intake
 and Phase4's owning fixture/runner/hygiene wave. Preserve the existing
 primary, installer/test/process/GUI/native, audit/cohort/periodic-failure,
@@ -1231,7 +1250,224 @@ is delivered, not work reopened by these unchecked accounting rows.)_
   evidence separate. Current policy need not preserve every historical
   budget byte-for-byte; no relaxed retry or waiver is authorized.
 
+### Finite Logger interpreter, probe and retry fixtures from #7243
+
+Agent-recommended Phase 4 Logger-wave tracking through Phase 7 intake.
+Preserve ALL THREE original failure families, not a generic SRE fix.
+
+- [ ] **F7243-P1:** Retain the native Windows x86_64/Git Bash/PowerShell
+  5.1 and 7 report at its actual source/environment: six failed, ten passed,
+  three skipped in the narrow packet, plus the seventh variable retry
+  parametrization in the full selection. Map both bootstrap-reconcile
+  cases, independent cold-store manifest creation/replacement and all
+  reported SRE-retry cases without asserting they still fail today.
+- [ ] **F7243-P2:** At the actual Bash test/script consumer, isolate inherited
+  `PYTHONHOME` and relevant Python environment state OR select the matching
+  test interpreter on PATH. Preserve the original alternative, uv-venv/
+  first-PATH version mismatch and real JSON import/name/manifest outcomes.
+  Do not change global Python, production profile authority or assertions
+  merely to get a reconcile message.
+- [ ] **F7243-P3:** Separately decide and document the original failed
+  bootstrap-name-probe reporting question. A failed interpreter/JSON probe
+  currently looks like a successful empty-name exit; environment sanitation
+  alone is not that diagnostic decision. Preserve legitimate no-op/output
+  behavior and the actual production hook owner; intake changes neither.
+- [ ] **F7243-P4:** Keep isolated `-I` policy-harness timing DISTINCT from
+  inherited-Python-state failures. The original four-attempt measurements
+  were 23.3 seconds on PS5.1 and 23.2 seconds on PS7 against a 20-second
+  child limit, with expected results, not a diagnosed deadlock. Choose
+  actual fixture/work reduction OR a justified reviewed bounded child-budget
+  correction (the original 60-second suggestion is not an applied value).
+  Preserve outer item/group/plugin/process/resource bounds and actual
+  retry-success, exhaustion/nonzero, unrelated-error and delay assertions.
+- [ ] **F7243-P5:** Keep the finite native x86_64 report distinct from
+  #1874 ARM64 consistency, other installer-recovery families and #7245's
+  metrics feature. Passing unrelated Logger suites, a version bump or
+  managed-publication changes are not causal repair of all three families.
+
+#### Local Validation for #7243
+
+- [ ] **F7243-V1:** At the actual supported contained Bash boundary, prove
+  both reconcile cases AND cold-store manifest creation/replacement under
+  controlled mismatched/matched interpreter environments. A message-only
+  assertion or mock past Python selection cannot establish manifest output.
+- [ ] **F7243-V2:** Record the separate failed-probe reporting decision and
+  meaningful failure/no-op controls for its chosen realization. Preserve
+  real diagnostics without leaking environment secrets or altering a live
+  hook during validation.
+- [ ] **F7243-V3:** Qualify the selected reduction-OR-child-budget treatment
+  on BOTH native PowerShell hosts, retaining real retry/exhaustion/unrelated-
+  error/delay behavior, attributable work/timing and owning cleanup.
+  Historical completed timings, unsupported skips and new outcomes stay
+  distinct. No blanket timeout expansion, retry-to-green or full-suite/
+  every-host prerequisite is introduced.
+
+### Finite contained native-profile fixture from #9614
+
+Agent-recommended Phase 4 shared-fixture wave through Phase 7 intake;
+production incumbent-command protection remains authoritative.
+
+- [ ] **F9614-P1:** Retain the reported nineteen Linux legacy-uninstall
+  failures across BOTH `pwsh` and Bash, the installed developer binstub
+  versus empty-CI distinction, and actual shared-case adopters affected.
+  A temporary HOME alone does not establish native-profile containment.
+- [ ] **F9614-P2:** Bind the shared uninstall fixture's REAL native
+  command-recovery/profile consumer to a contained-test OS-profile seam
+  OR an explicit controlled profile argument at the native entrypoint.
+  Preserve the original alternatives and actual contained-test admission;
+  do not globally replace authoritative passwd/profile selection with
+  arbitrary inherited HOME.
+- [ ] **F9614-P3:** Preserve production refusal of unrecognized/foreign
+  incumbent commands and all original uninstall assertions. The fixture
+  must neither inspect nor mutate the developer's real binstub/home.
+  A Codespaces working-directory correction is a different consumer, not
+  proof of this native-uninstall profile boundary.
+
+#### Local Validation for #9614
+
+- [ ] **F9614-V1:** Map all nineteen original cases and actual shared-case
+  adopters to their real native entry/command-recovery consumer on both
+  supported shell hosts. With synthetic populated outside and contained
+  profiles, prove only the admitted contained profile is used; test the
+  absent/present/foreign command outcomes without reading real host state.
+- [ ] **F9614-V2:** Exercise the chosen seam-OR-argument through actual
+  fixture construction, not a mock past recovery, while preserving
+  production authoritative-profile and incumbent-refusal negatives.
+  Record exact source/tier/adopter outcomes and unavailable cases honestly;
+  unchanged CI green or HOME assignment is not the reported boundary proof.
+
+### Finite retained preparation/cache denial family from #9436
+
+Agent-recommended Phase 5 owning-runner work through Phase 7 intake;
+keep three observations distinct until their actual causes are established.
+
+- [ ] **F9436-P1:** Preserve the source-fingerprint-triggered
+  `clear_cache_contents` bootstrap-uv executable denial; post-assertion
+  disposable group-sandbox teardown denial; and separate selected-environment
+  preparation refusal. Readable, non-read-only/Archive-only bytes, inherited
+  Modify access and negative exact-path/Restart Manager queries do not prove
+  an ACL defect, absence of a holder or one shared cause.
+- [ ] **F9436-P2:** Investigate through the ordinary contained runner after
+  a local source dependency changes, keeping containment AND environment
+  leases enabled. Preserve the affected cache for diagnosis. A fresh
+  separately leased environment can distinguish cache from test behavior;
+  it is not permission to repair/delete the original or claim it recovered.
+- [ ] **F9436-P3:** Keep the failed aggregate's unchanged 30-second item
+  limit, the isolated two-case/37.66-second result with failed cleanup,
+  separate ten-case normal teardown and later two-regression/65.22-second
+  canonical-contained result as different evidence. Preparation refusal
+  means no tests ran in that attempt; passing assertions or alternative
+  contained execution does not supply successful managed preparation.
+- [ ] **F9436-P4:** Obtain an attributable owning runner/cache/fixture
+  diagnosis and bounded correction OR an explicit requirement-preserving
+  disposition of each retained unknown. Do not mask failed cleanup, infer
+  a lock owner from a miss, alter ACLs, terminate unrelated processes,
+  clear an uncertain cache or enlarge deadlines to manufacture acceptance.
+
+#### Local Validation for #9436
+
+- [ ] **F9436-V1:** At the actual separately authorized Windows owning
+  preparation/rebuild AND group-disposal boundaries, distinguish each
+  original stimulus, test outcome, cleanup outcome and remaining unknown.
+  Preserve primary test/preparation failure alongside cleanup diagnostics,
+  exact source/environment/lease identity and retained affected artifacts.
+- [ ] **F9436-V2:** Demonstrate the chosen causal correction or explicit
+  retained disposition without bypassing admission/containment or mutating
+  an unrelated environment. A fresh leased control or one successful
+  alternative run supplies only its actual evidence; original failed
+  attempts stay recorded. Native execution/repair is not performed by intake.
+
+### Finite post-exit sharing-handle family from #10225
+
+Agent-recommended Phase 5 runner/native-test-path disposal work through
+Phase 7 intake; this is not #7643's already-attributed external mapping.
+
+- [ ] **F10225-P1:** Retain the original isolated eight passes/three opt-in
+  skips followed by repeated `Scripts/python.exe` WinError 5, supervisor-
+  verified process cleanup, non-read-only executable and later exclusive-read
+  sharing violation. A negative process-image/argv query does not identify
+  the remaining handle owner; retained denied files are not cleanup proof.
+- [ ] **F10225-P2:** Identify the ACTUAL handle owner and make the owning
+  test/runner release it BEFORE targeted sandbox cleanup at
+  `tools/native_test_paths.py` and the real transport-owner suite boundary.
+  Preserve process and wall-clock bounds, primary failures and truthful
+  cleanup status. Do not substitute generic retained-artifact policy,
+  wider recursive removal, failure suppression or unrelated-process stops
+  for this original explicit release requirement.
+- [ ] **F10225-P3:** Keep process independence separately credited:
+  the transport-owner suite requires `agent_worktrees` not importable,
+  whereas the real native launch-plan suite imports it. The #10149
+  independent-suite entry addresses import contamination, not the unknown
+  handle. Preserve both suites' actual assertions and current tier.
+- [ ] **F10225-P4:** Credit the later successful owner-boundary-only
+  invocation (eight passes, three opt-in skips, runner exit zero and
+  verified supervisor cleanup) without erasing failed aggregate attempts
+  or claiming that one success identifies/releases the original holder.
+
+#### Local Validation for #10225
+
+- [ ] **F10225-V1:** Prove actual owner attribution and owning handle release
+  before scoped disposal, with meaningful sharing-denial/nonrelease and
+  successful-release controls. Exercise the real owning consumer rather
+  than mocking past disposal; process exit alone is insufficient.
+- [ ] **F10225-V2:** Record repeated bounded Windows runs settling BOTH
+  assertions and sandbox cleanup, preserved import independence, complete
+  source/attempt identity, skips and primary/cleanup outcomes. Retain prior
+  failures and unknowns. Unavailable native capacity, process cleanup or
+  an isolated green cannot stand in for every original acceptance clause.
+
+#### Continuing delivery gate for the four finite families
+
+- [ ] **F4-C1:** Continue through the SAME primary maintainer, owning Logger/
+  shared-fixture/runner/cache/platform and actual source/audit/cohort/native/
+  periodic-failure/release/resource custodians and existing Phase 7 review.
+  Preserve all #1303 body inheritance and live claims, original alternatives,
+  checked foundations, actual ROOT global Validation and complete history.
+  No new executor, blanket acknowledgement, claim expiry or handoff follows.
+- [ ] **F4-C2:** Preserve #7643 independently OPEN, #8521's explicit OPEN
+  diagnostic/private-cache residual and #9460/#9467's separate claimed
+  teardown-fixture/production guard. #9699 is finite completed fixture
+  credit, not a production-guard relaxation or portfolio completion.
+  The separate #9375/#10239 cases are not intake scope.
+- [ ] **F4-C3:** BEFORE any administrative source supersession, obtain
+  ordinary review and actual delivery of ALL applicable direct Plan, local
+  AND actual level-two ROOT global Validation, Coordination and dated Journal;
+  then fully read the current ROOT and linked historical Journal, freshly
+  qualified whole source/umbrella discussion and actual custody/holds.
+  Apply each source's literal condition separately. Unknown scope, fit,
+  delivery, current ownership or retained OPEN condition means KEEP.
+  A study, graph edge, child-only note or document merge is not a fix.
+
 ## Validation Plan
+
+- [ ] **F7243-G:** Resolve EVERY F7243 Plan/local Validation and F4
+  Coordination clause: both Bash reconcile cases, independent cold-store
+  publication, isolation-OR-matching-PATH, separate failed-probe decision
+  and BOTH native PowerShell retry families with attributable bounded
+  reduction-OR-reviewed-child-budget treatment. Preserve all original
+  assertions, three-family causality distinctions and current custodians.
+- [ ] **F9614-G:** Resolve EVERY F9614 Plan/local Validation and F4
+  Coordination clause for all nineteen original cases and actually affected
+  shared adopters: admitted seam-OR-controlled-profile at the REAL native
+  consumer, both hosts, no real-home access/mutation, and unchanged
+  authoritative production/incumbent refusal.
+- [ ] **F9436-G:** Resolve EVERY F9436 Plan/local Validation and F4
+  Coordination clause: all three retained denial contexts, actual causal
+  correction OR explicit requirement-preserving unknown disposition,
+  lease-safe ordinary preparation and honest primary/cleanup results.
+  Preserve original artifacts, unsuccessful attempts and native uncertainty;
+  no shared-cause, cache-repair or successful-preparation inference.
+- [ ] **F10225-G:** Resolve EVERY F10225 Plan/local Validation and F4
+  Coordination clause: ACTUAL owner and owning release BEFORE targeted
+  disposal, repeated Windows assertions AND cleanup, unchanged bounds
+  and separate import-independence credit. Retained artifacts or a later
+  isolated pass are not substitutes for the original handle requirement.
+
+These four finite families preserve current unit-only required CI,
+periodic/explicit/native admission, effect/storage/process/time budgets
+and every incumbent parent gate. Tracking is not implementation, executed
+acceptance or source/resource release; no unrelated whole-portfolio,
+every-host or release prerequisite is added to a finite family.
 
 - [ ] G5921: Resolve EVERY direct #5921 P1-P6, V1-V5 and C1-C3 clause in the Phase4 finite clean-room verdict family at its ORIGINAL source/API consumer tier: actual Python AND Python-less version/schema/evidence-complete reduction and real caller shape, explicit malformed/incomplete/unjudged NON-PASS, correct valid control/classified-jam results/exits, literal-mode separation and source-safe diagnostics. Preserve all incumbent Plan/Validation, OPEN #1303, same owners and independent #5922/#8511/#4312/#688/#1475 gates. Administrative intake is not a reducer fix or executed evidence; no live box/model/all-host/native programme or unrelated whole-portfolio prerequisite is added, and this does not waive the ROOT's own whole completion gate.
 
@@ -1390,6 +1626,23 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-11-04 - Four finite fixture and runner contracts
+
+Added complete unchecked direct Plan/local AND actual global Validation
+and continuing Coordination for #7243/#9436/#9614/#10225 after whole-
+contract and actual current ROOT/framework/history/umbrella-custody reading.
+The [nine-contract study](../backlog-reconciliation/native-fixture-cohort.md)
+separates mechanisms and preserves original evidence, alternatives, unknowns
+and owners. #9699's finite completion is independent; #7643/#8521 and
+#9460/#9467 remain separate OPEN/claimed work. All incumbent rows, checked
+credit, journal and #1303 inherited/live responsibilities remain unchanged.
+
+This is documentary intake, not a new suite, effect authority or native/
+installed PASS. Normal review, actual complete delivery, permitted current
+readback and separate source judgments remain required. No test, collection,
+import, cache/environment mutation, process/service action, cleanup,
+implementation appointment or source/resource transfer occurred.
 
 ### 2026-10-30 - Proposed retained hygiene diagnostic tail
 
