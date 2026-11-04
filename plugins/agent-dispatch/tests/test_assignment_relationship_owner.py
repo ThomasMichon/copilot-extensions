@@ -7,12 +7,14 @@ import io
 import json
 import os
 import subprocess
+import threading
 import time
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
 
 import pytest
+from agent_procutil import _windows_caller_owned, owned_process
 from agent_procutil.owned_budget import OwnedExecutionBudget
 from agent_procutil.owned_process import OwnedCleanupError, _communicate_windows_bounded
 
@@ -367,10 +369,237 @@ def test_real_blocked_pipe_custody_survives_writer_translation_and_retry(
 
 def test_retry_refuses_new_unknown_resources_without_releasing_custody() -> None:
     cleanup = Mock()
-    failure = OwnedCleanupError(object(), object(), cleanup_retry=cleanup)
+    settled = Mock()
+    failure = OwnedCleanupError(
+        object(), object(), cleanup_retry=cleanup, on_settled=settled,
+    )
     resource = object()
     failure.cleanup_resources = (("unknown", resource),)
     with pytest.raises(RuntimeError, match="no complete retry"):
         failure.retry_cleanup(deadline=time.monotonic() + 1)
     cleanup.assert_not_called()
+    settled.assert_not_called()
     assert failure.cleanup_resources == (("unknown", resource),)
+
+
+@pytest.fixture
+def owned_windows_capture(monkeypatch: pytest.MonkeyPatch) -> tuple[list[Any], dict]:
+    """Keep the owned Windows orchestration, with synthetic native process handles."""
+    processes = []
+    control = {"allow_retirement": True}
+
+    class Process:
+        def __init__(self) -> None:
+            self.stdin = io.BytesIO()
+            self.stdout = io.BytesIO(json.dumps(support()).encode())
+            self.stderr = io.BytesIO()
+            self.returncode = 0
+            self.allow_retirement = control["allow_retirement"]
+            self.retirements = 0
+            self.closes = 0
+
+        def poll(self) -> int:
+            return 0
+
+        def wait(self, timeout: float) -> int:
+            assert timeout > 0
+            return 0
+
+        def retire_job(self, job: Any, timeout: float) -> None:
+            assert timeout > 0
+            self.retirements += 1
+            if not self.allow_retirement:
+                raise OSError("native exit unconfirmed")
+            job.handle = 0
+
+        def close(self) -> None:
+            assert self.stdin.closed and self.stdout.closed and self.stderr.closed
+            self.closes += 1
+
+    def spawn(*args: Any, **kwargs: Any) -> tuple[Any, Any]:
+        assert kwargs["require_job"] is True and kwargs["allow_breakaway"] is False
+        process = Process()
+        processes.append(process)
+        return process, SimpleNamespace(handle=1)
+
+    monkeypatch.setattr(owned_process, "os", SimpleNamespace(**{**vars(os), "name": "nt"}))
+    monkeypatch.setattr(owned_process, "no_window_kwargs", lambda: {})
+    monkeypatch.setattr(_windows_caller_owned, "spawn", spawn)
+    return processes, control
+
+
+@pytest.mark.parametrize("retirement_fails", [False, True])
+def test_definite_stdlib_pre_start_failure_settles_without_an_unjoinable_worker_hold(
+    monkeypatch: pytest.MonkeyPatch, owned_windows_capture: tuple[list[Any], dict],
+    retirement_fails: bool,
+) -> None:
+    processes, control = owned_windows_capture
+    control["allow_retirement"] = not retirement_fails
+    workers = []
+
+    def make_thread(*args: Any, **kwargs: Any) -> threading.Thread:
+        worker = threading.Thread(*args, **kwargs)
+        if not workers:
+            # The stdlib start() rejects this before native thread creation.
+            worker._initialized = False
+        workers.append(worker)
+        return worker
+
+    monkeypatch.setattr(owned_process, "threading", SimpleNamespace(
+        Thread=make_thread, Event=threading.Event, Lock=threading.Lock,
+    ))
+    settled = Mock()
+    budget = OwnedExecutionBudget.from_timeout(.5, cleanup_reserve=.25)
+    def run() -> None:
+        owned_process._run_owned(
+            ["synthetic-native-child"], timeout=.5, input_text="request",
+            capture_limits=(1024, 1024), budget=budget, on_settled=settled,
+        )
+
+    if retirement_fails:
+        with pytest.raises(OwnedCleanupError) as caught:
+            run()
+        settled.assert_not_called()
+        processes[0].allow_retirement = True
+        caught.value.retry_cleanup(deadline=time.monotonic() + 1)
+    else:
+        with pytest.raises(RuntimeError, match=r"thread.__init__"):
+            run()
+    assert processes[0].retirements == (2 if retirement_fails else 1)
+    assert processes[0].closes == 1
+    settled.assert_called_once_with()
+    assert all(not worker._started.is_set() for worker in workers)
+    assert module._pending_cleanup == []
+    # A fresh capture can run; there is no fabricated incomplete worker to retry.
+    control["allow_retirement"] = True
+    result = owned_process._run_owned(
+        ["synthetic-native-child"], timeout=1, input_text="request",
+        capture_limits=(1024, 1024),
+    )
+    assert json.loads(result.stdout) == support()
+
+
+@pytest.mark.parametrize("launch_before_error", [True, False])
+def test_uncertain_start_retains_worker_until_kickoff_completion_and_settlement(
+    monkeypatch: pytest.MonkeyPatch, owned_windows_capture: tuple[list[Any], dict],
+    launch_before_error: bool,
+) -> None:
+    processes, _control = owned_windows_capture
+    release = threading.Event()
+    workers = []
+
+    class LateWorker(threading.Thread):
+        def run(self) -> None:
+            release.wait()
+            super().run()
+
+        def start(self) -> None:
+            if not launch_before_error:
+                # This wrapper cannot attest native absence merely by raising.
+                raise RuntimeError("can't start new thread")
+            super().start()
+            raise RuntimeError("post-launch failure")
+
+    def make_thread(*args: Any, **kwargs: Any) -> threading.Thread:
+        worker = LateWorker(*args, **kwargs)
+        workers.append(worker)
+        return worker
+
+    monkeypatch.setattr(owned_process, "threading", SimpleNamespace(
+        Thread=make_thread, Event=threading.Event, Lock=threading.Lock,
+    ))
+    settled = Mock()
+    failure = None
+    try:
+        budget = OwnedExecutionBudget.from_timeout(.2, cleanup_reserve=.1)
+        with pytest.raises(OwnedCleanupError) as caught:
+            owned_process._run_owned(
+                ["synthetic-native-child"], timeout=.2, input_text="request",
+                capture_limits=(1024, 1024), budget=budget, on_settled=settled,
+            )
+        failure = caught.value
+        attempted = [
+            resource for kind, resource in failure.cleanup_resources if kind == "pipe-worker"
+        ]
+        assert len(attempted) == 1 and attempted[0][0] is workers[0]
+        assert workers[0].is_alive() is launch_before_error
+        assert not attempted[0][1].is_set()
+        assert not any(kind == "pipe-worker-unstarted" for kind, _ in failure.cleanup_resources)
+        settled.assert_not_called()
+        with pytest.raises((RuntimeError, TimeoutError)):
+            failure.retry_cleanup(deadline=time.monotonic() + .02)
+        assert processes[0].closes == 0
+        settled.assert_not_called()
+        release.set()
+        if not launch_before_error:
+            # Resolve the held, indeterminate kickoff using this exact worker.
+            threading.Thread.start(workers[0])
+        failure.retry_cleanup(deadline=time.monotonic() + 1)
+        assert not workers[0].is_alive() and attempted[0][1].is_set()
+        assert processes[0].retirements == processes[0].closes == 1
+        settled.assert_called_once_with()
+        failure.retry_cleanup(deadline=time.monotonic() + 1)
+        assert processes[0].closes == 1
+        settled.assert_called_once_with()
+    finally:
+        release.set()
+        if failure is not None:
+            if not launch_before_error and workers[0].ident is None:
+                threading.Thread.start(workers[0])
+            failure.retry_cleanup(deadline=time.monotonic() + 2)
+        for worker in workers:
+            if worker.ident is not None:
+                worker.join(timeout=1)
+                assert not worker.is_alive()
+
+
+@pytest.mark.parametrize("callback_fails", [False, True])
+def test_owned_retry_delivers_original_settlement_once_only_after_native_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+    owned_windows_capture: tuple[list[Any], dict], callback_fails: bool,
+) -> None:
+    processes, control = owned_windows_capture
+    control["allow_retirement"] = False
+    callback_error = ValueError("delivery outcome is unknown")
+
+    def settled() -> None:
+        assert processes[0].closes == 1
+        if callback_fails:
+            raise callback_error
+
+    notify = Mock(side_effect=settled)
+    with pytest.raises(OwnedCleanupError) as caught:
+        owned_process._run_owned(
+            ["synthetic-native-child"], timeout=1, input_text="request",
+            capture_limits=(1024, 1024), on_settled=notify,
+        )
+    failure = caught.value
+    notify.assert_not_called()
+    processes[0].allow_retirement = True
+    if callback_fails:
+        with pytest.raises(ValueError) as delivered:
+            failure.retry_cleanup(deadline=time.monotonic() + 1)
+        assert delivered.value is callback_error
+        with pytest.raises(RuntimeError, match="delivery is unconfirmed"):
+            failure.retry_cleanup(deadline=time.monotonic() + 1)
+        assert failure._cleanup_complete is True
+        module._pending_cleanup.append(failure)
+        capture = Mock(side_effect=AssertionError("unconfirmed delivery must hold new capture"))
+        monkeypatch.setattr(module, "run_background_capture", capture)
+        with pytest.raises(TaskError, match="custody retained"):
+            module.WorktreeRelationshipWriter(["selected"], admit_workspace=lambda workspace: None)
+        assert module._pending_cleanup == [failure]
+        capture.assert_not_called()
+    else:
+        failure.retry_cleanup(deadline=time.monotonic() + 1)
+        failure.retry_cleanup(deadline=time.monotonic() + 1)
+    notify.assert_called_once_with()
+    assert processes[0].closes == 1
+
+
+def test_unsupported_retry_keeps_settlement_callback_undelivered() -> None:
+    notify = Mock()
+    failure = OwnedCleanupError(object(), object(), on_settled=notify)
+    with pytest.raises(RuntimeError, match="no complete retry"):
+        failure.retry_cleanup(deadline=time.monotonic() + 1)
+    notify.assert_not_called()

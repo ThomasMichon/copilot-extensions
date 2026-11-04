@@ -522,6 +522,11 @@ operation, `OwnedCleanupError.retry_cleanup(deadline=<monotonic instant>)`
 retries only those exact process, Job and worker objects, then closes their
 streams and process handle. Successful settlement is idempotent. Missing retry
 support or additional unknown resources refuses without dropping custody.
+Proven stdlib pre-start refusal does not leave an impossible worker join;
+started or indeterminate workers remain retained through completion and joining.
+Retained errors also preserve the original settlement callback, invoking it
+once after confirmed resource settlement. Failed callback delivery remains
+unconfirmed and is not automatically repeated.
 Consumers must retain the error independently of exception translation and
 settle it before launching another attempt; this API never replays the child
 command or asserts that an interrupted mutation failed.

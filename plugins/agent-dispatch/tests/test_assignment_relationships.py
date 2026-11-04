@@ -400,6 +400,38 @@ def test_assignment_change_during_ground_write_never_publishes_admission(assignm
     assert queue.reconcile_task_relationship(task.id)["state"] == "closed"
 
 
+@pytest.mark.parametrize("replay", [False, True])
+@pytest.mark.parametrize("cancel", ["before", "after"])
+@pytest.mark.parametrize("with_outcome", [False, True])
+def test_cancelled_reconciliation_never_acknowledges_original_or_replayed_claim(
+    assignment, monkeypatch, replay, cancel, with_outcome,
+):
+    queue, owner, workspace, task = assignment
+    if replay:
+        claim(queue, workspace, task)
+    reconcile = queue.reconcile_task_relationship
+
+    def interrupted(task_id, *, event_id=None):
+        if cancel == "before":
+            queue.yield_task(task_id, workspace.worker_id)
+        result = reconcile(task_id, event_id=event_id)
+        if cancel == "after":
+            queue.yield_task(task_id, workspace.worker_id)
+            reconcile(task_id, event_id=event_id)
+        return result
+
+    monkeypatch.setattr(queue, "reconcile_task_relationship", interrupted)
+    operation = queue.claim_outcome if with_outcome else queue.claim_one
+    with pytest.raises(TaskError, match=r"cancelled during|changed during"):
+        operation(
+            workspace.worker_id, task_id=task.id, assignment_workspace=workspace,
+        )
+    assert queue.get(task.id).status == Status.QUEUED
+    assert queue.get(task.id).owner is None
+    assert queue.task_relationship(task.id)["state"] == "closed"
+    assert len(owner.claims) == 1
+
+
 def test_retained_requirement_cannot_be_omitted_or_cleared_after_requeue(assignment):
     queue, _, workspace, task = assignment
     claim(queue, workspace, task)

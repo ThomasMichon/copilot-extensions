@@ -175,6 +175,11 @@ successful protection. A failed or lost response retains the original request,
 worker and allocation; it cannot report a successfully admitted assignment.
 Exact direct-claim retries and required workspace retries reconcile that same
 request rather than allocating another claim.
+Initial direct-claim acknowledgments and replays require a bound reconciliation
+result and a fresh consistent read of the original claimed status, worker,
+generation and assignment event. Cancellation during reconciliation reports a
+task error, not a queued task or a previously captured claim as successful
+acquisition.
 
 Unconfirmed native capture cleanup is retained by the adapter's resident owner
 before queue or HTTP error translation, including failures during construction.

@@ -155,8 +155,28 @@ class QueueTaskRelationshipsMixin:
             return None
         if request["workspace"] != asdict(workspace):
             raise TaskError("claim replay conflicts with its original workspace")
-        self.reconcile_task_relationship(task_id, event_id=request["event_id"])
-        return self.get(task_id)
+        return self._acknowledge_relationship_claim(
+            task_id, worker_id, task.generation, event_id=request["event_id"],
+        )
+
+    def _acknowledge_relationship_claim(
+        self, task_id: str, worker_id: str, generation: int, *, event_id: int,
+    ) -> Task:
+        value = self.reconcile_task_relationship(task_id, event_id=event_id)
+        if value["state"] != "bound":
+            raise TaskError("task assignment was cancelled during relationship reconciliation")
+        with self._connect() as conn:
+            conn.execute("BEGIN")
+            task = self._fetch(conn, task_id)
+            current = latest_relationship(conn, task_id)
+            if (
+                task is None or task.status != Status.CLAIMED
+                or task.owner != worker_id or task.generation != generation
+                or current is None or current["id"] != event_id
+            ):
+                raise TaskError("task assignment changed during relationship reconciliation")
+            require_relationship(conn, task_id)
+            return task
 
     def _retain_task_relationship(
         self,

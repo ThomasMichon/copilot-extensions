@@ -207,14 +207,16 @@ class QueueClaimQueriesMixin:
                 )
             task = self._fetch(conn, chosen["id"])
             conn.execute("COMMIT")
+        if task is not None:
+            self._notify_owned_transition()
+        if relationship_event is not None:
+            task = self._acknowledge_relationship_claim(
+                task.id, worker_id, task.generation, event_id=relationship_event,
+            )
         outcome = ClaimOutcome(
             task=task,
             producer_rejections=producer_rejections,
         )
-        if task is not None:
-            self._notify_owned_transition()
-        if relationship_event is not None:
-            self.reconcile_task_relationship(task.id, event_id=relationship_event)
         return outcome if _with_outcome else task
 
     def claim_outcome(self, *args: object, **kwargs: object) -> ClaimOutcome:

@@ -21,6 +21,25 @@ from agent_procutil import (
 )
 from agent_procutil.owned_budget import OwnedExecutionBudget
 
+_THREAD_START_CODE = getattr(threading.Thread.start, "__code__", None)
+
+
+def _pipe_worker_definitely_unstarted(
+    worker: threading.Thread, started: threading.Event, error: BaseException,
+) -> bool:
+    """Only direct stdlib pre-launch refusals attest that no worker was created."""
+    traceback = error.__traceback__
+    while traceback is not None and traceback.tb_next is not None:
+        traceback = traceback.tb_next
+    return (
+        type(error) is RuntimeError
+        and str(error) in {"can't start new thread", "thread.__init__() not called"}
+        and traceback is not None
+        and traceback.tb_frame.f_code is _THREAD_START_CODE
+        and traceback.tb_frame.f_locals.get("self") is worker
+        and not started.is_set()
+    )
+
 
 class UnreapedChild(Protocol):
     @property
@@ -45,6 +64,7 @@ class OwnedCleanupError(subprocess.SubprocessError):
     def __init__(
         self, process: UnreapedChild | None, job=None, *, cleanup_resources=(),
         cleanup_retry: Callable[[float], None] | None = None,
+        on_settled: Callable[[], None] | None = None,
     ) -> None:
         self.process = process
         self.job = job
@@ -53,7 +73,15 @@ class OwnedCleanupError(subprocess.SubprocessError):
         self._cleanup_retry = cleanup_retry
         self._cleanup_lock = threading.Lock()
         self._cleanup_complete = False
+        self._on_settled: list[Callable[[], None]] = []
+        self._settlement_attempted = 0
+        self._settlement_error: BaseException | None = None
+        self._retain_on_settled(on_settled)
         super().__init__("native child cleanup did not complete")
+
+    def _retain_on_settled(self, callback: Callable[[], None] | None) -> None:
+        if callback is not None and not any(existing is callback for existing in self._on_settled):
+            self._on_settled.append(callback)
 
     def retry_cleanup(self, *, deadline: float) -> None:
         """Settle retained native objects, never infer cleanup from their absence."""
@@ -69,6 +97,20 @@ class OwnedCleanupError(subprocess.SubprocessError):
                 if time.monotonic() >= deadline:
                     raise TimeoutError("owned cleanup retry deadline expired")
                 self._cleanup_complete = True
+            if self._settlement_error is not None:
+                raise RuntimeError(
+                    "native settlement callback delivery is unconfirmed"
+                ) from self._settlement_error
+            while self._settlement_attempted < len(self._on_settled):
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("owned settlement callback deadline expired")
+                callback = self._on_settled[self._settlement_attempted]
+                self._settlement_attempted += 1
+                try:
+                    callback()
+                except BaseException as error:
+                    self._settlement_error = error
+                    raise
         finally:
             self._cleanup_lock.release()
 
@@ -398,7 +440,8 @@ def _communicate_windows_bounded(
                 ):
                     fail(error)
 
-    def run_worker(callback, completed, *args) -> None:
+    def run_worker(callback, started, completed, *args) -> None:
+        started.set()
         try:
             callback(*args)
         finally:
@@ -406,11 +449,15 @@ def _communicate_windows_bounded(
 
     workers = []
     attempted = []
+    started_workers = {}
+    unstarted = set()
     cleanup_error = None
 
     def retry_cleanup(retry_deadline: float) -> None:
         retire(retry_deadline)
         for worker, completed in attempted:
+            if worker in unstarted:
+                continue
             if not completed.wait(cleanup_timeout(retry_deadline)):
                 raise RuntimeError("native child pipe worker completion is unconfirmed")
             worker.join(timeout=cleanup_timeout(retry_deadline))
@@ -427,18 +474,29 @@ def _communicate_windows_bounded(
     try:
         for index, stream in enumerate((process.stdout, process.stderr)):
             if stream is not None:
+                started = threading.Event()
                 completed = threading.Event()
-                workers.append((threading.Thread(
-                    target=run_worker, args=(read, completed, stream, index), daemon=True,
-                ), completed))
+                worker = threading.Thread(
+                    target=run_worker, args=(read, started, completed, stream, index), daemon=True,
+                )
+                workers.append((worker, completed))
+                started_workers[worker] = started
         if process.stdin is not None:
+            started = threading.Event()
             completed = threading.Event()
-            workers.append((threading.Thread(
-                target=run_worker, args=(write, completed), daemon=True,
-            ), completed))
+            worker = threading.Thread(
+                target=run_worker, args=(write, started, completed), daemon=True,
+            )
+            workers.append((worker, completed))
+            started_workers[worker] = started
         for worker, completed in workers:
             attempted.append((worker, completed))
-            worker.start()
+            try:
+                worker.start()
+            except BaseException as error:
+                if _pipe_worker_definitely_unstarted(worker, started_workers[worker], error):
+                    unstarted.add(worker)
+                raise
         for worker, _completed in workers:
             while worker.is_alive():
                 worker.join(min(0.05, _remaining(deadline, argv, timeout)))
@@ -458,6 +516,8 @@ def _communicate_windows_bounded(
         except BaseException as error:
             cleanup_error = error
         for worker, completed in attempted:
+            if worker in unstarted:
+                continue
             try:
                 if not completed.wait(budget.cleanup_timeout() if budget else 2.0):
                     raise RuntimeError("native child pipe worker startup or completion is unconfirmed")
@@ -476,7 +536,10 @@ def _communicate_windows_bounded(
         raise OwnedCleanupError(
             process, job, cleanup_resources=[
                 ("pipe-worker", (worker, completed)) for worker, completed in attempted
-            ], cleanup_retry=retry_cleanup,
+            ] + [
+                ("pipe-worker-start", (worker, started_workers[worker])) for worker, _ in attempted
+            ] + [("pipe-worker-unstarted", worker) for worker in unstarted],
+            cleanup_retry=retry_cleanup,
         ) from cleanup_error
     if primary:
         if isinstance(primary[0], subprocess.TimeoutExpired):
@@ -577,6 +640,9 @@ def _run_owned(
         )
     except subprocess.TimeoutExpired as error:
         raise subprocess.TimeoutExpired(argv, timeout) from error
+    except OwnedCleanupError as error:
+        error._retain_on_settled(on_settled)
+        raise
     retained = False
     stream_capture = None
     try:
@@ -617,6 +683,7 @@ def _run_owned(
             )
     except OwnedCleanupError as error:
         retained = True
+        error._retain_on_settled(on_settled)
         if stream_capture is not None:
             error.cleanup_resources = (*error.cleanup_resources, ("output", stream_capture))
         raise
@@ -628,7 +695,7 @@ def _run_owned(
                     process.wait(timeout=budget.cleanup_timeout() if budget else 2.0)
                 except BaseException as error:
                     retained = True
-                    raise OwnedCleanupError(process, job) from error
+                    raise OwnedCleanupError(process, job, on_settled=on_settled) from error
             elif not windows:
                 if confirm_posix_group:
                     from agent_procutil._caller_owned import _confirm_group
@@ -643,6 +710,7 @@ def _run_owned(
                             process, cleanup_resources=(
                                 (("output", stream_capture),) if stream_capture is not None else ()
                             ),
+                            on_settled=on_settled,
                         ) from error
                 else:
                     try:
@@ -650,12 +718,12 @@ def _run_owned(
                         process.wait(timeout=budget.cleanup_timeout() if budget else 2.0)
                     except BaseException as error:
                         retained = True
-                        raise OwnedCleanupError(process) from error
+                        raise OwnedCleanupError(process, on_settled=on_settled) from error
         finally:
             if not retained:
                 if streaming and stream_capture is None:
                     retained = True
-                    raise OwnedCleanupError(process) from sys.exc_info()[1]
+                    raise OwnedCleanupError(process, on_settled=on_settled) from sys.exc_info()[1]
                 if stream_capture is not None:
                     try:
                         stream_capture.finish(
@@ -670,6 +738,7 @@ def _run_owned(
                         retained = True
                         raise OwnedCleanupError(
                             process, cleanup_resources=(("output", stream_capture),),
+                            on_settled=on_settled,
                         ) from error
                 try:
                     for stream in (process.stdin, process.stdout, process.stderr):
@@ -678,7 +747,7 @@ def _run_owned(
                     if bounded_windows:
                         process.close()
                 except BaseException as error:
-                    raise OwnedCleanupError(process, job) from error
+                    raise OwnedCleanupError(process, job, on_settled=on_settled) from error
                 if on_settled is not None:
                     on_settled()
     if streaming and capture and not binary:
