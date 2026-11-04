@@ -40,7 +40,7 @@ on:
         type: boolean
         default: false
       post_tool_fallback:
-        description: "Run only contained Worktrees advisory post-tool and late-guidance consumers (Linux only)."
+        description: "Run only contained Worktrees post-tool, late-guidance and guard-publication consumers (Linux only)."
         required: false
         type: boolean
         default: false
