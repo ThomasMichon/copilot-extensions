@@ -2347,13 +2347,12 @@ def _save_record_contents_unlocked(
     current code** -- a still-live OLDER-code process has no such field and
     can drop it on an unrelated save (pre-existing/systemic, not per-field).
     """
-    from . import pr_authority, pr_publication_state
+    from . import pr_authority, pr_publication_state, receiving_allocation, resource_producer
     if path is None:
         path = record.yaml_path
-    from . import receiving_allocation
-
     capture_before = save_notifications.prepare(current, path)
     receiving_allocation.preserve(record, current, path)
+    resource_producer.preserve_incarnation(record, current)
     if preserve_handoff_reservations and current is not None:
         if current.effort_revision > record.effort_revision:
             record.active_effort = current.active_effort

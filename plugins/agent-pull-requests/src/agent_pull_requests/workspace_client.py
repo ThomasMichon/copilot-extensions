@@ -86,6 +86,14 @@ class WorkspaceClient:
             or any(not isinstance(name, str) for name in value["operations"])
         ):
             raise WorkspaceClientError("unsupported_workspace_contract")
+        if "events" in value["operations"]:
+            from .conversation_journal import PROTOCOL as CONVERSATION_PROTOCOL
+            if value.get("conversation_contract") != {
+                "protocol": CONVERSATION_PROTOCOL, "owner_store_versions": [3],
+                "ingest": "trusted_owner_only", "bodies": False, "acknowledges": False,
+            }:
+                value["operations"] = [name for name in value["operations"] if name != "events"]
+                value["unavailable_operations"] = {"events": "unsupported_conversation_contract"}
         if epoch != self._discovery_epoch:
             raise WorkspaceClientError("workspace_discovery_superseded")
         self._capabilities = copy.deepcopy(value)

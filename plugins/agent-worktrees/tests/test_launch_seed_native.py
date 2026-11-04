@@ -188,15 +188,13 @@ def test_spawned_backend_cannot_restore_or_claim_another_spawn(record):
     assert seeds.peek(record) is None
 
 
-def test_changed_incarnation_or_correlation_cannot_finish_seed(record):
+def test_changed_incarnation_or_correlation_cannot_finish_seed(record, overwrite_record_nonce):
     seed = seeds.stage(record, kind="new", text="must not cross incarnations")
     reply = native.prepare(record, ["copilot"], seed_id=seed.seed_id)
     wrong = audit.Correlation(reply["attempt_id"], uuid4().hex)
     with pytest.raises(ValueError, match="identity or incarnation"):
         native.spawn_failed(record, wrong, reply["operation_id"])
-    current = tracking.load_record(record)
-    current.creation_nonce = uuid4().hex
-    tracking.save_record(current, record)
+    overwrite_record_nonce(record, uuid4().hex)
     with pytest.raises(ValueError, match="identity or incarnation"):
         native.spawn_failed(record, _identity(reply), reply["operation_id"])
     assert seeds.peek(record).handoff_id

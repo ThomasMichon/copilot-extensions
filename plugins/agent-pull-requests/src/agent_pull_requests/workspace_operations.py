@@ -11,6 +11,7 @@ import math
 import threading
 
 from .generation_cache import GenerationCache
+from .attention import PRKey
 from .owner_read import OwnerReadHandler, REQUEST_SCHEMA
 from .review_executor import execute_review
 from .review_intent import identifier
@@ -18,7 +19,7 @@ from .review_workspace import MAX_GENERATION_BYTES, _generation, _scope, compare
 
 PROTOCOL = "agent-pull-requests.workspace/v1"
 CHUNK_BYTES = 8192
-OPERATIONS = ("capabilities", "load", "sync", "lookup", "chunk", "inspect", "submit")
+OPERATIONS = ("capabilities", "load", "sync", "lookup", "chunk", "inspect", "submit", "events")
 
 
 class WorkspaceUnavailable(RuntimeError):
@@ -29,6 +30,16 @@ def encoded(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
 
 
+def conversation_key(scope: dict, namespace: str) -> PRKey:
+    """Map the current ADO workspace owner without conflating project/repository IDs."""
+    scope = _scope(scope)
+    return PRKey(
+        scope["provider"], scope["endpoint"],
+        json.dumps([scope["project_id"], scope["repository_id"]], separators=(",", ":")),
+        scope["number"], scope["principal_id"], namespace,
+    )
+
+
 class WorkspaceOperations:
     """Trusted embedding input; neither callbacks nor selected data grant authority.
 
@@ -37,7 +48,7 @@ class WorkspaceOperations:
     """
 
     def __init__(self, store, cache, *, scope, read_owner, binding_ref,
-                 write_context=None, checkpoint, max_work_seconds):
+                 write_context=None, checkpoint, max_work_seconds, conversations=False):
         if (
             not isinstance(cache, GenerationCache)
             or not isinstance(read_owner, OwnerReadHandler)
@@ -45,6 +56,7 @@ class WorkspaceOperations:
             or write_context is not None and not callable(write_context)
             or type(max_work_seconds) not in (int, float)
             or not math.isfinite(max_work_seconds) or max_work_seconds <= 0
+            or type(conversations) is not bool
         ):
             raise ValueError("actual workspace owner inputs required")
         self.scope = _scope({**scope, "number": 1})
@@ -61,6 +73,7 @@ class WorkspaceOperations:
         self.read_owner, self.binding_ref = read_owner, binding_ref
         self.write_context, self.checkpoint = write_context, checkpoint
         self.max_work_seconds = max_work_seconds
+        self.conversations = conversations
         self._materializations = OrderedDict()
         self._materialization_lock = threading.Lock()
 
@@ -75,6 +88,7 @@ class WorkspaceOperations:
             "chunk": ({"number", "generation_id", "offset"}, set()),
             "inspect": ({"number", "operation_id"}, set()),
             "submit": ({"number", "intent", "source_attachment", "budget_seconds"}, set()),
+            "events": ({"number", "after", "limit"}, set()),
         }
         required, optional = fields[operation]
         if not required <= payload.keys() or payload.keys() - required - optional:
@@ -89,10 +103,21 @@ class WorkspaceOperations:
 
         check()
         if operation == "capabilities":
+            from .conversation_store import ConversationStore
+            conversation_contract = None
+            if self.conversations:
+                conversation_contract = ConversationStore(self.store).capabilities(
+                    expires_at=expires_at, checkpoint=check,
+                )
             return {
                 "protocol": PROTOCOL,
-                "operations": [name for name in OPERATIONS if name != "submit" or self.write_context is not None],
+                "operations": [
+                    name for name in OPERATIONS
+                    if (name != "submit" or self.write_context is not None)
+                    and (name != "events" or self.conversations)
+                ],
                 "generation_versions": [1], "owner_store_versions": [2],
+                **({"conversation_contract": conversation_contract} if self.conversations else {}),
                 "max_generation_bytes": MAX_GENERATION_BYTES, "chunk_bytes": CHUNK_BYTES,
                 "refresh": "full_sections", "source": "existing_client_local_owner",
                 "provision_or_adopt": False,
@@ -101,6 +126,22 @@ class WorkspaceOperations:
         if type(number) is not int or number <= 0:
             raise ValueError("positive workspace PR number required")
         scope = _scope({**self.scope, "number": number})
+        if operation == "events":
+            from .attention import Cursor
+            from .conversation_store import ConversationStore
+            if not self.conversations:
+                raise WorkspaceUnavailable("conversation operation not enabled by the existing owner")
+            after = payload["after"]
+            if after is not None:
+                if not isinstance(after, dict) or set(after) != {"epoch", "sequence"}:
+                    raise ValueError("invalid conversation cursor fields")
+                after = Cursor(**after)
+            result = ConversationStore(self.store).events(
+                conversation_key(scope, self.store.namespace), after=after, limit=payload["limit"],
+                expires_at=expires_at, checkpoint=check,
+            )
+            check()
+            return {"protocol": PROTOCOL, "scope": scope, "result": result}
         for field in ("generation_id", "previous_id"):
             if field in payload:
                 identifier(payload[field])

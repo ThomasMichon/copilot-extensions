@@ -39,6 +39,17 @@ It checks same-process module execution, `__main__` identity and settled instanc
 cleanup without binding a service port or touching existing sessions. This is
 source-boundary admission evidence, not installed watchdog recovery or rollout.
 
+The explicit `agent-worktrees --test-file
+tests/native/test_resident_prompt_receipt_integration.py --allow-explicit-tiers`
+packet exercises a real Node consumer and private resident receipt server.
+Without `RECEIPT_CLIENT_ROOT`, its test-only client fixture selects the sibling
+`context-handoff` source payload; an explicit fixture override remains supported.
+Its finite Node peer borrows the bounded runner's process scope with an absolute
+execution/cleanup budget, retaining the strict no-helper assertion on resident
+code. Deliberate persisted nonce replacement uses raw fixture YAML and verifies
+the new incarnation before testing refusal. This qualifies the isolated receipt
+boundary, not installed services, whole task-lifecycle acceptance or rollout.
+
 The explicit `agent-worktrees` native packet
 `--test-file tests/test_python_runtime_install.py -k real_installer_returns_before_resident_owned_monitor_drain --allow-explicit-tiers`
 contains the three compatible routed/lock-layout controls plus one legacy-peer
@@ -3612,6 +3623,14 @@ resolver. Synthetic source, resolver and registry boundaries retain probe
 order and call counts without actor effects. Full reports keep their opaque
 execution-owner frontier; these controls do not qualify machine-registry
 acquisition completeness, reuse or installed behavior.
+Eight machine-registry controls in the same packet borrow parser, merge,
+normalization and config-source boundaries. They check original acquisition
+order, alias filtering, type-only fatal/suppressed failures and selected callback
+identity through self-restoration or argument-time rebinding. These actor-free
+controls do not qualify delegated document/config-source frontiers or reuse.
+The plugin's `test_machines_yaml_location.py` separately exercises the real
+file/parser/merge/report path and empty/overlay cases; execution-identity
+fixtures retain an explicit registered knowledge-path boundary.
 The runner selects pytest's `parametrize_long_str_id_strategy=legacy` to
 preserve the manifest's full-value parameter IDs across pytest 9.1 and 9.2.
 This keeps exact node admission; it does not truncate, rename or omit long
