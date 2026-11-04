@@ -21,13 +21,13 @@ def _normalized_path(path: Path) -> str:
     return os.path.normpath(raw)
 
 
-def _document(path: Path):
+def _document(path: Path, *, limit: int | None = 65536):
     metadata = path.lstat()
     if not stat.S_ISREG(metadata.st_mode) or path.is_symlink():
         raise ValueError(f"provider entry is not an ordinary file: {path}")
     with path.open(encoding="utf-8-sig") as stream:
-        content = stream.read(65537)
-    if len(content) > 65536:
+        content = stream.read(limit + 1) if limit is not None else stream.read()
+    if limit is not None and len(content) > limit:
         raise ValueError(f"provider entry exceeds its read bound: {path}")
     return json.loads(content)
 
@@ -82,7 +82,7 @@ def register_installed_application() -> Path:
             if path.suffix != ".json" or path == target:
                 continue
             try:
-                other = _document(path)
+                other = _document(path, limit=None)
             except FileNotFoundError:
                 continue
             except ValueError:

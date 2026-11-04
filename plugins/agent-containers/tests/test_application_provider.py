@@ -302,7 +302,8 @@ def _real_bridge_classification(command, *, mismatch=False):
             "assert m.schema_version==0 and m.plugin is None;"
             "assert m.command==(sys.argv[2],);"
         )
-        + "print(json.dumps({'consumer':p.__file__,'findings':[f.reason for f in report.findings]}))"
+        + "print(json.dumps({'consumer':p.__file__,'namespaces':sorted(report.manifests),"
+        "'findings':[f.reason for f in report.findings]}))"
     )
     settled = []
     result = run_caller_owned(
@@ -313,6 +314,7 @@ def _real_bridge_classification(command, *, mismatch=False):
     )
     assert settled
     assert result.returncode == 0, result.stdout + result.stderr
+    return json.loads(result.stdout)
 
 
 def test_application_provider_install_root_is_discovered_by_real_bridge_consumer(
@@ -375,3 +377,65 @@ def test_application_provider_canonical_registry_override_real_consumer_positive
         scoped.setattr(Path, "resolve", forbidden_resolve)
         assert provider.register_installed_application() == registry / provider.MANIFEST_NAME
     _real_bridge_classification(command)
+
+
+@pytest.mark.parametrize("filename", ["aa-large-foreign.json", "zz-large-foreign.json"])
+@pytest.mark.parametrize("duplicate_namespace", [False, True])
+def test_application_provider_large_valid_foreign_peer_refuses_after_real_consumer(
+    real_application_bridge_home, monkeypatch, filename, duplicate_namespace,
+):
+    home, _command = real_application_bridge_home
+    registry = home / "bridge" / "providers.d"
+    registry.mkdir(parents=True)
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(registry.parent))
+    foreign_command = home / ("foreign.cmd" if os.name == "nt" else "foreign")
+    foreign_command.write_text("fixture foreign command; never executed\n")
+    if os.name != "nt":
+        foreign_command.chmod(0o700)
+    prefix = '"namespace":"unrelated",' if duplicate_namespace else ""
+    content = (
+        "{" + prefix + '"padding":' + json.dumps("x" * 70000)
+        + ',"namespace":"container","schema_version":0,"command":'
+        + json.dumps([str(foreign_command)]) + "}"
+    )
+    (registry / filename).write_text(content)
+    assert (registry / filename).stat().st_size > 65536
+    _real_bridge_classification(foreign_command)
+    before = _snapshot(home)
+    with pytest.raises(RuntimeError, match="namespace provider must be preserved"):
+        provider.register_installed_application()
+    assert _snapshot(home) == before
+
+
+@pytest.mark.parametrize("duplicate_namespace", [False, True])
+def test_application_provider_large_valid_unrelated_peer_is_classified_completely(
+    real_application_bridge_home, monkeypatch, duplicate_namespace,
+):
+    home, command = real_application_bridge_home
+    registry = home / "bridge" / "providers.d"
+    registry.mkdir(parents=True)
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(registry.parent))
+    prefix = '"namespace":"container",' if duplicate_namespace else ""
+    peer = registry / "large-unrelated.json"
+    peer.write_text(
+        "{" + prefix + '"padding":' + json.dumps("x" * 70000)
+        + ',"namespace":"unrelated","command":' + json.dumps([str(command)]) + "}"
+    )
+    before = (peer.read_bytes(), peer.stat().st_mtime_ns)
+    provider.register_installed_application()
+    assert (peer.read_bytes(), peer.stat().st_mtime_ns) == before
+    assert "unrelated" in _real_bridge_classification(command)["namespaces"]
+
+
+def test_application_provider_large_valid_owned_target_retains_strict_bound(
+    real_application_bridge_home, monkeypatch,
+):
+    home, _command = real_application_bridge_home
+    registry = home / "bridge" / "providers.d"
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(registry.parent))
+    target = provider.register_installed_application()
+    target.write_bytes(target.read_bytes() + b" " * 70000)
+    before = _snapshot(home)
+    with pytest.raises(RuntimeError, match="Refusing to replace provider entry"):
+        provider.register_installed_application()
+    assert _snapshot(home) == before

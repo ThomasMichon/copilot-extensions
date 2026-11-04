@@ -49,8 +49,14 @@ precedence. Peer entries are never overwritten or removed. Rejected
 configuration creates no provider entry. This registration is not a Docker,
 fleet or serving-readiness check.
 
-Malformed or oversized unrelated entries are isolated per entry. An invalid
-or oversized entry at the application's own destination is refused unchanged.
+Ordinary peer JSON is read completely before namespace classification, matching
+Bridge's UTF-8-sig JSON decoding, unknown-key handling and last-duplicate-key
+semantics. Large valid foreign namespace claims refuse publication; large valid
+unrelated entries remain isolated after classification, as does malformed JSON.
+The application's own destination retains its bounded 65536-character read and
+refuses invalid or oversized content unchanged. Peer reads have the same
+whole-document memory/I/O cost as the existing consumer, not a truncated-prefix
+classification or a separate arbitrary byte cap.
 Registry enumeration I/O errors refuse publication, including unchanged-entry
 setup, without rewriting entries. Only a genuinely absent directory is empty.
 Registry location precedence is `AGENT_BRIDGE_PROVIDERS_DIR`,

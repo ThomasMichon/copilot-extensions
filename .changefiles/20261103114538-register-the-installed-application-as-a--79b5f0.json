@@ -1,5 +1,5 @@
 {
-  "comment": "Register the installed application as a separate plain Bridge provider with configured-registry matching, install-root precedence, explicit I/O refusal and preserved canonical payload ownership",
+  "comment": "Register the installed application as a separate plain Bridge provider with complete peer JSON classification, configured-registry matching, explicit I/O refusal and preserved namespace ownership",
   "changes": [
     {
       "plugin": "agent-containers",
