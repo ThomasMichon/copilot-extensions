@@ -504,7 +504,7 @@ def test_bridge_reconciliation_preserves_other_sources_and_their_next_publicatio
     assert model.toggle_expansion(event(worktree, 0).ref).applied
     assert model.apply_delta(LiveDelta(
         bridge, position(bridge, "live-0"), position(bridge, "overflow"),
-        tuple(event(bridge, number) for number in range(1, 5)),
+        tuple(event(bridge, number) for number in range(1, 8)),
     )).code is ResultCode.LIMIT
     renewed = replace(bridge, request_epoch=1)
     candidate = model.reconciliation_window(replace(
@@ -522,3 +522,38 @@ def test_bridge_reconciliation_preserves_other_sources_and_their_next_publicatio
         worktree, before, None, (event(worktree, -1),), Completeness.COMPLETE,
     )).applied
     assert model.reconciliation_required == frozenset({"bridge"})
+
+
+@pytest.mark.parametrize("budget", ["proof", "cursor", "bytes"])
+def test_exhausted_owner_cannot_starve_an_empty_bridge_baseline(monkeypatch, budget: str) -> None:
+    from worktree_manager import companion_timeline_model as implementation
+
+    if budget == "cursor":
+        monkeypatch.setattr(implementation, "MAX_EVENT_PROOFS", 6)
+    if budget == "bytes":
+        monkeypatch.setattr(implementation, "MAX_WINDOW_BYTES", 3000)
+    model = TimelineWindow(max_proofs=6 if budget == "bytes" else 2, max_bytes=3000)
+    owner = token()
+    bridge = SourceToken(replace(
+        owner.identity, provider=Provider.BRIDGE, source_key="bridge",
+        head_session_id=None, owner_ref="fixture-owner",
+    ), 0)
+    for source in (owner, bridge):
+        assert model.bind(source).applied
+        assert model.apply_snapshot(snapshot(source, ())).applied
+    before = position(owner, "live-0")
+    for number in range(1, 10):
+        after = position(owner, f"live-{number}")
+        result = model.apply_delta(LiveDelta(
+            owner, before, after, () if budget == "cursor" else (event(owner, number),),
+        ))
+        if not result.applied:
+            break
+        before = after
+    assert result.code is ResultCode.LIMIT
+    assert {"proof": "proof budget", "cursor": "cursor integrity", "bytes": "byte budget"}[budget] in result.reason
+    assert model.reconciliation_required == frozenset({owner.identity.source_key})
+    assert model.apply_delta(LiveDelta(
+        bridge, position(bridge, "live-0"), position(bridge, "bridge-change"), (event(bridge, 0),),
+    )).applied
+    assert model.sources[bridge.identity.source_key].availability is Availability.OBSERVED

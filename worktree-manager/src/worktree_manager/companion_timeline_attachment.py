@@ -85,6 +85,8 @@ class TimelineAttachment:
     def _error(self, token: SourceToken | None, message: str) -> None:
         if not self._renderable():
             return
+        if self._cleanup_error is not None:
+            message = "Owned timeline cleanup remains unresolved: " + self._cleanup_error
         tokens = (token,) if token is not None else tuple(
             state.token for state in self.panel.window.sources.values()
             if state.token.identity.provider is self.provider
@@ -101,6 +103,10 @@ class TimelineAttachment:
     @property
     def closed(self) -> bool:
         return self._closed
+
+    @property
+    def cleanup_failed(self) -> bool:
+        return self._cleanup_failure is not None
 
     @property
     def retained_windows(self) -> tuple[TimelineWindow, ...]:
@@ -149,6 +155,9 @@ class TimelineAttachment:
         previous_window = self.panel.window
         viewport = self.panel.capture_viewport() if selection is not None and self._renderable() else None
         async with self._lock:
+            if self._cleanup_error is not None:
+                self._error(None, "Owned timeline cleanup remains unresolved: " + self._cleanup_error)
+                return
             if self.controller is not None:
                 try:
                     await self.controller.close()
@@ -158,9 +167,6 @@ class TimelineAttachment:
                     self._error(None, "Owned timeline cleanup failed: " + self._cleanup_error)
                     return
                 self.controller = None
-            if self._cleanup_error is not None:
-                self._error(None, "Owned timeline cleanup remains unresolved: " + self._cleanup_error)
-                return
             if revision != self._revision or self._closed or selection is None:
                 return
             stop = asyncio.Event()

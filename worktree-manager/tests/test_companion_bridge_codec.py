@@ -154,6 +154,17 @@ def test_unhashable_frame_and_change_kinds_are_contract_errors(field: str) -> No
         MembershipCodec("example", "selected", OWNER).decode(raw(frame))
 
 
+def test_null_relationship_identity_is_a_contract_error() -> None:
+    frame = snapshot()
+    frame["members"][0].update(
+        registry="relationship", member_id="relationship:relation", relationship_id=None,
+        uncertain_remote_outcome=False, relationship_qualification="unknown",
+        incarnation={"relationship_id": None},
+    )
+    with pytest.raises(TimelineContractError, match="relationship_id"):
+        MembershipCodec("example", "selected", OWNER).decode(raw(frame))
+
+
 def test_conflicting_native_identity_is_not_hidden_by_a_new_display_epoch() -> None:
     codec, token, window = admitted()
     frame = codec.decode(raw(delta()))

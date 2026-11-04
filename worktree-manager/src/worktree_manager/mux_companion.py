@@ -638,7 +638,7 @@ class MuxCompanionApp(App):
             self._timeline_attachment.history(message)
 
     def on_subway_timeline_changed(self, message: SubwayTimeline.Changed) -> None:
-        if any(
+        if not self._bridge_attachment.cleanup_failed and any(
             state.token.identity.provider is Provider.BRIDGE
             and state.availability is Availability.HEAD_CHANGED
             for state in self._timeline_panel.window.sources.values()

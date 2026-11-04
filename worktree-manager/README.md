@@ -143,7 +143,7 @@ The optional Bridge adapter selects the enabled payload through shared plugin
 activation, uses the selected worktree's qualified Claims owner reference, and
 invokes its passive `observe-owner` operation across a process boundary.
 The owning CLI negotiates the running capability and resolves its own validated
-installation, without inheriting another plugin's installation receipt. A
+installation, without inheriting another plugin's installation receipt or root. A
 child-local no-provision fence also covers older payloads. Missing support preserves Summary and the
 independent sources. Current membership appears separately from history:
 bootstrap facts do not become fabricated creation or activity events.
@@ -163,8 +163,11 @@ tab reopening. With Timeline visible, explicit Refresh or Reconcile source first
 obtains a fresh owner-qualified snapshot and admits a separate bounded observation
 window before replacing the exhausted one. Only the exhausted source receives a
 fresh baseline: other providers retain their exact bindings, accepted cursors,
-facts, rows and immutable proofs. An exhausted Bridge source reconciles before
-independent reader rebootstrap consumes the shared proof budget. Failed, unqualified, stale or
+facts, rows and immutable proofs. Proof count, cursor count and integrity-byte
+budgets have fixed equal partitions for Worktrees, Agenda and Bridge within the
+unchanged total bounds. An exhausted owner cannot consume another owner's
+admission capacity, including Agenda commits while its fresh baseline is pending.
+Failed, unqualified, stale or
 conflicting snapshots leave the old proof fence and cached rows intact. A retained
 browsing anchor and unread state carry into the new window where available.
 This replaces ephemeral viewer evidence, not owner history or work/resource budgets.
@@ -184,7 +187,8 @@ anchor rather than shifting it as bottom padding shrinks.
 Timeline adapters receive independent request-local stop events. Teardown waits
 for their bounded cleanup, including a naturally completed read already being
 finalized, without canceling adapter tasks or discarding their handles. Cleanup
-errors remain explicit after selection retirement.
+errors remain explicit after selection retirement. A terminal cleanup failure
+also stops automatic head-change rescheduling and retains its diagnostic.
 Disconnects, frame deadlines and invalid source replies are read failures:
 after successful resource retirement, Refresh or tab reopening can subscribe
 again. Only a typed failure of owned process/pipe retirement latches cleanup

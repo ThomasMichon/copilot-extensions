@@ -24,6 +24,7 @@ from worktree_manager.companion_bridge_codec import MembershipCodec
 from worktree_manager.companion_timeline_contract import Provider
 from worktree_manager.companion_timeline_widget import SubwayTimeline
 from worktree_manager.companion_worktree_source import WorktreeTimelineSource
+from _companion_timeline_fixtures import event as timeline_event, position as timeline_position
 from test_agenda_end_to_end import ROOT, SOURCE_PATHS
 from test_companion_agenda_live import current_data, until
 from test_companion_agenda_rich import managed as managed, current_managed_data
@@ -465,16 +466,91 @@ def test_slow_bridge_preparation_does_not_block_published_rich_agenda(managed, m
                 token = codec.token(frame, 0)
                 app._timeline_panel.bind_source(token)
                 app._timeline_panel.apply_snapshot(codec.apply(frame, token))
-                app._timeline_panel.window.reconciliation_required |= {token.identity.source_key}
+                app._timeline_panel.window.max_proofs = 64
+                assert app._timeline_panel.apply_delta(bridge.LiveDelta(
+                    token, codec.position(token, frame["position"]), timeline_position(token, "full"),
+                    tuple(timeline_event(token, number) for number in range(64)),
+                )).applied
+                assert not app._timeline_panel.apply_delta(bridge.LiveDelta(
+                    token, timeline_position(token, "full"), timeline_position(token, "overflow"),
+                    (timeline_event(token, 64),),
+                )).applied
             app.query_one("#views", TabbedContent).active = "timeline-tab"
             await until(pilot, entered.is_set)
             await until(pilot, lambda: app._rich_agenda_attachment.token is not None)
             assert any(not stop.is_set() for stop in reads)
             assert any(row.source.provider is Provider.AGENDA for row in app._timeline_panel.window.events)
+            if reconcile:
+                app._receive_agenda(
+                    app._data, app._agenda_generation, app._agenda_cancel, managed["update"](), None,
+                )
+                await until(pilot, lambda: sum(
+                    row.source.provider is Provider.AGENDA for row in app._timeline_panel.window.events
+                ) == 2)
+                assert app._timeline_panel.window.reconciliation_required == frozenset({token.identity.source_key})
             app.query_one("#views", TabbedContent).active = "summary-tab"
             await until(pilot, release.is_set)
             await until(pilot, lambda: all(stop.is_set() for stop in reads))
             await until(pilot, lambda: app._rich_agenda_attachment.selection is None)
+
+    asyncio.run(check())
+
+
+def test_terminal_bridge_retirement_does_not_reschedule_head_change_cleanup(
+    native_bridge, tmp_path, monkeypatch,
+) -> None:
+    from worktree_manager.companion_timeline_controller import TimelineCleanupError
+
+    def data():
+        result = current_data()
+        result.worktree["path"] = str(tmp_path)
+        result.bundle = {"facts": {"claims": {"value": {"owner_ref": OWNER}, "confirmed": True}}}
+        return result
+
+    monkeypatch.setattr(companion, "_load_current_worktree", lambda *args, **kwargs: data())
+    monkeypatch.setattr(companion.MuxCompanionApp, "_start_agenda", lambda self: None)
+    monkeypatch.setattr(companion.MuxCompanionApp, "_poll_attention", lambda *args, **kwargs: None)
+
+    async def check() -> None:
+        app = companion.MuxCompanionApp(cwd=str(tmp_path))
+        async with app.run_test(size=(110, 40)) as pilot:
+            await until(pilot, lambda: not app._loading)
+            app.query_one("#views", TabbedContent).active = "timeline-tab"
+            await membership_ready(app, pilot, native_bridge)
+            controller = app._bridge_attachment.controller
+            close = controller.close
+            calls = []
+
+            async def fail() -> None:
+                calls.append(1)
+                await close()
+                raise TimelineCleanupError("fixture retained terminal cleanup failure")
+
+            monkeypatch.setattr(controller, "close", fail)
+            app._agenda_cancel = Event()
+            app._receive_agenda(
+                app._data, app._agenda_generation, app._agenda_cancel, {
+                    "project": "example", "worktree_id": "selected", "session_id": "head-a",
+                    "availability": "head-changed", "observation": None,
+                }, None,
+            )
+            try:
+                await until(pilot, lambda: app._bridge_attachment.cleanup_failed)
+                for _ in range(5):
+                    await pilot.pause()
+                revision = app._timeline_sync_revision
+                app._bridge_attachment.unavailable("repeat notification")
+                for _ in range(5):
+                    await pilot.pause()
+                assert calls == [1] and app._timeline_sync_revision == revision
+                assert "terminal cleanup failure" in str(app.query_one("#timeline-bridge-status", Static).content)
+                assert native_bridge["db"].get_session("child")["status"] == "starting"
+            finally:
+                # The fixture has already retired the real reader. Preserve
+                # the failure assertion above without failing app teardown.
+                monkeypatch.setattr(controller, "close", close)
+                app._bridge_attachment._cleanup_error = None
+                app._bridge_attachment._cleanup_failure = None
 
     asyncio.run(check())
 
@@ -687,9 +763,9 @@ def test_actual_three_source_commit_binding_and_child_join_preserves_history(
                 ))
                 assert timeline.virtual_size.height > timeline.size.height
                 old_window = timeline.window
-                # Leave room for an independent owner's bounded 32-row
-                # bootstrap, then exhaust this window with Bridge evidence.
-                old_window.max_proofs = len(old_window._proofs) + 32
+                old_window.max_proofs = sum(
+                    row.source.provider is Provider.BRIDGE for row in old_window.events
+                ) + 32
                 bridge_key = next(
                     key for key, state in old_window.sources.items()
                     if state.token.identity.provider is Provider.BRIDGE

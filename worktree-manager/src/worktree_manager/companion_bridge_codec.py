@@ -207,6 +207,7 @@ class MembershipCodec:
         }
         object_fields(member["incarnation"], incarnation_fields[registry])
         if registry == "relationship":
+            identifier(member.get("relationship_id"), "Bridge member relationship_id")
             if (
                 not {"relationship_id", "uncertain_remote_outcome", "relationship_qualification"} <= member.keys()
                 or member["incarnation"]["relationship_id"] != member["relationship_id"]
