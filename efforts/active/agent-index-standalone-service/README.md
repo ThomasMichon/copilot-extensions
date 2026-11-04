@@ -33,6 +33,14 @@ deployment or destructive migration of durable data.
 
 ## Coordination
 
+The proposed #2295 six-clause current-mode declaration family below uses the
+existing Phase 2/3 service/release/controller boundaries. Keep #2295 OPEN until
+the incumbent #5768 custodian accepts its exact current-mode mapping, as the
+source already requires. Ordinary automated document review does not itself
+supply that acceptance. Preserve native/standalone, managed/controller, durable
+engine, canary and optional-fleet custody; this is neither a universal ACK
+condition nor an implementation appointment.
+
 - **Topology:** independent per-slice PRs.
 - **Host (owns PRs):** Coordinator.
 - **Delegates:** bounded packaging evidence and implementation with exclusive
@@ -400,6 +408,60 @@ receiving readback precede any separate source-specific disposition.
   runtime cutover and supported rollback without rebuilding the index; separate executable-slot
   selection from data/schema rollback.
 
+### Proposed #2295 current-mode declaration and source authority
+
+_(Agent-recommended tracking proposal; historical fixture retirement is credited,
+not reversed. Review and source-specific incumbent acceptance remain separate.)_
+
+- [ ] **P2295-1:** Identify every actually supported native/standalone and
+  explicitly managed/controller declaration/profile producer and its
+  authoritative selected service package, version and source identity.
+  Distinguish lightweight plugin, service package, durable engine, immutable
+  source generation and external-controller facts.
+- [ ] **P2295-2:** Keep emitted/released version references synchronized with
+  their owning runtime metadata through ordinary source changes, dependency
+  bumps and release materialization, not repeated one-off fixture edits.
+- [ ] **P2295-3:** Preserve declared source/provenance authority and exact released
+  snapshot/artifact pinning. Detect stale, conflicting or missing declarations
+  and receipt/digest/version mismatches; never silently substitute an ambient
+  package or same-named sibling owner.
+- [ ] **P2295-4:** Retain focused generation/release/controller regressions for
+  declared version/source identity across updates and idempotent reconciliation.
+  Source imports or a healthy empty service are not installed/serving convergence.
+- [ ] **P2295-5:** Preserve mode boundaries: standalone/self-supervised operation
+  gains no Dispatch service-owner dependency to satisfy an obsolete test.
+  Managed placement remains explicitly selected and independently qualified;
+  maintenance-task declarations are not service ownership.
+- [ ] **P2295-6:** Retain native Windows/POSIX and supported controller/backend
+  qualification under existing source/activation/readiness gates. An independent
+  service version need not equal the lightweight plugin display version; no
+  broader optional deployment is declared complete.
+
+#### Local Validation for #2295
+
+- [ ] **V2295-1:** Cover every actually supported native/standalone and explicitly
+  managed/controller producer against authoritative selected package/version/
+  source identity. Unsupported modes refuse; do not recreate the retired
+  default Dispatch companion.
+- [ ] **V2295-2:** Exercise ordinary source change, dependency bump and release
+  materialization: emitted/released identity follows its owning metadata without
+  one-off fixture edits or equalizing independent plugin/service versions.
+- [ ] **V2295-3:** Cross exact snapshot/artifact identity with stale/conflicting/
+  missing declarations and receipt/digest/version mismatches; refuse ambient or
+  sibling substitution. Digest integrity is not authenticated acquisition or
+  build provenance.
+- [ ] **V2295-4:** Exercise focused generation/release/controller updates and
+  idempotent reconciliation, pairing declarations with actual installed/serving
+  identity at the originally applicable tier. Imports or healthy-empty-service
+  fixtures alone cannot satisfy that convergence.
+- [ ] **V2295-5:** Preserve native/standalone self-supervision without a Dispatch
+  service-owner dependency, and independently qualified authority in explicitly
+  selected managed/controller modes. Maintenance registration is not hosting.
+- [ ] **V2295-6:** Retain original Windows/POSIX and supported backend/controller
+  proof. Preserve legacy macOS compatibility versus candidate Windows/Linux
+  staging limits and explicit Darwin qualification; no new every-host or
+  whole-parent deployment gate is introduced.
+
 ## Validation Plan
 
 - [x] Unit regressions for layered designation, unconfigured/client nonactivation
@@ -652,12 +714,31 @@ receiving readback precede any separate source-specific disposition.
   finite evidence tier, preserving alternatives, completed credit and existing custodians.
   Administrative tracking is not technical completion or claim release.
 
+- [ ] **G2295:** Resolve all six direct #2295 Plan/local Validation pairs with
+  their exact mode, version, provenance, update, serving and platform distinctions.
+  Preserve the existing incumbent's exact current-mode acceptance condition and
+  all independent source/activation/readiness gates. Historical #2858 fixture
+  repair and #3187 companion retirement remain credited; #6047 integrity is not
+  acquisition/build or deployment proof. Documentary review/intake cannot
+  establish #2295's source disposition, reassign custody or complete this effort by itself.
+
 ## Proposal
 
 [Architecture proposal](architecture.md). It separates intended package
 boundaries from implementation decisions and deployment-specific policy.
 
 ## Journal
+
+### 2026-10-28 - Proposed six-clause current-mode declaration mapping
+
+- Added direct #2295 Plan/local Validation pairs, actual global Validation and
+  continuing custody under the existing service/release/controller owners.
+  Historical fixture repair and affirmative companion retirement remain
+  credited; no obsolete Dispatch-hosting mechanism is restored.
+- The source's exact incumbent-custodian current-mode mapping acceptance is
+  unestablished and remains separate from document review. No owner contact,
+  declaration change, test, service operation, rollout or source disposition
+  occurs here. Actual reviewed delivery/readback remains outstanding.
 
 ### 2026-10-13 - Fresh autonomous store implementation prepared
 - Implemented explicit `source-aware-v1` cold initialization, canonical
