@@ -1,29 +1,30 @@
 import base64
 import struct
 import time
+from pathlib import Path
 
 import pytest
 
-from agent_ssh_service.config import ServiceConfig
+from agent_ssh_service.config import Document, ServiceConfig
 from fleet_manager.private_state import private_directory
 
 
 class RealtimeClock:
     @property
-    def value(self):
+    def value(self) -> int:
         return int(time.time())
 
-    def __call__(self):
+    def __call__(self) -> int:
         return self.value
 
 
-def key(number):
+def key(number: int) -> str:
     wire = struct.pack(">I", 11) + b"ssh-ed25519" + struct.pack(">I", 32) + bytes([number]) * 32
     return "ssh-ed25519 " + base64.b64encode(wire).decode()
 
 
-def document(root):
-    machines = [{
+def document(root: Path) -> Document:
+    machines: list[Document] = [{
         "machine": name, "environment": "linux", "driver": "gateway",
         "role": "interactive", "inbound": True, "outbound": True,
         "controller": "gateway-a", "gateway_egress": True,
@@ -47,7 +48,7 @@ def document(root):
     }
 
 
-def enrollment(index=0):
+def enrollment(index: int = 0) -> Document:
     name = "worker-a" if index == 0 else "worker-b"
     return {
         "request_id": "join-" + name, "machine": name, "environment": "linux",
@@ -56,7 +57,7 @@ def enrollment(index=0):
 
 
 @pytest.fixture
-def config(tmp_path):
+def config(tmp_path: Path) -> ServiceConfig:
     root = tmp_path / "state"
     private_directory(root)
     return ServiceConfig.from_dict(document(root))

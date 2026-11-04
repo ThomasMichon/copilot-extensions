@@ -6,25 +6,38 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from typing import Any, BinaryIO, TYPE_CHECKING, cast
+from collections.abc import Callable
 
 from cryptography.hazmat.primitives import serialization
 from joserfc.jwk import ECKey
 import pytest
 
-from agent_ssh_service.config import ServiceConfig
+from agent_ssh_service.config import Document, ServiceConfig
 from agent_ssh_service.hosting import run
 from fleet_manager.gateway_service_caller import ServiceCaller
 from fleet_manager.gateway_service_channel import TransportError
-from fleet_manager.ssh_directory import SSHDirectoryClient
+from fleet_manager.ssh_directory import DirectoryUpdate, SSHDirectoryClient
 
-from conftest import document, enrollment
+if TYPE_CHECKING:
+    from services.ssh.tests.conftest import document, enrollment
+else:
+    from conftest import document, enrollment
 
 # Reuse the canonical synthetic issuer/CA and real Gateway, not a second protocol fixture.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "fleet-manager" / "tests"))
-from gateway_service_transport_fixtures import Rig, eventually
+if TYPE_CHECKING:
+    import importlib
+
+    # The existing path-injected fixture lives under the hyphenated distribution tree.
+    _fixtures = importlib.import_module("gateway_service_transport_fixtures")
+    Rig: Callable[[Path], Any] = _fixtures.Rig
+    eventually: Callable[..., Any] = _fixtures.eventually
+else:
+    from gateway_service_transport_fixtures import Rig, eventually
 
 
-async def milestone(event, owner):
+async def milestone(event: asyncio.Event, owner: asyncio.Task[None]) -> None:
     waiting = asyncio.create_task(event.wait())
     try:
         done, _ = await asyncio.wait({waiting, owner}, timeout=5,
@@ -39,8 +52,8 @@ async def milestone(event, owner):
 
 @pytest.mark.parametrize("external_process", [False, True])
 async def test_registered_service_delivers_later_join_to_authenticated_connected_machine(
-    tmp_path, external_process,
-):
+    tmp_path: Path, external_process: bool,
+) -> None:
     rig = Rig(tmp_path)
     rig.h.keys += (ECKey.generate_key("P-256"),)
     rig.h.document["manifest"]["key_sources"].append({
@@ -55,6 +68,10 @@ async def test_registered_service_delivers_later_join_to_authenticated_connected
         "slots": ["service-a"], "methods": ["GET", "POST"],
     })
     stop, watch_stop = asyncio.Event(), asyncio.Event()
+    owner: asyncio.Task[None] | None
+    watch: asyncio.Task[None] | None
+    process: subprocess.Popen[bytes] | None
+    diagnostic: BinaryIO | None
     owner = watch = process = diagnostic = None
     try:
         await rig.start()
@@ -78,16 +95,16 @@ async def test_registered_service_delivers_later_join_to_authenticated_connected
             process = subprocess.Popen(
                 [sys.executable, "-I", "-m", "agent_ssh_service", "--config", str(selected)],
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=diagnostic,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                creationflags=cast(Any, subprocess).CREATE_NO_WINDOW if os.name == "nt" else 0,
                 cwd=tmp_path,
             )
         else:
             owner = asyncio.create_task(run(config, stop=stop))
-        def registered():
+        def registered() -> bool:
             if process is not None and process.poll() is not None:
-                diagnostic.seek(0)
+                cast(BinaryIO, diagnostic).seek(0)
                 pytest.fail("Installed SSH service exited: "
-                            + diagnostic.read(2048).decode("utf-8", errors="replace"))
+                            + cast(BinaryIO, diagnostic).read(2048).decode("utf-8", errors="replace"))
             if owner is not None and owner.done():
                 owner.result()
             return "service-a" in rig.state.channels
@@ -102,9 +119,9 @@ async def test_registered_service_delivers_later_join_to_authenticated_connected
             raise
         assert rig.state.channels["service-a"].caller_context
 
-        def client(principal, key):
-            async def access():
-                return rig.access(principal, key)
+        def client(principal: str, key: int) -> SSHDirectoryClient:
+            async def access() -> str:
+                return cast(str, rig.access(principal, key))
 
             return SSHDirectoryClient(ServiceCaller(
                 gateway_origin=rig.origin, access_token_callback=access,
@@ -115,9 +132,9 @@ async def test_registered_service_delivers_later_join_to_authenticated_connected
         joined = await first.enroll(enrollment())
         assert joined.revision == 2
         initial, updated = asyncio.Event(), asyncio.Event()
-        received = []
+        received: list[Document] = []
 
-        def accept(update):
+        def accept(update: DirectoryUpdate) -> None:
             received.append(update.to_dict())
             initial.set()
             if update.revision == 3:
@@ -135,7 +152,7 @@ async def test_registered_service_delivers_later_join_to_authenticated_connected
         await milestone(updated, watch)
         assert received[-1] == later.to_dict()
         assert len(received[-1]["directory"]["machines"]) == 2
-        assert (await first.wait(0, seconds=0)).encoded == later.encoded
+        assert cast(DirectoryUpdate, await first.wait(0, seconds=0)).encoded == later.encoded
         assert (await second.enroll(enrollment(1))).encoded == later.encoded
         async with rig.session.get(rig.origin + "/api/directory") as anonymous:
             assert anonymous.status == 401

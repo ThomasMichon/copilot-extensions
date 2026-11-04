@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from collections.abc import Callable, Iterator
 import os
 import sqlite3
 
-from fleet_manager.gateway_ssh_policy import GatewaySSHPolicy
-from fleet_manager.gateway_ssh_provider import directory_snapshot, public_key
-from fleet_manager.planning import canonical, decode, identifier, integer
+from fleet_manager.gateway_ssh_provider import directory_snapshot
 from fleet_manager.private_state import create_private_file
 
-from .config import ServiceConfig, absolute, check
+from .config import Document, ServiceConfig, absolute, canonical, check, decode, identifier, integer, policy_from_dict, public_key
 
 MAX_REQUESTS = 4096
 MAX_RESPONSE = 32 * 1024
@@ -20,7 +19,7 @@ MAX_RESPONSE = 32 * 1024
 class DirectoryStore:
     """The host must hold its canonical single-writer lease for this lifetime."""
 
-    def __init__(self, config: ServiceConfig):
+    def __init__(self, config: ServiceConfig) -> None:
         self.config = config
         self.root = absolute(config.to_dict()["data_dir"])
         check(self.root.is_dir(), "service-data-directory-unavailable")
@@ -76,7 +75,7 @@ class DirectoryStore:
         self.approval = PeerApproval(self)
 
     @contextmanager
-    def _transaction(self):
+    def _transaction(self) -> Iterator[sqlite3.Connection]:
         db = sqlite3.connect(self.path, timeout=5, isolation_level=None)
         try:
             db.execute("PRAGMA synchronous=FULL")
@@ -89,7 +88,7 @@ class DirectoryStore:
         finally:
             db.close()
 
-    def _accept_configuration(self, db) -> None:
+    def _accept_configuration(self, db: sqlite3.Connection) -> None:
         row = db.execute("SELECT authority FROM metadata WHERE id=1").fetchone()
         check(row is not None, "interrupted-store-initialization")
         prior = decode(row[0])
@@ -119,7 +118,7 @@ class DirectoryStore:
                    (canonical(selected),))
         self._snapshot(db)
 
-    def _snapshot(self, db) -> dict:
+    def _snapshot(self, db: sqlite3.Connection) -> Document:
         authority, revision = db.execute(
             "SELECT authority, revision FROM metadata WHERE id=1").fetchone()
         check(decode(authority) == self.config.authority, "configuration-owner-changed")
@@ -138,7 +137,7 @@ class DirectoryStore:
                     )},
                     "public_key": row[0], "host_key": row[1],
                 })
-        policy = GatewaySSHPolicy.from_dict(selected["policy"])
+        policy = policy_from_dict(selected["policy"])
         directory = directory_snapshot({
             "schema": "fleet-manager.gateway-ssh-directory", "version": 1,
             "controller": selected["controller"], "revision": revision,
@@ -151,15 +150,15 @@ class DirectoryStore:
         check(len(canonical(result)) <= MAX_RESPONSE, "directory-response-limit")
         return result
 
-    def snapshot(self) -> dict:
+    def snapshot(self) -> Document:
         with self._transaction() as db:
             return self._snapshot(db)
 
-    def _relay_snapshot(self, db) -> list[dict]:
+    def _relay_snapshot(self, db: sqlite3.Connection) -> list[Document]:
         snapshot = self._snapshot(db)
         rows = []
         keys = {row["public_key"] for row in snapshot["directory"]["machines"]}
-        policy = GatewaySSHPolicy.from_dict(snapshot["policy"])
+        policy = policy_from_dict(snapshot["policy"])
         for row in snapshot["directory"]["machines"]:
             binding = next(item for item in self.config.authority["bindings"] if (
                 item["machine"], item["environment"]
@@ -181,11 +180,11 @@ class DirectoryStore:
                 rows.append({**row, "relay_public_key": relay[0]})
         return rows
 
-    def relay_snapshot(self) -> list[dict]:
+    def relay_snapshot(self) -> list[Document]:
         with self._transaction() as db:
             return self._relay_snapshot(db)
 
-    def _validate_enrollment(self, principal: str, request: dict) -> dict:
+    def _validate_enrollment(self, principal: str, request: Document) -> Document:
         required = {
             "request_id", "machine", "environment", "generation", "public_key", "host_key",
         }
@@ -200,7 +199,7 @@ class DirectoryStore:
         check(all(request[name] == binding[name] for name in (
             "machine", "environment", "generation",
         )), "enrollment-binding-mismatch")
-        decision = GatewaySSHPolicy.from_dict(self.config.to_dict()["policy"]).resolve(
+        decision = policy_from_dict(self.config.to_dict()["policy"]).resolve(
             binding["machine"], binding["environment"],
         ).to_dict()
         check(decision["state"] == "configured", "machine-policy-not-configured")
@@ -217,7 +216,7 @@ class DirectoryStore:
               "relay-public-key-required")
         return binding
 
-    def _activate(self, db, principal: str, request: dict) -> tuple[dict, bool]:
+    def _activate(self, db: sqlite3.Connection, principal: str, request: Document) -> tuple[Document, bool]:
         binding = self._validate_enrollment(principal, request)
         relay_key = request.get("relay_public_key")
         encoded = canonical(request)
@@ -251,7 +250,7 @@ class DirectoryStore:
         self._relay_snapshot(db)
         return result, changed
 
-    def _remember_request(self, db, principal: str, request_id: str, encoded: bytes) -> None:
+    def _remember_request(self, db: sqlite3.Connection, principal: str, request_id: str, encoded: bytes) -> None:
         previous = db.execute(
             "SELECT content FROM requests WHERE principal=? AND request_id=?",
             (principal, request_id),
@@ -262,7 +261,7 @@ class DirectoryStore:
             check(count < MAX_REQUESTS, "enrollment-journal-full")
             db.execute("INSERT INTO requests VALUES (?,?,?)", (principal, request_id, encoded))
 
-    def enroll(self, principal: str, request: dict, *, checkpoint=lambda: None) -> tuple[dict, bool]:
+    def enroll(self, principal: str, request: Document, *, checkpoint: Callable[[], None] = lambda: None) -> tuple[Document, bool]:
         self._validate_enrollment(principal, request)
         with self._transaction() as db:
             checkpoint()

@@ -2,6 +2,8 @@ import asyncio
 import time
 import threading
 from types import SimpleNamespace
+from typing import Any, TYPE_CHECKING, TypeVar
+from collections.abc import Callable, Coroutine
 
 import pytest
 from single_instance_lease import AlreadyRunningError, SingleInstance
@@ -9,24 +11,92 @@ from single_instance_lease import AlreadyRunningError, SingleInstance
 from agent_ssh_service import hosting
 from agent_ssh_service.gateway import SSHService
 from agent_ssh_service.store import DirectoryStore
-from agent_ssh_service.config import SSHServiceError
+from agent_ssh_service.config import Document, ServiceConfig, SSHServiceError, canonical, decode
 from agent_ssh_service.hosting import run
-from fleet_manager.gateway_service_handler import CallerContext, ServiceRequest
+from fleet_manager.gateway_service_handler import CallerContext, ServiceRequest, ServiceResponse
 from fleet_manager.gateway_service_channel import TransportError
-from fleet_manager.planning import canonical, decode
-from fleet_manager.ssh_directory import DirectoryUpdate, SSHDirectoryClient
+from fleet_manager.ssh_directory import DirectoryUpdate, SSHDirectoryClient as _SSHDirectoryClient
 
-from conftest import enrollment
+if TYPE_CHECKING:
+    from services.ssh.tests.conftest import enrollment
+else:
+    from conftest import enrollment
+
+SSHDirectoryClient: Callable[..., _SSHDirectoryClient] = _SSHDirectoryClient
+T = TypeVar("T")
 
 
-def request(principal, method, path, body=b""):
+def request(principal: str, method: str, path: str, body: bytes = b"") -> ServiceRequest:
     return ServiceRequest(
         CallerContext("fleet-a", "gateway-a", "ssh", principal, int(time.time()) + 60),
         method, path, (), body,
     )
 
 
-async def test_connected_machine_wakes_on_later_join_and_reconnect_catches_up(config):
+@pytest.mark.parametrize("suffix", ["", "?"])
+async def test_empty_query_directory_uses_original_defaults(
+    config: ServiceConfig, suffix: str,
+) -> None:
+    store = DirectoryStore(config)
+    service = SSHService(store)
+    try:
+        response = await service.handle(request(
+            "principal-worker-a", "GET", "/directory" + suffix))
+        explicit = await service.handle(request(
+            "principal-worker-a", "GET", "/directory?after=0&wait=0"))
+        assert response.status == explicit.status == 200
+        assert response.body == explicit.body == canonical(store.snapshot())
+        assert store.snapshot()["directory"]["revision"] == 1
+    finally:
+        await service.close()
+
+
+@pytest.mark.parametrize("suffix", ["", "?"])
+async def test_empty_query_pending_uses_original_unfiltered_page(
+    config: ServiceConfig, suffix: str,
+) -> None:
+    value = config.to_dict()
+    value["enrollment_policy"] = {"mode": "peer-approval", "recovery_principals": []}
+    store = DirectoryStore(ServiceConfig.from_dict(value))
+    store.enroll("principal-worker-a", {
+        **enrollment(), "enrollment_policy": "peer-approval",
+    })
+    before = store.snapshot()
+    expected = store.approval.pending("principal-worker-a")
+    service = SSHService(store)
+    try:
+        response = await service.handle(request(
+            "principal-worker-a", "GET", "/enrollment/pending" + suffix))
+        assert response.status == 200
+        assert decode(response.body) == expected
+        assert store.snapshot() == before
+    finally:
+        await service.close()
+
+
+@pytest.mark.parametrize("path", [
+    "/directory?&", "/directory?after=0&", "/directory?unknown=1",
+    "/enrollment/pending?&", "/enrollment/pending?after",
+    "/enrollment/pending?unknown=1",
+    "/enrollment/pending?after=worker-a&after=worker-b",
+])
+async def test_nonempty_queries_keep_strict_parsing_and_field_rejection(
+    config: ServiceConfig, path: str,
+) -> None:
+    value = config.to_dict()
+    value["enrollment_policy"] = {"mode": "peer-approval", "recovery_principals": []}
+    store = DirectoryStore(ServiceConfig.from_dict(value))
+    before = store.snapshot()
+    service = SSHService(store)
+    try:
+        response = await service.handle(request("principal-worker-a", "GET", path))
+        assert response.status in (400, 403)
+        assert store.snapshot() == before
+    finally:
+        await service.close()
+
+
+async def test_connected_machine_wakes_on_later_join_and_reconnect_catches_up(config: ServiceConfig) -> None:
     service = SSHService(DirectoryStore(config))
     first = await service.handle(request(
         "principal-worker-a", "POST", "/enroll", canonical(enrollment())))
@@ -51,13 +121,13 @@ async def test_connected_machine_wakes_on_later_join_and_reconnect_catches_up(co
     ("principal-worker-a", "/directory?after=0&after=1"),
     ("principal-worker-a", "/directory?wait=26"),
 ])
-async def test_notification_does_not_accept_unknown_callers_or_positions(config, principal, path):
+async def test_notification_does_not_accept_unknown_callers_or_positions(config: ServiceConfig, principal: str, path: str) -> None:
     service = SSHService(DirectoryStore(config))
     response = await service.handle(request(principal, "GET", path))
     assert response.status in (400, 403)
 
 
-async def test_foreign_gateway_context_is_not_a_service_grant(config):
+async def test_foreign_gateway_context_is_not_a_service_grant(config: ServiceConfig) -> None:
     service = SSHService(DirectoryStore(config))
     selected = request("principal-worker-a", "GET", "/directory")
     foreign = ServiceRequest(
@@ -67,7 +137,7 @@ async def test_foreign_gateway_context_is_not_a_service_grant(config):
     assert (await service.handle(foreign)).status == 403
 
 
-async def test_drain_releases_wait_without_fabricating_a_new_revision(config):
+async def test_drain_releases_wait_without_fabricating_a_new_revision(config: ServiceConfig) -> None:
     service = SSHService(DirectoryStore(config))
     waiting = asyncio.create_task(service.handle(request(
         "principal-worker-a", "GET", "/directory?after=1&wait=20")))
@@ -77,7 +147,7 @@ async def test_drain_releases_wait_without_fabricating_a_new_revision(config):
     assert service.store.snapshot()["directory"]["revision"] == 1
 
 
-async def test_waiter_limit_keeps_gateway_channel_capacity_for_enrollment(config):
+async def test_waiter_limit_keeps_gateway_channel_capacity_for_enrollment(config: ServiceConfig) -> None:
     service = SSHService(DirectoryStore(config))
     service.waiters = 6
     refused = await service.handle(request(
@@ -88,21 +158,21 @@ async def test_waiter_limit_keeps_gateway_channel_capacity_for_enrollment(config
     assert joined.status == 200
 
 
-async def test_fleet_watch_consumes_actual_service_updates_and_stops_owned_wait(config):
+async def test_fleet_watch_consumes_actual_service_updates_and_stops_owned_wait(config: ServiceConfig) -> None:
     service = SSHService(DirectoryStore(config))
     stop = asyncio.Event()
 
     class Caller:
-        async def request(self, method, target, *, body=b"", response_limit):
+        async def request(self, method: str, target: str, *, body: bytes = b"", response_limit: int) -> ServiceResponse:
             assert response_limit == 32768
             return await service.handle(request(
                 "principal-worker-a", method, target.removeprefix("/ssh"), body))
 
     client = SSHDirectoryClient(Caller())
-    accepted = []
+    accepted: list[int] = []
     caught_up = asyncio.Event()
 
-    def accept(update):
+    def accept(update: DirectoryUpdate) -> None:
         assert isinstance(update, DirectoryUpdate)
         accepted.append(update.revision)
         caught_up.set()
@@ -123,13 +193,15 @@ async def test_fleet_watch_consumes_actual_service_updates_and_stops_owned_wait(
 
 @pytest.mark.parametrize("status", [429, 503])
 async def test_fleet_watch_recovers_after_sustained_notification_capacity_refusals(
-    config, monkeypatch, status,
-):
+    config: ServiceConfig, monkeypatch: pytest.MonkeyPatch, status: int,
+) -> None:
     service = SSHService(DirectoryStore(config))
+    delays: list[float]
+    accepted: list[int]
     stop, delays, accepted = asyncio.Event(), [], []
     original_wait_for = asyncio.wait_for
 
-    async def fast_backoff(awaitable, timeout):
+    async def fast_backoff(awaitable: Coroutine[Any, Any, T], timeout: float) -> T:
         if timeout <= 4:
             delays.append(timeout)
             awaitable.close()
@@ -140,7 +212,7 @@ async def test_fleet_watch_recovers_after_sustained_notification_capacity_refusa
     class Caller:
         calls = 0
 
-        async def request(self, method, target, *, response_limit):
+        async def request(self, method: str, target: str, *, response_limit: int) -> ServiceResponse | SimpleNamespace:
             assert method == "GET" and response_limit == 32768
             self.calls += 1
             if self.calls <= 12:
@@ -151,7 +223,7 @@ async def test_fleet_watch_recovers_after_sustained_notification_capacity_refusa
     caller = Caller()
     monkeypatch.setattr(asyncio, "wait_for", fast_backoff)
 
-    def accept(update):
+    def accept(update: DirectoryUpdate) -> None:
         accepted.append(update.revision)
         stop.set()
 
@@ -161,25 +233,27 @@ async def test_fleet_watch_recovers_after_sustained_notification_capacity_refusa
 
 
 @pytest.mark.parametrize("status", [401, 403])
-async def test_fleet_watch_preserves_fatal_authentication_refusals(status):
+async def test_fleet_watch_preserves_fatal_authentication_refusals(status: int) -> None:
     class Caller:
         calls = 0
 
-        async def request(self, method, target, *, response_limit):
+        async def request(self, method: str, target: str, *, response_limit: int) -> SimpleNamespace:
             self.calls += 1
             return SimpleNamespace(status=status, body=b"")
 
+    accepted: list[DirectoryUpdate]
     caller, accepted = Caller(), []
     with pytest.raises(TransportError) as error:
         await SSHDirectoryClient(caller).watch(asyncio.Event(), accepted.append)
     assert error.value.status == status and caller.calls == 1 and accepted == []
 
 
-async def test_fleet_watch_can_stop_while_capacity_is_unavailable(monkeypatch):
+async def test_fleet_watch_can_stop_while_capacity_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    accepted: list[DirectoryUpdate]
     stop, accepted = asyncio.Event(), []
     original_wait_for = asyncio.wait_for
 
-    async def stop_during_backoff(awaitable, timeout):
+    async def stop_during_backoff(awaitable: Coroutine[Any, Any, T], timeout: float) -> T:
         if timeout <= 4:
             stop.set()
         return await original_wait_for(awaitable, timeout)
@@ -187,7 +261,7 @@ async def test_fleet_watch_can_stop_while_capacity_is_unavailable(monkeypatch):
     class Caller:
         calls = 0
 
-        async def request(self, method, target, *, response_limit):
+        async def request(self, method: str, target: str, *, response_limit: int) -> SimpleNamespace:
             self.calls += 1
             return SimpleNamespace(status=503, body=b"")
 
@@ -197,16 +271,17 @@ async def test_fleet_watch_can_stop_while_capacity_is_unavailable(monkeypatch):
     assert stop.is_set() and caller.calls == 1 and accepted == []
 
 
-async def test_fleet_watch_does_not_retry_a_failed_local_consumer(config):
+async def test_fleet_watch_does_not_retry_a_failed_local_consumer(config: ServiceConfig) -> None:
+    calls: list[str]
     service, calls = SSHService(DirectoryStore(config)), []
 
     class Caller:
-        async def request(self, method, target, *, response_limit):
+        async def request(self, method: str, target: str, *, response_limit: int) -> ServiceResponse:
             calls.append(target)
             return await service.handle(request(
                 "principal-worker-a", method, target.removeprefix("/ssh")))
 
-    def accept(update):
+    def accept(update: DirectoryUpdate) -> None:
         raise RuntimeError("synthetic local convergence failure")
 
     with pytest.raises(RuntimeError, match="local convergence failure"):
@@ -214,11 +289,11 @@ async def test_fleet_watch_does_not_retry_a_failed_local_consumer(config):
     assert len(calls) == 1
 
 
-async def test_cancelled_handler_settles_its_disk_worker_before_returning(config, monkeypatch):
+async def test_cancelled_handler_settles_its_disk_worker_before_returning(config: ServiceConfig, monkeypatch: pytest.MonkeyPatch) -> None:
     service = SSHService(DirectoryStore(config))
     started, release, finished = threading.Event(), threading.Event(), threading.Event()
 
-    def blocked(*args, **kwargs):
+    def blocked(*args: Any, **kwargs: Any) -> tuple[Document, bool]:
         started.set()
         try:
             assert release.wait(3)
@@ -256,7 +331,7 @@ async def test_cancelled_handler_settles_its_disk_worker_before_returning(config
         await asyncio.gather(handler, return_exceptions=True)
 
 
-async def test_foreign_data_directory_is_not_adopted_before_credentials_or_lease(config):
+async def test_foreign_data_directory_is_not_adopted_before_credentials_or_lease(config: ServiceConfig) -> None:
     root = config.to_dict()["data_dir"]
     from pathlib import Path
 
@@ -270,28 +345,28 @@ async def test_foreign_data_directory_is_not_adopted_before_credentials_or_lease
 
 @pytest.mark.parametrize("operation", ["enrollment", "reconciliation"])
 async def test_repeated_host_and_handler_cancellation_retains_actual_writer_lease(
-    config, monkeypatch, operation,
-):
+    config: ServiceConfig, monkeypatch: pytest.MonkeyPatch, operation: str,
+) -> None:
     started, release, finished = threading.Event(), threading.Event(), threading.Event()
     selected = request("principal-worker-a", "POST", "/enroll", canonical(enrollment()))
     enroll = DirectoryStore.enroll
 
-    def blocked():
+    def blocked() -> None:
         started.set()
         try:
             assert release.wait(10)
         finally:
             finished.set()
 
-    def blocked_enrollment(store, *args, **kwargs):
+    def blocked_enrollment(store: DirectoryStore, *args: Any, **kwargs: Any) -> tuple[Document, bool]:
         blocked()
         return enroll(store, *args, **kwargs)
 
     class Connector:
-        def __init__(self, *, handler, **_):
+        def __init__(self, *, handler: Any, **_: Any) -> None:
             self.binding = handler
 
-        async def run(self, stop):
+        async def run(self, stop: asyncio.Event) -> None:
             service = self.binding.handle.__self__
             if operation == "reconciliation":
                 service.reconcile_relay = blocked

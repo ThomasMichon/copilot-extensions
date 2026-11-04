@@ -1,15 +1,20 @@
 import sqlite3
+from typing import TYPE_CHECKING
 
 import pytest
 
-from agent_ssh_service.config import ServiceConfig, SSHServiceError
+from agent_ssh_service.config import Document, ServiceConfig, SSHServiceError
 from agent_ssh_service.store import DirectoryStore
 
-from conftest import enrollment
-from test_approval import bootstrap, decision, selected, submit
+if TYPE_CHECKING:
+    from services.ssh.tests.conftest import enrollment
+    from services.ssh.tests.test_approval import bootstrap, decision, selected, submit
+else:
+    from conftest import enrollment
+    from test_approval import bootstrap, decision, selected, submit
 
 
-def round_trip(config):
+def round_trip(config: ServiceConfig) -> tuple[DirectoryStore, Document]:
     peer = selected(config)
     pending_store = DirectoryStore(peer)
     pending = submit(pending_store)
@@ -19,13 +24,13 @@ def round_trip(config):
     automatic_store = DirectoryStore(ServiceConfig.from_dict(automatic))
     automatic_store.enroll(
         "principal-worker-a", {**enrollment(), "request_id": "automatic-admission"})
-    peer = peer.to_dict()
-    peer["revision"] = automatic["revision"] + 1
-    return DirectoryStore(ServiceConfig.from_dict(peer)), pending
+    peer_document = peer.to_dict()
+    peer_document["revision"] = automatic["revision"] + 1
+    return DirectoryStore(ServiceConfig.from_dict(peer_document)), pending
 
 
 @pytest.mark.parametrize("first_read", ["status", "resubmit"])
-def test_retained_policy_round_trip_records_a_stable_supersedable_decision(config, first_read):
+def test_retained_policy_round_trip_records_a_stable_supersedable_decision(config: ServiceConfig, first_read: str) -> None:
     store, pending = round_trip(config)
     if first_read == "status":
         retained = store.approval.status("principal-worker-a", pending["request_id"])
@@ -45,7 +50,7 @@ def test_retained_policy_round_trip_records_a_stable_supersedable_decision(confi
     assert superseded["decision"] == retained["decision"]
 
 
-def test_identical_future_request_alias_preserves_the_original_public_candidate_decision(config):
+def test_identical_future_request_alias_preserves_the_original_public_candidate_decision(config: ServiceConfig) -> None:
     store = DirectoryStore(selected(config))
     first = bootstrap(store)
     other = submit(store, 1)
@@ -56,11 +61,11 @@ def test_identical_future_request_alias_preserves_the_original_public_candidate_
     assert alias["decision"] == first["decision"]
 
 
-def test_retained_observation_rolls_back_when_its_status_caller_is_withdrawn(config):
+def test_retained_observation_rolls_back_when_its_status_caller_is_withdrawn(config: ServiceConfig) -> None:
     store, pending = round_trip(config)
     calls = 0
 
-    def checkpoint():
+    def checkpoint() -> None:
         nonlocal calls
         calls += 1
         if calls == 2:

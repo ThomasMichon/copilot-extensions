@@ -6,17 +6,22 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable
+from typing import Any, ParamSpec, TypeVar
 from urllib.parse import parse_qs, urlsplit
 
 from fleet_manager.gateway_service_handler import HandlerBinding, ServiceRequest, ServiceResponse
 from fleet_manager.gateway_service_channel import CHANNEL_REQUESTS
-from fleet_manager.planning import PlanError, canonical, decode
+from fleet_manager.planning import PlanError
 
-from .config import SSHServiceError, check
+from .config import Document, SSHServiceError, canonical, check, decode
 from .store import DirectoryStore
 
 
-async def _drain(*tasks):
+P = ParamSpec("P")
+T = TypeVar("T")
+
+
+async def _drain(*tasks: asyncio.Future[Any]) -> tuple[list[Any], bool]:
     """Settle owned work even if the caller is cancelled more than once."""
     settlement = asyncio.gather(*tasks, return_exceptions=True)
     interrupted = False
@@ -29,19 +34,19 @@ async def _drain(*tasks):
 
 class SSHService:
     def __init__(self, store: DirectoryStore, *,
-                 reconcile_relay: Callable[[], None] | None = None):
+                 reconcile_relay: Callable[[], None] | None = None) -> None:
         self.store = store
         self.reconcile_relay = reconcile_relay
         self.changed = asyncio.Condition()
         self.waiters = 0
         self.closed = False
-        self.workers = set()
-        self.closing = None
+        self.workers: set[asyncio.Task[Any]] = set()
+        self.closing: asyncio.Task[None] | None = None
         config = store.config.to_dict()
         self.binding = HandlerBinding(config["fleet"], config["gateway"], self.handle)
         self.owner = (config["fleet"], config["gateway"], config["slot"])
 
-    async def _disk(self, operation, *args, **kwargs):
+    async def _disk(self, operation: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
         check(not self.closed, "service-draining")
         worker = asyncio.create_task(asyncio.to_thread(operation, *args, **kwargs))
         self.workers.add(worker)
@@ -66,7 +71,7 @@ class SSHService:
 
     async def _directory(self, request: ServiceRequest, query: str) -> ServiceResponse:
         self.store.config.binding(request.context.principal)
-        arguments = parse_qs(query, strict_parsing=True)
+        arguments = parse_qs(query, strict_parsing=True) if query else {}
         check(set(arguments) <= {"after", "wait"}
               and all(len(values) == 1 for values in arguments.values()), "invalid-directory-query")
         after_text = arguments.get("after", ["0"])[0]
@@ -109,22 +114,25 @@ class SSHService:
                 if target.path == "/enrollment" and not target.query:
                     return ServiceResponse(200, (), canonical(self.store.approval.contract()))
                 if target.path == "/enrollment/pending":
-                    arguments = parse_qs(target.query, strict_parsing=True, keep_blank_values=True)
+                    arguments = (
+                        parse_qs(target.query, strict_parsing=True, keep_blank_values=True)
+                        if target.query else {}
+                    )
                     check(set(arguments) <= {"after"}
                           and all(len(values) == 1 for values in arguments.values()),
                           "invalid-pending-query")
-                    result = await self._disk(
+                    pending_result = await self._disk(
                         self.store.approval.pending, request.context.principal,
                         after=arguments.get("after", [None])[0])
                     self._checkpoint(request)
-                    return ServiceResponse(200, (), canonical(result))
+                    return ServiceResponse(200, (), canonical(pending_result))
                 if target.path.startswith("/enrollment/requests/") and not target.query:
-                    result = await self._disk(
+                    status_result = await self._disk(
                         self.store.approval.status, request.context.principal,
                         target.path.removeprefix("/enrollment/requests/"),
                         checkpoint=lambda: self._checkpoint(request))
                     self._checkpoint(request)
-                    return ServiceResponse(200, (), canonical(result))
+                    return ServiceResponse(200, (), canonical(status_result))
             if request.method == "POST" and target.path == "/enroll" and not target.query:
                 value = decode(request.body)
                 result, _ = await self._disk(
@@ -150,7 +158,7 @@ class SSHService:
         except (PlanError, UnicodeError, ValueError, RecursionError):
             return ServiceResponse(400, (), canonical({"error": "invalid-request"}))
 
-    async def _activated(self, request: ServiceRequest, result: dict) -> ServiceResponse:
+    async def _activated(self, request: ServiceRequest, result: Document) -> ServiceResponse:
         pending = result.get("status") == "pending"
         if not pending:
             if self.reconcile_relay is not None:
@@ -170,7 +178,7 @@ class SSHService:
     async def close(self) -> None:
         self.closed = True
 
-        async def settle():
+        async def settle() -> None:
             async with self.changed:
                 self.changed.notify_all()
             await _drain(*tuple(self.workers))
