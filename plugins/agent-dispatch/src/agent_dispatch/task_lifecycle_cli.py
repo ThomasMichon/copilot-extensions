@@ -98,6 +98,10 @@ def _cmd_claim_status(args: argparse.Namespace) -> int:
     from .client_authority import require_explicit_claim_authority
 
     require_explicit_claim_authority(args)
+    if args.task_id.startswith("l1."):
+        from .task_relationship_cli import claim_status
+
+        return claim_status(args, core=_core())
     restart_policy = bool(getattr(args, "native_restart_policy", False))
     if restart_policy and not any(
         getattr(args, flag, None) for flag in ("local", "shared", "url")
