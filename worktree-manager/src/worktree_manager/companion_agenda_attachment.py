@@ -156,24 +156,44 @@ class AgendaTimelineAttachment:
             for token in self._tokens():
                 self.panel.source_error(token, message)
 
-    def _head_current(self) -> bool:
-        if self.selection is None:
-            return False
-        project, worktree, head = self.selection
-        invalidated = self._invalidated_selection == self.selection or any(
+    def head_current(self, selection: Selection) -> bool:
+        """Share selected-head invalidation with other provider admissions."""
+        project, worktree, head = selection
+        return self._invalidated_selection != selection and not any(
             (state.token.identity.project, state.token.identity.worktree_id) == (project, worktree)
             and (
-                state.availability is Availability.HEAD_CHANGED
-                or state.token.identity.head_session_id not in (None, head)
+                (
+                    state.availability is Availability.HEAD_CHANGED
+                    and state.token.identity.head_session_id == head
+                )
+                or (
+                    selection == self._last_selection
+                    and state.token.identity.head_session_id not in (None, head)
+                )
             )
             for state in self.panel.window.sources.values()
         )
-        if invalidated:
+
+    def _head_current(self) -> bool:
+        if self.selection is None:
+            return False
+        current = self.head_current(self.selection)
+        if not current:
             self._invalidated_selection = self.selection
             self._stop.set()
             self._changed.set()
             self.status("Rich Agenda: head changed; Refresh required")
-        return not invalidated
+        return current
+
+    def _publication_current(self, frame: dict[str, Any]) -> bool:
+        latest = self._publication
+        return bool(
+            not self._error and latest is not None
+            and latest.get("availability") == "observed"
+            and (latest.get("project"), latest.get("worktree_id"), latest.get("session_id")) == self.selection
+            and latest["observation"]["source"]["store_id"] == frame["observation"]["source"]["store_id"]
+            and latest["observation"]["revision"] >= frame["observation"]["revision"]
+        )
 
     def _tokens(self, *, all_providers: bool = False) -> tuple[SourceToken, ...]:
         return tuple(
@@ -288,7 +308,7 @@ class AgendaTimelineAttachment:
                     lambda: reader.latest(publication, cancelled, previous),
                     self._stop, cancelled,
                 )
-                if self._stop.is_set() or version != self._version or not self._renderable():
+                if self._stop.is_set() or not self._publication_current(frame) or not self._renderable():
                     continue
                 if not self._head_current():
                     return

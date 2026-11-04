@@ -433,6 +433,7 @@ class MuxCompanionApp(App):
         self._timeline_panel = CompanionTimelinePanel(id="timeline")
         self._timeline_attachment = TimelineAttachment(
             self._timeline_panel, cwd=self._cwd or os.getcwd(),
+            head_current=lambda selection: self._rich_agenda_attachment.head_current(selection),
         )
         self._rich_agenda_attachment = AgendaTimelineAttachment(
             self._timeline_panel, cwd=self._cwd or os.getcwd(),

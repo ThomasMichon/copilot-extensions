@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 
 from rich.text import Text
 from textual.widgets import Static
@@ -22,8 +23,12 @@ MAX_RETAINED_WINDOWS = MAX_SOURCE_SCOPES
 
 
 class TimelineAttachment:
-    def __init__(self, panel: CompanionTimelinePanel, *, cwd: str) -> None:
+    def __init__(
+        self, panel: CompanionTimelinePanel, *, cwd: str,
+        head_current: Callable[[tuple[str, str, str]], bool] | None = None,
+    ) -> None:
         self.panel, self.cwd = panel, cwd
+        self._head_current = head_current
         self.controller: TimelineController | None = None
         self._stop = asyncio.Event()
         self._revision = 0
@@ -124,6 +129,8 @@ class TimelineAttachment:
                 initial = await source.prepare(revision, stop=stop)
                 if revision != self._revision or stop.is_set() or not self._renderable():
                     return
+                if self._head_current is not None and not self._head_current(selection):
+                    return
                 if (
                     not isinstance(initial, TimelineSnapshot)
                     or initial.token.request_epoch != revision
@@ -154,7 +161,10 @@ class TimelineAttachment:
                     raise TimelineSourceError(result.reason)
 
                 def current() -> bool:
-                    return revision == self._revision and self._renderable()
+                    return (
+                        revision == self._revision and self._renderable()
+                        and (self._head_current is None or self._head_current(selection))
+                    )
 
                 def observation(value: TimelineSnapshot | LiveDelta | TimelineGap) -> None:
                     if not current():

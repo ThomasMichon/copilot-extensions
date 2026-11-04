@@ -227,8 +227,14 @@ not move a browsing anchor.
 
 Rich-result admission rechecks shared head evidence after every awaited latest
 or history read. Worktree-provider invalidation fences an old-head Agenda result
-even before the Agenda subscription delivers its own terminal notice. Live
-updates do not rebind an unchanged source token or clear its pending backward
+even before the Agenda subscription delivers its own terminal notice.
+Worktree preparation and later observations also consult the Agenda head fence
+before binding or publishing, so a delayed result cannot restore retired rows.
+Newer observed publications for the same selected head and store coalesce the
+next read without discarding a completed, still-valid earlier page. This allows
+visible progress under continuous notifications while retaining error, store,
+selection and head-invalidation fences. Live updates do not rebind an unchanged
+source token or clear its pending backward
 request. Each history read captures its minimum admitted revision before
 starting, so a concurrent live advance cannot falsely turn that older atomic
 page into a rewound-store error or move the independent live boundary.

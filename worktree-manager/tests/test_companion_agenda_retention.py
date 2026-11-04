@@ -96,6 +96,88 @@ def owner_snapshot(epoch: int) -> TimelineSnapshot:
     )
 
 
+def test_agenda_invalidation_fences_a_successful_inflight_worktree_prepare(managed, monkeypatch) -> None:
+    real_selection = worktree_attachment.TimelineAttachment.set_selection
+    configure(managed, monkeypatch)
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class Source:
+        async def prepare(self, epoch, *, stop):
+            self.initial = owner_snapshot(epoch)
+            entered.set()
+            await release.wait()
+            return self.initial
+
+        async def observe(self, token, *, stop):
+            yield self.initial
+            await stop.wait()
+
+    monkeypatch.setattr(worktree_attachment, "WorktreeTimelineSource", lambda *args, **kwargs: Source())
+
+    async def check() -> None:
+        app = companion.MuxCompanionApp(cwd=str(managed["cwd"]))
+        async with app.run_test(size=(110, 40)) as pilot:
+            await until(pilot, lambda: not app._loading)
+            app._agenda_cancel = Event()
+            publish(app, managed["publication"]())
+            app.query_one("#views", TabbedContent).active = "timeline-tab"
+            await until(pilot, lambda: app._rich_agenda_attachment.token is not None)
+            pending = asyncio.create_task(real_selection(
+                app._timeline_attachment, ("example", "selected", "head-a"),
+            ))
+            try:
+                await entered.wait()
+                publish(app, {**managed["publication"](), "availability": "head-changed", "observation": None})
+                assert not app._timeline_panel.window.events
+            finally:
+                release.set()
+                await pending
+            assert not app._timeline_panel.window.events
+            assert app._timeline_attachment.controller is None
+
+    asyncio.run(check())
+
+
+def test_newer_publication_does_not_starve_an_already_completed_rich_read(managed, monkeypatch) -> None:
+    configure(managed, monkeypatch)
+    original = AgendaReader.latest
+    blocked, release = Event(), Event()
+    calls = []
+
+    async def check() -> None:
+        loop = asyncio.get_running_loop()
+        app = companion.MuxCompanionApp(cwd=str(managed["cwd"]))
+
+        def delayed(reader, *args):
+            pages = original(reader, *args)
+            calls.append(1)
+            if len(calls) == 1:
+                newer = managed["update"]()
+                loop.call_soon_threadsafe(publish, app, newer)
+            elif len(calls) == 2:
+                blocked.set()
+                assert release.wait(10)
+            return pages
+
+        monkeypatch.setattr(AgendaReader, "latest", delayed)
+        async with app.run_test(size=(110, 40)) as pilot:
+            try:
+                await until(pilot, lambda: not app._loading)
+                app._agenda_cancel = Event()
+                publish(app, managed["publication"]())
+                app.query_one("#views", TabbedContent).active = "timeline-tab"
+                attachment = app._rich_agenda_attachment
+                await until(pilot, blocked.is_set, attempts=400)
+                assert attachment.token is not None
+                assert len(app._timeline_panel.window.events) == 1
+                release.set()
+                await until(pilot, lambda: len(app._timeline_panel.window.events) == 2)
+            finally:
+                release.set()
+
+    asyncio.run(check())
+
+
 @pytest.mark.parametrize("kind", ["latest", "history"])
 def test_agenda_conflict_is_rejected_against_actual_reconciled_window_archive(managed, monkeypatch, kind) -> None:
     real_selection = worktree_attachment.TimelineAttachment.set_selection
