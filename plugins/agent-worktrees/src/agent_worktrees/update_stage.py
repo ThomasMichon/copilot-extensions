@@ -419,6 +419,12 @@ def stage(
                         if "COPILOT_EXTENSIONS_CONTEXT" in installer_environment else None
                     ),
                 )
+                if deployment_diagnostic is None:
+                    from .reconcile_freshness import check_runtime_freshness
+
+                    result["runtime_freshness"], deployment_diagnostic = (
+                        check_runtime_freshness("agent-worktrees", plugin_dir, runtime_root)
+                    )
         except ValueError as error:
             result["venv_drift_error"] = str(error)
             result["runtime_apply_blocked"] = "installation-context-invalid"

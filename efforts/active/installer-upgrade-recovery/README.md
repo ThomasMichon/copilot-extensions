@@ -650,3 +650,50 @@ second repair entry. #3004's first actual restarted-model prompt is distinct
 from #1159's completed stateless write guard. Source, containing release,
 contained consumers and affected-host readiness remain separate facts. The
 remaining selected Plan/Validation items and original holds are unchanged.
+
+### 2026-11-04 - Bounded automatic launch-freshness source unit
+
+The retained #2404 scope is claimed under #7030 in
+[comment 6640613933](https://github.com/ThomasMichon/copilot-extensions/issues/7030#issuecomment-6640613933),
+as U11 in the acceptance matrix. ROOT coordination, first-use adapters and the
+existing native application's external-cache correction remain with their
+declared owners.
+
+Read-only inspection found inconsistent decisions: reconciliation compared
+against the serving version preferentially, staging treated version inequality
+as apply-worthy, and pre-launch/native execution admission did not share the
+source/freshness decision. The candidate now uses one read-only guard, preserves
+independently selected sources and both installed/serving freshness, and compares
+prepared facts again at actual apply. Existing publication, context and root
+admission remain independent. Explicit update/recovery is not gated by this
+automatic-action decision.
+
+The eighteen new consumer regressions (including four real child-process
+protocol controls) and all 106 retained publication-policy cases pass.
+The combined file exceeded its unchanged 300-second group limit;
+the same complete case inventory passes in three disjoint selections. The
+staging/monotonic compatibility packet passes 75 cases after replacing only
+affected shorthand test versions with real package-version spellings. The
+durable launch consumer packet passes 53 cases with one explicit platform skip.
+Ten actor-free decision units, Python lint and the thirteen-plugin install,
+documentation and version guards also pass. Exact whole-packet unit admission,
+review, merge and containing release remain pending. These isolated source
+controls do not establish native installed adoption or close #7030, #7028 or
+this parent effort.
+
+The declared enforced MyPy portfolio subsequently passed all forty strict
+projects for both Linux and Windows type targets, after explicit preparation
+of its missing checker environments. Worktrees and repository tools remain
+pending projects; this does not claim their typing admission. Tracking-write,
+headless-launch, daemon and asyncio-timeout source guards pass.
+
+The complete normal unit packet remains locally unqualified. All 4,086 selected
+tests passed, but the first run exceeded the unchanged 300-second aggregate
+budget. A second run without another owned validation job still failed aggregate
+accounting: pytest took 287.63 seconds, with admission, source-bytecode
+preparation and temporary teardown also inside the packet clock. No source,
+node selection, coverage or budget was relaxed. Missing tooling was prepared
+through the seasoned dependency owner; UV-owned tooling outside the checkout
+preserved the source-read boundary. Required exact-head hosted CI must qualify
+the packet before this source unit can merge. These local budget failures are
+not represented as successful unit evidence.

@@ -1860,20 +1860,20 @@ def build_plan(
             # a restart from the selected runtime, not rewriting that build.
             rver = rrun if rrun is not None else rdep
             if pver is None or not _versions_equal(rver, pver):
-                # Monotonic guard (#1366): never redeploy a payload that is
-                # strictly OLDER than the running/deployed build -- doing so would
-                # REVERT a newer local `source: local` deploy toward a stale /
-                # throttled marketplace payload on the next reconcile pass. Only
-                # a confidently-older payload is suppressed; runtime-missing
-                # (rver is None) and forward/ambiguous cases still deploy.
-                if _version_lt(pver, rver):
-                    continue
                 diagnostic = publication_diagnostic(
                     name, pdir, selected_runtime_root,
                     context=(
                         Path(runtime_env["COPILOT_EXTENSIONS_CONTEXT"])
                         if "COPILOT_EXTENSIONS_CONTEXT" in runtime_env else None
                     ),
+                )
+                if diagnostic is not None:
+                    diagnostics.append(diagnostic)
+                    continue
+                from .reconcile_freshness import check_runtime_freshness
+
+                freshness, diagnostic = check_runtime_freshness(
+                    name, pdir, selected_runtime_root,
                 )
                 if diagnostic is not None:
                     diagnostics.append(diagnostic)
@@ -1912,6 +1912,7 @@ def build_plan(
                         "scope": scope,
                         "payload_root": str(pdir),
                         "runtime_root": str(selected_runtime_root),
+                        "runtime_freshness": freshness,
                         "command": cmd,
                         "argv": argv,
                         "environment": {

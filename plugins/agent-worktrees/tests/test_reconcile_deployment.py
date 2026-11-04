@@ -8,6 +8,7 @@ import io
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +16,8 @@ import pytest
 from agent_procutil import no_window_kwargs
 
 from agent_worktrees import reconcile, reconcile_deployment, update_cli, update_stage
-from test_reconcile import env as env
+
+pytest_plugins = ["test_reconcile"]
 
 
 @pytest.fixture
@@ -92,6 +94,196 @@ def _snapshot(root: Path) -> dict[str, tuple[int, bytes]]:
         str(path.relative_to(root)): (path.stat().st_mtime_ns, path.read_bytes())
         for path in root.rglob("*") if path.is_file()
     }
+
+
+@pytest.mark.parametrize(
+    ("installed", "serving", "local", "reason"),
+    [
+        ("3.0.0", "1.0.0", False, "runtime-payload-older"),
+        ("1.0.0", "3.0.0", False, "runtime-payload-older"),
+        ("1.0.0", None, True, "runtime-source-selection-required"),
+        ("1.0.0", None, False, None),
+    ],
+)
+def test_launch_freshness_preserves_both_versions_and_local_source(
+    deployment, monkeypatch, installed, serving, local, reason,
+):
+    deployment.deploy_runtime(deployment.plugin, installed)
+    if local:
+        manifest_path = deployment.root / "deploy-manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["source"].update(
+            kind="local", path=str(deployment.home / "selected-source"),
+        )
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    if serving:
+        deployment.deploy_running(deployment.plugin, serving)
+        monkeypatch.setattr(reconcile, "_pid_alive", lambda pid: True)
+    before = _snapshot(deployment.home)
+    plan = reconcile.build_plan(
+        deployment.repo, machine="test", cache={}, save=False, include_payload_refresh=True,
+    )
+    assert _snapshot(deployment.home) == before
+    assert [step["phase"] for step in plan["updates"]] == (
+        ["payload", "runtime"] if reason is None else ["payload"]
+    )
+    if reason:
+        assert plan["diagnostics"][0]["reason"] == reason
+        assert plan["diagnostics"][0]["message"]
+    else:
+        assert reconcile_deployment.execution_diagnostic(plan["updates"][-1]) is None
+
+
+@pytest.mark.parametrize("change", ["payload", "source", "selector", "serving"])
+def test_actual_launch_apply_rejects_changed_freshness_before_installer(
+    deployment, monkeypatch, change,
+):
+    from agent_worktrees import update_launch_cli
+
+    step = reconcile.build_plan(
+        deployment.repo, machine="test", cache={}, save=False,
+    )["updates"][0]
+    if change == "payload":
+        source = deployment.payload / "src"
+        source.mkdir()
+        (source / "changed.py").write_text("CHANGED = True\n", encoding="utf-8")
+    elif change == "source":
+        manifest = deployment.root / "deploy-manifest.json"
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        data["source"].update(kind="local", path=str(deployment.home / "another-source"))
+        manifest.write_text(json.dumps(data), encoding="utf-8")
+    elif change == "selector":
+        (deployment.root / "current-version").write_text("3.0.0", encoding="utf-8")
+    else:
+        deployment.deploy_running(deployment.plugin, "3.0.0")
+        monkeypatch.setattr(reconcile, "_pid_alive", lambda pid: True)
+    before = _snapshot(deployment.home)
+    monkeypatch.setattr(
+        reconcile, "_run_plan_step", lambda *args, **kwargs: pytest.fail("installer executed"),
+    )
+    result = update_launch_cli._apply(step)
+    assert result["ok"] is False
+    assert result["diagnostic"]["reason"] == "runtime-freshness-changed"
+    assert _snapshot(deployment.home) == before
+
+
+@pytest.mark.parametrize("change", ["forward", "older", "local", "payload"])
+def test_native_launch_freshness_protocol(deployment, change):
+    step = reconcile.build_plan(
+        deployment.repo, machine="test", cache={}, save=False,
+    )["updates"][0]
+    if change in {"older", "local"}:
+        manifest_path = deployment.root / "deploy-manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["source"]["version"] = "3.0.0" if change == "older" else "2.0.0"
+        if change == "local":
+            manifest["source"].update(
+                kind="local", path=str(deployment.home / "another-source"),
+            )
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    elif change == "payload":
+        source = deployment.payload / "src"
+        source.mkdir()
+        (source / "changed.py").write_text("CHANGED = True\n", encoding="utf-8")
+    before = _snapshot(deployment.root)
+    script = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "from agent_worktrees import reconcile, __main__ as main\n"
+        "payload,root=map(Path,sys.argv[1:])\n"
+        "reconcile.core_installed_payload_dir=lambda name: payload\n"
+        "reconcile.runtime_installer_environment=lambda *a,**kw: ({},root)\n"
+        "raise SystemExit(main.main(['reconcile-plugins','--check-update']))\n"
+    )
+    run = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", script,
+         str(deployment.payload), str(deployment.root)],
+        input=json.dumps(step), text=True, encoding="utf-8", capture_output=True,
+        timeout=30, check=False, **no_window_kwargs(),
+    )
+    assert run.returncode == (0 if change == "forward" else 3), run.stderr
+    result = json.loads(run.stdout)
+    assert result["allowed"] is (change == "forward")
+    if change != "forward":
+        assert result["diagnostics"][0]["reason"] == "runtime-freshness-changed"
+    assert _snapshot(deployment.root) == before
+
+
+@pytest.mark.parametrize("case", ["missing-receipt", "different-source", "malformed", "lost-manifest"])
+def test_launch_freshness_refuses_same_version_source_or_unavailable_evidence(deployment, case):
+    from agent_worktrees.reconcile_freshness import check_runtime_freshness
+
+    deployment.deploy_runtime(deployment.plugin, "2.0.0")
+    manifest_path = deployment.root / "deploy-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    receipt = {
+        "schema": "copilot-extensions.runtime-source", "version": 1,
+        "plugin": deployment.plugin, "package_version": "2.0.0",
+        "source_commit": "a" * 40, "source_tree": "b" * 40,
+        "assembly_hash": "c" * 64, "runtime_version": "2.0.0+source.fixture",
+    }
+    manifest["runtime_source"] = receipt
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    if case == "different-source":
+        (deployment.payload / "runtime-source.json").write_text(
+            json.dumps({**receipt, "source_commit": "d" * 40}), encoding="utf-8",
+        )
+    elif case == "malformed":
+        manifest_path.write_text("{", encoding="utf-8")
+    elif case == "lost-manifest":
+        manifest_path.unlink()
+        (deployment.root / "current-version").write_text("2.0.0", encoding="utf-8")
+    before = _snapshot(deployment.home)
+    _facts, diagnostic = check_runtime_freshness(
+        deployment.plugin, deployment.payload, deployment.root,
+    )
+    assert diagnostic["reason"] == (
+        "runtime-source-selection-required"
+        if case in {"missing-receipt", "different-source"} else "runtime-freshness-unavailable"
+    )
+    assert _snapshot(deployment.home) == before
+
+
+@pytest.mark.parametrize("deployment", ["agent-worktrees"], indirect=True)
+@pytest.mark.parametrize("producer", ["stage", "prelaunch"])
+def test_native_launch_producers_preserve_newer_local_runtime(deployment, monkeypatch, producer):
+    from types import SimpleNamespace
+    from agent_worktrees import __main__ as core
+
+    deployment.deploy_runtime(deployment.plugin, "3.0.0")
+    manifest_path = deployment.root / "deploy-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["source"].update(kind="local", path=str(deployment.home / "selected-source"))
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    before = _snapshot(deployment.root)
+    if producer == "stage":
+        monkeypatch.setattr(
+            update_stage, "discover_plugin_dir", lambda home: (deployment.payload, "marketplace"),
+        )
+        refreshes = []
+        monkeypatch.setattr(
+            update_stage, "_run_copilot_update", lambda: (refreshes.append(True) or True, "refreshed"),
+        )
+        monkeypatch.setattr(core, "plan_pre_launch", lambda: {"action": "continue"})
+        result = update_stage.stage(
+            status=deployment.home / "stage-status.json", lock=deployment.home / "stage-lock",
+            home=deployment.home,
+        )
+        assert refreshes == [True]
+        assert result["plugin_changed"] is False
+        assert result["runtime_apply_blocked"] == "runtime-payload-older"
+    else:
+        monkeypatch.setattr(update_cli.worktree_identity, "_find_repo_dir", lambda: deployment.repo)
+        monkeypatch.setattr(update_cli.cfg, "load_config", lambda **kwargs: SimpleNamespace(
+            default_repo=SimpleNamespace(service_paths=None, bootstrap_services=[]),
+        ))
+        monkeypatch.setattr(update_cli, "_resolve_environment", lambda config: "test")
+        monkeypatch.setattr(update_cli.svc, "discover_services", lambda *args, **kwargs: [])
+        monkeypatch.setattr(update_cli.svc, "check_staleness", lambda *args: "unknown")
+        result = update_cli.plan_pre_launch()
+        assert result["action"] == "continue"
+        assert result["diagnostics"][0]["reason"] == "runtime-payload-older"
+    assert _snapshot(deployment.root) == before
 
 
 @pytest.mark.parametrize(

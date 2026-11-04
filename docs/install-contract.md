@@ -1689,6 +1689,27 @@ paths, and any foreign plugin context are removed. A missing or invalid receipt
 blocks that plugin's mutation with an explicit diagnostic rather than falling
 through to an unattributed legacy root.
 
+Automatic runtime actions also use one read-only source/freshness decision
+across reconciliation, Worktrees staging, pre-launch planning and immediate
+execution admission. A payload older than either the deployed or serving
+package cannot replace it. A different local source or a source-qualified
+runtime without the same payload receipt requires an explicit selected-source
+update, including when package versions match. Missing or malformed required
+evidence produces a recovery diagnostic, not permission to deploy.
+Older standalone manifests that predate source-kind metadata retain their
+version-guarded compatibility path; a present invalid source kind or lost
+selected-runtime manifest does not qualify as that legacy case.
+
+Newly prepared actions retain their payload manifest/content fingerprint,
+runtime source receipt, deployment manifest, selector and relevant serving
+identity facts. Execution re-reads those facts and rejects a changed decision
+before invoking the installer. Older cached actions without that snapshot still
+undergo the current source/freshness decision. Publication policy, installation
+scope and the installer's construction/activation admission remain independent.
+These automatic-action guards do not constrain explicit `update` or its
+authoritative recovery path, disable marketplace content refresh, or suppress
+unrelated hooks. They do not prove installed service convergence.
+
 Installation-mode probes and explicit-context validation in read-only launch
 preflight invoke the owning payload's portable
 `installation_context.py` with the running runtime's Python in isolated UTF-8

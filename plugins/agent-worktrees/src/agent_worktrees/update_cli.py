@@ -724,6 +724,14 @@ def plan_pre_launch() -> dict:
             )
             if diagnostic is not None:
                 diagnostics.append(diagnostic)
+            else:
+                from .reconcile_freshness import check_runtime_freshness
+
+                freshness, diagnostic = check_runtime_freshness(
+                    "agent-worktrees", aw_plugin_dir, aw_runtime_root,
+                )
+                if diagnostic is not None:
+                    diagnostics.append(diagnostic)
         if staleness != "current" and diagnostic is None:
             installer = next(
                 (
@@ -754,6 +762,7 @@ def plan_pre_launch() -> dict:
                         "environment": aw_environment,
                         "unset_environment": list(_reconcile._RUNTIME_ENV_UNSET),
                         "runtime_root": str(aw_runtime_root),
+                        "runtime_freshness": freshness,
                     }
                 ]
                 append_update_if_stale = _core_helper(

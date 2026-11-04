@@ -473,13 +473,13 @@ def test_stage_skipped_when_no_plugin_dir(tmp_path: Path):
 
 def test_stage_detects_change(tmp_path: Path, monkeypatch):
     home = tmp_path / "home"
-    d = _make_marketplace(home, {"plugin.json": '{"version":"dev1"}'})
+    d = _make_marketplace(home, {"plugin.json": '{"version":"1.0.0-dev1"}'})
     status = tmp_path / "status.json"
     lock = tmp_path / "lock"
 
     def fake_update():
         # Simulate the marketplace download rewriting the payload.
-        (d / "plugin.json").write_text('{"version":"dev2"}', encoding="utf-8")
+        (d / "plugin.json").write_text('{"version":"1.0.0-dev2"}', encoding="utf-8")
         return True, "updated to dev2"
 
     monkeypatch.setattr(us, "_run_copilot_update", fake_update)
@@ -650,14 +650,14 @@ def test_stage_reused_before_fingerprint_still_detects_a_real_change(
     download actually rewrites the payload -- caching BEFORE never weakens
     the AFTER-hash's ability to detect a genuine change."""
     home = tmp_path / "home"
-    d = _make_marketplace(home, {"plugin.json": '{"version":"dev1"}'})
+    d = _make_marketplace(home, {"plugin.json": '{"version":"1.0.0-dev1"}'})
     status = tmp_path / "status.json"
     lock = tmp_path / "lock"
     monkeypatch.setattr(us, "_run_copilot_update", lambda: (True, "already at latest"))
     us.stage(status=status, lock=lock, home=home)  # seed the cache
 
     def fake_update():
-        (d / "plugin.json").write_text('{"version":"dev2"}', encoding="utf-8")
+        (d / "plugin.json").write_text('{"version":"1.0.0-dev2"}', encoding="utf-8")
         return True, "updated to dev2"
 
     monkeypatch.setattr(us, "_run_copilot_update", fake_update)
@@ -671,8 +671,8 @@ def test_stage_detects_venv_drift_when_payload_ahead(tmp_path: Path, monkeypatch
     # venv is still dev1. The download is a no-op ("already at latest"), so the
     # fingerprint never moves -- only the version-drift reconcile catches it.
     home = tmp_path / "home"
-    _make_marketplace(home, {"plugin.json": '{"version":"dev2"}'})
-    _make_runtime_manifest(home, "dev1")
+    _make_marketplace(home, {"plugin.json": '{"version":"1.0.0-dev2"}'})
+    _make_runtime_manifest(home, "1.0.0-dev1")
     status = tmp_path / "status.json"
     lock = tmp_path / "lock"
     monkeypatch.setattr(us, "_run_copilot_update",
@@ -681,8 +681,8 @@ def test_stage_detects_venv_drift_when_payload_ahead(tmp_path: Path, monkeypatch
     assert result["venv_drift"] is True
     assert result["plugin_changed"] is True
     assert result["plugin_changed_reason"] == "venv-drift"
-    assert result["payload_version"] == "dev2"
-    assert result["deployed_version"] == "dev1"
+    assert result["payload_version"] == "1.0.0-dev2"
+    assert result["deployed_version"] == "1.0.0-dev1"
 
 
 def test_stage_no_drift_when_versions_match(tmp_path: Path, monkeypatch):
@@ -723,13 +723,13 @@ def test_stage_namespaced_runtime_uses_validated_installer_environment(
     from agent_worktrees import reconcile
 
     home = tmp_path / "home"
-    payload = _make_marketplace(home, {"plugin.json": '{"version":"dev1"}'})
+    payload = _make_marketplace(home, {"plugin.json": '{"version":"1.0.0-dev1"}'})
     cell_root = tmp_path / "cell" / "plugins" / "agent-worktrees"
     cell_root.mkdir(parents=True)
     context = cell_root / "install.json"
     context.write_text("{}", encoding="utf-8")
     (cell_root / "deploy-manifest.json").write_text(
-        json.dumps({"source": {"version": "dev1"}}),
+        json.dumps({"source": {"version": "1.0.0-dev1"}}),
         encoding="utf-8",
     )
     status = tmp_path / "status.json"
@@ -737,7 +737,7 @@ def test_stage_namespaced_runtime_uses_validated_installer_environment(
 
     def fake_update():
         (payload / "plugin.json").write_text(
-            '{"version":"dev2"}', encoding="utf-8"
+            '{"version":"1.0.0-dev2"}', encoding="utf-8"
         )
         return True, "updated to dev2"
 

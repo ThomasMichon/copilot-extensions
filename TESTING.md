@@ -33,6 +33,18 @@ source/topology work counts, configuration forwarding, precedence, failure and
 separate-invocation freshness. It neither expands required unit-only CI nor
 qualifies installed runtime, native Windows, ACP or whole-hook throughput.
 
+The focused Worktrees `tests/test_reconcile_deployment.py` launch-freshness
+packet exercises real planning, staging, native execution-admission and the
+durable launch consumer with isolated metadata. It preserves newer installed
+and serving versions, independent same-version sources, payload refresh and
+forward standalone updates, and refuses changed cached actions without runtime
+writes. Its existing policy matrices may be selected separately with
+`-k 'stage_refreshes or prelaunch_retains'` to retain the ordinary group deadline.
+The actor-free `tools/promotion_unit_tests/test_launch_freshness.py` cases
+substitute only file/source observations and belong to the unit-only promotion
+packet. Neither lane qualifies an installed service, external rollout or every
+first-use adapter; #7030 retains those acceptance boundaries.
+
 The manual `windows-coverage-rotation.yml` selector `post_tool_fallback=true`
 runs only Worktrees' post-tool shell, status/bind reminder, late-guidance and
 guard-publication consumer packet through the canonical hardened Linux container. Supply `ref`
