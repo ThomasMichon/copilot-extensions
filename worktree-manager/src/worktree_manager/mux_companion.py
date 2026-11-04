@@ -53,7 +53,7 @@ from .companion_topology import topology_view
 from . import handoff_client as hc
 from .companion_agenda import agenda_text, subscribe
 from .companion_timeline_widget import CompanionTimelinePanel, SubwayTimeline
-from .companion_timeline_attachment import TimelineAttachment
+from .companion_timeline_attachment import TimelineAttachment, selected_head
 from .companion_agenda_attachment import AgendaTimelineAttachment
 from .companion_timeline_contract import Provider
 
@@ -431,6 +431,7 @@ class MuxCompanionApp(App):
         self._observer_pane = os.environ.get("TMUX_PANE")
         self._action_message: Text | None = None
         self._timeline_panel = CompanionTimelinePanel(id="timeline")
+        self._timeline_sync_revision = 0
         self._timeline_attachment = TimelineAttachment(
             self._timeline_panel, cwd=self._cwd or os.getcwd(),
             head_current=lambda selection: self._rich_agenda_attachment.head_current(selection),
@@ -690,26 +691,26 @@ class MuxCompanionApp(App):
     async def _sync_timeline(self, *, reconcile: bool = False) -> None:
         if self._timeline_attachment.closed or not self._timeline_panel.query(SubwayTimeline):
             return
+        self._timeline_sync_revision += 1
+        revision = self._timeline_sync_revision
+        self._timeline_attachment.stop_now()
         data = self._data
         selection = None
-        if self._timeline_panel.query_one(SubwayTimeline).demand_visible and not self._loading:
-            heads = [row.get("id") for row in data.sessions if row.get("is_head") is True
-                     and isinstance(row.get("id"), str) and row["id"]]
-            worktree, project = data.worktree.get("id"), data.worktree.get("repo")
-            if not isinstance(project, str) or not project:
-                selected_project, selected_worktree, _ = self._observer_identity
-                project = selected_project if selected_worktree == worktree else None
-            if (
-                not data.error and not data.sessions_error and len(heads) == 1
-                and isinstance(worktree, str) and worktree and isinstance(project, str) and project
-            ):
-                selection = (project, worktree, heads[0])
-            else:
+        visible = self._timeline_panel.query_one(SubwayTimeline).demand_visible
+        if visible and not self._loading:
+            if not data.error and not data.sessions_error:
+                selection = selected_head(data.worktree, data.sessions, self._observer_identity)
+            if selection is None:
                 self._timeline_attachment.unavailable(
                     "Selected project/worktree and exactly one canonical head are required.",
                 )
+        if selection is None or selection != self._rich_agenda_attachment.selection:
+            self._rich_agenda_attachment.stop_now()
         await self._timeline_attachment.set_selection(selection, reconcile=reconcile)
-        if data is self._data and not self._loading:
+        if (
+            revision == self._timeline_sync_revision and data is self._data and not self._loading
+            and visible == self._timeline_panel.query_one(SubwayTimeline).demand_visible
+        ):
             await self._rich_agenda_attachment.set_selection(
                 selection, data.agenda, data.agenda_error, project_root=data.worktree.get("path"),
             )

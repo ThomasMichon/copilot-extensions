@@ -123,6 +123,11 @@ class AgendaTimelineAttachment:
 
     def begin_close(self) -> None:
         self._closed = True
+        self.stop_now()
+
+    def stop_now(self) -> None:
+        if self.selection is not None and self._renderable():
+            self._head_current()
         self._stop.set()
         self._changed.set()
 
@@ -130,21 +135,27 @@ class AgendaTimelineAttachment:
         self._publication, self._error = deepcopy(frame), error
         self._version += 1
         self._changed.set()
+        terminal = (
+            (frame.get("project"), frame.get("worktree_id"), frame.get("session_id"))
+            if frame is not None and frame.get("availability") == "head-changed" else None
+        )
+        if terminal is not None and terminal in (self.selection, self._last_selection):
+            self._invalidated_selection = terminal
+            if self._renderable():
+                for state in tuple(self.panel.window.sources.values()):
+                    token = state.token
+                    if (token.identity.project, token.identity.worktree_id, token.identity.head_session_id) == terminal:
+                        self.panel.apply_snapshot(TimelineSnapshot(
+                            token, None, Availability.HEAD_CHANGED, Completeness.PARTIAL,
+                        ))
+                self.status("Rich Agenda: head changed; Refresh required")
+            if self.selection in (None, terminal):
+                self._stop.set()
+            return
         if self.selection is None or not self._renderable():
             return
         if error or frame is None:
             self._failure(error or "awaiting provider snapshot")
-        elif (
-            (frame.get("project"), frame.get("worktree_id"), frame.get("session_id")) == self.selection
-            and frame.get("availability") == "head-changed"
-        ):
-            self._invalidated_selection = self.selection
-            for token in self._tokens(all_providers=True):
-                self.panel.apply_snapshot(TimelineSnapshot(
-                    token, None, Availability.HEAD_CHANGED, Completeness.PARTIAL,
-                ))
-            self.status("Rich Agenda: head changed; Refresh required")
-            self._stop.set()
         elif frame.get("availability") != "observed":
             self._failure("selected head has no current publication")
 
@@ -235,6 +246,7 @@ class AgendaTimelineAttachment:
             if (
                 selection is not None and selection == self.selection
                 and project_root == self.project_root and self._task is not None and not self._task.done()
+                and not self._stop.is_set()
             ):
                 return
             self.selection = None

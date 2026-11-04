@@ -96,7 +96,8 @@ def owner_snapshot(epoch: int) -> TimelineSnapshot:
     )
 
 
-def test_agenda_invalidation_fences_a_successful_inflight_worktree_prepare(managed, monkeypatch) -> None:
+@pytest.mark.parametrize("reopen", [False, True])
+def test_agenda_invalidation_fences_a_successful_inflight_worktree_prepare(managed, monkeypatch, reopen) -> None:
     real_selection = worktree_attachment.TimelineAttachment.set_selection
     configure(managed, monkeypatch)
     entered, release = asyncio.Event(), asyncio.Event()
@@ -122,6 +123,9 @@ def test_agenda_invalidation_fences_a_successful_inflight_worktree_prepare(manag
             publish(app, managed["publication"]())
             app.query_one("#views", TabbedContent).active = "timeline-tab"
             await until(pilot, lambda: app._rich_agenda_attachment.token is not None)
+            if reopen:
+                await app._rich_agenda_attachment.set_selection(None)
+                assert app._rich_agenda_attachment.selection is None
             pending = asyncio.create_task(real_selection(
                 app._timeline_attachment, ("example", "selected", "head-a"),
             ))
@@ -134,6 +138,55 @@ def test_agenda_invalidation_fences_a_successful_inflight_worktree_prepare(manag
                 await pending
             assert not app._timeline_panel.window.events
             assert app._timeline_attachment.controller is None
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("overlap", [False, True])
+def test_hidden_demand_stops_rich_before_blocked_worktree_retirement(managed, monkeypatch, overlap) -> None:
+    configure(managed, monkeypatch)
+    entered, release = asyncio.Event(), asyncio.Event()
+    reads = []
+    original = AgendaReader.latest
+
+    def latest(reader, *args):
+        reads.append(1)
+        return original(reader, *args)
+
+    monkeypatch.setattr(AgendaReader, "latest", latest)
+
+    async def blocked_retirement(self, selection, **kwargs):
+        if selection is None:
+            entered.set()
+            await release.wait()
+
+    async def check() -> None:
+        app = companion.MuxCompanionApp(cwd=str(managed["cwd"]))
+        async with app.run_test(size=(110, 40)) as pilot:
+            try:
+                await until(pilot, lambda: not app._loading)
+                app._agenda_cancel = Event()
+                publish(app, managed["publication"]())
+                app.query_one("#views", TabbedContent).active = "timeline-tab"
+                attachment = app._rich_agenda_attachment
+                await until(pilot, lambda: attachment.token is not None)
+                monkeypatch.setattr(worktree_attachment.TimelineAttachment, "set_selection", blocked_retirement)
+                app.query_one("#views", TabbedContent).active = "summary-tab"
+                await until(pilot, entered.is_set)
+                assert attachment._stop.is_set()
+                if overlap:
+                    app.query_one("#views", TabbedContent).active = "timeline-tab"
+                    await until(pilot, lambda: not attachment._stop.is_set())
+                    app.query_one("#views", TabbedContent).active = "summary-tab"
+                    await until(pilot, attachment._stop.is_set)
+                count = len(reads)
+                publish(app, managed["update"]())
+                await pilot.pause()
+                assert len(reads) == count
+                release.set()
+                await until(pilot, lambda: attachment.selection is None)
+            finally:
+                release.set()
 
     asyncio.run(check())
 

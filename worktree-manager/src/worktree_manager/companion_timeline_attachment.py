@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from typing import Any
 
 from rich.text import Text
 from textual.widgets import Static
@@ -20,6 +21,25 @@ from .companion_worktree_source import WorktreeTimelineSource
 
 MAX_RETAINED_EVIDENCE_BYTES = 2 * MAX_WINDOW_BYTES
 MAX_RETAINED_WINDOWS = MAX_SOURCE_SCOPES
+
+
+def selected_head(
+    worktree: dict[str, Any], sessions: list[dict[str, Any]],
+    observer: tuple[str | None, str | None, str | None],
+) -> tuple[str, str, str] | None:
+    """Resolve the selected canonical head without borrowing another observer."""
+    heads = [row.get("id") for row in sessions if row.get("is_head") is True
+             and isinstance(row.get("id"), str) and row["id"]]
+    identity, project = worktree.get("id"), worktree.get("repo")
+    if not isinstance(project, str) or not project:
+        selected_project, selected_worktree, _ = observer
+        project = selected_project if selected_worktree == identity else None
+    if (
+        len(heads) == 1 and isinstance(identity, str) and identity
+        and isinstance(project, str) and project
+    ):
+        return project, identity, heads[0]
+    return None
 
 
 class TimelineAttachment:

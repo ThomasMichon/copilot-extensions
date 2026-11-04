@@ -249,6 +249,13 @@ An Agenda head-change notice invalidates every bound selected-head source even
 before the first Agenda token exists. An explicit refresh selecting a different
 canonical head supersedes the retired viewer scope without depending on optional
 Worktree observations; a same-head retry cannot clear that head fence.
+Terminal head evidence also persists while rich selection is absent during
+hide/reopen, and immediately clears matching retained rows. Hiding or changing
+selection stops both provider scopes before waiting on either retirement.
+Selection synchronization rechecks its revision and actual visibility after
+Worktree preparation, so an older show request cannot restore hidden demand.
+Repeated visible demand for the same selection does not restart a healthy rich
+reader.
 Retired history results and errors cannot downgrade a recovered source. A
 queued history request carrying a retired viewer token is ignored without
 changing the current source's health or pending request. A
