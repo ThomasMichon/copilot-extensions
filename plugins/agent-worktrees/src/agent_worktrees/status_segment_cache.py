@@ -44,15 +44,27 @@ class _StatusSegmentCache:
     def pending_segment() -> str:
         return "UNKNOWN (cleanup pending)"
 
-    def pending_segment_for_path(self, path: str) -> str:
-        return self.pending_segment()
+    def pending_segment_for_path(self, path: str, *, project: str | None = None) -> str:
+        project = project if project is not None else self.project_for_observation_path(path) or ""
+        with self._lock:
+            if self._blocked(project, path, cleanup_only=True):
+                return self.pending_segment()
+            if self._closing_observations:
+                return "UNKNOWN (observation retiring)"
+            if self._blocked(project, path):
+                return "UNKNOWN (Git observation busy)"
+            return "UNKNOWN (Git observation unavailable)"
 
-    def _blocked(self, project: str, path: str | None = None) -> bool:
-        if self._closing_observations:
+    def _blocked(
+        self, project: str, path: str | None = None, *, cleanup_only: bool = False,
+    ) -> bool:
+        if self._closing_observations and not cleanup_only:
             return True
         keys = self._project_scopes.get(project, set())
         target = self._key(path) if path else None
         for ticket in self._observations.values():
+            if cleanup_only and ticket.cleanup is None:
+                continue
             if ticket.project == project or ticket.key in keys:
                 return True
             candidates = [ticket.path]
@@ -285,7 +297,7 @@ class _StatusSegmentCache:
         input_key = self._key(path)
         with self._lock:
             if self.observation_blocked(project, path):
-                return self.pending_segment()
+                return self.pending_segment_for_path(path, project=project)
             self._invalidate_keys(self._invalidated)
             now = time.monotonic()
             key = self._aliases.get(input_key, input_key)
@@ -297,7 +309,7 @@ class _StatusSegmentCache:
         key = self._key(target)
         with self._lock:
             if self.observation_blocked(project, target):
-                return self.pending_segment()
+                return self.pending_segment_for_path(target, project=project)
             self._invalidate_keys(self._invalidated)
             cached = self._entries.get(key)
             if cached and time.monotonic() - cached[0] < self.ttl:
@@ -319,12 +331,12 @@ class _StatusSegmentCache:
             )
         except push_timeout.ObservationCleanupError as error:
             self.retain_unclaimed_cleanup(project, target, error)
-            return self.pending_segment()
+            return self.pending_segment_for_path(target, project=project)
         except push_timeout.ObservationCleanupPending:
-            return self.pending_segment()
+            return self.pending_segment_for_path(target, project=project)
         with self._lock:
             if self.observation_blocked(project, target):
-                return self.pending_segment()
+                return self.pending_segment_for_path(target, project=project)
             self._aliases[input_key] = key
             self._entries[key] = (time.monotonic(), value)
             self._entry_projects[key] = project

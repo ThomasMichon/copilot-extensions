@@ -26,6 +26,34 @@ def _worktree_status_fact(value, *, confirmed: bool, observed_at: float) -> dict
     return {"value": value, "confirmed": confirmed, "observed_at": observed_at}
 
 
+def refresh_unconfirmed_liveness(project: str, worktree_id: str, bundle: dict) -> dict:
+    """Keep an explicit native refresh independent of resident Git custody."""
+    if (
+        bundle.get("project") != project or bundle.get("worktree_id") != worktree_id
+        or not isinstance(bundle.get("facts"), dict)
+        or not isinstance(bundle["facts"].get("liveness"), dict)
+        or bundle["facts"]["liveness"].get("confirmed") is True
+    ):
+        return bundle
+    record = tracking.load_record_by_id(
+        worktree_id, tracking_path=cfg.project_dir(project) / "worktrees",
+    )
+    if record is None or record.worktree_id != worktree_id:
+        raise ValueError("Worktree identity changed during status refresh")
+    verdict = sessions.verify_worktree_active(record)
+    if not verdict.probes_ok:
+        return bundle
+    return {
+        **bundle,
+        "facts": {
+            **bundle["facts"],
+            "liveness": _worktree_status_fact(
+                dataclasses.asdict(verdict), confirmed=True, observed_at=time.time(),
+            ),
+        },
+    }
+
+
 def compute(project: str, worktree_id: str, *, cleanup_owner=None) -> dict:
     """Assemble the full per-worktree status bundle
     (agent-worktrees-external-status-accelerator effort, Phase 2).

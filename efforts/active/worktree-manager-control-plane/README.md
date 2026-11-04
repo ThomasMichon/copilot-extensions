@@ -2378,6 +2378,92 @@ I/O and static-guard credit is not reopened.)_
   when separately authorized. No new universal UI/native/every-host or
   whole-Manager prerequisite is added.
 
+### Proposed finite approved-source and venue-consumer contracts
+
+_(Agent-recommended additive tracking proposal. Completed bootstrap,
+creation, relocation and provider foundations remain credited. #5912's
+explicit final numeric canonical remains OPEN even if this tracking lands.)_
+
+#### #5910 - Approved gitless core source
+
+- [ ] **P5910-1:** RETAIN OR RESOLVE an approved ATTRIBUTABLE core source
+  after gitless bootstrap/self-update using bounded durable metadata,
+  registered discovery OR reviewed acquisition. EXPLICIT source/checkout
+  wins FIRST; do not guess another repository/branch or incidentally clone
+  an organizational source when approved context is lost.
+- [ ] **P5910-2:** Preserve Git AND tar acquisition and known-checkout CWD/
+  flat-staging positives. Cover retained nested tar extraction, installed
+  external-CWD setup, Manager-only self-update staging and explicit checkout.
+  Keep the trusted pointer/materializer boundary, plugin-owned actual core
+  installer and install/adopt/source custody; no arbitrary fetched-tool execution.
+- [ ] **P5910-3:** Credit #540/#551 and git-optional/bootstrap/core-install
+  foundations without claiming the nested/Manager-only cases complete.
+  #352 is closed history, not a live claim token; existing Journal/open
+  bounded-source and #356/#357 owners continue. Preserve conditional
+  handoff, not whole #4097 launch acceptance, a Git-install mandate or the
+  withdrawn presence-as-command-health/global-source-absence claim.
+- [ ] **V5910:** Qualify every original disposable fixture/clean-room case
+  through the actual installed-source consumer: explicit-first selection,
+  approved retain/resolve alternatives, Git/tar/nested/self-update/
+  external-CWD positives and unapproved-source refusal without host
+  registration effects. Preserve finite tiers and existing install/adopt
+  ownership; tracking grants no acquisition, installation or update.
+
+#### #5912 - Exact title relationship and component-aware rendering
+
+- [ ] **P5912-1:** Derive subtitle title from declared checkout intent,
+  ELSE the ACTUAL driving-worktree title, ELSE stable venue identity, THEN
+  transient activity. Title AND claims come from the SAME actual owning
+  relationship, including effort/supervisor holds; separate mapped title
+  columns, borrowed claims or duplicate title stores are not this consumer.
+- [ ] **P5912-2:** Preserve ALL direct #5962 R1-R3: actual provider-subtitle/
+  column/Option renderer prioritizes the durable component and ellipsizes
+  ACTIVITY FIRST. If the durable title itself cannot fit, cap DISPLAY ONLY;
+  retain full canonical title/history and the actual owning claim. Whole-line
+  crop, assumed wrapping or another worker's ellipsis is not proof.
+- [ ] **P5912-3:** Preserve BOTH CodeSpaces/Containers lifecycle vocabulary,
+  gates, cross-machine holds, orphan signals, shared prominence and graceful
+  missing-owner/partial/status data through existing provider/adapter/renderer
+  owners, not another schema or lifecycle authority.
+- [ ] **V5912-1:** Preserve #5962 RV1/RV2's ACTUAL subtitle-to-Option/render
+  narrow-layout path, explicit activity-first ellipsis, short AND long
+  durable titles, long activity, title-only/activity-empty and constrained
+  cases with full authoritative data retained. No fabricated observed
+  visual-loss cause, universal character/pixel threshold or all-terminal/
+  theme/production-session experiment.
+- [ ] **V5912-2:** Preserve RV3's pure adapter/render, BOTH-provider content/
+  width, exact fallback and actual effort/supervisor relationship, missing
+  owner and partial/status/hold/prominence matrix. Fixtures retain their
+  tier; a live parity claim needs its OWN original applicable evidence,
+  not a new installed/native/lifecycle programme.
+- [ ] **C5912:** Preserve ALL direct #5962 C1/C2: SAME title/claim/provider/
+  adapter/renderer owners, separate #3657/#3507, historic pivot Done credit;
+  complete direct intake/current whole readback and custody before #5962
+  supersession, otherwise KEEP it. The current source reports that intake
+  and explicitly keeps final numeric #5912 OPEN. This ROOT proposal neither
+  repeats the transfer nor changes that canonical condition.
+
+#### #5913 - Existing generic New to the same owned session
+
+- [ ] **P5913-1:** Credit shipped generic row-independent `create_action`
+  prompting/execution/refresh. Add actual CodeSpace AND Container provider
+  declarations and explicit repository/spec input without requiring an
+  existing venue row; no new contribution schema or provider CLI.
+- [ ] **P5913-2:** Reuse provider provisioning AND shared reserve/connect/
+  release/embody into the SAME owning session contract for New AND Open.
+  Preserve leases, profiles, capability honesty and failure cleanup; no
+  duplicate allocation, second lifecycle/transport or separate provision-
+  then-manual-attach substitute.
+- [ ] **P5913-3:** Retain supported restrictions and target/agency fences.
+  Restricted unsupported venues do not acquire interactive reach; generic
+  CLI success or reattachment alone is not exact registered-session identity
+  or New parity. #3657/#3507 and normal provider/session custodians remain.
+- [ ] **V5913:** Qualify original default/missing prerequisites, success/
+  failure, lease retention/release and BOTH venue fixtures PLUS the original
+  applicable owned live lane through actual create/reservation/session
+  consumers. Credit design-only #3258, historic #3253 and #5914 source sweep
+  only at their scopes; no automatic fleet enrollment or new all-host gate.
+
 ## Validation Plan
 
 - [ ] G1: Resolve EVERY directly retained #4096 original
@@ -2545,7 +2631,37 @@ tiers without imposing every-host or native-on-every-leaf requirements.
   documentary intake is not implementation, UI/native proof, parent
   completion or resource release.
 
+- [ ] **G5910:** Resolve EVERY direct P5910/Validation/continuing Coordination
+  clause: approved source RETAIN OR RESOLVE, explicit-first precedence,
+  exact Git/tar/nested/self-update/external-CWD cases and trusted installer/
+  adopt ownership. Preserve foundations, conditional handoff and original
+  tiers; paper intake is not installed setup or whole #4097 acceptance.
+- [ ] **G5912:** Resolve EVERY P5912/V5912/C5912 and continuing Coordination
+  clause, including ALL #5962 R1-R3/RV1-RV3/C1-C2, exact ELSE precedence,
+  SAME title/claim relationship, BOTH providers, actual activity-first
+  renderer and display-only durable cap. Preserve finite tiers and explicit
+  final numeric #5912 OPEN; tracking is not title mutation, UI/native
+  qualification, another transfer or parent/custody completion.
+- [ ] **G5913:** Resolve EVERY P5913/Validation/continuing Coordination
+  clause at original scope: actual generic provider New/repo/spec/
+  reservation/provisioning to SAME session as Open, lease/profile/failure/
+  restriction controls, BOTH fixtures AND applicable owned live evidence.
+  Generic creation/reattachment is partial credit, not per-venue parity;
+  no new lifecycle authority, resource release or whole-parent gate.
+
 ## Coordination
+
+The proposed #5910/#5912/#5913 finite families use existing Phase8
+migration-intake/domain review and Journal/open bounded-source claiming.
+Approved-source/bootstrap/install/adopt, both venue/provider/session,
+title/claim/effort/supervisor and actual renderer/source/native/resource
+custodians retain their scopes; #3657/#3507/#4097 and prior holds remain
+independent. #5912's explicit final numeric OPEN survives this tracking.
+Normal review, complete actual direct Plan/local AND global Validation/
+Coordination/Journal delivery and permitted whole-current source/receiver/
+custody readback precede separate source-specific judgment, never override
+its literal KEEP condition. No assignment, generic ACK, expiry, source/
+resource transfer, setup, provisioning, UI or native operation is authorized.
 
 The proposed #5343 finite producer/consumer family enters existing Phase8
 migration-intake/domain-Plan review and the dated Journal/open bounded-source
@@ -2679,6 +2795,16 @@ No product, native, credential, host, process, service or resource operation
 is authorized by tracker consolidation.
 
 ## Journal
+
+### 2026-10-30 - Proposed approved-source and venue-consumer cases
+
+Added unchecked direct #5910/#5912/#5913 Plan/local AND actual global
+Validation with continuing same-owner coordination. Approved-source
+alternatives, actual title/claim/renderer and complete direct #5962 union,
+and per-venue New-to-owned-session acceptance retain their finite tiers.
+Completed foundations remain credit; final numeric #5912 remains OPEN.
+No setup, UI/native qualification, receiving acceptance, implementation
+appointment, source closure or custody/resource release is claimed.
 
 ### 2026-10-30 - Proposed specific action-progress consumer
 

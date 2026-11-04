@@ -34,6 +34,12 @@ runtime an unsupported deadline. Canonical custody settlement, including direct
 installer callers, first completes any matching grace-route cleanup; failure
 retains the original record and runtime references for retry.
 
+Mux status distinguishes `Git observation busy` from `cleanup pending`.
+The former means a matching observation is still running; the latter means its
+owner retained unsettled native cleanup. `observation retiring` identifies closed
+admission without a matching cleanup ticket. These labels do not release custody,
+refresh cached Git facts, or change drain readiness.
+
 ## What actually happens
 
 1. The installer builds, marks complete and selects the new immutable runtime.
