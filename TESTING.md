@@ -3815,9 +3815,10 @@ single-project histories above the offered-candidate cap, bounded multi-project
 indexes and retained unsafe/tag-budget refusal,
 configured-feed redirects, credential isolation, explicit redirect refusal,
 late index and source rechecks, retained inputs,
-one-download selected wheels, tampered retained bytes, shared budgets and Windows
-owned-worker timeout cleanup. Actor-free projection,
-candidate-witness and recheck controls live in
+one-download selected wheels, tampered retained bytes, shared budgets, sanitized
+admission refusals and Windows owned-worker timeout cleanup. Actor-free
+projection, candidate-witness, recheck, safe resolver-stop and isolated-worker
+deadline controls (including pre-launch expiry) live in
 `tools/promotion_unit_tests/test_guarded_core_contract.py`.
 `tools/test_core_public_feed_native.py` compares real local-TLS producer outputs
 across separate machine-local keyed identities and source containers, and checks
