@@ -227,6 +227,17 @@ real venvs and two actual sibling module invocations per layout, retaining data
 and selectors. It does not qualify whole installation, resident lifetime,
 desktop visibility, graceful cutover or rollout.
 
+The Windows daemon-status native packet is
+`python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_daemon_observation_native.py --allow-explicit-tiers`.
+It reads a real caller-contained process's census membership, literal command
+line, token SID, creation time and root through native APIs with subprocess
+probes forbidden. The process carries synthetic daemon arguments; this does not
+start a central daemon or prove installed cutover. Portable reader/refusal
+controls remain in `tests/test_windows_daemon_observation.py` and the existing
+status/CLI suites. The existing manual `mux-companion` portfolio also selects
+these status/CLI and native files on its Windows runner; its job and test
+budgets remain unchanged. No native packet is added to required unit-only CI.
+
 The explicitly selected Windows Picker-handoff packet is
 `python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_terminal_launch_native.py --test-file tests/native/test_terminal_launch_mux_native.py --allow-explicit-tiers`.
 It requires native PowerShell 7 and PSMux. A caller-contained, headless ConPTY
