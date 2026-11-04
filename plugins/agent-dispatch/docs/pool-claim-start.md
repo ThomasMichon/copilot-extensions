@@ -88,6 +88,12 @@ Both owners retain the original creation key. A conflicting older creation or
 an unconfirmed owner reply retains the claim without another key, replacement
 workspace or native launch. Existing retained agents keep their original
 invocation and allocation; missing historical attribution is not retrofitted.
+The same-key Bridge owner retains the original positively sessionless allocation
+snapshot. A lost creation reply or uncommitted coordinator storage does not
+force a new sessionless read against the native just created: recovery first
+asks that original owner for its keyed result, then validates the complete
+original attempt, incarnation and returned native before storing or sending.
+Bridge still refuses an unrelated live holder, changed head or conflicting key.
 
 ## Managed ordinary allocator (opt-in)
 

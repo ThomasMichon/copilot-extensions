@@ -53,6 +53,7 @@ def ordinary(
     from agent_dispatch import embody, ordinary_assignment
 
     allocations = []
+    creation_records = []
     ground = {
         "id": "worktree-a", "repo": "example", "path": str(admission_owner.workspace),
         "status": "active", "creation_nonce": "allocation-a", "session_count": 0,
@@ -65,6 +66,11 @@ def ordinary(
     def create_workspace(**kwargs: Any) -> dict:
         assert q.get(requested.id).status == Status.CLAIMED and not calls
         allocations.append(kwargs)
+        ground["dispatch_attempt"] = {
+            "task_id": kwargs["task_id"], "reservation_key": kwargs["reservation_key"],
+            "attempt": kwargs["attempt"], "driver": kwargs["driver"],
+            "supervisor": kwargs["supervisor"], "creator_machine": "host-a", "ownership": "created",
+        }
         return {
             "worktree": ground["id"], "project": ground["repo"], "path": ground["path"],
         }
@@ -77,10 +83,15 @@ def ordinary(
         if argv[2] == "create":
             assert not kwargs.get("input") and "--prompt-file" not in argv
             assert q.get(requested.id).status == Status.CLAIMED
+            if not creation_records:
+                creation_records.append(dict(ground))
             ground.update(session_count=1, last_session_id="native-a", session_live=True)
             return subprocess.CompletedProcess(argv, 0, json.dumps({
                 "session_id": "bridge-a", "ready": True, "status": "awaiting_first_prompt",
-                "creation": {"worktree": {"creation_nonce": "allocation-a"}},
+                "creation": {
+                    "version": 1, "status": "complete", "worktree": creation_records[0],
+                    "native_session_id": "native-a", "turn_index": None,
+                },
                 "connection": {
                     "worktree_id": "worktree-a", "repo": "example",
                     "native_session_id": "native-a", "target_dir": str(admission_owner.workspace),
@@ -111,6 +122,7 @@ def ordinary(
         q=q, api=api, task=snapshot, client=client, requests=requests, calls=calls, placed=placed,
         install_root=install_root,
         allocations=allocations, ground=ground,
+        creation_records=creation_records,
     )
     client.close()
 
@@ -221,6 +233,74 @@ def test_ambiguous_allocation_stops_before_bridge_without_another_key(
     assert o.q.get_reservation(o.placed["reservation"]["key"]).creation_key == (
         o.placed["reservation"]["creation_key"]
     )
+
+
+@pytest.mark.parametrize("failure", ["create-reply", "uncommitted-storage"])
+def test_owned_native_recovers_same_key_after_lost_reply_or_storage(
+    ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    o = ordinary
+    run = ordinary_bridge.subprocess.run
+    store = o.client.record_created_agent
+    failed = False
+
+    def create(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        nonlocal failed
+        result = run(argv, **kwargs)
+        if failure == "create-reply" and argv[2] == "create" and not failed:
+            failed = True
+            raise subprocess.TimeoutExpired(argv, 180)
+        return result
+
+    def storage(*args: Any, **kwargs: Any) -> dict:
+        nonlocal failed
+        if failure == "uncommitted-storage" and not failed:
+            failed = True
+            raise DispatchError(502, "storage did not commit")
+        return store(*args, **kwargs)
+
+    monkeypatch.setattr(ordinary_bridge.subprocess, "run", create)
+    monkeypatch.setattr(o.client, "record_created_agent", storage)
+    with pytest.raises(ordinary_bridge.CreatedAgentUnrecorded):
+        launch(o)
+    original = o.q.get_reservation(o.placed["reservation"]["key"])
+    assert original.agent_info is None and original.worktree_ownership == "created"
+    assert o.ground["session_live"] is True and not any(
+        argv[2] == "send" for argv, _ in o.calls
+    )
+    result = launch(o)
+    assert result["native_session_id"] == "native-a"
+    assert len(o.allocations) == 1
+    assert [argv[2] for argv, _ in o.calls] == ["create", "create", "send"]
+    assert all(
+        argv[argv.index("--creation-key") + 1] == original.creation_key
+        for argv, _ in o.calls if argv[2] == "create"
+    )
+    assert o.q.get_reservation(original.key).agent_info["connection"]["native_session_id"] == "native-a"
+
+
+@pytest.mark.parametrize("failure", ["foreign-holder", "changed-admission"])
+def test_owned_creation_does_not_resume_or_prompt_an_unproven_holder(
+    ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    o = ordinary
+    run = ordinary_bridge.subprocess.run
+
+    def refuse(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        result = run(argv, **kwargs)
+        assert argv[2] == "create"
+        if failure == "foreign-holder":
+            return subprocess.CompletedProcess(argv, 1, "", "foreign_live_holder")
+        value = json.loads(result.stdout)
+        value["creation"]["native_session_id"] = "foreign-native"
+        return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
+
+    monkeypatch.setattr(ordinary_bridge.subprocess, "run", refuse)
+    with pytest.raises(ordinary_bridge.CreatedAgentUnrecorded):
+        launch(o)
+    assert [argv[2] for argv, _ in o.calls] == ["create"]
+    assert o.q.get_reservation(o.placed["reservation"]["key"]).agent_info is None
+    assert o.q.get(o.task["id"]).status == Status.CLAIMED
 
 
 def test_ordinary_worker_decline_keeps_distinct_bridge_and_native_custody(

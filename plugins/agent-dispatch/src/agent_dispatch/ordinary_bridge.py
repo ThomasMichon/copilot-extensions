@@ -290,6 +290,11 @@ def start(
     assigned = bool(reservation.get("worktree") and not info) or bool(
         info and info.get("fact_kind") == "resumed"
     )
+    owned_creation = (
+        execution_machine is not None and not info
+        and reservation.get("worktree_ownership") == "created"
+        and reservation.get("allocation_reservation_key") in (None, reservation["key"])
+    )
     if assigned and not info and reservation.get("ordinary_assignment_error"):
         raise BridgeCarriedSessionBusy(reservation["ordinary_assignment_error"])
     if assigned:
@@ -459,7 +464,7 @@ def start(
             assigned and reservation.get("inherited_retirement_reconcilable") is True
         ):
             raise BridgeCarriedSessionBusy("ordinary allocation has retired or unknown native history")
-        if assigned:
+        if assigned and not owned_creation:
             record = assignment_record()
             known = reservation.get("known_native_session_ids")
             retired = reservation.get("retired_native_session_ids")
@@ -518,6 +523,9 @@ def start(
                     raise CreatedAgentUnrecorded(created.stderr or created.stdout or "ordinary bridge create failed")
                 info = _json_result(created)
                 validate_created(info, project=project)
+                if owned_creation:
+                    from .ordinary_pool_startup import created_workspace_record
+                    initial_record = created_workspace_record(task, reservation, info)
                 store_info()
             except (TaskError, DispatchError, TypeError, OSError, subprocess.TimeoutExpired, BridgeCarriedSessionBusy) as exc:
                 raise CreatedAgentUnrecorded(

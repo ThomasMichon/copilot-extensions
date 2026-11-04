@@ -90,3 +90,35 @@ def prepare_owned_workspace(
         from .workspace_binding import hold
         hold("ordinary owned-workspace readback is unconfirmed; retain the original creation")
     return current
+
+
+def created_workspace_record(task: dict, reservation: dict, info: dict) -> dict:
+    """Recover the original sessionless admission from the same-key Bridge owner."""
+    from .ordinary_agent_facts import identity, owner_record, sessionless
+    from .bridge_remote import normalize_host
+
+    creation = info.get("creation")
+    actual = identity(info)
+    if (
+        not isinstance(creation, dict) or type(creation.get("version")) is not int
+        or creation["version"] != 1 or creation.get("status") != "complete"
+        or creation.get("native_session_id") != actual.native
+        or creation.get("turn_index") is not None
+    ):
+        raise TaskError("owned ordinary creation lacks its original native admission receipt")
+    record = owner_record(creation.get("worktree"), reservation, task["id"])
+    expected = {
+        "task_id": task["id"], "reservation_key": reservation["key"],
+        "attempt": reservation["attempt"], "driver": "ordinary-bridge",
+        "supervisor": reservation["reserved_by"],
+        "creator_machine": reservation["execution_machine"], "ownership": "created",
+    }
+    allocation = record.get("dispatch_attempt")
+    if (
+        not sessionless(record) or not isinstance(allocation, dict)
+        or not isinstance(allocation.get("creator_machine"), str)
+        or normalize_host(allocation["creator_machine"]) != normalize_host(expected["creator_machine"])
+        or {**allocation, "creator_machine": expected["creator_machine"]} != expected
+    ):
+        raise TaskError("owned ordinary creation changed its original sessionless allocation")
+    return record
