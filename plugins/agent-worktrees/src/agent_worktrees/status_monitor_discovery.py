@@ -131,19 +131,20 @@ def _initialize_standalone_presentation(mux_bin: str, name: str) -> bool:
 
 
 def _session_path_matches(mux_bin: str, name: str, path: str) -> bool:
+    """The mux server may start in home while its worktree pane starts elsewhere."""
     try:
         result = subprocess.run(
-            [mux_bin, "display-message", "-p", "-t",
-             sessions._mux_named_session_target(name, mux_bin), "#{session_path}"],
+            [mux_bin, "list-panes", "-s", "-t",
+             sessions._mux_named_session_target(name, mux_bin), "-F", "#{pane_current_path}"],
             capture_output=True, text=True, timeout=1, **no_window_kwargs(),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         LOG.warning("Connected mux path probe unavailable for %s: %s", name, exc)
         return False
-    return (
-        result.returncode == 0 and bool(result.stdout.strip())
-        and os.path.normcase(os.path.realpath(result.stdout.strip()))
-        == os.path.normcase(os.path.realpath(path))
+    expected = os.path.normcase(os.path.realpath(path))
+    return result.returncode == 0 and any(
+        pane.strip() and os.path.normcase(os.path.realpath(pane.strip())) == expected
+        for pane in result.stdout.splitlines()
     )
 
 

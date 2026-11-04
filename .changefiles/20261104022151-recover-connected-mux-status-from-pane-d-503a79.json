@@ -1,0 +1,9 @@
+{
+  "comment": "Recover connected mux status from pane directories when the mux server starts outside the checkout.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
