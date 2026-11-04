@@ -4311,3 +4311,166 @@ def test_control_plane_acquisition_selected_wrapper_cannot_borrow_original_compl
     assert any(f.reason == "owner-coverage-unavailable" for f in owned[-1].findings)
     assert report.authority is ScanAuthority.INDETERMINATE and report.reusable is False
     assert cfg.config_acquisition.current_observations() is None
+
+
+@pytest.fixture
+def execution_acquisition_sources(tmp_path, monkeypatch):
+    from agent_worktrees import machine_identity, state_root
+
+    calls = []
+    roots = [tmp_path / "first", tmp_path / "second"]
+    state = SimpleNamespace(roots=roots, present=roots[1] / "machines.yaml", failure=None)
+    machine, global_path = tmp_path / "machine.yaml", tmp_path / "global.yaml"
+
+    def sources(config, *, base_anchor, family):
+        calls.append("sources")
+        assert base_anchor == str(roots[0]) and family == "registry"
+        if state.failure == "sources":
+            raise PermissionError("private execution source error")
+        return [SimpleNamespace(anchor=str(root)) for root in state.roots]
+
+    def is_file(path):
+        calls.append(("file", path))
+        if state.failure == "presence":
+            raise ValueError("private execution presence error")
+        return path == state.present
+
+    def registry(anchor, *, config):
+        calls.append(("registry", anchor))
+        if state.failure == "registry":
+            raise FileNotFoundError("private execution registry error")
+        return {}
+
+    monkeypatch.setattr(cfg, "global_config_path", lambda: global_path)
+    monkeypatch.setattr(cfg, "_load_yaml_safe", lambda path: {} if path == global_path else {
+        "repo_name": "sample", "machine": "fixture", "platform": "windows",
+        "repos": {"sample": {"anchor": str(roots[0])}},
+    })
+    monkeypatch.setattr(cfg, "_load_config_d", lambda *a, **k: {})
+    monkeypatch.setattr(cfg, "_load_inrepo_config", lambda *a, **k: {})
+    monkeypatch.setattr(cfg, "_resolve_adoption_defaults_from_registry", lambda *a: {})
+    monkeypatch.setattr(cfg, "derive_worktree_root", lambda anchor: str(tmp_path / "trees"))
+    monkeypatch.setattr(cfg, "detect_machine", lambda value=None: value or "fixture")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "fixture")
+    monkeypatch.setattr(state_root, "config_source_anchors", sources)
+    monkeypatch.setattr(Path, "is_file", is_file)
+    monkeypatch.setattr(cfg, "load_machines_yaml", registry)
+
+    def load():
+        return cfg.load_config_report(
+            machine, include_knowledge_preferences=False, include_control_plane_related_pr=False,
+        )
+
+    return SimpleNamespace(
+        state=state, roots=roots, calls=calls, load=load, identity=machine_identity,
+    )
+
+
+@pytest.mark.parametrize("selected", [False, True])
+def test_execution_acquisition_original_selection_is_observed_without_replay(
+    execution_acquisition_sources, selected,
+):
+    from dropin_registry import ScanAuthority
+
+    source = execution_acquisition_sources
+    if not selected:
+        source.state.present = None
+    report = source.load()
+    assert report.value.machine == "fixture"
+    expected = ["sources"]
+    for root in source.roots:
+        expected.extend(("file", root / rel) for rel in (".agent-worktrees/machines.yaml", "machines.yaml"))
+    if selected:
+        expected.append(("registry", str(source.roots[1])))
+    assert source.calls == expected
+    owned = [o for o in report.observations if o.stage == "execution-machine"]
+    assert owned and owned[-1].authority is ScanAuthority.COMPLETE
+    assert any(o.stage == "config-owner" and o.source == "execution-machine"
+               for o in report.observations)
+    assert report.authority is ScanAuthority.INDETERMINATE and report.reusable is False
+
+
+@pytest.mark.parametrize("failure", ["sources", "presence", "registry"])
+def test_execution_acquisition_errors_preserve_original_outcome_and_type_only(
+    execution_acquisition_sources, failure,
+):
+    from dropin_registry import ScanAuthority
+    from agent_worktrees import config_acquisition as acquisition
+
+    source = execution_acquisition_sources
+    source.state.failure = failure
+    if failure == "registry":
+        report = source.load()
+        assert report.value.machine == "fixture"
+        observations = report.observations
+        expected_type = "FileNotFoundError"
+    else:
+        error = PermissionError if failure == "sources" else ValueError
+        with acquisition.capture_config_observations() as observations:
+            with pytest.raises(error):
+                cfg.load_config(
+                    Path("machine.yaml"), include_knowledge_preferences=False,
+                    include_control_plane_related_pr=False,
+                )
+        expected_type = error.__name__
+    assert "private execution" not in repr(observations)
+    assert any(o.stage == "execution-machine" and o.authority is ScanAuthority.INDETERMINATE
+               and any(f.detail == expected_type for f in o.findings) for o in observations)
+    assert source.calls.count("sources") == 1
+    assert acquisition.current_observations() is None
+
+
+@pytest.mark.parametrize("callback", ["resolve_execution_machine", "load_execution_registry"])
+def test_execution_acquisition_self_restoring_callback_stays_opaque(
+    execution_acquisition_sources, monkeypatch, callback,
+):
+    from dropin_registry import ScanAuthority
+
+    source = execution_acquisition_sources
+    original = getattr(source.identity, callback)
+    selected = []
+
+    def wrapper(*args, **kwargs):
+        selected.append(callback)
+        monkeypatch.setattr(source.identity, callback, original)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(source.identity, callback, wrapper)
+    report = source.load()
+    assert selected == [callback]
+    assert getattr(source.identity, callback) is original
+    assert report.value.machine == "fixture"
+    owned = [o for o in report.observations if o.stage == "execution-machine"]
+    assert owned and owned[-1].authority is ScanAuthority.INDETERMINATE
+    assert any(f.reason == "owner-coverage-unavailable" for o in owned for f in o.findings)
+    assert source.calls.count(("registry", str(source.roots[1]))) == 1
+    assert report.reusable is False
+
+
+def test_execution_acquisition_argument_rebinding_keeps_original_selected_callbacks(
+    execution_acquisition_sources, monkeypatch,
+):
+    from dropin_registry import ScanAuthority
+
+    source = execution_acquisition_sources
+    rebound = []
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("execution callback was rebound after original selection")
+
+    def platform():
+        if not rebound and ("file", source.state.present) in source.calls:
+            rebound.append(True)
+            monkeypatch.setattr(source.identity, "load_execution_registry", forbidden)
+            monkeypatch.setattr(source.identity, "resolve_execution_machine", forbidden)
+        return "windows"
+
+    monkeypatch.setattr(cfg, "detect_platform", platform)
+    report = source.load()
+    assert rebound == [True]
+    assert report.value.machine == "fixture"
+    assert source.calls.count(("registry", str(source.roots[1]))) == 1
+    owned = [o for o in report.observations if o.stage == "execution-machine"]
+    assert owned and owned[-1].authority is ScanAuthority.COMPLETE
+    assert report.reusable is False
