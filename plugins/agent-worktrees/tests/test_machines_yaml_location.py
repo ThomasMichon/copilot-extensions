@@ -392,6 +392,60 @@ def test_machine_registry_acquisition_report_replacement_empty_value_stays_uncer
     assert acquisition.current_observations() is None
 
 
+@pytest.mark.parametrize("replacement", [False, True], ids=["original-source-owner", "self-restoring-source-owner"])
+def test_machine_registry_original_source_selection_is_borrowed_once(tmp_path, monkeypatch, replacement):
+    import builtins
+    from types import SimpleNamespace
+
+    from dropin_registry import ScanAuthority
+
+    from agent_worktrees import config_acquisition as acquisition, state_root
+
+    harness, knowledge, local = (tmp_path / name for name in ("harness", "knowledge", "local"))
+    harness.mkdir()
+    (local / cfg.INREPO_CONFIG_DIRNAME).mkdir(parents=True)
+    selected = knowledge / cfg.INREPO_CONFIG_DIRNAME / "machines.yaml"
+    _write(selected)
+    config = _stateless_config(harness)
+    calls = []
+    native_open = builtins.open
+    source_owner = state_root.config_source_anchors
+
+    def resolve(value, **kwargs):
+        assert value is config and kwargs == {"cwd": None}
+        calls.append("state-root")
+        return SimpleNamespace(requires_external=True, bound=True, path=str(knowledge))
+
+    def open_source(path, *args, **kwargs):
+        if Path(path) == selected:
+            calls.append("document")
+        return native_open(path, *args, **kwargs)
+
+    def sources(*args, **kwargs):
+        calls.append("replacement")
+        monkeypatch.setattr(state_root, "config_source_anchors", source_owner)
+        return source_owner(*args, **kwargs)
+
+    monkeypatch.setattr(cfg, "project_dir", lambda project=None: local)
+    monkeypatch.setattr(state_root, "resolve_state_root", resolve)
+    monkeypatch.setattr(builtins, "open", open_source)
+    if replacement:
+        monkeypatch.setattr(state_root, "config_source_anchors", sources)
+    report = cfg.load_machines_yaml_report(harness, config=config)
+    assert list(report.value) == ["m1"]
+    assert calls == (["replacement"] if replacement else []) + ["state-root", "document"]
+    assert any(o.stage == "config-source-anchors" and o.authority is ScanAuthority.COMPLETE
+               for o in report.observations)
+    source_findings = [f for o in report.observations if o.source == "machine-registry-config-sources"
+                       for f in o.findings]
+    assert bool(source_findings) is replacement
+    assert all(f.reason == "owner-coverage-unavailable" for f in source_findings)
+    assert any(o.source == "machine-registry-document" for o in report.observations)
+    assert any(o.source == "config-source-state-root" for o in report.observations)
+    assert report.authority is ScanAuthority.INDETERMINATE and report.reusable is False
+    assert acquisition.current_observations() is None
+
+
 def test_overlay_redirects_to_knowledge(tmp_path: Path, monkeypatch):
     harness = tmp_path / "harness"
     harness.mkdir()

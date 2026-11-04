@@ -279,8 +279,27 @@ control-plane PR loading skips this decision; a config-cache hit neither replays
 it nor manufactures acquisition observations. All reports remain `reusable=False`;
 owner completion does not certify a stable input frontier or reusable data.
 
-Execution-machine discovery and unresolved child acquisition frontiers remain
-opaque. Non-default committed parser callbacks likewise lack parser coverage.
+Original `config_sources.config_source_anchors()` calls now contribute their
+ordered selection outcomes to the existing request-local collector. Registry
+and ordinary-configuration families preserve their original base selection,
+machine/knowledge ordering, global-file probe and error propagation. The
+separate diagnostic `config_source_anchors_report()` retains its existing
+failure-visible probes and partial-value recovery; it is not replayed to
+reconstruct the value-only reader's evidence.
+
+Machine-registry and execution-machine consumers qualify the exact source
+callback selected before argument evaluation. Replacements, including
+self-restoring wrappers or calls to nested originals, cannot borrow original
+completion for their returned values. Default Git-root discovery, machine-root
+classification, configuration selection, installation-root and state-root
+resolution remain opaque child inputs. A negative original `is_file()` result
+remains indeterminate rather than authoritative absence. Caught and propagated
+errors retain type-only diagnostics, unchanged fallback values and original
+exception/cause behavior. Reporting adds no read, parse, probe or discovery
+replay, and no new cache.
+
+Unresolved child acquisition frontiers remain opaque, including shared
+machine-document parsing. Non-default committed parser callbacks likewise lack parser coverage.
 A valid `Config` or mapping does not certify those owners. Fatal loads propagate
 their original exceptions, never a success-shaped report. These observations are
 not stable input witnesses.
