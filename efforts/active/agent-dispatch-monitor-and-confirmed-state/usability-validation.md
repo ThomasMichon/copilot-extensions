@@ -96,6 +96,16 @@ with 648 contained coupled controls. It does not finalize a workspace, apply
 exclusions or requeue, and ordinary prompts are not migrated to it. Complete
 decline closeout remains unqualified.
 
+The local coordinator observation and atomic routing/requeue source merged in
+#10319, followed by ordinary worker/supervisor consumers in #10325. The latter
+merged as `cfe20b2d97` after exact-head approval and required CI, with 682 Dispatch
+and 247 Worktrees controls passing. The worker prepares its decision and
+finalizes only its own workspace; existing supervision requests independent
+coordinator observation. Stable initial/retry templates and separate decision
+nudges preserve keyed acquisition and mixed-reader recovery. This closes the
+bounded ordinary local source integration, not remote/no-worktree applicability,
+complete cohort adoption or actual native decline/closeout acceptance.
+
 The following is an **agent-recommended execution/validation sequence** under
 the existing reviewed five-outcome contract. It does not create an operational
 grant, a second effort or a requirement to wait for a marketplace release
