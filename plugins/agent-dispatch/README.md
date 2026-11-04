@@ -254,6 +254,20 @@ Unavailable mutable status reads retain custody and retry only within the existi
 readiness deadline. Persistent I/O reports its reason at expiry; malformed status
 still refuses immediately, and no retry treats an unknown observation as absence.
 
+The opt-in Windows `test_supervisor_source_faults_native.py -k installed_supervisor`
+lane uses the same canonical profile/native-root inputs as the enabled-master
+fixture. A finite controller imports the constructed old slot's code, holds the
+real scope singleton, and drives actual prepared successor processes through
+withdrawal, selection flap and admission restoration. Test-only worker/cancellation
+gates call the original owner methods; production code and immutable slots stay
+unchanged. A native creation refusal uses the SDK's process-factory seam and its
+real reservation cancellation before a successful normal candidate retry.
+The unknown-outcome control is a real leased no-preparation sentinel with an
+injected lost reply, not an operating-system permission-denial qualification.
+`DISPATCH_NATIVE_REMAINING_ONLY=1` skips the already-completed selection/exit cases
+when resuming that bounded fixture. Ordinary nonprofile installation remains a
+separate native lane; these profiled applications are not reshaped to impersonate it.
+
 `tests/test_source_start_native.py` consumes an explicitly prepared canonical
 Source/profile snapshot; it never rebuilds one. Its opt-in generated-frontdoor
 checks use private roots and renewed daemon leases. The repair-generation
