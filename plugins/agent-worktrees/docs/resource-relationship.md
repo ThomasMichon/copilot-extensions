@@ -61,6 +61,48 @@ Ordinary inspection without `allow_missing`
 still refuses a missing handle; unsupported authorities reject the extra field.
 Neither a timeout nor a generic refusal is absence evidence.
 
+### Workspace incarnation and executing-writer support
+
+Capabilities advertise `expected_creation_nonce: true`. Any transactional input
+may include `expected_creation_nonce`, a nonempty string from the authoritative
+workspace creation receipt or record. The locked owner transaction requires an
+exact match before inspecting claims, proving absence, reserving, binding or
+probing retirement. Missing legacy nonces are not lazily assigned by this API.
+Close rechecks the nonce after provider I/O, including already-closed replay.
+The option does not change opaque claim metadata or callback encoding.
+
+An opted-in success adds `creation_nonce` and `writer_contract`. The latter is
+the version-1 `copilot-extensions.worktree-record-writer` declaration, with
+`retained_relationships: 1` and `creation_nonce: 1`. It describes protected
+relationship preservation and nonce preservation by that executing serializer.
+Generic current-code saves retain a nonce backfill and refuse a different
+nonempty incarnation rather than overwriting a successor at the same path.
+Existing receiving-allocation saves still restore their authoritative binding
+before this check rather than accepting a stale caller's replacement nonce.
+Inputs without the option retain their existing response shape and semantics.
+
+The CLI capability response labels its declaration
+`writer_scope: executing-process`; it does **not** establish support in a
+resident daemon, another installation or every writer sharing the ledger.
+The resident publishes its own `tracking_write_record_contract` through the
+existing rendezvous alongside `resource_relationship` verb version 2. IPC
+callers requiring incarnation checking must select that verb at `min_version=2`;
+the operation's response independently confirms the checked incarnation and
+actual executing writer. Direct CLI execution uses the same registered handler.
+No monitor bootstrap or additional preflight process is required.
+
+This is provider-first expansion, not ordinary assignment activation or
+whole-writer-cohort qualification. Older handlers reject the extra input field;
+missing declarations or responses without checked-incarnation support are
+unknown support, never permission to drop the requirement or use legacy claim
+writes. Current serializers cannot prevent an unrelated, genuinely older
+process from overwriting YAML with fields it does not understand. Qualify or
+replace all participating ledger writers before enabling governed assignments;
+one new CLI declaration or direct fallback is insufficient. Supported old
+callers keep the unchanged baseline, while a provider rollback cannot satisfy
+an incarnation-required assignment. These facts constrain assignment admission,
+not authorized installer replacement or unrelated legacy operations.
+
 ## Replay and obligation
 
 Reserve persists pending responsibility before returning. Exact request-ID
@@ -85,10 +127,10 @@ and finalize cascades cannot erase protected metadata. An active owner cannot
 freeze/finalize with an unsettled retained relationship. Malformed/unknown
 metadata stays raw and blocking, with an explicit invalid-metadata wire view.
 
-The new registered `resource_relationship` transaction is a distinct capability,
-not an enriched request sent to an older same-named writer. It uses the existing
-logged direct RMW path and required sidecar locks, with provider I/O outside the
-lock and exact revalidation afterward. Existing generic claim verb version 3
+The registered `resource_relationship` transaction uses the existing logged
+direct RMW path and required sidecar locks, with provider I/O outside the lock
+and exact revalidation afterward. Its version-1 baseline remains supported;
+version 2 additionally checks the optional expected incarnation. Existing generic claim verb version 3
 already preserves/refuses all explicitly present producer metadata; its wire
 shape is unchanged. This is not qualification of arbitrary old full-record
 writers: upgrade/qualify every participating writer before activating retained

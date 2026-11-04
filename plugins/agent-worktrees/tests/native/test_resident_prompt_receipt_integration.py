@@ -20,6 +20,7 @@ import pytest
 
 from agent_worktrees import config, handoff_prompt_receipt, handoff_trace, installer, tracking
 from agent_procutil.owned_process import run_caller_owned
+from agent_procutil.owned_budget import OwnedExecutionBudget
 from receipt_budget_fixture import receipt_budget_factor, validate_receipt_fixture_budgets
 
 
@@ -41,6 +42,10 @@ def load_provider(name, monkeypatch):
 
 @pytest.fixture
 def resident(sample_record, tmp_tracking_dir, tmp_path, monkeypatch):
+    client_root = os.environ.get("RECEIPT_CLIENT_ROOT") or (
+        Path(__file__).parents[3] / "context-handoff"
+    )
+    monkeypatch.setenv("RECEIPT_CLIENT_ROOT", str(client_root))
     factor = receipt_budget_factor()
     provider_root = os.environ.get("RECEIPT_PROVIDER_SOURCE") or (
         Path(__file__).parents[2] / "src" / "agent_worktrees"
@@ -202,6 +207,8 @@ def resident(sample_record, tmp_tracking_dir, tmp_path, monkeypatch):
         result = run_caller_owned(
             [node, str(driver), str(request_file)], timeout=6 * factor,
             max_stdout_bytes=16384, max_stderr_bytes=16384,
+            borrow_parent_scope=True,
+            budget=OwnedExecutionBudget.from_timeout(6 * factor, cleanup_reserve=factor),
         )
         assert result.returncode == 0, result.stderr
         value = json.loads(result.stdout)
@@ -418,7 +425,9 @@ def test_storage_failure_is_unknown_and_never_blindly_retried(resident, monkeypa
     assert len(handoff_trace.read_trace(resident.record.repo, resident.record.worktree_id)) == 1
 
 
-def test_same_installation_cutover_reconciles_but_new_incarnation_refuses(resident):
+def test_same_installation_cutover_reconciles_but_new_incarnation_refuses(
+    resident, overwrite_record_nonce,
+):
     resident.drop_reply = True
     first = resident.observe()
     assert first["status"] == "unknown"
@@ -429,8 +438,7 @@ def test_same_installation_cutover_reconciles_but_new_incarnation_refuses(reside
     route["active"]["generation"] = 2
     resident.route_path.write_text(json.dumps(route), encoding="utf-8")
     assert resident.observe(pending=first["pending"])["status"] == "logged"
-    resident.record.creation_nonce = "replacement-incarnation"
-    tracking.save_record(resident.record, resident.record_path)
+    overwrite_record_nonce(resident.record_path, "replacement-incarnation")
     assert resident.observe(pending=first["pending"])["status"] == "unknown"
     assert resident.counts["record"] == 1 and resident.counts["query"] == 2
     assert resident.counts["fsync"] == 2

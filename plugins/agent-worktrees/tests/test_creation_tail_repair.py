@@ -412,7 +412,7 @@ def test_creation_repairs_original_native_pair_after_optional_naming(
     "foreign_key", "former_custom",
 ])
 def test_creation_naming_compatibility_refuses_independent_authority_conflicts(
-    tmp_path, monkeypatch, capsys, tuple_identity, conflict,
+    tmp_path, monkeypatch, capsys, tuple_identity, conflict, overwrite_record_nonce,
 ):
     creation = _creation_fixture(
         tmp_path, monkeypatch, tuple_identity=tuple_identity, observed_identity=True,
@@ -433,7 +433,7 @@ def test_creation_naming_compatibility_refuses_independent_authority_conflicts(
         if tuple_identity:
             record.machine_identity = replace(record.machine_identity, environment=record.platform)
     elif conflict == "nonce":
-        record.creation_nonce = None
+        overwrite_record_nonce(record.yaml_path, None)
     elif conflict == "owner":
         record.owner_ref = "foreign-space/another-project/another-parent"
     elif conflict == "namespace":
@@ -485,7 +485,7 @@ def test_creation_naming_compatibility_refuses_independent_authority_conflicts(
             if tuple_identity:
                 raw["execution_machine"] = "former-custom-space"
         record.yaml_path.write_text(yaml.safe_dump(raw))
-    elif conflict in {"nonce", "owner"}:
+    elif conflict == "owner":
         tracking.save_record(record)
     before = (
         record.yaml_path.read_bytes(), launch_seed_state.state_path(record.yaml_path).read_bytes(),
@@ -509,6 +509,7 @@ def test_creation_naming_compatibility_refuses_independent_authority_conflicts(
 @pytest.mark.parametrize("change", ["binding", "nonce", "seed_text", "owner"])
 def test_creation_rechecks_retained_authority_inside_companion_allocation_lock(
     tmp_path, monkeypatch, capsys, _creation_anchor_seed, tuple_identity, change,
+    overwrite_record_nonce,
 ):
     creation = _creation_fixture(
         tmp_path, monkeypatch, anchor_seed=_creation_anchor_seed,
@@ -541,10 +542,10 @@ def test_creation_rechecks_retained_authority_inside_companion_allocation_lock(
             else:
                 record = tracking.load_record(creation.record.yaml_path)
                 if change == "nonce":
-                    record.creation_nonce = "another-creation"
+                    overwrite_record_nonce(record.yaml_path, "another-creation")
                 else:
                     record.owner_ref = "foreign-space/another-project/another-parent"
-                tracking.save_record(record)
+                    tracking.save_record(record)
             changed.append(True)
             yield
 
@@ -718,6 +719,7 @@ def test_creation_refuses_legacy_parent_receiving_conflicts_before_effects(
 @pytest.mark.parametrize("child_naming", [False, True])
 def test_creation_repairs_native_child_with_nonce_less_legacy_parent(
     tmp_path, monkeypatch, capsys, _creation_anchor_seed, tuple_identity, child_naming,
+    overwrite_record_nonce,
 ):
     creation = _creation_fixture(
         tmp_path, monkeypatch, anchor_seed=_creation_anchor_seed,
@@ -730,8 +732,7 @@ def test_creation_repairs_native_child_with_nonce_less_legacy_parent(
         creation.record.execution_machine, cfg.detect_platform(),
         creation.projects["knowledge"] / "worktrees",
     )
-    parent.creation_nonce = None
-    tracking.save_record(parent)
+    parent = overwrite_record_nonce(parent.yaml_path, None)
     record = tracking.load_record(creation.record.yaml_path)
     record.owner_ref = tracking.format_claim_ref(parent.execution_machine, "knowledge", "parent")
     tracking.save_record(record)
@@ -1526,8 +1527,13 @@ def test_creation_real_cli_first_touch_report_and_fix(tmp_path, monkeypatch):
         "AGENT_WORKTREES_STATUS_MONITOR": "0",
         "PYTHONPATH": str(Path(repair.__file__).resolve().parents[1]),
     })
+    # Keep the actual CLI independent of an installed mux in the test container.
     command = [
-        sys.executable, "-m", "agent_worktrees", "--project", "fixture",
+        sys.executable, "-c",
+        "import sys; from agent_worktrees import __main__ as main, sessions; "
+        "sessions._list_mux_sessions = lambda **kwargs: {}; "
+        "raise SystemExit(main.main(sys.argv[1:]))",
+        "--project", "fixture",
         "doctor", "--repair-creation", identity, "--seed-id", seed.seed_id, "--json",
     ]
     options = {
