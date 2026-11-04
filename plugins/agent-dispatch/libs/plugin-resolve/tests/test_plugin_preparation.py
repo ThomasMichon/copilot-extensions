@@ -15,7 +15,7 @@ import pytest
 
 from plugin_resolve.preparation import prepare
 from plugin_resolve.reflection import build_plan
-from plugin_resolve.registration import atomic_json, register_prepared
+from plugin_resolve.registration import _installation_home, atomic_json, register_prepared
 from plugin_resolve.resolve import resolve_repo_plugins
 from plugin_resolve.conventions import SETTINGS_RELS
 from plugin_resolve.reflection import selection_spec, selection_cli_args
@@ -467,7 +467,7 @@ def test_every_native_remote_layer_overrides_overlapping_host_origin(tmp_path: P
     _expect_installer_settings(monkeypatch, target)
     first = prepare({"repo": str(target), **host}, copilot_command=command)
     payload = Path(first["native@remote"])
-    assert "installation" in payload.parts
+    assert payload.parents[2] == _installation_home(target / ".git" / "copilot-venue-plugins" / "marketplaces", "native@remote", origin)
     assert json.loads((payload / "plugin.json").read_text())["version"] == "2.3.4"
     assert list((target / ".git").rglob(".installation-complete.json"))
     assert prepare({"repo": str(target), **host}, copilot_command=command) == first
@@ -982,9 +982,7 @@ def test_late_enabled_owned_projection_requires_current_origin_proof(tmp_path: P
     local = target / ".github" / "copilot" / "settings.local.json"
     catalog = state / "marketplaces" / "local" / "marketplace.json"
     if mode in {"changed-remote", "inactive-remote", "cached-remote"}:
-        catalog = next((state / "marketplaces" / "local" / "installation").glob(
-            "*/.installation-complete.json",
-        ))
+        catalog = _installation_home(state / "marketplaces", "sample@local", original_remote) / ".installation-complete.json"
     receipt = state / "ownership.json"
     before = local.read_bytes(), catalog.read_bytes(), receipt.read_bytes()
     assert read_repo_settings(target).enabled["sample@local"] is False
@@ -1031,7 +1029,7 @@ def test_late_enabled_owned_projection_requires_current_origin_proof(tmp_path: P
         resolution = resolve_repo_plugins(target)
         assert set(resolution.resolved) | set(resolution.unresolved) == set(result)
         if mode == "cached-remote":
-            assert "installation" in Path(result["sample@local"]).parts
+            assert Path(result["sample@local"]).parents[2] == _installation_home(state / "marketplaces", "sample@local", original_remote)
             assert json.loads((Path(result["sample@local"]) / "plugin.json").read_text())["version"] == "2.3.4"
         if mode == "direct-local":
             assert Path(result["sample@local"]) == (replacement / ".ai" / "sample").resolve()
@@ -1253,8 +1251,8 @@ def test_partial_install_retry_retains_registration_and_retries_only_install(tmp
     assert [call["argv"][:3] for call in first_calls] == [
         ["plugin", "install", "remote@synthetic"],
     ]
-    home = next((target / ".git" / "copilot-venue-plugins" / "marketplaces" / "synthetic"
-                 / "installation").iterdir())
+    item = _remote_request(target)["plugins"][0]
+    home = _installation_home(target / ".git" / "copilot-venue-plugins" / "marketplaces", item["source"], item["marketplace"])
     assert json.loads((home / "settings.json").read_text())["extraKnownMarketplaces"]["synthetic"] == (
         _remote_request(target)["plugins"][0]["marketplace"]
     )
@@ -1772,7 +1770,7 @@ def test_target_native_remote_is_installed_alongside_host_local(tmp_path: Path) 
     command = (sys.executable, str(Path(__file__).parent / "fixtures" / "venue_installer.py"))
     result = prepare({"repo": str(target), **plan}, copilot_command=command)
     assert set(result) == {"sample@local", "native@remote"}
-    assert "installation" in Path(result["native@remote"]).parts
+    assert Path(result["native@remote"]).parents[2] == _installation_home(target / ".git" / "copilot-venue-plugins" / "marketplaces", "native@remote", read_repo_settings(target).marketplaces["remote"])
     assert (Path(result["native@remote"]) / "plugin.json").is_file()
 
 
@@ -1984,7 +1982,7 @@ def test_native_remote_origin_in_local_settings_is_preserved_and_localized(
     diagnostics: list[dict[str, Any]] = []
     result = prepare({"repo": str(target), **plan}, copilot_command=command, diagnostics=diagnostics)
     assert set(result) == {"native@remote"}
-    assert "installation" in Path(result["native@remote"]).parts
+    assert Path(result["native@remote"]).parents[2] == _installation_home(target / ".git" / "copilot-venue-plugins" / "marketplaces", "native@remote", origin)
     assert json.loads((Path(result["native@remote"]) / "plugin.json").read_text())["version"] == "2.3.4"
     value = json.loads(path.read_text())
     assert value["unrelated"] == {"retained": True}
@@ -2070,7 +2068,7 @@ def test_two_plugins_localize_one_operator_origin_without_deactivating_it(tmp_pa
     host = local_plan(tmp_path / "host", name="a", marketplace="remote")
     again = prepare({"repo": str(target), **host}, copilot_command=installer)
     assert again == first
-    assert all("installation" in Path(payload).parts for payload in again.values())
+    assert all(Path(payload).parents[2] == _installation_home(target / ".git" / "copilot-venue-plugins" / "marketplaces", source, origin) for source, payload in again.items())
     assert all(json.loads((Path(payload) / "plugin.json").read_text())["version"] == "2.3.4"
                for payload in again.values())
 
@@ -2101,7 +2099,7 @@ def test_new_native_selection_uses_active_origin_and_respects_changed_local_over
     monkeypatch.setenv("VENUE_EXPECTED_SETTINGS_SHA256", hashlib.sha256(path.read_bytes()).hexdigest())
     result = prepare({"repo": str(target), "plugins": []}, copilot_command=installer)
     assert set(result) == {"a@remote", "b@remote"}
-    assert all("installation" in Path(payload).parts for payload in result.values())
+    assert all(Path(payload).parents[2] == _installation_home(target / ".git" / "copilot-venue-plugins" / "marketplaces", source, origin) for source, payload in result.items())
     assert all(json.loads((Path(payload) / "plugin.json").read_text())["version"] == "2.3.4"
                for payload in result.values())
 

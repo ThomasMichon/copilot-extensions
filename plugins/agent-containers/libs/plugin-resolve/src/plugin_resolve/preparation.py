@@ -137,9 +137,15 @@ def _install(source: str, definition: dict[str, Any], home: Path, repo: Path,
              ) -> tuple[Path, dict[str, Any], dict[str, Any]]:
     check_cancelled()
     name, marketplace = identity(source)
-    home.mkdir(parents=True, exist_ok=True)
     payload = home / "installed-plugins" / marketplace / name
     payload.resolve().relative_to(home.resolve())
+    # Native cwd normalization needs room for a trailing separator and NUL.
+    if os.name == "nt" and len(str(payload.resolve()).encode("utf-16-le")) // 2 >= 259:
+        raise ValueError(
+            f"Windows venue payload working directory is too long: {source}; "
+            "use a shorter repository/worktree path and retry preparation"
+        )
+    home.mkdir(parents=True, exist_ok=True)
     receipt = home / ".installation-complete.json"
     previous = strict_json(receipt)
     if previous and previous.get("source") != source:

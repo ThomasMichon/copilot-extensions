@@ -95,7 +95,7 @@ def _operator_settings(repo: Path, receipt: dict[str, Any]) -> RepoPluginSetting
 def _installation_home(staging: Path, source: str, definition: dict[str, Any]) -> Path:
     _name, marketplace = split_source(source)
     digest = hashlib.sha256(json.dumps([source, definition], sort_keys=True).encode()).hexdigest()
-    home = staging / marketplace / "installation" / digest
+    home = staging / digest if os.name == "nt" else staging / marketplace / "installation" / digest
     home.resolve().relative_to(staging.resolve())
     return home
 
@@ -306,12 +306,16 @@ def register_prepared(
                     owned_plugins[source] = plugins[source]
                 continue
             reference = details.get("reference")
-            root = Path(reference["marketplace_root"] if reference else roots[marketplace]).resolve()
-            payload.relative_to(root)
             remote = details.get("marketplace")
+            root = (
+                _installation_home(state_dir / "marketplaces", source, remote)
+                if remote is not None
+                else Path(reference["marketplace_root"] if reference else roots[marketplace])
+            ).resolve()
+            payload.relative_to(root)
             if remote is not None:
                 definition = remote
-                home = _installation_home(state_dir / "marketplaces", source, remote)
+                home = root
                 if (
                     payload != (home / "installed-plugins" / marketplace / name).resolve()
                     or strict_json(home / ".installation-complete.json").get("source") != source
