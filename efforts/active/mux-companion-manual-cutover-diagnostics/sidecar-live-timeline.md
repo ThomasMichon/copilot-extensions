@@ -91,6 +91,13 @@ records 120 isolated controls, the corrected lossless origin-identity boundary
 and actual reviewed merge. Automatic export/collection and existing-tick
 orchestration remain open; this does not complete D4 or authorize live effects.
 
+#10512 merged as `f2143b1467c72bab36ca30839f4ab0b8d8b93773`, delivering explicit
+policy-first managed export/collection composition and fresh local readback.
+The [source readback](journal/2026/11.04-sidecar-managed-export-composition.md)
+records 224 isolated controls, the corrected shared origin-probe deadline and
+actual reviewed merge. Existing-tick integration, automatic collection, legacy
+rescue, actual archive acknowledgment and native qualification remain open.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than

@@ -28,8 +28,10 @@ consumer. #10495 adds separately negotiated Efforts-owned contributor provenance
 from the same complete verified export cut, without changing its manifest.
 #10500 adds the explicit Logger library consumer for that negotiated projection,
 including complete nullable attribution and fresh retained-metadata verification;
-explicit passive owner/provider discovery follows in #10503. Automatic
-export/collection and existing-tick orchestration, complete source
+explicit passive owner/provider discovery follows in #10503. #10512 composes
+explicit policy-first managed export, revision-pinned provenance and fresh local
+collection readback through those selected owners. Automatic
+collection and existing-tick orchestration, complete source
 coverage, qualified current answerability/PRE, installed and native acceptance
 remain open.
 Providers advertise actual running support before independently installed

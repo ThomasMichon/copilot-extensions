@@ -33,10 +33,11 @@ from agent_logger.sync.meta import (
     status_text as _status_text,
 )
 from agent_logger.sync.notify import post_notify
-from agent_logger.sync.origin import classify_for_sync, effective_harness, mark_all
+from agent_logger.sync.origin import classify_for_sync, effective_harness
+from agent_logger.sync.source_metadata import mark_source as _mark_source
 from agent_logger.sync.targets import build_target
+from agent_logger.sync.targets.base import Target
 from agent_logger.sync.timing import timed_call
-from agent_logger.sync.worktree_binding import mark_all_worktrees
 
 
 def _machine(cfg: Config) -> str:
@@ -259,28 +260,10 @@ def _push_incremental(
     ))
 
 
-def _mark_source(
-    source: Path, machine: str, effective: list[str], *, dry_run: bool, verbose: bool,
-) -> None:
-    # Tag every local session with its origin (harness repo + machine) so the
-    # sidecar syncs with the session and downstream daemons can route by origin.
-    origin_summary = mark_all(source, machine, effective, dry_run=dry_run)
-    if verbose:
-        print(f"origin:    marked {origin_summary['marked']}/"
-              f"{origin_summary['total']} session(s) {origin_summary['by_repo']}")
+def _sync_worktree_state(cfg: Config, target: Target) -> int:
+    from agent_logger.sync.worktree_state_tick import sync_worktree_state
 
-    # session-worktree-archive-linkout Phase 3: proactively bind each session
-    # to its worktree (via the live local agent-worktrees tracking, while it's
-    # still available) rather than requiring Permanent Record to reconstruct
-    # one from the archived CWD after the fact. Must run after origin marking
-    # above -- it reads each session's just-written origin.json for its
-    # harness-project scope. A no-op (never an error) when agent-worktrees
-    # isn't installed alongside agent-logger on this machine.
-    worktree_summary = mark_all_worktrees(source, dry_run=dry_run)
-    if verbose:
-        print(f"worktree:  marked {worktree_summary['marked']}/"
-              f"{worktree_summary['total']} session(s) "
-              f"({worktree_summary['unresolved']} unresolved)")
+    return sync_worktree_state(cfg, target)
 
 
 def run_sync(
@@ -296,6 +279,7 @@ def run_sync(
         print("session-sync: disabled via AGENT_LOGGER_SYNC_DISABLED")
         return 0
 
+    worktree_state_enabled = cfg.sync_worktree_state_enabled
     machine = _machine(cfg)
     _ = cfg.process_log_archives
     validate_reclamation_context(cfg, dry_run=dry_run)
@@ -325,6 +309,12 @@ def run_sync(
 
     if not source.is_dir():
         print(f"session-sync: source not found: {source}", file=sys.stderr)
+        if worktree_state_enabled and not dry_run:
+            with sync_lock(
+                cfg.home / cfg.sync_lock_name, timeout=cfg.sync_lock_timeout,
+            ) as acquired:
+                if acquired:
+                    timed_call("worktree-state", _sync_worktree_state, cfg, target)
         return 1
 
     reclaim = _pe.reclamation_allowed(cfg)
@@ -344,6 +334,9 @@ def run_sync(
         if not acquired:
             print("session-sync: another sync holds the lock; skipping", file=sys.stderr)
             return 0
+        worktree_state_failed = worktree_state_enabled and timed_call(
+            "worktree-state", _sync_worktree_state, cfg, target,
+        )
         reclamation = prepare_reclamation(cfg, machine, target, dry_run=False) if reclaim else None
         timed_call("source-metadata", _mark_source, source, machine, effective, dry_run=False, verbose=verbose)
 
@@ -445,7 +438,7 @@ def run_sync(
             )
             if verbose:
                 print(f"session-sync: notify {'sent' if sent else 'failed (ignored)'}")
-        if process_logs_failed or accounting_failed:
+        if process_logs_failed or accounting_failed or worktree_state_failed:
             return 1
     return 0
 

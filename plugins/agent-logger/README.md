@@ -19,7 +19,7 @@ session-to-log pipeline out of any single bespoke service:
   (see [`docs/manifest-contract.md`](docs/manifest-contract.md)).
 - **session-sync** — push raw session data to a configurable target: a
   `local` dotfolder, `onedrive`, `ssh`/`ssh-tunnel`, or a generic `ingest`
-  endpoint. It archives only Copilot session state, can scope by repo
+  endpoint. By default it archives only Copilot session state, can scope by repo
   allow/deny lists, and can fire a target-independent best-effort HTTP notify
   after a successful push. `session-sync health` classifies freshness and
   repeated partial passes for one machine or a filesystem-backed fleet, with
@@ -35,8 +35,9 @@ session-to-log pipeline out of any single bespoke service:
   The provider-first [typed worktree-state collection library](docs/worktree-state.md)
   separately supports explicitly admitted owner exports, optional complete
   contributor provenance, fresh local readback, passive exact-repository
-  provider discovery and explicit policy-first managed export composition;
-  scheduled discovery/collection and remote archive acknowledgment remain open.
+  provider discovery and policy-first managed export composition. Its existing-tick
+  leg requires a separate explicit machine opt-in; remote archive acknowledgment
+  and installed/native qualification remain open.
 - **Background chronicling core** (`agent_logger.chronicle`) — an optional
   `agent-logger chronicle status | scan | tick` pass over a *synced* corpus. It
   discovers settled sessions, routes them by recorded origin, groups them into

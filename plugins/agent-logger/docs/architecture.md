@@ -102,8 +102,8 @@ deployment-specific hostname, shared-folder path, or persona baked in.
 
 The provider-first [typed worktree-state collection library](worktree-state.md)
 adds owner-verified exports and revision-bound local readback under aggregate,
-privacy and destination admission. It does not yet enable scheduled worktree
-discovery or collection; the ordinary session-shaped path below is unchanged.
+privacy and destination admission. Its existing-tick leg requires a separate
+explicit machine opt-in; the ordinary session-shaped default below is unchanged.
 
 The scheduled producer preserves content-free, source-qualified accounting
 before signatures and cold compaction; see [session-local usage evidence](usage-evidence.md)

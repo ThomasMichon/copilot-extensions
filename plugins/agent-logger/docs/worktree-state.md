@@ -10,15 +10,15 @@ Standing intent: [durable worktree data](../../../visions/plugins/agent-worktree
 readback for an explicitly selected, owner-verified agenda export. It uses the
 existing `Target` abstraction; only `LocalTarget.worktree_state_root()` opts in.
 Other targets explicitly lack that capability, including OneDrive replicas.
-This first source slice is a library boundary, not a new scheduled collection,
-CLI, source crawler or installed integration. Ordinary session sync is unchanged.
+The existing sync tick can explicitly opt into this boundary; there is no new
+CLI, source crawler or service. Ordinary session sync remains the default.
 
 The orchestration caller must first qualify the worktree owner's repository,
 full worktree/incarnation and selected store, obtain the complete domain-owned
 export, and negotiate the selected owner's complete-export verifier. The library
 takes that exact typed identity and verifier; it never imports another plugin's
 runtime or guesses a state home. Explicit managed-placement composition is also
-available as a library; existing-tick integration remains unfinished.
+available as a library and through the default-off existing-tick leg below.
 
 ## Passive provider discovery
 
@@ -68,8 +68,8 @@ another reader's support do not qualify it.
 These discovery calls remain passive. Their process commands use the shared
 finite caller-owned boundary with bounded stdout/stderr and descendant
 settlement. An optional caller-supplied absolute budget is shared rather than
-renewed by each command. No CLI, scheduler, sync tick, migration or installed
-rollout is enabled. Inventory retains its typed project-root/installation scope
+renewed by each command. These passive calls do not themselves enable a CLI,
+scheduler, migration or installed rollout. Inventory retains its typed project-root/installation scope
 for fresh effect-side requalification; observations are not a lease.
 
 ## Explicit managed export composition
@@ -106,6 +106,47 @@ This is an explicit source-library operation, not automatic collection or a new
 command/service. Ordinary sync defaults, accounting and scheduled ticks are
 unchanged. Real-data collection and installed/native qualification remain
 separate effect and validation gates.
+
+## Existing sync tick: explicit machine opt-in
+
+Machine-local `sync.worktree_state: {enabled: true}` enables the typed leg in
+`session-sync run`. The default is false; malformed mappings, unknown options
+and nonboolean values refuse before sync effects. Ordinary users do not load
+aggregate policy, inventory owners or export stores. Dry runs never invoke the
+typed leg or create its staging, cursor or destination.
+
+The leg runs under the existing sync lock, before ordinary session accounting
+and transfer. It loads the actual filesystem aggregate inputs once, compiles
+that same snapshot, and retains each typed admission's authoritative checkout.
+The opt-in is not a collection grant: enforce-mode aggregate admission, privacy,
+exact repository/target policy and provider capability checks still apply before
+inventory or export staging. Native Windows and unsupported targets refuse.
+
+The typed leg shares a 120-second caller-owned budget, including a five-second
+cleanup reserve, across policy Git observations, inventory, export, verification
+and collection copying. Budgeted policy loading caps each config/Git response
+at 1 MiB and the admission list at 128 repositories. This is not a hard bound
+on synchronous filesystem operations or the whole existing sync pass, and does
+not qualify installed or remote-filesystem latency.
+
+At most eight eligible repositories are visited per pass, with one selected
+store per repository. A durable, private `worktree-state-sync-cursor.json` under
+Logger's home rotates repositories and stores, advancing before owner reads and
+exports so failed early attempts cannot starve independent sources. It records
+scheduling position, never authority, success, a cached revision or remote
+acknowledgment. Missing positions resume at the next sorted candidate; malformed
+cursor state refuses without overwriting it. Failed cursor publication retains
+its temporary evidence.
+
+Results distinguish local readbacks, known unattempted stores, repositories
+whose inventory was not evaluated, and failed attempts. An inventory/export
+failure does not drop healthy independent repositories; unconfirmed native
+cleanup still propagates exceptionally. Typed failures make the combined pass
+fail even when ordinary sessions transfer successfully. A missing ordinary
+session source still returns failure, but no longer prevents this independently
+admitted retained-state leg from running. Accounting, compaction gates,
+notification, scheduler ownership and ordinary missing-source semantics remain
+unchanged. No installed configuration is enabled by this source change.
 
 ## Admission before effects
 
@@ -219,8 +260,7 @@ Before supplying it, the orchestration caller must negotiate
 not a live database or a session lookup. Missing support preserves the original
 API; it cannot satisfy a requirement for complete attribution. The passive
 selector above requires richer support without changing those original calls.
-The explicit composition supplies that negotiated reader; automatic collection
-remains unimplemented.
+The explicit composition and opted-in existing tick supply that negotiated reader.
 
 Logger checks the projection's exact raw-manifest digest, source identity,
 complete operation count, tuple uniqueness, first-acceptance order and bounds.
@@ -306,3 +346,9 @@ temporary cleanup, retained failure evidence, changed-owner refusal and
 revision-pinned lossless provenance. A Linux pidfd witness checks that an export
 timeout settles its console descendant. These are isolated synthetic fixtures,
 not native Windows visibility, installed collection or remote durability proof.
+The existing-tick cases use real filesystem policy loading and selected owners
+to collect both retained stores across successive passes with no ordinary session
+source, while preserving every source byte. `tests/test_worktree_state_tick.py`
+adds bounded rotation, independent failure, exhausted-budget, corrupt-cursor and
+unconfirmed-cleanup controls; the focused existing sync tests cover default-off,
+dry-run and combined failure semantics.
