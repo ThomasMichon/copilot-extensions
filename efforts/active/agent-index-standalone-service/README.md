@@ -33,6 +33,19 @@ deployment or destructive migration of durable data.
 
 ## Coordination
 
+The proposed #4220/#5302 families retain existing Index source/data,
+serving-worker, migration, corpus/model/engine/canary and native/deployment
+custodians. #6383 fleet source-credential/index-client, #5789 Gateway,
+#6030 deployment and #6236 integration duties stay independent.
+Existing-store repair remains later work, NOT a prerequisite for fresh
+source-aware creation; neither mandatory Dispatch hosting nor another
+controller is introduced. No store, worker, lock, process, reindex or
+resource operation follows. Before any separate administrative source
+judgment, require normal review and actual complete direct Plan/local AND
+actual global Validation/Coordination/Journal delivery, permitted whole-current
+readback and each literal source/hold/complete-transfer condition. Unknown
+fit or custody retains the source; no generic ACK, expiry or reassignment.
+
 The proposed #2295 six-clause current-mode declaration family below uses the
 existing Phase 2/3 service/release/controller boundaries. Keep #2295 OPEN until
 the incumbent #5768 custodian accepts its exact current-mode mapping, as the
@@ -462,6 +475,72 @@ not reversed. Review and source-specific incumbent acceptance remain separate.)_
   staging limits and explicit Darwin qualification; no new every-host or
   whole-parent deployment gate is introduced.
 
+### Proposed finite intake: source exclusion and historical vector repair
+
+_(Agent-recommended documentary refinement; original operational work remains
+with its existing owners and no execution is authorized here.)_
+
+#### #4220 - Durable source-family ownership
+
+- [ ] **I4220-P1:** Bind surviving worker AND replacement service to durable
+  cross-process SOURCE ownership covering acquisition/discovery/ingestion/
+  checkpoint THROUGH completed cursor publication AND source GC, not only
+  individual store mutations or the former service's asyncio lock.
+  Canonical overlapping families conflict even under different aliases;
+  a pre-acquisition check alone cannot fence a later writer/GC.
+- [ ] **I4220-P2:** Preserve exact ownership through cutover, adoption,
+  completion AND crash recovery. Replacement defers/refuses while incumbent
+  owns the source; generation change, missing reply or elapsed time is not
+  release. No old-worker kill or forced adoption manufactures exclusion.
+- [ ] **I4220-P3:** State participating new/legacy binary boundaries and
+  owning safe drain/isolation/adoption alternatives. A new lock does not
+  retroactively exclude an immutable old writer; do not mutate incumbent
+  data or demand retrofitting every unsupported binary.
+- [ ] **I4220-P4:** Preserve the deterministic A/B/C REVERT case: two aliases
+  share a store but keep separate cursors; alias one completes B, alias two
+  still has A, and C reverts a file changed only in B, so A..C can omit it
+  although the store contains B. Require regression AND (shared COMPLETED
+  watermark OR explicit stale-alias repair). Empty pending journal does
+  not prove each cursor describes the shared store.
+- [ ] **I4220-P5:** Credit participating source-aware kernel writer/FTS
+  exclusion, fresh isolated queued synthetic ingestion and acquired-manifest
+  journal admission, retaining those safeguards while extending the lock/
+  cursor/GC domain. They are not mixed-generation/live-store proof or a
+  replacement for the complete original. Keep independent canary/corpus/
+  model/Gateway/rollback obligations and fresh-creation priority.
+- [ ] **I4220-LV:** Exercise TWO owning processes on ONE synthetic source
+  across cutover/adoption/completion/release AND crash recovery, canonical
+  alias conflicts and writer/GC starting after acquisition. Prove A/B/C
+  regression AND the watermark OR repair arm, safe legacy refusal/drain
+  and no expiry/kill/takeover. Preserve actual source/fixture/native tiers;
+  no universal native rollout or legacy migration prerequisite is added.
+
+#### #5302 - Historical missing-vector repair
+
+- [ ] **I5302-P1:** Keep historical no-vector DATA repair separate from the
+  already-delivered fail-loud/embedding/checkpoint source fix. Original
+  reported counts/percentage are dated motivation, not a current corpus
+  health measurement, and current ordering cannot prove old data repaired.
+- [ ] **I5302-P2:** Audit affected sources/tasks and verify `--full` actually
+  re-embeds already-stored content against a KNOWN-CORRUPTED chunk before
+  relying on it at scale. Preserve content-hash/resume-since semantics;
+  generic full-run success is not that bounded original oracle.
+- [ ] **I5302-P3:** Confirm the fixed-code worker is ACTUALLY SERVING BEFORE
+  authorized backfill. Repair affected sources OR the full corpus and audit
+  full-corpus coverage/vector presence against the original outcome.
+  Source/release availability, healthy fresh state or contemporary counts
+  alone do not supply historical repair evidence.
+- [ ] **I5302-P4:** Give the proposed periodic/startup consistency check an
+  explicit owning disposition: meaningful counts OR sampled per-chunk
+  vector-presence monitoring as appropriate. Do not silently drop this
+  original decision or require its implementation if rightfully declined.
+- [ ] **I5302-LV:** Retain distinct evidence for affected-data audit,
+  known-corrupted-chunk full-reindex behavior, fixed serving worker,
+  affected-source/full-corpus repair and monitoring disposition. Existing
+  operational/data owners control any later authorized work; no private
+  corpus inspection, health probe, model/reindex/deletion/service action
+  or cold-creation dependency is authorized by documentary intake.
+
 ## Validation Plan
 
 - [x] Unit regressions for layered designation, unconfigured/client nonactivation
@@ -722,12 +801,36 @@ not reversed. Review and source-specific incumbent acceptance remain separate.)_
   acquisition/build or deployment proof. Documentary review/intake cannot
   establish #2295's source disposition, reassign custody or complete this effort by itself.
 
+- [ ] **I4220-G:** Resolve ALL I4220 Plan/local Validation and the whole
+  original/refined durable source contract: acquisition THROUGH completed
+  cursor AND GC, exact nonexpiring custody/crash adoption, canonical alias
+  conflicts, A/B/C regression AND (completed watermark OR repair), and safe
+  supported/legacy alternatives. Kernel/journal partials remain credited;
+  documentary delivery is neither mixed-generation proof nor release.
+- [ ] **I5302-G:** Resolve ALL I5302 Plan/local Validation independently of
+  source repair and fresh creation: original affected-data audit,
+  known-corrupted oracle, fixed SERVING worker BEFORE backfill, complete
+  affected-source/full-corpus repair and explicit monitoring disposition.
+  Retain operational/native/corpus custodians and original evidence scope;
+  a documentary merge is not a repaired corpus or parent completion.
+
 ## Proposal
 
 [Architecture proposal](architecture.md). It separates intended package
 boundaries from implementation decisions and deployment-specific policy.
 
 ## Journal
+
+### 2026-10-30 - Proposed source-lock and historical-repair intake
+
+Whole eligible #4220/#5302 texts and complete fixed-pin ROOT research support
+unchecked direct proposals. Participating kernel/journal and fail-loud source
+work remain credited, not relabeled mixed-generation exclusion or repaired
+historical data. Acquisition/cursor/GC, alias-revert and serving-before-backfill
+conditions stay explicit. Historical data repair remains later, separately
+owned work, not a fresh-creation prerequisite. No live corpus, lock, worker,
+model or service was inspected or operated. Review, actual delivery,
+complete current readback and separate source judgments remain outstanding.
 
 ### 2026-10-28 - Proposed six-clause current-mode declaration mapping
 

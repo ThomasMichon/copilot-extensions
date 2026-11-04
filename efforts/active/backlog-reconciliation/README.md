@@ -131,6 +131,13 @@ splitting and conditional process-owned transport proof stay distinct.
 The dead-letter effort remains Draft, and every original claim, applicability
 gap, alternative and source/resource condition remains.
 
+The [further sixteen whole contracts](receiving-recovered-sixteen.md) retain
+ten direct documentary families under six Active ROOTs, two complete withheld
+amendments under the parked Review Reliability ROOT, and four whole-contract
+gaps. All sixteen metadata records remain unchanged from the admitted 44-text
+study. Existing operational, migration, native and resource custodians remain;
+publication does not resume a parked effort or establish source acceptance.
+
 ## Request
 
 Operator request, with identifying organizational references redacted:
@@ -189,6 +196,14 @@ outcomes from agent-recommended research and prioritization mechanics.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [further sixteen-contract register](receiving-recovered-sixteen.md)
+  preserves all-nine/four-consumer selection, literal alternatives, finite
+  original cohorts and same-canonical retirement. Ten proposed direct families,
+  two withheld parked-home amendments and four retained whole-scope gaps remain
+  separate; no new implementation appointment or receiving acceptance follows.
+  The original study also retains an existing over-deep relative vision link
+  in the Index Service ROOT for its documentation owner's bounded correction;
+  this addition-only unit does not claim that reference was repaired.
 - [ ] Verify and publish supported dispositions, preserving source versus
   release versus rollout distinctions and all active ownership.
   The [roadmap follow-through register](roadmap-follow-through.md) records
@@ -445,6 +460,12 @@ outcomes from agent-recommended research and prioritization mechanics.
   clauses and explicit original claim/conditional closure/KEEP_OPEN duties.
   It changes no product, issue state or custody; complete delivery and
   source-specific acceptance remain separate.
+  The further sixteen-contract unit preserves all twelve finite proposal
+  families, with two withheld rather than inserted into a parked ROOT, plus
+  four independent whole-contract gaps. Local AND actual global Validation
+  and every existing owner remain intact. The current 1,019-open census is
+  290 above the whole target; unchanged identities yield no closure credit.
+  Publication is not implementation, receiving acceptance or source disposition.
 
 ## Proposal
 
