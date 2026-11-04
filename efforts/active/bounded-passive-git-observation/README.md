@@ -183,7 +183,7 @@ or additional operator authorization.
 - [x] Qualify direct/snapshot consumers, aliases, unchanged ages, retained
   cleanup, invalidation, expiry and closed admission, including an actual
   authenticated request while mutation admission is held.
-- [ ] Record reviewed source delivery, release and separately authorized
+- [x] Record reviewed source delivery, release and separately authorized
   installed mux proof. This correction does not claim R1b lock separation.
 
 ### Direct retained acceptance from #7944/#7945
@@ -638,3 +638,26 @@ selection and footprint semantics. Fresh provider review/CI still govern merge.
 - Current-head review/CI, release and actual installed mux behavior remain
   open. Parent R1b/R2/platform and broader process/publication gates remain
   with their existing owners.
+- The scoped correction merged as #10428 at
+  `50082dc5005c43b8678c71a53db207a9a518eabf`, after actual current-head
+  Copilot approval, required CI and native legacy-monitor Linux/Windows
+  checks passed. Post-merge CI also passes. Release and installed mux proof
+  remain open; the broader parent effort is not complete.
+- The scoped correction is released and installed in an authorized Windows
+  deployment selecting and serving Worktrees `1.24.462-dev1`. The installed
+  cache module's Git blob exactly matches the reviewed correction, and the
+  normal targeted update has its own completed/zero-exit outcome.
+- Two actual mux-option/native-pane observations 65 seconds apart retain all
+  six existing native session incarnations and live panes, with normal,
+  nonempty status segments and no Git-busy/UNKNOWN labels. This is consumer
+  readback, not a direct-renderer or version-only proxy.
+- The selected installed updater also preserves the repository selector for
+  the unmodified Vault activation reader invoked from an unrelated payload
+  working directory: configured/zero-exit, without unlocking or starting a
+  vault or changing its configuration.
+- An interrupted queue guard initially refused deployment. Its separately
+  approved canonical queue release preserved interrupted history and did not
+  certify historical cleanup or replay the old request. The fresh targeted
+  update and serving proof above are distinct from that release. This is
+  Worktrees-component completion, not a claim that an earlier whole-suite
+  update or this broader effort is complete.

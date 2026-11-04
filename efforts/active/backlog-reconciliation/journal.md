@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-04 - Five venue/runtime contracts, fourteen bounded completed-work comparisons and inherited holds](<journal/2026/11.04 venue-runtime-contracts.md>)
+
 - [2026-11-04 - Seven continuity/lifecycle contracts, eighteen message comparisons and bounded newer receipt-source credit](<journal/2026/11.04 continuity-lifecycle-contracts.md>)
 - [2026-11-04 - Seven session/task contracts, twenty bounded comparisons and a finite report-design documentation proposal](<journal/2026/11.04 session-task-observation-contracts.md>)
 - [2026-11-04 - Eight mux contracts, 21 bounded commit-message comparisons and one whole standing-vision alignment](<journal/2026/11.04 mux-lifecycle-contracts.md>)
