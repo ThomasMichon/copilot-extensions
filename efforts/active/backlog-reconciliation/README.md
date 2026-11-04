@@ -285,6 +285,21 @@ existing previews. These are not technical completions. The subsequent
 arrival #10451. No new arrival text, implementation, rollout, source/resource
 release or recovery of the held session-data publication is claimed.
 
+The [whole Fleet core study](fleet-core-cohort.md) now reads all 25 originals
+and 215 comments: 240 complete texts. #6424/#6681 were separately freshly
+qualified after the initial drift refusal, without reusing old changed text
+or releasing other holds. Current whole-home research separates role/CI,
+routing/provider, client/onboarding, connection/credential and discovery/
+placement/venue contracts. A complete direct #5861 generic reconciliation
+matrix under existing Linux Role Fleet is the next receiving candidate;
+canonical, claimed, Draft and explicit independent-source lanes remain.
+Two strong #9620 semantic matches are partial external-provider foundation,
+not whole selector/task-placement completion. The complete 14:58:01 UTC /
+06:58:01 PST census is 1,024 whole open, 295 above 729: 683 original-cohort,
+341 inflow. External #10409 departure supplies no body access or campaign
+credit. Research, receiving proposal and actual source disposition remain
+separate; every original parent check state and source/resource gate survives.
+
 - [x] Holistically sweep the initial eligible backlog and build an issue/effort
   relationship graph; use alignment and theme to identify consolidation groups.
   The [initial graph snapshot](graph-overview.md) accounts for all 695 assigned
