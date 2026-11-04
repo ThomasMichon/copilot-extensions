@@ -230,7 +230,7 @@ def _project_url(feed, name: str) -> str:
     ))
 
 
-def _fetch_project(feed, name, limits, deadline, context, budget, *, candidate_limit=None):
+def _fetch_project(feed, name, limits, deadline, context, budget):
     client = acquisition._Client(limits, deadline, context, {}, budget)
     location = _project_url(feed, name)
     origin = acquisition._url(location)[1]
@@ -245,7 +245,7 @@ def _fetch_project(feed, name, limits, deadline, context, budget, *, candidate_l
         media = response.headers.get_content_type()
         entries = acquisition._entries(
             content, media, name,
-            min(limits.max_candidates_per_project, candidate_limit or limits.max_candidates_per_project),
+            limits.max_candidates_per_project,
         )
     finally:
         response.close()
@@ -329,7 +329,6 @@ class _GuardedIndex(ThreadingHTTPServer):
     def _project(self, name):
         return _fetch_project(
             self.feed, name, self.limits, self.deadline, self.context, self.budget,
-            candidate_limit=self.limits.max_requests * self.limits.max_workers,
         )
 
     def page(self, name):

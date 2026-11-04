@@ -130,13 +130,13 @@ def test_guarded_feed_filters_incompatible_records_without_changing_uv_selection
         listed(hashes={"sha256": digest}, size=len(wheel)),
         listed(filename=newer_name, url="/files/" + newer_name,
                hashes={"sha256": hashlib.sha256(newer).hexdigest()}, size=len(newer)),
-        *incompatible("fixture", 8),
+        *incompatible("fixture", 18),
     ])
     dep_index = json.dumps({
         "meta": {"api-version": "1.1"}, "name": "dep",
         "files": [listed(filename=dependency_name, url="/files/" + dependency_name,
                          hashes={"sha256": hashlib.sha256(dependency).hexdigest()}, size=len(dependency)),
-                  *incompatible("dep", 9)],
+                  *incompatible("dep", 17)],
     }).encode()
     state["routes"]["/simple/dep/"] = (200, {"Content-Type": "application/vnd.pypi.simple.v1+json"}, dep_index)
     state["routes"]["/files/" + FILENAME] = (200, {}, wheel)
