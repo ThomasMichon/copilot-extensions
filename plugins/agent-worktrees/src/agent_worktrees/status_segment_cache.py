@@ -270,8 +270,7 @@ class _StatusSegmentCache:
             if self.observation_busy(runtime):
                 wait()
 
-    @staticmethod
-    def degraded_bundle(project, worktree_id, previous=None):
+    def degraded_bundle(self, project, worktree_id, previous=None):
         if not isinstance(previous, dict) or (
             previous.get("project") != project or previous.get("worktree_id") != worktree_id
         ):
@@ -287,6 +286,16 @@ class _StatusSegmentCache:
         for fact in bundle.get("facts", {}).values():
             if isinstance(fact, dict):
                 fact["confirmed"] = False
+        with self._lock:
+            if self._blocked(project, cleanup_only=True):
+                reason = "project cleanup pending"
+            elif self._closing_observations:
+                reason = "Git observation retiring"
+            elif self._blocked(project):
+                reason = "Git observation busy"
+            else:
+                reason = "Git observation unavailable"
+        bundle["availability"] = {"status": "pending", "reason": reason}
         return bundle
 
     def get_cached(self, path: str) -> str | None:

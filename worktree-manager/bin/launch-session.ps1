@@ -1015,25 +1015,36 @@ function Assert-AwColdResume {
         if ($script:LaunchProject) { $checkArgs += @('--project', $script:LaunchProject) }
         $checkArgs += @('worktree-status-bundle', '--worktree', $plan.worktree_id, '--force-refresh', '--json')
         try {
-            $rawBundle = & $VenvPython @checkArgs
+            $rawBundle = & $VenvPython @checkArgs 2>&1
             $checkExit = $LASTEXITCODE
+            if ($checkExit -ne 0) {
+                throw "Status probe exited with code ${checkExit}: $($rawBundle -join "`n")"
+            }
             $bundle = ($rawBundle -join "`n") | ConvertFrom-Json -ErrorAction Stop
             $liveness = $bundle.facts.liveness
-            if ($checkExit -eq 0 -and $bundle.worktree_id -eq $plan.worktree_id -and
+            if ($bundle.worktree_id -eq $plan.worktree_id -and
                 $liveness.confirmed -is [bool] -and $liveness.confirmed -eq $true -and
                 $liveness.value.active -is [bool] -and $liveness.value.active -eq $false) {
                 return
             }
-            if ($checkExit -ne 0 -or $bundle.worktree_id -ne $plan.worktree_id -or
-                $liveness.confirmed -ne $true -or $liveness.value.active -isnot [bool]) {
-                $message = 'Could not verify cold launch target; refresh and retry. The seed remains staged.'
+            if ($bundle.error) {
+                throw [string]$bundle.error
+            }
+            if ($bundle.worktree_id -ne $plan.worktree_id) {
+                throw 'Status probe returned a different or missing worktree identity'
+            }
+            if ($liveness.confirmed -isnot [bool] -or $liveness.confirmed -ne $true -or
+                $liveness.value.active -isnot [bool]) {
+                $detail = if ($bundle.availability.reason) {
+                    [string]$bundle.availability.reason
+                } else {
+                    'Status probe did not confirm liveness'
+                }
+                $message = "Could not verify cold launch target: ${detail}. Refresh and retry. The seed remains staged."
             }
         } catch {
             $message = "Could not verify cold launch target: $($_.Exception.Message). The seed remains staged."
         }
-    }
-    if ($plan.seed_pending) {
-        $message = 'Could not start the staged launch prompt on a confirmed cold target. The seed remains staged for retry.'
     }
     Write-SetupLog $message 'ERROR'
     [Console]::Error.WriteLine("ERROR: $message")

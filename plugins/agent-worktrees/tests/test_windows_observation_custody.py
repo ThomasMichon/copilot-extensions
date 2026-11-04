@@ -287,6 +287,32 @@ def _status_cache(owner, monkeypatch):
     return cache
 
 
+@pytest.mark.parametrize("condition,reason", [
+    ("cleanup", "project cleanup pending"),
+    ("busy", "Git observation busy"),
+    ("retiring", "Git observation retiring"),
+    ("unavailable", "Git observation unavailable"),
+])
+def test_degraded_bundle_explains_pending_scope_without_changing_cached_facts(
+    owner, condition, reason,
+):
+    if condition == "cleanup":
+        pending(owner)
+    elif condition == "busy":
+        owner.begin_observation("A", "/repo", "/repo/wt")
+    elif condition == "retiring":
+        owner.close_observation_admission()
+    original = _cached_bundle()
+    before = copy.deepcopy(original)
+    bundle = owner.degraded_bundle("A", "wt", original)
+    assert bundle["availability"] == {"status": "pending", "reason": reason}
+    assert bundle["facts"]["git_state"] == {
+        **before["facts"]["git_state"], "confirmed": False,
+    }
+    assert bundle["as_of"] == before["as_of"]
+    assert original == before
+
+
 def test_bundle_request_and_background_preserve_bytes_and_allow_B(owner, monkeypatch):
     cache = _status_cache(owner, monkeypatch)
     old = _cached_bundle()
@@ -313,8 +339,9 @@ def test_bundle_request_and_background_preserve_bytes_and_allow_B(owner, monkeyp
     assert owner.observation_counts() == (0, 1)
 
 
+@pytest.mark.parametrize("active,probes_ok", [(False, True), (True, True), (False, False)])
 def test_forced_resident_liveness_progresses_without_releasing_git_custody(
-    owner, monkeypatch,
+    owner, monkeypatch, active, probes_ok,
 ):
     from agent_worktrees import worktree_status_compute, worktree_status_daemon, sessions
 
@@ -327,15 +354,20 @@ def test_forced_resident_liveness_progresses_without_releasing_git_custody(
         lambda worktree_id, **kwargs: record,
     )
     monkeypatch.setattr(
-        sessions, "verify_worktree_active", lambda current: sessions.LiveVerdict(active=False),
+        sessions, "verify_worktree_active",
+        lambda current: sessions.LiveVerdict(active=active, probes_ok=probes_ok),
     )
     compute = worktree_status_daemon.build_cached_compute(
         cache, lambda *args: pytest.fail("Retained Git cleanup must not be bypassed"),
     )
     result = compute("worktree_status", {"project": "A", "worktree_id": "wt", "force": True})
-    assert result["facts"]["liveness"]["confirmed"] is True
-    assert result["facts"]["liveness"]["value"]["active"] is False
+    assert result["facts"]["liveness"]["confirmed"] is probes_ok
+    if probes_ok:
+        assert result["facts"]["liveness"]["value"]["active"] is active
+    else:
+        assert result["facts"]["liveness"]["value"] is None
     assert result["facts"]["git_state"]["confirmed"] is False
+    assert result["availability"] == {"status": "pending", "reason": "project cleanup pending"}
     assert owner.observation_counts() == (0, 1)
     assert cache._entries == {}
 
@@ -378,7 +410,7 @@ def test_fallback_warm_list_never_renews_pending_cache(owner, monkeypatch):
 def test_status_client_pending_data_never_enters_direct_fallback(monkeypatch):
     from agent_worktrees import worktree_status_daemon as daemon
 
-    data = core._StatusSegmentCache.degraded_bundle("A", "wt", _cached_bundle())
+    data = core._StatusSegmentCache().degraded_bundle("A", "wt", _cached_bundle())
     monkeypatch.setattr(daemon.wcs_client, "new_client_id", lambda: "client")
     monkeypatch.setattr(daemon.wcs_client, "request", lambda *a, **k: data)
     monkeypatch.setattr(daemon.wcs_client, "release", lambda *a, **k: None)

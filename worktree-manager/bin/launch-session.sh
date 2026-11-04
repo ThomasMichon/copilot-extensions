@@ -806,27 +806,34 @@ aw_assert_cold_resume() {
         local check_args=(-m agent_worktrees)
         [[ -z "$LAUNCH_PROJECT" ]] || check_args+=(--project "$LAUNCH_PROJECT")
         check_args+=(worktree-status-bundle --worktree "$_SEEDED_WORKTREE_ID" --force-refresh --json)
-        local bundle probe_exit=0
-        if bundle=$("$PYTHON" "${check_args[@]}"); then
-            printf '%s' "$bundle" | "$PYTHON" -c '
+        local bundle detail probe_exit=0
+        if bundle=$("$PYTHON" "${check_args[@]}" 2>&1); then
+            detail=$(printf '%s' "$bundle" | "$PYTHON" -c '
 import json,sys
-d=json.load(sys.stdin)
-f=d.get("facts",{}).get("liveness",{})
-v=f.get("value") or {}
-if d.get("worktree_id")!=sys.argv[1] or f.get("confirmed") is not True:
+try:
+    d=json.load(sys.stdin)
+    if d.get("error"):
+        raise ValueError(d["error"])
+    if d.get("worktree_id")!=sys.argv[1]:
+        raise ValueError("Status probe returned a different or missing worktree identity")
+    f=d.get("facts",{}).get("liveness") or {}
+    v=f.get("value") or {}
+    if f.get("confirmed") is not True or type(v.get("active")) is not bool:
+        raise ValueError((d.get("availability") or {}).get("reason") or "Status probe did not confirm liveness")
+except (ValueError, AttributeError, TypeError) as error:
+    print(error)
     sys.exit(2)
-sys.exit(0 if v.get("active") is False else 1)
-' "$_SEEDED_WORKTREE_ID" || probe_exit=$?
+sys.exit(0 if v["active"] is False else 1)
+' "$_SEEDED_WORKTREE_ID") || probe_exit=$?
             [[ "$probe_exit" != "0" ]] || return 0
         else
+            probe_exit=$?
+            detail="Status probe exited with code ${probe_exit}: ${bundle}"
             probe_exit=2
         fi
         if [[ "$probe_exit" != "1" ]]; then
-            message='Could not verify cold launch target; refresh and retry. The seed remains staged.'
+            message="Could not verify cold launch target: ${detail}. Refresh and retry. The seed remains staged."
         fi
-    fi
-    if [[ "${_PENDING_NEW_SEED:-0}" == "1" ]]; then
-        message='Could not start the staged launch prompt on a confirmed cold target. The seed remains staged for retry.'
     fi
     setup_log ERROR "$message"
     echo "ERROR: $message" >&2

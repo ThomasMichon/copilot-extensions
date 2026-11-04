@@ -19,6 +19,17 @@ plugins. It is the one piece that must work *before* the plugins do.
 > [#1165](https://github.com/ThomasMichon/copilot-extensions/issues/1165) and
 > [#1174](https://github.com/ThomasMichon/copilot-extensions/issues/1174).
 
+## Staged launch prompts
+
+Launch prompts require a freshly confirmed cold target. A confirmed live target
+is refused; an unavailable, malformed, or unconfirmed status response is not proof
+that a target is cold. Refusals preserve the staged seed and distinguish a live
+session from an unverified target, retaining status-probe errors or the pending
+observation reason when available. Resolve the reported prerequisite and retry.
+An independent successful liveness probe can confirm a cold target even while
+Git status observations await cleanup; it does not release that cleanup custody
+or mark the other status facts confirmed.
+
 ## Optional historical cleanup
 
 `worktree-manager cleanup capabilities --json` describes the optional cleanup

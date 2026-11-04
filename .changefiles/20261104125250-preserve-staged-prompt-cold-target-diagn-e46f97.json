@@ -1,0 +1,13 @@
+{
+  "comment": "Preserve staged launch prerequisite diagnostics and report pending status observations",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
