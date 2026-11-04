@@ -55,6 +55,10 @@ The shared `agent_logger.sessions` registry supports `<id>.tar.gz` and
 uncompressed and use the same session ID. A session ID must be one safe path
 component; invalid archive stems fail instead of escaping sidecar, lookup, or
 materialization paths. Compression formats never create extra logical sessions.
+Ordinary archive writes and recursive session disposal also honor
+[worktree-state preservation](worktree-state.md#ancestor-disposal-and-retained-legacy-evidence):
+marked or unprovably disposable subtrees are retained, not silently packed or
+reclaimed as session-owned data.
 
 Library extensions register codecs in `sessions.CODECS`.
 `archive_suffixes()` returns a unique, longest-first snapshot of the current

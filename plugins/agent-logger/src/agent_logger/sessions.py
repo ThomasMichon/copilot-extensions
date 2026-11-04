@@ -33,6 +33,7 @@ from __future__ import annotations
 import atexit
 import io
 import json
+import logging
 import os
 import shutil
 import stat
@@ -595,9 +596,18 @@ def force_rmtree(path: Path) -> bool:
     placeholders) makes reconciliation a no-op that mis-reports success. This
     clears the read-only attribute on every entry first, then removes, and
     verifies the tree is actually gone so callers count only real removals.
+    Marked or unprovably disposable worktree-state evidence returns ``False``
+    before permission changes or deletion.
     """
+    from agent_logger.sync.worktree_state_preservation import require_disposable_tree
+
     if not path.exists():
         return True
+    try:
+        require_disposable_tree(path)
+    except OSError as error:
+        logging.getLogger("agent-logger.sessions").warning("retained session tree: %s", error)
+        return False
 
     def _make_removable(p: Path) -> None:
         # OR-in owner write (clears the Windows read-only attribute); for a
@@ -606,6 +616,8 @@ def force_rmtree(path: Path) -> bool:
         # ``x`` bit, so on POSIX the recursive delete cannot enter the dir and
         # silently leaves the tree in place (the failure ``ignore_errors=True``
         # then hides), making reconciliation a no-op that mis-reports success.
+        if p.is_symlink():
+            return
         try:
             mode = p.stat().st_mode
         except OSError:
@@ -640,9 +652,24 @@ def archive_session(session_dir: Path, store: Path, *, codec: str = "targz") -> 
     source directory is **not** removed -- callers decide whether to reclaim it
     once the archive is verified.
     """
+    from agent_logger.sync.worktree_state_namespace import ordinary_publication
+    from agent_logger.sync.worktree_state_preservation import (
+        WorktreeStatePreservationError, require_disposable_tree,
+    )
+
+    require_disposable_tree(session_dir)
     session_id = session_dir.name
     _validate_session_id(session_id)
     codec_impl = get_codec(codec)
+    with ordinary_publication(store, f"{session_id}{codec_impl.suffix}") as admitted:
+        if admitted is None:
+            raise WorktreeStatePreservationError("session archive would enter a typed-state namespace")
+        return _archive_session(session_dir, admitted, session_id, codec_impl)
+
+
+def _archive_session(
+    session_dir: Path, store: Path, session_id: str, codec_impl: Codec,
+) -> SessionRef:
     store.mkdir(parents=True, exist_ok=True)
     archive_path = store / f"{session_id}{codec_impl.suffix}"
 

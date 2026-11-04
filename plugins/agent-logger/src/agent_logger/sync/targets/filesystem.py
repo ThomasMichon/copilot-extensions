@@ -21,7 +21,6 @@ import stat
 import time
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
-from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import BinaryIO
 
@@ -77,13 +76,12 @@ from agent_logger.sync.targets.base import (
     Target,
     is_session_path_included,
 )
-from agent_logger.sync.targets.hub_sessions import (
-    _hub_session_age_days,
-    _hub_session_cwd,
-    _parse_iso,
-)
+from agent_logger.sync.targets.hub_sessions import _parse_iso, compact_hub_sessions
 from agent_logger.sync.targets.fleet_health import FleetScanLimits, read_fleet_status
 from agent_logger.sync.worktree_state_namespace import namespace_overlap, ordinary_publication
+from agent_logger.sync.worktree_state_preservation import (
+    require_disposable_tree, refuse_collection_destination, refuse_collection_at,
+)
 
 #: Excluded from sync: legacy lock names, ``.lock``/``.tmp`` suffixes, and ``.hold`` (Copilot's restrictive-ACL ``inuse.<pid>.hold`` marker).
 _EXCLUDE_NAMES, _EXCLUDE_SUFFIXES = frozenset({".lock", "lock"}), (".lock", ".tmp", ".hold")
@@ -326,6 +324,7 @@ def _copy_stream_replace(
 
 def _copy_replace(src: Path, dst: Path) -> None:
     """Copy one regular source without following links."""
+    refuse_collection_destination(dst)
     try:
         source = open_regular_no_follow(src)
     except OSError as exc:
@@ -859,6 +858,7 @@ def _session_files(
     pending = [root]
     while pending:
         directory = pending.pop()
+        refuse_collection_at(directory)
         with os.scandir(_windows_extended_path(directory)) as entries:
             for entry in entries:
                 path = directory / entry.name
@@ -892,6 +892,7 @@ def _iter_regular_source_files(
     pending = [root]
     while pending:
         directory = pending.pop()
+        refuse_collection_at(directory)
         with os.scandir(_windows_extended_path(directory)) as entries:
             for entry in entries:
                 path = directory / entry.name
@@ -1492,6 +1493,8 @@ def _replace_selected_sessions(
             )
             had_destination = _path_exists(destination)
             if had_destination:
+                if _is_real_directory(destination):
+                    require_disposable_tree(destination)
                 _ensure_relative_directory(
                     transaction,
                     backup.parent.relative_to(transaction),
@@ -1553,6 +1556,7 @@ def _remove_tree_checked(path: Path, *, allow_nonempty: bool = False) -> None:
                     return
             raise
         return
+    require_disposable_tree(path)
     directories = [path]
     pending = [path]
     while pending:
@@ -2053,6 +2057,8 @@ class FilesystemTarget(Target):
                 ),
                 default=d.stat().st_mtime,
             )
+            if newest < cutoff and snapshots is not None:
+                require_disposable_tree(snapshots / rescue_session_key(d.name))
             if newest < cutoff and sessions.force_rmtree(d):
                 if provenance is not None:
                     (provenance / f"{d.name}.json").unlink(missing_ok=True)
@@ -2126,6 +2132,8 @@ class FilesystemTarget(Target):
             ref = SessionRef(id=sid, kind="archive", path=arc, store=archived)
             if not sessions.verify_archive(ref):
                 continue
+            if dry_run:
+                require_disposable_tree(live)
             if dry_run or sessions.force_rmtree(live):
                 # Count successful removes only; OneDrive placeholders can defeat rmtree.
                 removed_ids.add(sid)
@@ -2167,29 +2175,9 @@ class FilesystemTarget(Target):
             _existing_relative_directory(base, Path("archived")) or base / "archived"
             if dry_run else _ensure_relative_directory(base, Path("archived"))
         )
-        now = datetime.now(timezone.utc)
-        compacted = 0
-        for d in state.iterdir():
-            if not d.is_dir() or not (d / sessions.EVENTS_MEMBER).exists():
-                continue
-            if sessions.is_archived(d.name, archived, codec):
-                continue
-            if tracked_paths is not None:
-                cwd = _hub_session_cwd(d)
-                if cwd and cwd in tracked_paths:
-                    continue
-            age = _hub_session_age_days(d, now)
-            if age is None or age < min_age_days:
-                continue
-            if dry_run:
-                compacted += 1
-                continue
-            ref = sessions.archive_session(d, archived, codec=codec)
-            if sessions.verify_archive(ref):
-                compacted += 1
-            else:
-                sessions.remove_archive(ref)
-        return compacted
+        return compact_hub_sessions(
+            state, archived, min_age_days, codec, tracked_paths=tracked_paths, dry_run=dry_run,
+        )
 
     def doctor(self) -> DoctorResult:
         result = DoctorResult(ok=True)

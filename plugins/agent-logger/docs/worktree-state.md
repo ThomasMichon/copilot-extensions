@@ -44,6 +44,11 @@ barriers. Native Windows collection is explicitly unsupported, not inferred
 from the existing owner's separate export support. The isolated Linux packet
 does not qualify Windows or hardware power-loss behavior.
 
+Collection roots must also be outside the reserved `session-state`,
+`provenance`, `archived` and `.session-sync-*` payload/replacement components.
+Such custom placements are unsupported even when a filesystem claim otherwise
+matches: ordinary session retention is not persistent-state reclamation.
+
 ## Identity, publication and readback
 
 One collection key binds canonical repository, **full** worktree identity,
@@ -100,6 +105,26 @@ digest and member size/hash. It reports **local readback verified** and
 copy grants reclamation, retention changes, restoration, head ownership, claims,
 leases or live execution authority.
 
+## Ancestor disposal and retained legacy evidence
+
+Ordinary session archiving, replacement and recursive cleanup must not consume
+or erase a marked collection hidden below a session or replacement candidate.
+Marker presence, including partial or unsupported metadata, blocks those
+operations before recursive deletion or permission changes. A verified ordinary
+session archive does not authorize removal of a nested worktree collection.
+Session-copy walkers refuse a marked subtree instead of publishing its database
+under a session identity.
+Raw and redacted copies also refuse overwriting an existing collection member;
+the generic session archiver participates in destination namespace admission.
+Recursive removal does not change permissions through external symbolic links.
+
+Preservation checks read directory metadata only, never ledger contents. Their
+failure budgets are 100,000 entries, 20,000 directories, depth 64 and a
+30-second cooperative deadline. An unreadable or over-budget candidate remains
+retained; the check does not truncate evidence or authorize an unverified wipe.
+The disposal owner still owns quiescence and the separate deletion permission.
+This is not a universal recursive lease or authorization to rescue/migrate data.
+
 ## Qualification
 
 The opt-in `agent-logger` `tests/test_worktree_state.py` and
@@ -112,3 +137,6 @@ leg and deterministic session/log/archive claim interleavings. It uses synthetic
 not an operator's actual agenda or archive destination. Required unit-only CI
 admission and operational/native acceptance are separate gates; see
 [testing](../../../TESTING.md).
+The separate `tests/test_worktree_state_preservation.py` packet qualifies unsafe
+placement refusal and existing/restored nested-marker retention across prune,
+verified-archive reconciliation, compaction, replacement and generic cleanup.

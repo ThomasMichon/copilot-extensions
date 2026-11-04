@@ -19,6 +19,7 @@ from agent_logger.aggregate_machine import resolve_machine_identity
 from agent_logger.sync.targets import build_target
 from agent_logger.sync.targets.base import Target
 from agent_logger.sync.worktree_state_namespace import DIRECTORY
+from agent_logger.sync.worktree_state_preservation import validate_collection_root
 
 MAX_MANIFEST_BYTES = 16384
 MAX_MEMBER_BYTES = 1 << 30
@@ -155,6 +156,10 @@ def admit_collection(
     if root is None:
         raise WorktreeStateError("active target does not support typed worktree-state collection")
     root = _native_root(root)
+    try:
+        validate_collection_root(root)
+    except ValueError as error:
+        raise WorktreeStateError(str(error)) from error
     configured = build_target(cfg.sync_target, cfg.target_options(cfg.sync_target))
     configured_root = configured.worktree_state_root()
     if configured_root is None or _native_root(configured_root) != root:
