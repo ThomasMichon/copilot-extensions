@@ -191,6 +191,8 @@ class ReplayStore:
         )
         if version == 3:
             from .conversation_journal import ConversationJournal
+            if not isinstance(document["conversations"], dict):
+                raise ReplayStoreInvalid("persisted conversation journal must be an object")
             try:
                 journal = ConversationJournal(document["conversations"])
             except ValueError:

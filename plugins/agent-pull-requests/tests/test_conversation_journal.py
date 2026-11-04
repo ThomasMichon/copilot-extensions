@@ -287,3 +287,30 @@ def test_corrupt_state_is_not_reinitialized(owner, mutation):
     with pytest.raises((ValueError, ReplayStoreInvalid)):
         journal.events(observation().key, after=None, limit=16, expires_at=200)
     assert owner.path.read_bytes() == raw
+
+
+@pytest.mark.parametrize("invalid", [None, [], False, 0, ""])
+def test_missing_journal_object_is_never_first_provisioning_for_any_owner_operation(
+    owner, invalid
+):
+    journal = ConversationStore(owner)
+    journal.adopt(lifecycle_checkpoint=lambda: None, expires_at=200)
+    journal.observe(observation(), expected=None, expires_at=200)
+    document = json.loads(owner.path.read_bytes())
+    document["conversations"] = invalid
+    raw = json.dumps(document).encode()
+    owner.path.write_bytes(raw)
+    for operation in (
+        lambda: journal.capabilities(expires_at=200),
+        lambda: journal.observe(observation(), expected=None, expires_at=200),
+        lambda: journal.adopt(lifecycle_checkpoint=lambda: None, expires_at=200),
+        lambda: owner.execute(
+            ConsumerScope("consumer-a", "account-a", "example/project"),
+            "pending",
+            {},
+            expires_at=200,
+        ),
+    ):
+        with pytest.raises(ReplayStoreInvalid):
+            operation()
+        assert owner.path.read_bytes() == raw
