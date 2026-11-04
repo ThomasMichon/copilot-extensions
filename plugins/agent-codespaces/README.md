@@ -11,6 +11,12 @@ yet. The explicit `AGENT_BRIDGE_PROVIDERS_DIR` override wins; otherwise the
 directory belongs to `AGENT_BRIDGE_CONFIG_DIR` or the default Bridge config root.
 Without a config override, an explicit `AGENT_BRIDGE_INSTALL_DIR` precedes the
 home-directory fallback, matching Bridge's own configuration-root resolution.
+An override whose final component is exactly `providers.d` must have a parent
+lexically matching that declared config root; otherwise setup refuses before
+creating directories or publishing. Comparison expands home/relative paths,
+normalizes path syntax and Windows case, but never resolves links or activates
+Source/Bridge to infer another installation. Other override directory names
+retain Bridge's explicit escape-hatch behavior.
 Publication is atomic, create-only and idempotent through the canonical drop-in
 writer. It never invokes a registration hook or backend.
 An identical concurrent reader may wait up to one second for this target's

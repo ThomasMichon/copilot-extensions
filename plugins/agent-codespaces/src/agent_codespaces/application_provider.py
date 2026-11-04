@@ -14,6 +14,13 @@ from plugin_resolve import split_source
 MANIFEST_NAME = "agent-codespaces.standalone.json"
 
 
+def _normalized_path(path: Path) -> str:
+    raw = os.path.abspath(os.fspath(path.expanduser()))
+    if os.name == "nt":
+        return os.path.normcase(raw).replace("/", "\\")
+    return os.path.normpath(raw)
+
+
 class _PendingLink(RuntimeError):
     def __init__(self, identity):
         super().__init__("CodeSpaces provider declaration must be an ordinary file")
@@ -81,15 +88,15 @@ def _settled_target_document(path: Path):
 def register_installed_application() -> Path:
     """Create only this app's plain contribution; preserve all other producers."""
     override = os.environ.get("AGENT_BRIDGE_PROVIDERS_DIR")
-    directory = (
-        Path(override).expanduser() if override else
-        Path(
-            os.environ.get("AGENT_BRIDGE_CONFIG_DIR")
-            or os.environ.get("AGENT_BRIDGE_INSTALL_DIR")
-            or Path.home() / ".agent-bridge"
-        ).expanduser()
-        / "providers.d"
-    )
+    config_root = Path(
+        os.environ.get("AGENT_BRIDGE_CONFIG_DIR")
+        or os.environ.get("AGENT_BRIDGE_INSTALL_DIR")
+        or Path.home() / ".agent-bridge"
+    ).expanduser()
+    directory = Path(override).expanduser() if override else config_root / "providers.d"
+    if (override and directory.name == "providers.d"
+            and _normalized_path(directory.parent) != _normalized_path(config_root)):
+        raise RuntimeError("CodeSpaces provider directory targets a different Bridge configuration root")
     target = directory / MANIFEST_NAME
     command = Path.home() / ".local" / "bin" / (
         "agent-codespaces.cmd" if os.name == "nt" else "agent-codespaces"

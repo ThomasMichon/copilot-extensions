@@ -133,6 +133,7 @@ def test_concurrent_identical_setup_waits_for_link_cleanup(tmp_path, monkeypatch
     registry = tmp_path / "providers.d"
     registry.mkdir()
     monkeypatch.setenv("AGENT_BRIDGE_PROVIDERS_DIR", str(registry))
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(registry.parent))
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
     target = registry / application_provider.MANIFEST_NAME
     published = threading.Event()
@@ -222,6 +223,7 @@ def test_target_settlement_refuses_interrupt_or_identity_change(tmp_path, monkey
 
     registry = tmp_path / "providers.d"
     monkeypatch.setenv("AGENT_BRIDGE_PROVIDERS_DIR", str(registry))
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(registry.parent))
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
     target = application_provider.register_installed_application()
     before = target.read_bytes(), target.stat().st_mtime_ns
@@ -308,6 +310,7 @@ def test_plain_setup_has_no_source_activation_or_backend_prerequisite(tmp_path, 
     import plugin_activation
 
     monkeypatch.setenv("AGENT_BRIDGE_PROVIDERS_DIR", str(tmp_path / "providers.d"))
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path))
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
     fail = lambda *a, **k: pytest.fail("unexpected activation, source proof, or backend effect")
     monkeypatch.setattr(plugin_activation, "resolve_active_plugins", fail)
@@ -333,6 +336,7 @@ def test_setup_preserves_a_foreign_namespace_contribution(
     registry = tmp_path / "providers.d"
     registry.mkdir()
     monkeypatch.setenv("AGENT_BRIDGE_PROVIDERS_DIR", str(registry))
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(registry.parent))
     foreign = registry / filename
     contents = {"namespace": "codespace:", "command": ["foreign"]}
     if attributed:
@@ -377,6 +381,98 @@ def test_install_root_override_matches_actual_bridge_consumer(tmp_path, monkeypa
     assert found.manifests["codespace"].command == (str(command),)
 
 
+@pytest.mark.parametrize("existing", [False, True])
+def test_mismatched_canonical_provider_override_refuses_before_mutation(
+    tmp_path, monkeypatch, existing,
+):
+    from agent_codespaces import application_provider
+
+    registry = tmp_path / "custom" / "providers.d"
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.setenv("AGENT_BRIDGE_PROVIDERS_DIR", str(registry))
+    monkeypatch.delenv("AGENT_BRIDGE_CONFIG_DIR", raising=False)
+    if existing:
+        monkeypatch.setenv("AGENT_BRIDGE_INSTALL_DIR", str(registry.parent))
+        application_provider.register_installed_application()
+        (registry / "unrelated.json").write_text('{"namespace":"other"}\n')
+    before = {path: (path.read_bytes(), path.stat().st_mtime_ns)
+              for path in registry.iterdir()} if existing else {}
+    monkeypatch.setenv("AGENT_BRIDGE_INSTALL_DIR", str(tmp_path / "bridge"))
+    monkeypatch.syspath_prepend(str(PLUGIN.parents[1] / "plugins" / "agent-bridge" / "src"))
+    from agent_bridge import provider_sources
+
+    monkeypatch.setattr(provider_sources, "resolve_active_plugins",
+                        lambda: pytest.fail("mismatch must not resolve activation"))
+    rejected = provider_sources.scan_provider_registry()
+    assert not rejected.manifests
+    assert any(item.reason == "bridge-install-mismatch" for item in rejected.findings)
+    with pytest.raises(RuntimeError, match="different Bridge configuration root"):
+        application_provider.register_installed_application()
+    if existing:
+        assert {path: (path.read_bytes(), path.stat().st_mtime_ns)
+                for path in registry.iterdir()} == before
+    else:
+        assert not registry.parent.exists()
+
+
+@pytest.mark.parametrize("dirname", ["standalone-providers", "PROVIDERS.D"])
+def test_noncanonical_provider_override_remains_discoverable(tmp_path, monkeypatch, dirname):
+    from agent_codespaces import application_provider
+
+    home = tmp_path / "home"
+    registry = tmp_path / "custom" / dirname
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setenv("AGENT_BRIDGE_PROVIDERS_DIR", str(registry))
+    monkeypatch.delenv("AGENT_BRIDGE_CONFIG_DIR", raising=False)
+    monkeypatch.setenv("AGENT_BRIDGE_INSTALL_DIR", str(tmp_path / "bridge"))
+    command = home / ".local" / "bin" / (
+        "agent-codespaces.cmd" if os.name == "nt" else "agent-codespaces"
+    )
+    command.parent.mkdir(parents=True)
+    command.write_text("fixture installed global command\n")
+    command.chmod(0o700)
+    assert application_provider.register_installed_application().parent == registry
+    monkeypatch.syspath_prepend(str(PLUGIN.parents[1] / "plugins" / "agent-bridge" / "src"))
+    from agent_bridge import provider_sources
+
+    monkeypatch.setattr(provider_sources, "resolve_active_plugins",
+                        lambda: pytest.fail("plain discovery must not resolve activation"))
+    assert provider_sources.scan_provider_registry().manifests["codespace"].command == (str(command),)
+
+
+def test_matching_override_uses_lexical_config_precedence_without_activation(tmp_path, monkeypatch):
+    from agent_codespaces import application_provider
+
+    home = tmp_path / "home"
+    (home / "anchor").mkdir(parents=True)
+    registry = home / "anchor" / ".." / "bridge-root" / "providers.d"
+    if os.name == "nt":
+        registry = Path(str(registry.parent).upper()) / "providers.d"
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("AGENT_BRIDGE_PROVIDERS_DIR", str(registry))
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(Path("~") / "bridge-root"))
+    monkeypatch.setenv("AGENT_BRIDGE_INSTALL_DIR", str(tmp_path / "other-install"))
+    command = home / ".local" / "bin" / (
+        "agent-codespaces.cmd" if os.name == "nt" else "agent-codespaces"
+    )
+    command.parent.mkdir(parents=True)
+    command.write_text("fixture installed global command\n")
+    command.chmod(0o700)
+    monkeypatch.syspath_prepend(str(PLUGIN.parents[1] / "plugins" / "agent-bridge" / "src"))
+    from agent_bridge import provider_sources
+
+    fail = lambda *a, **k: pytest.fail("must not resolve paths or activate Source/plugins")
+    monkeypatch.setattr(provider_sources, "resolve_active_plugins", fail)
+    with monkeypatch.context() as paths:
+        paths.setattr(Path, "resolve", fail)
+        declaration = application_provider.register_installed_application()
+        found = provider_sources.scan_provider_registry()
+    assert declaration.parent == registry
+    assert found.manifests["codespace"].command == (str(command),)
+
+
 @pytest.mark.parametrize("already_published", [False, True])
 def test_peer_enumeration_failure_preserves_registry(tmp_path, monkeypatch, already_published):
     from agent_codespaces import application_provider
@@ -384,6 +480,7 @@ def test_peer_enumeration_failure_preserves_registry(tmp_path, monkeypatch, alre
     registry = tmp_path / "providers.d"
     registry.mkdir()
     monkeypatch.setenv("AGENT_BRIDGE_PROVIDERS_DIR", str(registry))
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(registry.parent))
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
     (registry / "unrelated.json").write_text('{"namespace":"other"}\n')
     if already_published:
@@ -411,6 +508,7 @@ def test_oversized_provider_is_isolated_only_when_unrelated(tmp_path, monkeypatc
     registry = tmp_path / "providers.d"
     registry.mkdir()
     monkeypatch.setenv("AGENT_BRIDGE_PROVIDERS_DIR", str(registry))
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(registry.parent))
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
     large = registry / (application_provider.MANIFEST_NAME if owned else "unrelated.json")
     large.write_text(json.dumps({"namespace": "unrelated", "padding": "x" * 65536}))
