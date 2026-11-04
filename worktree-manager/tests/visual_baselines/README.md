@@ -10,8 +10,8 @@ count are compared as rendered, not reconstructed from DTOs.
 
 These are rendered fixture screens, not native tmux/PSMux screenshots,
 installed-runtime evidence or a complete Companion-app baseline. Only remote
-font-loading declarations are omitted; text, styles, coordinates, clipping
-and geometry are retained. SVG viewers use their available monospace font.
+font-loading declarations and blank-line indentation are omitted; text, styles,
+coordinates, clipping and geometry are retained. SVG viewers use their available monospace font.
 The regression compares SVG rendering instructions, not browser-rasterized
 pixels, so browser/font differences are outside its scope.
 

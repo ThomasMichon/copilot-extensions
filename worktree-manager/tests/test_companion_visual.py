@@ -59,7 +59,8 @@ def visual_window() -> TimelineWindow:
 
 def offline_svg(svg: str) -> str:
     # Keep every rendered cell, style and coordinate; omit only remote font loading.
-    return re.sub(r"    @font-face \{.*?\n    \}\n", "", svg, flags=re.DOTALL)
+    svg = re.sub(r"    @font-face \{.*?\n    \}\n", "", svg, flags=re.DOTALL)
+    return re.sub(r"(?m)^[ \t]+$", "", svg)
 
 
 @pytest.mark.parametrize("state", ["live", "browsing"])
