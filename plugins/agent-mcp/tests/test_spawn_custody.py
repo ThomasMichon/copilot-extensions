@@ -53,7 +53,7 @@ def test_first_reservation_checks_selected_socket_parent(tmp_path, monkeypatch, 
             forward._spawn_serve_host(str(selected / "serve.sock"))
         else:
             cutover.spawn_passive_daemon(SimpleNamespace(
-                data_root=home, new_socket_path=selected / "serve.sock",
+                data_root=home, config_home=None, new_socket_path=selected / "serve.sock",
                 new_log_path=home / "serve.log", new_control_token="synthetic",
                 token_by_port={},
             ), 41234)
