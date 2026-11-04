@@ -366,6 +366,9 @@ Each call observes a fresh read-only snapshot, not one stable transcript across
 concurrent writes. History is neither deleted nor capped, and existing JSON
 limits remain unchanged. Incoming command-target inspection resolves its exact
 reservation independently from the displayed page.
+Expected target-proof, native lease and I/O failures use the normal
+`fleet-manager:` CLI refusal with no inspection JSON, rather than a traceback;
+no target or foreign object is adopted or changed by that refusal.
 
 A refused publication does not undo an independently started direct command.
 Retry the same explicit request rather than silently allocating new identifiers.

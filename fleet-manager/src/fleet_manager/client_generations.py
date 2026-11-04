@@ -211,7 +211,9 @@ def _read(connection, identity, location):
 def _legacy_snapshot(root, identity):
     with client_admission._root(root) as (path, database_root, unchanged):
         client_admission._lease_shape(path)
-        database = client_admission._ordinary_file(path / client_admission.DATABASE)
+        database = client_admission._ordinary_file(
+            path / client_admission.DATABASE, sqlite_state=True,
+        )
         with client_admission._connection(
             path, database_root=database_root, readonly=True,
         ) as connection:
@@ -224,7 +226,7 @@ def _legacy_snapshot(root, identity):
             }
             unchanged()
             if artifact_staging._identity(client_admission._ordinary_file(
-                path / client_admission.DATABASE,
+                path / client_admission.DATABASE, sqlite_state=True,
             )) != artifact_staging._identity(database):
                 raise PlanError("client lineage legacy database changed during import")
             return result
@@ -346,7 +348,7 @@ def _reserve_generation(root, identity, selection, staged, *, generation, reques
             identity, selection, staged, current_policy, current_target, clock,
         )
         with client_admission._root(root) as (path, _, unchanged):
-            client_admission._ordinary_file(path / client_admission.DATABASE)
+            client_admission._ordinary_file(path / client_admission.DATABASE, sqlite_state=True)
             unchanged()
         with (
             staged._retained_authentication(policy, clock=clock) as (manifest, authenticate),

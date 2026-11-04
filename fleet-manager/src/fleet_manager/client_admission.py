@@ -11,7 +11,7 @@ import sys
 import time
 
 from . import artifact_staging
-from .planning import PlanError, canonical, decode, identifier, integer, record
+from .planning import MAX_BYTES, PlanError, canonical, decode, identifier, integer, record
 from .private_state import windows_private as _windows_private
 from .release_selection import ReleaseSelection
 from .staging_cleanup import _windows_handle
@@ -92,7 +92,7 @@ def _root(root):
         yield root, database_root, unchanged
 
 
-def _ordinary_file(path):
+def _ordinary_file(path, *, sqlite_state=False):
     info = artifact_staging._file_stat(path)
     if info.st_nlink != 1:
         raise PlanError("client admission refuses multiply linked state")
@@ -100,7 +100,8 @@ def _ordinary_file(path):
         info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) & 0o077
     ):
         raise PlanError("client admission state is not private to its owner")
-    if info.st_size > 4 * 1024 * 1024:
+    # SQLite pages/journals grow independently of bounded JSON metadata.
+    if not sqlite_state and info.st_size > 4 * 1024 * 1024:
         raise PlanError("client admission state exceeds its byte bound")
     if os.name == "nt":
         _windows_private(path)
@@ -157,12 +158,12 @@ def _check_database_header(path, expected, *, initializing):
 
 @contextmanager
 def _connection(root, *, database_root, readonly, initializing=False):
-    before = _ordinary_file(root / DATABASE)
+    before = _ordinary_file(root / DATABASE, sqlite_state=True)
     database = database_root / DATABASE
     for suffix in ("-wal", "-shm", "-journal"):
         sidecar = root / (DATABASE + suffix)
         if sidecar.exists() or sidecar.is_symlink():
-            _ordinary_file(sidecar)
+            _ordinary_file(sidecar, sqlite_state=True)
             if suffix != "-journal":
                 raise PlanError("client admission refuses unsupported WAL state")
     with ExitStack() as stack:
@@ -174,8 +175,12 @@ def _connection(root, *, database_root, readonly, initializing=False):
             uri=True, timeout=30, isolation_level=None,
         )
         try:
-            if artifact_staging._identity(_ordinary_file(root / DATABASE)) != artifact_staging._identity(before):
+            if artifact_staging._identity(_ordinary_file(
+                root / DATABASE, sqlite_state=True,
+            )) != artifact_staging._identity(before):
                 raise PlanError("client admission database identity changed")
+            if hasattr(connection, "setlimit"):
+                connection.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, MAX_BYTES)
             connection.execute("PRAGMA trusted_schema = OFF")
             if connection.execute("PRAGMA journal_mode").fetchone() != ("delete",):
                 raise PlanError("client admission requires the owned rollback-journal format")
@@ -405,7 +410,7 @@ def recover_client_admission(root, identity):
     identity = _identity(identity)
     try:
         with _root(root) as (path, _, unchanged):
-            _ordinary_file(path / DATABASE)
+            _ordinary_file(path / DATABASE, sqlite_state=True)
             _lease_shape(path)
             unchanged()
         with _owned(root) as (path, database_root, unchanged):

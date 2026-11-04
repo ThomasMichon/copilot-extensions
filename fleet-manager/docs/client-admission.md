@@ -59,6 +59,14 @@ accepted sequence, manifest digest, selected decision and decision digest, plus
 the original admission time. It is local lifecycle state, not the fleet
 operation ledger or node journal.
 
+SQLite page storage and rollback journals are separate from bounded metadata
+files: valid retained state is not limited to a 4 MiB database. Ordinary JSON
+and lease files keep their existing file bound, and every decoded record keeps
+its JSON limits. On Python interfaces providing SQLite `setlimit`, the
+connection also applies the existing per-value byte limit. Private ownership,
+single-link/ordinary-file checks, physical database identity, header, exact
+schema and integrity validation remain required.
+
 Initialization/admission reuse the canonical versioned-runtime construction
 lease named `client-admission`, with persistent ownership metadata under
 `.construction-leases`. Deleting that lock file is not a recovery procedure:

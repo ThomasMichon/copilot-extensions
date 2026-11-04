@@ -23,21 +23,26 @@ def inspect_command_targets(root, identity, reservation, *, command_directory):
     """Observe fixed incoming targets; never infer permission from old receipts."""
     identity = admission._identity(identity)
     reservation = generations._reservation(reservation, identity)
-    observed = generations.inspect_client_generations(
-        root, identity, generation=reservation["generation"],
-    )
-    if observed["reservations"].get(reservation["generation"]) != reservation:
-        raise PlanError("command targets require the exact existing generation reservation")
-    with admission._root(command_directory) as (directory, _anchor, unchanged):
-        if directory.is_relative_to(Path(root)) or Path(root).is_relative_to(directory):
-            raise PlanError("client commands require a separate explicit private directory")
-        with artifact_staging._primitive() as primitive:
-            publication = primitive._runtime_component("versioned_runtime_publication")
-            targets = frontdoor._command_paths(directory)
-            with publication.target_leases(Path(root), targets):
-                result = _command_targets(identity, reservation, directory, targets, publication)
-                unchanged()
-                return result
+    try:
+        observed = generations.inspect_client_generations(
+            root, identity, generation=reservation["generation"],
+        )
+        if observed["reservations"].get(reservation["generation"]) != reservation:
+            raise PlanError("command targets require the exact existing generation reservation")
+        with admission._root(command_directory) as (directory, _anchor, unchanged):
+            if directory.is_relative_to(Path(root)) or Path(root).is_relative_to(directory):
+                raise PlanError("client commands require a separate explicit private directory")
+            with artifact_staging._primitive() as primitive:
+                publication = primitive._runtime_component("versioned_runtime_publication")
+                targets = frontdoor._command_paths(directory)
+                with publication.target_leases(Path(root), targets):
+                    result = _command_targets(identity, reservation, directory, targets, publication)
+                    unchanged()
+                    return result
+    except PlanError:
+        raise
+    except (OSError, sqlite3.Error, subprocess.SubprocessError, RuntimeError, ValueError):
+        raise PlanError("client command targets could not be inspected without mutation") from None
 
 
 def _command_targets(identity, reservation, directory, targets, publication):
@@ -99,7 +104,7 @@ def _legacy_commands(origin, identity, directory, publication):
     if generations._location(path) != legacy["location"]:
         raise PlanError("client legacy command origin changed")
     if list(artifact_staging._identity(admission._ordinary_file(
-        path / admission.DATABASE,
+        path / admission.DATABASE, sqlite_state=True,
     ))) != legacy["database"]:
         raise PlanError("client legacy command database changed")
     namespace = path / construction.NAMESPACE

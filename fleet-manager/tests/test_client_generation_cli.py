@@ -13,13 +13,13 @@ import pytest
 
 from fleet_manager import client_admission as admission, client_generations as generations
 from fleet_manager.__main__ import main
-from fleet_manager.planning import canonical, digest
+from fleet_manager.planning import PlanError, canonical, digest
 from test_artifact_staging import primitive as primitive  # noqa: F401
 from test_client_admission import database_bytes, identity, independently_sign, retained, selection
 from test_client_construction import signed_wheel as signed_wheel, target  # noqa: F401
 from test_client_distribution import FLAGS
 from test_client_generation_construction import direct_health
-from test_client_generations import FIRST, lineage_at, reserve, state
+from test_client_generations import FIRST, SECOND, lineage_at, reserve, state
 from test_release_auth import artifact_fixture
 
 
@@ -186,6 +186,115 @@ def test_large_retained_history_is_paged_and_exact_request_remains_recoverable(
     )
     assert targets["reservation_digest"] == digest(reservation)
     assert all(value is None for value in targets["targets"].values())
+    assert database_bytes(root) == before
+
+
+@pytest.mark.timeout(90)
+def test_growing_sqlite_lineage_preserves_inspection_retry_and_retirement(tmp_path, primitive, capsys):
+    root = lineage_at(tmp_path)
+    fixture = artifact_fixture(tmp_path)
+    generations._initialize_lineage(root, identity())
+    paths = inputs_at(tmp_path)
+    base = ["client-generation", "inspect", "--root", str(root),
+            "--identity", str(paths["identity"]), "--generation"]
+    with retained(fixture, tmp_path) as (staged, trusted):
+        first = reserve(root, fixture, staged, trusted)
+        rows = []
+        for number in range(1, 8001):
+            generation = f"{number:032x}"
+            request = f"history-{number:06d}-" + "x" * 100
+            previous = {**first, "generation": generation, "request": request}
+            rows.append((generation, request, canonical(previous).decode()))
+        with sqlite3.connect(root / admission.DATABASE) as connection:
+            connection.executemany("INSERT INTO generations VALUES (?, ?, ?, NULL, NULL)", rows)
+        assert (root / admission.DATABASE).stat().st_size > 4 * 1024 * 1024
+        assert main(base + [FIRST]) == 0
+        assert json.loads(capsys.readouterr().out)["reservations"] == {FIRST: first}
+        second = reserve(root, fixture, staged, trusted, generation=SECOND, request="large-retry")
+        before = database_bytes(root)
+        assert reserve(
+            root, fixture, staged, trusted, generation=SECOND, request="large-retry",
+        ) == second
+        assert database_bytes(root) == before
+        tombstone = generations._retire_generation(root, identity(), first, clock=lambda: 151)
+        assert main(base + [FIRST]) == 0
+        report = json.loads(capsys.readouterr().out)
+        assert report["retired"][FIRST] == tombstone and report["current_generation"] == SECOND
+    metadata = root / "bounded-metadata"
+    with metadata.open("xb") as stream:
+        os.chmod(metadata, 0o600)
+        stream.truncate(4 * 1024 * 1024 + 1)
+    with pytest.raises(PlanError, match="byte bound"):
+        admission._ordinary_file(metadata)
+
+
+@pytest.mark.parametrize("kind", ["directory", "symlink"])
+def test_command_target_inspection_reports_nonordinary_targets_without_traceback(
+    tmp_path, primitive, capsys, kind,
+):
+    from fleet_manager import client_frontdoor
+
+    root = lineage_at(tmp_path)
+    fixture = artifact_fixture(tmp_path)
+    generations._initialize_lineage(root, identity())
+    with retained(fixture, tmp_path) as (staged, trusted):
+        reservation = reserve(root, fixture, staged, trusted)
+    paths = inputs_at(tmp_path)
+    saved = tmp_path / "reservation.json"
+    saved.write_bytes(canonical(reservation))
+    directory = tmp_path / "commands"
+    directory.mkdir(mode=0o700)
+    command = client_frontdoor._command_paths(directory)[0]
+    foreign = tmp_path / "foreign"
+    foreign.write_bytes(b"preserved target")
+    if kind == "directory":
+        command.mkdir(mode=0o700)
+    else:
+        try:
+            command.symlink_to(foreign)
+        except OSError:
+            pytest.skip("native symlink creation is unavailable")
+    before = database_bytes(root)
+    assert main([
+        "client-generation", "inspect-command-targets", "--root", str(root),
+        "--identity", str(paths["identity"]), "--reservation", str(saved),
+        "--command-directory", str(directory),
+    ]) == 1
+    refused = capsys.readouterr()
+    assert not refused.out and refused.err.startswith("fleet-manager:")
+    assert "Traceback" not in refused.err
+    assert foreign.read_bytes() == b"preserved target" and database_bytes(root) == before
+
+
+@pytest.mark.parametrize("boundary", ["lease", "read"])
+def test_command_target_inspection_normalizes_native_failures(
+    tmp_path, primitive, monkeypatch, capsys, boundary,
+):
+    root = lineage_at(tmp_path)
+    fixture = artifact_fixture(tmp_path)
+    generations._initialize_lineage(root, identity())
+    with retained(fixture, tmp_path) as (staged, trusted):
+        reservation = reserve(root, fixture, staged, trusted)
+    paths = inputs_at(tmp_path)
+    saved = tmp_path / "reservation.json"
+    saved.write_bytes(canonical(reservation))
+    directory = tmp_path / "commands"
+    directory.mkdir(mode=0o700)
+    publication = primitive._runtime_component("versioned_runtime_publication")
+
+    def unavailable(*_args, **_kwargs):
+        raise OSError("private injected native failure")
+
+    monkeypatch.setattr(publication, "target_leases" if boundary == "lease" else "state_path", unavailable)
+    before = database_bytes(root)
+    assert main([
+        "client-generation", "inspect-command-targets", "--root", str(root),
+        "--identity", str(paths["identity"]), "--reservation", str(saved),
+        "--command-directory", str(directory),
+    ]) == 1
+    refused = capsys.readouterr()
+    assert not refused.out and refused.err.startswith("fleet-manager:")
+    assert "private injected native failure" not in refused.err and "Traceback" not in refused.err
     assert database_bytes(root) == before
 
 

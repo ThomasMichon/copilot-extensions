@@ -3517,6 +3517,12 @@ retirement records exercises actual CLI page serialization, complete traversal,
 exact interrupted-request lookup outside the first page and command-target
 inspection. It preserves all database bytes and existing JSON bounds; this is
 state-inspection evidence, not 514 runtime installations.
+An additional valid SQLite fixture grows beyond 4 MiB and retains exact
+inspection, new reservation, exact retry and retirement access while a separate
+oversized metadata file still refuses. Target-inspection cases exercise actual
+nonordinary command objects plus injected native lease/read failures through
+the CLI, requiring the normal refusal without a traceback. Native symlink
+creation is explicitly platform-qualified or skipped, not credited implicitly.
 Independent actual installed-console cases cover construction/retry,
 default publication/retry, exact withdrawal/retry and exact runtime removal/
 retry with current independently signed artifacts and real direct diagnostics.
