@@ -290,6 +290,7 @@ class TaskRecoveryMixin:
             self._audit(
                 conn, task_id, ts=ts, from_status=task.status, to_status=destination,
                 worker=actor, note=f"{operation}: {reason}",
+                unassigned_worker=task.owner if destination == Status.QUEUED else None,
             )
             updated = self._fetch(conn, task_id)
             result = {

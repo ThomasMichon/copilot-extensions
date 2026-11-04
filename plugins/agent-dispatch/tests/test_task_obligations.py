@@ -64,6 +64,72 @@ def test_only_confirmed_unassignment_to_unbound_queue_is_a_release_outcome(q):
     assert read_snapshot(q, task_id)["release_outcome"] is None
 
 
+@pytest.mark.parametrize("operation", ["detach_agent", "reset_queued"])
+def test_recovery_keeps_former_assignment_identity_separate_from_operator(q, operation):
+    task_id = claimed(q)
+    q.recover_task(
+        task_id, operation=operation, actor="operator", reason="explicit recovery",
+        expected_revision=q.task_diagnostics(task_id)["revision"], request_id="detach-1",
+    )
+    value = read_snapshot(q, task_id)
+    assert value["release_outcome"] == "unassigned_queued"
+    assert value["unassignment"]["worker_id"] == "machine/worktree"
+    assert q.events(task_id)[-1]["worker"] == "operator"
+    with q._connect() as conn:
+        recorded = conn.execute(
+            "SELECT unassigned_worker FROM task_events WHERE id=?", (value["unassignment"]["event_id"],),
+        ).fetchone()
+    assert recorded[0] == "machine/worktree"
+
+
+def test_old_audit_writer_without_former_worker_does_not_invent_assignment_identity(q):
+    task_id = claimed(q)
+    with q._connect() as conn:
+        conn.execute("UPDATE tasks SET status='queued', owner=NULL WHERE id=?", (task_id,))
+        conn.execute(
+            "INSERT INTO task_events(task_id, ts, from_status, to_status, worker, note)"
+            " VALUES (?, 1, 'claimed', 'queued', 'operator', 'legacy detach')", (task_id,),
+        )
+    value = read_snapshot(q, task_id)
+    assert value["unassignment"] is None and value["release_outcome"] is None
+
+
+def test_task_event_migration_preserves_actor_and_does_not_backfill_former_worker(q):
+    task_id = claimed(q)
+    q.yield_task(task_id, "machine/worktree")
+    with q._connect() as conn:
+        conn.execute("ALTER TABLE task_events DROP COLUMN unassigned_worker")
+    migrated = TaskQueue(q.db_path)
+    value = read_snapshot(migrated, task_id)
+    assert value["unassignment"] is None and value["release_outcome"] is None
+    assert migrated.events(task_id)[-1]["worker"] == "machine/worktree"
+
+
+def test_hard_worktree_requirement_survives_claim_and_yield(q):
+    task = q.create("work", repo="project", requires=["worktree:workspace"])
+    owner = "machine/workspace"
+    assert q.claim_one(
+        owner, machine="machine", worktree="workspace", task_id=task.id,
+    ) is not None
+    q.yield_task(task.id, owner)
+    value = read_snapshot(q, task.id)
+    assert value["bindings"]["worktree_requirement"]
+    assert value["release_outcome"] is None
+    assert q.claim_one(
+        "other/elsewhere", machine="other", worktree="elsewhere", task_id=task.id,
+    ) is None
+
+
+@pytest.mark.parametrize("requires", ["null", "{}", "[1]", "invalid-json"])
+def test_malformed_requirements_cannot_prove_no_worktree_requirement(q, requires):
+    task_id = claimed(q)
+    q.yield_task(task_id, "machine/worktree")
+    with q._connect() as conn:
+        conn.execute("UPDATE tasks SET requires=? WHERE id=?", (requires, task_id))
+    value = read_snapshot(q, task_id)
+    assert value["bindings"]["worktree_requirement"] and value["release_outcome"] is None
+
+
 @pytest.mark.parametrize("binding", ["owner", "owner_session_id", "target_worktree", "hold_reason"])
 def test_queued_status_does_not_override_retained_binding_or_hold(q, binding):
     task_id = claimed(q)
@@ -106,6 +172,7 @@ def test_allocator_assignment_and_unreleased_spawn_bind_even_without_task_owner(
         q._audit(
             conn, task_id, ts=1, from_status="claimed", to_status="queued",
             worker=binding["worker_id"], note="test disposition",
+            unassigned_worker=binding["worker_id"],
         )
     assert read_snapshot(q, task_id)["release_outcome"] is None
 
@@ -124,6 +191,7 @@ def test_undisposed_or_unknown_spawn_binding_does_not_prove_unassignment(q, stat
         q._audit(
             conn, task_id, ts=1, from_status="claimed", to_status="queued",
             worker=binding["worker_id"], note="test disposition",
+            unassigned_worker=binding["worker_id"],
         )
     value = read_snapshot(q, task_id)
     assert value["bindings"]["spawn_reservation"] and value["release_outcome"] is None

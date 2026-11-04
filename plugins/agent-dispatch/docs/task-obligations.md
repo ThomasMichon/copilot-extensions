@@ -22,9 +22,9 @@ The object contains:
 | Field | Meaning |
 |---|---|
 | `task_id`, `generation`, `state` | Current task incarnation and lifecycle state |
-| `bindings` | Boolean presence of task owner, native owner, explicit target worktree, unreleased pool assignment and unresolved spawn binding |
+| `bindings` | Boolean presence of task owner, native owner, explicit target worktree, hard worktree requirement, unreleased pool assignment and unresolved spawn binding |
 | `held` | Any retained task hold field |
-| `unassignment` | Latest transition from claimed, started or suspended to queued, with its event id, original worker id and prior state; otherwise null |
+| `unassignment` | Latest transition from claimed, started or suspended to queued, with its event id, separately recorded former worker id and prior state; otherwise null |
 | `release_outcome` | `completed`, `unassigned_queued`, or null |
 
 `completed` reports the existing authoritative `COMPLETED` state. This preserves
@@ -38,6 +38,16 @@ binding and a recorded state-changing unassignment event. Initial queued work,
 an unaudited status edit, a still-bound queued task, `SUBMITTED`, suspension,
 abandonment and dead-letter status do not satisfy it. Lease expiry, process exit,
 idle time and native liveness are not settlement inputs.
+Hard `requires=["worktree:<id>"]` routing remains a binding after yield, just as
+an explicit target worktree does. Malformed requirement storage is not positive
+absence of a worktree requirement.
+
+The existing audit row retains nullable `unassigned_worker` independently of
+its `worker` field, which may instead identify the operator performing recovery.
+Yield, suspended release, explicit recovery and pool decline record the actual
+former worker in that same disposition transaction. Historical rows and older
+writers without this fact cannot establish unassignment evidence; the provider
+does not guess the former worker from an audit actor or backfill legacy history.
 
 A reservation with a confirmed release request in `RELEASING` is no longer a
 logical task binding. Its separate allocation/native-retirement obligation and

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 from .queue_records import SpawnState, Status
@@ -11,8 +12,20 @@ if TYPE_CHECKING:
 
 SCHEMA = "dispatch-task-obligation"
 VERSION = 1
-_BINDINGS = {"owner", "native", "target_worktree", "pool_assignment", "spawn_reservation"}
+_BINDINGS = {
+    "owner", "native", "target_worktree", "worktree_requirement", "pool_assignment", "spawn_reservation",
+}
 _UNASSIGNABLE = {Status.CLAIMED, Status.STARTED, Status.SUSPENDED}
+
+
+def _worktree_requirement(raw: str) -> bool:
+    try:
+        requires = json.loads(raw)
+    except (ValueError, TypeError):
+        return True
+    if not isinstance(requires, list) or any(not isinstance(item, str) for item in requires):
+        return True
+    return any(item.startswith("worktree:") for item in requires)
 
 
 def read_snapshot(queue: TaskQueue, task_id: str) -> dict | None:
@@ -21,7 +34,7 @@ def read_snapshot(queue: TaskQueue, task_id: str) -> dict | None:
     try:
         conn.execute("BEGIN")
         task = conn.execute(
-            "SELECT id, status, generation, owner, owner_session_id, target_worktree,"
+            "SELECT id, status, generation, owner, owner_session_id, target_worktree, requires,"
             " hold_reason, hold_actor, hold_at FROM tasks WHERE id=?", (task_id,),
         ).fetchone()
         if task is None:
@@ -38,18 +51,18 @@ def read_snapshot(queue: TaskQueue, task_id: str) -> dict | None:
              SpawnState.RELEASING),
         ).fetchone()
         transition = conn.execute(
-            "SELECT id, from_status, to_status, worker FROM task_events"
+            "SELECT id, from_status, to_status, unassigned_worker FROM task_events"
             " WHERE task_id=? AND from_status IS NOT to_status ORDER BY id DESC LIMIT 1",
             (task_id,),
         ).fetchone()
         unassignment = None
         if (
             transition is not None and transition["from_status"] in _UNASSIGNABLE
-            and transition["to_status"] == Status.QUEUED and transition["worker"]
+            and transition["to_status"] == Status.QUEUED and transition["unassigned_worker"]
         ):
             unassignment = {
                 "event_id": transition["id"], "from_state": transition["from_status"],
-                "worker_id": transition["worker"],
+                "worker_id": transition["unassigned_worker"],
             }
         result = {
             "schema": SCHEMA, "version": VERSION, "task_id": task["id"],
@@ -58,6 +71,7 @@ def read_snapshot(queue: TaskQueue, task_id: str) -> dict | None:
                 "owner": task["owner"] is not None,
                 "native": task["owner_session_id"] is not None,
                 "target_worktree": task["target_worktree"] is not None,
+                "worktree_requirement": _worktree_requirement(task["requires"]),
                 "pool_assignment": assignment is not None,
                 "spawn_reservation": reservation is not None,
             },
