@@ -1,6 +1,6 @@
 {
   "name": "fleet-manager-client-admission",
-  "description": "Agent-free fresh-machine proof of installed thin-client admission, durable retry/reopen, revoked-policy refusal and absence of hosting effects.",
+  "description": "Agent-free fresh-machine proof of installed thin-client admission and explicit forward-generation construction, default publication, withdrawal and runtime removal.",
   "tier": "P",
   "family": "F1",
   "image": "base",
@@ -14,7 +14,10 @@
     "a freshly installed wheel's actual console entry point works outside the checkout",
     "explicit client initialization and authenticated selected-release admission persist across processes",
     "same-release retry is idempotent and revoked policy refuses without resetting durable state",
-    "installed client commands preserve user configuration and create no runtime slot, selector, hosting role or Python network use",
+    "admission commands preserve user configuration and create no runtime slot, selector, hosting role or Python network use",
+    "explicit generation commands construct and retry a real installed runtime without implicitly initializing missing state",
+    "exact reservation and publication bindings support separate default registration, withdrawal and native runtime removal with durable retries",
+    "selected runtime removal refuses before retirement and completed cleanup preserves the lineage and admitted floor",
     "missing packaged runtime resources never fall back to a checkout helper"
   ],
   "config": {

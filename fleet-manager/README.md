@@ -165,6 +165,12 @@ real installed console. Construction rechecks current policy and explicit
 API/config/retained-data compatibility, preserves failed-candidate ownership for
 retry, and never publishes an active selector. These prerequisites do not
 complete managed install/update/uninstall or establish fleet readiness.
+The separate [forward-generation CLI](docs/client-construction.md#explicit-generation-cli)
+keeps replacement construction and its direct command independent from optional
+predecessor cleanup. Its explicit `client-generation` operations use one durable
+lineage and exact request/reservation bindings; default-command publication,
+withdrawal and native runtime removal remain separate requests. Version-1
+`client-state` commands do not implicitly adopt or initialize that lineage.
 The separate [owned runtime activation](docs/client-runtime-activation.md)
 transition freshly revalidates that candidate before publishing physically
 attributed local selectors. It supports bounded, proven forward retries, not

@@ -3421,6 +3421,130 @@ with one of `cli_transition`, `commands_and_exact_rerun` or
 and fault controls, using explicitly labelled unit health stubs rather than
 claiming native proof. Split large behavioral selections into disjoint bounded
 groups when needed; an earlier timeout remains a failure, not a waived gate.
+The synthetic frontdoor, withdrawal and retained-recovery fixtures copy only
+the verified launcher resources. Native interpreter import-policy installation
+is a separate required constructor step, not an implicit probe in copy-only
+fixture preparation.
+
+`fleet-manager/tests/test_client_generations.py` exercises lineage initialization,
+exact legacy-floor import, request/generation reservation, physical root intent,
+no-replace publication and refusal/retry using real SQLite and native owners.
+Reservation controls forbid artifact-content reads under central writer custody
+and change current trust, expiry, target and stage retention at acquisition.
+Committed competing requests still fence stale floor/request/generation input;
+the private in-memory authentication scope cannot become reusable evidence.
+Independent-process reservation races commit one current request; exact retry
+cannot reclaim it. State-only selected-owner fixtures exercise conservative
+retirement refusal, not successful publication. Tombstone commit interruptions,
+malformed fences and delayed generation holders exercise durable refusal without
+waiting for old generation custody or deleting runtime/configuration bytes.
+`test_client_generation_construction.py` separately exercises actual installed
+generation health and direct commands while predecessor custody remains held.
+For bounded native selections, run the initialized-predecessor case on its own;
+run `installed_predecessor_preparation` together with
+`real_installed_replacement_starts_with_legacy_construction_and_retention_still_held`.
+The explicit prerequisite owns its existing 90-second clock before replacement
+startup's separate 90-second clock; retain the 120-second caller bound and
+45-second constructor-child bound. Use the canonical environment admission,
+isolated HOME and process containment for exact file/node-ID selections.
+For forward retry/reinstall, select `forward_generation_preparation` with exactly
+one of `same_generation_retry` or the `forward_reinstall` parameters `same`,
+`higher` and `failed-health` per bounded invocation. Direct commands must leave
+the completed fingerprint and file inventory unchanged without relying on
+inherited bytecode-suppression flags. Failed installed diagnostics must preserve
+the usable predecessor and newly admitted floor.
+The same-release native case also retries the older constructed generation
+without reclaiming current authority. Run `retired_generation_stays` separately
+to prove a retained immutable runtime remains directly usable after its
+non-destructive lifecycle tombstone, cannot reconstruct, and does not block
+successor startup.
+The factory-owned ordinary roots avoid adding a test function's name to every
+native runtime path; this is not qualification of overlong Windows executable
+or working-directory paths.
+The separate `test_client_construction_native.py` selector
+`native_launcher_uses_private_short_temporary_path` keeps an overlong candidate
+home while exercising two actual retained-supervisor launches and native
+temporary-file use. Only Windows temporary paths move to the ordinary private
+runtime namespace; home isolation and existing deadlines are unchanged.
+
+`test_client_generation_frontdoor.py` exercises actual installed default commands,
+native copy proofs and durable selection independently from construction.
+Run individual outcome selectors on Windows rather than accumulating several
+runtime constructions under one caller clock. Controls include exact object
+reuse, same/higher-release cutover, actual failed startup, before/after intent
+and acknowledgement commits, pending health, canonical copy rollback proofs,
+superseded acknowledgement, a bound default directory and foreign/same-byte
+commands. Implicit publication still refuses corrupt predecessor proof without
+blocking independent successor startup. Explicit incoming target observations
+instead prove actual default selection with missing and malformed old copy
+receipts, preserving the damaged evidence. Wrong installation/reservation
+snapshots and changed physical targets, including same-byte replacements,
+refuse before command effects. Original-observation retries also cover both
+acknowledgement durability boundaries, native copy recovery over an existing
+baseline and foreign same-byte replacements. Before-effect retries retain
+fresh-target admission even when the interrupted attempt's proof is lost.
+The installed register-console case repeats the original
+`--replacement-targets` file rather than silently switching modes.
+`test_client_generation_publication_native.py`
+pauses an independent publisher after real default health: another process can
+construct the successor while targets remain held; resumed acknowledgement
+refuses without rollback.
+`test_client_generation_withdrawal.py` uses real published commands and canonical
+native removal for exact-attempt withdrawal, partial effects, before/after
+selection commits, foreign objects, pending publication, same-generation
+republishing and delayed predecessor cleanup.
+Empty, partial and complete-but-unpublished writes to each withdrawal metadata
+document leave commands untouched and permit exact retry. Separate final-name
+collision controls preserve foreign metadata through native no-replace
+publication. Its independent child pauses before native removal while a
+successor reserves, constructs and runs directly,
+then proves old cleanup cannot remove the successor's later publication.
+`test_client_generation_removal.py` removes actually constructed runtimes
+through the existing native remover, including exact retry, partial deletion,
+retained-intent corruption, changed root/owner/input, canonical reference
+protection, selected-generation refusal and withdrawal-before-deletion.
+Pending predecessor commands, recovery-restored baselines and same-byte foreign
+successor commands must refuse before runtime deletion. An independent child
+pauses native old-runtime cleanup while the parent constructs, directly runs
+and publishes a successor, then verifies that publication survives cleanup.
+`test_client_generation_legacy.py` separates real legacy preparation from the
+delayed effect, with registered/unregistered lanes. Its legacy process is
+already inside the version-1 writer before the real copy producer starts; a
+forward winner must remain unchanged when that producer resumes. Use exact
+lane selections with their preparation prerequisite and keep the existing
+90-second item, 120-second caller and 45-second constructor-child bounds.
+These are shared-publication controls, not complete delayed cleanup fencing,
+selected-command withdrawal, retirement/removal, installer or live-rollout proof.
+
+`test_client_generation_cli.py` checks explicit generation arguments, read-only
+reservation recovery, strict separation from version-1 state and legacy-origin
+import. A real SQLite fixture with 514 synthetic retained reservations and
+retirement records exercises actual CLI page serialization, complete traversal,
+exact interrupted-request lookup outside the first page and command-target
+inspection. It preserves all database bytes and existing JSON bounds; this is
+state-inspection evidence, not 514 runtime installations.
+An additional valid SQLite fixture grows beyond 4 MiB and retains exact
+inspection, new reservation, exact retry and retirement access while a separate
+oversized metadata file still refuses. Target-inspection cases exercise actual
+nonordinary command objects plus injected native lease/read failures through
+the CLI, requiring the normal refusal without a traceback. Native symlink
+creation is explicitly platform-qualified or skipped, not credited implicitly.
+Independent actual installed-console cases cover construction/retry,
+default publication/retry, exact withdrawal/retry and exact runtime removal/
+retry with current independently signed artifacts and real direct diagnostics.
+Missing state is never initialized by construction; selected-runtime removal
+refuses before retirement. These cases retain the 90-second item, 120-second
+caller and 45-second child bounds; they do not prove full installer integration,
+whole-installation retirement or live rollout.
+Each native case uses a short factory-owned root to avoid pip's separate Win32
+command-token limit; this is not arbitrary long-executable-path qualification.
+
+The agent-free `fleet-manager-client-admission` clean-room scenario includes
+those four actual generation consumers alongside admission/revocation/reopen
+and missing-resource refusal. Its strict six-case JUnit oracle rejects missing,
+duplicate, unknown, skipped, errored or failed cases, including an old
+admission-only report. `tools/test_fleet_client_admission_clean_room.py` tests
+that oracle; an oracle unit pass or fresh SDK is not a fresh-OS scenario pass.
 
 `libs/versioned-runtime/tests/test_receipt_header_publication.py` exercises
 unpublished empty/partial/synced header attempts, abrupt producer death, a
@@ -3816,8 +3940,12 @@ of reserving their full file allowance for every small source read. The existing
 file-boundary regression retains full-size archive/readback coverage and checks
 small-file allocations and growth across the unchanged byte limit.
 The retained client-resource units substitute fixture-confined artifact handles
-at the native open boundary. Resource framing, hashing and retention remain real;
+and directory identities at their native boundaries. Resource framing, hashing,
+path checks and retention remain real;
 these units do not qualify Windows read-sharing fences.
+Guardian cleanup checks its operation-owned module namespaces while preserving
+pre-existing modules; legitimate lazy standard-library imports are not treated
+as leaked private modules.
 
 `tools/promotion_unit_tests/test_cell_installer.py` admits the original thirteen
 actor-free Machines release-payload and watchdog controls. The owned process

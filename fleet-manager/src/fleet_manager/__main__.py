@@ -93,6 +93,38 @@ def main(argv=None):
             state.add_argument("--recovery-decision", type=Path, required=True)
         elif operation == "register-commands":
             state.add_argument("--recovery-decision", type=Path)
+    generation = commands.add_parser(
+        "client-generation", help="Explicit forward-generation lifecycle; never retire an installation",
+    )
+    generation_commands = generation.add_subparsers(dest="generation_command", required=True)
+    for operation in (
+        "initialize", "inspect", "inspect-command-targets", "construct",
+        "register-commands", "unregister-commands", "remove-runtime",
+    ):
+        forward = generation_commands.add_parser(operation)
+        forward.add_argument("--root", type=Path, required=True)
+        forward.add_argument("--identity", type=Path, required=True)
+        if operation == "initialize":
+            forward.add_argument("--legacy-root", type=Path)
+        if operation == "inspect":
+            inspection = forward.add_mutually_exclusive_group()
+            inspection.add_argument("--generation")
+            inspection.add_argument("--after")
+        if operation == "construct":
+            forward.add_argument("--generation", required=True)
+            forward.add_argument("--request", required=True)
+            forward.add_argument("--selection", type=Path, required=True)
+        if operation in ("inspect-command-targets", "register-commands", "unregister-commands", "remove-runtime"):
+            forward.add_argument("--reservation", type=Path, required=True)
+        if operation in ("construct", "register-commands"):
+            for name in ("release", "proof", "policy", "sources", "staging-parent", "target"):
+                forward.add_argument("--" + name, type=Path, required=True)
+        if operation in ("inspect-command-targets", "register-commands", "unregister-commands"):
+            forward.add_argument("--command-directory", type=Path, required=True)
+        if operation == "register-commands":
+            forward.add_argument("--replacement-targets", type=Path)
+        if operation == "unregister-commands":
+            forward.add_argument("--publication", required=True)
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
@@ -189,7 +221,76 @@ def main(argv=None):
             return 1
         return serve(args.config)
     try:
-        if args.command == "client-state":
+        if args.command == "client-generation":
+            from .artifact_staging import _bytes, stage_authenticated_artifacts
+            from .client_admission import _identity
+            from .client_generations import (
+                _initialize_lineage, _reservation, construct_client_generation,
+                inspect_client_generations, remove_client_generation,
+            )
+
+            def local(path):
+                return decode(_bytes(path.absolute(), MAX_BYTES))
+
+            identity = _identity(local(args.identity))
+            operation = args.generation_command
+            if operation == "initialize":
+                result = _initialize_lineage(args.root, identity, legacy_root=args.legacy_root)
+            elif operation == "inspect":
+                result = inspect_client_generations(
+                    args.root, identity, generation=args.generation, after=args.after,
+                )
+            else:
+                reservation = (
+                    None if operation == "construct" else _reservation(local(args.reservation), identity)
+                )
+                if operation == "inspect-command-targets":
+                    from .client_generation_frontdoor import inspect_command_targets
+
+                    result = inspect_command_targets(
+                        args.root, identity, reservation, command_directory=args.command_directory,
+                    )
+                elif operation == "remove-runtime":
+                    result = remove_client_generation(args.root, identity, reservation)
+                elif operation == "unregister-commands":
+                    from .client_generation_frontdoor import unregister_client_generation
+
+                    result = unregister_client_generation(
+                        args.root, identity, reservation, publication=args.publication,
+                        command_directory=args.command_directory,
+                    )
+                else:
+                    if (
+                        args.staging_parent.absolute().is_relative_to(args.root.absolute())
+                        or args.root.absolute().is_relative_to(args.staging_parent.absolute())
+                    ):
+                        raise PlanError("client generation requires a separate explicit staging parent")
+                    with stage_authenticated_artifacts(
+                        _bytes(args.release.absolute(), MAX_BYTES), local(args.proof), local(args.policy),
+                        local(args.sources), authority=identity["authority"],
+                        installation=identity["installation"], role="client",
+                        staging_parent=args.staging_parent,
+                    ) as staged:
+                        options = {
+                            "current_policy": lambda: local(args.policy),
+                            "current_target": lambda: local(args.target),
+                        }
+                        if operation == "construct":
+                            result = construct_client_generation(
+                                args.root, identity, local(args.selection), staged,
+                                generation=args.generation, request=args.request, **options,
+                            )
+                        else:
+                            from .client_generation_frontdoor import publish_client_generation
+
+                            result = publish_client_generation(
+                                args.root, identity, reservation, staged,
+                                command_directory=args.command_directory,
+                                replacement_targets=(
+                                    None if args.replacement_targets is None else local(args.replacement_targets)
+                                ), **options,
+                            )
+        elif args.command == "client-state":
             from .artifact_staging import _bytes, stage_authenticated_artifacts
             from .client_admission import (
                 admit_client_release, initialize_client_admission, inspect_client_admission,
@@ -288,7 +389,7 @@ def main(argv=None):
         print(f"fleet-manager: {exc}", file=sys.stderr)
         return 1
     print(serialized)
-    if args.command in ("doctor", "client-state"):
+    if args.command in ("doctor", "client-state", "client-generation"):
         return 0
     if args.command == "inspect":
         return 0 if result["status"] in ("installed", "ready") else 2

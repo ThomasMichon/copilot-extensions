@@ -70,6 +70,10 @@ def damage(slot, site, case, tmp_path):
             (site / "pywin32.pth").write_text("import pywin32_bootstrap; import editable\n")
     elif case == "system-site-packages":
         (slot / "pyvenv.cfg").write_text("include-system-site-packages = true\n")
+    elif case == "modified-immutable-hook":
+        (site / "immutable_runtime.pth").write_text(
+            "import sys; sys.dont_write_bytecode = True; import editable\n"
+        )
     elif case == "invalid-venv-encoding":
         (slot / "pyvenv.cfg").write_bytes(b"\xff")
     elif case == "invalid-path-encoding":
@@ -82,7 +86,7 @@ def damage(slot, site, case, tmp_path):
     "editable-origin", "editable-origin-case", "invalid-origin", "invalid-editable-type", "egg-link",
     "editable-finder", "external-path", "relative-external-path", "executable-hook",
     "fake-virtualenv-hook", "modified-virtualenv-hook", "fake-pywin32-hook",
-    "modified-pywin32-hook", "system-site-packages",
+    "modified-pywin32-hook", "modified-immutable-hook", "system-site-packages",
     "invalid-venv-encoding", "invalid-path-encoding",
 ])
 @pytest.mark.parametrize("published", [False, True])
@@ -105,6 +109,7 @@ def test_standard_bootstrap_hooks_and_slot_local_paths(installed):
     root, slot, site = installed
     (site / "_virtualenv.py").write_text("")
     (site / "_virtualenv.pth").write_text("import _virtualenv\n")
+    (site / "immutable_runtime.pth").write_text("import sys; sys.dont_write_bytecode = True\n")
     package = site / "_distutils_hack"
     package.mkdir()
     (package / "__init__.py").write_text("")
