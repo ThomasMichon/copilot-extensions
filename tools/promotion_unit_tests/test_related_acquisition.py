@@ -1048,6 +1048,7 @@ def _knowledge_owner(api, monkeypatch):
     api.stub("git_ops", git=git, GitError=RuntimeError)
     api.load("inrepo_config_source")
     api.load("runtime_paths")
+    api.load("machine_registry_acquisition")
     owner = api.load("config")
     launch = Path("synthetic-launch")
     knowledge = Path("synthetic-knowledge")
@@ -1722,4 +1723,189 @@ def test_execution_acquisition_original_decision_and_selected_callbacks(api, mon
     assert "private" not in repr(observations)
     report = api.config.AcquisitionReport("execution-machine", None, tuple(observations))
     assert report.authority is ScanAuthority.INDETERMINATE and report.reusable is False
+    assert api.config.current_observations() is None
+
+
+@pytest.fixture
+def machine_registry_api(api, monkeypatch):
+    from pathlib import PurePosixPath
+
+    calls = []
+    present = set()
+    entry = SimpleNamespace(ssh_environments=[SimpleNamespace(alias=""), SimpleNamespace(alias="ssh")])
+
+    class RegistryPath(PurePosixPath):
+        def is_file(self):
+            calls.append(("file", str(self)))
+            return str(self) in present
+
+        def exists(self):
+            calls.append(("exists", str(self)))
+            return str(self) in present
+
+    def parse(path, *, require_alias):
+        calls.append(("parse", str(path), require_alias))
+        return {"shared": entry}
+
+    def merge(legacy, canonical):
+        calls.append("merge")
+        return {**(legacy or {}), **(canonical or {})}
+
+    def normalize(entries, *, observed_hostname):
+        assert observed_hostname == "fixture"
+        calls.append("normalize")
+        return entries
+
+    transport = ModuleType("machine_transport")
+    transport.parse_machines_yaml_file = parse
+    transport.merge_machines_yaml = merge
+    transport.normalize_machine_entries = normalize
+    for name in (
+        "MachineEntry", "MachineEnvironment", "MachineSelection", "machine_name",
+        "resolve_local_execution_context", "resolve_machine_selection", "split_machine_environment",
+        "is_local_machine",
+    ):
+        setattr(transport, name, SimpleNamespace)
+    monkeypatch.setitem(sys.modules, transport.__name__, transport)
+    registry = ModuleType("machine_transport.registry")
+    registry.machine_identity_names = lambda entry, **kwargs: ()
+    monkeypatch.setitem(sys.modules, registry.__name__, registry)
+    owner = api.load("machine_registry_acquisition")
+    monkeypatch.setattr(owner, "Path", RegistryPath)
+
+    def replace(value, *, ssh_environments):
+        calls.append(("environments", len(ssh_environments)))
+        return value
+
+    def load_config(**kwargs):
+        calls.append(("config", kwargs))
+        raise ValueError("private registry config failure")
+
+    config = api.stub(
+        "config", INREPO_CONFIG_DIRNAME=".agent-worktrees",
+        _mt_parse_machines_yaml_file=parse, _mt_merge_machines_yaml=merge,
+        _mt_normalize_machine_entries=normalize, replace=replace,
+        socket=SimpleNamespace(gethostname=lambda: "fixture"), load_config=load_config,
+        _parse_machines_yaml_file=owner.parse, _MACHINES_PARSE_OWNER=owner.parse,
+        machines_yaml_path=owner.path, _MACHINES_PATH_OWNER=owner.path,
+        _overlay_machines_yaml_path=owner.overlay, _MACHINES_OVERLAY_OWNER=owner.overlay,
+        load_machines_yaml=owner.load, _MACHINES_LOAD_OWNER=owner.load,
+    )
+    api.stub("state_root")
+    return SimpleNamespace(owner=owner, config=config, calls=calls, present=present, entry=entry)
+
+
+@pytest.mark.parametrize("require_alias", [False, True])
+def test_machine_registry_original_merge_is_once_and_report_remains_nonreusable(api, machine_registry_api, require_alias):
+    source = machine_registry_api
+    canonical, legacy = "registry/.agent-worktrees/machines.yaml", "registry/machines.yaml"
+    source.present.update((canonical, legacy))
+    report = source.owner.load_machines_yaml_report("registry", require_alias=require_alias)
+    assert report.value == {"shared": source.entry}
+    assert source.calls == [
+        ("file", canonical), ("file", legacy),
+        ("parse", legacy, False), ("parse", canonical, False), "merge", "normalize",
+        ("environments", 1 if require_alias else 2),
+    ]
+    assert [o.source for o in report.observations if o.stage == "machine-registry-parser"] == [legacy, canonical]
+    assert report.authority is ScanAuthority.INDETERMINATE and report.reusable is False
+    assert api.config.current_observations() is None
+
+
+@pytest.mark.parametrize("configured", [False, True])
+def test_execution_registry_selected_loader_cannot_hide_its_self_restoration(api, machine_registry_api, configured):
+    source = machine_registry_api
+    source.present.add("registry/machines.yaml")
+    identity = api.load("machine_identity")
+    original = source.config.load_machines_yaml
+    selected = []
+    config = object() if configured else None
+
+    def replacement(*args, **kwargs):
+        selected.append((args, kwargs))
+        source.config.load_machines_yaml = original
+        return original(*args, **kwargs)
+
+    source.config.load_machines_yaml = replacement
+    with api.config.capture_config_observations() as observations:
+        value = identity.load_execution_registry("registry", config=config)
+    assert value == {"shared": source.entry}
+    assert selected == [(("registry",), {"config": config} if configured else {})]
+    assert source.config.load_machines_yaml is original
+    assert source.calls.count("merge") == source.calls.count("normalize") == 1
+    assert any(o.stage == "machine-registry" and any(
+        finding.reason == "owner-coverage-unavailable" for finding in o.findings
+    ) for o in observations)
+    assert api.config.current_observations() is None
+
+
+@pytest.mark.parametrize("mode", ["suppressed-config", "parser-failure"])
+def test_machine_registry_original_failures_keep_type_only_outcomes(api, machine_registry_api, mode):
+    source = machine_registry_api
+    error = PermissionError("private registry parser failure")
+    if mode == "parser-failure":
+        source.present.add("registry/machines.yaml")
+
+        def parse(*args, **kwargs):
+            source.calls.append("failed-parse")
+            raise error
+
+        source.config._mt_parse_machines_yaml_file = parse
+    with api.config.capture_config_observations() as observations:
+        with pytest.raises(Exception) as caught:
+            source.owner.load("registry")
+    if mode == "parser-failure":
+        assert caught.value is error
+        assert source.calls == [
+            ("file", "registry/.agent-worktrees/machines.yaml"),
+            ("file", "registry/machines.yaml"), "failed-parse",
+        ]
+    else:
+        assert isinstance(caught.value, FileNotFoundError)
+        assert source.calls == [
+            ("file", "registry/.agent-worktrees/machines.yaml"),
+            ("file", "registry/machines.yaml"),
+            ("exists", "registry/.agent-worktrees/machines.yaml"),
+            ("exists", "registry/machines.yaml"),
+            ("config", {"include_control_plane_related_pr": False}),
+            ("exists", "registry/.agent-worktrees/machines.yaml"),
+        ]
+        assert any(o.stage == "machine-registry-overlay" and any(
+            finding.detail == "ValueError" for finding in o.findings
+        ) for o in observations)
+    assert not any(o.authority is ScanAuthority.ABSENT for o in observations)
+    assert "private registry" not in repr(observations)
+    owned = [o for o in observations if o.stage == "machine-registry"]
+    assert owned[-1].authority is ScanAuthority.INDETERMINATE
+
+
+@pytest.mark.parametrize("mode", ["self-restoring-parser", "argument-rebinding"])
+def test_machine_registry_selected_callback_identity_survives_rebinding(api, machine_registry_api, mode):
+    source = machine_registry_api
+    source.present.add("registry/machines.yaml")
+    original = source.config._parse_machines_yaml_file
+    merge = source.config._mt_merge_machines_yaml
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("the merge callback was selected before parser argument evaluation")
+
+    def parser(*args, **kwargs):
+        if mode == "self-restoring-parser":
+            source.config._parse_machines_yaml_file = original
+        else:
+            source.config._mt_merge_machines_yaml = forbidden
+        return original(*args, **kwargs)
+
+    source.config._parse_machines_yaml_file = parser
+    report = source.owner.load_machines_yaml_report("registry")
+    assert report.value == {"shared": source.entry}
+    assert source.calls.count("merge") == source.calls.count("normalize") == 1
+    assert any(o.stage == "machine-registry" and any(
+        finding.reason == "owner-coverage-unavailable" for finding in o.findings
+    ) for o in report.observations)
+    assert report.reusable is False
+    if mode == "argument-rebinding":
+        assert source.config._mt_merge_machines_yaml is forbidden and merge is not forbidden
+    else:
+        assert source.config._parse_machines_yaml_file is original
     assert api.config.current_observations() is None

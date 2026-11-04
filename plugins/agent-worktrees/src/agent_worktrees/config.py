@@ -16,7 +16,8 @@ import os
 import re
 import socket
 import sys
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
+from dataclasses import replace as replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -26,11 +27,13 @@ from machine_transport import find_machine_entry as _mt_find_machine_entry
 from machine_transport import machine_name  # noqa: F401 (re-export)
 from machine_transport import detect_platform
 from machine_transport import find_machine_metadata as _mt_find_machine_metadata
-from machine_transport import merge_machines_yaml as _mt_merge_machines_yaml
-from machine_transport import normalize_machine_entries as _mt_normalize_machine_entries
-from machine_transport import parse_machines_yaml_file as _mt_parse_machines_yaml_file
+from machine_transport import merge_machines_yaml as _mt_merge_machines_yaml  # noqa: F401 (acquisition seam)
+from machine_transport import normalize_machine_entries as _mt_normalize_machine_entries  # noqa: F401 (acquisition seam)
+from machine_transport import parse_machines_yaml_file as _mt_parse_machines_yaml_file  # noqa: F401 (acquisition seam)
 
 from . import config_acquisition
+from . import machine_registry_acquisition
+from .machine_registry_acquisition import load_machines_yaml_report as load_machines_yaml_report
 from .config_acquisition import (
     _load_config_d_report as _load_config_d_report,
     _load_yaml_safe_report as _load_yaml_safe_report,
@@ -625,16 +628,7 @@ def machines_yaml_path(repo_dir: str | Path, *, config: Config | None = None) ->
     the launch/default repo, never an arbitrary ``repo_dir`` (a product repo with
     no ``machines.yaml`` still reports its own canonical path, unchanged).
     """
-    canonical = Path(repo_dir) / INREPO_CONFIG_DIRNAME / "machines.yaml"
-    if canonical.exists():
-        return canonical
-    legacy = Path(repo_dir) / "machines.yaml"
-    if legacy.exists():
-        return legacy
-    overlay = _overlay_machines_yaml_path(repo_dir, config=config)
-    if overlay is not None:
-        return overlay
-    return canonical  # non-existent: report the canonical path in errors
+    return machine_registry_acquisition.path(repo_dir, config=config)
 
 
 def _overlay_machines_yaml_path(
@@ -647,37 +641,7 @@ def _overlay_machines_yaml_path(
     requires an external state root -- so a plain product repo without a
     ``machines.yaml`` is never silently redirected.
     """
-    try:
-        from . import state_root
-        config = (
-            config if config is not None
-            else load_config(include_control_plane_related_pr=False)
-        )
-        try:
-            default_anchor = config.default_repo.anchor
-        except KeyError:
-            return None
-        if not default_anchor or os.path.abspath(default_anchor) != os.path.abspath(
-            str(repo_dir)
-        ):
-            return None
-        srcs = state_root.config_source_anchors(
-            config, base_anchor=str(repo_dir), family="registry",
-        )
-    except Exception:
-        return None
-    # Walk the overlay sources (everything past the base) for a machines.yaml;
-    # the knowledge overlay wins.
-    for src in srcs:
-        if os.path.abspath(src.anchor) == os.path.abspath(str(repo_dir)):
-            continue
-        cand = Path(src.anchor) / INREPO_CONFIG_DIRNAME / "machines.yaml"
-        if cand.exists():
-            return cand
-        legacy = Path(src.anchor) / "machines.yaml"
-        if legacy.exists():
-            return legacy
-    return None
+    return machine_registry_acquisition.overlay(repo_dir, config=config)
 
 
 def _parse_machines_yaml_file(
@@ -692,7 +656,7 @@ def _parse_machines_yaml_file(
     dropped entirely here (not kept with ``alias=""``), preserving this
     module's own historical behavior exactly.
     """
-    return _mt_parse_machines_yaml_file(path, require_alias=require_alias)
+    return machine_registry_acquisition.parse(path, require_alias=require_alias)
 
 
 def load_machines_yaml(
@@ -704,25 +668,13 @@ def load_machines_yaml(
     canonical entry wins a key collision; the two files carry disjoint keys
     in practice.
     """
-    canonical = Path(repo_dir) / INREPO_CONFIG_DIRNAME / "machines.yaml"
-    legacy = Path(repo_dir) / "machines.yaml"
-    have_canonical, have_legacy = canonical.is_file(), legacy.is_file()
-    if not have_canonical and not have_legacy:
-        path = machines_yaml_path(repo_dir, config=config)  # overlay fallback, or the error path
-        if not path.exists():
-            raise FileNotFoundError(f"Machine registry not found at {path}")
-        entries = _parse_machines_yaml_file(path, require_alias=False)
-    else:
-        entries = _mt_merge_machines_yaml(
-            _parse_machines_yaml_file(legacy, require_alias=False) if have_legacy else None,
-            _parse_machines_yaml_file(canonical, require_alias=False) if have_canonical else None,
-        )
-    return {
-        key: replace(entry, ssh_environments=[env for env in entry.ssh_environments if env.alias or not require_alias])
-        for key, entry in _mt_normalize_machine_entries(
-            entries, observed_hostname=socket.gethostname(),
-        ).items()
-    }
+    return machine_registry_acquisition.load(repo_dir, config=config, require_alias=require_alias)
+
+
+_MACHINES_PATH_OWNER = machines_yaml_path
+_MACHINES_OVERLAY_OWNER = _overlay_machines_yaml_path
+_MACHINES_PARSE_OWNER = _parse_machines_yaml_file
+_MACHINES_LOAD_OWNER = load_machines_yaml
 
 
 def find_machine_entry(

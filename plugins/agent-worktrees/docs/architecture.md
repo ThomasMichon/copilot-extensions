@@ -8,7 +8,9 @@ behavior. Optional in-process report siblings share the same acquisition path:
 `related.installed_plugin_related_anchors_report`,
 `related_cli._related_config_source_anchors_report`,
 `config_sources.config_source_anchors_report`, `config._load_yaml_safe_report`
-and `config._load_config_d_report`. They add no CLI syntax or JSON fields.
+and `config._load_config_d_report`. `config.load_machines_yaml_report` observes
+the original machine-registry load, not a second acquisition. They add no CLI
+syntax or JSON fields.
 Machine-overlay reports borrow the machine-config owner's failure-aware lookup
 and link-following marker classification; lookup/stat errors are not absence.
 Report-mode related entry conversion failures retain healthy peers and surface
@@ -69,6 +71,17 @@ restore the original function during execution. Completion describes only
 the selection decision; delegated source/registry frontiers stay opaque and
 the report remains non-reusable. No additional discovery or callback replay
 is performed to construct these observations.
+
+Machine-registry outcomes retain the existing boolean probes, ordered overlay
+selection, canonical-over-legacy merge, parser and normalization calls. False
+legacy probes remain uncertain; they do not prove absence. Overlay failures
+that were already suppressed retain type-only diagnostics, while fatal parser
+and normalization exceptions propagate unchanged. The callback selected before
+its arguments or execution is qualified even if it restores or rebinds the
+public seam. Available empty data remains empty. Delegated document acquisition
+and config-source selection remain opaque; a successful original load is not
+proof that those child frontiers are complete or stable. No file is re-read,
+hashed or parsed merely to produce the report.
 
 This realizes the harness-guidance vision's reusable-facts/current-decisions
 separation at the acquisition boundary and follows the circumstantial-hook and

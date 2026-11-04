@@ -116,10 +116,15 @@ def test_knowledge_topology_uses_loaded_config_without_recursion(
     monkeypatch.setattr(cfg, "global_config_path", lambda: tmp_path / "missing.yaml")
     monkeypatch.setattr(cfg.socket, "gethostname", lambda: "generated-host")
     monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
+    monkeypatch.setattr(
+        state_root, "_checkout_path",
+        lambda name: str(topology) if name == "knowledge" else None,
+    )
 
-    def sources(config, *, base_anchor):
+    def sources(config, *, base_anchor, family):
         assert config.knowledge_repo == "knowledge"
         assert base_anchor == str(harness)
+        assert family == "registry"
         return [SimpleNamespace(anchor=str(harness)), SimpleNamespace(anchor=str(topology))]
 
     monkeypatch.setattr(state_root, "config_source_anchors", sources)
