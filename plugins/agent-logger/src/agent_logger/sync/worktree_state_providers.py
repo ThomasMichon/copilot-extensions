@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -255,8 +256,31 @@ def _placements(
     return tuple(result)
 
 
-def _checkout_repository_identity(admission: Admission) -> str:
-    remote = repo_trust._run_git(admission.authoritative_checkout, "remote", "get-url", "origin")
+def _checkout_repository_identity(
+    admission: Admission,
+    *,
+    budget: OwnedExecutionBudget | None = None,
+) -> str:
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in repo_trust._AMBIENT_GIT_ENV_VARS
+    }
+    try:
+        result = run_caller_owned(
+            ["git", "-C", str(admission.authoritative_checkout), "remote", "get-url", "origin"],
+            env=environment,
+            timeout=5,
+            max_stdout_bytes=65536,
+            max_stderr_bytes=4096,
+            binary=True,
+            budget=budget,
+        )
+        remote = result.stdout.decode("utf-8").strip() if result.returncode == 0 else None
+    except OwnedCleanupError:
+        raise
+    except (OSError, UnicodeError, subprocess.SubprocessError) as error:
+        raise WorktreeStateError("actual checkout origin probe failed") from error
     if not remote or canonical_repository_identity(remote) != admission.repository:
         raise WorktreeStateError("actual checkout differs from the admitted repository")
     identity = repo_trust._normalize_git_remote(remote)
@@ -324,7 +348,7 @@ def read_project_inventory(
             "live_authority",
         },
     )
-    expected_repository = _checkout_repository_identity(admission)
+    expected_repository = _checkout_repository_identity(admission, budget=budget)
     if (
         data["project"] != project
         or data["live_authority"] is not False
@@ -333,7 +357,7 @@ def read_project_inventory(
         raise WorktreeStateError("selected owner inventory differs from the admitted repository")
     marketplace = own["marketplaceId"] if own is not None else None
     scope = None if data["scope"] is None else _scope(data["scope"], project, marketplace)
-    return ProjectInventory(
+    inventory = ProjectInventory(
         admission.repository,
         project,
         expected_repository,
@@ -348,6 +372,9 @@ def read_project_inventory(
         if scope is not None
         else None,
     )
+    if budget is not None and time.monotonic() >= budget.execution_deadline:
+        raise WorktreeStateError("complete owner inventory exhausted its shared time budget")
+    return inventory
 
 
 _SCRIPT_ENTRY = (

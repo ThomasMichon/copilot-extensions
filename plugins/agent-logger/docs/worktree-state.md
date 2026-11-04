@@ -40,8 +40,10 @@ scan another registry or fabricate an empty successful result.
 The complete inventory must match the admitted repository's actual Git origin
 and selected installation. The existing aggregate policy identity is checked
 separately; it cannot reconstruct a lossless owner identity because it folds
-path case and omits ports. A fresh bounded Git read plus the existing local
-repository-trust normalizer preserves non-GitHub path case and non-default
+path case and omits ports. A fresh caller-owned Git read shares the same execution
+budget and cleanup custody, strips ambient Git repository-routing variables and
+bounds its stdout/stderr. The existing local repository-trust normalizer preserves
+non-GitHub path case and non-default
 ports, folds GitHub path case and removes only protocol-default ports.
 `ProjectInventory.owner_repository_identity` retains that exact owner identity
 separately from the unchanged aggregate-policy identity. A case-distinct path
@@ -52,6 +54,8 @@ partial, duplicate, foreign or over-budget results. Limits remain 128 worktrees,
 32 stores per worktree and a 1 MiB response. Locations and registration fences
 are observations, not proof of initialized domain contents or a collection grant.
 The read does not open a domain database or allocate missing state.
+Inventory completion also checks the execution cutoff after response validation;
+completed commands cannot turn expired caller time into a successful observation.
 
 `select_efforts_exporter` uses the canonical plugin-activation resolver for
 that exact checkout plus its effective global settings. Explicit project
