@@ -98,3 +98,54 @@ def test_probe_cleanup_failure_retains_exact_custody(tmp_path, monkeypatch):
     assert raised.value is failure
     assert raised.value.process is process
     assert raised.value.job is job
+
+
+def test_instrumented_delivery_captures_original_peer_refusal(tmp_path, monkeypatch):
+    from agent_procutil.owned_process import run_caller_owned
+    from manager_suite_artifacts import _DELIVERY
+
+    home = tmp_path / "h"
+    config = home / ".copilot" / "config.json"
+    config.parent.mkdir(parents=True)
+    config.write_text('{"installedPlugins":[]}')
+    payload = tmp_path / "published" / "plugins" / "agent-vault"
+    reader = payload / "scripts" / "runtime-activation.py"
+    reader.parent.mkdir(parents=True)
+    (payload / "plugin.json").write_text('{"version":"1.0.0"}')
+    roster = tmp_path / "published" / ".github" / "plugin" / "marketplace.json"
+    roster.parent.mkdir(parents=True)
+    roster.write_text(json.dumps({
+        "plugins": [{"name": "agent-vault", "source": "plugins/agent-vault"}],
+    }))
+    reader.write_text(
+        'import json, sys, subprocess\n'
+        'def read_owner_context():\n'
+        ' result = subprocess.CompletedProcess([], 7, b"", b"controlled refusal")\n'
+        ' raise RuntimeError("owner refused")\n'
+        'def main():\n'
+        ' try:\n  read_owner_context()\n'
+        ' except RuntimeError:\n  print(json.dumps({"state":"failed"}))\n'
+        ' return 3\n'
+        '\nif __name__ == "__main__":\n raise SystemExit(main())\n',
+    )
+    monkeypatch.setenv("SUITE_FIXTURE", str(tmp_path))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setattr(sys, "argv", ["delivery", "copilot", "plugin", "update", "agent-vault"])
+    with pytest.raises(SystemExit) as delivered:
+        exec(compile(_DELIVERY, "fixture-delivery", "exec"), {})
+    assert delivered.value.code == 0
+    installed = (
+        home / ".copilot" / "installed-plugins" / "copilot-extensions"
+        / "agent-vault" / "scripts" / "runtime-activation.py"
+    )
+    result = run_caller_owned(
+        [sys.executable, "-I", "-B", str(installed)],
+        timeout=30, max_stdout_bytes=64 * 1024, max_stderr_bytes=64 * 1024,
+    )
+    assert result.returncode == 3
+    assert json.loads(result.stdout) == {"state": "failed"}
+    assert json.loads(result.stderr) == {
+        "fixture_activation_peer_returncode": 7,
+        "fixture_activation_peer_stderr": "controlled refusal",
+    }

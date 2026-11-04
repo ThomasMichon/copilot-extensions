@@ -619,3 +619,13 @@
   execution or cleanup still propagates with its exact custody. Eight focused
   controls pass under the canonical contained native runner, including the
   real reader and retained cleanup-error identity.
+- Run `41806293228` reaches the original failure report in both modes:
+  the qualified Worktrees configuration peer returns nonzero inside
+  `read_owner_context`; the outer reader returns failed/3. Its later replay
+  remains inactive/2, so the original peer's stderr is still needed.
+- Temporarily instrument only the disposable fixture's acquired Vault reader
+  to capture that original peer result. Preparation explicitly refuses
+  acceptance even if the instrumented update succeeds. Remove this trace and
+  refusal before final qualification. Nine focused controls pass, including
+  actual acquisition plus reader execution with unchanged failed/3 output and
+  the controlled peer diagnostic; the ordinary runner settles successfully.
