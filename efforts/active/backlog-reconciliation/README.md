@@ -160,6 +160,14 @@ without a fresh source or native study. Delivered sweep/primitive credit,
 actual consumers, authorized closure, inherited execution-world obligations
 and existing source/resource custodians remain; publication is not acceptance.
 
+The [fifteen following contracts](receiving-following-fifteen.md) retain six
+finite documentary proposals under four existing Active homes and nine
+whole-contract outcomes. All fifteen complete metadata records match the
+admitted 93-text study. Combined admission, qualification-only Windows safety,
+approved-source alternatives, same-owner title rendering, per-venue New and
+same-waiter transport visibility remain distinct. Protected #5472 and final
+numeric #5912 remain OPEN; publication is not implementation or custody change.
+
 ## Request
 
 Operator request, with identifying organizational references redacted:
@@ -246,6 +254,12 @@ outcomes from agent-recommended research and prioritization mechanics.
   execution-world union. Eleven whole canonical, Draft, authority and
   qualification gaps remain; current metadata and documentary delivery
   neither appoint an implementer nor release source/resource custody.
+  The [following register](receiving-following-fifteen.md) retains six
+  complete finite families and nine whole canonical/fit/authority outcomes.
+  #5356 is qualification-only; #5410 authentication stays separate from
+  #5452 data threading. Every original/refined/direct-inherited clause,
+  completed partial, explicit OPEN condition and actual holder survives.
+  Documentary delivery is not technical acceptance or source disposition.
 - [ ] Verify and publish supported dispositions, preserving source versus
   release versus rollout distinctions and all active ownership.
   The [roadmap follow-through register](roadmap-follow-through.md) records
