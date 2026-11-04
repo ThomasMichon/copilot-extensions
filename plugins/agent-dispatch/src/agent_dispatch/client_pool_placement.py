@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from .client_errors import DispatchError, DispatchUpgradeRequired
 from .queue_pool_placement import POOL_PLACEMENT_PROTOCOL, POOL_PLACEMENT_VERSION
+from .task_scope import TASK_SCOPE_HEADER
 
 if TYPE_CHECKING:
     import httpx
@@ -191,7 +192,16 @@ class PoolPlacementClientMixin:
         ):
             raise DispatchError(400, "pool acceptance requires task, worker, native identity and current generation")
         try:
-            health = self.health()
+            health = (
+                self._unwrap(self._http.get(f"/tasks/{task_id}/pool-start/contract"))
+                if TASK_SCOPE_HEADER in self._http.headers else self.health()
+            )
+        except DispatchError as exc:
+            if TASK_SCOPE_HEADER in self._http.headers and exc.status_code in {404, 405, 501}:
+                raise DispatchUpgradeRequired(
+                    "running coordinator lacks task-scoped pool-start discovery"
+                ) from exc
+            raise
         except ValueError as exc:
             raise DispatchUpgradeRequired("running coordinator returned an invalid health contract") from exc
         contract = _validate_contract(

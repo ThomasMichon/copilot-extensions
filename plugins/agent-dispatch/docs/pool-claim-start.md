@@ -392,7 +392,9 @@ agent-dispatch start <task-id> --pool-generation <generation> --pool-recovery-re
 The wake carries the current revision. The client checks the actual
 coordinator's `pool_placement.suspended_recovery_versions` support before
 posting to `/tasks/{id}/pool-start`; unsupported providers refuse without an
-effectful fallback. The queue checks the exact owner, native, generation,
+effectful fallback. Task-only clients discover this through the existing
+`GET /tasks/{id}/pool-start/contract`, which returns only capabilities for
+their authorized task, not global health or backlog. The queue checks the exact owner, native, generation,
 recovery revision and deadline inside its write transaction. Only successful
 affirmation restores the lease, writes `STARTED` and resets startup/cooldown
 counters. Successful process resume or prompt delivery alone never does.

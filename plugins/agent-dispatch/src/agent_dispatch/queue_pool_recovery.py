@@ -144,7 +144,8 @@ def request_recovery(
     _current(conn, task, assignment)
     if not math.isfinite(ts):
         raise TaskError("pool recovery requires finite time")
-    if task.resume_requested and assignment["recovery_requested_at"] is not None:
+    continuing = task.resume_requested and assignment["recovery_requested_at"] is not None
+    if continuing and (not wake_requested or assignment["recovery_wake_id"] is not None):
         return task
     from .queue_execution_custody import require_execution_send_reconciliation
     require_execution_send_reconciliation(conn, task.id, exclusive_key=task.exclusive_key)
@@ -152,6 +153,11 @@ def request_recovery(
         "SELECT 1 FROM wake_outbox WHERE task_id=? AND status='delivering' LIMIT 1", (task.id,),
     ).fetchone():
         raise TaskError("original owner wake is still delivering; retain its custody")
+    if continuing:
+        if ts >= _decision_deadline(conn, assignment):
+            raise TaskError("pool recovery deadline expired before the requested wake")
+        _enqueue(owner, conn, task, ts, assignment["recovery_revision"], message)
+        return owner._fetch(conn, task.id)
     begin_pool_episode(conn, task.id, ts, assignment["startup_timeout"])
     revision = assignment["recovery_revision"] + 1
     conn.execute(
@@ -306,7 +312,10 @@ def reconcile_recoveries(owner: Any, *, now: float | None = None) -> int:
             ).fetchone()
             deadline = assignment["decision_deadline"] or assignment["startup_deadline"]
             if (
-                wake is not None and wake["status"] == "delivered"
+                wake is not None and (
+                    wake["status"] == "delivered" or wake["execution_send_state"] == "sent"
+                )
+                and wake["delivered_at"] is not None
                 and assignment["reachable_at"] is None and wake["delivered_at"] < deadline
             ):
                 delivered = wake["delivered_at"]

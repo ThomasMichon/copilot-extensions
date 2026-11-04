@@ -441,3 +441,117 @@ def test_held_steering_is_durable_without_starting_or_charging_recovery(q: TaskQ
     assert q.list_wakes(task_id) == []
     assert q.pool_startup(task_id).recovery_requested_at is None
     assert q.pool_startup(task_id).startup_attempts == 0
+
+
+@pytest.mark.parametrize("operation", ["resume", "steer"])
+def test_later_wake_request_uses_existing_episode_without_resetting_budget(
+    q: TaskQueue, operation: str,
+) -> None:
+    task_id, _, _ = suspended(q)
+    q.resume(task_id, "host-a/worktree", wake_requested=False, now=103)
+    budget = q.pool_startup(task_id)
+    assert q.list_wakes(task_id) == []
+    if operation == "resume":
+        q.resume(task_id, "host-a/worktree", wake_requested=True, now=104)
+    else:
+        q.submit_steer(task_id, fields={"answer": "continue"}, wake_requested=True, now=104)
+    after = q.pool_startup(task_id)
+    assert after.recovery_revision == budget.recovery_revision
+    assert after.startup_attempts == budget.startup_attempts
+    assert after.startup_deadline == budget.startup_deadline
+    assert after.recovery_requested_at == budget.recovery_requested_at
+    assert len(q.list_wakes(task_id)) == 1
+    assert q.list_wakes(task_id)[0].pool_recovery_revision == budget.recovery_revision
+    q.resume(task_id, "host-a/worktree", wake_requested=True, now=105)
+    assert len(q.list_wakes(task_id)) == 1
+
+
+def test_settled_delivery_starts_decision_clock_before_outbox_finish(
+    q: TaskQueue, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task_id, _, generation = suspended(q)
+    revision = request(q, task_id)
+    wake = q.claim_due_wake(now=104, lease_seconds=600)
+    admission = q.admit_execution_wake(wake, provenance=None, now=104)
+    monkeypatch.setattr(q, "_now", lambda now: 702 if now is None else now)
+    q.settle_execution_wake(wake, admission, outcome="sent", detail="accepted")
+    assert q.list_wakes(task_id)[0].status == "delivering"
+    assert reconcile_recoveries(q, now=703) == 1
+    assert q.get(task_id).status == Status.SUSPENDED
+    assert q.pool_startup(task_id).decision_deadline == 2502
+    assert affirm(q, task_id, generation, revision, now=704).status == Status.STARTED
+
+
+@pytest.mark.parametrize("stale", ["generation", "native"])
+def test_stale_repeated_suspend_cannot_invalidate_current_recovery(
+    q: TaskQueue, stale: str,
+) -> None:
+    task_id, key, generation = suspended(q)
+    revision = request(q, task_id)
+    before = q.get(task_id), q.pool_startup(task_id), q.get_reservation(key)
+    with pytest.raises(TaskError, match="incarnation changed"):
+        q.suspend(
+            task_id, "host-a/worktree", reason="stale wait", now=104,
+            expected_generation=generation + int(stale == "generation"),
+            expected_owner_session_id="old-native" if stale == "native" else "native",
+        )
+    assert (q.get(task_id), q.pool_startup(task_id), q.get_reservation(key)) == before
+    assert affirm(q, task_id, generation, revision).status == Status.STARTED
+
+
+def test_task_only_client_discovers_scoped_contract_then_affirms_recovery(q: TaskQueue) -> None:
+    from agent_dispatch.client import DispatchClient
+    from agent_dispatch.task_authority import mint_task_token
+    from agent_dispatch.task_scope import TASK_SCOPE_HEADER
+    task_id, _, generation = suspended(q)
+    revision = request(q, task_id)
+    api = TestClient(create_app(
+        q, token="data", control_token="control", enable_mcp=False, verification_interval=0,
+    ))
+    token = mint_task_token("control", None, task_id, "host-a/worktree", "native", generation)
+    requests = []
+
+    def transport(req: httpx.Request) -> httpx.Response:
+        requests.append(req)
+        response = api.request(req.method, str(req.url), headers=dict(req.headers), content=req.content)
+        return httpx.Response(response.status_code, content=response.content, headers=dict(response.headers))
+
+    with DispatchClient("http://testserver", task_token=token, transport=httpx.MockTransport(transport)) as worker:
+        result = worker.start_pool_task(
+            task_id, "host-a/worktree", owner_session_id="native",
+            expected_generation=generation, recovery_revision=revision,
+        )
+    assert result["status"] == Status.STARTED
+    assert [(req.method, req.url.path) for req in requests] == [
+        ("GET", f"/tasks/{task_id}/pool-start/contract"), ("POST", f"/tasks/{task_id}/pool-start"),
+    ]
+    scoped = {TASK_SCOPE_HEADER: token}
+    contract = api.get(f"/tasks/{task_id}/pool-start/contract", headers=scoped)
+    assert set(contract.json()) == {"pool_placement"}
+    assert api.get("/health", headers=scoped).status_code == 403
+    foreign = task(q)
+    assert api.get(
+        f"/tasks/{foreign.id}/pool-start/contract", headers=scoped,
+    ).status_code == 403
+
+
+@pytest.mark.parametrize("status", [404, 405, 501])
+def test_task_only_start_refuses_provider_without_scoped_discovery(status: int) -> None:
+    from agent_dispatch.client import DispatchClient, DispatchUpgradeRequired
+    requests = []
+
+    def transport(req: httpx.Request) -> httpx.Response:
+        requests.append(req)
+        return httpx.Response(status, json={"detail": "unsupported route"})
+
+    with DispatchClient(
+        "http://testserver", task_token="opaque-grant", transport=httpx.MockTransport(transport),
+    ) as worker:
+        with pytest.raises(DispatchUpgradeRequired, match="task-scoped pool-start discovery"):
+            worker.start_pool_task(
+                "task-a", "host-a/worktree", owner_session_id="native",
+                expected_generation=1, recovery_revision=1,
+            )
+    assert [(req.method, req.url.path) for req in requests] == [
+        ("GET", "/tasks/task-a/pool-start/contract"),
+    ]

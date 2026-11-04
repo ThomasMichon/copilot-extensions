@@ -87,6 +87,11 @@ class QueueSuspendMixin:
             if current is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
+            if expected_generation is not None and (
+                current.generation != expected_generation
+                or current.owner_session_id != expected_owner_session_id
+            ):
+                raise TaskError(f"task {task_id!r} ownership incarnation changed")
             try:
                 _check_expected_status(current, expected_status)
             except TaskError:
