@@ -196,3 +196,29 @@ def test_another_subscriber_or_role_does_not_inherit_handled_progress() -> None:
     )
     assert independent.reasons == ("initial-review",)
     assert len(rank([view(value), independent], now=100, aging_seconds=60)) == 2
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"state": "merged"},
+        {"state": "closed-unmerged"},
+        {"draft": True},
+    ],
+)
+@pytest.mark.parametrize("contradiction", ["epoch", "sequence", "candidate"])
+def test_terminal_and_draft_evidence_cannot_bypass_feedback_consistency(
+    changes: dict,
+    contradiction: str,
+) -> None:
+    value = facts(**changes)
+    handled = baseline(value)
+    if contradiction == "epoch":
+        handled = replace(handled, cursor=Cursor(2, 0))
+    elif contradiction == "sequence":
+        handled = replace(handled, cursor=Cursor(1, 4))
+    else:
+        handled = replace(handled, candidate=Candidate("c" * 40, "b" * 40))
+    assert view(value, handled).status == "unavailable"
+    consistent = view(value, baseline(value))
+    assert consistent.status == ("terminal" if value.state != "open" else "waiting")

@@ -226,20 +226,20 @@ def project(
         return result("unavailable", "selection-unknown")
     if not facts.complete or not 0 <= now - facts.observed_at < max_age_seconds:
         return result("unavailable", "evidence-incomplete-or-stale")
-    if facts.state != "open":
-        return result("terminal", facts.state)
-    if facts.draft:
-        return result("waiting", "draft")
     if handled is not None:
         if handled.cursor.epoch > facts.cursor.epoch or (
             handled.cursor.epoch == facts.cursor.epoch
             and handled.cursor.sequence > facts.cursor.sequence
         ):
             return result("unavailable", "observation-behind-feedback")
-        if handled.cursor == facts.cursor:
-            if handled.candidate != facts.candidate:
-                return result("unavailable", "candidate-cursor-mismatch")
-            return result("waiting", "handled-through-cursor")
+        if handled.cursor == facts.cursor and handled.candidate != facts.candidate:
+            return result("unavailable", "candidate-cursor-mismatch")
+    if facts.state != "open":
+        return result("terminal", facts.state)
+    if facts.draft:
+        return result("waiting", "draft")
+    if handled is not None and handled.cursor == facts.cursor:
+        return result("waiting", "handled-through-cursor")
     reasons = []
     if facts.conflict:
         reasons.append("rebase")
