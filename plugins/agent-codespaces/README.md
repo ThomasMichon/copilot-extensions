@@ -36,8 +36,11 @@ this is not schema-1 attribution or backend readiness. Collisions at the plain
 destination or with other anonymous/foreign namespace entries refuse rather than
 overwrite, including a prior plain entry at the payload filename. Those entries
 require their owner's migration; application setup never silently downgrades one.
-Malformed or oversized unrelated peers are isolated; unsafe paths and storage
-failures, including unreadable peer enumeration, still refuse publication.
+The own destination retains its 64 KiB read limit. Ordinary peer JSON is read
+completely before namespace classification, matching Bridge; size alone never
+hides a foreign namespace, and duplicate keys use their final value. Unrelated
+or malformed JSON peers are isolated. Unsafe paths and storage failures,
+including unreadable peer enumeration, still refuse publication.
 
 Startup reads merged configuration without current-directory overlays and uses
 the existing finite Connection Owner ensure only when enabled and executing

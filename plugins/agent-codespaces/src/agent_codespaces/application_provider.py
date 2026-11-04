@@ -27,7 +27,7 @@ class _PendingLink(RuntimeError):
         self.identity = identity
 
 
-def _document(path: Path, *, expected_identity=None):
+def _document(path: Path, *, expected_identity=None, read_limit: int | None = 65536):
     info = path.lstat()
     if (not stat.S_ISREG(info.st_mode)
             or getattr(info, "st_file_attributes", 0) & 0x400):
@@ -39,13 +39,13 @@ def _document(path: Path, *, expected_identity=None):
         raise _PendingLink(identity)
     if info.st_nlink != 1:
         raise RuntimeError("CodeSpaces provider declaration must be an ordinary file")
-    if info.st_size > 65536:
+    if read_limit is not None and info.st_size > read_limit:
         raise ValueError("CodeSpaces provider declaration exceeds its byte bound")
     with path.open(encoding="utf-8-sig") as stream:
         opened = os.fstat(stream.fileno())
         if (opened.st_dev, opened.st_ino) != identity:
             raise RuntimeError("CodeSpaces provider changed before reading")
-        content = stream.read(65537)
+        content = stream.read() if read_limit is None else stream.read(read_limit + 1)
     after = path.lstat()
     if ((after.st_dev, after.st_ino) != identity
             or not stat.S_ISREG(after.st_mode)
@@ -55,7 +55,7 @@ def _document(path: Path, *, expected_identity=None):
         raise _PendingLink(identity)
     if after.st_nlink != 1:
         raise RuntimeError("CodeSpaces provider declaration must be an ordinary file")
-    if len(content) > 65536:
+    if read_limit is not None and len(content) > read_limit:
         raise ValueError("CodeSpaces provider declaration exceeds its byte bound")
     return json.loads(content)
 
@@ -138,7 +138,7 @@ def register_installed_application() -> Path:
             if path == target:
                 continue
             try:
-                other = _document(path)
+                other = _document(path, read_limit=None)
             except FileNotFoundError:
                 continue
             except ValueError:

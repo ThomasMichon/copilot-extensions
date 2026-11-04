@@ -510,9 +510,20 @@ def test_oversized_provider_is_isolated_only_when_unrelated(tmp_path, monkeypatc
     monkeypatch.setenv("AGENT_BRIDGE_PROVIDERS_DIR", str(registry))
     monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(registry.parent))
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    command = tmp_path / ("unrelated-command.cmd" if os.name == "nt" else "unrelated-command")
+    command.write_text("@exit /b 0\n" if os.name == "nt" else "#!/bin/sh\nexit 0\n")
+    command.chmod(0o700)
     large = registry / (application_provider.MANIFEST_NAME if owned else "unrelated.json")
-    large.write_text(json.dumps({"namespace": "unrelated", "padding": "x" * 65536}))
+    large.write_text(json.dumps({
+        "command": [str(command)], "padding": "x" * 65536, "namespace": "unrelated",
+    }))
     before = large.read_bytes(), large.stat().st_mtime_ns
+    monkeypatch.syspath_prepend(str(PLUGIN.parents[1] / "plugins" / "agent-bridge" / "src"))
+    from agent_bridge import provider_sources
+
+    monkeypatch.setattr(provider_sources, "resolve_active_plugins",
+                        lambda: pytest.fail("plain discovery must not resolve activation"))
+    assert provider_sources.scan_provider_registry().manifests["unrelated"].command == (str(command),)
     if owned:
         with pytest.raises(RuntimeError):
             owner_cli.cmd_source_setup(None)
@@ -521,6 +532,65 @@ def test_oversized_provider_is_isolated_only_when_unrelated(tmp_path, monkeypatc
         assert owner_cli.cmd_source_setup(None) == 0
         assert (registry / application_provider.MANIFEST_NAME).is_file()
     assert (large.read_bytes(), large.stat().st_mtime_ns) == before
+
+
+@pytest.mark.parametrize("filename", ["a-foreign.json", "z-foreign.json"])
+@pytest.mark.parametrize("duplicate_namespace", [False, True])
+def test_large_consumer_eligible_foreign_namespace_refuses_unchanged(
+    tmp_path, monkeypatch, filename, duplicate_namespace,
+):
+    from agent_codespaces import application_provider
+
+    home = tmp_path / "home"
+    registry = tmp_path / "providers.d"
+    registry.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setenv("AGENT_BRIDGE_PROVIDERS_DIR", str(registry))
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(registry.parent))
+    command = tmp_path / ("foreign-command.cmd" if os.name == "nt" else "foreign-command")
+    command.write_text("@exit /b 0\n" if os.name == "nt" else "#!/bin/sh\nexit 0\n")
+    command.chmod(0o700)
+    installed = home / ".local" / "bin" / (
+        "agent-codespaces.cmd" if os.name == "nt" else "agent-codespaces"
+    )
+    installed.parent.mkdir(parents=True)
+    installed.write_text("fixture installed command\n")
+    installed.chmod(0o700)
+    document = {
+        **({"namespace": "unrelated"} if duplicate_namespace else {}),
+        "schema_version": 0, "command": [str(command)], "padding": "x" * 65536,
+    }
+    text = json.dumps(document)[:-1] + ', "namespace": "codespace"}'
+    foreign = registry / filename
+    foreign.write_text(text)
+    before = foreign.read_bytes(), foreign.stat().st_mtime_ns
+    monkeypatch.syspath_prepend(str(PLUGIN.parents[1] / "plugins" / "agent-bridge" / "src"))
+    from agent_bridge import provider_sources
+
+    monkeypatch.setattr(provider_sources, "resolve_active_plugins",
+                        lambda: pytest.fail("plain discovery must not resolve activation"))
+    assert provider_sources.scan_provider_registry().manifests["codespace"].command == (str(command),)
+    with pytest.raises(RuntimeError, match="preserved"):
+        application_provider.register_installed_application()
+    assert (foreign.read_bytes(), foreign.stat().st_mtime_ns) == before
+    assert list(registry.iterdir()) == [foreign]
+    assert provider_sources.scan_provider_registry().manifests["codespace"].command == (str(command),)
+
+
+def test_large_malformed_peer_remains_isolated(tmp_path, monkeypatch):
+    from agent_codespaces import application_provider
+
+    registry = tmp_path / "providers.d"
+    registry.mkdir()
+    monkeypatch.setenv("AGENT_BRIDGE_PROVIDERS_DIR", str(registry))
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(registry.parent))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    malformed = registry / "malformed.json"
+    malformed.write_text(json.dumps({"padding": "x" * 65536})[:-1])
+    before = malformed.read_bytes(), malformed.stat().st_mtime_ns
+    application_provider.register_installed_application()
+    assert (registry / application_provider.MANIFEST_NAME).is_file()
+    assert (malformed.read_bytes(), malformed.stat().st_mtime_ns) == before
 
 
 def test_bridge_provider_manifest_is_attributed_and_writers_stamp_root_atomically():
