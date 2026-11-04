@@ -133,9 +133,11 @@ independence and the retained handle once through the existing assignment owner
 before authorized writes; do not require a coordinator's per-round approval or
 release handshake. The reviewer asynchronously returns its actual posted,
 verified receipt or real blocker. The coordinator is never the normal verdict
-relay/editor: it independently audits forge authority **after publication** and
-retains census, follow-ups and authorized normal merge stewardship. Direct posting
-grants no author-fix, merge, consent or resource-custody authority.
+relay/editor: it monitors outcomes, coverage and unresolved obligations, and
+retains census, follow-ups and authorized normal merge stewardship. Additional
+coordinator checks must address a concrete risk or integration need, not impose
+a duplicate per-write forge audit. Direct posting grants no author-fix, merge,
+consent or resource-custody authority.
 
 Apply the coordination reference's separate analysis, publication and readback
 gates. Use supported provider preconditions and revision pinning without making
