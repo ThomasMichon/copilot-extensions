@@ -778,6 +778,11 @@ class QueueStorageMixin:
                 if accepted is None:
                     if claim_as and status == Status.QUEUED:
                         self.require_worker_admission()
+                        if self._relationship_writer is not None:
+                            raise TaskError(
+                                "protected atomic create-and-claim is unsupported; "
+                                "create queued work and claim it with its original workspace"
+                            )
                     self._require_agent_backed_repo(canonical_repo)
                     if supersede_exclusive_key:
                         superseded = conn.execute(

@@ -484,6 +484,7 @@ class DispatchTools(TaskRecoveryToolsMixin):
         worktree: str | None = None,
         repo: str | None = None,
         all_repos: bool = False,
+        assignment_workspace: dict | None = None,
     ) -> dict | None:
         """Atomically lease one eligible task (identity + lane auto-resolved from CWD).
 
@@ -518,6 +519,8 @@ class DispatchTools(TaskRecoveryToolsMixin):
                 worktree=worktree,
                 task_id=task_id,
                 lease_seconds=lease_seconds,
+                **({"assignment_workspace": assignment_workspace}
+                   if assignment_workspace is not None else {}),
             )
 
     # -- lifecycle -----------------------------------------------------------

@@ -666,6 +666,7 @@ def build_coordinator_mcp(
         worktree: str | None = None,
         repo: str | None = None,
         all_repos: bool = False,
+        assignment_workspace: dict | None = None,
     ) -> dict | None:
         """Atomically lease one eligible task (identity + lane via header or args).
 
@@ -692,6 +693,7 @@ def build_coordinator_mcp(
                 }
             }
         try:
+            from .assignment_workspace import AssignmentWorkspace
             outcome = queue.claim_outcome(
                 worker_id_for(machine, worktree),
                 capabilities or [],
@@ -700,6 +702,8 @@ def build_coordinator_mcp(
                 worktree=worktree,
                 task_id=task_id,
                 lease_seconds=lease_seconds,
+                **({"assignment_workspace": AssignmentWorkspace.from_dict(assignment_workspace)}
+                   if assignment_workspace is not None else {}),
             )
         except TaskError as exc:
             return {"error": str(exc)}

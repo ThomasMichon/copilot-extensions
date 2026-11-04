@@ -28,6 +28,10 @@ def resolver(monkeypatch, tmp_path):
         "windowless_daemon_kwargs", "windowless_python", "windowless_python_env",
     ), unused))
     module("agent_procutil.daemon_instances", DaemonInstanceSpec=unused, spawn_finite_worker=unused)
+    module("agent_procutil.owned_budget", OwnedExecutionBudget=unused)
+    module("agent_procutil.owned_process", OwnedCleanupError=type(
+        "OwnedCleanupError", (Exception,), {},
+    ), _run_owned=unused)
     package = "promotion_dispatch_runtime"
     module(package, __path__=[])
     module(f"{package}.install_paths", install_dir=lambda: tmp_path)

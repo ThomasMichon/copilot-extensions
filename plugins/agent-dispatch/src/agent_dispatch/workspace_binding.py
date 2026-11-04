@@ -20,6 +20,25 @@ def _prepared_facts_match(recorded: dict, facts: dict) -> bool:
     return True
 
 
+def workspace_identity(row: dict, worktree: str) -> dict:
+    value = {"worktree": worktree, "path": row.get("path"), "project": row.get("repo")}
+    if "creation_nonce" in row:
+        value["creation_nonce"] = row["creation_nonce"]
+    return value
+
+
+def prepared_result(
+    handle: dict, *, project: str | None, ownership: str, created: bool,
+) -> dict:
+    result = {
+        "worktree": handle["worktree"], "path": handle.get("path"), "project": handle.get("project"),
+        "requested_project": project, "created": created, "replaced": False, "ownership": ownership,
+    }
+    if "creation_nonce" in handle:
+        result["creation_nonce"] = handle["creation_nonce"]
+    return result
+
+
 def hold(message: str) -> None:
     from .spawn_factories import SpawnPreparationRetained
 
@@ -110,6 +129,11 @@ def record_prepared(
         "worktree": worktree, "worktree_ownership": ownership,
         "allocation_project": prepared.get("project"), "worktree_path": prepared.get("path"),
     }
+    if reservation.get("task_relationship_required") is True:
+        nonce = prepared.get("creation_nonce")
+        if not isinstance(nonce, str) or not nonce:
+            hold("governed workspace owner did not retain its original creation nonce")
+        facts["creation_nonce"] = nonce
     if "execution_machine" in reservation and creating_host is not None:
         facts["execution_machine"] = creating_host
     conflicting_project = (
@@ -118,13 +142,14 @@ def record_prepared(
     )
     if conflicting_project:
         facts["allocation_project"] = None
-    if not _prepared_facts_match(reservation, facts):
+    if reservation.get("task_relationship_required") is True or not _prepared_facts_match(reservation, facts):
         try:
             recorded = client.record_spawn_worktree(
                 reservation["key"], worktree, ownership=ownership,
                 allocation_project=facts["allocation_project"], worktree_path=facts["worktree_path"],
                 creating_host=creating_host if ownership == "created" else None, driver=driver,
                 **({"execution_machine": creating_host} if "execution_machine" in facts else {}),
+                **({"creation_nonce": facts["creation_nonce"]} if "creation_nonce" in facts else {}),
             )
         except DispatchError as exc:
             hold(f"workspace {worktree} could not be recorded; retained for repair: {exc}")
@@ -185,6 +210,8 @@ def parse_created_workspace(result: subprocess.CompletedProcess, *, creation_key
         handle["worktree"] = handle.get("worktree") or worktree.get("id")
         handle["path"] = worktree.get("path")
         handle["project"] = worktree.get("repo")
+        if "creation_nonce" in worktree:
+            handle["creation_nonce"] = worktree["creation_nonce"]
     if creation_key is not None:
         creation = data.get("creation") if isinstance(data, dict) else None
         if not isinstance(creation, dict) or creation.get("version") != 1 or creation.get("status") != "complete":

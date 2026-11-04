@@ -111,6 +111,7 @@ class RecordSpawnWorktreeBody(BaseModel):
     driver: str | None = None
     allocation_project: str | None = None
     worktree_path: str | None = None
+    creation_nonce: str | None = Field(default=None, min_length=1)
 
 
 class RecordSpawnAllocationBody(BaseModel):
@@ -559,6 +560,7 @@ def register_spawn_routes(
                 driver=body.driver,
                 allocation_project=body.allocation_project,
                 worktree_path=body.worktree_path,
+                **({"creation_nonce": body.creation_nonce} if body.creation_nonce is not None else {}),
             )
         )
         bus.publish({"type": "spawn.worktree_recorded", "reservation": result})

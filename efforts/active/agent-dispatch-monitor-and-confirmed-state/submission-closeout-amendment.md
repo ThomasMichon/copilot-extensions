@@ -44,8 +44,13 @@ It merged in #10382 after exact-head approval and required CI; it does not
 enable ordinary assignment callers or qualify allocator workspace binding.
 The [incarnation-bound writer expansion](journal/2026/11.04-relationship-writer-incarnation.md)
 adds locked expected-workspace checks and executing-writer declarations.
+It merged in #10393 after exact-head approval and successful required CI.
 Its source tests do not establish every participating writer's support or
 enable ordinary assignment admission.
+The [actual-assignment source integration](journal/2026/11.04-assignment-relationships.md)
+now exercises both queue assignment owners and the real claim ledger under
+validation. Ordinary construction still leaves the writer disabled; source
+integration is not cohort activation or installed readiness qualification.
 
 The CLI's completion command and client reach the coordinator's `/complete`
 route. Its queue transition records `SUBMITTED` and clears the task owner.

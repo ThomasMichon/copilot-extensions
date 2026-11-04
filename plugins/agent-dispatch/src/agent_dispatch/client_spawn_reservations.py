@@ -40,8 +40,12 @@ class SpawnReservationClientMixin:
         creating_host: str | None = None, execution_machine: str | None = None,
         driver: str | None = None, allocation_project: str | None = None,
         worktree_path: str | None = None,
+        creation_nonce: str | None = None,
     ) -> dict:
         """Retain workspace provenance and its independent execution machine."""
+        if creation_nonce is not None:
+            from .client_task_relationships import require_support
+            require_support(self)
         return self._unwrap(self._http.post(
             f"/spawn-reservations/{key}/worktree",
             json={
@@ -49,6 +53,7 @@ class SpawnReservationClientMixin:
                 "creating_host": creating_host, "driver": driver,
                 "allocation_project": allocation_project, "worktree_path": worktree_path,
                 **({"execution_machine": execution_machine} if execution_machine is not None else {}),
+                **({"creation_nonce": creation_nonce} if creation_nonce is not None else {}),
             },
         ))
 

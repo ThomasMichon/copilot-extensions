@@ -208,7 +208,8 @@ def resolve_worktree(
         raise WorktreeNotFound(f"worktree is terminal and cannot be reused: {worktree_id}")
     if task_id and (owner := worktree_attribution.foreign_task_id(row, task_id)):
         raise WorktreeNotFound(f"worktree now owned by {owner!r}, not {task_id!r}")
-    return {"worktree": worktree_id, "path": row.get("path"), "project": row.get("repo")}
+    from .workspace_binding import workspace_identity
+    return workspace_identity(row, worktree_id)
 
 
 def prepare_reusable_worktree(
@@ -225,7 +226,7 @@ def prepare_reusable_worktree(
     allocation_client=None,
 ) -> dict[str, object]:
     """Resolve a carried owner-qualified workspace or allocate a new one."""
-    from .workspace_binding import allocation_project, allocation_provenance, hold
+    from .workspace_binding import allocation_project, allocation_provenance, hold, prepared_result
 
     project = allocation_project(reservation, project or project_for_task(task))
     allocation_task, allocation_key, allocation_attempt = allocation_provenance(str(task["id"]), reservation)
@@ -245,15 +246,10 @@ def prepare_reusable_worktree(
         path = resolved.get("path")
         if not isinstance(path, str) or not path:
             raise EmbodyUnavailable(f"agent-worktrees resolved {carried!r} without a path")
-        return {
-            "worktree": carried,
-            "path": path,
-            "project": resolved.get("project"),
-            "requested_project": project,
-            "created": False,
-            "replaced": False,
-            "ownership": reservation.get("worktree_ownership") or "reused",
-        }
+        return prepared_result(
+            resolved, project=project, ownership=reservation.get("worktree_ownership") or "reused",
+            created=False,
+        )
 
     if allocation_client is not None:
         from .workspace_binding import bind_allocation
@@ -272,16 +268,7 @@ def prepare_reusable_worktree(
         no_pair=no_pair,
         creation_key=reservation.get("creation_key"),
     )
-    path = created.get("path")
-    return {
-        "worktree": created["worktree"],
-        "path": path,
-        "project": created.get("project"),
-        "requested_project": project,
-        "created": True,
-        "replaced": False,
-        "ownership": "created",
-    }
+    return prepared_result(created, project=project, ownership="created", created=True)
 
 
 def _agent_worktrees_launch_prefix() -> list[str] | None:

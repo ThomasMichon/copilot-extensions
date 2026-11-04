@@ -17,6 +17,7 @@ class SpawnWorkspaceMixin:
         driver: str | None = None,
         allocation_project: str | None = None,
         worktree_path: str | None = None,
+        creation_nonce: str | None = None,
         now: float | None = None,
     ) -> SpawnReservation:
         """Record a reusable worktree while the reservation is still reserving.
@@ -47,6 +48,10 @@ class SpawnWorkspaceMixin:
             from .queue_pool_placement import pool_assignment, require_pool_workspace
             from .bridge_remote import normalize_host
             task = self._fetch(conn, row["task_id"])
+            if row["task_relationship_required"] and creation_nonce is None:
+                raise TaskError("governed workspace attachment requires its original creation nonce")
+            if creation_nonce is not None and not row["task_relationship_required"]:
+                raise TaskError("legacy reservation cannot adopt a new workspace relationship")
             if pool_assignment(conn, task.id) is not None and driver != row["driver"]:
                 raise TaskError("pool workspace cannot change its placed startup driver")
             if execution_machine is not None and (
@@ -100,5 +105,41 @@ class SpawnWorkspaceMixin:
             updated = conn.execute(
                 "SELECT * FROM spawn_reservations WHERE key = ?", (key,),
             ).fetchone()
+            relationship_event = row["task_relationship_event_id"]
+            if creation_nonce is not None:
+                from .assignment_workspace import AssignmentWorkspace
+                workspace = AssignmentWorkspace(
+                    execution_machine, allocation_project, worktree, worktree_path, creation_nonce,
+                )
+                if row["creation_nonce"] not in (None, creation_nonce):
+                    raise TaskError("recorded workspace incarnation cannot change")
+                if relationship_event is None:
+                    relationship_event = self._retain_task_relationship(
+                        conn, task, workspace, worker_id=workspace.worker_id,
+                        generation=task.generation, ts=ts, reservation_key=key,
+                    )
+                else:
+                    import json
+                    retained = conn.execute(
+                        "SELECT task_relationship FROM task_events WHERE id=?",
+                        (relationship_event,),
+                    ).fetchone()
+                    if json.loads(retained["task_relationship"])["request"]["workspace"] != {
+                        "machine": workspace.machine, "project": workspace.project,
+                        "worktree": workspace.worktree, "path": workspace.path,
+                        "creation_nonce": workspace.creation_nonce,
+                    }:
+                        raise TaskError("recorded relationship workspace cannot change")
+                conn.execute(
+                    "UPDATE spawn_reservations SET creation_nonce=?, task_relationship_event_id=?,"
+                    " task_relationship_required=1,"
+                    " task_relationship_generation=COALESCE(task_relationship_generation, ?) WHERE key=?",
+                    (creation_nonce, relationship_event, task.generation, key),
+                )
+            elif relationship_event is not None:
+                raise TaskError("governed workspace attachment requires its original creation nonce")
             conn.execute("COMMIT")
+        if relationship_event is not None:
+            self.reconcile_task_relationship(task.id, event_id=relationship_event)
+            return self.get_reservation(key)
         return SpawnReservation._from_row(updated)
