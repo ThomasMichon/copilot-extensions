@@ -168,6 +168,10 @@ state can instead be selected for the owner's separately negotiated
 This replaces the one held Bridge reader; it does not add a permanent worker for
 each delegate. Membership discovery is explicitly paused while a session is
 selected. Returning to membership obtains fresh facts and resumes its push feed.
+Explicit Refresh also returns to membership so a restarted Bridge's current
+generation is reacquired before selecting the session again. Reselecting a
+same-incarnation exhausted session reconciles its bounded baseline while
+retaining the old window's integrity evidence.
 Inactive streams retain loaded evidence and immutable proofs, not current
 availability. Their old head markers cannot restart an unrelated active reader.
 
@@ -178,8 +182,11 @@ facts and wire positions. Represented sources retain a null project rather than
 borrowing the parent project; arbitrary federated relationships are not acquired.
 The owner's snapshot tail, contiguous live pages and finite backward pages
 retain their native identities, content hashes, omission references and partial
-coverage. History never advances the live cursor. An empty log acquires only its
-real first-event continuity; replacement or retention gaps require Refresh.
+coverage. History never advances the live cursor. For an empty log, the selected reader
+waits on the owner's existing follow stream before admitting its first real
+event continuity. It shows unknown history and remains cancellable during that
+wait; Refresh cannot turn a provisional observer scope into a new proof budget.
+Replacement or retention gaps require Refresh.
 Missing recorded timestamps display as unknown instead of a fabricated clock.
 Historical input/resolution events do not prove current pending requests or
 answerability, and compaction starts do not qualify active pre-window capacity.

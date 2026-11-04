@@ -40,6 +40,7 @@ class SessionCommands(MembershipCommands):
 
 
 class BridgeSessionSource:
+    preparing_message = "loading selected session; an empty log waits for its first real event (history unknown)"
     status_message = (
         "selected session: partial retained events; current requests and answerability unknown; "
         "membership discovery paused (return to membership to resume)"
@@ -66,6 +67,15 @@ class BridgeSessionSource:
                 frame = self.codec.decode(raw)
                 if frame["kind"] != "snapshot":
                     raise TimelineContractError("Bridge session bootstrap is not a snapshot")
+                if frame["position"] is None:
+                    stream.close()
+                    stream = self.commands.frames(cancelled, follow=True)
+                    for raw in stream:
+                        frame = self.codec.decode(raw)
+                        if frame["kind"] == "snapshot" and frame["position"] is not None:
+                            break
+                    else:
+                        raise InterruptedError("Bridge session first-event read stopped")
                 token = self.codec.token(frame, epoch)
                 self.initial = self.codec.snapshot(frame, token)
                 self._cursor = frame["position"]
@@ -77,7 +87,7 @@ class BridgeSessionSource:
 
     async def observe(self, token: SourceToken, *, stop: asyncio.Event) -> AsyncGenerator[Observation, None]:
         initial = self.initial
-        if initial is None or initial.token != token:
+        if initial is None or initial.token != token or initial.position is None or self._cursor is None:
             raise TimelineContractError("Bridge session selection has not been prepared")
         cancelled = Event()
         stream = self.commands.frames(cancelled, follow=True, after=self._cursor)
@@ -95,27 +105,15 @@ class BridgeSessionSource:
                     if frame["position"] != cursor:
                         raise TimelineContractError("Bridge heartbeat changed its delivered position")
                     continue
-                kind = frame["kind"]
-                if cursor is None:
-                    if kind != "snapshot":
-                        raise TimelineContractError("empty Bridge log did not deliver its first snapshot")
-                    cursor = frame["position"]
-                    if cursor is None:
-                        continue
-                    published = self.codec.position(token, cursor) if cursor else None
-                    yield self.codec.snapshot(frame, token)
-                else:
-                    if kind != "delta" or frame["base_position"] != cursor:
-                        raise TimelineContractError("Bridge session lost its delivered boundary")
-                    position = self.codec.position(token, frame["position"])
-                    if published is None:
-                        raise TimelineContractError("Bridge session lost its accepted baseline")
-                    if position != published:
-                        yield LiveDelta(token, published, position, self.codec.events(frame, token))
-                        published = position
-                    elif frame["entries"]:
-                        raise TimelineContractError("Bridge session repeated events without advancing")
-                    cursor = frame["position"]
+                if frame["kind"] != "delta" or frame["base_position"] != cursor:
+                    raise TimelineContractError("Bridge session lost its delivered boundary")
+                position = self.codec.position(token, frame["position"])
+                if position != published:
+                    yield LiveDelta(token, published, position, self.codec.events(frame, token))
+                    published = position
+                elif frame["entries"]:
+                    raise TimelineContractError("Bridge session repeated events without advancing")
+                cursor = frame["position"]
                 self._cursor = cursor
         finally:
             cancelled.set()

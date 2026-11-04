@@ -159,11 +159,11 @@ class SessionCodec:
                 raise TimelineContractError("Bridge native event content hash changed")
             prior = sequence
         position = offset(frame["position"], source) if frame["position"] is not None else 0
-        if position > retained["head"] or (prior is not None and position < prior):
-            raise TimelineContractError("Bridge session position precedes its delivered evidence")
+        if position > retained["head"] or (prior is not None and position != prior):
+            raise TimelineContractError("Bridge session position does not end at its delivered evidence")
         if kind == "delta":
             base = offset(frame["base_position"], source)
-            if frame["before"] is not None or position < base or (
+            if frame["before"] is not None or (prior is None and position != base) or (
                 frame["entries"] and frame["entries"][0]["native_event_id"] != base + 1
             ):
                 raise TimelineContractError("Bridge session delta lost its base")
@@ -189,8 +189,8 @@ class SessionCodec:
 
     def token(self, frame: dict[str, Any], epoch: int) -> SourceToken:
         source = frame["source"]
-        # An empty-to-first-event log stays on its prepared consumer scope;
-        # every wire position still carries the actual admitted incarnation.
+        if source["journal_incarnation"] is None:
+            raise OwnerReadError("source-unavailable", "Bridge log has no real event continuity yet")
         generation = sha256(encoded(source).encode()).hexdigest()
         return SourceToken(SourceIdentity(
             Provider.BRIDGE, "bridge-session:" + sha256(encoded({

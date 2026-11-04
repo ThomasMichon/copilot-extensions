@@ -130,13 +130,31 @@ def test_actual_compaction_preserves_unqualified_start_evidence_without_false_wa
     assert evidence["pre_usage"]["qualification"] == "unknown"
 
 
+@pytest.mark.parametrize("empty", [False, True])
+def test_delta_position_cannot_skip_hashed_or_undelivered_native_events(semantic, empty: bool) -> None:
+    for index in range(3):
+        semantic.log.append("turn_complete", {"title": str(index)})
+    current = semantic.frame()
+    before = semantic.wire.position(current["source"], 1)
+    body = semantic.frame(position=before, limit=1)
+    assert body["entries"][0]["native_event_id"] == 2 and body["has_more"]
+    body.update(position=current["position"], has_more=False)
+    if empty:
+        body["entries"] = []
+        body["next_before"] = None
+    with pytest.raises(TimelineContractError, match="delivered evidence|delta lost its base"):
+        semantic.codec().decode(body)
+
+
 def test_empty_log_acquires_only_real_first_continuity_then_rebuild_refuses(semantic) -> None:
     codec = semantic.codec()
     empty = codec.decode(semantic.frame())
-    token = codec.token(empty, 1)
-    assert codec.snapshot(empty, token).position is None
+    assert empty["position"] is None
+    with pytest.raises(OwnerReadError, match="no real event continuity"):
+        codec.token(empty, 1)
     semantic.log.append("turn_complete", {})
     first = codec.decode(semantic.frame())
+    token = codec.token(first, 1)
     assert codec.snapshot(first, token).events[0].event_id == "event:1"
     semantic.log.rebuild([("turn_complete", {})])
     with pytest.raises(OwnerReadError, match="incarnation changed"):

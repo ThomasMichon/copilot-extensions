@@ -88,7 +88,7 @@ class BridgeTimelineAttachment(TimelineAttachment):
             return
         self.choice = value
         self._chosen = deepcopy(self._members[value]) if value != "membership" else None
-        await self.set_selection(self.selection)
+        await self.set_selection(self.selection, reconcile=True, reset_membership=False)
 
     def head_changed(self) -> bool:
         """Ignore paused historical streams when testing the active reader's head fence."""
@@ -102,9 +102,12 @@ class BridgeTimelineAttachment(TimelineAttachment):
 
     async def set_selection(
         self, selection: tuple[str, str, str] | None, *, reconcile: bool = False,
+        reset_membership: bool = True,
     ) -> None:
         if selection is not None:
-            if self.selection is not None and selection != self.selection:
+            if (reconcile and reset_membership) or (
+                self.selection is not None and selection != self.selection
+            ):
                 self.choice, self._chosen, self._members = "membership", None, {}
             self.selection = selection
         # Retain events and integrity proofs, but never present an inactive

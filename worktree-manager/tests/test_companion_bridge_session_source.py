@@ -87,7 +87,7 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                         counts["max_held"] = max(counts["max_held"], counts["held"])
                 if url.path.endswith("/owner-observations"):
                     assert query["owner_ref"] == OWNER
-                    body = owner.frame(OWNER, query.get("after"))
+                    body = membership.source_for(manager, OWNER).frame(OWNER, query.get("after"))
                     peer.sendall(wire.sse(body))
                     while held and not stop.wait(0.05):
                         if select.select([peer], [], [], 0)[0] and not peer.recv(1, socket.MSG_PEEK):
@@ -184,6 +184,7 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "log": log, "session": session, "requests": requests, "following": following,
         "counts": counts, "unsupported": unsupported,
         "history_entered": history_entered, "block_history": block_history,
+        "manager": manager,
     }
     try:
         yield result
@@ -199,6 +200,7 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             worker.join(timeout=3)
         listener.close()
         owner.close()
+        getattr(db, "_owner_membership_source", owner).close()
         db.flush()
         db.close()
         assert not thread.is_alive() and not any(worker.is_alive() for worker in workers)
@@ -265,21 +267,36 @@ def test_missing_running_semantic_capability_never_uses_raw_or_session_route(sem
 def test_empty_log_live_first_event_uses_real_continuity(semantic_peer, tmp_path) -> None:
     async def check() -> None:
         reader, stop = source(tmp_path), asyncio.Event()
-        initial = await reader.prepare(1, stop=stop)
-        assert initial.position is None and not initial.events
-        stream = reader.observe(initial.token, stop=stop)
-        await anext(stream)
-        waiting = asyncio.create_task(anext(stream))
+        preparing = asyncio.create_task(reader.prepare(1, stop=stop))
         try:
             assert await asyncio.to_thread(semantic_peer["following"].wait, 5)
+            assert not preparing.done() and reader.initial is None
             semantic_peer["log"].append("ask_user_request", {"request_id": "input-a"})
-            value = await waiting
-            assert value.events[0].kind.value == "input-request"
-            assert value.token == initial.token and value.position is not None
+            initial = await preparing
+            assert initial.events[0].kind.value == "input-request"
+            assert initial.position is not None
+            # Refreshing the same real incarnation must not change its integrity scope.
+            second = await source(tmp_path).prepare(2, stop=asyncio.Event())
+            assert second.token.identity == initial.token.identity
+            assert second.events == initial.events
         finally:
             stop.set()
-            await asyncio.gather(waiting, return_exceptions=True)
-            await stream.aclose()
+            await asyncio.gather(preparing, return_exceptions=True)
+
+    asyncio.run(check())
+
+
+def test_empty_log_first_event_wait_is_owned_and_cancellable(semantic_peer, tmp_path) -> None:
+    async def check() -> None:
+        reader, stop = source(tmp_path), asyncio.Event()
+        preparing = asyncio.create_task(reader.prepare(1, stop=stop))
+        try:
+            assert await asyncio.to_thread(semantic_peer["following"].wait, 5)
+        finally:
+            stop.set()
+        with pytest.raises(asyncio.CancelledError):
+            await preparing
+        assert reader.initial is None and reader.codec.source["journal_incarnation"] is None
 
     asyncio.run(check())
 
