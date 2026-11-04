@@ -42,6 +42,20 @@ def test_public_identity_is_stable_without_keying_on_the_local_index_name():
     assert identify(json.dumps(changed)) != before
 
 
+def test_public_identity_tracks_core_content_not_its_source_container():
+    source = deepcopy(SOURCE)
+    original = {"source": SOURCE, "index": [URL, None], "downloadOrigins": []}
+    source.update(source_commit="1" * 40, source_tree="2" * 40, main_head="3" * 40)
+    moved = {"source": source, "index": [URL, None], "downloadOrigins": []}
+    assert public._public_identity(URL, SOURCE)(json.dumps(original)) == (
+        public._public_identity(URL, source)(json.dumps(moved))
+    )
+    source["core_artifact_id"] = "sha256:" + "4" * 64
+    assert public._public_identity(URL, SOURCE)(json.dumps(original)) != (
+        public._public_identity(URL, source)(json.dumps(moved))
+    )
+
+
 @pytest.mark.parametrize("url", [
     "http://feed.example/simple/", "https://u:p@feed.example/simple/",
     "https://feed.example/simple/?token=sample", "https://feed.example/simple/#fragment",

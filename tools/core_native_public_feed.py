@@ -59,6 +59,9 @@ def _public_identity(url: str, source: dict):
                 ):
                     raise ValueError
                 data["index"][1] = None
+                data["source"] = {
+                    key: source[key] for key in ("core_payload_sha256", "core_artifact_id")
+                }
             elif keys == {"name", "url", "authenticate", "headers"}:
                 if (
                     data["url"] != url or data["headers"] != []
