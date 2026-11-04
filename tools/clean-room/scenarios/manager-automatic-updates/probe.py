@@ -91,7 +91,7 @@ def _qualify_cases(
                     if case in ("all", "failed-successor"):
                         report["failed_successor"] = lifecycle.case(
                             source, workdir / "f", manager, cycles=1,
-                            failing_standby=True, windows_observer=observer,
+                            failing_standby=True, native_startup=True, windows_observer=observer,
                             instance_environment=instance_environment,
                         )
                 packet = observer.packet()
