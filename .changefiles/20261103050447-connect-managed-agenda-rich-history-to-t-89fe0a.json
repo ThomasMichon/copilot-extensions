@@ -1,0 +1,9 @@
+{
+  "comment": "Connect managed Agenda rich history to the existing Companion subscription through passive owner reads.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
