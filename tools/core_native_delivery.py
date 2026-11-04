@@ -32,6 +32,7 @@ from core_native_feed_resolution import (
     verify_guarded_projects,
     verify_lock_witness,
 )
+from core_native_public_feed import public_feed_policy, require_public_feed
 from core_runtime_profile import (
     _core_manifest,
     _read,
@@ -273,6 +274,7 @@ def _build_from_snapshot(
     material_paths: dict, destination: Path, deadline: float, max_bytes: int,
     native_lock: Path | None = None, offline_wheel_pool: Path | None = None,
     guarded_feed: bool = False, artifact_index: Path | None = None,
+    nonsecret_feed_url: str | None = None,
 ) -> dict:
     """Keep selected lock, wheel and material custody until candidate publication."""
     if type(max_bytes) is not int or max_bytes <= 0:
@@ -281,6 +283,8 @@ def _build_from_snapshot(
         (native_lock is not None, offline_wheel_pool is not None, guarded_feed),
     ) != 1:
         raise ProfileError("core delivery requires exactly one native selection mode")
+    if nonsecret_feed_url is not None and (not guarded_feed or download_origins):
+        raise ProfileError("public feed identity requires delegated guarded-feed selection")
     if (
         not isinstance(materials, dict) or not isinstance(material_paths, dict)
         or any(not isinstance(name, str) for name in materials)
@@ -408,6 +412,8 @@ def _build_from_snapshot(
                         selected, transaction, projections, uv=uv, download_origins=download_origins,
                         exclusions=first_exclusions, deadline=deadline,
                     )
+                    if nonsecret_feed_url is not None:
+                        require_public_feed(selected, transaction, nonsecret_feed_url, initial_feed)
                     witness, guarded_directory, snapshot_budget = compile_owners.enter_context(compile_guarded(
                         transaction, projections[1], initial_feed, floor=floor, cutoffs=cutoffs,
                         exclusions=first_exclusions, target_tags=target["tags"],
@@ -447,6 +453,18 @@ def _build_from_snapshot(
                     policy != initial_policy or feed.policy_id != initial_feed.policy_id
                 ):
                     raise ProfileError("native core feed identity changed during selection")
+                public_feed = None
+                if nonsecret_feed_url is not None:
+                    public_feed = public_feed_policy(
+                        selected, transaction, projections, uv=uv, url=nonsecret_feed_url,
+                        wheels=selected_files, exclusions=first_exclusions, deadline=deadline,
+                    )
+                    if (
+                        [(item.index_url, item.headers) for item in public_feed.feeds]
+                        != [(item.index_url, item.headers) for item in feed.feeds]
+                        or public_feed.cutoffs != feed.cutoffs
+                    ):
+                        raise ProfileError("public feed capture differs from the native acquisition")
                 if guarded_feed:
                     if selected_files:
                         selected_files, _origins = validate_acquisition_inputs(
@@ -490,7 +508,8 @@ def _build_from_snapshot(
                     ) as retained:
                         native_profile = native.complete_profile(
                             selected, target, roots, retained, policy_id=policy["policyId"],
-                            acquisition_id=feed.policy_id, deadline=deadline,
+                            acquisition_id=public_feed.policy_id if public_feed is not None else feed.policy_id,
+                            deadline=deadline,
                         )
                         selected_paths = {
                             row["filename"]: retained.paths[row["filename"]]
@@ -531,6 +550,13 @@ def _build_from_snapshot(
                 )
                 if policy != final_policy or feed.policy_id != final_feed.policy_id:
                     raise ProfileError("native core feed identity changed during construction")
+                if public_feed is not None:
+                    final_public = public_feed_policy(
+                        selected, transaction, projections, uv=uv, url=nonsecret_feed_url,
+                        wheels=selected_files, exclusions=first_exclusions, deadline=deadline,
+                    )
+                    if final_public.policy_id != public_feed.policy_id or final_public.cutoffs != feed.cutoffs:
+                        raise ProfileError("public feed identity changed during construction")
                 if guarded_feed and witness["projects"]:
                     verification_limits = acquisition_limits
                 if project_core_inputs(source, manifest_data, target, deadline=deadline) != (
@@ -577,6 +603,7 @@ def prepare_core_delivery(
     download_origins: tuple[str, ...], deadline: float, max_bytes: int,
     native_lock: Path | None = None, offline_wheel_pool: Path | None = None,
     guarded_feed: bool = False, artifact_index: Path | None = None,
+    nonsecret_feed_url: str | None = None,
 ) -> dict:
     """Compose the selected Main source and prepare one inert native candidate."""
     _check_deadline(deadline)
@@ -586,6 +613,8 @@ def prepare_core_delivery(
         (native_lock is not None, offline_wheel_pool is not None, guarded_feed),
     ) != 1:
         raise ProfileError("core delivery requires exactly one native selection mode")
+    if nonsecret_feed_url is not None and (not guarded_feed or download_origins):
+        raise ProfileError("public feed identity requires delegated guarded-feed selection")
     destination = Path(os.path.abspath(destination))
     if os.path.lexists(destination):
         raise FileExistsError("core delivery output already exists")
@@ -608,6 +637,7 @@ def prepare_core_delivery(
             download_origins=download_origins, materials=materials, material_paths=material_paths,
             destination=destination, deadline=deadline, max_bytes=max_bytes, native_lock=native_lock,
             offline_wheel_pool=offline_wheel_pool, guarded_feed=guarded_feed, artifact_index=artifact_index,
+            nonsecret_feed_url=nonsecret_feed_url,
         )
 
 
@@ -631,6 +661,10 @@ def main(argv: list[str] | None = None) -> int:
     selection.add_argument("--offline-wheel-pool", type=Path)
     selection.add_argument("--guarded-feed", action="store_true")
     parser.add_argument("--download-origin", action="append", default=[])
+    parser.add_argument(
+        "--nonsecret-feed-url",
+        help="opt in to reproducible identity for this explicitly nonsecret anonymous HTTPS feed",
+    )
     parser.add_argument("--timeout", type=float, default=600)
     parser.add_argument("--max-bytes", type=int, default=512 << 20)
     args = parser.parse_args(argv)
@@ -645,7 +679,7 @@ def main(argv: list[str] | None = None) -> int:
             args.output, uv=args.uv, download_origins=tuple(args.download_origin),
             deadline=deadline, max_bytes=args.max_bytes, native_lock=args.native_lock,
             offline_wheel_pool=args.offline_wheel_pool, guarded_feed=args.guarded_feed,
-            artifact_index=args.artifact_index,
+            artifact_index=args.artifact_index, nonsecret_feed_url=args.nonsecret_feed_url,
         )
         print(json.dumps(result, sort_keys=True))
         return 0
