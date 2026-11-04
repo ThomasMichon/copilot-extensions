@@ -57,6 +57,12 @@ positions and selected-head/reader retirement controls. The
 174 coupled cases and the final 41-case pending-admission correction without
 claiming current answerability, qualified PRE, installed or native acceptance.
 
+#10447 merged as `c3437ffe05261e7b71c2763517133b6f36f46d45`, delivering D4's
+policy-qualified typed export collection/readback library and retained-namespace
+fencing. The [source readback](journal/2026/11.04-sidecar-collection-library.md)
+records 876 coupled controls, separate depth/Windows-API controls and continuing
+owner-discovery/orchestration, archival, rescue and native gates.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than

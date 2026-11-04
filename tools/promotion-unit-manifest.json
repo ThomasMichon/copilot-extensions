@@ -4603,7 +4603,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/pr_publication_config.py": "90a5caff767b47717774f41e2cfae2d91aa0a15c10efd59903a75c9d3de41558",
         "plugins/agent-worktrees/src/agent_worktrees/pr_publish.py": "af2466bd58d2c543ed647340a6554d039602af20a3cea4803b8995e4374ed626",
         "plugins/agent-worktrees/src/agent_worktrees/pr_related_binding.py": "9f15a66b015b1ca0dfb29f9bf483f4b4baed868647d2f8334627ae3803fa6822",
-        "plugins/agent-worktrees/src/agent_worktrees/project_state.py": "599ee5165a9e7e825de150bda88931cac943d1cc66cae6990231127339ad662b",
+        "plugins/agent-worktrees/src/agent_worktrees/project_state.py": "281ed5dbc5e2508446b1d3842905426a95a5dff25bd0f9fb13f083078c483219",
         "plugins/agent-worktrees/src/agent_worktrees/publication_deadline.py": "6cf2c2553dd588fc3d32f42549c6c8d77646ac20c80c6e6d3f1395e4b2df735b",
         "plugins/agent-worktrees/src/agent_worktrees/push_timeout.py": "53ab40cc1f3e8e79c9dbbf0726057d50c59ca59326b19e0a5dbee9b6c810dbeb",
         "plugins/agent-worktrees/src/agent_worktrees/record_cache.py": "92027ac4c125b1f86e1e437c6f1f9f01651e8c15a02dc01d1ea72a89a1ce9f7f",

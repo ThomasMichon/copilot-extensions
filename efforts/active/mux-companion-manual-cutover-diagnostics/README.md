@@ -473,6 +473,8 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       #10392 delivers passive Bridge membership consumption and the first
       isolated three-owner demonstration. #10435 delivers the supported
       selected-session Bridge event/history consumer and lifecycle controls.
+      #10447 delivers D4's policy-gated local collection/readback library and
+      namespace/retention fencing, not owner discovery or scheduled collection.
       Current answerability/PRE qualification, archival/rescue, native durability and
       whole S2-S5 and original root gates remain open.
 
@@ -551,6 +553,7 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+- [2026-11-04 - Typed collection library merged; owner orchestration remains open](journal/2026/11.04-sidecar-collection-library.md)
 - [2026-11-04 - Selected-session Bridge consumer merged; archival and qualification next](journal/2026/11.04-sidecar-known-session-consumer.md)
 - [2026-11-04 - Bridge membership consumer merged; known-session observations next](journal/2026/11.04-sidecar-bridge-membership-consumer.md)
 - [2026-11-03 - Rich Agenda consumer merged; Bridge composition and archival remain open](journal/2026/11.03-sidecar-rich-agenda-consumer.md)

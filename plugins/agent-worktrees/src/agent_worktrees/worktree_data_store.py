@@ -80,9 +80,14 @@ def _regular(path: Path, *, optional: bool = False) -> os.stat_result | None:
     return metadata
 
 
-def _project_root(project: str) -> tuple[Path, os.stat_result | None]:
+def _project_root(
+    project: str, *, allow_missing: bool = False,
+) -> tuple[Path, os.stat_result | None]:
     segment(project, "project")
-    root = Path(cfg.project_dir(project))
+    root = (
+        project_state._cell_state_root(project, allow_missing=True)
+        if allow_missing and project_state.namespaced() else Path(cfg.project_dir(project))
+    )
     if not root.is_absolute():
         raise WorktreeDataError("owner-unavailable", "project-data owner returned a relative root")
     try:

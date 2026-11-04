@@ -38,6 +38,7 @@ def test_capability_discovery_and_invalid_selection_never_read_project_state(
     assert args.func(args) == 0
     result = json.loads(capsys.readouterr().out)
     assert result["ok"] is True and result["capabilities"] == [cli.CAPABILITY]
+    assert result["optional_capabilities"] == ["worktree-data-project-inventory-v1"]
     invalid = parse(
         "worktree-data-read", "--capabilities", "--store-id", "a" * 32, "--json",
     )
@@ -46,10 +47,43 @@ def test_capability_discovery_and_invalid_selection_never_read_project_state(
     assert result["error"]["code"] == "invalid-request" and result["ok"] is False
 
 
+@pytest.mark.parametrize("selector", [
+    ["--store-id", "a" * 32], ["--creation-nonce", "nonce"], ["--placement-generation", "1"],
+])
+def test_project_inventory_rejects_point_selectors_before_resolving_project(
+    monkeypatch, capsys, selector: list[str],
+) -> None:
+    monkeypatch.setattr(cli.cfg, "project_name", lambda: pytest.fail("invalid request read owner"))
+    args = parse("worktree-data-read", "--inventory", "--json", *selector)
+    assert args.func(args) == 1
+    value = json.loads(capsys.readouterr().out)
+    assert value["error"]["code"] == "invalid-request" and "data" not in value
+
+
+def test_project_inventory_wire_overflow_is_one_explicit_failure(
+    tmp_path: Path, monkeypatch, capsys,
+) -> None:
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(cfg, "_home", lambda: tmp_path)
+    monkeypatch.setattr(cfg, "project_name", lambda: "sample-project")
+    monkeypatch.setattr(
+        project_state, "_normalized_repository_remote",
+        lambda *_a: "network:example.invalid/sample-project",
+    )
+    monkeypatch.setattr(cli, "MAX_INVENTORY_BYTES", 64)
+    args = parse("worktree-data-read", "--inventory", "--json")
+    assert args.func(args) == 1
+    value = json.loads(capsys.readouterr().out)
+    assert value["error"]["code"] == "inventory-limit" and "data" not in value
+    assert not cfg.project_dir("sample-project").exists()
+
+
 @pytest.mark.parametrize("argv", [
     ["worktree-data-read", "--worktree", "exact", "--contract-version", "2"],
     ["worktree-data-read", "--worktree", "exact", "--store", "a" * 32],
     ["worktree-data-read", "--worktree", "exact", "--capabilities"],
+    ["worktree-data-read", "--worktree", "exact", "--inventory"],
+    ["worktree-data-read", "--inventory", "--capabilities"],
     ["worktree-data-allocate", "--worktree", "exact"],
     [
         "worktree-data-allocate", "--worktree", "exact", "--creation-nonce", "nonce",
@@ -232,10 +266,10 @@ def test_real_root_cli_allocates_once_and_fresh_reader_survives_retirement(
         "machine": "sample-machine", "platform": "linux",
     }), encoding="utf-8")
 
-    def invoke(command: str, *argv: str, code: int = 0):
+    def invoke(command: str, *argv: str, code: int = 0, inventory: bool = False):
         result = run_headless(
             [sys.executable, "-c", CHILD, str(tmp_path), project, command,
-             "--worktree", worktree, "--json", *argv],
+             *([] if inventory else ["--worktree", worktree]), "--json", *argv],
             capture_output=True, text=True, timeout=30,
             env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
         )
@@ -278,8 +312,16 @@ def test_real_root_cli_allocates_once_and_fresh_reader_survives_retirement(
     assert retained["data"]["live_authority"] is False
     assert retained["data"]["placements"] == [placement]
     assert bytes_by_path() == retired
+    inventory = invoke("worktree-data-read", "--inventory", inventory=True)
+    assert inventory["capability"] == "worktree-data-project-inventory-v1"
+    assert inventory["data"]["repository_identity"] == f"network:example.invalid/{project}"
+    assert inventory["data"]["worktrees"] == [retained["data"]]
+    assert bytes_by_path() == retired
     descriptor = root / "worktree-state" / worktree / "descriptor.json"
     descriptor.write_bytes(b"{")
     broken = invoke("worktree-data-read", "--store-id", store, code=1)
     assert broken["ok"] is False and "availability" not in broken
     assert broken["error"]["code"] in {"invalid-descriptor", "partial-registration"}
+    broken_inventory = invoke("worktree-data-read", "--inventory", inventory=True, code=1)
+    assert broken_inventory["error"]["code"] == "invalid-descriptor"
+    assert "data" not in broken_inventory

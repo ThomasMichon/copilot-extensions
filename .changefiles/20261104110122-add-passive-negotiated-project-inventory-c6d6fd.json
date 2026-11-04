@@ -1,0 +1,9 @@
+{
+  "comment": "Add passive negotiated project inventory for retained worktree data",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

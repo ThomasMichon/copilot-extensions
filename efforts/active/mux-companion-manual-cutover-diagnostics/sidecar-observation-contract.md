@@ -20,7 +20,9 @@ contracts. #10251 connects Manager discovery, rich reads and the existing coarse
 push subscription without changing that observation wire. #10392 adds passive
 Bridge membership consumption and the first isolated three-owner demonstration.
 #10435 adds the supported selected-session semantic consumer and its independent
-history/live and lifecycle fences. Logger, complete source coverage, qualified
+history/live and lifecycle fences. #10447 adds Logger's
+[explicit typed collection/readback library](../../../plugins/agent-logger/docs/worktree-state.md),
+not owner discovery or scheduled orchestration. Logger integration, complete source coverage, qualified
 current answerability/PRE, installed and native acceptance remain open.
 Providers advertise actual running support before independently installed
 callers use new syntax. Existing roster, agenda-v1/v2 and raw Bridge event

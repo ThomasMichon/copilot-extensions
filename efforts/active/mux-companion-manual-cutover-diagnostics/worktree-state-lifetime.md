@@ -6,7 +6,8 @@ Standing intent: [worktree data](../../../visions/plugins/agent-worktrees/worktr
 
 **Status: design reviewed in #10199; D1 placement/discovery source merged in
 #10224; D2 managed initialization/export source merged in #10238; D3 Manager
-consumer source merged in #10251.** Native durability and D4-D5 remain open.
+consumer source merged in #10251; D4's explicit collection/readback library
+merged in #10447.** Native durability and complete D4-D5 remain open.
 No source merge performs a live data move,
 export, collection, cleanup or rollout. The
 [D1 readback](journal/2026/11.03-sidecar-durable-placement.md) and
@@ -44,8 +45,9 @@ discovery outside the checkout. The owning
 records allocation and filesystem refusal semantics. #10238 composes explicit
 new managed initialization with complete consistent context-qualified export
 and local readback. #10251 connects Manager to that discovery and the owning rich reader,
-using the existing single permanent Agenda subscription. Logger collection and
-legacy rescue remain separate, unfinished integrations.
+using the existing single permanent Agenda subscription. #10447 supplies
+Logger's explicit local collection/readback library; automatic owner discovery,
+existing-tick orchestration and legacy rescue remain unfinished integrations.
 
 Existing cleanup can remove a checkout while retaining a lifecycle tombstone.
 That tombstone does not preserve arbitrary checkout-local agenda bytes.
@@ -173,6 +175,9 @@ not consequences of a reviewed design.
 - [ ] D4. Extend the existing logger collection and readback flow for exported
   worktree state under its actual repository/privacy/destination policy. Retain
   the existing Session Sync/accounting owners; no parallel scheduler or service.
+  #10447 supplies the policy-qualified local library and namespace/preservation
+  fencing. Negotiated owner inventory, contributor discovery and existing-tick
+  orchestration remain open; see the [source readback](journal/2026/11.04-sidecar-collection-library.md).
 - [ ] D5. Qualify legacy rescue and the separation of checkout removal from data
   reclamation. Actual relocation, collection, deletion and rollout need their
   own concrete authorization and evidence.
@@ -207,11 +212,16 @@ not consequences of a reviewed design.
 - [ ] Owner export and archive readback preserve the complete declared ledger,
   immutable records, original identity and revision under concurrent mutation.
   Omitted/truncated/rewritten members fail the hash/completeness oracle.
-  #10238 delivers the owner export/local-readback source portion; actual logger
-  collection, destination acknowledgment and archive readback remain open.
+  #10238 delivers the owner export/local-readback source portion; owner discovery,
+  scheduled orchestration, destination acknowledgment and actual archive readback
+  remain open.
+  #10447 qualifies explicit local Logger collection and fresh owner readback in
+  isolated processes, not automatic discovery or actual archive acknowledgment.
 - [ ] Multiple contributing sessions reference one revision-bound worktree
   collection. Existing logger aggregate authorization, privacy, idempotency
   and destination ownership remain effective.
+  #10447 qualifies two explicitly supplied references to one local collection;
+  owner-derived contributing-session discovery remains open.
 - [ ] Checkout retirement retains managed data and its discoverable descriptor;
   legacy or unverified rescue prevents data-destroying removal. Archive outage
   alone neither erases data nor fabricates an unfinished source objective.
