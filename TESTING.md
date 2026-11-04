@@ -5926,6 +5926,9 @@ constructing the fresh Manager first. Controlled acquisition replaces only exter
 delivery and credentials; the planner, constructors, launchers and scheduled
 registrations remain real. Missing prerequisite or resident-attribution evidence
 fails acceptance rather than reducing the portfolio.
+The disposable project explicitly opts Vault into runtime participation with
+`enabled: true`; plugin visibility alone is not activation. This does not alter
+the default inactive behavior or any operator configuration.
 
 If baseline preparation reports a Vault activation refusal, the fixture also
 runs the retained payload's read-only activation reader under a bounded native

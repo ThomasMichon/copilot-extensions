@@ -217,6 +217,8 @@ def _configuration(case: Path, declared: dict[str, Any]) -> None:
     index_repo = project / ".copilot-extensions" / "agent-index" / "config.yaml"
     index_repo.parent.mkdir(parents=True)
     index_repo.write_text(f"indexers:\n  - machine: {machine}\n", encoding="utf-8")
+    if "agent-vault" in declared:
+        _write(project / ".agent-vault.json", {"enabled": True})
     _write(project / "services.yaml", {"plugins": [
         {"name": name, "deploy_machines": [machine]}
         for name, row in declared.items() if row["scope"] == "machine-gated"

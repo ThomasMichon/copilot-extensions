@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import sys
 import subprocess
+import shutil
 
 import pytest
 
@@ -98,3 +99,30 @@ def test_probe_cleanup_failure_retains_exact_custody(tmp_path, monkeypatch):
     assert raised.value is failure
     assert raised.value.process is process
     assert raised.value.job is job
+
+
+def test_whole_suite_declares_vault_runtime_activation(tmp_path):
+    from agent_procutil.owned_process import run_caller_owned
+    from manager_suite_artifacts import _configuration, _env
+
+    source = Path(__file__).resolve().parents[3] / "plugins" / "agent-vault"
+    payload = tmp_path / "published" / "plugins" / "agent-vault"
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True)
+    shutil.copyfile(source / "scripts" / "runtime-activation.py", scripts / "runtime-activation.py")
+    shutil.copytree(source / "scripts" / "configuration-layers", scripts / "configuration-layers")
+    module = payload / "src" / "agent_vault"
+    module.mkdir(parents=True)
+    for name in ("__init__.py", "config.py", "configuration.py", "_peer_launch.py"):
+        shutil.copyfile(source / "src" / "agent_vault" / name, module / name)
+    environment = _env(tmp_path)
+    _configuration(tmp_path, {"agent-vault": {"scope": "universal", "version": "1.0.0"}})
+    result = run_caller_owned(
+        [sys.executable, "-I", "-B", str(scripts / "runtime-activation.py"),
+         "--cwd", str(tmp_path / "project")],
+        cwd=payload, env=environment, timeout=30,
+        max_stdout_bytes=64 * 1024, max_stderr_bytes=64 * 1024,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout)["state"] == "configured"
+    assert not (tmp_path / "h" / ".agent-vault").exists()

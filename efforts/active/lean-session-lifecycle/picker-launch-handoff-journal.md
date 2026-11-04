@@ -636,3 +636,9 @@
   edits. Remove the temporary trace, deliberate refusal and its control
   without running another instrumented VM. Final acceptance must use ordinary
   fixture delivery after the independently reviewed updater prerequisite.
+- Make the whole-suite fixture's Vault participation explicit in its
+  disposable project (`enabled: true`). The lane expects a real Vault resident;
+  plugin enablement alone must not supply that opt-in. A real payload-reader
+  control proves configured activation from the fixture's repository without
+  installing a runtime. The nine-control packet passes with ordinary cleanup;
+  inactive defaults and operator configuration remain unchanged.
