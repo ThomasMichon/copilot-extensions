@@ -8,7 +8,7 @@ import pytest
 
 from agent_dispatch.owner_wake_delivery import deliver_owner_wake
 from agent_dispatch.queue import SpawnState, Status
-from agent_dispatch.queue_pool_recovery import prepare_recovery_wake
+from agent_dispatch.queue_pool_recovery import prepare_recovery_wake, reconcile_recoveries
 from agent_dispatch.queue_task_recovery import _captured, _revision
 from agent_dispatch.supervisor import Supervisor
 from agent_dispatch.task_wake_recovery import reconcile_wake
@@ -82,10 +82,10 @@ def test_cold_wake_uses_retained_bridge_native_then_waits_for_worker(
 
 
 def test_unqualified_recovery_unknown_uses_existing_original_receipt_reconciliation(
-    ordinary: SimpleNamespace,
+    ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     o = ordinary
-    task_id, _, _ = recoverable(o)
+    task_id, _, recovery_revision = recoverable(o)
     wake = o.q.claim_due_wake(now=102)
     prepare_recovery_wake(o.q, wake)
     admission = o.q.admit_execution_wake(wake, provenance=None, now=102)
@@ -101,12 +101,27 @@ def test_unqualified_recovery_unknown_uses_existing_original_receipt_reconciliat
             "invocation_key": wake.id, "admission": "accepted", "queued": False, "turn_index": 1,
         }
 
+    deadline = o.q.pool_startup(task_id).startup_deadline
+    monkeypatch.setattr(o.q, "_now", lambda now: deadline - 1 if now is None else now)
     result = reconcile_wake(
         o.q, task_id, outbox="wake_outbox", wake_id=wake.id,
         expected_revision=revision, actor="operator", reason="observe original outcome", observe=observe,
     )
     assert result["outcome"] == "sent" and len(observations) == 1
     assert observations[0][:2] == ("bridge-a", "native-a")
-    assert o.q.finish_wake(wake.id, wake.delivery_token, delivered=False, now=103).status == "delivered"
+    retained = o.q.list_wakes(task_id)[0]
+    assert retained.status == "delivering" and retained.delivered_at == deadline - 1
+    assert reconcile_recoveries(o.q, now=deadline) == 1
     assert o.q.get(task_id).status == Status.SUSPENDED
+    assert o.q.pool_startup(task_id).decision_deadline == deadline - 1 + 1800
+    monkeypatch.setattr(o.q, "_now", lambda now: deadline + 1 if now is None else now)
+    accepted = o.client.start_pool_task(
+        task_id, "host-a/worktree-a", owner_session_id="native-a",
+        expected_generation=1, recovery_revision=recovery_revision,
+    )
+    assert accepted["status"] == Status.STARTED
+    assert o.q.finish_wake(
+        wake.id, wake.delivery_token, delivered=False, now=deadline + 2,
+    ).status == "stale"
+    assert o.q.get(task_id).status == Status.STARTED
     assert len(o.allocations) == 1
