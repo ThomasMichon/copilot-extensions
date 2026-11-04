@@ -115,6 +115,14 @@ literal alternatives, #3115's separate live-umbrella requirement and #9535's
 current reserved source continuation remain intact; publication is not
 technical completion, receiving acceptance or source disposition.
 
+The [next sixteen qualified contracts](receiving-qualified-sixteen.md)
+retain five finite direct documentation families and eleven independent
+canonical/home or proof gaps. All sixteen complete metadata records remain
+unchanged from the admitted 56-text study. Manager preview and canonical
+Finalize, filesystem-registry isolation, native transport and headless
+provider-miss acceptance remain distinct. Vault stays Draft with design and
+implementation-owner admission pending; no source or resource transfer follows.
+
 ## Request
 
 Operator request, with identifying organizational references redacted:
@@ -420,6 +428,10 @@ outcomes from agent-recommended research and prioritization mechanics.
   finite evidence tiers, eight canonical/home retentions and #9532/#9535's
   source/receipt boundaries. Its historical 923-open starting census
   remains distinct from later observations; no closure is claimed.
+  The sixteen-contract unit preserves five finite direct families and
+  eleven complete canonical/home retentions, including explicit WHOLE OPEN,
+  Draft, native OR accepted-transfer and pending design-choice conditions.
+  It introduces no implementation or source/resource disposition.
 
 ## Proposal
 
