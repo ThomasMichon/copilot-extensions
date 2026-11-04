@@ -23,7 +23,11 @@ def _normalized_path(path: Path) -> str:
 
 def _document(path: Path, *, limit: int | None = 65536):
     metadata = path.lstat()
-    if not stat.S_ISREG(metadata.st_mode) or path.is_symlink():
+    if (
+        not stat.S_ISREG(metadata.st_mode) or path.is_symlink()
+        or getattr(metadata, "st_file_attributes", 0) & 0x400
+        or getattr(metadata, "st_reparse_tag", 0)
+    ):
         raise ValueError(f"provider entry is not an ordinary file: {path}")
     with path.open(encoding="utf-8-sig") as stream:
         content = stream.read(limit + 1) if limit is not None else stream.read()

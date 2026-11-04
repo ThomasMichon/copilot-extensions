@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import stat
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -496,3 +498,47 @@ def test_application_provider_linked_registry_refused_like_real_consumer(
     with pytest.raises(RuntimeError, match="registry"):
         provider.register_installed_application()
     assert _snapshot(actual) == before
+
+
+@pytest.mark.parametrize("owned", [False, True])
+@pytest.mark.parametrize("attributes,tag", [(0x400, 0), (0, 0x9000001A)])
+def test_application_provider_reparse_entries_match_consumer_admission(
+    real_application_bridge_home, monkeypatch, owned, attributes, tag,
+):
+    from dropin_registry import EntryDecision, scan_directory
+
+    home, _command = real_application_bridge_home
+    registry = home / "bridge" / "providers.d"
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(registry.parent))
+    target = provider.register_installed_application()
+    selected = target if owned else registry / "foreign.json"
+    if not owned:
+        selected.write_bytes(target.read_bytes())
+    before = _snapshot(home)
+    original = Path.lstat
+
+    def metadata(path, *args, **kwargs):
+        if path == selected:
+            return SimpleNamespace(
+                st_mode=stat.S_IFREG | 0o600, st_file_attributes=attributes,
+                st_reparse_tag=tag,
+            )
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", metadata)
+    classified = []
+
+    def classify(path):
+        classified.append(path)
+        return EntryDecision.active(path)
+
+    consumed = scan_directory(registry, classify, registry="providers.d", suffixes={".json"})
+    assert selected not in classified
+    assert any(item.entry == str(selected) and item.reason == "invalid-entry"
+               for item in consumed.findings)
+    if owned:
+        with pytest.raises(RuntimeError, match="Refusing to replace"):
+            provider.register_installed_application()
+    else:
+        assert provider.register_installed_application() == target
+    assert _snapshot(home) == before

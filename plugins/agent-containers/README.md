@@ -74,6 +74,9 @@ symbolic links, junctions and reparse points before target reads or writes,
 including unchanged-entry setup. A missing root may still be created. This
 matches the consumer's leaf-root check; it does not resolve or inspect every
 ancestor.
+Manifest entries also use the consumer's regular, non-reparse file admission:
+a linked/reparse own destination refuses unchanged, while nonordinary peers
+are skipped rather than treated as eligible namespace owners.
 
 The contained wheel/sdist/prepared-source resource packet checks each linked
 origin as a separate bounded item, sharing only its fixture-owned installed
