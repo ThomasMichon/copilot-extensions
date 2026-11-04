@@ -233,11 +233,12 @@ class ConversationJournal:
                 value.our_roles
             ):
                 raise ValueError("observed conversation relationships cannot disappear")
+            reopening = old.terminal and value.state == "open" and value.complete and reopen
             previous_terminal = record["previous_terminal"]
             epoch, sequence = record["epoch"], record["sequence"]
             events = list(record["events"])
             if old.terminal:
-                if value.state == "open" and value.complete and reopen:
+                if reopening:
                     previous_terminal = old.document()
                     epoch, sequence, events, kind = epoch + 1, 0, [], "reopened"
                 elif not value.terminal:
@@ -246,6 +247,12 @@ class ConversationJournal:
                     )
             else:
                 kind = "terminal" if value.terminal else "changed"
+            if (
+                old.review_rounds is not None
+                and not reopening
+                and (value.review_rounds is None or value.review_rounds < old.review_rounds)
+            ):
+                raise ValueError("known cumulative review rounds cannot disappear or decrease")
             changed = sorted(
                 name
                 for name in SECTIONS

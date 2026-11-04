@@ -172,6 +172,22 @@ def owner(tmp_path):
     return store
 
 
+@pytest.mark.parametrize("rounds", [None, 1])
+def test_terminal_statistics_do_not_erase_a_previously_known_review_round_count(rounds):
+    journal = ConversationJournal()
+    initial = observation(review_rounds=2)
+    journal.observe(initial, expected=None)
+    before = journal.snapshot()
+    with pytest.raises(ValueError, match="cumulative review rounds"):
+        journal.observe(
+            replace(
+                initial, observed_from=102, observed_to=103, state="merged", review_rounds=rounds
+            ),
+            expected=Cursor(1, 1),
+        )
+    assert journal.snapshot() == before
+
+
 def test_explicit_layout_adoption_preserves_replay_and_refuses_unsafe_capacity(owner):
     scope = ConsumerScope("consumer-a", "account-a", "example/project")
     owner.execute(

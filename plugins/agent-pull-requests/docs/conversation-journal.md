@@ -16,7 +16,8 @@ repository/PR/account/namespace key, exact head/base, original observation
 interval, state/completeness, provider actor IDs, accumulated observed reviewer
 and own-role relationships, normalized verdict, known review-round/count
 statistics and current normalized section digests. Unknown statistics are null,
-not zero. Digests summarize current commits, comments, threads, checks, reviews
+not zero. A known cumulative review-round count cannot disappear or decrease
+within an observation epoch. Digests summarize current commits, comments, threads, checks, reviews
 and participants; they are not message bodies or patches.
 
 An observation is at most 4 KiB. The journal admits at most 256 PRs, retains
