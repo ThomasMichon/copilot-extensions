@@ -1,0 +1,9 @@
+{
+  "comment": "Keep backup guidance-worker bytecode in the selected runtime external cache",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
