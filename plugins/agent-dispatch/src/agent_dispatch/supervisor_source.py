@@ -314,6 +314,7 @@ def _cancel_owned_candidate(child, root):
         or not Path(row.get("runtime_root", "")).samefile(root)
     ):
         return False
+    targets = []
     for pid_key, birth_key in (("supervisor_pid", "supervisor_birth"), ("pid", "birth")):
         if not row.get(pid_key):
             continue
@@ -323,33 +324,56 @@ def _cancel_owned_candidate(child, root):
         observed = identity_state(pid, birth)
         if observed == "dead":
             continue
-        if observed != "matching" or not stop_identity(pid, birth, graceful=pid_key == "supervisor_pid"):
+        if observed != "matching":
+            return False
+        targets.append((pid, birth, pid_key == "supervisor_pid"))
+    for pid, birth, graceful in targets:
+        if not stop_identity(pid, birth, graceful=graceful):
             return False
     return cleanup_instance(receipt, terminate=False).status in {"settled", "missing"}
 
 
-def _retarget_handoff(daemon, state):
+def _settled_launch_error(state):
+    from agent_procutil.daemon_instances import cleanup_instance, inspect_instances
+    from agent_procutil._daemon_instance_identity import identity_state
+
+    error = state.get("spawn_error")
+    receipt = getattr(error, "instance_receipt", None)
+    if receipt is None or not getattr(receipt, "registry_root", None) or not getattr(receipt, "instance_id", None):
+        return False
+    try:
+        row = next((item for item in inspect_instances(receipt.registry_root)
+                    if item.get("instance_id") == receipt.instance_id), None)
+        if row is None:
+            identity = state.get("spawn_binding")
+            if identity is None or identity_state(*identity) != "dead":
+                return False
+            return cleanup_instance(receipt, terminate=False).status == "settled"
+        if (
+            row.get("state") in {"reserved", "pending", "starting"}
+            or not Path(row.get("runtime_root", "")).samefile(state["root"])
+        ):
+            return False
+        pid, birth = int(row.get("pid", "0")), row.get("birth")
+        if pid <= 0 or not isinstance(birth, str) or not birth:
+            return False
+        identity = (pid, birth)
+        retained = getattr(error, "process_identity", None)
+        if retained is not None and retained != identity:
+            return False
+        state["spawn_binding"] = identity
+        if identity_state(*identity) != "dead":
+            return False
+        return cleanup_instance(receipt, terminate=False).status == "settled"
+    except (OSError, RuntimeError, TypeError, ValueError):
+        log.warning("retained supervisor launch outcome is still unconfirmed", exc_info=True)
+        return False
+
+
+def _restore_admission(daemon, state):
     from .supervisor_retirement import _retire_owned_workers, _tracked_work
     from .supervisor_daemon import _SHUTDOWN_GRACE_SECONDS
 
-    child = state.get("child")
-    if child is None:
-        ready = state.get("prepared")
-        if ready is None:
-            return False
-        from agent_procutil._daemon_instance_identity import identity_state
-
-        # A discovered peer is not ours to terminate, even while we hold the lock.
-        if identity_state(ready["generation"]["pid"], ready["birth"]) not in {"dead", "reused"}:
-            return False
-    else:
-        try:
-            settled = _cancel_owned_candidate(child, state["root"])
-        except (OSError, RuntimeError, ValueError):
-            log.warning("obsolete supervisor candidate custody is unconfirmed", exc_info=True)
-            return False
-        if not settled:
-            return False
     pools = state.get("pools", set())
     if any(not future.done() for future in _tracked_work(daemon)):
         return False
@@ -360,7 +384,54 @@ def _retarget_handoff(daemon, state):
     daemon._shutdown_drained = True
     with daemon._pool_metadata_admission_lock:
         daemon._pool_metadata_closed.clear()
-    daemon._source_handoff = None
+    state.pop("pools", None)
+    return True
+
+
+def _settle_handoff_candidate(daemon, state):
+    child = state.get("child")
+    if child is None:
+        ready = state.get("prepared")
+        if ready is None:
+            if not state.get("spawn_settled"):
+                if not _settled_launch_error(state):
+                    return False
+                state["spawn_settled"] = True
+                daemon._self_update_last_spawn = daemon.clock()
+        else:
+            from agent_procutil._daemon_instance_identity import identity_state
+
+            # A discovered peer is not ours to terminate, even while we hold the lock.
+            if identity_state(ready["generation"]["pid"], ready["birth"]) not in {"dead", "reused"}:
+                return False
+    else:
+        try:
+            settled = _cancel_owned_candidate(child, state["root"])
+        except (OSError, RuntimeError, ValueError):
+            log.warning("obsolete supervisor candidate custody is unconfirmed", exc_info=True)
+            return False
+        if not settled:
+            return False
+    return True
+
+
+def _retarget_handoff(daemon, state):
+    if not _settle_handoff_candidate(daemon, state):
+        return False
+    if _restore_admission(daemon, state):
+        daemon._source_handoff = None
+    return False
+
+
+def _pause_handoff(daemon):
+    state = daemon._source_handoff
+    if state is not None:
+        settled = _settle_handoff_candidate(daemon, state)
+        if _restore_admission(daemon, state):
+            if settled:
+                daemon._source_handoff = None
+            else:
+                state["phase"] = "unconfirmed" if state.get("spawn_error") is not None else "preparing"
     return False
 
 
@@ -372,12 +443,12 @@ def advance_handoff(daemon, root, version, target):
     from .supervisor_daemon import native_restart_unit
 
     state = daemon._source_handoff
+    if action_inhibited("supervisor-self-update", root=root, automatic=True, logger=log):
+        return _pause_handoff(daemon)
     if read_current_version(root) != version or (state is not None and state.get("retargeting")):
         if state is not None:
             state["retargeting"] = True
             return _retarget_handoff(daemon, state)
-        return False
-    if action_inhibited("supervisor-self-update", root=root, automatic=True, logger=log):
         return False
     try:
         native_unit = native_restart_unit()
@@ -389,7 +460,7 @@ def advance_handoff(daemon, root, version, target):
         return False
     verdict = daemon._recheck_governance("source-handoff")
     if verdict is not None and verdict.get("status") != "ready":
-        return False
+        return _pause_handoff(daemon)
     scope = supervisor_lease_scope(daemon.machine, daemon.env)
     try:
         ready = read_prepared(root, version, scope, authority=_authority(daemon))
@@ -433,7 +504,7 @@ def advance_handoff(daemon, root, version, target):
                 raise RuntimeError("supervisor candidate has no native instance custody")
         elif (
             state.get("child") is not None and state["child"].poll() is not None
-        ) or state.get("prepared") is not None:
+        ) or state.get("prepared") is not None or state.get("spawn_error") is not None:
             return _retarget_handoff(daemon, state)
         return False
     if state is None:
@@ -463,10 +534,10 @@ def advance_handoff(daemon, root, version, target):
     if read_current_version(root) != version:
         return False
     if action_inhibited("supervisor-self-update", root=root, automatic=True, logger=log):
-        return False
+        return _pause_handoff(daemon)
     verdict = daemon._recheck_governance("source-pre-release")
     if verdict is not None and verdict.get("status") != "ready":
-        return False
+        return _pause_handoff(daemon)
     daemon.release_singleton()
     return True
 

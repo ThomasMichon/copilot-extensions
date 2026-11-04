@@ -241,6 +241,15 @@ settlement; ordinary production cleanup alone is not cancellation. Candidate
 exit restores the original owner's admission only after local work settles,
 including when selection has not changed. Confirmed non-starts with settled
 reservations retry under normal cooldown; unknown outcomes retain their identity.
+An update hold at either preparation or pre-release settles only an owned
+candidate and local retirement work, then restores the same original owner's
+admission/reconciliation without releasing its singleton. A discovered live peer
+is retained, never terminated to implement the hold. Native supervisor and child
+identities are both preflighted before any cancellation signal.
+Retained unknown-launch receipts are re-observed through the SDK. Verified native
+exit plus SDK settlement permits clearing the attempt and starting its existing
+cooldown; pending, unavailable, foreign or reused identities remain held. Receipt
+absence alone is not settlement and the application never deletes that evidence.
 The passive application lane requires a profiled nested `.venv`; ordinary Source
 layouts retain their existing handoff. Preparation attests machine/environment,
 interval and legacy-source mode, which startup must match to its captured plan.
@@ -264,6 +273,10 @@ unchanged. A native creation refusal uses the SDK's process-factory seam and its
 real reservation cancellation before a successful normal candidate retry.
 The unknown-outcome control is a real leased no-preparation sentinel with an
 injected lost reply, not an operating-system permission-denial qualification.
+Its continuation follows the same original receipt through natural exit and SDK
+settlement, then requires cooldown before a normal prepared-candidate retry.
+This extension requires qualification against the next authorized built Source;
+older live-sentinel-only evidence does not establish that continuation.
 `DISPATCH_NATIVE_REMAINING_ONLY=1` skips the already-completed selection/exit cases
 when resuming that bounded fixture. Ordinary nonprofile installation remains a
 separate native lane; these profiled applications are not reshaped to impersonate it.

@@ -248,11 +248,12 @@ def main():
                 daemon.release_singleton()
 
             original_spawn = source.spawn_candidate
-            daemon = owner("native-unknown")
+            daemon = owner("native-unknown", cooldown=1)
             assert daemon.acquire_singleton()
             sentinel = []
             release_unknown = root / "profile" / "unknown-control.done"
             assert not release_unknown.exists()
+            retry_pending, retry_pool = None, None
             try:
                 def lost_reply(*_args, **_kwargs):
                     from agent_dispatch.procutil import spawn_dispatch_daemon
@@ -280,18 +281,51 @@ def main():
                 assert len(sentinel) == 1 and sentinel[0].poll() is None
                 assert daemon._source_handoff is state
                 held(daemon)
+                unknown_identity = {"pid": sentinel[0].pid, "birth": birth_identity(sentinel[0].pid)}
+                source.spawn_candidate = original_spawn
+                release_unknown.touch()
+                assert sentinel[0].wait(timeout=10) == 0
+                deadline = time.monotonic() + 60
+                while daemon._source_handoff is not None:
+                    assert time.monotonic() < deadline
+                    assert daemon._maybe_self_update() is False
+                    time.sleep(0.05)
+                held(daemon)
+                assert daemon._maybe_self_update() is False and daemon._source_handoff is None
+                retry_pending = threading.Event()
+                retry_pool = ThreadPoolExecutor(max_workers=1)
+                retry_future = retry_pool.submit(retry_pending.wait)
+                daemon._runtime_executor = retry_pool
+                daemon._probe_inflight.add(retry_future)
+                time.sleep(max(0, daemon._self_update_last_spawn + 1.1 - time.time()))
+                retried = prepared(daemon)
+                assert retried["child"].poll() is None
+                assert retried["prepared"]["generation"]["pid"] != unknown_identity["pid"]
                 result["cases"].append({
-                    "case": "unknown-live-no-preparation-control",
-                    "pid": sentinel[0].pid, "birth": birth_identity(sentinel[0].pid),
+                    "case": "unknown-live-settled-eventual-retry",
+                    **unknown_identity,
                     "no_replay_or_subject_termination": True,
+                    "natural_exit": 0, "sdk_settlement_observed_before_retry": True,
+                    "retry_after_cooldown": retried["prepared"],
                     "limit": "native SDK sentinel without app preparation; injected lost reply, not OS permission denial",
                 })
             finally:
                 source.spawn_candidate = original_spawn
                 release_unknown.touch()
+                if retry_pending is not None:
+                    retry_pending.set()
+                if retry_pool is not None:
+                    retry_pool.shutdown(wait=True, cancel_futures=True)
                 for child in sentinel:
                     assert child.wait(timeout=10) == 0
                     settlement(child)
+                state = daemon._source_handoff
+                if state and state.get("child") is not None:
+                    deadline = time.monotonic() + 60
+                    while not source._cancel_owned_candidate(state["child"], root):
+                        assert time.monotonic() < deadline
+                        time.sleep(0.05)
+                    settlement(state["child"])
                 daemon.shutdown()
                 daemon.release_singleton()
             assert client.get(request["held_id"]) == request["held_before"]
