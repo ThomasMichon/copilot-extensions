@@ -4337,7 +4337,10 @@ served for each selected lock entry instead of downloading them again. The
 acquisition owner validates the captured transport and exact selected records,
 then reapplies file-admission rules against the selected wheel's actual upload
 time and rechecked seasoning cutoff. Selection and the final index recheck share
-request, redirect and metadata budgets.
+request, redirect and metadata budgets. A stopped resolver reports only
+allowlisted, nonsecret failure categories or a generic refusal; raw exception
+text, feed locations and credentials are never included. Deadline expiry is
+reported separately when no earlier failure was retained.
 
 For a reproducible producer profile, the caller may explicitly supply
 `--nonsecret-feed-url` with `--guarded-feed`. The value must be the exact

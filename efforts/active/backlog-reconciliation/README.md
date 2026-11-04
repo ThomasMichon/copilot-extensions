@@ -312,6 +312,20 @@ existing Active PR Lifecycle Conformance home is the next receiving candidate.
 No new closure, implementation appointment, parked-home resumption or source/
 resource transfer follows; changed #9535 remains withheld.
 
+The [runtime-entry core study](runtime-entry-cohort.md) now integrates fourteen
+admitted originals and forty-one comments: 55 complete texts, 125,950 body
+characters. It separates supported entry/caller identity, construction/staging,
+deployed-helper/status truth and bootstrap/uninstall. Whole-home comparisons
+remain incomplete; held-ROOT-derived material is withheld, not receiving fit.
+Four qualified merged descriptions supply ten bounded comparisons and one
+separately refused PR relation while preserving every original score and prior
+invalidated target. Only #10061 has an independently verified finite source
+completion. Thirteen other contracts retain their conditions; no ROOT
+amendment, implementation appointment, native proof or deployment is accepted.
+Continue through a changed, bounded eligible evidence question rather than
+repeating the unsuccessful broad documentary reads. All incumbent parent
+Plan/Validation states and the fixed whole-queue completion gate remain.
+
 - [x] Holistically sweep the initial eligible backlog and build an issue/effort
   relationship graph; use alignment and theme to identify consolidation groups.
   The [initial graph snapshot](graph-overview.md) accounts for all 695 assigned
@@ -582,6 +596,15 @@ calibrated retrieval, stable cores from connected paths, and all 560
 completed-work targets from independently verified whole completion.
 #10203's code/requirement/review/CI and post-close audit are separate
 from its model score. No native run, rollout or source/resource transfer follows.
+
+The [runtime-entry study](runtime-entry-cohort.md) preserves all fourteen
+finite original/refined contracts without qualifying incomplete whole-home
+comparisons. Ten admitted PR relations retain bounded different-contract or
+partial credit, one description reference remains refused before rendering,
+and commit-message candidates remain unresearched. #10061's independently
+verified finite source completion does not validate the thirteen remaining
+contracts, native/installed behavior, held homes or custody transfer. Every
+incumbent parent check state remains unchanged.
 
 - [ ] Full enumeration excludes pull requests and records observation time,
   original cohort, live open count, oldest unreviewed issue and inflow.
