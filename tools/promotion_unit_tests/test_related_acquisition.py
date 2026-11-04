@@ -1582,3 +1582,144 @@ def test_tool_profile_does_not_graft_through_ordinary_preferences(api, monkeypat
         {"copilot_plugin_profile": None},
     )
     assert result == {"headless": True}
+
+
+@pytest.mark.parametrize("mode", [
+    "selected", "absent", "source-failure", "presence-failure", "registry-failure",
+    "self-restoring-resolver", "self-restoring-registry", "late-argument-rebind",
+    "absent-self-restoring-resolver",
+])
+def test_execution_acquisition_original_decision_and_selected_callbacks(api, monkeypatch, mode):
+    from dataclasses import dataclass
+
+    @dataclass
+    class Config:
+        machine: str
+        default_repo: object
+
+    calls = []
+    roots = [Path("synthetic-first"), Path("synthetic-second")]
+    present = roots[1] / "machines.yaml"
+    value = Config("fixture", SimpleNamespace(anchor=str(roots[0])))
+
+    def sources(config, *, base_anchor, family):
+        assert config is value and base_anchor == str(roots[0]) and family == "registry"
+        calls.append("sources")
+        if mode == "source-failure":
+            raise PermissionError("private source body")
+        return [SimpleNamespace(anchor=str(root)) for root in roots]
+
+    def is_file(path):
+        calls.append(("file", path))
+        if mode == "presence-failure":
+            raise ValueError("private presence body")
+        return not mode.startswith("absent") and path == present
+
+    def registry(anchor, *, config):
+        assert anchor == str(roots[1]) and config is value
+        calls.append("registry")
+        if mode == "registry-failure":
+            raise FileNotFoundError("private registry body")
+        return {"fixture": object()}
+
+    def resolver(candidate, *, guest, configured, load_entries, preserve_native_hostname=False):
+        assert candidate == "fixture" and not guest and configured
+        assert preserve_native_hostname is (not mode.startswith("absent"))
+        calls.append("resolver")
+        if load_entries is None:
+            return candidate
+        try:
+            assert "fixture" in load_entries()
+        except FileNotFoundError:
+            return candidate
+        return "selected"
+
+    identity = api.stub(
+        "machine_identity", load_execution_registry=registry, resolve_execution_machine=resolver,
+        _EXECUTION_REGISTRY_OWNER=registry, _EXECUTION_MACHINE_OWNER=resolver,
+    )
+
+    def restore(callback, original):
+        def wrapper(*args, **kwargs):
+            calls.append("replacement")
+            monkeypatch.setattr(identity, callback, original)
+            return original(*args, **kwargs)
+        monkeypatch.setattr(identity, callback, wrapper)
+
+    if mode in ("self-restoring-resolver", "absent-self-restoring-resolver"):
+        restore("resolve_execution_machine", resolver)
+    elif mode == "self-restoring-registry":
+        restore("load_execution_registry", registry)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("execution callback selected again after argument evaluation")
+
+    def platform():
+        calls.append("platform")
+        if mode == "late-argument-rebind":
+            monkeypatch.setattr(identity, "resolve_execution_machine", forbidden)
+            monkeypatch.setattr(identity, "load_execution_registry", forbidden)
+        return "windows"
+
+    def fallback(*, value):
+        calls.append("fallback")
+        if mode == "absent-self-restoring-resolver":
+            return identity.resolve_execution_machine(value, guest=False, configured=True, load_entries=None)
+        return value
+
+    api.stub("config", INREPO_CONFIG_DIRNAME=".agent-worktrees",
+             detect_platform=platform, detect_machine=fallback)
+    api.stub("state_root", config_source_anchors=sources)
+    monkeypatch.setattr(Path, "is_file", is_file)
+    with api.config.capture_config_observations() as observations:
+        api.config.full_load_started()
+        if mode in ("source-failure", "presence-failure"):
+            error = PermissionError if mode == "source-failure" else ValueError
+            with pytest.raises(error):
+                api.config.execution_config(value, "fixture", {"machine": "fixture"}, {})
+        else:
+            result = api.config.execution_config(value, "fixture", {"machine": "fixture"}, {})
+            assert result.machine == (
+                "fixture" if mode.startswith("absent") or mode == "registry-failure" else "selected"
+            )
+            assert result.default_repo is value.default_repo
+    expected = ["sources"]
+    if mode != "source-failure":
+        expected.append(("file", roots[0] / ".agent-worktrees" / "machines.yaml"))
+        if mode != "presence-failure":
+            expected.extend([
+                ("file", roots[0] / "machines.yaml"),
+                ("file", roots[1] / ".agent-worktrees" / "machines.yaml"), ("file", present),
+            ])
+            if mode.startswith("absent"):
+                expected.append("fallback")
+                if mode == "absent-self-restoring-resolver":
+                    expected.extend(["replacement", "resolver"])
+            else:
+                expected.append("platform")
+                if mode == "self-restoring-resolver":
+                    expected.append("replacement")
+                expected.append("resolver")
+                if mode == "self-restoring-registry":
+                    expected.append("replacement")
+                expected.append("registry")
+    assert calls == expected
+    owned = [o for o in observations if o.stage == "execution-machine"]
+    uncertain = mode in (
+        "absent", "absent-self-restoring-resolver", "source-failure", "presence-failure", "registry-failure",
+        "self-restoring-resolver", "self-restoring-registry",
+    )
+    assert owned[-1].authority is (ScanAuthority.INDETERMINATE if uncertain else ScanAuthority.COMPLETE)
+    if mode in ("source-failure", "presence-failure", "registry-failure"):
+        detail = {
+            "source-failure": "PermissionError", "presence-failure": "ValueError",
+            "registry-failure": "FileNotFoundError",
+        }[mode]
+        assert any(f.detail == detail for o in owned for f in o.findings)
+    if "self-restoring" in mode:
+        assert any(f.reason == "owner-coverage-unavailable" for o in owned for f in o.findings)
+        assert identity.load_execution_registry is registry and identity.resolve_execution_machine is resolver
+    assert "private" not in repr(observations)
+    report = api.config.AcquisitionReport("execution-machine", None, tuple(observations))
+    assert report.authority is ScanAuthority.INDETERMINATE and report.reusable is False
+    assert api.config.current_observations() is None
