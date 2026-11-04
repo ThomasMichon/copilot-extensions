@@ -171,6 +171,17 @@ def test_actual_verifier_pins_producer_and_returns_immutable_whole_profile(relea
     assert len(calls) == 1 and not calls[0].parent.parent.exists()
 
 
+def test_authenticated_release_can_select_a_compatible_target_only_when_requested(release, monkeypatch):
+    calls = _verification(monkeypatch, release)
+    target = deepcopy(release[2]["target"])
+    target["environment"]["platform_version"] = "10.0.2"
+    with pytest.raises(ProfileError, match="unavailable"):
+        _select(release, target=target)
+    selected = _select(release, target=target, allow_compatible_target=True)
+    assert selected.selected.profile == validate_profile(release[2])
+    assert len(calls) == 2
+
+
 @pytest.mark.parametrize("failure", ["signature", "timeout", "cancel"])
 def test_authentication_failure_or_cancellation_never_selects_and_cleans(release, monkeypatch, failure):
     calls = _verification(monkeypatch, release, failure=failure)

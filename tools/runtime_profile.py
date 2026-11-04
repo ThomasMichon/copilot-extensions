@@ -33,6 +33,10 @@ _ENVIRONMENT = frozenset({
     "platform_release", "platform_system", "platform_version", "python_full_version",
     "platform_python_implementation", "python_version", "sys_platform",
 })
+_TARGET_FAMILY = (
+    "implementation_name", "os_name", "platform_machine", "platform_system",
+    "platform_python_implementation", "python_version", "sys_platform",
+)
 
 
 class ProfileError(ValueError):
@@ -300,19 +304,45 @@ def validate_profile_preference(preference: tuple[str, ...]) -> None:
         raise ProfileError("duplicate profile preference")
 
 
+def _compatible_target(profile: RuntimeProfile, target: dict) -> bool:
+    """Recheck a frozen closure against an independently selected target."""
+    deadline = time.monotonic() + 120
+    try:
+        _target(target, 10_000, deadline)
+    except (InvalidVersion, InvalidSpecifier, KeyError, TypeError, ValueError) as error:
+        _check_deadline(deadline)
+        raise ProfileError("invalid requested target") from error
+    record = profile.record()
+    original = record["target"]
+    if original["device"] != target["device"] or any(
+        original["environment"][key] != target["environment"][key] for key in _TARGET_FAMILY
+    ):
+        return False
+    try:
+        validate_profile(record | {"target": target}, deadline=deadline)
+    except ProfileError:
+        _check_deadline(deadline)
+        return False
+    return True
+
+
 def select_profile(
     candidates: Iterable[dict], *, approvals: Mapping[str, str],
     release: dict, target: dict, component: str, roots: list[str], mode: str,
     backend: str | None = None, retained_backend: str | None = None,
     existing_installation: bool = False, preference: tuple[str, ...] = (),
+    allow_compatible_target: bool = False,
 ) -> SelectedProfile:
     """Pure selection; approvals map whole-record digests to trusted source IDs.
 
     The adapter, not this function or a record's own declaration, authenticates
-    that map. No adapter/runtime loader is provided here. Mode/backend changes
-    are explicit; this function never performs an automatic fallback.
+    that map. Compatible-target selection is opt-in and does not change the
+    approved record; the caller independently identifies the actual target and
+    still admits the inspected wheel bytes before construction.
     """
     validate_profile_preference(preference)
+    if type(allow_compatible_target) is not bool:
+        raise ProfileError("compatible target selection must be explicit")
     if backend is None:
         backend = retained_backend
         if backend is None:
@@ -326,9 +356,13 @@ def select_profile(
         if approvals.get(profile.lock_id) != record["approval_source"]:
             raise ProfileError("profile lacks whole-record approval from a trusted source")
         if (
-            record["release"] == release and record["target"] == target
+            record["release"] == release
             and record["component"] == component and record["roots"] == roots
             and record["mode"] == mode and record["backend"] == backend
+            and (
+                record["target"] == target
+                or (allow_compatible_target and _compatible_target(profile, target))
+            )
         ):
             matches[profile.lock_id] = SelectedProfile(profile, record["approval_source"])
     if preference:
