@@ -268,6 +268,9 @@ _Operator-required outcome; agent-recommended slices and validation._
 - [ ] Complete P1 normalized candidate/conversation/cursor and inert attention
   foundation, then P2 existing-owner central intake, bounded journal and
   terminal tombstone recovery.
+  The first finite source leaf is the
+  [inert attention projection](../../../plugins/agent-pull-requests/docs/attention.md);
+  it does not close normalized acquisition, durable cursors or serving adoption.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
