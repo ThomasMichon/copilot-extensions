@@ -71,12 +71,32 @@ acceptance are **not** claimed from a graph, title, list or link.
 | group-007: mux/client lifetime and input | 9 historical; 8 admitted | Existing Manager, restart, source, hosting and client owners; whole receiver fit unqualified | [Eight-contract study](mux-lifecycle-cohort.md); #8669 withheld before new rendering, 21 message-only comparisons and three withheld edges. Native/human/installed residuals and actual reservations remain. |
 | group-008: continuity and lifecycle | 8 historical; 7 admitted | Existing succession, native transport, lifecycle-state, work-custody, compatibility and receipt owners; whole receivers unqualified | [Seven-contract study](continuity-lifecycle-cohort.md); #7694 withheld before new rendering, eighteen message comparisons and three withheld PR relations. Separately credit #8026's newer merged source without erasing its actual remaining gates. |
 | group-009: session/task observation consumers | 8 historical; 7 admitted | Existing Bridge/Dispatch/interface and actual source/resource owners; whole effort receivers unqualified | [Seven-contract study](session-task-observation-cohort.md); #6462 withheld before new rendering, twenty bounded comparisons and one withheld relation. The finite report-design documentation proposal needs reviewed delivery and a separate judgment. |
+| group-010: measurement, preservation and exact completion | 8 historical; 7 admitted | Existing Logger, Index, metadata-repair and producer-discovery owners; whole current receivers unqualified | [Seven-contract study](measurement-preservation-cohort.md); inherited-held member excluded, seventeen bounded comparisons and four withheld relations. Two whole functions confirm only #6026's retained per-call type pattern; repair, native, installed and handoff residuals remain. |
 | group-011: common venue/runtime adapters | 7 historical; 5 admitted | Existing venue, assigned protocol and restricted runtime/custody owners; whole current receivers unqualified | [Five-contract study](venue-runtime-cohort.md); two inherited-held members excluded, fourteen bounded completed-work comparisons and one withheld description. Specific wrapper mapping conditions and all incumbent claims remain. |
 | group-013: interpreter and construction inputs | 7 | [Vendored Installer](../vendored-installer-engine/README.md), [Feed Construction](../feed-construction-release-gate/README.md) | Separate interpreter selection, native argument handling and source materialization. Preserve every original platform/feed/source and existing #7028 boundary. |
 | group-014: native CI timeout evidence | 7 | [Test Portfolio](../test-portfolio-rationalization/README.md), existing release/fixture owners | Match actual failed boundaries and unchanged budgets before repair or duplicate judgments; neither an isolated retry nor broad CI success proves the finite cause. |
 | group-015: session intelligence and accounting | 6 | [Session Intelligence](../session-intelligence-and-accounting/README.md), [Large-Corpus Sync](../large-corpus-session-sync/README.md) | Preserve the canonical backend, independently claimed daily adoption and #4976's remaining-home question. Do not equate related data paths with completed accounting or retirement. |
 | group-018: attention and history readers | 5 | [Operator Attention](../operator-attention-contract/README.md), actual Bridge reader owners | Keep wait/deadline, history paging and event coverage separate; an attention home does not automatically receive the complete history contract. |
 | group-021: head succession | 4 | [Head Succession](../worktree-head-succession-hardening/README.md) | The home remains Draft; #84's OPEN canonical and #912's actual claim conditions survive. No automatic transfer or session operation. |
+
+### Measurement/preservation core
+
+#4186, #5302, #5676, #6026, #6407, #6819 and #7950.
+
+The [seven-contract study](measurement-preservation-cohort.md) integrates
+23 whole original/discussion texts from a completed exclusive reader packet.
+The inherited-held member stays withheld before rendering, without linked
+source or subset retry. Thirteen whole messages supply fourteen comparisons;
+two actual merged descriptions supply three more. Four protected relations
+remain unrendered. Retrieval scores and all prior invalidations survive.
+
+Separate preservation/governed completion, retrospective analytics/index
+integrity, safe metadata/file provenance and bounded producer discovery.
+These are typed research interfaces, not duplicate status or hard sequence.
+Two complete fixed-source functions still contain per-call Win32 type
+definitions; no memory-growth, native, whole-module or fix acceptance follows.
+All seven originals remain OPEN with literal handoff, selected-repair,
+runtime/installed and whole-workload proof boundaries intact.
 
 ### Venue/runtime-adapter core
 
