@@ -420,6 +420,13 @@ Implementation sequencing below is **agent-recommended**:
   actual merge. Its original incoming observation is durable across retries.
   This closes that explicit client composition, not the broader packaging,
   controller, fresh-OS, release-acquisition or adopter gates.
+  #10509 composes the existing explicit legacy-floor import with managed install.
+  Both native hosts passed the original six and seven managed consumers at the
+  implementation head; the final documentation-only correction retained those
+  byte-unchanged runtime/tests and passed renewed review and required CI.
+  Import/install and exact retry preserve the original floor and do not require
+  an already imported predecessor to remain present. Complete role packaging,
+  installed-client self-update, first-touch and adopter duties remain open.
   Its [authoritative replacement reconciliation](client-lifecycle-admission.md#authoritative-replacement-reconciliation)
   keeps incoming readiness plus complete current launcher/registration selection
   as the completion gate. Retained generation work is not complete installation
@@ -685,6 +692,17 @@ Runtime package/API details belong to the implementation contract after review,
 not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
+
+### 2026-11-04 - Managed legacy client integration accepted
+
+#10509 merged at `be98510a8f4e98b4377de29f756111a05f89027f` after both native
+platforms passed the original six plus seven managed installed consumers,
+the valid retry-documentation finding was fixed, and the final owner-PR verdict
+and latest required CI passed. The
+[existing incoming-selection journal](journal/2026/11.04-client-incoming-selection.md#managed-legacy-client-integration-accepted)
+retains the exact revisions, carried native evidence, failed local attempts
+and accepted limits. The whole Plan and Validation Plan were reread; no broad
+checkbox, release promotion, installed rollout or existing owner is discharged.
 
 ### 2026-11-04 - Explicit managed client composition accepted
 

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import importlib.metadata
 import importlib.util
 import json
+import os
+import shutil
 import subprocess
 import sys
 import time
@@ -1058,6 +1061,97 @@ def test_build_wheel_ambiguous_output_raises(tmp_path: Path, monkeypatch: pytest
         bpa.build_wheel(tmp_path / "src", tmp_path / "dist")
 
 
+def test_direct_wheel_build_keeps_the_caller_epoch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("SOURCE_DATE_EPOCH", "1704067200")
+    seen = []
+
+    def fake_run(cmd, **kwargs):
+        seen.append(kwargs["env"]["SOURCE_DATE_EPOCH"])
+        (_staging_dir_from_cmd(cmd) / "demo-1.0-py3-none-any.whl").write_bytes(b"x")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    bpa.build_wheel(tmp_path / "src", tmp_path / "dist")
+    assert seen == ["1704067200"]
+
+
+def test_artifact_wheel_build_overrides_the_caller_epoch(
+    fake_repo: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _write_pyproject(fake_repo / "plugins" / "demo")
+    monkeypatch.setattr(bpa, "_assert_toolchain_satisfies_build_requires", lambda *a, **k: None)
+    seen = []
+
+    def fake_run(cmd, **kwargs):
+        seen.append(kwargs["env"]["SOURCE_DATE_EPOCH"])
+        _make_fake_wheel(
+            _staging_dir_from_cmd(cmd) / "demo-0.1.0-py3-none-any.whl",
+            generator=_FAKE_TOOLCHAIN.generator,
+        )
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    for index, epoch in enumerate(("1609459200", "1704067200")):
+        monkeypatch.setenv("SOURCE_DATE_EPOCH", epoch)
+        bpa.build_plugin_artifacts("demo", out_dir=fake_repo / f"dist-{index}", toolchain=_FAKE_TOOLCHAIN)
+        assert os.environ["SOURCE_DATE_EPOCH"] == epoch
+    assert seen[0] == seen[1]
+    assert seen[0] not in {"1609459200", "1704067200"}
+
+
+def test_first_party_wheels_ignore_source_and_ambient_timestamps(
+    fake_repo: Path, monkeypatch: pytest.MonkeyPatch
+):
+    if not shutil.which("uv"):
+        pytest.skip("uv is required for the real wheel-build control")
+    try:
+        setuptools = importlib.metadata.version("setuptools")
+    except importlib.metadata.PackageNotFoundError:
+        pytest.skip("setuptools is required for the real wheel-build control")
+    monkeypatch.setattr(bpa.subprocess, "run", _REAL_SUBPROCESS_RUN)
+    monkeypatch.setenv("UV_OFFLINE", "1")
+    monkeypatch.setenv("UV_NO_CONFIG", "1")
+    source = fake_repo / "first"
+    (source / "src" / "example").mkdir(parents=True)
+    (source / "pyproject.toml").write_text(
+        '[build-system]\nrequires = ["setuptools"]\nbuild-backend = "setuptools.build_meta"\n'
+        '[project]\nname = "example"\nversion = "1.0"\n',
+        encoding="utf-8",
+    )
+    (source / "src" / "example" / "__init__.py").write_text("value = 1\n", encoding="utf-8")
+    other = fake_repo / "second"
+    shutil.copytree(source, other)
+    changed = fake_repo / "changed"
+    shutil.copytree(source, changed)
+    (changed / "src" / "example" / "__init__.py").write_text("value = 2\n", encoding="utf-8")
+    lock = bpa.ToolchainLock(
+        Path(sys.executable), {"setuptools": setuptools},
+        provenance={
+            "source_policy": "governed", "python": sys.executable,
+            "validated_index_identity": "fixture",
+        },
+    )
+    results = []
+    for index, (project, timestamp, epoch) in enumerate((
+        (source, 1577923200, "1609459200"),
+        (other, 1746057600, "1704067200"),
+        (changed, 1746057600, "1704067200"),
+    )):
+        os.utime(project / "src" / "example" / "__init__.py", (timestamp, timestamp))
+        monkeypatch.setenv("SOURCE_DATE_EPOCH", epoch)
+        out = fake_repo / f"dist-{index}"
+        manifest = bpa.build_project_artifacts(
+            identity={"composition": "core"} if index == 0 else {"plugin": "example"},
+            projects=[("vendored-lib", project)], raw_version="1.0", schema_version=3,
+            resources=(), out_dir=out, python=None, toolchain=lock,
+        )
+        entry = manifest["wheels"][0]
+        results.append((entry["sha256"], (out / entry["filename"]).read_bytes()))
+        assert os.environ["SOURCE_DATE_EPOCH"] == epoch
+    assert results[0] == results[1]
+    assert results[0][0] != results[2][0]
+
+
 # --- build_plugin_artifacts (end-to-end, mocked build_wheel) ---------------
 
 @pytest.mark.parametrize("provenance", [None, {}, {"source_policy": "governed"}])
@@ -1081,7 +1175,7 @@ def test_build_plugin_artifacts_end_to_end(
 
     out_dir = fake_repo / "dist"
 
-    def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None):  # noqa: ARG001
+    def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None, **_):  # noqa: ARG001
         out.mkdir(parents=True, exist_ok=True)
         name = source_dir.name.replace("-", "_")
         wheel = out / f"{name}-0.1.0-py3-none-any.whl"
@@ -1143,7 +1237,7 @@ def test_build_plugin_artifacts_payload_hash_excludes_build_residue(
     expected_hash = bpa.compute_payload_hash([plugin_dir])
     out_dir = fake_repo / "dist"
 
-    def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None):  # noqa: ARG001
+    def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None, **_):  # noqa: ARG001
         (source_dir / "demo.egg-info").mkdir(exist_ok=True)
         (source_dir / "demo.egg-info" / "PKG-INFO").write_text(
             "build residue", encoding="utf-8"
@@ -1176,7 +1270,7 @@ def test_build_plugin_artifacts_artifact_id_changes_with_wheel_bytes(
     out_dir = fake_repo / "dist"
 
     def make_builder(payload: bytes):
-        def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None):  # noqa: ARG001
+        def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None, **_):  # noqa: ARG001
             out.mkdir(parents=True, exist_ok=True)
             wheel = out / "demo-0.1.0-py3-none-any.whl"
             with zipfile.ZipFile(wheel, "w") as zf:
@@ -1227,7 +1321,7 @@ def test_build_plugin_artifacts_preserves_raw_version(
     )
     out_dir = fake_repo / "dist"
 
-    def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None):  # noqa: ARG001
+    def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None, **_):  # noqa: ARG001
         out.mkdir(parents=True, exist_ok=True)
         wheel = out / "demo-0.4.1.dev3-py3-none-any.whl"
         _make_fake_wheel(wheel, generator="setuptools (84.1.0)")
@@ -1250,7 +1344,7 @@ def test_build_plugin_artifacts_rejects_real_version_mismatch(
     )
     out_dir = fake_repo / "dist"
 
-    def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None):  # noqa: ARG001
+    def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None, **_):  # noqa: ARG001
         out.mkdir(parents=True, exist_ok=True)
         wheel = out / "demo-9.9.9-py3-none-any.whl"
         _make_fake_wheel(wheel, generator="setuptools (84.1.0)")
@@ -1284,7 +1378,7 @@ def test_build_plugin_artifacts_rejects_duplicate_wheel_filename(
     _write_pyproject(plugin_dir, sources={"demo-widget": "../../libs/widget"})
     out_dir = fake_repo / "dist"
 
-    def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None):  # noqa: ARG001
+    def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None, **_):  # noqa: ARG001
         out.mkdir(parents=True, exist_ok=True)
         # Every source produces the SAME filename, regardless of identity.
         wheel = out / "collision-0.1.0-py3-none-any.whl"
@@ -4645,7 +4739,7 @@ def test_build_plugin_artifacts_rejects_generator_mismatch_with_toolchain(
     _write_pyproject(plugin_dir)
     out_dir = fake_repo / "dist"
 
-    def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None):  # noqa: ARG001
+    def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None, **_):  # noqa: ARG001
         out.mkdir(parents=True, exist_ok=True)
         wheel = out / "demo-0.1.0-py3-none-any.whl"
         _make_fake_wheel(wheel, generator="setuptools (60.0.0)")
@@ -4681,7 +4775,7 @@ def test_build_plugin_artifacts_resolves_own_toolchain_when_none_given(
         assert not venv_dir.exists()
         return _FAKE_TOOLCHAIN
 
-    def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None):  # noqa: ARG001
+    def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None, **_):  # noqa: ARG001
         assert toolchain is _FAKE_TOOLCHAIN
         out.mkdir(parents=True, exist_ok=True)
         wheel = out / "demo-0.1.0-py3-none-any.whl"

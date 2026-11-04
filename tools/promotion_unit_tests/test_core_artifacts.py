@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
+import zipfile
 
 import build_python_artifacts as builder
 import core_python_artifacts as core
@@ -183,6 +186,41 @@ def test_core_builder_uses_the_shared_locked_set_owner(tmp_path, monkeypatch):
     assert result["schema_version"] == 5 and result["toolchain"] is lock
     assert len(result["projects"]) == len(set(result["projects"])) == 2
     assert len(calls) == 1
+
+
+def test_artifact_wheel_epoch_is_stable_and_scoped(tmp_path, monkeypatch):
+    _source(tmp_path)
+    monkeypatch.setattr(builder, "REPO", tmp_path)
+    monkeypatch.setattr(builder, "_assert_toolchain_satisfies_build_requires", lambda *a, **k: None)
+    lock = builder.ToolchainLock(
+        tmp_path / "python", {"setuptools": "84.0"},
+        provenance={
+            "source_policy": "governed", "python": "fixture",
+            "validated_index_identity": "fixture",
+        },
+    )
+    seen = []
+
+    def build_child(command, environment, deadline):
+        seen.append(environment["SOURCE_DATE_EPOCH"])
+        wheel = Path(command[command.index("-o") + 1]) / "sample-1.0-py3-none-any.whl"
+        with zipfile.ZipFile(wheel, "w") as archive:
+            archive.writestr("sample-1.0.dist-info/WHEEL", "Generator: setuptools (84.0)\n")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(builder, "_build_child", build_child)
+    project = tmp_path / "plugins" / "sample"
+    for index, epoch in enumerate(("1609459200", "1704067200")):
+        monkeypatch.setenv("SOURCE_DATE_EPOCH", epoch)
+        builder.build_project_artifacts(
+            identity={"plugin": "sample"}, projects=[("plugin", project)],
+            raw_version="1.0", schema_version=3, resources=(),
+            out_dir=tmp_path / f"artifact-{index}", python=None, toolchain=lock,
+        )
+        assert os.environ["SOURCE_DATE_EPOCH"] == epoch
+    builder.build_wheel(project, tmp_path / "direct", toolchain=lock)
+    assert seen[0] == seen[1] and seen[0] not in {"1609459200", "1704067200"}
+    assert seen[2] == "1704067200"
 
 
 @pytest.mark.parametrize(

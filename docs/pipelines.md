@@ -400,6 +400,12 @@ Hosted validator provisioning also hash-pins `packaging`; its binary-only,
 hash-checked install accepts `ARTIFACT_VALIDATION_INDEX_URL` as an explicit
 feed override, defaulting to the public tooling index on public runners.
 
+First-party artifact builds use a fixed ZIP-compatible `SOURCE_DATE_EPOCH`
+instead of the host's source or build timestamps. This removes one source of
+wheel-byte differences; it is not a general reproducibility or authorization
+guarantee. Manifests and attestations still bind exact wheel digests, and
+ordinary source builds retain their caller's environment.
+
 The canonical seasoning CLI's explicit `--registry-only` mode admits such
 registry toolchains without discovering product project/library roots. It
 denies local source projects and retains the existing cutoff, selected index,

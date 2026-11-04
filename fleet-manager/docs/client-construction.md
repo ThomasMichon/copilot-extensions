@@ -388,6 +388,24 @@ trusted caller's existing authority over the fixed command family in the exact
 supplied private directory; it is not permission to discover or take over
 unrelated commands. No automatic-maintenance invocation is exposed.
 
+Run authenticated install/forward update from the explicitly prepared **owning
+runtime** with `release-verification` and `construction`, not from the
+dependency-free client it constructs. The candidate contains only the supplied
+Fleet wheel and no pip or crypto distribution. Its installed default commands
+can inspect the lineage, but a pinned-key install request refuses at release
+verification before admission or command changes. The packaged lifecycle
+declaration describes the provider interface; it does not assert that every
+optional execution dependency is installed. There is no implicit toolchain
+installation, delegation to another interpreter or unsigned fallback.
+
+The native `installed-owner` consumer exercises that boundary through every
+actual default launcher, checks the candidate's real distribution inventory
+and preserved lineage/commands/configuration, then completes the same explicit
+higher-release request through the prepared external owner. This is not
+installed-client self-update. A self-sufficient lifecycle dependency closure
+and its normal package/setup integration remain undelivered; do not mutate a
+completed candidate to add them.
+
 Receiver support is declared in the selected immutable runtime's packaged
 `fleet_manager/client-lifecycle-contract.json`, schema
 `fleet-manager.client-lifecycle-contract`, version `1`, capability

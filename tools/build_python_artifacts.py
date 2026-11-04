@@ -115,6 +115,7 @@ PLUGINS_DIR = REPO / "plugins"
 LIBS_DIR = REPO / "libs"
 MANIFEST_SCHEMA = "copilot-extensions.python-artifact-manifest"
 MANIFEST_SCHEMA_VERSION = 3
+_ARTIFACT_SOURCE_DATE_EPOCH = "315532800"
 
 _GENERATOR_RE = re.compile(r"^Generator:\s*(.+?)\s*$", re.MULTILINE)
 
@@ -632,12 +633,13 @@ def build_wheel(
     procutil=None,
     construction_fd: int | None = None,
     retained_runtime: tuple[Path, str, Path] | None = None,
+    normalize_timestamps: bool = False,
 ) -> Path:
     """Builds a wheel for ``source_dir`` via `uv build --wheel`.
 
     When ``toolchain`` is given, builds with ``--no-build-isolation``
     against that one locked venv (``toolchain.venv_python``) -- the
-    pinned, reproducible path every real ``build_plugin_artifacts`` call
+    pinned path every real ``build_plugin_artifacts`` call
     uses -- and ``python`` is ignored (the toolchain's own venv already
     pins the interpreter). Without a ``toolchain`` (direct callers / low-
     level tests only), falls back to `uv`'s normal per-wheel ISOLATED PEP
@@ -648,6 +650,8 @@ def build_wheel(
     an already admitted toolchain and retained runtime custody. It disables
     indexes, configuration discovery, caches and Python downloads; requirement
     checks and the build share the caller's deadline and owned-child scope.
+    First-party artifact sets request a fixed, ZIP-compatible build epoch;
+    direct source builds otherwise retain the caller's environment.
 
     Builds into a fresh, empty temporary staging directory (never directly
     into ``out_dir``) and moves the single resulting wheel into ``out_dir``
@@ -713,6 +717,8 @@ def build_wheel(
             cmd += ["--python", python]
         cmd.append(str(source_dir))
         build_env = sanitize_subprocess_env()
+        if normalize_timestamps:
+            build_env["SOURCE_DATE_EPOCH"] = _ARTIFACT_SOURCE_DATE_EPOCH
         if toolchain is not None:
             # `--no-build-isolation` means this build needs NO index
             # access at all -- the locked toolchain venv already has
@@ -901,7 +907,8 @@ def build_project_artifacts(
         toolchain_record = toolchain.record
         def _build_and_verify(source_dir: Path) -> tuple[Path, dict, str]:
             wheel = build_wheel(
-                source_dir, out_dir, toolchain=toolchain, reserved_names=reserved_names
+                source_dir, out_dir, toolchain=toolchain, reserved_names=reserved_names,
+                normalize_timestamps=True,
             )
             info = parse_wheel_filename(wheel)
             generator = read_wheel_generator(wheel)
