@@ -4206,6 +4206,16 @@ the selected source and actual wheel metadata. This adapter does not select or
 authenticate the source checkout, approve a runtime profile, provision
 third-party materials, publish a delivery, or enable an updater.
 
+For a delivery that already holds the first-party wheels,
+`retain_reconstructed_core` uses the promotion owner's canonical bundle writer
+to reconstruct the selected core ZIP from those held wheels and the exact
+manifest bytes. It checks the selected entry's identity and digest within the
+caller's byte, count and deadline limits, then holds the temporary ZIP until
+the context exits. The caller must still authenticate the source index,
+perform any required attestation check on that ZIP, admit the source and
+profile independently, and stage consequential output until custody checks
+finish. Reconstruction itself grants no authority and performs no download.
+
 `tools/core_release_delivery.py` combines that adapter with the native
 producer in one local candidate operation:
 

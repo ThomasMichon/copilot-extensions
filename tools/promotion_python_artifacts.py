@@ -92,8 +92,7 @@ def candidate_projects(root: Path) -> dict[str, str]:
     return projects
 
 
-def bundle_wheels(manifest: dict, wheel_dir: Path, out_dir: Path) -> dict:
-    """Bundle only the builder's declared first-party wheels and manifest."""
+def _bundle_filename(manifest: dict) -> str:
     plugin, version = _artifact_label(manifest), manifest["version"]
     artifact_id = manifest["artifact_id"]
     if (
@@ -104,8 +103,15 @@ def bundle_wheels(manifest: dict, wheel_dir: Path, out_dir: Path) -> dict:
         or not _DIGEST.fullmatch(artifact_id[7:])
     ):
         raise PromotionArtifactError("invalid artifact bundle identity")
-    filename = f"{plugin}-{version}-{artifact_id[7:]}.zip"
-    destination = out_dir / filename
+    return f"{plugin}-{version}-{artifact_id[7:]}.zip"
+
+
+def _bundle_manifest(manifest: dict) -> bytes:
+    wheels = sorted(manifest["wheels"], key=lambda wheel: wheel["filename"])
+    return (json.dumps({**manifest, "wheels": wheels}, sort_keys=True) + "\n").encode("utf-8")
+
+
+def _write_bundle_members(bundle, manifest: dict, write_wheel) -> None:
     names = {"manifest.json"}
 
     def member(name: str) -> zipfile.ZipInfo:
@@ -114,36 +120,47 @@ def bundle_wheels(manifest: dict, wheel_dir: Path, out_dir: Path) -> dict:
         info.external_attr = (stat.S_IFREG | 0o644) << 16
         return info
 
+    bundle.writestr(member("manifest.json"), _bundle_manifest(manifest))
     wheels = sorted(manifest["wheels"], key=lambda wheel: wheel["filename"])
-    canonical_manifest = {**manifest, "wheels": wheels}
+    for wheel in wheels:
+        name = wheel["filename"]
+        if (
+            wheel["role"] not in (
+                ("plugin", "standalone", "vendored-lib") if "composition" in manifest else
+                ("standalone", "vendored-lib") if "component" in manifest
+                else ("plugin", "vendored-lib")
+            )
+            or not isinstance(name, str) or Path(name).name != name
+            or "/" in name or "\\" in name or not name.endswith(".whl")
+            or name in names
+        ):
+            raise PromotionArtifactError("invalid or duplicate first-party wheel entry")
+        names.add(name)
+        write_wheel(wheel, member(name))
+
+
+def bundle_wheels(manifest: dict, wheel_dir: Path, out_dir: Path) -> dict:
+    """Bundle only the builder's declared first-party wheels and manifest."""
+    filename = _bundle_filename(manifest)
+    destination = out_dir / filename
+
     # Wheels are already compressed; storing them avoids zlib-version drift too.
     with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_STORED) as bundle:
-        bundle.writestr(member("manifest.json"), json.dumps(canonical_manifest, sort_keys=True) + "\n")
-        for wheel in wheels:
+        def write_wheel(wheel, info):
             name = wheel["filename"]
-            if (
-                wheel["role"] not in (
-                    ("plugin", "standalone", "vendored-lib") if "composition" in manifest else
-                    ("standalone", "vendored-lib") if "component" in manifest
-                    else ("plugin", "vendored-lib")
-                )
-                or not isinstance(name, str) or Path(name).name != name
-                or "/" in name or "\\" in name or not name.endswith(".whl")
-                or name in names
-            ):
-                raise PromotionArtifactError("invalid or duplicate first-party wheel entry")
-            names.add(name)
             path = wheel_dir / name
             try:
                 if path.is_symlink() or f"sha256:{_digest(path)}" != wheel["sha256"]:
                     raise PromotionArtifactError(f"{name}: wheel digest changed before bundling")
-                with path.open("rb") as source, bundle.open(member(name), "w") as target:
+                with path.open("rb") as source, bundle.open(info, "w") as target:
                     shutil.copyfileobj(source, target, length=1 << 20)
             except OSError as exc:
                 raise PromotionArtifactError(f"{name}: cannot read wheel for bundling: {exc}") from exc
+
+        _write_bundle_members(bundle, manifest, write_wheel)
     return {
         **{key: manifest[key] for key in ("plugin", "component", "composition") if key in manifest},
-        "version": version, "artifact_id": artifact_id,
+        "version": manifest["version"], "artifact_id": manifest["artifact_id"],
         "filename": filename, "sha256": _digest(destination),
     }
 
