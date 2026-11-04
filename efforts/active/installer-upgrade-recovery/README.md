@@ -442,3 +442,57 @@ throwing publication callbacks. All four native broker/publication controls
 pass in 5.08 seconds (53.00 including isolated preparation/cleanup). This fixes
 test integration, not production behavior, and is additional to the 141-control
 evidence above. Current-head CI/review and reconciliation with Dev remain due.
+
+### 2026-11-04 - Producer recovery merged; outer consumer qualification next
+
+#10426 merged to Dev as `8d71dd2f275c3289801767440a0adef0b2abf162`
+at 13:13:27 UTC. Copilot approved exact head
+`258d1964c3784090c85bbb7210dabd670c56dd73` in review 5768817967;
+all three review threads were resolved. Required CI 41834233630 passed,
+including exact-input unit qualification and the final PR gate. The earlier
+same-head CI and native Linux/Windows legacy-monitor lanes also passed.
+The maintained rebase preserved current Dev's 4,044 unit nodes, coverage
+targets and 300-second budget; this unit changed only three source hashes.
+All 54 authored paths match the verified squash merge.
+
+This completes the bounded Codespaces adapter and predecessor-reference
+prerequisite reservations on #5472 at the source tier. It does not complete
+the shared immutable-slot campaign or its guardian, watchdog, lifecycle and
+other adopter work. The previous #10398 planner fix is separately released
+through #10430; #10426 still needs containing-release observation. No installed
+or serving generation was changed by either source result.
+
+The next serial acceptance unit joins the normal outer collected update to
+the real Codespaces producer in a disposable guarded profile. A matching
+manifest must not suppress incomplete-slot repair; the resulting selected CLI
+and generated command must work, an immediate rerun must retain the healthy
+generation without dependency writes, and actual incoming failure must remain
+failed with prior state preserved. Acquisition and unrelated portfolio members
+remain explicit fixture boundaries, not evidence for feeds, services or fleet
+completion. The parent Plan/Validation items and #10377 remain active.
+
+### 2026-11-04 - Outer collected consumer recovery qualified
+
+The new bounded Windows packet joins the actual normal collected update
+orchestration and currentness subprocess to the real installer process/receipt
+owner and Codespaces producer. A matching deployment manifest with an incomplete
+selected slot now reaches fresh repair, publishes a usable selected Python and
+generated command, and preserves the old slot/configuration. Immediate repeat
+is a truthful outer `SKIPPED (current)` without dependency writes. Failed
+incoming dependency preparation remains failed and retains the original
+selectors, manifest, old slot and configuration without a candidate left behind.
+
+Both cases pass in 88.12 seconds (133.91 including isolated preparation/cleanup)
+under the original 120-second native-child, 180-second item and 300-second
+group bounds. Initial fixture construction failed at real machine admission
+before reaching the installer; the fixture now explicitly supplies synthetic
+participation, alongside controlled acquisition, unrelated engine and final
+host integration. The currentness, producer, process/receipt checks and final
+CLI remain real. No production behavior was changed to obtain this result.
+
+These are U8/U9 collected-consumer results, not proof of repository-shell fresh
+bootstrap, governed feeds, services, every portfolio member or installed-host
+recovery. The packet reuses the existing guarded Codespaces fixture rather than
+creating another installer. It remains on-demand and outside required unit-only
+CI. The test/documentation PR and #10426's containing release remain due; the
+other candidate owners and parent Plan/Validation gates remain open.

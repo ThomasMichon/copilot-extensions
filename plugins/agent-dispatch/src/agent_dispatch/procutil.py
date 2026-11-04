@@ -18,8 +18,6 @@ allocate their own consoles.
 
 from __future__ import annotations
 
-from agent_procutil.daemon_instances import DaemonInstanceSpec, spawn_finite_worker
-
 import os
 import re
 import shutil
@@ -32,8 +30,6 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from .install_paths import install_dir
-
 # Re-exported so existing callers keep using ``from .procutil import
 # no_window_kwargs`` while the implementation is single-sourced in the shared
 # ``agent_procutil`` lib.
@@ -45,6 +41,11 @@ from agent_procutil import (
     windowless_python,
     windowless_python_env,
 )
+from agent_procutil.daemon_instances import DaemonInstanceSpec, spawn_finite_worker
+from agent_procutil.owned_budget import OwnedExecutionBudget
+from agent_procutil.owned_process import OwnedCleanupError, _run_owned
+
+from .install_paths import install_dir
 
 __all__ = [
     "agent_bridge_launch_prefix",
@@ -409,6 +410,7 @@ def run_background_capture(
     env: Mapping[str, str] | None = None,
     cwd: str | os.PathLike[str] | None = None,
     max_output: int | None = None,
+    input_text: str | None = None,
 ) -> subprocess.CompletedProcess[str] | None:
     """Run a short-lived captured process tree without a headed Windows console.
 
@@ -436,14 +438,39 @@ def run_background_capture(
     :func:`run_agent_worktrees_capture`) should instead pass an explicitly
     scrubbed environment (:func:`agent_worktrees_environment`).
     """
+    if input_text is not None and max_output is not None:
+        raise ValueError("bounded streaming capture does not support stdin")
     args = [os.fspath(arg) for arg in argv]
+    if input_text is not None and sys.platform == "win32":
+        if timeout <= 0:
+            return None
+        # Windows communicate() writes stdin synchronously. The owned binary
+        # capture drains all three pipes concurrently and settles its pinned,
+        # non-breakaway Job and pipe workers inside this same absolute budget.
+        # sys.maxsize preserves capture without a caller-requested output cap;
+        # direct execution also avoids a serialized-request size restriction.
+        budget = OwnedExecutionBudget.from_timeout(
+            timeout, cleanup_reserve=min(2.0, timeout / 2),
+        )
+        try:
+            return _run_owned(
+                args, timeout=timeout, input_text=input_text,
+                capture_limits=(sys.maxsize, sys.maxsize), budget=budget,
+                env=dict(env) if env is not None else None, cwd=cwd,
+            )
+        except OwnedCleanupError:
+            # Unconfirmed cleanup retains exact Job/process custody; never
+            # disguise it as an ordinary unavailable/timeout result.
+            raise
+        except (OSError, subprocess.SubprocessError):
+            return None
     try:
         spawn_time = time.monotonic()
         proc = subprocess.Popen(  # noqa: S603 -- fixed module argv
             args,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            stdin=subprocess.DEVNULL,
+            stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
             text=True,
             env=dict(env) if env is not None else None,
             cwd=cwd,
@@ -482,7 +509,10 @@ def run_background_capture(
             return None
         return subprocess.CompletedProcess(args, proc.returncode, *captured)
     try:
-        stdout, stderr = proc.communicate(timeout=remaining)
+        if input_text is None:
+            stdout, stderr = proc.communicate(timeout=remaining)
+        else:
+            stdout, stderr = proc.communicate(input=input_text, timeout=remaining)
     except subprocess.TimeoutExpired:
         terminate_process_tree(proc, expected_start_token=start_token)
         return None

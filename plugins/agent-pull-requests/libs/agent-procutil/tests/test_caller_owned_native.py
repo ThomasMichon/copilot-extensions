@@ -35,6 +35,34 @@ def _command(argv, *, cwd=None):
     return result
 
 
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux") and sys.platform != "darwin",
+    reason="isolated Python controller is a POSIX implementation",
+)
+def test_controller_imports_do_not_write_bytecode(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    shutil.copytree(
+        LIBRARY / "src", source,
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    result = _command([
+        sys.executable, "-I", "-B", "-S", "-c",
+        "import json,sys;"
+        "sys.path.insert(0,sys.argv[1]);"
+        "from agent_procutil.owned_process import run_caller_owned;"
+        "assert sys.dont_write_bytecode;"
+        "result=run_caller_owned("
+        "[sys.executable,'-I','-c','import sys;print(int(sys.dont_write_bytecode))'],"
+        "timeout=5,max_stdout_bytes=128,max_stderr_bytes=128);"
+        "print(json.dumps([result.returncode,result.stdout,result.stderr]))",
+        str(source),
+    ], cwd=tmp_path)
+    assert json.loads(result.stdout) == [0, "0\n", ""]
+    assert not list(source.rglob("__pycache__"))
+    assert not list(source.rglob("*.pyc"))
+
+
 @pytest.fixture(scope="module")
 def installed_console(tmp_path_factory):
     uv = shutil.which("uv")

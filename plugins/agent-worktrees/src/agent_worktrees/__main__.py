@@ -3770,6 +3770,7 @@ def _start_provisioning_if_needed(
     *,
     include_status_diagnostic: bool = True,
     process_holder: list[subprocess.Popen] | None = None,
+    skip_preview: bool = False,
 ) -> str:
     # Stage D: status_monitor_runtime is cluster-free.
     from . import status_monitor_runtime as _smr
@@ -3782,21 +3783,16 @@ def _start_provisioning_if_needed(
         return ""
     status = _self_override("_aw_runtime_home", _smr._aw_runtime_home)() / "logs" / "provision-status.json"
     diagnostic = _provisioning_status_diagnostic(cwd) if include_status_diagnostic else ""
-    try:
-        from . import reconcile
+    services = ""
+    if not skip_preview:
+        try:
+            from .session_provisioning import preview_services
 
-        plan = reconcile.build_plan(Path(cwd), save=False)
-    except Exception as exc:
-        return diagnostic + (f"[agent-worktrees] Runtime provisioning preview failed: {exc}\n")
-    if plan.get("action") != "reconcile":
-        return diagnostic
-    services = ", ".join(  # marketplace-isolation: allow query-column-list
-        dict.fromkeys(
-            str(item.get("service"))
-            for item in plan.get("updates", [])
-            if isinstance(item, dict) and item.get("service")
-        )
-    )
+            services = preview_services(cwd)
+        except Exception as exc:
+            return diagnostic + (f"[agent-worktrees] Runtime provisioning preview failed: {exc}\n")
+        if services is None:
+            return diagnostic
     status.parent.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     log = status.parent / f"provision-{stamp}.log"
@@ -3835,6 +3831,8 @@ def _start_provisioning_if_needed(
         spawned = False
     if not spawned:
         diagnostic += "[agent-worktrees] Could not start background provisioning.\n"
+    elif skip_preview:
+        diagnostic += "[agent-worktrees] Background reconciliation launched.\n"
     elif services:
         diagnostic += f"[agent-worktrees] Provisioning runtime(s) in background: {services}\n"
     return diagnostic
@@ -3989,7 +3987,9 @@ def _run_session_lifecycle(
             diagnostics += _anchor_hygiene_diagnostic(cwd)
         if deadline is None or time.time() < deadline - 1.0:
             if provisioning_start_event is None:
-                diagnostics += _start_provisioning_if_needed(cwd, session_environment)
+                diagnostics += _start_provisioning_if_needed(
+                    cwd, session_environment, skip_preview=True,
+                )
             else:
                 diagnostics += _schedule_provisioning_if_needed(
                     cwd,

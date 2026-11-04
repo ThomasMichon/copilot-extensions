@@ -748,7 +748,7 @@ def test_closed_lifetime_pipe_refuses_before_target_launch(tmp_path):
     try:
         result = subprocess.run(
             [
-                sys.executable, "-I", "-S", "-c", protocol._BOOTSTRAP,
+                sys.executable, "-I", "-B", "-S", "-c", protocol._BOOTSTRAP,
                 str(Path(protocol.__file__).resolve().parents[1]), str(reader),
             ],
             input=json.dumps(request) + "\n", text=True, capture_output=True,
@@ -806,8 +806,15 @@ def test_run_owned_reports_success_only_after_eperm_group_settlement(monkeypatch
     if zombie_only:
         assert ownership.run_owned(argv, timeout=10).returncode == 0
     else:
-        with pytest.raises(PermissionError):
+        with pytest.raises(OwnedCleanupError) as caught:
             ownership.run_owned(argv, timeout=10)
+        assert isinstance(caught.value.__cause__, PermissionError)
+        assert caught.value.__cause__.errno == errno.EPERM
+        process = caught.value.process
+        assert process.returncode is None
+        assert process.wait(timeout=2) == 0
+        process.stdout.close()
+        process.stderr.close()
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="native Darwin process-group census")
@@ -827,8 +834,15 @@ def test_darwin_census_refuses_eperm_while_a_group_member_lives(monkeypatch, tmp
         assert ownership.run_owned(argv, timeout=10).returncode == 0
         return
     try:
-        with pytest.raises(PermissionError):
+        with pytest.raises(OwnedCleanupError) as caught:
             ownership.run_owned(argv, timeout=10)
+        assert isinstance(caught.value.__cause__, PermissionError)
+        assert caught.value.__cause__.errno == errno.EPERM
+        process = caught.value.process
+        assert process.returncode is None
+        assert process.wait(timeout=2) == 0
+        process.stdout.close()
+        process.stderr.close()
     finally:
         if marker.exists():
             try:

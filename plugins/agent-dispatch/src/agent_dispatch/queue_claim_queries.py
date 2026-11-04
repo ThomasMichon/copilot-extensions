@@ -29,6 +29,7 @@ from .queue_common import (
 from .queue_records import SpawnReservation, Status, TaskError
 from .queue_dedup import find_live_dedup_task
 from .queue_execution_handoff import closed_execution, require_execution_admission
+from .assignment_workspace import AssignmentWorkspace
 
 
 class QueueClaimQueriesMixin:
@@ -47,9 +48,13 @@ class QueueClaimQueriesMixin:
         lease_seconds: int | None = None,
         evaluation: bool = False,
         _with_outcome: bool = False,
+        assignment_workspace: AssignmentWorkspace | None = None,
     ) -> Task | ClaimOutcome | None:
         """Atomically lease the best eligible ``queued`` task, or ``None``."""
         self.require_worker_admission()
+        replay = self._replay_relationship_claim(task_id, worker_id, assignment_workspace)
+        if replay is not None:
+            return ClaimOutcome(task=replay, producer_rejections=[]) if _with_outcome else replay
         repo = self._canonical_repo(repo)
         ts = self._now(now)
         caps = set(self._canonical_selector_tokens(capabilities))
@@ -89,6 +94,16 @@ class QueueClaimQueriesMixin:
             for row in rows:
                 if repo is not None and row["repo"] != repo:
                     continue
+                if task_id is None:
+                    from .queue_task_relationships import latest_relationship
+
+                    previous = latest_relationship(conn, row["id"])
+                    if previous is not None and (
+                        self._relationship_writer is None
+                        or assignment_workspace is None
+                        or json.loads(previous["task_relationship"])["state"] not in {"closed", "absent"}
+                    ):
+                        continue
                 from .queue_pool_placement import pool_assignment
                 if pool_assignment(conn, row["id"], include_released=True) is not None:
                     if task_id is not None:
@@ -161,6 +176,18 @@ class QueueClaimQueriesMixin:
                 )
                 return outcome if _with_outcome else None
             self.require_worker_admission()
+            relationship_event = None
+            if self._relationship_writer is not None and assignment_workspace is None:
+                raise TaskError("qualified assignment requires its original workspace identity")
+            if assignment_workspace is not None:
+                relationship_event = self._retain_task_relationship(
+                    conn, self._fetch(conn, chosen["id"]), assignment_workspace,
+                    worker_id=worker_id, generation=chosen["generation"] + 1, ts=ts,
+                )
+            else:
+                from .queue_task_relationships import latest_relationship
+                if latest_relationship(conn, chosen["id"]) is not None:
+                    raise TaskError("governed task assignment requires its original workspace contract")
             conn.execute(
                 "UPDATE tasks SET status = ?, owner = ?, claimed_at = ?, updated_at = ?,"
                 " lease_expires_at = ?, last_seen_at = ?, generation = generation + 1,"
@@ -168,23 +195,28 @@ class QueueClaimQueriesMixin:
                 " attempts = attempts + 1 WHERE id = ? AND status = ?",
                 (Status.CLAIMED, worker_id, ts, ts, ts + lease, ts, chosen["id"], Status.QUEUED),
             )
-            self._audit(
-                conn,
-                chosen["id"],
-                ts=ts,
-                from_status=Status.QUEUED,
-                to_status=Status.CLAIMED,
-                worker=worker_id,
-                note="claim",
-            )
+            if relationship_event is None:
+                self._audit(
+                    conn,
+                    chosen["id"],
+                    ts=ts,
+                    from_status=Status.QUEUED,
+                    to_status=Status.CLAIMED,
+                    worker=worker_id,
+                    note="claim",
+                )
             task = self._fetch(conn, chosen["id"])
             conn.execute("COMMIT")
+        if task is not None:
+            self._notify_owned_transition()
+        if relationship_event is not None:
+            task = self._acknowledge_relationship_claim(
+                task.id, worker_id, task.generation, event_id=relationship_event,
+            )
         outcome = ClaimOutcome(
             task=task,
             producer_rejections=producer_rejections,
         )
-        if task is not None:
-            self._notify_owned_transition()
         return outcome if _with_outcome else task
 
     def claim_outcome(self, *args: object, **kwargs: object) -> ClaimOutcome:

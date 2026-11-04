@@ -1081,6 +1081,23 @@ native-startup-pending, not prompt consumption; only the existing invocation
 owner claims/settles the seed. Custom/unrecognized launch shapes keep their
 terminal fallback, selected before effects. Deferred Bridge acquisition and
 already-live delivery retain their existing owners.
+### Optional standalone runtime reconciliation
+
+Standalone `session-lifecycle` keeps optional runtime planning off its foreground
+path: after the registration and static-guidance steps, the existing detached
+`reconcile-plugins --repo ... --status ... --apply` child owns planning and apply
+through the execution driver. This deliberately launches one helper per eligible
+standalone pass even when there are no updates; the child's existing no-op and
+equivalent-pending-request coalescing handles that case. It is not a zero-work
+startup path.
+Both session-local provisioning opt-outs and the foreground deadline gate remain
+in force. The resident path retains its gated, per-repository preview worker.
+
+`Background reconciliation launched` reports only child launch, not queue
+acceptance, runtime readiness, maintenance completion, or cleanup. Existing logs
+and provisioning status retain delayed failures; the next matching lifecycle can
+report the previous failure. Foreground return does not prove detached work has
+finished.
 
 ### Current session, conclusion, and succession (the head pointer)
 
