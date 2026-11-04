@@ -1,5 +1,13 @@
 # Testing copilot-extensions
 
+Procutil's explicit `tests/test_caller_owned_native.py -k
+controller_imports_do_not_write_bytecode` packet copies the package into a
+disposable source tree and executes the real POSIX controller. It checks that
+parent `-B`/environment settings do not substitute for controller-owned bytecode
+suppression, while the requested command retains its own interpreter flags.
+This source-boundary control does not expand required unit-only CI or qualify
+an installed rollout.
+
 The opt-in Manager `tests/test_companion_visual.py` packet compares actual
 Textual timeline renders against synthetic live-following and history-browsing
 SVG baselines, plus a selected-session view with visibly paused membership and
