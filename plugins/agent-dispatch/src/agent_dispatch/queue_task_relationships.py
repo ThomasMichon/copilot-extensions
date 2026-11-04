@@ -1,0 +1,364 @@
+"""Cross-owner assignment reconciliation on the original task audit event."""
+
+from __future__ import annotations
+
+import base64
+import json
+import secrets
+import sqlite3
+from dataclasses import asdict
+
+from .assignment_workspace import AssignmentWorkspace
+from .queue_common import Task
+from .queue_records import Status, TaskError
+
+SCHEMA = "copilot-extensions.resource-relationship"
+WRITER = {
+    "schema": "copilot-extensions.worktree-record-writer",
+    "version": 1,
+    "retained_relationships": 1,
+    "creation_nonce": 1,
+}
+
+
+def valid_record_writer(value: object) -> bool:
+    return (
+        isinstance(value, dict)
+        and value.get("schema") == WRITER["schema"]
+        and all(
+            type(value.get(key)) is int and value[key] == 1
+            for key in ("version", "retained_relationships", "creation_nonce")
+        )
+    )
+
+
+def _encoded(value: dict) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+
+def latest_relationship(conn: sqlite3.Connection, task_id: str) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM task_events WHERE task_id=? AND task_relationship IS NOT NULL"
+        " ORDER BY id DESC LIMIT 1",
+        (task_id,),
+    ).fetchone()
+
+
+def require_relationship(conn: sqlite3.Connection, task_id: str) -> None:
+    row = latest_relationship(conn, task_id)
+    required = conn.execute(
+        "SELECT 1 FROM spawn_reservations"
+        " WHERE task_id=? AND task_relationship_required=1 LIMIT 1",
+        (task_id,),
+    ).fetchone()
+    if (row is not None or required is not None) and (
+        row is None or json.loads(row["task_relationship"])["state"] != "bound"
+    ):
+        raise TaskError(
+            "task relationship protection is unconfirmed; reconcile its original assignment"
+        )
+
+
+def _matches_receipt(value: object, request: dict, *, phase: str | None = None) -> bool:
+    workspace = AssignmentWorkspace(**request["workspace"])
+    if not isinstance(value, dict) or not (
+        value.get("schema") == SCHEMA
+        and type(value.get("version")) is int
+        and value["version"] == 1
+        and value.get("ok") is True
+        and value.get("owner") == workspace.owner_ref
+        and value.get("creation_nonce") == workspace.creation_nonce
+        and valid_record_writer(value.get("writer_contract"))
+        and value.get("request_id") == request["request_id"]
+    ):
+        return False
+    if value.get("absent") is True:
+        return phase == "absent"
+    metadata = value.get("producer")
+    if not isinstance(metadata, dict) or not (
+        {"version", "lifetime", "creator", "namespace", "request_id", "recovery", "token", "phase"}
+        <= metadata.keys()
+        and value.get("phase") in {"pending", "bound", "closed"}
+        and metadata.get("version") == 2
+        and metadata.get("lifetime") == "retained-relationship"
+        and metadata.get("creator") == workspace.owner_ref
+        and metadata.get("namespace") == request["namespace"]
+        and metadata.get("request_id") == request["request_id"]
+        and metadata.get("recovery") == request["recovery"]
+        and value.get("token") == metadata.get("token")
+        and value.get("phase") == metadata.get("phase")
+        and (phase is None or value["phase"] == phase)
+    ):
+        return False
+    envelope = {
+        key: metadata[key] for key in ("version", "token", "creator", "request_id", "recovery")
+    }
+    envelope["phase"] = "bound" if "identity" in metadata else "pending"
+    if "identity" in metadata:
+        envelope["identity"] = metadata["identity"]
+    expected_ref = (
+        request["namespace"]
+        + ":l1."
+        + base64.urlsafe_b64encode(
+            _encoded(envelope).encode("ascii"),
+        )
+        .decode("ascii")
+        .rstrip("=")
+    )
+    from .client_errors import DispatchError
+    from .task_relationships import AssignmentSubject
+
+    ref = value.get("ref")
+    if ref != expected_ref:
+        return False
+    try:
+        subject = AssignmentSubject.decode(
+            ref[len(request["namespace"]) + 1 :],
+            authority=request["authority"],
+        )
+    except DispatchError:
+        return False
+    return (
+        subject.assignment_event_id == request["event_id"]
+        and subject.worker_id == workspace.worker_id
+        and subject.task_id == request["task_id"]
+        and ("identity" not in metadata or metadata["identity"] == request["identity"])
+    )
+
+
+class QueueTaskRelationshipsMixin:
+    def _replay_relationship_claim(
+        self,
+        task_id: str | None,
+        worker_id: str,
+        workspace: AssignmentWorkspace | None,
+    ) -> Task | None:
+        if task_id is None or workspace is None:
+            return None
+        value = self.task_relationship(task_id)
+        if value is None:
+            return None
+        request = value["request"]
+        task = self.get(task_id)
+        if (
+            request["reservation_key"] is not None
+            or task.status != Status.CLAIMED
+            or task.owner != worker_id
+            or task.generation != request["generation"]
+        ):
+            return None
+        if request["workspace"] != asdict(workspace):
+            raise TaskError("claim replay conflicts with its original workspace")
+        self.reconcile_task_relationship(task_id, event_id=request["event_id"])
+        return self.get(task_id)
+
+    def _retain_task_relationship(
+        self,
+        conn: sqlite3.Connection,
+        task: Task,
+        workspace: AssignmentWorkspace,
+        *,
+        worker_id: str,
+        generation: int,
+        ts: float,
+        reservation_key: str | None = None,
+    ) -> int:
+        if self._relationship_writer is None or self._relationship_authority not in {
+            "local",
+            "central",
+        }:
+            raise TaskError("selected task owner has no qualified relationship writer")
+        if not isinstance(workspace, AssignmentWorkspace):
+            raise TaskError("task relationship requires an original workspace identity")
+        if workspace.worker_id != worker_id:
+            raise TaskError("task relationship workspace does not match the assigned worker")
+        previous = latest_relationship(conn, task.id)
+        if previous is not None and json.loads(previous["task_relationship"])["state"] not in {
+            "closed",
+            "absent",
+        }:
+            raise TaskError("previous task relationship requires original-owner settlement")
+        cursor = conn.execute(
+            "INSERT INTO task_events(task_id, ts, from_status, to_status, worker, note)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                task.id,
+                ts,
+                task.status,
+                Status.CLAIMED,
+                worker_id,
+                "worktree assignment" if reservation_key else "claim",
+            ),
+        )
+        event_id = cursor.lastrowid
+        identity = {"assignment_event_id": event_id, "worker_id": worker_id}
+        request = {
+            "request_id": secrets.token_hex(16),
+            "event_id": event_id,
+            "task_id": task.id,
+            "generation": generation,
+            "workspace": asdict(workspace),
+            "reservation_key": reservation_key,
+            "authority": self._relationship_authority,
+            "namespace": f"dispatch-{self._relationship_authority}-task",
+            "identity": identity,
+            "recovery": {
+                "schema": "dispatch-task-assignment",
+                "version": 2,
+                "authority": self._relationship_authority,
+                "task_id": task.id,
+                "queue_identity": conn.execute(
+                    "SELECT identity FROM workspace_queue_identity WHERE singleton=1",
+                ).fetchone()["identity"],
+                **identity,
+            },
+        }
+        conn.execute(
+            "UPDATE task_events SET task_relationship=? WHERE id=?",
+            (_encoded({"request": request, "state": "pending", "receipt": None}), event_id),
+        )
+        return event_id
+
+    def task_relationship(self, task_id: str, *, event_id: int | None = None) -> dict | None:
+        if event_id is not None and (
+            type(event_id) is not int or not 1 <= event_id <= 2**63 - 1
+        ):
+            raise TaskError("invalid original task relationship event")
+        with self._connect() as conn:
+            row = (
+                latest_relationship(conn, task_id)
+                if event_id is None
+                else conn.execute(
+                    "SELECT * FROM task_events WHERE task_id=? AND id=?"
+                    " AND task_relationship IS NOT NULL",
+                    (task_id, event_id),
+                ).fetchone()
+            )
+        return json.loads(row["task_relationship"]) if row is not None else None
+
+    def reconcile_task_relationship(self, task_id: str, *, event_id: int | None = None) -> dict:
+        """Replay the same ground-owner request; never hold SQLite during I/O."""
+        value = self.task_relationship(task_id, event_id=event_id)
+        if value is None:
+            raise TaskError("no retained task relationship request")
+        request = value["request"]
+        if (
+            self._relationship_writer is None
+            or self._relationship_authority != request["authority"]
+        ):
+            raise TaskError("original relationship writer is unavailable; assignment retained")
+        workspace = AssignmentWorkspace(**request["workspace"])
+        if value["state"] in {"closed", "absent"}:
+            return value
+        from .task_obligations import read_snapshot
+
+        snapshot = read_snapshot(self, task_id, assignment_event_id=request["event_id"])
+        if snapshot is None or snapshot["assignment"] != {
+            "event_id": request["event_id"],
+            "worker_id": workspace.worker_id,
+        }:
+            raise TaskError("original audited task assignment is unconfirmed")
+        retiring = snapshot["release_outcome"] in {"completed", "unassigned_queued"}
+        if retiring and snapshot["release_outcome"] == "unassigned_queued":
+            retiring = (
+                snapshot["unassignment"]["worker_id"] == workspace.worker_id
+                and snapshot["unassignment"]["event_id"] > request["event_id"]
+            )
+        if not retiring and value["state"] == "bound":
+            return value
+        with self._connect() as conn:
+            task = self._fetch(conn, task_id)
+            current = latest_relationship(conn, task_id)
+            if not retiring and (
+                current["id"] != request["event_id"]
+                or task.generation != request["generation"]
+                or task.status not in {Status.CLAIMED, Status.STARTED, Status.SUSPENDED}
+                or task.owner not in (None, workspace.worker_id)
+            ):
+                raise TaskError("original task assignment changed; relationship retained")
+        common = {"expected_creation_nonce": workspace.creation_nonce}
+
+        def write(operation: str, payload: dict, *, phase: str | None = None) -> dict:
+            try:
+                result = self._relationship_writer(workspace, operation, {**payload, **common})
+            except Exception as exc:
+                raise TaskError(
+                    "task relationship request is unresolved; reconcile its original assignment"
+                ) from exc
+            if not _matches_receipt(result, request, phase=phase):
+                raise TaskError("ground owner did not confirm the exact task relationship")
+            return result
+
+        if retiring:
+            receipt = self._relationship_writer(
+                workspace,
+                "inspect",
+                {
+                    **common,
+                    "request_id": request["request_id"],
+                    "allow_missing": True,
+                },
+            )
+            if isinstance(receipt, dict) and receipt.get("absent") is True:
+                if not _matches_receipt(receipt, request, phase="absent"):
+                    raise TaskError("ground owner did not confirm exact relationship absence")
+                # Absence alone does not fence an earlier in-flight reserve.
+                # Replay the original id, then retain its closed tombstone.
+                receipt = write(
+                    "reserve",
+                    {
+                        "kind": "task",
+                        "namespace": request["namespace"],
+                        "request_id": request["request_id"],
+                        "recovery": request["recovery"],
+                    },
+                )
+            else:
+                if not _matches_receipt(receipt, request):
+                    raise TaskError("ground owner did not confirm the original relationship")
+            receipt = write("close", {"token": receipt["token"]}, phase="closed")
+            state = "closed"
+        else:
+            receipt = write(
+                "reserve",
+                {
+                    "kind": "task",
+                    "namespace": request["namespace"],
+                    "request_id": request["request_id"],
+                    "recovery": request["recovery"],
+                },
+            )
+            receipt = write(
+                "bind",
+                {
+                    "token": receipt["token"],
+                    "identity": request["identity"],
+                },
+                phase="bound",
+            )
+            state = "bound"
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            retained = conn.execute(
+                "SELECT task_relationship FROM task_events WHERE id=? AND task_id=?",
+                (request["event_id"], task_id),
+            ).fetchone()
+            if retained is None or json.loads(retained["task_relationship"])["request"] != request:
+                raise TaskError("original task relationship request changed")
+            task = self._fetch(conn, task_id)
+            if state == "bound" and (
+                latest_relationship(conn, task_id)["id"] != request["event_id"]
+                or task.generation != request["generation"]
+                or task.status not in {Status.CLAIMED, Status.STARTED, Status.SUSPENDED}
+                or task.owner not in (None, workspace.worker_id)
+            ):
+                raise TaskError(
+                    "task changed during relationship write; original request retained"
+                )
+            result = {"request": request, "state": state, "receipt": receipt}
+            conn.execute(
+                "UPDATE task_events SET task_relationship=? WHERE id=?",
+                (_encoded(result), request["event_id"]),
+            )
+            conn.commit()
+        return result

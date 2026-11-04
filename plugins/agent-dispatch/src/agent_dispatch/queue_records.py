@@ -255,6 +255,9 @@ class SpawnReservation:
     agent_info: dict | None = None
     allocation_project: str | None = None
     worktree_path: str | None = None
+    creation_nonce: str | None = None
+    task_relationship_event_id: int | None = None
+    task_relationship_required: bool = False
     allocation_revision: int = 1
     creation_key: str | None = None
     allocation_reservation_key: str | None = None
@@ -295,6 +298,11 @@ class SpawnReservation:
             agent_info=json.loads(row["agent_info"]) if "agent_info" in row.keys() and row["agent_info"] else None,
             allocation_project=row["allocation_project"] if "allocation_project" in row.keys() else None,
             worktree_path=row["worktree_path"] if "worktree_path" in row.keys() else None,
+            creation_nonce=row["creation_nonce"] if "creation_nonce" in row.keys() else None,
+            task_relationship_event_id=row["task_relationship_event_id"]
+            if "task_relationship_event_id" in row.keys() else None,
+            task_relationship_required=bool(row["task_relationship_required"])
+            if "task_relationship_required" in row.keys() else False,
             allocation_revision=row["allocation_revision"] if "allocation_revision" in row.keys() else 1,
             creation_key=row["creation_key"] if "creation_key" in row.keys() else None,
             allocation_reservation_key=row["allocation_reservation_key"]

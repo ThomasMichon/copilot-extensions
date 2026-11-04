@@ -97,6 +97,21 @@ class ProducerScopeHandoffBody(BaseModel):
     required_label: str | None = None
 
 
+class AssignmentWorkspaceBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    machine: str = Field(min_length=1)
+    project: str = Field(min_length=1)
+    worktree: str = Field(min_length=1)
+    path: str = Field(min_length=1)
+    creation_nonce: str = Field(min_length=1)
+
+
+class RelationshipReconcileBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    event_id: StrictInt = Field(ge=1, le=2**63 - 1)
+
+
 class ClaimBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -109,6 +124,7 @@ class ClaimBody(BaseModel):
     task_id: str | None = None
     lease_seconds: int | None = None
     evaluation: bool = False
+    assignment_workspace: AssignmentWorkspaceBody | None = None
 
 
 class WorkerBody(BaseModel):

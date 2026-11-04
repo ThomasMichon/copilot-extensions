@@ -38,6 +38,9 @@ class AssignmentSubject:
     queue_identity: str
     assignment_event_id: int
     worker_id: str
+    request_id: str | None = None
+    creator: str | None = None
+    recovery: dict | None = None
 
     @classmethod
     def decode(cls, bare: str, *, authority: str) -> AssignmentSubject:
@@ -53,13 +56,12 @@ class AssignmentSubject:
                 base64.b64decode(encoded + "=" * (-len(encoded) % 4), altchars=b"-_", validate=True),
                 object_pairs_hook=_unique,
             )
-            if not isinstance(envelope, dict) or set(envelope) != {
-                "version", "token", "creator", "request_id", "recovery", "phase", "identity",
-            }:
-                raise ValueError("task relationship must be exactly bound")
+            fields = {"version", "token", "creator", "request_id", "recovery", "phase"}
+            if not isinstance(envelope, dict) or set(envelope) not in (fields, fields | {"identity"}):
+                raise ValueError("task relationship has invalid fields")
             if (
                 type(envelope["version"]) is not int or envelope["version"] != 2
-                or envelope["phase"] != "bound"
+                or envelope["phase"] not in {"bound", "pending"}
                 or not isinstance(envelope["token"], str)
                 or re.fullmatch(r"[A-Za-z0-9_-]{32,128}", envelope["token"]) is None
                 or not isinstance(envelope["request_id"], str)
@@ -68,13 +70,27 @@ class AssignmentSubject:
                 raise ValueError("unsupported task relationship identity")
             if base64.urlsafe_b64encode(_canonical(envelope)).decode("ascii").rstrip("=") != encoded:
                 raise ValueError("noncanonical task relationship subject")
-            recovery, identity = envelope["recovery"], envelope["identity"]
+            recovery = envelope["recovery"]
+            if not isinstance(recovery, dict):
+                raise ValueError("invalid original task recovery")
+            recovery_version = recovery.get("version")
+            recovery_fields = {"schema", "version", "authority", "queue_identity", "task_id"}
+            if type(recovery_version) is not int or recovery_version not in {1, 2}:
+                raise ValueError("unsupported task recovery version")
+            if recovery_version == 2:
+                recovery_fields |= {"assignment_event_id", "worker_id"}
+                identity = {key: recovery.get(key) for key in ("assignment_event_id", "worker_id")}
+                if envelope["phase"] == "bound" and envelope.get("identity") != identity:
+                    raise ValueError("bound assignment conflicts with retained recovery")
+            else:
+                if envelope["phase"] != "bound":
+                    raise ValueError("legacy task recovery must be bound")
+                identity = envelope.get("identity")
+            if (envelope["phase"] == "pending") == ("identity" in envelope):
+                raise ValueError("task relationship phase conflicts with identity")
             if (
-                not isinstance(recovery, dict) or set(recovery) != {
-                    "schema", "version", "authority", "queue_identity", "task_id",
-                }
-                or recovery["schema"] != SCHEMA or type(recovery["version"]) is not int
-                or recovery["version"] != VERSION or recovery["authority"] != authority
+                set(recovery) != recovery_fields
+                or recovery["schema"] != SCHEMA or recovery["authority"] != authority
                 or not isinstance(recovery["queue_identity"], str)
                 or re.fullmatch(r"[0-9a-f]{32}", recovery["queue_identity"]) is None
                 or not isinstance(recovery["task_id"], str)
@@ -96,6 +112,9 @@ class AssignmentSubject:
             return cls(
                 subject, recovery["task_id"], recovery["queue_identity"],
                 identity["assignment_event_id"], identity["worker_id"],
+                envelope["request_id"] if recovery_version == 2 else None,
+                creator if recovery_version == 2 else None,
+                recovery if recovery_version == 2 else None,
             )
         except (ValueError, TypeError, UnicodeError, RecursionError) as exc:
             raise DispatchError(409, f"task relationship refused: {exc}") from exc
@@ -111,6 +130,16 @@ class AssignmentSubject:
             }
         ):
             raise DispatchError(409, "original queue and exact task assignment are unconfirmed")
+        if self.recovery is not None:
+            request = value.get("relationship")
+            workspace = request.get("workspace") if isinstance(request, dict) else None
+            if (
+                not isinstance(workspace, dict)
+                or request.get("request_id") != self.request_id
+                or request.get("recovery") != self.recovery
+                or f"{workspace.get('machine')}/{workspace.get('project')}/{workspace.get('worktree')}" != self.creator
+            ):
+                raise DispatchError(409, "original task relationship request is unconfirmed")
         outcome = value["release_outcome"]
         retired = outcome == "completed" or (
             outcome == "unassigned_queued"

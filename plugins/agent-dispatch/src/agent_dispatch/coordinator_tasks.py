@@ -12,12 +12,14 @@ import uuid
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 
 from . import telemetry
+from .assignment_workspace import AssignmentWorkspace
 from .coordinator_auth import _make_control_auth
 from .coordinator_categories import CategorySelection, register_category_routes
 from .coordinator_loops import DrainGate, DrainRequest
 from .coordinator_pool_decline import enrich_task
 from .task_obligations import enrich_task_detail
 from .coordinator_task_models import (
+    AssignmentWorkspaceBody,
     AbandonBody,
     ActivityBody,
     CardBody,
@@ -75,6 +77,10 @@ from .steering import SteeringError, steer_request_fingerprint, steer_wake_messa
 #: `kind: state_transition` records for them. The bus publish (the actual
 #: wake every `--subscribe` relay/poller needs) still fires unconditionally.
 _NO_TELEMETRY_EVENT_TYPES = frozenset({"task.heartbeat", "task.activity_updated"})
+
+
+def _assignment_workspace(body: AssignmentWorkspaceBody) -> AssignmentWorkspace:
+    return AssignmentWorkspace.from_dict(body.model_dump())
 
 
 def _draft_scope(queue: TaskQueue) -> dict:
@@ -408,6 +414,11 @@ def register_task_routes(
             "result": queue.read_result(task),
         }
 
+    from .coordinator_task_relationships import register_task_relationship_routes
+    register_task_relationship_routes(
+        app, queue, control_token=control_token, emit_event=_emit_producer_event,
+    )
+
     @app.get("/tasks/{task_id}/events")
     def get_events(task_id: str) -> list[dict]:
         _require(queue.get(task_id))
@@ -486,6 +497,8 @@ def register_task_routes(
                     task_id=body.task_id,
                     lease_seconds=body.lease_seconds,
                     evaluation=body.evaluation,
+                    **({"assignment_workspace": _assignment_workspace(body.assignment_workspace)}
+                       if body.assignment_workspace is not None else {}),
                 )
             except WorkerAdmissionInhibited as exc:
                 raise HTTPException(status_code=409, detail=exc.detail()) from exc

@@ -211,6 +211,7 @@ class DispatchClient(PoolDeclineClientMixin, PoolStartupClientMixin, PoolPlaceme
         task_id: str | None = None,
         lease_seconds: int | None = None,
         evaluation: bool = False,
+        assignment_workspace: dict | None = None,
     ) -> dict | None:
         body = {
             "worker_id": worker_id,
@@ -223,6 +224,10 @@ class DispatchClient(PoolDeclineClientMixin, PoolStartupClientMixin, PoolPlaceme
             "lease_seconds": lease_seconds,
             "evaluation": evaluation,
         }
+        if assignment_workspace is not None:
+            from .client_task_relationships import require_support
+            require_support(self)
+            body["assignment_workspace"] = assignment_workspace
         probe_timeout = {"timeout": 60.0} if task_id and "ci-repair-admitted" in capabilities else {}
         return self._unwrap(self._http.post("/claim", json=body, **probe_timeout))
 
@@ -231,6 +236,14 @@ class DispatchClient(PoolDeclineClientMixin, PoolStartupClientMixin, PoolPlaceme
         if repo is not None:
             params["repo"] = repo
         return self._unwrap(self._http.get("/tasks/mine", params=params))
+
+    def reconcile_task_relationship(self, task_id: str, *, event_id: int) -> dict:
+        from .client_task_relationships import require_support
+        require_support(self)
+        return self._unwrap(self._http.post(
+            f"/tasks/{task_id}/relationship/reconcile",
+            json={"event_id": event_id}, headers=self._control_headers(),
+        ))
 
     def start(
         self, task_id: str, worker_id: str, *, owner_session_id: str | None = None,

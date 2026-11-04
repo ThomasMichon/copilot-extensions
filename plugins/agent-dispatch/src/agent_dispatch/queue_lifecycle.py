@@ -817,6 +817,8 @@ class QueueLifecycleMixin(QueueProgressMixin):
                 )
             if to == Status.STARTED:
                 require_execution_admission(conn, task_id)
+                from .queue_task_relationships import require_relationship
+                require_relationship(conn, task_id)
             if require_owner and worker_id is not None and task.owner not in (None, worker_id):
                 conn.execute("COMMIT")
                 raise TaskError(f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}")

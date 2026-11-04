@@ -409,6 +409,7 @@ def run_background_capture(
     env: Mapping[str, str] | None = None,
     cwd: str | os.PathLike[str] | None = None,
     max_output: int | None = None,
+    input_text: str | None = None,
 ) -> subprocess.CompletedProcess[str] | None:
     """Run a short-lived captured process tree without a headed Windows console.
 
@@ -436,6 +437,8 @@ def run_background_capture(
     :func:`run_agent_worktrees_capture`) should instead pass an explicitly
     scrubbed environment (:func:`agent_worktrees_environment`).
     """
+    if input_text is not None and max_output is not None:
+        raise ValueError("bounded streaming capture does not support stdin")
     args = [os.fspath(arg) for arg in argv]
     try:
         spawn_time = time.monotonic()
@@ -443,7 +446,7 @@ def run_background_capture(
             args,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            stdin=subprocess.DEVNULL,
+            stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
             text=True,
             env=dict(env) if env is not None else None,
             cwd=cwd,
@@ -482,7 +485,10 @@ def run_background_capture(
             return None
         return subprocess.CompletedProcess(args, proc.returncode, *captured)
     try:
-        stdout, stderr = proc.communicate(timeout=remaining)
+        if input_text is None:
+            stdout, stderr = proc.communicate(timeout=remaining)
+        else:
+            stdout, stderr = proc.communicate(input=input_text, timeout=remaining)
     except subprocess.TimeoutExpired:
         terminate_process_tree(proc, expected_start_token=start_token)
         return None

@@ -29,3 +29,23 @@ def test_a_flood_is_stopped_and_raised_within_its_timeout():
 def test_a_bounded_capture_that_times_out_returns_none():
     assert procutil.run_background_capture(
         [sys.executable, "-c", "import time; time.sleep(30)"], timeout=1, max_output=1000) is None
+
+
+def test_stdin_request_is_fully_delivered_while_both_output_pipes_drain():
+    payload = "original request\n" * 10000
+    done = procutil.run_background_capture(
+        [sys.executable, "-c",
+         "import sys; sys.stderr.write('e'*100000); data=sys.stdin.read(); sys.stdout.write(data)"],
+        timeout=20, input_text=payload,
+    )
+    assert done is not None and done.returncode == 0
+    assert done.stdout == payload and done.stderr == "e" * 100000
+
+
+def test_a_child_not_reading_stdin_stays_inside_the_original_timeout():
+    started = time.monotonic()
+    done = procutil.run_background_capture(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        timeout=1, input_text="x" * 100000,
+    )
+    assert done is None and time.monotonic() - started < 15

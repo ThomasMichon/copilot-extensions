@@ -115,6 +115,10 @@ def register_status_routes(
                 control_token, source_owned=cohort_source_owned,
             ),
             "pool_placement": pool_placement_contract(),
+            "task_relationships": {
+                "version": 1, "enabled": queue._relationship_writer is not None,
+                "assignment_request": 2, "authority": queue._relationship_authority,
+            },
             "pool_cohort": {"version": 1, "revision": queue.pool_configured_cohort().revision},
             "task_recovery": RECOVERY_CONTRACT,
             "delegated_run_waiters": {
