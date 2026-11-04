@@ -51,6 +51,11 @@ def _captured(queue, conn: sqlite3.Connection, task_id: str) -> dict:
         "waiters": _history(conn, "run_waiters", task_id),
         "acquisitions": _history(conn, "acquisition_receipts", task_id),
         "pool_assignments": _history(conn, "task_pool_assignments", task_id),
+        "task_relationships": [dict(row) for row in conn.execute(
+            "SELECT id, task_relationship FROM task_events"
+            " WHERE task_id=? AND task_relationship IS NOT NULL ORDER BY id DESC LIMIT ?",
+            (task_id, HISTORY_LIMIT + 1),
+        )],
     }
 
 
@@ -65,7 +70,7 @@ def _blockers(conn: sqlite3.Connection, captured: dict) -> list[str]:
         reasons.append("retained history exceeds the bounded recovery view; inspect owning history")
     if task["hold_reason"] is not None:
         reasons.append("task is held; clear the independent hold explicitly")
-    if task["status"] in Status.OWNED and any(
+    if task["status"] in {*Status.OWNED, Status.QUEUED} and any(
         not row["assignment_released"] for row in captured["pool_assignments"]
     ):
         reasons.append(
@@ -126,9 +131,24 @@ def _blockers(conn: sqlite3.Connection, captured: dict) -> list[str]:
     return list(dict.fromkeys(reasons))
 
 
+def _reset_blockers(captured: dict) -> list[str]:
+    for row in captured["task_relationships"]:
+        try:
+            closed = json.loads(row["task_relationship"])["state"] == "closed"
+        except (ValueError, KeyError, TypeError):
+            closed = False
+        if not closed:
+            return [
+                "task relationship remains unsettled; confirm completion or exact unassignment "
+                "to unbound queued work and reconcile its original claim before resetting"
+            ]
+    return []
+
+
 def require_task_recovery_safe(queue, conn: sqlite3.Connection, task_id: str) -> None:
     """Prevent legacy reset from bypassing the same retained-execution fences."""
-    reasons = _blockers(conn, _captured(queue, conn, task_id))
+    captured = _captured(queue, conn, task_id)
+    reasons = _blockers(conn, captured) + _reset_blockers(captured)
     if reasons:
         raise TaskError("; ".join(reasons))
 
@@ -157,7 +177,9 @@ class TaskRecoveryMixin:
             task = captured["task"]
             blockers = _blockers(conn, captured)
             allowed, _ = _task_transition_spec("reset")
-            reset_reasons = blockers + ([] if task["status"] in allowed else ["status cannot be reset"])
+            reset_reasons = blockers + _reset_blockers(captured) + (
+                [] if task["status"] in allowed else ["status cannot be reset"]
+            )
             detach_reasons = blockers + (
                 [] if task["owner"] or task["owner_session_id"] or any(
                     row["detached_at"] is None for row in captured["attachments"]
@@ -263,6 +285,8 @@ class TaskRecoveryMixin:
             if _revision(captured) != expected_revision:
                 raise TaskError("task or retained execution changed; refresh diagnostics")
             reasons = _blockers(conn, captured)
+            if operation != "detach_agent":
+                reasons += _reset_blockers(captured)
             if reasons:
                 raise TaskError("; ".join(reasons))
             task = self._fetch(conn, task_id)

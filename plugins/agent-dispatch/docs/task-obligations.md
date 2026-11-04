@@ -233,11 +233,18 @@ complete it without readmitting execution. Reopening execution still requires
 current-generation protection. The replacement guard installs before its
 stricter predecessors are removed.
 
-For nonterminal owned work, native retirement alone does not unassign its
+For nonterminal owned or queued work, native retirement alone does not unassign its
 logical pool placement. Administrative recovery refuses before mutation while
 that assignment remains bound, with an explicit pool-owner disposition blocker.
 Its recovery revision includes the logical assignment. Detachment cannot
 silently queue replacement work while stranding the original pool claim.
+This includes exhausted startup episodes waiting to retry in their retained
+workspace. Reset also refuses any unsettled task relationship, including a
+direct claim with no native resources: confirm completion or exact unassignment
+to unbound queued work, then reconcile that original claim before resetting.
+Recovery revisions include the retained relationships, so a changed claim
+outcome requires a fresh diagnostic snapshot. Metadata-only detachment of
+submitted/completed work remains independent of these reset prerequisites.
 
 With a qualified writer enabled, atomic `create(..., claim_as=...)` refuses
 before creating new work; create queued work and use the protected claim path

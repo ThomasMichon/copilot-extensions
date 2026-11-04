@@ -414,3 +414,98 @@ def test_nonterminal_recovery_cannot_orphan_the_logical_pool_assignment(assignme
     assert (queue.get(task.id), queue.task_relationship(task.id)) == before
     assert queue.task_pool_assignment(task.id) == placement
     assert not any(operation == "close" for operation, _ in owner.calls)
+
+
+@pytest.mark.parametrize("pending", [False, True])
+def test_exhausted_queued_pool_recovery_preserves_original_retry_binding(
+    assignment, monkeypatch, pending,
+):
+    queue, owner, workspace, task = assignment
+    monkeypatch.setattr(queue, "_now", lambda now=None: 100.0 if now is None else now)
+    publish(queue, pool())
+    reservation, _ = place(queue, task)
+    if pending:
+        owner.lose_reply = "bind"
+    try:
+        queue.record_spawn_worktree(
+            reservation.key, workspace.worktree, ownership="created",
+            execution_machine=workspace.machine, allocation_project=workspace.project,
+            worktree_path=workspace.path, driver="cli", creation_nonce=workspace.creation_nonce,
+        )
+    except TaskError:
+        assert pending
+    assert queue.task_relationship(task.id)["state"] == ("pending" if pending else "bound")
+    queued = queue.exhaust_pool_startup(
+        reservation.key, generation=queue.get(task.id).generation,
+        startup_revision=reservation.startup_revision, now=700,
+    )
+    assert queued.status == Status.QUEUED
+    queue.request_spawn_release(
+        reservation.key, finished_startup_revision=reservation.startup_revision, now=701,
+    )
+    queue.retire_spawn(
+        reservation.key, exact_absence=True, conclusion_state="complete",
+        conclusion_detail="retained for original startup retry", now=702,
+    )
+    before = (
+        queue.get(task.id), copy.deepcopy(queue.task_relationship(task.id)),
+        queue.task_pool_assignment(task.id), queue.list_reservations(task_id=task.id),
+    )
+    snapshot = queue.task_diagnostics(task.id)
+    for operation in ("reset_proposed", "reset_queued"):
+        assert not snapshot["actions"][operation]["allowed"]
+        with pytest.raises(TaskError, match="logical pool assignment"):
+            queue.recover_task(
+                task.id, operation=operation, expected_revision=snapshot["revision"],
+                request_id=operation, actor="operator", reason="retirement is not unassignment",
+            )
+    with pytest.raises(TaskError, match="logical pool assignment"):
+        queue.reset(task.id)
+    assert (
+        queue.get(task.id), queue.task_relationship(task.id),
+        queue.task_pool_assignment(task.id), queue.list_reservations(task_id=task.id),
+    ) == before
+    from tests.test_pool_startup_policy import renew
+
+    renew(queue, queued.not_before)
+    replacement, reserved = place(queue, queued, now=queued.not_before)
+    assert reserved and replacement.task_relationship_event_id == before[1]["request"]["event_id"]
+    assert len(owner.claims) == 1
+
+
+@pytest.mark.parametrize("pending", [False, True])
+@pytest.mark.parametrize("operation", ["reset_proposed", "reset_queued", "legacy_reset"])
+def test_direct_claim_reset_requires_original_relationship_settlement(
+    assignment, pending, operation,
+):
+    queue, owner, workspace, task = assignment
+    if pending:
+        owner.lose_reply = "bind"
+        with pytest.raises(TaskError, match="unresolved"):
+            claim(queue, workspace, task)
+    else:
+        claim(queue, workspace, task)
+    before = queue.get(task.id), copy.deepcopy(queue.task_relationship(task.id))
+    snapshot = queue.task_diagnostics(task.id)
+    assert not snapshot["actions"]["reset_proposed"]["allowed"]
+    assert not snapshot["actions"]["reset_queued"]["allowed"]
+    with pytest.raises(TaskError, match="relationship remains unsettled"):
+        if operation == "legacy_reset":
+            queue.reset(task.id)
+        else:
+            queue.recover_task(
+                task.id, operation=operation, expected_revision=snapshot["revision"],
+                request_id=operation, actor="operator", reason="do not erase unassignment proof",
+            )
+    assert (queue.get(task.id), queue.task_relationship(task.id)) == before
+    queue.yield_task(task.id, workspace.worker_id)
+    unassigned = queue.task_diagnostics(task.id)
+    assert read_snapshot(queue, task.id)["release_outcome"] == "unassigned_queued"
+    queue.reconcile_task_relationship(task.id)
+    assert queue.task_relationship(task.id)["state"] == "closed"
+    with pytest.raises(TaskError, match="retained execution changed"):
+        queue.recover_task(
+            task.id, operation="reset_proposed", expected_revision=unassigned["revision"],
+            request_id="stale-relationship", actor="operator", reason="refresh original claim",
+        )
+    assert queue.reset(task.id).status == Status.PROPOSED
