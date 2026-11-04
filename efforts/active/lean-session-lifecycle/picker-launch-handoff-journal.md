@@ -648,3 +648,11 @@
   disposable Vault opt-in and safe failure diagnostics. No temporary trace
   or intentional acceptance refusal remains. Repeat the real normal/repair
   portfolio; source review or a merge is not combined acceptance or deployment.
+- The ordinary, uninstrumented Windows portfolio `41814631845` passes at
+  exact combined head `7f3ec8b90989bffafde2de0237fe74af8f99909d`. Both normal
+  and repair retain prepare/exercise/assertions/settle exit 0 and empty errors.
+  The earlier original-boundary refusal is corrected without converting
+  invalid configuration into inactive readiness or weakening custody.
+- This journal receipt changes no packaged code, fixture or workflow from
+  that qualified head. Current source review/CI, release and separately
+  authorized installed proof remain independent gates.
