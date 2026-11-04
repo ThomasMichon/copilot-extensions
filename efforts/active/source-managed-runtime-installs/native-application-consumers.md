@@ -74,7 +74,7 @@ and retained-wheel/profile changes are not taken over.
   behavior. A healthy selected application remains callable despite payload
   skew; unsupported or missing requirements produce actionable diagnostics,
   not silent exits, runtime reconstruction or whole-hook suppression.
-- [x] Route affected hook/command imports through the existing external-cache
+- [ ] Route affected hook/command imports through the existing external-cache
   owner. Preserve caching and normal non-deployment hook duties without new
   slot files, cache exemptions, site-startup hooks or deletion of prior state.
 - [ ] Qualify the exact native consumer, then publish source changes through
@@ -112,6 +112,82 @@ and retained-wheel/profile changes are not taken over.
   application in the contributor matrix.
 
 ## Journal
+
+### 2026-11-04 - Released worker verified; standalone reconciliation remains
+
+#10489 merged at `2026-11-04T19:17:28Z`, promoting admitted Dev
+`c3437ffe05261e7b71c2763517133b6f36f46d45` to Main
+`fd3b1de9b451f6efaa3d4243207dbe694bf99ed1`. The admitted source contains
+the #10481 merge, and the released Git worker and actually built wheel both
+match reviewed worker blob `52fe070611f48577663b9068fecd36863d262470`.
+
+The pre-promotion fresh witness reaches its bounded backend-availability limit
+before release and performs no backend installation. A distinct post-release
+guest acquires ordinary native payload `1.24.462-dev1` and the actual Main
+backend independently. Canonical pair construction, both full installs and
+readiness/preservation controls pass, but its first full hook/catalog/end
+interval adds 175 new slot bytecode files. Existing files, generations,
+selectors and redirects remain unchanged; external caching is also active
+(577 files). Refresh is not reached. Both exact guests are absent and watched
+host state is unchanged.
+
+The diagnostics show standalone background reconciliation launching. Its
+existing `_start_provisioning_if_needed` command starts another plain
+`python -m agent_worktrees reconcile-plugins` process. That is a concrete
+additional cache consumer, not yet a unique attribution of every observed file.
+The prior passing candidate does not substitute for this released result.
+
+The argv construction is moved into the existing session-provisioning component,
+preserving all root override callbacks and shrinking the compatibility root.
+All 12 existing controls pass with that mechanical move. The subsequent argv
+regression and actual-child cache-location regression both fail before the
+cache correction; all 57 standalone/guidance lifecycle controls pass after it.
+Python lint, the 13-plugin install contract and whitespace pass. The normal
+planner, opt-outs, deadlines, environment, process flags, status and reaping
+are unchanged. No reconciliation or bytecode suppression is used to hide the
+slot delta.
+
+The first distinct candidate preserves runtime bytes and reuses 537 external
+cache files, but neither native interval exercises standalone reconciliation.
+Its positive-path assertion correctly fails: an unexercised path is not a pass.
+The next fresh consumer uses the same committed candidate
+`a3576804891ba777d5b2dea9e7cf8089087f1c4b` and explicitly invokes the existing
+public `session-lifecycle --stdin --source-bound --timeout-seconds 10` command.
+Both cold and repeated operations report background launch and complete with
+canonical version-1 status, `ok: true`, no failed operations and the actual
+repository path. All compared runtime files, selected generations and redirects
+remain unchanged. The cold interval creates 602 external bytecode files; the
+repeated interval reuses all 602 without rewrite. No prewarming or bytecode
+suppression is used. This qualifies the standalone candidate path, not original
+Copilot-process activation.
+
+The overall witness still fails honestly: no changed ordinary default-head
+payload becomes available within its original 480-second bound, so an unchanged
+refresh is not counted as update proof. Both exact guests are absent and watched
+host state remains unchanged. Required source review/CI, actual Main promotion,
+released-consumer and changed-input acceptance remain open; no host rollout
+is included.
+
+Missing committed project authority configuration and unsupported container
+native epochs remain separate preparation/platform limits. Canonical local
+registration is not a fabricated committed authority declaration or an
+original Copilot-process witness; neither admission boundary is weakened.
+
+### 2026-11-04 - Backup-worker correction merged; released acceptance continues
+
+#10481 is provider-confirmed merged to Dev at `2026-11-04T18:47:21Z`,
+commit `35f7be610d297fad3ee582686178849f374319dd`. Genuine Copilot approval
+`5773807726`, zero review threads and the complete hosted CI run passed on
+published head `dcedae3ba59a462386591413c14f47cdb2e6706a`. The managed
+Maintainer path bypassed only the separate review-count gate, not CI or feedback.
+The source ROOT, this subplan and the adopter's parent gates remain open.
+
+The bounded candidate proves complete-file immutability and positive cold/warm
+cache behavior, not a released frontend update. Next is ordinary native
+acquisition before promotion, independently acquiring the actual released Main
+backend when available within the existing whole-run bound, then executing a
+genuinely changed native refresh. No older frontend ref, fabricated receipt,
+cache suppression or host rollout is introduced.
 
 ### 2026-11-04 - Released catalog works; backup guidance worker remains
 

@@ -3781,7 +3781,8 @@ def _start_provisioning_if_needed(
         or session_environment.get("WORKTREE_NO_PROVISION") == "1"
     ):
         return ""
-    status = _self_override("_aw_runtime_home", _smr._aw_runtime_home)() / "logs" / "provision-status.json"
+    runtime_root = _self_override("_aw_runtime_home", _smr._aw_runtime_home)()
+    status = runtime_root / "logs" / "provision-status.json"
     diagnostic = _provisioning_status_diagnostic(cwd) if include_status_diagnostic else ""
     services = ""
     if not skip_preview:
@@ -3796,18 +3797,12 @@ def _start_provisioning_if_needed(
     status.parent.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     log = status.parent / f"provision-{stamp}.log"
-    argv = [
-        sys.executable,
-        "-m",
-        "agent_worktrees",
-        "reconcile-plugins",
-        "--repo",
-        cwd,
-        "--status",
-        str(status),
-        "--apply",
-    ]
-    argv[0] = _self_override("_windowless_python", _smr._windowless_python)()
+    from .session_provisioning import reconciliation_argv
+
+    argv = reconciliation_argv(
+        _self_override("_windowless_python", _smr._windowless_python)(),
+        runtime_root, cwd, status,
+    )
     env = dict(os.environ)
     env.update(windowless_python_env(sys.executable))
     kwargs: dict = {

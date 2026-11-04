@@ -1,0 +1,9 @@
+{
+  "comment": "Keep standalone reconciliation imports in the selected runtime external cache",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
