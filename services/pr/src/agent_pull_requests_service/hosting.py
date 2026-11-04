@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+# Declare the real imported helper's type without hiding its admission decorator.
+daemon_entrypoint: Callable[..., Callable[[_Entry], _Entry]]
 from agent_procutil.daemon_instances import daemon_entrypoint
 
 import asyncio
@@ -14,7 +16,7 @@ import time
 import uuid
 from pathlib import Path
 from types import FrameType
-from typing import Any, Callable, TypeVar, cast
+from typing import Any, Callable, TypeVar
 
 from agent_pull_requests.watch_service import WatchService
 from fleet_manager.credential_references import load_service_credentials
@@ -128,9 +130,9 @@ async def run(config: HostConfig, *, stop: asyncio.Event | None = None) -> None:
     await _run_service(config, stop=stop)
 
 
-@cast(Callable[[_Entry], _Entry], daemon_entrypoint(
+@daemon_entrypoint(
     "agent-pull-requests-service", source=__file__, purpose="production",
-))
+)
 async def _run_service(config: HostConfig, *, stop: asyncio.Event | None = None) -> None:
     """Adopt existing state, then own exactly the existing WatchService lifetime."""
     stop = stop if stop is not None else asyncio.Event()
