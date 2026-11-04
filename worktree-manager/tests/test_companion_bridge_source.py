@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 import importlib
 import json
 import os
@@ -21,7 +22,7 @@ from worktree_manager import companion_bridge_source as bridge
 from worktree_manager import mux_companion as companion
 from worktree_manager.agenda_transport import STARTUP_TIMEOUT
 from worktree_manager.companion_bridge_codec import MembershipCodec
-from worktree_manager.companion_timeline_contract import Provider
+from worktree_manager.companion_timeline_contract import Provider, SourceToken, TimelineSnapshot
 from worktree_manager.companion_timeline_widget import SubwayTimeline
 from worktree_manager.companion_worktree_source import WorktreeTimelineSource
 from _companion_timeline_fixtures import event as timeline_event, position as timeline_position
@@ -421,7 +422,11 @@ def test_bridge_only_head_change_retires_reader_without_a_head_qualified_token(
 
 @pytest.mark.parametrize("reconcile", [False, True])
 def test_slow_bridge_preparation_does_not_block_published_rich_agenda(managed, monkeypatch, reconcile) -> None:
+    from dataclasses import replace
+    from test_companion_agenda_retention import owner_snapshot
+
     entered, release = asyncio.Event(), asyncio.Event()
+    update = asyncio.Event()
     reads = []
     sync = companion.MuxCompanionApp._sync_timeline
 
@@ -433,8 +438,29 @@ def test_slow_bridge_preparation_does_not_block_published_rich_agenda(managed, m
         result.bundle = {"facts": {"claims": {"value": {"owner_ref": OWNER}, "confirmed": True}}}
         return result
 
-    async def unavailable(*args, **kwargs):
-        raise bridge.OwnerReadError("unavailable", "fixture failed Worktree preparation")
+    class WorktreeSource:
+        async def prepare(self, epoch: int, *, stop: asyncio.Event) -> TimelineSnapshot:
+            self.initial = owner_snapshot(epoch)
+            return self.initial
+
+        async def observe(
+            self, token: SourceToken, *, stop: asyncio.Event,
+        ) -> AsyncIterator[TimelineSnapshot | bridge.LiveDelta]:
+            yield self.initial
+            changed, stopped = asyncio.create_task(update.wait()), asyncio.create_task(stop.wait())
+            try:
+                await asyncio.wait((changed, stopped), return_when=asyncio.FIRST_COMPLETED)
+                if stop.is_set():
+                    return
+                yield bridge.LiveDelta(
+                    token, self.initial.position, timeline_position(token, "healthy-worktree-update"),
+                    (replace(timeline_event(token, 6), summary="Worktrees progress while Bridge is blocked"),),
+                )
+                await stop.wait()
+            finally:
+                changed.cancel()
+                stopped.cancel()
+                await asyncio.gather(changed, stopped, return_exceptions=True)
 
     async def slow(self, epoch, *, stop):
         reads.append(stop)
@@ -446,7 +472,10 @@ def test_slow_bridge_preparation_does_not_block_published_rich_agenda(managed, m
     monkeypatch.setattr(companion, "_load_current_worktree", lambda *args, **kwargs: data())
     monkeypatch.setattr(companion.MuxCompanionApp, "_start_agenda", lambda self: None)
     monkeypatch.setattr(companion.MuxCompanionApp, "_poll_attention", lambda *args, **kwargs: None)
-    monkeypatch.setattr(WorktreeTimelineSource, "prepare", unavailable)
+    monkeypatch.setattr(
+        "worktree_manager.companion_timeline_attachment.WorktreeTimelineSource",
+        lambda *args, **kwargs: WorktreeSource(),
+    )
     monkeypatch.setattr(bridge.BridgeMembershipSource, "prepare", slow)
     monkeypatch.setattr(companion.MuxCompanionApp, "_sync_timeline", selected_sync)
 
@@ -459,8 +488,6 @@ def test_slow_bridge_preparation_does_not_block_published_rich_agenda(managed, m
                 app._data, app._agenda_generation, app._agenda_cancel, managed["publication"](), None,
             )
             if reconcile:
-                # The exhausted Bridge baseline must be refreshed first, but
-                # that preparation still cannot gate independent Agenda reads.
                 codec = MembershipCodec("example", "selected", OWNER)
                 frame = codec.decode(raw(snapshot()))
                 token = codec.token(frame, 0)
@@ -477,6 +504,20 @@ def test_slow_bridge_preparation_does_not_block_published_rich_agenda(managed, m
                 )).applied
             app.query_one("#views", TabbedContent).active = "timeline-tab"
             await until(pilot, entered.is_set)
+            if reconcile:
+                count = len(reads)
+                app.action_refresh()
+                await until(pilot, lambda: not app._loading and len(reads) > count and not reads[-1].is_set())
+                app._agenda_cancel = Event()
+                app._receive_agenda(
+                    app._data, app._agenda_generation, app._agenda_cancel, managed["publication"](), None,
+                )
+            await until(pilot, lambda: app._timeline_attachment.controller is not None)
+            update.set()
+            await until(pilot, lambda: any(
+                row.summary == "Worktrees progress while Bridge is blocked"
+                for row in app._timeline_panel.window.events
+            ))
             await until(pilot, lambda: app._rich_agenda_attachment.token is not None)
             assert any(not stop.is_set() for stop in reads)
             assert any(row.source.provider is Provider.AGENDA for row in app._timeline_panel.window.events)

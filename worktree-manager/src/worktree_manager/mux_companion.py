@@ -682,11 +682,6 @@ class MuxCompanionApp(App):
         await self._bridge_attachment.set_selection(None)
         if revision != self._timeline_sync_revision or data is not self._data:
             return
-        bridge_first = reconcile and any(
-            state.token.identity.provider is Provider.BRIDGE
-            and key in self._timeline_panel.window.reconciliation_required
-            for key, state in self._timeline_panel.window.sources.items()
-        )
         await self._rich_agenda_attachment.set_selection(
             selection, data.agenda, data.agenda_error, reconcile=reconcile, project_root=data.worktree.get("path"),
         )
@@ -697,17 +692,10 @@ class MuxCompanionApp(App):
             or visible != self._timeline_panel.query_one(SubwayTimeline).demand_visible
         ):
             return
-        first, second = (
-            (self._bridge_attachment, self._timeline_attachment) if bridge_first
-            else (self._timeline_attachment, self._bridge_attachment)
+        await asyncio.gather(
+            self._timeline_attachment.set_selection(selection, reconcile=reconcile),
+            self._bridge_attachment.set_selection(selection, reconcile=reconcile),
         )
-        await first.set_selection(selection, reconcile=reconcile)
-        if (
-            revision != self._timeline_sync_revision or data is not self._data
-            or self._bridge_attachment.closed or not self._timeline_panel.is_attached
-        ):
-            return
-        await second.set_selection(selection, reconcile=reconcile)
 
     def _bridge_status(self, message: str) -> None:
         if self.query("#timeline-bridge-status"):

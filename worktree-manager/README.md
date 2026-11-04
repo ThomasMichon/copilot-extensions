@@ -154,8 +154,11 @@ controls admission and retires the reader when that selection is invalidated.
 Paginated replacement stages bounded intermediate membership without publishing
 it as current facts; current members remain unknown until replay completes.
 Already-published rich Agenda work is admitted before optional Bridge startup
-waits. Unrelated-owner heartbeat progress retains transport continuity without a
-productive milestone. This adapter does not attach known-session event/history
+waits. Worktrees and Bridge preparations start independently, including after
+Refresh while Bridge evidence is exhausted. A blocked optional bootstrap cannot
+delay the healthy Worktrees reader or its live updates; each attachment retains
+its selected-head and revision fences. Unrelated-owner heartbeat progress retains
+transport continuity without a productive milestone. This adapter does not attach known-session event/history
 readers or infer pending input, SDK execution or compaction capacity.
 See the [owning membership contract](../plugins/agent-bridge/docs/owner-membership.md).
 Integrity-budget exhaustion does not discard evidence on ordinary reconnect or
