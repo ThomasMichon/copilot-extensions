@@ -28,6 +28,16 @@ before declaring the capability delivered.
 
 ## Coordination
 
+The proposed finite #5035 selected-service/temporary-fallback family stays
+with existing installer/service/runtime/Bridge and native custodians through
+this ROOT's consumer-integration and reviewed serial process. Preserve
+#4022/#876's source-specific holds and actual assignment conditions;
+#5225 cutover, #5215 telemetry and #5066 markers remain separate. Normal
+review and complete actual direct Plan/local AND global Validation/
+Coordination/Journal delivery, followed by permitted whole-current source/
+receiver/custody readback, precede separate administrative judgment. No new
+executor, universal ACK, expiry, process authority or resource transfer.
+
 The complete #4022 family below continues through this existing Active ROOT's Plan,
 actual global Validation and Journal under the SAME declared implementation, source,
 adopter and native custodians. Closed source trackers are historical provenance, not
@@ -340,6 +350,42 @@ or whole-parent completion gate is added.
   scheduler-success, principal/action mismatch and healthy existing-task cases,
   including truthful status and exit results.
 
+### Proposed finite selected-service reconciliation from #5035
+
+_(Agent-recommended additive tracking proposal; source/durable-launch
+credit is not a claim of native service adoption.)_
+
+- [ ] **P5035-1:** Reconcile ordinary lazy ensure with the ACTUAL selected
+  availability tier: when a native owner is enrolled, recover through its
+  exact selected unit OR make temporary fallback owner/provenance/ancestry
+  and eventual handback explicit. An unmanaged singleton must not
+  permanently satisfy health while the selected unit remains down.
+  Preserve the analogous Bridge race, configuration/control-authority
+  parity and explicit diagnostics.
+- [ ] **P5035-2:** Credit serialized startup, intended interpreter,
+  `service.env`, start diagnostics and #6015 durable caller-Job survival/
+  containment. Reachability, singleton/PPID labels, markers or Job escape
+  do not prove systemd/Scheduled-Task tracking/adoption. Preserve legitimate
+  tier1 user-mode ensure, not silent enrollment, elevation or mandatory tier2.
+- [ ] **P5035-3:** Settle an actual owned stopgap only through verified
+  identity/ownership, replacement policy and safe drain/retirement rules.
+  A suggested fixed TTL is NEVER kill authority. Preserve admitted
+  identity-checked bounded cold takeover/recovery rather than turning
+  successor readiness into a universal veto on every retirement.
+- [ ] **V5035-1:** Through actual normal ensure/installer/adopter consumers,
+  distinguish exact enrolled native-unit recovery from explicitly
+  attributed temporary fallback/handoff, including a racing lazy ensure,
+  config/control/environment and the accepted Bridge analogue.
+- [ ] **V5035-2:** Preserve legitimate tier1/no-enrollment positive controls
+  and actual native tracking evidence where claimed. Caller cleanup escape
+  is distinct from systemd cgroup/MainPID/accounting or supported Windows
+  Task ownership. Keep original finite platform/source/native tiers;
+  unavailable proof is not an all-host programme.
+- [ ] **V5035-3:** Qualify owned success/failure/unknown handoff, safe
+  retirement and admitted bounded cold recovery through existing identity/
+  drain authority. No TTL kill, foreign adoption, stale-route termination
+  or silent privilege change follows from this tracking proposal.
+
 ## Validation Plan
 
 - [ ] Complete EVERY directly retained #4022 P1-P8, V1-V7 and C1-C4 clause above at its
@@ -449,6 +495,14 @@ or whole-parent completion gate is added.
   technical completion, native/release/installed proof, source closure or claim
   transfer.
 
+- [ ] **G5035:** Resolve EVERY P5035/local Validation/continuing Coordination
+  clause at its original finite alternatives and tiers: selected native
+  recovery OR truthful attributed fallback/handback, legitimate tier1,
+  config/control parity, Bridge analogue and identity-safe settlement.
+  Preserve completed source credit, #4022/#876 and separate source,
+  containing-release, installed/native and resource gates. Documentary
+  intake is not technical completion or an execution/custody grant.
+
 ## Proposal
 
 Serial Linux-first delivery, followed by native Windows implementation and
@@ -457,6 +511,15 @@ above are **agent-recommended implementation hardening**, not new operator
 requirements or permission to weaken the existing vision.
 
 ## Journal
+
+### 2026-10-30 - Proposed selected-service and fallback reconciliation
+
+Added unchecked direct #5035 Plan/local and actual global Validation with
+same-custodian coordination. Serialized/durable lazy-start credit remains
+distinct from native service ancestry. Selected-unit OR explicit temporary
+fallback, legitimate tier1 and identity-safe cold/handoff alternatives
+survive; no source/native execution, accepted receiving delivery, process
+action, source disposition or resource release is claimed.
 
 ### 2026-10-08 - Implementation resumed
 
