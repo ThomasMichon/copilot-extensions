@@ -111,6 +111,7 @@ def test_windows_failure_case_cannot_claim_two_cycle_job_qualification(
     windows_native.observation_passed.assert_not_called()
     call = probe.lifecycle.case.call_args
     assert call.kwargs["cycles"] == 1 and call.kwargs["failing_standby"] is True
+    assert call.kwargs["native_startup"] is True
 
 
 def test_windows_handover_keeps_real_cadence_and_lifetime_assessment(
