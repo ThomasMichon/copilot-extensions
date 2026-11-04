@@ -380,8 +380,8 @@ Implementation sequencing below is **agent-recommended**:
   install/update/diagnostics/uninstall, with a client-only default and no local
   Komodo/controller activation on user machines.
   Client artifact-contained lifecycle primitives and local resource diagnostics
-  are the first prerequisite under #6424/#6240; managed lifecycle execution and
-  controller/connector components remain open.
+  are the first prerequisite under #6424/#6240; complete product setup integration
+  and controller/connector components remain open.
   The common authenticated byte-stage prerequisite is merged in #6569.
   [Client lifecycle admission](client-lifecycle-admission.md) proposes the next
   serial durable-admission, construction and owned-activation/removal gates;
@@ -414,10 +414,12 @@ Implementation sequencing below is **agent-recommended**:
   [incoming-selection journal](journal/2026/11.04-client-incoming-selection.md).
   The broader lifecycle matrix and complete managed installer remain open;
   these consumers are not a fresh-OS or adopter receipt.
-  The current client-only candidate composes explicit generation install/forward
-  update and exact uninstall through those existing owners. Its original incoming
-  command observation is durable across retries; source review and renewed native
-  qualification remain gates, not a closed packaging/controller checkbox.
+  #10496 composes explicit client-generation install/forward update and exact
+  uninstall through those existing owners. Both native hosts passed the original
+  six and distinct managed six installed consumers at the reviewed head, before
+  actual merge. Its original incoming observation is durable across retries.
+  This closes that explicit client composition, not the broader packaging,
+  controller, fresh-OS, release-acquisition or adopter gates.
   Its [authoritative replacement reconciliation](client-lifecycle-admission.md#authoritative-replacement-reconciliation)
   keeps incoming readiness plus complete current launcher/registration selection
   as the completion gate. Retained generation work is not complete installation
@@ -683,6 +685,15 @@ Runtime package/API details belong to the implementation contract after review,
 not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
+
+### 2026-11-04 - Explicit managed client composition accepted
+
+#10496 merged at `f6734831513d256475b64c2a41bac16ae0560d12` after exact-head
+native Linux/Windows qualification, a clean owner-PR Copilot verdict and required
+CI. The [existing incoming-selection journal](journal/2026/11.04-client-incoming-selection.md#explicit-managed-client-composition-accepted)
+records the actual twelve-consumer per-host result, preserved timing failures,
+boundaries and remaining source integration. No broader Plan/Validation checkbox,
+release promotion, installed rollout or existing owner's duty is closed.
 
 ### 2026-11-04 - Native client generation consumers accepted
 

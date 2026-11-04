@@ -25,17 +25,22 @@ NAMES = [
 @pytest.mark.parametrize("fault", [
     None, "missing", "admission-only", "empty", "duplicate", "unknown", "skipped", "error", "failure",
 ])
-def test_fresh_client_oracle_requires_all_non_skipped_consumers(tmp_path, fault):
+@pytest.mark.parametrize("managed", [False, True])
+def test_fresh_client_oracle_requires_all_non_skipped_consumers(tmp_path, fault, managed):
+    names = [
+        f"test_actual_installed_console_managed_lifecycle[{transition}]"
+        for transition in ("retry", "forward-missing", "forward-malformed", "higher", "uninstall", "foreign", "legacy")
+    ] if managed else NAMES
     root = ET.Element("testsuites")
     suite = ET.SubElement(root, "testsuite")
-    cases = [ET.SubElement(suite, "testcase", name=name) for name in NAMES]
+    cases = [ET.SubElement(suite, "testcase", name=name) for name in names]
     if fault == "missing":
         suite.remove(cases[-1])
     elif fault in ("admission-only", "empty"):
         for case in cases[2 if fault == "admission-only" else 0:]:
             suite.remove(case)
     elif fault == "duplicate":
-        cases[-1].set("name", NAMES[0])
+        cases[-1].set("name", names[0])
     elif fault == "unknown":
         cases[-1].set("name", "unrelated_consumer")
     elif fault:
@@ -43,7 +48,7 @@ def test_fresh_client_oracle_requires_all_non_skipped_consumers(tmp_path, fault)
     report = tmp_path / "consumer.xml"
     ET.ElementTree(root).write(report, encoding="utf-8")
     result = subprocess.run(
-        [sys.executable, "-I", str(VERIFY), str(report)],
+        [sys.executable, "-I", str(VERIFY), str(report), *(["--managed"] if managed else [])],
         capture_output=True, text=True, timeout=10,
         **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )

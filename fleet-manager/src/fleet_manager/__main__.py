@@ -104,7 +104,7 @@ def main(argv=None):
         forward = generation_commands.add_parser(operation)
         forward.add_argument("--root", type=Path, required=True)
         forward.add_argument("--identity", type=Path, required=True)
-        if operation == "initialize":
+        if operation in ("initialize", "install"):
             forward.add_argument("--legacy-root", type=Path)
         if operation == "inspect":
             inspection = forward.add_mutually_exclusive_group()
@@ -293,7 +293,8 @@ def main(argv=None):
                                 args.root, identity, local(args.selection), staged,
                                 generation=args.generation, request=args.request,
                                 command_directory=args.command_directory,
-                                replace_commands=args.replace_commands, **options,
+                                replace_commands=args.replace_commands,
+                                legacy_root=args.legacy_root, **options,
                             )
                         else:
                             from .client_generation_frontdoor import publish_client_generation

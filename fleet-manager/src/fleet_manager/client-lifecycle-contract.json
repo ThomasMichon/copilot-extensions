@@ -7,6 +7,11 @@
       "uninstall": "fleet-manager.client-generation-uninstallation",
       "report_version": 1,
       "requires_explicit_command_replacement": true
+    },
+    "explicit-legacy-generation-installation-v1": {
+      "install": "fleet-manager.client-generation-installation",
+      "report_version": 1,
+      "requires_explicit_legacy_root": true
     }
   }
 }

@@ -148,7 +148,7 @@ jobs:
               if path.name != "test_client_generation_cli.py"
           ]
           combined = ET.Element("testsuites")
-          for transition in ("retry", "forward-missing", "forward-malformed", "higher", "uninstall", "foreign"):
+          for transition in ("retry", "forward-missing", "forward-malformed", "higher", "uninstall", "foreign", "legacy"):
               report = reports / ("managed-" + transition + ".xml")
               if report.exists():
                   raise RuntimeError("native qualification refuses a retained managed report")

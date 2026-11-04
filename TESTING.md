@@ -3645,13 +3645,15 @@ the same canonical held-handle current-principal proof as runtime files plus
 the existing strict private-grant allowlist; roots and metadata retain their
 TokenUser-owner requirement.
 
-The same optional native portfolio separately runs six real installed
+The same optional native portfolio separately runs seven real installed
 `test_actual_installed_console_managed_lifecycle` cases: exact install/retry,
 same-release forward replacement with missing or malformed predecessor proofs,
 selected higher-release update, exact uninstall/retry and same-byte foreign
-command preservation. Each remains a separate 120-second caller with the
+command preservation, plus explicit legacy-origin import/install and exact retry
+after predecessor disappearance. The legacy case also refuses a different
+origin without altering the selected commands or lineage. Each remains a separate 120-second caller with the
 unchanged 90-second item and 45-second child limits. Its distinct `--managed`
-oracle requires exactly those six non-skipped cases; it does not replace or
+oracle requires exactly those seven non-skipped cases; it does not replace or
 weaken the original six-consumer oracle. The owner console runs outside the
 checkout, and incoming direct/default diagnostics use the actual constructed
 wheel. The fixture retains user configuration and checks the monotonic floor.
@@ -3659,6 +3661,9 @@ These are private first-touch installation roots, not fresh operating systems.
 `test_client_installation.py` separately covers durable original target
 observations, actual producer-copy recovery, interrupted real default health
 and refusal to recreate a missing incoming observation after publication.
+Its managed legacy-install controls prove imported lower-release and
+same-sequence content-conflict refusals before construction, with the old
+database and imported floor preserved, plus changed-origin refusal.
 Its heavy recovery cases should be selected separately under the same caller
 bound. None of these packets qualifies release acquisition, automatic
 maintenance, complete host setup, whole-lineage retirement or live adoption.

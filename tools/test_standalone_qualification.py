@@ -215,7 +215,7 @@ def test_managed_fleet_packet_requires_all_exact_consumers_without_wider_budgets
         assert "INSTALLED_MANAGED_CLIENT_LIFECYCLE_PASS" not in capsys.readouterr().out
     else:
         exec(body, {})
-        assert observed == ["retry", "forward-missing", "forward-malformed", "higher", "uninstall", "foreign"]
+        assert observed == ["retry", "forward-missing", "forward-malformed", "higher", "uninstall", "foreign", "legacy"]
         assert "INSTALLED_MANAGED_CLIENT_LIFECYCLE_PASS" in capsys.readouterr().out
     assert dict(os.environ) == original
 
