@@ -1,5 +1,16 @@
 # Testing copilot-extensions
 
+Efforts' optional `--test-file tests/test_agenda_export_contributors.py
+--test-file tests/test_agenda_export.py --test-file tests/test_agenda_export_cli.py
+--allow-explicit-tiers` packet checks complete verified contributor provenance,
+nullable/noncanonical identities, counts beyond the presentation-page ceiling,
+same-connection read-only projection, post-projection corruption refusal and
+whole-result count/byte/deadline limits. The actual CLI preserves the original
+capability list and export/verify manifest contract while separately advertising
+the new command. These isolated source controls do not enable a logging consumer,
+scheduled collection, native Windows qualification or actual archive acknowledgment.
+Required unit-only CI is unchanged.
+
 Worktrees' optional `--test-file tests/test_worktree_data_store.py
 --test-file tests/test_worktree_data_cli.py --allow-explicit-tiers` packet checks
 passive project-wide retained-descriptor inventory, explicit count/byte

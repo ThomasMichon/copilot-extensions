@@ -40,7 +40,10 @@ composes an explicitly selected worktree allocator with fresh context-qualified
 initialization, preserving standalone use without a sibling runtime.
 The optional [complete export/readback](skills/driving-effort-agendas/references/agenda-export.md)
 preserves the full declared context-qualified ledger at one consistent revision;
-it does not publish an archive or restore execution authority.
+it does not publish an archive or restore execution authority. Its separately
+negotiated contributor projection preserves all accepted nullable caller
+identities from the same verified snapshot, without changing the export manifest
+or enabling a collection consumer.
 The [field contract](skills/driving-effort-agendas/references/field-contract.md)
 distinguishes exact enums/identifiers from prose/raw JSON and documents literal
 text versus Markdown rendering; accepted string punctuation does not imply a
