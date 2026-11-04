@@ -642,3 +642,9 @@
   control proves configured activation from the fixture's repository without
   installing a runtime. The nine-control packet passes with ordinary cleanup;
   inactive defaults and operator configuration remain unchanged.
+- Integrate the independently reviewed updater-context prerequisite #10416
+  after its verified merge at `3938466f7586810d7b15a5be109febc661e66996`.
+  The ordinary native candidate now combines that source with the explicit
+  disposable Vault opt-in and safe failure diagnostics. No temporary trace
+  or intentional acceptance refusal remains. Repeat the real normal/repair
+  portfolio; source review or a merge is not combined acceptance or deployment.
