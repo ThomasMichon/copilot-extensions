@@ -1,0 +1,9 @@
+{
+  "comment": "Admit the complete SSH service source and fixture project to strict MyPy, preserve Python 3.10 empty-query defaults, and retain native fixture behavior under read-only inputs and process interception",
+  "changes": [
+    {
+      "plugin": "services/ssh",
+      "type": "patch"
+    }
+  ]
+}

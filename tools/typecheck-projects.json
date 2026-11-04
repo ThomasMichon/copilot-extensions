@@ -550,7 +550,13 @@
         "services/ssh"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict",
+      "python_version": "3.10",
+      "platforms": [
+        "linux",
+        "win32"
+      ],
+      "requirements": "tools/typecheck-service-ssh-requirements.txt"
     },
     {
       "name": "repository-tools",

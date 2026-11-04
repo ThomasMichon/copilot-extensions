@@ -2,19 +2,24 @@ import asyncio
 import json
 
 import pytest
+from pathlib import Path
+from typing import TYPE_CHECKING
 
-from agent_ssh_service.config import ServiceConfig, SSHServiceError
+from agent_ssh_service.config import Document, ServiceConfig, SSHServiceError, canonical, decode
 from agent_ssh_service.gateway import SSHService
 from agent_ssh_service.hosting import registered_lifetime
 from agent_ssh_service.relay import authorization, native_config, verify_host_pin
 from agent_ssh_service.store import DirectoryStore
-from fleet_manager.planning import canonical, decode
 
-from conftest import enrollment, key
-from test_notifications import request
+if TYPE_CHECKING:
+    from services.ssh.tests.conftest import enrollment, key
+    from services.ssh.tests.test_notifications import request
+else:
+    from conftest import enrollment, key
+    from test_notifications import request
 
 
-def relay_document(config):
+def relay_document(config: ServiceConfig) -> Document:
     value = config.to_dict()
     root = value["data_dir"]
     from pathlib import Path
@@ -29,12 +34,12 @@ def relay_document(config):
     return value
 
 
-def join(index=0):
+def join(index: int = 0) -> Document:
     return {**enrollment(index), "relay_public_key": key(30 + index)}
 
 
 @pytest.mark.parametrize("comment", ["", " owner@disposable", " comment with spaces"])
-def test_derived_host_pin_compares_identity_not_openssh_comment(comment):
+def test_derived_host_pin_compares_identity_not_openssh_comment(comment: str) -> None:
     verify_host_pin(key(50) + comment + "\n", key(50))
 
 
@@ -42,12 +47,12 @@ def test_derived_host_pin_compares_identity_not_openssh_comment(comment):
     "", "comment only", key(51), key(50).replace("ssh-ed25519", "ssh-rsa"),
     key(50) + "\n" + key(51), key(50) + "\ncomment",
 ])
-def test_derived_host_pin_refuses_wrong_identity_or_multiple_lines(derived):
+def test_derived_host_pin_refuses_wrong_identity_or_multiple_lines(derived: str) -> None:
     with pytest.raises(SSHServiceError, match="native-relay-host-pin-mismatch"):
         verify_host_pin(derived, key(50))
 
 
-def test_native_projection_is_forward_only_and_separates_peer_key_roles(config, tmp_path):
+def test_native_projection_is_forward_only_and_separates_peer_key_roles(config: ServiceConfig, tmp_path: Path) -> None:
     selected = ServiceConfig.from_dict(relay_document(config))
     store = DirectoryStore(selected)
     store.enroll("principal-worker-a", join())
@@ -73,7 +78,7 @@ def test_native_projection_is_forward_only_and_separates_peer_key_roles(config, 
 @pytest.mark.parametrize("mutation", [
     "login-key", "another-login-key", "another-relay-key", "missing", "rotation",
 ])
-def test_invalid_relay_enrollment_rolls_back_the_original_journal(config, mutation):
+def test_invalid_relay_enrollment_rolls_back_the_original_journal(config: ServiceConfig, mutation: str) -> None:
     store = DirectoryStore(ServiceConfig.from_dict(relay_document(config)))
     store.enroll("principal-worker-a", join())
     selected = join(1)
@@ -94,7 +99,7 @@ def test_invalid_relay_enrollment_rolls_back_the_original_journal(config, mutati
     assert (store.snapshot(), store.relay_snapshot()) == before
 
 
-def test_target_key_cannot_alias_an_existing_relay_key(config):
+def test_target_key_cannot_alias_an_existing_relay_key(config: ServiceConfig) -> None:
     store = DirectoryStore(ServiceConfig.from_dict(relay_document(config)))
     store.enroll("principal-worker-a", join())
     with pytest.raises(SSHServiceError, match="distinct"):
@@ -102,7 +107,7 @@ def test_target_key_cannot_alias_an_existing_relay_key(config):
     assert len(store.relay_snapshot()) == 1
 
 
-def test_generation_change_removes_old_relay_key_without_rotating_on_retry(config):
+def test_generation_change_removes_old_relay_key_without_rotating_on_retry(config: ServiceConfig) -> None:
     value = relay_document(config)
     selected = ServiceConfig.from_dict(value)
     store = DirectoryStore(selected)
@@ -119,14 +124,14 @@ def test_generation_change_removes_old_relay_key_without_rotating_on_retry(confi
 
 
 @pytest.mark.parametrize("direction", ["inbound", "outbound"])
-def test_unsupported_native_direction_refuses_instead_of_widening_it(config, direction):
+def test_unsupported_native_direction_refuses_instead_of_widening_it(config: ServiceConfig, direction: str) -> None:
     value = relay_document(config)
     value["policy"]["machines"][0][direction] = False
     with pytest.raises(SSHServiceError, match="bidirectional-policy"):
         ServiceConfig.from_dict(value)
 
 
-def test_native_policy_cannot_change_under_the_same_config_revision(config):
+def test_native_policy_cannot_change_under_the_same_config_revision(config: ServiceConfig) -> None:
     value = relay_document(config)
     DirectoryStore(ServiceConfig.from_dict(value))
     value["relay"]["host_public_key"] = key(51)
@@ -134,7 +139,7 @@ def test_native_policy_cannot_change_under_the_same_config_revision(config):
         DirectoryStore(ServiceConfig.from_dict(value))
 
 
-def test_enabling_relay_does_not_adopt_legacy_enrollment_without_a_new_generation(config):
+def test_enabling_relay_does_not_adopt_legacy_enrollment_without_a_new_generation(config: ServiceConfig) -> None:
     store = DirectoryStore(config)
     before, _ = store.enroll("principal-worker-a", enrollment())
     value = relay_document(config)
@@ -144,11 +149,11 @@ def test_enabling_relay_does_not_adopt_legacy_enrollment_without_a_new_generatio
     assert store.snapshot() == before
 
 
-async def test_committed_join_retries_native_convergence_under_the_same_request(config):
+async def test_committed_join_retries_native_convergence_under_the_same_request(config: ServiceConfig) -> None:
     store = DirectoryStore(ServiceConfig.from_dict(relay_document(config)))
-    calls = []
+    calls: list[list[Document]] = []
 
-    def reconcile():
+    def reconcile() -> None:
         calls.append(store.relay_snapshot())
         if len(calls) == 1:
             raise OSError("synthetic local writer failure")
@@ -165,13 +170,13 @@ async def test_committed_join_retries_native_convergence_under_the_same_request(
     assert "relay_public_key" not in json.dumps(decode(second.body))
 
 
-async def test_registration_waits_for_native_custody_and_drains_both_lifetimes():
+async def test_registration_waits_for_native_custody_and_drains_both_lifetimes() -> None:
     stop, native_ready, registered, drained = (
         asyncio.Event(), asyncio.Event(), asyncio.Event(), asyncio.Event(),
     )
 
     class Relay:
-        async def run(self, selected_stop, ready):
+        async def run(self, selected_stop: asyncio.Event, ready: asyncio.Event) -> None:
             await native_ready.wait()
             ready.set()
             await selected_stop.wait()
@@ -179,7 +184,7 @@ async def test_registration_waits_for_native_custody_and_drains_both_lifetimes()
             drained.set()
 
     class Connector:
-        async def run(self, selected_stop):
+        async def run(self, selected_stop: asyncio.Event) -> None:
             assert native_ready.is_set()
             registered.set()
             await selected_stop.wait()
@@ -199,17 +204,17 @@ async def test_registration_waits_for_native_custody_and_drains_both_lifetimes()
         await asyncio.gather(owner, return_exceptions=True)
 
 
-async def test_native_failure_withdraws_the_existing_gateway_channel():
+async def test_native_failure_withdraws_the_existing_gateway_channel() -> None:
     stop, registered, drained = asyncio.Event(), asyncio.Event(), asyncio.Event()
 
     class Relay:
-        async def run(self, selected_stop, ready):
+        async def run(self, selected_stop: asyncio.Event, ready: asyncio.Event) -> None:
             ready.set()
             await registered.wait()
             raise SSHServiceError("synthetic-native-exit")
 
     class Connector:
-        async def run(self, selected_stop):
+        async def run(self, selected_stop: asyncio.Event) -> None:
             registered.set()
             await selected_stop.wait()
             drained.set()

@@ -313,3 +313,31 @@ The example uses the existing
 The recipe and artifact tests are not an actual container execution witness.
 Image construction, actual native authentication/forwarding, normal Fleet
 placement and preserving migration/rollback need their own evidence.
+
+## Python type checking
+
+The `service-ssh` project in `tools/typecheck-projects.json` checks all 26
+canonical Python source and test files, including native and installed-consumer
+fixtures, strictly for Linux and Windows with Python 3.10 analysis. The runtime
+minimum remains Python 3.10; static platform analysis is not native execution.
+From the repository root:
+
+```text
+python tools/typecheck.py service-ssh --prepare
+python tools/typecheck.py service-ssh
+```
+
+The project uses its own flat SHA-256 checker lock for the existing
+Gateway/SSH SDK and asynchronous test dependencies; other projects retain their
+own dependency declarations. Preparation uses the normal seven-day seasoning
+and environment admission owner. JSON documents and unannotated shared APIs
+retain explicit dynamic boundaries; SQLite transactions, asynchronous work,
+fixture paths and results, and platform-specific native operations have typed
+contracts. Empty directory and pending-page queries explicitly retain their
+original defaults on Python 3.10; every nonempty query still uses strict parsing
+and the existing field checks. Original requests, assertions, containment and
+native opt-in gates remain unchanged. The standalone/native execution lanes
+are described in the repository's `TESTING.md`.
+Artifact fixtures make only their own copied build directory owner-writable
+when the input tree is read-only. Source-free process interception retains a
+stable process type independently of the patched constructor.

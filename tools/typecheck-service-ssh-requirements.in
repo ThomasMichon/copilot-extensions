@@ -1,0 +1,8 @@
+-r typecheck-requirements.txt
+aiohttp==3.14.5
+cryptography==50.0.2
+joserfc==1.7.7
+jwcrypto==1.6.1
+PyJWT==2.15.1
+pytest-asyncio==1.4.0
+multidict==7.1.0

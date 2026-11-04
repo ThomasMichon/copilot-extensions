@@ -1,6 +1,7 @@
 """The foreground retains admission across service and original-relay settlement."""
 
 import asyncio
+from typing import Any, cast
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -9,10 +10,11 @@ from agent_procutil import daemon_instances as instances
 
 from agent_ssh_service import hosting
 from agent_ssh_service.__main__ import _foreground
+from agent_ssh_service.config import Document, ServiceConfig
 
 
 @pytest.mark.parametrize("flag", ["--help", "--version"])
-def test_fresh_metadata_does_not_load_process_admission(flag):
+def test_fresh_metadata_does_not_load_process_admission(flag: str) -> None:
     import sys
     from pathlib import Path
 
@@ -46,11 +48,11 @@ runpy.run_module('agent_ssh_service',run_name='__main__')
         assert result.stdout.strip() == __version__
 
 
-def observe_admission(monkeypatch):
-    acquired = []
+def observe_admission(monkeypatch: pytest.MonkeyPatch) -> list[instances.DaemonInstanceGuard]:
+    acquired: list[instances.DaemonInstanceGuard] = []
     admit = instances.admit_daemon_instance
 
-    def observe(*args, **kwargs):
+    def observe(*args: Any, **kwargs: Any) -> instances.DaemonInstanceGuard:
         guard = admit(*args, **kwargs)
         acquired.append(guard)
         return guard
@@ -59,7 +61,7 @@ def observe_admission(monkeypatch):
     return acquired
 
 
-def record(guard):
+def record(guard: instances.DaemonInstanceGuard) -> Document:
     return next(
         row for row in instances.inspect_instances(guard.receipt.registry_root)
         if row["instance_id"] == guard.receipt.instance_id
@@ -68,12 +70,12 @@ def record(guard):
 
 @pytest.mark.parametrize("failure", [False, True])
 async def test_foreground_admits_before_service_and_finishes_after_terminal_work(
-    config, monkeypatch, failure,
-):
+    config: ServiceConfig, monkeypatch: pytest.MonkeyPatch, failure: bool,
+) -> None:
     acquired = observe_admission(monkeypatch)
-    calls = []
+    calls: list[str] = []
 
-    async def run(selected):
+    async def run(selected: ServiceConfig) -> None:
         assert selected is config
         assert len(acquired) == 1
         assert record(acquired[0])["state"] == "running"
@@ -93,7 +95,7 @@ async def test_foreground_admits_before_service_and_finishes_after_terminal_work
     assert record(acquired[0])["state"] == "finished"
 
 
-async def test_foreground_admission_refusal_precedes_service_or_native_work(config, monkeypatch):
+async def test_foreground_admission_refusal_precedes_service_or_native_work(config: ServiceConfig, monkeypatch: pytest.MonkeyPatch) -> None:
     run = AsyncMock()
     monkeypatch.setattr(hosting, "run", run)
     monkeypatch.setattr(
@@ -104,7 +106,7 @@ async def test_foreground_admission_refusal_precedes_service_or_native_work(conf
     run.assert_not_awaited()
 
 
-async def test_foreground_actual_writer_and_store_remain_inside_admission(config, monkeypatch):
+async def test_foreground_actual_writer_and_store_remain_inside_admission(config: ServiceConfig, monkeypatch: pytest.MonkeyPatch) -> None:
     from pathlib import Path
     from single_instance_lease import AlreadyRunningError, SingleInstance
 
@@ -112,10 +114,10 @@ async def test_foreground_actual_writer_and_store_remain_inside_admission(config
     root = Path(config.to_dict()["data_dir"])
 
     class Connector:
-        def __init__(self, **_):
+        def __init__(self, **_: Any) -> None:
             pass
 
-        async def run(self, stop):
+        async def run(self, stop: asyncio.Event) -> None:
             assert record(acquired[0])["state"] == "running"
             assert (root / "directory.sqlite3").is_file()
             contender = SingleInstance(str(root), service="agent-ssh-service")
@@ -136,26 +138,26 @@ async def test_foreground_actual_writer_and_store_remain_inside_admission(config
 
 
 async def test_foreground_retains_same_admission_and_writer_until_original_relay_settles(
-    config, monkeypatch,
-):
+    config: ServiceConfig, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     acquired = observe_admission(monkeypatch)
-    calls = []
-    lease = SimpleNamespace(release=lambda: calls.append("writer-released"))
-    relay = SimpleNamespace(process=SimpleNamespace(returncode=None))
+    calls: list[str] = []
+    lease: Any = SimpleNamespace(release=lambda: calls.append("writer-released"))
+    relay: Any = SimpleNamespace(process=SimpleNamespace(returncode=None))
 
     class Pending(hosting.UnsettledRelay):
-        async def settle(self):
+        async def settle(self) -> None:
             assert self.relay is relay and self.lease is lease
             assert len(acquired) == 1
             assert record(acquired[0])["state"] == "running"
             calls.append("settling")
             await asyncio.sleep(0)
             assert record(acquired[0])["state"] == "running"
-            self.relay.process.returncode = 0
+            cast(Any, self.relay.process).returncode = 0
             self.lease.release()
             calls.append("settled")
 
-    async def run(_selected):
+    async def run(_selected: ServiceConfig) -> None:
         calls.append("run")
         raise Pending(relay, lease, {})
 
@@ -167,7 +169,7 @@ async def test_foreground_retains_same_admission_and_writer_until_original_relay
     assert record(acquired[0])["state"] == "finished"
 
 
-async def test_foreground_borrows_existing_owner_without_releasing_it(config, monkeypatch):
+async def test_foreground_borrows_existing_owner_without_releasing_it(config: ServiceConfig, monkeypatch: pytest.MonkeyPatch) -> None:
     outer = instances.admit_daemon_instance(
         "agent-ssh-service", source=__file__, purpose="production",
         runtime_root=config.to_dict()["data_dir"],
@@ -187,7 +189,7 @@ async def test_foreground_borrows_existing_owner_without_releasing_it(config, mo
     assert record(outer)["state"] == "finished"
 
 
-async def test_foreground_accepts_parent_components_in_valid_absolute_data_dir(config, monkeypatch):
+async def test_foreground_accepts_parent_components_in_valid_absolute_data_dir(config: ServiceConfig, monkeypatch: pytest.MonkeyPatch) -> None:
     from pathlib import Path
 
     from agent_ssh_service.config import ServiceConfig
@@ -196,8 +198,8 @@ async def test_foreground_accepts_parent_components_in_valid_absolute_data_dir(c
     root = Path(selected["data_dir"])
     (root / "child").mkdir(parents=True)
     selected["data_dir"] = str(root / "child" / "..")
-    selected = ServiceConfig.from_dict(selected)
+    selected_config = ServiceConfig.from_dict(selected)
     run = AsyncMock()
     monkeypatch.setattr(hosting, "run", run)
-    assert await _foreground(selected) == 0
-    run.assert_awaited_once_with(selected)
+    assert await _foreground(selected_config) == 0
+    run.assert_awaited_once_with(selected_config)

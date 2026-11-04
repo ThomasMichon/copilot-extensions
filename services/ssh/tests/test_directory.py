@@ -1,19 +1,22 @@
 from copy import deepcopy
 from pathlib import Path
 import sqlite3
+from typing import TYPE_CHECKING
 
 import pytest
 
-from agent_ssh_service.config import ServiceConfig, SSHServiceError
+from agent_ssh_service.config import ServiceConfig, SSHServiceError, policy_from_dict
 from agent_ssh_service.store import DirectoryStore
 from fleet_manager.gateway_ssh_provider import project_gateway_authorization, project_gateway_profiles
-from fleet_manager.gateway_ssh_policy import GatewaySSHPolicy
 from fleet_manager.planning import PlanError
 
-from conftest import enrollment, key
+if TYPE_CHECKING:
+    from services.ssh.tests.conftest import enrollment, key
+else:
+    from conftest import enrollment, key
 
 
-def test_join_commits_public_directory_and_deduplicates_original_request(config):
+def test_join_commits_public_directory_and_deduplicates_original_request(config: ServiceConfig) -> None:
     store = DirectoryStore(config)
     assert store.snapshot()["directory"]["revision"] == 1
     update, changed = store.enroll("principal-worker-a", enrollment())
@@ -24,7 +27,7 @@ def test_join_commits_public_directory_and_deduplicates_original_request(config)
 
 
 @pytest.mark.parametrize("mutation", ["target", "generation", "request", "key"])
-def test_existing_identity_cannot_be_impersonated_or_rotated(config, mutation):
+def test_existing_identity_cannot_be_impersonated_or_rotated(config: ServiceConfig, mutation: str) -> None:
     store = DirectoryStore(config)
     before, _ = store.enroll("principal-worker-a", enrollment())
     request = enrollment()
@@ -42,7 +45,7 @@ def test_existing_identity_cannot_be_impersonated_or_rotated(config, mutation):
 
 
 @pytest.mark.parametrize("mutation", ["missing-host-pin", "duplicate-peer-key", "unknown-principal"])
-def test_invalid_join_rolls_back_both_notification_and_request_journal(config, mutation):
+def test_invalid_join_rolls_back_both_notification_and_request_journal(config: ServiceConfig, mutation: str) -> None:
     store = DirectoryStore(config)
     before, _ = store.enroll("principal-worker-a", enrollment())
     second = enrollment(1)
@@ -58,11 +61,11 @@ def test_invalid_join_rolls_back_both_notification_and_request_journal(config, m
         assert db.execute("SELECT COUNT(*) FROM requests").fetchone()[0] == 1
 
 
-def test_later_join_supplies_existing_profile_builder_and_login_authorization(config):
+def test_later_join_supplies_existing_profile_builder_and_login_authorization(config: ServiceConfig) -> None:
     store = DirectoryStore(config)
     store.enroll("principal-worker-a", enrollment())
     update, _ = store.enroll("principal-worker-b", enrollment(1))
-    policy = GatewaySSHPolicy.from_dict(update["policy"])
+    policy = policy_from_dict(update["policy"])
     directory = update["directory"]
     projected = project_gateway_profiles(
         policy, directory, machine="worker-a", environment="linux",
@@ -75,7 +78,7 @@ def test_later_join_supplies_existing_profile_builder_and_login_authorization(co
     assert {row["public_key"] for row in authorized["peers"]} == {key(1), key(2)}
 
 
-def test_new_config_generation_withdraws_old_key_and_retains_floor_after_removal(config):
+def test_new_config_generation_withdraws_old_key_and_retains_floor_after_removal(config: ServiceConfig) -> None:
     store = DirectoryStore(config)
     store.enroll("principal-worker-a", enrollment())
     document = config.to_dict()
@@ -93,7 +96,7 @@ def test_new_config_generation_withdraws_old_key_and_retains_floor_after_removal
 
 
 @pytest.mark.parametrize("mutation", ["same-revision", "older-revision", "foreign-store"])
-def test_restart_preserves_configuration_and_service_authority(config, mutation):
+def test_restart_preserves_configuration_and_service_authority(config: ServiceConfig, mutation: str) -> None:
     DirectoryStore(config)
     document = config.to_dict()
     if mutation == "same-revision":
@@ -108,7 +111,7 @@ def test_restart_preserves_configuration_and_service_authority(config, mutation)
         DirectoryStore(ServiceConfig.from_dict(document))
 
 
-def test_configuration_validation_cannot_mutate_its_inputs(config):
+def test_configuration_validation_cannot_mutate_its_inputs(config: ServiceConfig) -> None:
     document = config.to_dict()
     expected = deepcopy(document)
     ServiceConfig.from_dict(document)
@@ -117,11 +120,11 @@ def test_configuration_validation_cannot_mutate_its_inputs(config):
     assert config.to_dict() == expected
 
 
-def test_disconnected_request_cannot_commit_enrollment(config):
+def test_disconnected_request_cannot_commit_enrollment(config: ServiceConfig) -> None:
     store = DirectoryStore(config)
     calls = 0
 
-    def checkpoint():
+    def checkpoint() -> None:
         nonlocal calls
         calls += 1
         if calls == 2:
@@ -132,7 +135,7 @@ def test_disconnected_request_cannot_commit_enrollment(config):
     assert store.snapshot()["directory"]["revision"] == 1
 
 
-def test_filesystem_root_cannot_be_selected_as_service_state(config):
+def test_filesystem_root_cannot_be_selected_as_service_state(config: ServiceConfig) -> None:
     value = config.to_dict()
     value["data_dir"] = Path(value["data_dir"]).anchor
     with pytest.raises(SSHServiceError, match="dedicated-service"):

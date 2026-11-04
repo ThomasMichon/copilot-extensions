@@ -3,6 +3,8 @@ import json
 import signal
 import sys
 from types import SimpleNamespace
+from pathlib import Path
+from typing import Any, TYPE_CHECKING, cast
 
 import pytest
 from agent_procutil.native_child import NativeChildCleanupError
@@ -11,42 +13,46 @@ from single_instance_lease import AlreadyRunningError, SingleInstance
 
 from agent_ssh_service import hosting
 from agent_ssh_service.__main__ import main
+from agent_ssh_service.config import ServiceConfig
 
 
 @pytest.mark.parametrize("custody_pending", [False, True])
 def test_cli_retains_real_writer_lease_until_original_native_custody_settles(
-    config, tmp_path, monkeypatch, capsys, custody_pending,
-):
+    config: ServiceConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], custody_pending: bool,
+) -> None:
     lease = SingleInstance(str(tmp_path), service="agent-ssh-service")
     contender = SingleInstance(str(tmp_path), service="agent-ssh-service")
     lease.acquire()
     selected = tmp_path / "service.json"
     selected.write_text(json.dumps(config.to_dict()), encoding="utf-8")
+    attempts: list[bool]
+    waits: list[float]
     attempts, waits = [], []
     sleep = asyncio.sleep
 
     class Custody:
-        def retire(self):
+        def retire(self) -> int:
             attempts.append(True)
             assert lease.held
             with pytest.raises(AlreadyRunningError):
                 contender.acquire()
             if len(attempts) <= 3:
-                raise NativeChildCleanupError(self)
+                raise NativeChildCleanupError(cast(Any, self))
             return 0
 
     custody = Custody()
-    relay = SimpleNamespace(
+    relay: Any = SimpleNamespace(
         process=SimpleNamespace(returncode=None),
         custody=None if custody_pending else custody,
     )
 
-    async def failed_run(_config):
+    async def failed_run(_config: ServiceConfig) -> None:
         previous = {selected_signal: signal.signal(selected_signal, lambda *_: None)
                     for selected_signal in (signal.SIGINT, signal.SIGTERM)}
         raise hosting.UnsettledRelay(relay, lease, previous)
 
-    async def cancelled_wait(delay):
+    async def cancelled_wait(delay: float) -> None:
         waits.append(delay)
         if relay.custody is None:
             assert lease.held
@@ -54,8 +60,8 @@ def test_cli_retains_real_writer_lease_until_original_native_custody_settles(
                 contender.acquire()
             relay.custody = custody
         for selected_signal in (signal.SIGINT, signal.SIGTERM):
-            signal.getsignal(selected_signal)(selected_signal, None)
-        asyncio.current_task().cancel()
+            cast(Any, signal.getsignal(selected_signal))(selected_signal, None)
+        cast(asyncio.Task[Any], asyncio.current_task()).cancel()
         await sleep(0)
 
     monkeypatch.setattr(hosting, "run", failed_run)
@@ -72,9 +78,12 @@ def test_cli_retains_real_writer_lease_until_original_native_custody_settles(
 
 
 def test_real_sigterm_at_actual_hosting_restore_keeps_cli_and_writer_custody(
-    config, tmp_path,
-):
-    from test_relay import relay_document
+    config: ServiceConfig, tmp_path: Path,
+) -> None:
+    if TYPE_CHECKING:
+        from services.ssh.tests.test_relay import relay_document
+    else:
+        from test_relay import relay_document
 
     selected = tmp_path / "signal-service.json"
     selected.write_text(json.dumps(relay_document(config)), encoding="utf-8")
