@@ -16,7 +16,7 @@ REFUSALS = (
     "Original grant",
     "Task binding required by selected tool",
     "Author consent required by actual merge policy",
-    "Current mutation fence",
+    "Required provider write safeguard",
     "Old owner's effect/custody",
 )
 
@@ -41,8 +41,11 @@ def _validate_unobserved_example(example: dict) -> None:
     assert "Synthetic, non-authoritative" in example["description"]
     assert example["original_grant_reference"] is None
     assert example["charter_reference"] is None
-    limit = example["lane_choice"]["active_limit"]
-    assert type(limit) is int and limit > 0
+    target = example["lane_choice"]["desired_active"]
+    assert type(target) is int and target > 0
+    limit = example["lane_choice"]["hard_limit"]
+    assert limit is None or (type(limit) is int and limit > 0)
+    assert "work-conserving" in example["lane_choice"]["expansion"]
     assert example["lane_choice"]["mode"] in {"continuous", "finite-drain"}
     for candidate in example["candidates"]:
         for field in (
@@ -62,6 +65,8 @@ def _validate_unobserved_example(example: dict) -> None:
         pending = candidate["pending_round"]
         for field in (
             "current_fence_reference",
+            "preflight_reference",
+            "revision_binding_reference",
             "original_prepare_receipt",
             "original_post_receipt",
             "original_readback_receipt",
@@ -69,8 +74,11 @@ def _validate_unobserved_example(example: dict) -> None:
         ):
             assert pending[field] is None
         assert pending["effect_state"] == "unobserved"
+        assert pending["server_fence_support"] == "unknown"
         assert pending["unknown_evidence"]
+        assert candidate["watch"]["mode"] is None
         assert candidate["watch"]["returned_cursor"] is None
+        assert candidate["watch"]["last_successful_observation_at"] is None
         assert candidate["communication"]["semantic_acceptance"] is None
         assert candidate["communication"]["cooldown_reservation"] is None
         assert "no write" in candidate["next_action"]
@@ -120,14 +128,14 @@ def test_ordered_setup_and_actual_owner_limitations() -> None:
     assert len(re.findall(r"^## [1-6]\. ", text, re.M)) == 6
     for requirement in (
         "original grant",
-        "positive integer lane limit",
+        "positive integer concurrency target",
         "before** prescribing",
         "outside the candidate/source repository",
         "session SQLite",
         "complete, paginated live forge census",
         "fresh context for an unrelated PR",
         "never execute",
-        "server write fences or atomic provider preconditions",
+        "without making\nserver fencing mandatory",
         "actual returned cursors",
         "Approval is not author consent",
         "No generic administrative bypass",
@@ -147,7 +155,7 @@ def test_ordered_setup_and_actual_owner_limitations() -> None:
 def test_required_refusal_controls_are_present() -> None:
     text = _read(SKILL / "references" / "coordination-and-recovery.md")
     assert not _missing_refusals(text)
-    assert "naked write" in text
+    assert "Their absence\n   alone does not block" in text
     assert "full exact original receipts" in text
     assert "Null IDs remain null" in text
     assert "**same-owner**" in text and "**new-owner**" in text
@@ -180,7 +188,7 @@ def test_guidance_resolution_separates_contexts_and_uses_existing_owners() -> No
         "Read the full selected body",
         "not one universal precedence chain",
         "silently swap the acting identity",
-        "server candidate/write fences",
+        "disable existing required provider safeguards",
         "author/reviewer independence",
         "unresolved/missing/ambiguous/conflicting inputs",
     ):
@@ -274,6 +282,60 @@ def test_native_host_route_retains_handle_without_bridge_or_polling() -> None:
     assert "<agent-bridge catalog argv[0]>" not in native
 
 
+def test_provider_write_safety_is_capability_aware_not_a_universal_fence() -> None:
+    coordination = " ".join(_read(
+        SKILL / "references" / "coordination-and-recovery.md"
+    ).split())
+    for requirement in (
+        "where supported",
+        "preserve any safeguard the selected owner actually requires",
+        "Their absence alone does not block otherwise authorized review publication",
+        "refresh relevant state immediately before writing",
+        "record the residual race",
+        "not an atomic current-head transaction",
+        "keep any posted effect as historical",
+        "never claim stale authority is current or blindly repeat the write",
+    ):
+        assert requirement in coordination, requirement
+
+
+def test_forge_polling_fallback_preserves_clocks_without_polling_native_tasks() -> None:
+    coordination = " ".join(_read(
+        SKILL / "references" / "coordination-and-recovery.md"
+    ).split())
+    for requirement in (
+        "If webhooks or a subscribable service are unavailable",
+        "bounded shared polling is a supported fallback",
+        "one observation owner",
+        "last successful observation/completeness",
+        "partial/failed enumeration",
+        "Do not fabricate a cursor",
+        "not native Task completion",
+        "not a completed review",
+    ):
+        assert requirement in coordination, requirement
+
+
+def test_work_conserving_target_and_original_reviewer_survive_capacity_changes() -> None:
+    coordination = " ".join(_read(
+        SKILL / "references" / "coordination-and-recovery.md"
+    ).split())
+    for requirement in (
+        "the target is not a ceiling",
+        "explicit operator/host limits and budgets",
+        "Record a work/capacity shortage",
+        "Try the retained handle before replacement",
+        "If the host is one-shot or confirms context loss",
+        "prior findings, author replies, assessed source, receipts and unknown effects",
+        "Keep the original handle and replacement reason",
+        "A timeout alone is not confirmed context loss",
+    ):
+        assert requirement in coordination, requirement
+    example = json.loads(_read(SKILL / "assets" / "ledger.example.json"))
+    example["lane_choice"]["hard_limit"] = 1
+    _validate_unobserved_example(example)
+
+
 def test_effect_ids_and_receipt_timing_are_not_fabricated_prerequisites() -> None:
     text = _read(SKILL / "SKILL.md")
     assert "provider-native review/comment effect IDs as returned" in text
@@ -293,9 +355,17 @@ def test_synthetic_example_is_unobserved_not_authority() -> None:
 
 
 @pytest.mark.parametrize("limit", [True, False, 0, -1, 1.5, "2", None])
-def test_example_rejects_invalid_lane_choice(limit: object) -> None:
+def test_example_rejects_invalid_concurrency_target(limit: object) -> None:
     example = json.loads(_read(SKILL / "assets" / "ledger.example.json"))
-    example["lane_choice"]["active_limit"] = limit
+    example["lane_choice"]["desired_active"] = limit
+    with pytest.raises(AssertionError):
+        _validate_unobserved_example(example)
+
+
+@pytest.mark.parametrize("limit", [True, False, 0, -1, 1.5, "2"])
+def test_example_rejects_invalid_explicit_hard_limit(limit: object) -> None:
+    example = json.loads(_read(SKILL / "assets" / "ledger.example.json"))
+    example["lane_choice"]["hard_limit"] = limit
     with pytest.raises(AssertionError):
         _validate_unobserved_example(example)
 

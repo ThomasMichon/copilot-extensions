@@ -59,9 +59,12 @@ under that repository's existing planning convention. Capture:
 
 - Provider, repositories, bases, eligible PR population and excluded
   authors/forks; whether new inflow is included.
-- A **positive integer lane limit**; reject zero, negative, fractional and
-  boolean values. It bounds concurrently active independent reviewers,
-  not the number of unresolved PRs or a permission to launch new resources.
+- A **positive integer concurrency target**; reject zero, negative, fractional
+  and boolean values. Treat it as the desired minimum of active independent
+  reviewers while eligible work and capacity exist, not an arbitrary ceiling.
+  Refill promptly and use additional available capacity when authorized.
+  Preserve explicit operator/host limits and budgets; record a genuine
+  work/capacity shortage rather than launching dummy reviews or new resources.
 - Continuous mode or finite drain, with a concrete stop criterion and owner.
   An empty continuous census is not completion; finite drain requires a fresh,
   complete terminal census and settlement of the charter's obligations.
@@ -80,10 +83,12 @@ provider/task bindings **before** prescribing review or landing policy.
 Record the supported operation, owning command/tool, observed capability and
 explicit unsupported behavior. A package version or tool name is not support.
 
-Missing task-bound review tools, original receipts or supported write fences
-means a named adapter blocker, or a review-only/manual handoff permitted by
-the repository. Do not invent a task, claim, session, receipt or authorization.
-An unbound source API is not an installed operational loop.
+Missing tools or bindings actually required by the selected owner mean a named
+adapter blocker or a permitted manual handoff. Server write fences are a
+capability, not a universal prerequisite: record the available revision binding,
+freshness checks, readback and residual races instead of inventing a fence or
+refusing an otherwise authorized provider. Do not invent a task, claim, session,
+receipt or authorization. An unbound source API is not an installed loop.
 
 ## 3. Establish coordination and a complete census
 
@@ -104,9 +109,12 @@ unknown or a lower bound, never an empty queue.
 
 Deduplicate by actual provider/repository/PR identity through the existing
 task/host owner. Bind only naturally returned task and reviewer handles.
-Keep one retained reviewer context per PR across genuine source/base/discussion
-updates; start a fresh context for an unrelated PR. Refill available active
-lanes promptly while suspended reviews retain their pending work and lineage.
+Return genuine source/base/discussion updates to the original reviewer through
+its retained handle; start a fresh context for an unrelated PR. If that context
+is actually unavailable, use supported recovery or a documented handoff retaining
+prior findings, replies, receipts and uncertainty, not a claim of preserved
+conversation. Refill available active lanes while suspended reviews retain their
+pending work and lineage.
 
 Independent reviewers read exact candidate source **statically**: never execute
 untrusted candidate code, author its fixes, supply author consent or merge it.
@@ -128,11 +136,13 @@ retains census, follow-ups and authorized normal merge stewardship. Direct posti
 grants no author-fix, merge, consent or resource-custody authority.
 
 Apply the coordination reference's separate analysis, publication and readback
-gates. Fresh complete candidate/review/thread/check reads are evidence, not
-atomicity. **Supported server write fences or atomic provider preconditions**
-must bind a mutation to its actual candidate/round; naked read-then-write is
-not a safe optimistic transaction. Supplement intentionally partial tool reads
-with a fresh complete snapshot, never replace a server fence with that snapshot.
+gates. Use supported provider preconditions and revision pinning without making
+server fencing mandatory for every system. Otherwise refresh relevant candidate/
+review/thread/check state immediately before writing, persist the exact reviewed
+revision and intent, then verify authoritative readback and current state.
+Fresh reads and commit pinning do not make a read-then-write sequence atomic;
+retain historical effects and reassess on movement. Supplement partial reads
+with complete evidence and preserve every actual owner-required safeguard.
 
 Retain exact original receipts and unknown provider effect IDs as null;
 reconcile an uncertain post before retry. Verify actual official, non-dismissed
@@ -148,10 +158,12 @@ official retained-head authority may avoid duplicate reviews only when the
 target's actual policy permits it.
 
 Use the communication reference for same-context missing-input follow-ups,
-author replies and explicitly enabled nudges. Wait through existing coalesced
-subscriptions/events with their **actual returned cursors**. No polling,
-relaunch or repeated status-message loop; respect bounded owner retry policy
-and known transient backoff without losing the original operation identity.
+author replies and explicitly enabled nudges. Prefer existing coalesced
+subscriptions/events with their **actual returned cursors**. When webhooks or
+a subscribable owner are unavailable, bounded shared polling at the authorized
+cadence is legitimate; retain observation clocks, compare changes and back off
+on errors. Do not invent cursors, duplicate collectors, repeatedly relaunch
+reviewers or poll native Tasks that already provide completion notifications.
 
 ## 6. Land, settle or keep attending
 
