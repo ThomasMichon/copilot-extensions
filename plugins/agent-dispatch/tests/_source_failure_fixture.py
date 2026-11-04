@@ -88,7 +88,7 @@ def main():
         purpose="unattended-test",
     ) as guard:
         try:
-            for case in ("selection-flap", "candidate-exit"):
+            for case in ("selection-flap", "candidate-exit", "hold-early", "hold-pre-release", "hold-peer"):
                 if request.get("remaining_only"):
                     continue
                 daemon = owner("native-" + case)
@@ -100,6 +100,9 @@ def main():
                 daemon._probe_inflight.add(future)
                 assert daemon.acquire_singleton()
                 original_cancel = source._cancel_owned_candidate
+                from agent_dispatch import action_controls
+                original_inhibited = action_controls.action_inhibited
+                child = None
                 try:
                     start.set()
                     state = prepared(daemon)
@@ -142,11 +145,55 @@ def main():
                             release.set()
                             proceed.set()
                             assert attempt.result(timeout=30) is False
-                    else:
+                    elif case == "candidate-exit":
                         assert stop_identity(child.pid, ready["birth"])
                         assert child.poll() is not None
                         release.set()
                         assert daemon._maybe_self_update() is False
+                    else:
+                        hold_reads = []
+                        subject_cancels = []
+
+                        def held_update(action, **kwargs):
+                            if action == "supervisor-self-update":
+                                hold_reads.append(True)
+                                return case != "hold-pre-release" or len(hold_reads) > 1
+                            return original_inhibited(action, **kwargs)
+
+                        def observed_subject_cancel(*args):
+                            subject_cancels.append(args[0].pid)
+                            return original_cancel(*args)
+
+                        action_controls.action_inhibited = held_update
+                        source._cancel_owned_candidate = observed_subject_cancel
+                        if case == "hold-peer":
+                            state["child"] = None
+                        release.set()
+                        assert daemon._maybe_self_update() is False
+                        deadline = time.monotonic() + 60
+                        while daemon._pool_metadata_closed.is_set():
+                            assert time.monotonic() < deadline
+                            assert daemon._maybe_self_update() is False
+                            time.sleep(0.05)
+                        held(daemon)
+                        assert daemon._source_handoff is None or daemon._source_handoff["phase"] != "withdrawing"
+                        if case == "hold-peer":
+                            assert child.poll() is None and subject_cancels == []
+                            item["discovered_peer_left_live_and_untouched"] = True
+                        summary = daemon.reconcile_once()
+                        held(daemon)
+                        item["same_owner_reconcile_after_hold"] = True
+                        item["reconcile_running"] = summary.running
+                        item["hold_policy_checks"] = len(hold_reads)
+                        item["subject_cancellation_pids"] = subject_cancels
+                        if case == "hold-peer":
+                            assert original_cancel(child, root)
+                            settlement(child)
+                            result["cases"].append({
+                                **item, "native_exit_at_fixture_cleanup": child.poll(),
+                                "admission_restored_with_original_singleton": True,
+                            })
+                            continue
                     deadline = time.monotonic() + 60
                     while daemon._source_handoff is not None:
                         assert time.monotonic() < deadline
@@ -162,12 +209,15 @@ def main():
                     })
                 finally:
                     source._cancel_owned_candidate = original_cancel
+                    action_controls.action_inhibited = original_inhibited
                     release.set()
                     pool.shutdown(wait=True, cancel_futures=True)
                     runtime.activate(root, version, link_free=True)
                     state = daemon._source_handoff
                     if state and state.get("child") is not None:
                         assert original_cancel(state["child"], root)
+                    if child is not None and child.poll() is None:
+                        assert original_cancel(child, root)
                     daemon.shutdown()
                     daemon.release_singleton()
 
@@ -333,7 +383,7 @@ def main():
             result["held_work_preserved"] = True
         finally:
             result["selected_after"] = runtime.current_version(root)
-            result["completed"] = len(result["cases"]) == (2 if request.get("remaining_only") else 4)
+            result["completed"] = len(result["cases"]) == (2 if request.get("remaining_only") else 7)
             Path(request["output"]).write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
             client.close()
     return 0

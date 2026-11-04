@@ -275,7 +275,10 @@ The unknown-outcome control is a real leased no-preparation sentinel with an
 injected lost reply, not an operating-system permission-denial qualification.
 Its continuation follows the same original receipt through natural exit and SDK
 settlement, then requires cooldown before a normal prepared-candidate retry.
-This extension requires qualification against the next authorized built Source;
+The fixture also injects update holds at preparation and pre-release after local
+withdrawal starts, verifies same-owner reconciliation resumes, and retains an
+independently prepared live peer without subject termination.
+These controls require qualification against the actual built Source under test;
 older live-sentinel-only evidence does not establish that continuation.
 `DISPATCH_NATIVE_REMAINING_ONLY=1` skips the already-completed selection/exit cases
 when resuming that bounded fixture. Ordinary nonprofile installation remains a
