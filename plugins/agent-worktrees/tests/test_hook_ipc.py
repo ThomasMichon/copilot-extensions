@@ -475,8 +475,9 @@ def test_session_start_fallback_uses_one_runtime_process(monkeypatch, tmp_path):
         {"sessionId": "session-1", "cwd": str(tmp_path)}, tmp_path
     )
     assert result == {"additionalContext": "fallback"}
-    assert seen["argv"] == [
-        str(python),
+    assert seen["argv"][:3] == [str(python), "-I", "-X"]
+    assert seen["argv"][3].startswith("pycache_prefix=")
+    assert seen["argv"][4:] == [
         "-m",
         "agent_worktrees",
         "session-lifecycle",
@@ -602,12 +603,45 @@ def test_source_aware_hook_never_dispatches_to_legacy_peer(tmp_path, kind, capab
         server.close()
 
 
-@pytest.mark.parametrize("installer", ["install.sh", "install.ps1", "installer.py"])
+@pytest.mark.parametrize("installer", [
+    "install.sh", "install.ps1", "installer.py", "runtime_install_publication.py",
+])
 def test_installed_bin_layout_contains_all_lifecycle_helpers(tmp_path, monkeypatch, installer):
     scripts = _SCRIPT.parent
     installed = tmp_path / "runtime" / "bin"
     installed.mkdir(parents=True)
-    if installer == "installer.py":
+    helpers = (
+        "hook_client.py", "hook_runtime.py", "hook_pre_policy.py", "hook_policy_process.py",
+        "hook_lifecycle_runtime.py", "native_source_context.py",
+        "versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+        "versioned_runtime_source.py", "versioned_runtime_readiness.py", "versioned_runtime_publication.py",
+    )
+    if installer == "runtime_install_publication.py":
+        monkeypatch.syspath_prepend(str(scripts))
+        publisher = hook_client._load_sibling(installer)
+        bindings = publisher.declared_copies(scripts.parent, installed.parent, "wrappers", "sh", True)
+        directory = installed.parent / "publication"
+        directory.mkdir()
+        copies = directory / "copies"
+        fields = [
+            field for row in bindings for field in (
+                row["source"], row["target"], str(int(row["executable"])),
+                str(int(row["normalized_noop"])),
+            )
+        ]
+        proof = publisher.runtime._runtime_component("versioned_runtime_publication")
+        with os.fdopen(proof._created_file(copies), "wb") as stream:
+            stream.write(("\0".join(fields) + "\0").encode("utf-8"))
+        identity = copies.stat()
+        publication = publisher.publish(
+            {"root": str(installed.parent), "copies": str(copies), "bindings": bindings},
+            directory, {copies: (identity.st_dev, identity.st_ino)}, lambda: None,
+        )
+        publication.verify()
+        publication.keep()
+        declared = [path.name for path in installed.iterdir()]
+        text = ""
+    elif installer == "installer.py":
         from agent_worktrees import installer as publisher
 
         monkeypatch.setattr(publisher, "bin_dir", lambda: installed)
@@ -622,18 +656,12 @@ def test_installed_bin_layout_contains_all_lifecycle_helpers(tmp_path, monkeypat
     elif installer.endswith(".ps1"):
         declared = text.split("foreach ($script in @(", 1)[1].split(")) {", 1)[0]
         declared = [name.strip().strip("'") for name in declared.split(",")]
-    for name in (
-        "hook_client.py", "hook_runtime.py", "hook_pre_policy.py", "hook_policy_process.py", "hook_lifecycle_runtime.py",
-        "native_source_context.py",
-    ):
+    for name in helpers:
         assert name in declared, f"{installer} does not deploy {name}"
-    if installer != "installer.py":
+    if installer.endswith((".sh", ".ps1")):
         fixture_scripts = tmp_path / "payload" / "scripts"
         fixture_scripts.mkdir(parents=True)
-        for name in (
-            "hook_client.py", "hook_runtime.py", "hook_pre_policy.py", "hook_policy_process.py", "hook_lifecycle_runtime.py",
-            "native_source_context.py",
-        ):
+        for name in helpers:
             relative = (
                 Path("src") / "agent_worktrees" / name
                 if name == "native_source_context.py" else Path("scripts") / name
@@ -689,10 +717,7 @@ def test_installed_bin_layout_contains_all_lifecycle_helpers(tmp_path, monkeypat
                     source = scripts.parent / "src" / "agent_worktrees" / name
                 if source.is_file():
                     shutil.copy2(source, installed / name)
-    for name in (
-        "hook_client.py", "hook_runtime.py", "hook_pre_policy.py", "hook_policy_process.py", "hook_lifecycle_runtime.py",
-        "native_source_context.py",
-    ):
+    for name in helpers:
         source = (
             scripts.parent / "src" / "agent_worktrees" / name
             if name == "native_source_context.py" else scripts / name
@@ -714,6 +739,17 @@ def test_installed_bin_layout_contains_all_lifecycle_helpers(tmp_path, monkeypat
     assert module._capture_native_source()["version"] == 1
     assert installed / "native_source_context.py" in loaded
     assert module._load_sibling("hook_lifecycle_runtime.py").run_end
+    version = "1.2.3"
+    slot = installed.parent / "versions" / version
+    python = slot / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True)
+    python.touch()
+    (slot / ".install-complete.json").write_text(json.dumps({
+        "version": version, "completed_at": "2026-11-04T00:00:00Z", "pid": 1,
+    }), encoding="utf-8")
+    (installed.parent / "current-version").write_text(version, encoding="utf-8")
+    assert module._RUNTIME.runtime_python(installed.parent) == python
+    assert installed / "versioned_runtime.py" in loaded
 
 
 @pytest.mark.parametrize("failure", ["nonconformant", "timeout"])
@@ -793,7 +829,7 @@ def test_session_start_old_runtime_uses_legacy_compatibility(
     python.parent.mkdir(parents=True)
     python.write_text("", encoding="utf-8")
     (python.parents[1] / ".install-complete.json").write_text(
-        json.dumps({"version": "1.5.3-dev744"}),
+        json.dumps({"version": "1.5.3-dev744", "completed_at": "2026-01-01T00:00:00Z", "pid": 1}),
         encoding="utf-8",
     )
     (runtime / "current-version").write_text(
@@ -846,7 +882,7 @@ def test_session_start_old_runtime_keeps_non_install_hooks_while_update_active(
     python.parent.mkdir(parents=True)
     python.write_text("", encoding="utf-8")
     (python.parents[1] / ".install-complete.json").write_text(
-        json.dumps({"version": "1.5.3-dev744"}),
+        json.dumps({"version": "1.5.3-dev744", "completed_at": "2026-01-01T00:00:00Z", "pid": 1}),
         encoding="utf-8",
     )
     (runtime / "current-version").write_text(
@@ -897,7 +933,7 @@ def test_session_start_old_runtime_keeps_non_install_hooks_while_update_active(
 @pytest.mark.parametrize("skip_reconcile", [False, True])
 @pytest.mark.parametrize("caller_flags", [False, True])
 def test_session_start_always_preserves_only_non_install_legacy_hooks(
-    monkeypatch, skip_reconcile, caller_flags,
+    monkeypatch, tmp_path, skip_reconcile, caller_flags,
 ):
     launched = []
 
@@ -911,6 +947,10 @@ def test_session_start_always_preserves_only_non_install_legacy_hooks(
 
     monkeypatch.setattr(hook_client.shutil, "which", lambda name: "shell")
     monkeypatch.setattr(hook_client.subprocess, "Popen", Process)
+    runtime = tmp_path / "runtime"
+    monkeypatch.setattr(
+        hook_client, "_runtime_python", lambda _home: runtime / "versions/1.0.0/bin/python",
+    )
     for flag in ("WORKTREE_NO_RECONCILE", "WORKTREE_NO_PROVISION"):
         if caller_flags:
             monkeypatch.setenv(flag, "caller-value")
@@ -923,6 +963,8 @@ def test_session_start_always_preserves_only_non_install_legacy_hooks(
         "project-hooks", "register-nudge", "register-session", "anchor-hygiene-check", "provision-check"
     }
     for name, env in launched:
+        cache = env["PYTHONPYCACHEPREFIX"].replace("\\\\?\\", "")
+        assert Path(cache).is_relative_to(runtime / "cache/python")
         for flag in ("WORKTREE_NO_RECONCILE", "WORKTREE_NO_PROVISION"):
             assert env.get(flag) == ("caller-value" if caller_flags else None)
 
@@ -1953,7 +1995,10 @@ def test_session_start_catalog_matches_native_emitter(monkeypatch, tmp_path):
         **({"creationflags": hook_client.subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )
     native = _hook_catalog(json.loads(result.stdout)["additionalContext"])
-    assert _hook_catalog(hook_client._command_catalog_context()) == native, result.stderr
+    generated = _hook_catalog(hook_client._command_catalog_context())
+    assert generated == native, json.dumps(
+        {"native": native, "client": generated, "stderr": result.stderr}, sort_keys=True,
+    )
 
 
 def test_session_start_main_folds_decision_context_and_emits_empty_result(
@@ -2412,7 +2457,7 @@ def test_explicit_context_session_start_selects_cell_runtime(
     executable.parent.mkdir(parents=True)
     executable.write_text("", encoding="utf-8")
     (slot / ".install-complete.json").write_text(
-        json.dumps({"version": version}),
+        json.dumps({"version": version, "completed_at": "2026-01-01T00:00:00Z", "pid": 1}),
         encoding="utf-8",
     )
     (cell / "current-version").write_text(version, encoding="utf-8")
@@ -2529,18 +2574,6 @@ def test_invalid_explicit_context_reports_unavailable_before_guard_fallback(
     assert "not authorization" in result["additionalContext"]
 
 
-def test_explicit_context_session_end_uses_payload_client():
-    hooks = json.loads(
-        (Path(__file__).resolve().parents[1] / "hooks.json").read_text("utf-8")
-    )
-    entry = hooks["hooks"]["sessionEnd"][0]
-    assert "COPILOT_PLUGIN_ROOT" in entry["powershell"]
-    assert "hook_client.py" in entry["powershell"]
-    assert "WindowsApps" in entry["powershell"]
-    assert "COPILOT_PLUGIN_ROOT" in entry["bash"]
-    assert 'python3 "$s" sessionEnd' in entry["bash"]
-
-
 def test_hooks_json_does_not_register_user_prompt_submitted():
     """No ``userPromptSubmitted`` hook: the Phase 8 reopen mechanism this
     would have driven turned out to guard nothing -- ``prune.py``'s
@@ -2571,8 +2604,9 @@ def test_explicit_context_session_end_uses_cell_runtime(
     payload = {"sessionId": "session-1", "cwd": str(tmp_path)}
 
     assert hook_client._fallback_session_end(payload, tmp_path) == {}
-    assert seen["argv"] == [
-        str(python),
+    assert seen["argv"][:3] == [str(python), "-I", "-X"]
+    assert seen["argv"][3].startswith("pycache_prefix=")
+    assert seen["argv"][4:] == [
         "-m",
         "agent_worktrees",
         "deregister-session",
@@ -2581,6 +2615,115 @@ def test_explicit_context_session_end_uses_cell_runtime(
     ]
     assert json.loads(seen["kwargs"]["input"]) == payload
     assert seen["kwargs"]["timeout"] == hook_client._SESSION_END_TIMEOUT_S
+
+
+@pytest.mark.parametrize("capabilities", [
+    None, [], ["session-lifecycle-v1"], ["session-lifecycle-v1", "session-start-source-v1"],
+])
+def test_nested_hook_uses_installed_contract_not_payload_version(
+    monkeypatch, tmp_path, capabilities,
+):
+    root = tmp_path / ".agent-worktrees"
+    version = "1.0.0+source." + "a" * 40
+    slot = root / "versions" / version
+    environment = slot / ".venv"
+    python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True)
+    python.touch()
+    (slot / ".install-complete.json").write_text(json.dumps({
+        "version": version, "completed_at": "2026-11-04T00:00:00Z", "pid": 1,
+    }), encoding="utf-8")
+    (root / "current-version").write_text(version, encoding="utf-8")
+    if capabilities is not None:
+        site = environment / ("Lib/site-packages" if os.name == "nt" else "lib/python3.12/site-packages")
+        descriptor = site / "agent_worktrees/_runtime_assets/scripts/hook-runtime-contract.json"
+        descriptor.parent.mkdir(parents=True)
+        descriptor.write_text(json.dumps({
+            "schema": "agent-worktrees.hook-runtime", "version": 1,
+            "capabilities": capabilities,
+        }), encoding="utf-8")
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(returncode=0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(hook_client.subprocess, "run", run)
+    monkeypatch.setattr(
+        hook_client, "_fallback_legacy_session_start",
+        lambda *_args, **_kwargs: pytest.fail("application downgraded to legacy hooks"),
+    )
+    result = hook_client._fallback_session_start({
+        "_agentWorktrees": {"pluginVersion": "99.0.0", "nativeSource": {"qualified": False}},
+    }, tmp_path)
+    if capabilities and "session-start-source-v1" in capabilities:
+        assert result == {}
+        assert len(calls) == 1 and calls[0][0] == str(python)
+        assert "--source-bound" in calls[0]
+        assert calls[0][1:3] == ["-I", "-X"]
+        assert str(root).casefold() in calls[0][3].casefold()
+    else:
+        assert not calls
+        assert "does not declare" in result["_stderr"]
+
+
+def test_hook_runtime_refuses_unordered_source_recovery(tmp_path):
+    root = tmp_path / "runtime"
+    version = "1.0.0+source." + "a" * 40
+    slot = root / "versions" / version
+    python = slot / "bin/python"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    (slot / ".install-complete.json").write_text(json.dumps({
+        "version": version, "completed_at": "2026-11-04T00:00:00Z", "pid": 1,
+    }), encoding="utf-8")
+    assert hook_client._RUNTIME.runtime_python(root) is None
+    (root / "last-known-good").write_text(version, encoding="utf-8")
+    assert hook_client._RUNTIME.runtime_python(root) == python
+
+
+@pytest.mark.parametrize("event", ["preToolUse", "postToolUse", "sessionEnd"])
+def test_native_hooks_prefer_payload_without_legacy_install(monkeypatch, tmp_path, event):
+    root = _SCRIPT.parents[1]
+    entry = json.loads((root / "hooks.json").read_text(encoding="utf-8"))["hooks"][event][0]
+    payload = tmp_path / "payload"
+    script = payload / "scripts/hook_client.py"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        'import json,sys;print(json.dumps({"additionalContext":"payload-"+sys.argv[1]}))\n',
+        encoding="utf-8",
+    )
+    if event == "sessionEnd":
+        (script.parent / "deregister-session.ps1").write_text(
+            "[Console]::Out.Write('{\"additionalContext\":\"payload-sessionEnd\"}')\n",
+            encoding="utf-8",
+        )
+        (script.parent / "deregister-session.sh").write_text(
+            "printf '%s' '{\"additionalContext\":\"payload-sessionEnd\"}'\n",
+            encoding="utf-8",
+        )
+    legacy = tmp_path / ".agent-worktrees/bin/hook_client.py"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("raise AssertionError('legacy hook selected')\n", encoding="utf-8")
+    environment = {
+        **os.environ, "HOME": str(tmp_path), "USERPROFILE": str(tmp_path),
+        "COPILOT_PLUGIN_ROOT": str(payload),
+    }
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    environment.pop("AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION", None)
+    host = shutil.which("pwsh") if os.name == "nt" else shutil.which("bash")
+    if not host:
+        pytest.skip("native hook shell unavailable")
+    command = (
+        [host, "-NoProfile", "-Command", entry["powershell"]] if os.name == "nt"
+        else [host, "-c", entry["bash"]]
+    )
+    result = subprocess.run(
+        command, input="{}", env=environment, capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["additionalContext"] == "payload-" + event
 
 
 def test_session_end_transports_original_source_without_terminal_or_env_probe(monkeypatch, tmp_path):

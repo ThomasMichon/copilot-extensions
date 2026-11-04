@@ -1,0 +1,13 @@
+{
+  "comment": "Carry the synchronized canonical lifecycle archive through its existing standalone consumers.",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    }
+  ]
+}

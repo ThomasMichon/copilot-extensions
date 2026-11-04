@@ -96,6 +96,31 @@ retain their separate qualification boundaries. External references:
 [uv project environments](https://docs.astral.sh/uv/concepts/projects/layout/#the-project-environment)
 and [Python virtual environments](https://docs.python.org/3/library/venv.html).
 
+Worktrees' source-aware hook CLI retains its existing `session-lifecycle --stdin
+--source-bound` and `deregister-session --stdin --source-bound` operations.
+The provider ships `scripts/hook-runtime-contract.json` inside its installed
+`agent_worktrees/_runtime_assets` resources, with contract identity
+`agent-worktrees.hook-runtime`, integer version 1 and additive capabilities.
+Version 1 declares `session-lifecycle-v1`, `session-start-source-v1` and
+`session-end-source-v1`; these names have the same meaning as the resident
+handshake. Readers ignore unrelated fields/capabilities and require the specific
+operation's support before sending lifecycle work. The descriptor comes from
+the selected environment, not the current plugin. Package-version equality is
+not a compatibility requirement. Missing or unsupported application metadata
+reports unavailable lifecycle work without installation or an effectful retry.
+Historical flat-slot callers retain their existing legacy compatibility path;
+the descriptor and old CLI spelling remain supported through provider rollback.
+Resident calls continue to qualify the running peer through its live handshake.
+
+Worktrees' plugin hooks select their own payload helpers even when no historical
+`bin` snapshot exists. The legacy command-publisher binding in the catalog still
+describes that publisher, not ownership of an independently installed application.
+An unresolved legacy binding is not evidence that the application is missing.
+The existing read-only backend status and the exact payload-local command use
+the selected completed runtime without claiming a legacy publication receipt or
+requiring its package version to match the plugin. Independent source selection
+does not waive installation-context or managed-publication policy.
+
 **Current stage limitation:** the shared generated `install --stage` synchronizes
 the environment and returns `staged`; it does not by itself prove canonical
 completion, app readiness, active publication or successful installation.
