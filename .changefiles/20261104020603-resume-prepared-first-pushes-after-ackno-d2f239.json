@@ -1,0 +1,9 @@
+{
+  "comment": "Resume prepared first pushes after acknowledgement loss without adopting ambiguous legacy heads",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

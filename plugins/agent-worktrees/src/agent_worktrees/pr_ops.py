@@ -725,13 +725,19 @@ def create_pr(
     if publish_remote is None:
         return {**base, "error": pr_publish.UNREADABLE_REMOTE}
 
-    # --- Re-run path: already on the feature branch -> (re)push + record. ---
-    if head_branch == feature_branch:
+    try:
+        candidate = pr_publish._pr_for(record, feature_branch)
+        if candidate is not None and "push_head" in candidate.creation:
+            pr_publication_state.unpublished_retry(candidate, feature_branch, prcfg.provider, default_pr_repo)
+        resume_source = pr_creation_state.publication_source(record, candidate, publish_remote, feature_branch, worktree_path, prcfg)
+    except ValueError as exc:
+        return {**base, "error": str(exc)}
+    if head_branch == feature_branch or resume_source:
         return _push_existing_feature(
             worktree_path, feature_branch, publish_remote, repo, prcfg, record,
             base, config=config, worktree_id=worktree_id, title=eff_title,
             body=body, open_pr=open_pr, draft=want_draft, attribution=attribution,
-            pr_head=(f"{fork_owner}:{feature_branch}" if fork_owner else ""), fork_head_repo=fork_head_repo, fork_head_identity=fork_head_identity,
+            pr_head=(f"{fork_owner}:{feature_branch}" if fork_owner else ""), fork_head_repo=fork_head_repo, fork_head_identity=fork_head_identity, source_ref=resume_source,
         )
 
     if head_branch != wt_branch:
@@ -859,7 +865,9 @@ def create_pr(
     # keeps those commits intact to avoid rewriting published history (#5300).
     surviving_commits = len(ahead)
     squashed = False
+    squash_backup = ""
     if not reusing and surviving_commits > 1:
+        squash_backup = _rev("HEAD", cwd=worktree_path)
         squashed, squash_reason = git_ops.squash_branch(
             upstream, squash_msg, cwd=worktree_path
         )
@@ -889,13 +897,16 @@ def create_pr(
     # Reuse-lease guard (#5298): see push_diagnostics.reuse_lease_expect.
     lease_expect = push_diagnostics.reuse_lease_expect(target_pr, active) if reusing else ""
     try:
-        provisional = pr_publication_state.provisional_lease(target_pr, publish_remote, feature_branch, worktree_path)
+        provisional = pr_publication_state.provisional_lease(target_pr, publish_remote, feature_branch, worktree_path, record=record, prcfg=prcfg)
     except ValueError as exc:
         return {**base, "error": str(exc)}
     if reusing and not lease_expect and provisional is None:
         return {**base, "error": push_diagnostics.missing_expected_sha_error(
             feature_branch=feature_branch, retry_command="agent-worktrees create-pr")}
-    pr_creation_state.start_publication(record, target_pr)
+    try:
+        pr_creation_state.start_publication(record, target_pr, remote=publish_remote, source_ref=wt_branch if use_refspec else feature_branch, head_sha=head_sha, base_sha=base_sha, backup_sha=squash_backup)
+    except ValueError as exc:
+        return {**base, "error": str(exc)}
     expected_publication = replace(target_pr) if target_pr is not None else None
     push_lease = provisional if provisional is not None else (lease_expect or None)
 
@@ -973,7 +984,7 @@ def create_pr(
         target_pr.provider = target_pr.provider or prcfg.provider
         pr_publish.persist_publication(config, record, target_pr, expected=expected_publication)
 
-    git_ops.delete_backup_ref(cwd=worktree_path)
+    pr_creation_state.release_backup(squash_backup, cwd=worktree_path)
 
     result = {
         **base, "success": True, "state": "open",
@@ -2302,15 +2313,11 @@ def _push_existing_feature(
     open_pr: bool | None,
     draft: bool,
     attribution: SourceAttribution | None,
-    pr_head: str = "", fork_head_repo: str = "", fork_head_identity: str = "",
+    pr_head: str = "", fork_head_repo: str = "", fork_head_identity: str = "", source_ref: str = "",
 ) -> dict:
-    """Re-run helper: push an already-created feature branch and record state.
+    """Resume an exact prepared source or update an existing feature branch.
 
-    Also completes auto-open: if the matched PR has not been opened yet it is
-    opened now; if it is already open its number/url is surfaced.  This keeps a
-    re-run from leaving a pushed branch with no reported PR -- which otherwise
-    leads the agent to open a duplicate (#1167).
-
+    Complete pending auto-open, surfacing an existing number/url without duplication.
     ``pr_head``, when non-empty, is an explicit ``<owner>:<branch>`` PR head
     (the role-aware fork-PR flow's publish step, when ``remote`` here is
     actually the caller's fork remote rather than the repo's own) -- carried
@@ -2320,7 +2327,8 @@ def _push_existing_feature(
     # Resolve the head from the feature branch ref, not HEAD: a #1804 re-run from the worktree
     # base branch leaves HEAD off the feature branch, so reading HEAD would record the wrong
     # commit. Invoked from the legacy on-feature-branch path these are identical.
-    head_sha = _rev(feature_branch, cwd=worktree_path)
+    source_ref = source_ref or feature_branch
+    head_sha = _rev(source_ref, cwd=worktree_path)
     # Non-terminal PRRecord (#1336) for this branch, if any -- leases the reuse push below (#5298).
     existing_target = next(
         (p for p in (record.prs if record is not None else [])
@@ -2334,17 +2342,21 @@ def _push_existing_feature(
             record, existing_target, feature_branch, prcfg, attribution, remote=remote, cwd=worktree_path,
         )
         lease_expect = push_diagnostics.reuse_lease_expect(target)
-        provisional = pr_publication_state.provisional_lease(target, remote, feature_branch, worktree_path)
+        provisional = pr_publication_state.provisional_lease(target, remote, feature_branch, worktree_path, record=record, prcfg=prcfg)
     except ValueError as exc:
         return {**base, "error": str(exc)}
     if existing_target is not None and not lease_expect and provisional is None:
         return {**base, "error": push_diagnostics.missing_expected_sha_error(
             feature_branch=feature_branch, retry_command="agent-worktrees create-pr")}
-    pr_creation_state.start_publication(record, target)
+    try:
+        pr_creation_state.start_publication(record, target, remote=remote, source_ref=source_ref, head_sha=head_sha, base_sha=target.base_sha if target else "")
+    except ValueError as exc:
+        return {**base, "error": str(exc)}
     expected_publication = replace(target) if target is not None else None
+    squash_backup = target.creation.get("push_backup", "") if pr_publication_state.unpublished(target) else ""
     with hooks.allow_pr_push():
         pushed = pr_publish.push_checked(
-            record, remote, feature_branch, cwd=worktree_path,
+            record, remote, f"{source_ref}:refs/heads/{feature_branch}", cwd=worktree_path,
             timeout=publication_deadline.configured(prcfg),
             expected_head_repo=fork_head_repo, expected_head_identity=fork_head_identity,
             force_with_lease_expect=(provisional if provisional is not None else (lease_expect or None)),
@@ -2360,9 +2372,12 @@ def _push_existing_feature(
         return {**base, "error": f"{error}\n{pushed.stderr.strip()}" if pushed.stderr else error}
     if record is not None:
         # target is always non-terminal here (a live match or a fresh record).
-        target.state = "open"
+        if pr_publication_state.unpublished(target):
+            pr_publication_state.settle_creation(record, target)
+        else:
+            target.state = "open"
         pr_publish.record_remote_identity(target, remote, repo.remote, pushed.head_repo, getattr(pushed, "head_identity", ""), pr_head.partition(":")[0] if ":" in pr_head else "")
-        target.base_sha = getattr(pushed, "rebase_base_sha", "") or target.base_sha
+        target.base_sha = getattr(pushed, "rebase_base_sha", "") or target.base_sha or target.creation.get("push_base", "")
         head_sha = target.head_sha = getattr(pushed, "published_head_sha", "") or head_sha
         target.head_observed_at = ""
         target.head_observed_api_base = ""
@@ -2371,6 +2386,7 @@ def _push_existing_feature(
             target.base_sha, head_sha, cwd=worktree_path)
         target.provider = target.provider or prcfg.provider
         pr_publish.persist_publication(config, record, target, expected=expected_publication)
+        pr_creation_state.release_backup(squash_backup, cwd=worktree_path)
     base_sha = target.base_sha if target else ""
     patch_id = target.patch_id if target else ""
     result = {

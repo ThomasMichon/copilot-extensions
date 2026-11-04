@@ -521,6 +521,22 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
                 return git_ops.PushResult(ok=False, stderr=str(exc))
         from .git_push_transport import pinned_destination
         with pinned_destination(remote, destinations, tuple(transport_settings), fetch_url=fetch_url):
+            from . import pr_creation_state
+            try:
+                prepared = pr_creation_state.publication_source(
+                    record, pr, remote, pr.branch if pr else "", cwd, getattr(repo, "pr", None),
+                )
+                if prepared and (identity != pr.creation["identity"] or git_ops.git(
+                    "rev-parse", "--verify", f"{refspec.partition(':')[0]}^{{commit}}",
+                    cwd=cwd, isolated_repository=True,
+                ).stdout.strip() != pr.creation["push_head"]):
+                    raise ValueError("Prepared first-push destination or source changed before transport.")
+                if prepared:
+                    strict_lease = True
+                    destination = refspec.partition(":")[2] or f"refs/heads/{pr.branch}"
+                    refspec = f"{pr.creation['push_head']}:{destination}"
+            except ValueError as exc:
+                return git_ops.PushResult(ok=False, stderr=str(exc))
             result = git_ops.push(remote, refspec, cwd=cwd, force_with_lease=force_with_lease,
                                   force_with_lease_expect=force_with_lease_expect, timeout=timeout, **rewrite_args)
             if (
@@ -554,7 +570,9 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
             if result:
                 result.head_repo = got
                 result.head_identity = identity
-                if checked_policy is not None:
+                if prepared:
+                    result.published_head_sha = pr.creation["push_head"]
+                elif checked_policy is not None:
                     result.published_head_sha = publication["head"]
             return result
     except PublishLockTimeout as exc:
