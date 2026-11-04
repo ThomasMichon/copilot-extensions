@@ -104,6 +104,8 @@ creation identity only after the prior revision's native custody has settled.
 The finalized predecessor and its creation journal remain intact; replacement
 replay retains the new key rather than retrying the predecessor's creation.
 An explicitly pinned old allocation revision is not silently advanced.
+Closeout lookup retains the original workspace independently of optional
+workspace carry, including an ordinary-Bridge-to-CLI driver transition.
 
 ## Remaining integration
 

@@ -78,6 +78,32 @@ def test_real_git_snapshot_survives_roundtrip_and_repeated_polling(finalized_rep
         assert finalized_checkout.matches(record)
 
 
+@pytest.mark.parametrize("dirty", ["managed", "alternate"])
+def test_snapshot_ignores_inherited_git_repository_selectors(
+    finalized_repository, tmp_path, monkeypatch, dirty,
+):
+    import shutil
+    from pathlib import Path
+
+    record = finalized_repository
+    managed = Path(record.worktree_path)
+    alternate = tmp_path / "alternate"
+    shutil.copytree(managed, alternate)
+    ({"managed": managed, "alternate": alternate}[dirty] / "tracked.txt").write_text(
+        "uncommitted", encoding="utf-8",
+    )
+    monkeypatch.setenv("GIT_DIR", str(alternate / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(alternate))
+    monkeypatch.setenv("GIT_INDEX_FILE", str(alternate / ".git" / "index"))
+    if dirty == "managed":
+        with pytest.raises(ValueError, match="uncommitted content"):
+            finalized_checkout.snapshot(record.worktree_path)
+        assert not finalized_checkout.matches(record)
+    else:
+        assert finalized_checkout.snapshot(record.worktree_path) == record.finalized_checkout
+        assert finalized_checkout.matches(record)
+
+
 @pytest.mark.parametrize("change", [
     "untracked", "staged", pytest.param("modified", marks=pytest.mark.guard),
     "deleted", "head", "branch", "reopened",

@@ -68,7 +68,10 @@ def test_actual_own_finalize_retains_checkout_session_and_dispatch_identity(own_
     assert result["task_release"] is False and result["process_retirement"] is False
 
 
-def test_observer_rechecks_actual_checkout_after_worker_finalizes(own_checkout, monkeypatch) -> None:
+@pytest.mark.parametrize("inherited_selectors", [False, True])
+def test_observer_rechecks_actual_checkout_after_worker_finalizes(
+    own_checkout, monkeypatch, inherited_selectors,
+) -> None:
     _, path, _, workspace = own_checkout
     record = tracking.load_record(path)
     closeout.finalize_own("task", "reservation", NATIVE)
@@ -80,6 +83,17 @@ def test_observer_rechecks_actual_checkout_after_worker_finalizes(own_checkout, 
     }})
     result = observation.observe(record.worktree_id, "task", "reservation", NATIVE)
     assert result["status"] == "finalized" and workspace.is_dir()
+    if inherited_selectors:
+        import shutil
+        alternate = workspace.parent / "alternate"
+        shutil.copytree(workspace, alternate)
+        git_dir = _git("rev-parse", "--absolute-git-dir", cwd=workspace)
+        index = _git("rev-parse", "--git-path", "index", cwd=workspace)
+        alternate_index = alternate / "alternate-index"
+        shutil.copyfile(index, alternate_index)
+        monkeypatch.setenv("GIT_DIR", git_dir)
+        monkeypatch.setenv("GIT_WORK_TREE", str(alternate))
+        monkeypatch.setenv("GIT_INDEX_FILE", str(alternate_index))
     (workspace / "late-work.txt").write_text("New work after finalization\n", encoding="utf-8")
     with pytest.raises(ValueError, match="currently clean"):
         observation.observe(record.worktree_id, "task", "reservation", NATIVE)

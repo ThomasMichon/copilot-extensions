@@ -85,6 +85,9 @@ foreign-session preservation gates. It then verifies the actual clean
 checkout against the existing finalized snapshot. The observer need not be
 the worker process and never invokes the finalizer. Missing, dirty, changed,
 protected or uninspectable state is not a successful observation.
+Snapshot creation and comparison isolate Git from inherited repository,
+worktree, index and configuration selectors; the explicitly named checkout,
+not an alternate clean repository from the caller's environment, is inspected.
 
 The reply identifies the project/path, worktree creation nonce, complete
 Dispatch allocation, native head revision and observed finalized checkout.

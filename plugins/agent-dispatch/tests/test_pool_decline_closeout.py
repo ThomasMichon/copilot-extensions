@@ -193,10 +193,27 @@ def test_later_due_time_and_cooldown_stage_survive_decline(q, ready):
     assert q.pool_startup(task_id).cooldown_stage == 4
 
 
-def test_retired_decline_can_select_another_pool_without_reusing_finalized_workspace(q, ready, monkeypatch):
+@pytest.mark.parametrize("original_driver", ["cli", "ordinary-bridge"])
+def test_retired_decline_can_select_another_pool_without_reusing_finalized_workspace(
+    q, ready, monkeypatch, original_driver,
+):
     from agent_dispatch import embody
 
-    task_id, binding, _, _ = ready
+    task_id, binding, value, _ = ready
+    if original_driver == "ordinary-bridge":
+        info = {
+            "session_id": "bridge", "ready": True, "status": "awaiting_first_prompt",
+            "connection": {
+                "worktree_id": "worktree", "native_session_id": "native",
+                "repo": "example", "target_dir": "/worker",
+            },
+        }
+        with q._connect() as conn:
+            conn.execute(
+                "UPDATE spawn_reservations SET driver=?, agent_info=? WHERE key=?",
+                (original_driver, json.dumps(info), binding["reservation_key"]),
+            )
+        value["allocation"]["driver"] = original_driver
     original = q.get_reservation(binding["reservation_key"])
     q.close_pool_decline(task_id, **binding)
     q.retire_spawn(binding["reservation_key"], exact_absence=True, conclusion_state="skipped")
