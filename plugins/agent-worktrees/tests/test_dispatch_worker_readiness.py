@@ -2,7 +2,7 @@
 
 import os
 import subprocess
-from contextlib import nullcontext
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -86,7 +86,19 @@ def prepared(worker, monkeypatch):
     monkeypatch.setattr(ready.cfg, "load_config", lambda: worker.config)
     monkeypatch.setattr(ready.cfg, "tracking_dir", lambda: worker.root)
     monkeypatch.setattr(tracking, "load_record", lambda path: record)
-    monkeypatch.setattr(tracking, "_RecordLock", lambda *a, **k: nullcontext())
+    worker.lock_depth = 0
+    worker.lock_entries = 0
+
+    @contextmanager
+    def lock(*args, **kwargs):
+        worker.lock_depth += 1
+        worker.lock_entries += 1
+        try:
+            yield
+        finally:
+            worker.lock_depth -= 1
+
+    monkeypatch.setattr(tracking, "_RecordLock", lock)
     monkeypatch.setattr(
         ready,
         "read_exact_record",
@@ -280,7 +292,16 @@ def test_changed_or_protected_workspace_is_not_ready(prepared, monkeypatch, kind
         _observe(prepared)
 
 
-@pytest.mark.parametrize("kind", ["untracked", "staged", "committed", "tracked-branch"])
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "untracked",
+        "staged",
+        "committed",
+        "tracked-branch",
+        "tracked-branch-tag",
+    ],
+)
 def test_dirty_and_unpublished_content_never_passes_readiness(prepared, kind):
     path = prepared.binding.path
     if kind in {"untracked", "staged"}:
@@ -288,7 +309,7 @@ def test_dirty_and_unpublished_content_never_passes_readiness(prepared, kind):
         if kind == "staged":
             _git(path, "add", "unfinished.txt")
     else:
-        if kind == "tracked-branch":
+        if kind.startswith("tracked-branch"):
             _git(path, "checkout", "-q", "--detach")
         _git(
             path,
@@ -302,9 +323,11 @@ def test_dirty_and_unpublished_content_never_passes_readiness(prepared, kind):
             "-m",
             "Unpublished",
         )
-        if kind == "tracked-branch":
+        if kind.startswith("tracked-branch"):
             _git(path, "update-ref", f"refs/heads/{prepared.record.branch}", "HEAD")
             _git(path, "checkout", "-q", "--detach", "refs/remotes/origin/main")
+            if kind == "tracked-branch-tag":
+                _git(path, "tag", prepared.record.branch, "HEAD")
     with pytest.raises(ValueError, match=r"uncommitted|committed content"):
         _observe(prepared)
 
@@ -324,6 +347,7 @@ def _merged_pr(prepared, monkeypatch):
     calls = []
 
     def pull(pr, repo):
+        assert prepared.lock_depth == 0, "Provider I/O must not hold the record lock"
         calls.append(pr.number)
         return (
             None,
@@ -342,6 +366,7 @@ def test_cached_merge_still_needs_fresh_provider_and_checks_real_content(prepare
     head, calls = _merged_pr(prepared, monkeypatch)
     prepared.record.pr.head_sha = "0" * 40
     assert _observe(prepared)["landing"]["prs"][0]["head_sha"] == head
+    assert prepared.lock_entries == 2 and prepared.lock_depth == 0
     assert calls == [1] and prepared.record.pr.head_sha == "0" * 40
     _git(
         prepared.binding.path,
@@ -357,6 +382,47 @@ def test_cached_merge_still_needs_fresh_provider_and_checks_real_content(prepare
     )
     with pytest.raises(ValueError, match="unpublished"):
         _observe(prepared)
+
+
+@pytest.mark.parametrize("branch", ["worktree/worker", "pr/change"])
+def test_merged_pr_branch_checks_cannot_be_shadowed_by_tags(prepared, monkeypatch, branch):
+    head, _ = _merged_pr(prepared, monkeypatch)
+    path = prepared.binding.path
+    _git(path, "checkout", "-q", "-B", branch, head)
+    _git(
+        path,
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "Unpublished branch work",
+    )
+    _git(path, "checkout", "-q", "--detach", head)
+    _git(path, "tag", branch, head)
+    with pytest.raises(ValueError, match="unpublished"):
+        _observe(prepared)
+
+
+@pytest.mark.parametrize("available", [True, False])
+def test_missing_default_base_uses_available_actual_pr_base_or_refuses(
+    prepared,
+    monkeypatch,
+    available,
+):
+    head, _ = _merged_pr(prepared, monkeypatch)
+    path = prepared.binding.path
+    _git(path, "update-ref", "-d", "refs/remotes/origin/main")
+    monkeypatch.setattr(ready.pr_gate, "pr_base_ref", lambda *a: "dev")
+    if available:
+        _git(path, "update-ref", "refs/remotes/origin/dev", head)
+        assert _observe(prepared)["landing"]["bases"] == ["refs/remotes/origin/dev"]
+    else:
+        with pytest.raises(ValueError, match="any published landing base"):
+            _observe(prepared)
 
 
 @pytest.mark.parametrize("value", [None, False, "open", "closed", "missing-head"])
@@ -382,7 +448,7 @@ def test_unknown_open_or_unmerged_provider_state_blocks_cached_merge(prepared, m
         _observe(prepared)
 
 
-@pytest.mark.parametrize("kind", ["checkout", "refs", "record", "hold"])
+@pytest.mark.parametrize("kind", ["checkout", "refs", "record", "hold", "config"])
 def test_changes_during_external_observation_invalidate_readiness(prepared, monkeypatch, kind):
     original = ready._landed
 
@@ -394,6 +460,8 @@ def test_changes_during_external_observation_invalidate_readiness(prepared, monk
             _git(prepared.binding.path, "update-ref", "refs/heads/later", "HEAD")
         elif kind == "record":
             prepared.record.title = "changed"
+        elif kind == "config":
+            prepared.config = replace(prepared.config, platform="win32")
         else:
             prepared.record.execution_leg_opaque = True
         return result

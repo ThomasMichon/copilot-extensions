@@ -115,6 +115,14 @@ def _require_ready(
         raise ValueError("Readiness requires its actual managed checkout")
 
 
+def _branch_ref(name: str) -> str:
+    if not name or name.startswith("refs/heads/"):
+        return name
+    if name.startswith("refs/"):
+        raise ValueError("Readiness requires a local tracked branch")
+    return f"refs/heads/{name}"
+
+
 def _landed(record: tracking.WorktreeRecord, repo, checkout: dict) -> dict:
     # Existing merge-boundary probes are read-only but accept inherited Git
     # selectors. Refuse those contexts rather than changing process-global env.
@@ -125,8 +133,11 @@ def _landed(record: tracking.WorktreeRecord, repo, checkout: dict) -> dict:
     ):
         raise ValueError("Readiness requires an unredirected Git observation context")
     observed = deepcopy(record)
+    observed.branch = _branch_ref(observed.branch)
     entries = [observed.pr] if observed.pr is not None else []
     entries += [pr for pr in observed.prs if all(pr is not entry for entry in entries)]
+    for pr in entries:
+        pr.branch = _branch_ref(pr.branch)
     with pr_gate.one_read_per_pr():
         for pr in entries:
             pulled = pr_gate.pull_for(pr, repo)
@@ -150,7 +161,13 @@ def _landed(record: tracking.WorktreeRecord, repo, checkout: dict) -> dict:
             if not base:
                 raise ValueError("Readiness cannot confirm the tracked PR landing base")
             bases.append(finalize_landing.remote_ref(repo, base))
-        bases = tuple(dict.fromkeys(bases))
+        bases = tuple(
+            base
+            for base in dict.fromkeys(bases)
+            if git_ops.ref_exists(base, cwd=record.worktree_path)
+        )
+        if not bases:
+            raise ValueError("Readiness cannot confirm any published landing base")
         if entries:
             if observed.pr is None or pr_gate.content_exceeds_merged_head_any(
                 observed,
@@ -161,7 +178,7 @@ def _landed(record: tracking.WorktreeRecord, repo, checkout: dict) -> dict:
                 raise ValueError("Readiness retains unpublished or unconfirmed committed content")
         else:
             # With no PR, ancestry is sufficient and cannot write probe objects.
-            refs = {checkout["head"], record.branch}
+            refs = {checkout["head"], observed.branch}
             if not all(
                 any(
                     git_ops.is_commit_ancestor(ref, base, cwd=record.worktree_path)
@@ -264,15 +281,19 @@ def observe_ready(
         checkout = finalized_checkout.snapshot(record.worktree_path)
         refs = _refs(record.worktree_path)
         repo = config.repos[record.repo]
-        landing = _landed(record, repo, checkout)
+    landing = _landed(before, repo, checkout)
+    with tracking._RecordLock(path, require_sidecar=True):
         fresh = tracking.load_record(path)
-        _require_ready(worker, fresh, config, task_claim_ref)
+        fresh_config = cfg.load_config()
+        if fresh_config != config:
+            raise ValueError("Readiness configuration changed during observation")
+        _require_ready(worker, fresh, fresh_config, task_claim_ref)
         if own_caller:
             worker.require_caller()
         if (
             fresh != before
-            or finalized_checkout.snapshot(record.worktree_path) != checkout
-            or _refs(record.worktree_path) != refs
+            or finalized_checkout.snapshot(before.worktree_path) != checkout
+            or _refs(before.worktree_path) != refs
         ):
             raise ValueError("Readiness custody or checkout changed during observation")
         return {

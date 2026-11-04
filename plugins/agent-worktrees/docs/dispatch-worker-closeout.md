@@ -124,7 +124,10 @@ handoffs remain blocking; even PR claims need settlement by their normal owner.
 Every tracked PR is freshly read through the configured authority, including
 locally cached merges. An open, unmerged, incomplete or unobservable PR blocks.
 Fresh merged heads feed the existing per-branch committed-content boundary
-check without modifying persisted PR metadata. With no tracked PR, the actual
+check without modifying persisted PR metadata. Tracked branch revisions are
+fully qualified so a same-named tag cannot mask unpublished work. Only locally
+resolvable published bases enter the proof; none available is a blocker.
+With no tracked PR, the actual
 head and tracked worktree branch must be ancestors of the configured published
 base. This conservative ancestry proof does not accept an untracked squash or
 patch-equivalent publication. No fetch, probe commit, source repair or automatic
@@ -132,8 +135,11 @@ publication is performed. Inherited Git repository/index/configuration selectors
 refuse before the existing merge-boundary probes; observation does not alter
 process-global environment.
 
-The observer rechecks custody, clean checkout and local branch/remote-ref
-identity before returning. `own_caller=True` additionally requires the actual
+The observer captures custody and checkout under the existing record lock,
+releases it for provider/content observation, then reacquires it to recheck
+current configuration, custody, clean checkout and local branch/remote-ref
+identity before returning. Network/provider I/O never holds that lock.
+`own_caller=True` additionally requires the actual
 invoking native process and cwd both before and after the content observation.
 Independent observation does not require the observer to impersonate that
 process. Neither form proves runner exit or freezes arbitrary out-of-band
