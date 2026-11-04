@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
@@ -126,6 +127,67 @@ def test_setup_does_not_replace_a_concurrently_published_provider(
     assert len(list(registry.iterdir())) == 1
 
 
+def test_concurrent_identical_setup_waits_for_link_cleanup(tmp_path, monkeypatch):
+    from agent_codespaces import application_provider
+
+    registry = tmp_path / "providers.d"
+    registry.mkdir()
+    monkeypatch.setenv("AGENT_BRIDGE_PROVIDERS_DIR", str(registry))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    target = registry / application_provider.MANIFEST_NAME
+    published = threading.Event()
+    release = threading.Event()
+    observed = threading.Event()
+    outcomes = {}
+    links = []
+    real_link = os.link
+    real_document = application_provider._document
+
+    def paused_link(source, destination, *args, **kwargs):
+        real_link(source, destination, *args, **kwargs)
+        if Path(destination) == target:
+            links.append(destination)
+            published.set()
+            assert release.wait(5), "publisher was not released"
+
+    def document(path, **kwargs):
+        try:
+            return real_document(path, **kwargs)
+        finally:
+            if threading.current_thread().name == "second" and path == target:
+                observed.set()
+
+    def setup():
+        name = threading.current_thread().name
+        try:
+            result = application_provider.register_installed_application()
+            outcomes[name] = (result, target.stat().st_nlink)
+        except BaseException as error:
+            outcomes[name] = error
+
+    monkeypatch.setattr(os, "link", paused_link)
+    monkeypatch.setattr(application_provider, "_document", document)
+    first = threading.Thread(target=setup, name="first")
+    second = threading.Thread(target=setup, name="second")
+    first.start()
+    try:
+        assert published.wait(5)
+        assert target.stat().st_nlink == 2
+        before = target.read_bytes(), target.stat().st_mtime_ns
+        second.start()
+        assert observed.wait(5), "second setup did not read the paused declaration"
+    finally:
+        release.set()
+        first.join(5)
+        if second.ident is not None:
+            second.join(5)
+    assert not first.is_alive() and not second.is_alive()
+    assert outcomes == {"first": (target, 1), "second": (target, 1)}
+    assert len(links) == 1
+    assert (target.read_bytes(), target.stat().st_mtime_ns) == before
+    assert list(registry.iterdir()) == [target]
+
+
 @pytest.mark.parametrize("unsafe", ["directory-as-file", "hardlinked-declaration"])
 def test_setup_refuses_unsafe_provider_paths(tmp_path, monkeypatch, unsafe):
     from agent_codespaces import owner_cli
@@ -144,10 +206,47 @@ def test_setup_refuses_unsafe_provider_paths(tmp_path, monkeypatch, unsafe):
         foreign.write_bytes(b"another owner's declaration\n")
         manifest = registry / "agent-codespaces.standalone.json"
         os.link(foreign, manifest)
+        before = manifest.read_bytes(), manifest.stat().st_mtime_ns
         with pytest.raises(RuntimeError, match="ordinary file"):
             owner_cli.cmd_source_setup(None)
         assert manifest.read_bytes() == foreign.read_bytes() == b"another owner's declaration\n"
+        assert (manifest.read_bytes(), manifest.stat().st_mtime_ns) == before
         assert foreign.stat().st_nlink == 2
+
+
+@pytest.mark.parametrize("event", ["interrupted", "replaced"])
+def test_target_settlement_refuses_interrupt_or_identity_change(tmp_path, monkeypatch, event):
+    import time
+    import types
+    from agent_codespaces import application_provider
+
+    registry = tmp_path / "providers.d"
+    monkeypatch.setenv("AGENT_BRIDGE_PROVIDERS_DIR", str(registry))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    target = application_provider.register_installed_application()
+    before = target.read_bytes(), target.stat().st_mtime_ns
+    foreign = tmp_path / "foreign-link"
+    os.link(target, foreign)
+
+    def wait(_seconds):
+        if event == "interrupted":
+            raise KeyboardInterrupt
+        target.unlink()
+        target.write_bytes(before[0])
+
+    monkeypatch.setattr(application_provider, "time",
+                        types.SimpleNamespace(monotonic=time.monotonic, sleep=wait))
+    if event == "interrupted":
+        with pytest.raises(KeyboardInterrupt):
+            application_provider.register_installed_application()
+        assert (target.read_bytes(), target.stat().st_mtime_ns) == before
+        assert target.stat().st_nlink == 2
+    else:
+        with pytest.raises(RuntimeError, match="changed"):
+            application_provider.register_installed_application()
+        assert target.stat().st_nlink == 1
+    assert (foreign.read_bytes(), foreign.stat().st_mtime_ns) == before
+    assert list(registry.iterdir()) == [target]
 
 
 @pytest.mark.parametrize("enabled", [False, True])

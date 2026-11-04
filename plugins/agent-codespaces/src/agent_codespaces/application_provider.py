@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import stat
 import tempfile
+import time
 
 from dropin_registry import atomic_write_text
 from plugin_resolve import split_source
@@ -13,18 +14,68 @@ from plugin_resolve import split_source
 MANIFEST_NAME = "agent-codespaces.standalone.json"
 
 
-def _document(path: Path):
+class _PendingLink(RuntimeError):
+    def __init__(self, identity):
+        super().__init__("CodeSpaces provider declaration must be an ordinary file")
+        self.identity = identity
+
+
+def _document(path: Path, *, expected_identity=None):
     info = path.lstat()
-    if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+    if (not stat.S_ISREG(info.st_mode)
             or getattr(info, "st_file_attributes", 0) & 0x400):
+        raise RuntimeError("CodeSpaces provider declaration must be an ordinary file")
+    identity = info.st_dev, info.st_ino
+    if expected_identity is not None and identity != expected_identity:
+        raise RuntimeError("CodeSpaces provider changed while its publication settled")
+    if info.st_nlink == 2:
+        raise _PendingLink(identity)
+    if info.st_nlink != 1:
         raise RuntimeError("CodeSpaces provider declaration must be an ordinary file")
     if info.st_size > 65536:
         raise ValueError("CodeSpaces provider declaration exceeds its byte bound")
     with path.open(encoding="utf-8-sig") as stream:
+        opened = os.fstat(stream.fileno())
+        if (opened.st_dev, opened.st_ino) != identity:
+            raise RuntimeError("CodeSpaces provider changed before reading")
         content = stream.read(65537)
+    after = path.lstat()
+    if ((after.st_dev, after.st_ino) != identity
+            or not stat.S_ISREG(after.st_mode)
+            or getattr(after, "st_file_attributes", 0) & 0x400):
+        raise RuntimeError("CodeSpaces provider changed while reading")
+    if after.st_nlink == 2:
+        raise _PendingLink(identity)
+    if after.st_nlink != 1:
+        raise RuntimeError("CodeSpaces provider declaration must be an ordinary file")
     if len(content) > 65536:
         raise ValueError("CodeSpaces provider declaration exceeds its byte bound")
     return json.loads(content)
+
+
+def _settled_target_document(path: Path):
+    deadline = None
+    identity = None
+    while True:
+        if deadline is not None and time.monotonic() >= deadline:
+            raise RuntimeError("CodeSpaces provider declaration must be an ordinary file")
+        try:
+            document = _document(path, expected_identity=identity)
+            if deadline is not None and time.monotonic() >= deadline:
+                raise RuntimeError("CodeSpaces provider declaration must be an ordinary file")
+            return document
+        except _PendingLink as error:
+            identity = error.identity
+            if deadline is None:
+                deadline = time.monotonic() + 1.0
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError(str(error)) from error
+            time.sleep(min(.01, remaining))
+        except FileNotFoundError:
+            if identity is not None:
+                raise RuntimeError("CodeSpaces provider disappeared while publication settled")
+            raise
 
 
 def register_installed_application() -> Path:
@@ -50,7 +101,7 @@ def register_installed_application() -> Path:
 
     def check_target() -> bool:
         try:
-            existing = _document(target)
+            existing = _settled_target_document(target)
         except FileNotFoundError:
             return False
         except ValueError as error:

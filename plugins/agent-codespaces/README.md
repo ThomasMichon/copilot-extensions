@@ -13,6 +13,11 @@ Without a config override, an explicit `AGENT_BRIDGE_INSTALL_DIR` precedes the
 home-directory fallback, matching Bridge's own configuration-root resolution.
 Publication is atomic, create-only and idempotent through the canonical drop-in
 writer. It never invokes a registration hook or backend.
+An identical concurrent reader may wait up to one second for this target's
+two-link publication window to settle. Reads retain the same file identity and
+require an ordinary single-link declaration before success. Persistent hardlinks,
+replacement or interruption refuse without rewriting either publisher's entry;
+the producer acquires no lock during this bounded read-only wait.
 
 The identity-bearing payload entry `agent-codespaces.json` stays separate and
 untouched. An eligible attributed entry retains Bridge's existing filename-order
