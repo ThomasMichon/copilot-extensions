@@ -8,11 +8,13 @@ import os
 import shutil
 import subprocess
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+UTC = timezone.utc
 
 # zstd compression args for the snapshot tarball (#1950). ``-T0`` uses all
 # available cores; nightly compression of the multi-GB index is otherwise

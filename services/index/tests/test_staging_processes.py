@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 import os
 import sys
 import time
@@ -15,8 +16,8 @@ from agent_index_service.staging import CandidateError, _run
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux subreaper boundary")
 @pytest.mark.parametrize("mode", ["failure", "timeout"])
 def test_contained_linux_reaps_descendants_without_killing_outer_group(
-    tmp_path, monkeypatch, mode,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str,
+) -> None:
     monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
     receipt = tmp_path / "child-pid"
     script = f"""
@@ -28,12 +29,12 @@ if {mode!r} == 'failure':
     raise SystemExit(7)
 time.sleep(60)
 """
-    group = os.getpgrp()
+    group = getattr(os, "getpgrp")()
     deadline = time.monotonic() + (2 if mode == "timeout" else 15)
     with pytest.raises(CandidateError, match="timeout" if mode == "timeout" else "exit status 7"):
         _run([sys.executable, "-I", "-c", script], cwd=tmp_path,
              env=dict(os.environ), deadline=deadline)
-    assert os.getpgrp() == group
+    assert getattr(os, "getpgrp")() == group
     pid = int(receipt.read_text())
     state = Path(f"/proc/{pid}/stat")
     assert not state.exists() or state.read_text().split(") ", 1)[1].startswith("Z ")

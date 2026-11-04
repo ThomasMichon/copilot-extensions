@@ -8,7 +8,7 @@ import logging
 import os
 import re
 from collections.abc import Callable, Iterable
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
@@ -20,6 +20,8 @@ import httpx
 from agent_index.config import install_dir
 from agent_index.sources.base import FileEntry, nonsecret_target
 from agent_index.sources.good_citizen_http import GoodCitizenSession
+
+UTC = timezone.utc
 
 _DEFAULT_API_BASE = "https://dev.azure.com"
 _DEFAULT_TIMEOUT = 20.0

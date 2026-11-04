@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any, BinaryIO, TYPE_CHECKING, cast
+
 import hashlib
 import json
 import os
@@ -9,9 +12,13 @@ import subprocess
 import sys
 import tarfile
 from dataclasses import replace
+from typing import TypedDict
 
 import pytest
-import test_release as wheels
+if TYPE_CHECKING:
+    from services.index.tests import test_release as wheels
+else:
+    import test_release as wheels
 from agent_procutil import no_window_kwargs
 
 from agent_index_service import container
@@ -22,8 +29,19 @@ BASE = "approved.invalid/python@sha256:" + "a" * 64
 TARGET = ContainerTarget("3.12.3", "linux/amd64", "2.36")
 
 
+class ContainerCase(TypedDict, total=False):
+    descriptor_path: Path
+    expected_source_commit: str
+    third_party_lock: Path
+    third_party_wheels: Path
+    output: Path
+    base_image: str
+    target: ContainerTarget
+    profile: str
+
+
 @pytest.fixture
-def case(tmp_path):
+def case(tmp_path: Path) -> ContainerCase:
     bundle = tmp_path / "bundle"
     third = tmp_path / "third"
     bundle.mkdir()
@@ -47,13 +65,13 @@ def case(tmp_path):
     }
 
 
-def prepare(case, **changes):
-    values = {**case, **changes}
+def prepare(case: ContainerCase, **changes: Any) -> dict[str, Any]:
+    values: dict[str, Any] = {**case, **changes}
     descriptor = values.pop("descriptor_path")
     return prepare_container_context(descriptor, **values)
 
 
-def test_exact_prepared_context_and_no_secret_copy(case):
+def test_exact_prepared_context_and_no_secret_copy(case: ContainerCase) -> None:
     (case["third_party_wheels"] / "private-config.json").write_text('{"token":"secret-sentinel"}')
     result = prepare(case)
     assert result["state"] == "prepared"
@@ -95,7 +113,7 @@ def test_exact_prepared_context_and_no_secret_copy(case):
     assert result["contract_sha256"] not in dockerfile  # No circular digest.
 
 
-def test_replay_unchanged_and_unrelated_output_preserved(case):
+def test_replay_unchanged_and_unrelated_output_preserved(case: ContainerCase) -> None:
     first = prepare(case)
     before = container._files(case["output"])
     assert prepare(case)["state"] == "already_prepared"
@@ -109,7 +127,7 @@ def test_replay_unchanged_and_unrelated_output_preserved(case):
 
 
 @pytest.mark.parametrize("uid,gid", [(10001, 10001), (1001, 1001), (12001, 12002)])
-def test_selected_account_profile_matches_numeric_runtime_identity(case, uid, gid):
+def test_selected_account_profile_matches_numeric_runtime_identity(case: ContainerCase, uid: int, gid: int) -> None:
     prepare(case, uid=uid, gid=gid)
     runtime = (case["output"] / "Dockerfile").read_text().split(" AS runtime\n", 1)[1]
     assert f"getent group {gid}" in runtime
@@ -122,7 +140,7 @@ def test_selected_account_profile_matches_numeric_runtime_identity(case, uid, gi
 
 
 @pytest.mark.parametrize("name", ["unrelated-empty", "wheels/unrelated-empty"])
-def test_replay_rejects_unlisted_empty_directories_and_preserves_them(case, name):
+def test_replay_rejects_unlisted_empty_directories_and_preserves_them(case: ContainerCase, name: str) -> None:
     prepare(case)
     extra = case["output"] / name
     extra.mkdir()
@@ -132,10 +150,10 @@ def test_replay_rejects_unlisted_empty_directories_and_preserves_them(case, name
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX special-file fixture")
-def test_replay_rejects_special_entries_without_opening_them(case):
+def test_replay_rejects_special_entries_without_opening_them(case: ContainerCase) -> None:
     prepare(case)
     fifo = case["output"] / "unrelated-fifo"
-    os.mkfifo(fifo)
+    getattr(os, "mkfifo")(fifo)
     with pytest.raises(ContainerError, match="non-regular"):
         prepare(case)
     assert fifo.exists()
@@ -147,7 +165,7 @@ def test_replay_rejects_special_entries_without_opening_them(case):
     "python@sha256:" + "A" * 64, "python@sha256:" + "a" * 63, "python\nRUN unsafe",
     "approved.invalid/python:bad:tag@sha256:" + "a" * 64,
 ])
-def test_base_pin_validation_before_writes(case, base):
+def test_base_pin_validation_before_writes(case: ContainerCase, base: str) -> None:
     with pytest.raises(ContainerError):
         prepare(case, base_image=base)
     assert not case["output"].exists()
@@ -158,27 +176,27 @@ def test_base_pin_validation_before_writes(case, base):
     ("python_version", None), ("platform", "windows/amd64"),
     ("glibc_version", "musl"), ("glibc_version", "2.1000000"),
 ])
-def test_explicit_target_validation(case, field, value):
+def test_explicit_target_validation(case: ContainerCase, field: str, value: object) -> None:
     with pytest.raises(ContainerError):
-        prepare(case, target=replace(TARGET, **{field: value}))
+        prepare(case, target=replace(TARGET, **{field: cast(str, value)}))
     assert not case["output"].exists()
 
 
 @pytest.mark.parametrize("changes", [{"uid": 0}, {"gid": True}, {"uid": -1}])
-def test_nonroot_identity_required(case, changes):
+def test_nonroot_identity_required(case: ContainerCase, changes: dict[str, Any]) -> None:
     with pytest.raises(ContainerError):
         prepare(case, **changes)
     assert not case["output"].exists()
 
 
-def test_wrong_revision_no_output(case):
+def test_wrong_revision_no_output(case: ContainerCase) -> None:
     with pytest.raises(ContainerError):
         prepare(case, expected_source_commit="b" * 40)
     assert not case["output"].exists()
 
 
 @pytest.mark.parametrize("kind", ["missing", "extra", "duplicate", "hash"])
-def test_exact_hashed_native_wheel_set(case, kind):
+def test_exact_hashed_native_wheel_set(case: ContainerCase, kind: str) -> None:
     third = case["third_party_wheels"]
     if kind == "missing":
         next(third.glob("httpx-*.whl")).unlink()
@@ -194,7 +212,7 @@ def test_exact_hashed_native_wheel_set(case, kind):
     assert not case["output"].exists()
 
 
-def test_missing_transitive_native_requirement(case):
+def test_missing_transitive_native_requirement(case: ContainerCase) -> None:
     source = next(case["third_party_wheels"].glob("httpx-*.whl"))
     wheels._mutate_metadata(case["third_party_wheels"], lambda text: text.replace(
         "Version: 0.28.0", "Version: 0.28.0\nRequires-Dist: missing-package>=1",
@@ -209,7 +227,7 @@ def test_missing_transitive_native_requirement(case):
         prepare(case)
 
 
-def test_secret_url_requirement_rejected(case):
+def test_secret_url_requirement_rejected(case: ContainerCase) -> None:
     case["third_party_lock"].write_text(
         "httpx @ https://user:password@invalid.example/pkg.whl --hash=sha256:" + "a" * 64,
     )
@@ -218,10 +236,10 @@ def test_secret_url_requirement_rejected(case):
     assert not case["output"].exists()
 
 
-def test_snapshot_tamper_detected_and_owned_output_removed(case, monkeypatch):
+def test_snapshot_tamper_detected_and_owned_output_removed(case: ContainerCase, monkeypatch: pytest.MonkeyPatch) -> None:
     original = container._copy
 
-    def changed(source, target, digest):
+    def changed(source: Path, target: Path, digest: str) -> None:
         original(source, target, digest)
         with target.open("ab") as stream:
             stream.write(b"changed")
@@ -232,7 +250,7 @@ def test_snapshot_tamper_detected_and_owned_output_removed(case, monkeypatch):
     assert not case["output"].exists()
 
 
-def test_output_overlap_or_symlink_rejected(case, tmp_path):
+def test_output_overlap_or_symlink_rejected(case: ContainerCase, tmp_path: Path) -> None:
     with pytest.raises(ContainerError):
         prepare(case, output=case["third_party_wheels"] / "image")
     link = tmp_path / "linked-image"
@@ -247,7 +265,7 @@ def test_output_overlap_or_symlink_rejected(case, tmp_path):
     assert not list(target.iterdir())
 
 
-def test_build_guard_checks_actual_bytes_before_any_install(case):
+def test_build_guard_checks_actual_bytes_before_any_install(case: ContainerCase) -> None:
     result = prepare(case)
     output = case["output"]
     env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
@@ -264,7 +282,7 @@ def test_build_guard_checks_actual_bytes_before_any_install(case):
     assert "digest mismatch" in bad.stderr
 
 
-def test_container_cli_preserves_normal_commands(case, capsys):
+def test_container_cli_preserves_normal_commands(case: ContainerCase, capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["container", "prepare", "--descriptor", str(case["descriptor_path"]),
                  "--expected-source-commit", wheels.COMMIT,
                  "--third-party-lock", str(case["third_party_lock"]),
@@ -278,7 +296,7 @@ def test_container_cli_preserves_normal_commands(case, capsys):
     assert build_parser().parse_args(["serve", "--config", "/tmp/host.yaml"]).command == "serve"
 
 
-def test_conflicting_image_identity_keeps_existing_context(case):
+def test_conflicting_image_identity_keeps_existing_context(case: ContainerCase) -> None:
     prepare(case)
     before = container._files(case["output"])
     with pytest.raises(ContainerError, match="conflicts"):
@@ -286,7 +304,7 @@ def test_conflicting_image_identity_keeps_existing_context(case):
     assert container._files(case["output"]) == before
 
 
-def test_model_stack_cannot_enter_service_image(case):
+def test_model_stack_cannot_enter_service_image(case: ContainerCase) -> None:
     case["third_party_lock"].write_text(
         "torch==1.0 --hash=sha256:" + "a" * 64,
     )
@@ -295,7 +313,7 @@ def test_model_stack_cannot_enter_service_image(case):
     assert not case["output"].exists()
 
 
-def test_native_extra_transitive_requirement_cannot_be_omitted(case):
+def test_native_extra_transitive_requirement_cannot_be_omitted(case: ContainerCase) -> None:
     wheels._mutate_metadata(case["descriptor_path"].parent, lambda text: text.replace(
         "Name: agent-index",
         'Name: agent-index\nRequires-Dist: native-only>=1; extra == "store"',
@@ -307,7 +325,7 @@ def test_native_extra_transitive_requirement_cannot_be_omitted(case):
         prepare(case)
 
 
-def test_wrong_python_tag_cannot_enter_linux_context(case):
+def test_wrong_python_tag_cannot_enter_linux_context(case: ContainerCase) -> None:
     path = next(case["third_party_wheels"].glob("httpx-*.whl"))
     wheels._mutate_metadata(case["third_party_wheels"],
                            lambda text: text.replace("py3-none-any", "cp311-none-win_amd64"),
@@ -323,7 +341,7 @@ def test_wrong_python_tag_cannot_enter_linux_context(case):
 
 
 @pytest.mark.parametrize("size", [4096, 4097])
-def test_bounded_native_members_without_widening_release_budget(case, monkeypatch, size):
+def test_bounded_native_members_without_widening_release_budget(case: ContainerCase, monkeypatch: pytest.MonkeyPatch, size: int) -> None:
     from agent_index_service import release
 
     assert release._MEMBER_LIMIT == 64 * 1024 * 1024
@@ -333,7 +351,7 @@ def test_bounded_native_members_without_widening_release_budget(case, monkeypatc
     monkeypatch.setattr(release, "_NATIVE_MEMBER_LIMIT", 4096)
     path = next(case["third_party_wheels"].glob("httpx-*.whl"))
 
-    def payload(entries):
+    def payload(entries: dict[str, bytes]) -> dict[str, bytes]:
         return {**entries, "httpx/native.so": b"x" * size}
 
     wheels._rewrite(path, payload)
@@ -356,7 +374,7 @@ def test_bounded_native_members_without_widening_release_budget(case, monkeypatc
 @pytest.mark.parametrize("platform,architecture,minimum", [
     ("linux/amd64", "x86_64", 5), ("linux/arm64", "aarch64", 17),
 ])
-def test_manylinux_policy_floor_matches_architecture(platform, architecture, minimum):
+def test_manylinux_policy_floor_matches_architecture(platform: str, architecture: str, minimum: int) -> None:
     from packaging.tags import Tag
 
     tags = replace(TARGET, platform=platform).tags()
@@ -364,7 +382,7 @@ def test_manylinux_policy_floor_matches_architecture(platform, architecture, min
     assert Tag("py3", "none", f"manylinux_2_{minimum - 1}_{architecture}") not in tags
 
 
-def test_unsupported_old_arm_policy_cannot_enter_context(case):
+def test_unsupported_old_arm_policy_cannot_enter_context(case: ContainerCase) -> None:
     path = next(case["third_party_wheels"].glob("httpx-*.whl"))
     wheels._mutate_metadata(case["third_party_wheels"],
                            lambda text: text.replace("py3-none-any", "py3-none-manylinux_2_16_aarch64"),
@@ -380,7 +398,7 @@ def test_unsupported_old_arm_policy_cannot_enter_context(case):
 
 
 @pytest.mark.parametrize("name", ["Dockerfile", ".dockerignore"])
-def test_recipe_tamper_rejected_before_any_docker_execution(case, monkeypatch, name, tmp_path):
+def test_recipe_tamper_rejected_before_any_docker_execution(case: ContainerCase, monkeypatch: pytest.MonkeyPatch, name: str, tmp_path: Path) -> None:
     result = prepare(case)
     (case["output"] / name).write_text("tampered recipe or ignore")
     docker = tmp_path / "docker"
@@ -392,7 +410,7 @@ def test_recipe_tamper_rejected_before_any_docker_execution(case, monkeypatch, n
         )
 
 
-def test_builder_uses_only_captured_bytes_after_verification(case, monkeypatch, tmp_path):
+def test_builder_uses_only_captured_bytes_after_verification(case: ContainerCase, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     result = prepare(case)
     expected = {str(path.relative_to(case["output"])).replace("\\", "/"): path.read_bytes()
                 for path in case["output"].rglob("*") if path.is_file()}
@@ -400,7 +418,7 @@ def test_builder_uses_only_captured_bytes_after_verification(case, monkeypatch, 
     docker.write_bytes(b"fake executable")
     commands = []
 
-    def run(argv, *, cwd, env, deadline, input_stream=None, operation_label=None):
+    def run(argv: list[str], *, cwd: Path, env: dict[str, str], deadline: float, input_stream: BinaryIO | None=None, operation_label: str | None=None) -> str:
         commands.append(argv)
         assert "--context" in argv
         if "inspect" in argv:
@@ -415,7 +433,11 @@ def test_builder_uses_only_captured_bytes_after_verification(case, monkeypatch, 
         assert "CONTEXT_SHA256=" + result["contract_sha256"] in argv
         assert str(case["output"]) not in argv
         with tarfile.open(fileobj=input_stream, mode="r") as snapshot:
-            actual = {item.name: snapshot.extractfile(item).read() for item in snapshot.getmembers()}
+            actual = {}
+            for item in snapshot.getmembers():
+                stream = snapshot.extractfile(item)
+                assert stream is not None
+                actual[item.name] = stream.read()
         assert actual == expected
         container.Path(argv[argv.index("--iidfile") + 1]).write_text("sha256:" + "b" * 64)
         return ""
@@ -430,14 +452,14 @@ def test_builder_uses_only_captured_bytes_after_verification(case, monkeypatch, 
 
 
 @pytest.mark.parametrize("digest", ["a" * 64, "A" * 64, "", "too short"])
-def test_independent_context_pin_must_match_before_builder(case, monkeypatch, digest):
+def test_independent_context_pin_must_match_before_builder(case: ContainerCase, monkeypatch: pytest.MonkeyPatch, digest: str) -> None:
     prepare(case)
     monkeypatch.setattr(container, "_run", lambda *a, **kw: pytest.fail("Docker must not start"))
     with pytest.raises(ContainerError):
         container.build_container_context(case["output"], expected_contract_sha256=digest)
 
 
-def test_inside_build_argument_digest_mismatch_is_explicit(case):
+def test_inside_build_argument_digest_mismatch_is_explicit(case: ContainerCase) -> None:
     prepare(case)
     script = case["output"] / "verify-and-install.py"
     command = [sys.executable, "-I", "-B", "-S", str(script), "--verify-only"]
@@ -450,12 +472,12 @@ def test_inside_build_argument_digest_mismatch_is_explicit(case):
 
 
 @pytest.mark.parametrize("failure", [TimeoutError("timeout"), KeyboardInterrupt(), OSError("failed")])
-def test_builder_failure_reports_daemon_uncertainty(case, monkeypatch, tmp_path, failure):
+def test_builder_failure_reports_daemon_uncertainty(case: ContainerCase, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure: BaseException) -> None:
     prepared = prepare(case)
     docker = tmp_path / "docker"
     docker.write_bytes(b"fake executable")
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> str:
         if "inspect" in argv:
             return '{"os":"linux","architecture":"amd64"}'
         raise failure
@@ -468,7 +490,7 @@ def test_builder_failure_reports_daemon_uncertainty(case, monkeypatch, tmp_path,
     assert raised.value.__cause__ is failure
 
 
-def test_snapshot_limits_fail_before_builder(case, monkeypatch):
+def test_snapshot_limits_fail_before_builder(case: ContainerCase, monkeypatch: pytest.MonkeyPatch) -> None:
     result = prepare(case)
     monkeypatch.setattr(container, "_CONTEXT_LIMIT", 100)
     monkeypatch.setattr(container, "_run", lambda *a, **kw: pytest.fail("Docker must not start"))
@@ -478,11 +500,13 @@ def test_snapshot_limits_fail_before_builder(case, monkeypatch):
         )
 
 
-def test_race_during_snapshot_capture_is_not_accepted(case, monkeypatch):
+def test_race_during_snapshot_capture_is_not_accepted(case: ContainerCase, monkeypatch: pytest.MonkeyPatch) -> None:
     result = prepare(case)
     actual_add = tarfile.TarFile.addfile
 
-    def race(archive, info, fileobj=None):
+    def race(
+        archive: tarfile.TarFile, info: tarfile.TarInfo, fileobj: BinaryIO | None = None,
+    ) -> None:
         if info.name == "Dockerfile":
             with (case["output"] / "Dockerfile").open("ab") as output:
                 output.write(b"changed")
@@ -497,7 +521,7 @@ def test_race_during_snapshot_capture_is_not_accepted(case, monkeypatch):
 
 
 @pytest.mark.parametrize("cleanup", [OSError("cleanup IO"), ValueError("cleanup fence")])
-def test_preparation_cleanup_error_keeps_primary_failure(case, monkeypatch, cleanup):
+def test_preparation_cleanup_error_keeps_primary_failure(case: ContainerCase, monkeypatch: pytest.MonkeyPatch, cleanup: BaseException) -> None:
     primary = ValueError("primary snapshot mismatch")
     monkeypatch.setattr(container, "_copy", lambda *a, **kw: (_ for _ in ()).throw(primary))
     monkeypatch.setattr(container.shutil, "rmtree",
@@ -510,11 +534,11 @@ def test_preparation_cleanup_error_keeps_primary_failure(case, monkeypatch, clea
     assert case["output"].exists()
 
 
-def test_preparation_missing_output_does_not_mask_primary(case, monkeypatch):
+def test_preparation_missing_output_does_not_mask_primary(case: ContainerCase, monkeypatch: pytest.MonkeyPatch) -> None:
     primary = ValueError("primary snapshot mismatch")
     real_remove = container.shutil.rmtree
 
-    def fail(source, target, expected):
+    def fail(source: Path, target: Path, expected: str) -> None:
         real_remove(case["output"])
         raise primary
 
@@ -524,7 +548,7 @@ def test_preparation_missing_output_does_not_mask_primary(case, monkeypatch):
     assert raised.value.__cause__ is primary
 
 
-def test_unknown_preparation_ownership_never_deletes_output(tmp_path):
+def test_unknown_preparation_ownership_never_deletes_output(tmp_path: Path) -> None:
     output = tmp_path / "output"
     output.mkdir()
     (output / "unrelated").write_text("keep")
@@ -540,14 +564,14 @@ def test_unknown_preparation_ownership_never_deletes_output(tmp_path):
     " --hash=sha256:" + "a" * 63, " --hash=sha256:" + "A" * 64,
     " --hash=sha256:" + "a" * 64 + " --index-url=unapproved",
 ])
-def test_existing_hash_lock_rejections_are_preserved(suffix):
+def test_existing_hash_lock_rejections_are_preserved(suffix: str) -> None:
     from agent_index_service.staging import CandidateError, hashed_requirements
 
     with pytest.raises(CandidateError, match="sha256"):
         hashed_requirements(("httpx==0.28.0" + suffix).encode())
 
 
-def test_hash_lock_record_has_precise_typed_shape():
+def test_hash_lock_record_has_precise_typed_shape() -> None:
     from agent_index_service.staging import HashedRequirement, hashed_requirements
 
     assert set(HashedRequirement.__annotations__) == {"version", "extras", "sha256"}
@@ -556,7 +580,7 @@ def test_hash_lock_record_has_precise_typed_shape():
     ) == {"httpx": {"version": "0.28.0", "extras": ["http2"], "sha256": ["a" * 64]}}
 
 
-def test_cleanup_symlink_swap_preserves_primary_and_other_tree(tmp_path):
+def test_cleanup_symlink_swap_preserves_primary_and_other_tree(tmp_path: Path) -> None:
     output, outside = tmp_path / "output", tmp_path / "outside"
     output.mkdir()
     identity = output.stat()
@@ -574,7 +598,7 @@ def test_cleanup_symlink_swap_preserves_primary_and_other_tree(tmp_path):
     assert (outside / "keep").read_text() == "unrelated"
 
 
-def test_valid_build_argument_and_wrong_pin_are_independent(case):
+def test_valid_build_argument_and_wrong_pin_are_independent(case: ContainerCase) -> None:
     prepared = prepare(case)
     script = case["output"] / "verify-and-install.py"
     command = [sys.executable, "-I", "-B", "-S", str(script), "--verify-only"]
@@ -585,7 +609,7 @@ def test_valid_build_argument_and_wrong_pin_are_independent(case):
     assert json.loads(result.stdout) == {"verified": True}
 
 
-def test_snapshot_metadata_and_bytes_ignore_input_timestamps(case):
+def test_snapshot_metadata_and_bytes_ignore_input_timestamps(case: ContainerCase) -> None:
     import io
 
     prepared = prepare(case)
@@ -605,7 +629,7 @@ def test_snapshot_metadata_and_bytes_ignore_input_timestamps(case):
             assert (entry.mtime, entry.uid, entry.gid, entry.uname, entry.gname) == (0, 0, 0, "", "")
 
 
-def test_unrelated_build_tokens_do_not_infer_docker_operations():
+def test_unrelated_build_tokens_do_not_infer_docker_operations() -> None:
     from agent_index_service.staging import _operation
 
     assert _operation(["python", "-c", "pass", "build"]) == "isolated runtime probe"

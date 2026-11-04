@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+from typing import Any, TYPE_CHECKING, cast
+from pathlib import Path
+if TYPE_CHECKING:
+    from zdd.routing import Endpoint
+    from agent_index.indexing.task_store import TaskStore
+    from agent_index.client import AgentIndexClient
+
 import json
 import os
 import subprocess
@@ -10,24 +17,30 @@ import time
 import httpx
 import pytest
 import yaml
-from _service_process import owned_python
-from test_hosted import _seed, _wait_route, warm_engine  # noqa: F401 - registers fixture
+if TYPE_CHECKING:
+    from services.index.tests._service_process import owned_python
+    from services.index.tests.test_hosted import (
+        EngineCalls, WarmEngine, _seed, _wait_route, warm_engine,  # noqa: F401
+    )
+else:
+    from _service_process import owned_python
+    from test_hosted import _seed, _wait_route, warm_engine  # noqa: F401 - registers fixture
 
 from agent_index_service import __version__
-from agent_index_service.config import load_config
+from agent_index_service.config import HostConfig, load_config
 
 
-def _wait_file(path, process):
+def _wait_file(path: Path, process: subprocess.Popen[bytes]) -> dict[str, Any]:
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         if path.is_file():
-            return json.loads(path.read_text(encoding="utf-8"))
+            return cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
         assert process.poll() is None, "owned worker exited before attesting its identity"
         time.sleep(0.05)
     raise AssertionError("owned worker did not publish its identity within 15s")
 
 
-def _wait_dead(pid):
+def _wait_dead(pid: int) -> None:
     from agent_index.rendezvous import pid_alive
 
     deadline = time.monotonic() + 15
@@ -38,18 +51,22 @@ def _wait_dead(pid):
     raise AssertionError(f"owned service pid {pid} did not exit within 15s")
 
 
-def _assert_queue(store, active_id, worker_pid, pending_id):
+def _assert_queue(store: TaskStore, active_id: str, worker_pid: int, pending_id: str) -> None:
     active = store.get_task(active_id)
+    assert active is not None
     assert active.status == "processing"
     assert active.worker_pid == worker_pid
     assert active.attempt_count == 1
     pending = store.get_task(pending_id)
+    assert pending is not None
     assert pending.status == "queued"
     assert pending.source == "git:queued"
     assert store.get_pending_count() == 1
 
 
-def _assert_successor(config, route, worker_id, chunk_id, calls):
+def _assert_successor(
+    config: HostConfig, route: Endpoint, worker_id: str, chunk_id: str, calls: EngineCalls,
+) -> AgentIndexClient:
     from agent_index.client import AgentIndexClient
 
     client = AgentIndexClient(route.base_url)
@@ -81,9 +98,9 @@ def _assert_successor(config, route, worker_id, chunk_id, calls):
 
 @pytest.mark.parametrize("installation_id", [None, "native-deployment-instance"])
 def test_real_deploy_survives_updater_and_preserves_config_queue(
-    config_file, config_data, tmp_path, warm_engine,  # noqa: F811 - imported pytest fixture
-    installation_id,
-):
+    config_file: Path, config_data: dict[str, Any], tmp_path: Path, warm_engine: WarmEngine,  # noqa: F811 - imported pytest fixture
+    installation_id: str | None,
+) -> None:
     from agent_index.config import machine_id
     from agent_index.indexing.task_store import TaskStore
 
@@ -120,7 +137,9 @@ while True:
             assert identity["pid"] == worker.pid
             store = TaskStore(config.data / "tasks.db")
             active = store.enqueue(source="git:fixture", trigger_source="isolated-test")
-            assert store.dequeue_next().id == active.id
+            dequeued = store.dequeue_next()
+            assert dequeued is not None
+            assert dequeued.id == active.id
             store.set_worker(active.id, worker.pid, machine_id(), __version__)
             pending = store.enqueue(source="git:queued", trigger_source="isolated-test")
             arguments = [
@@ -200,11 +219,13 @@ while True:
                             client = _assert_successor(
                                 config, second_route, active.id, chunk_id, calls,
                             )
+                            assert first_route.pid is not None
                             _wait_dead(first_route.pid)
                             _assert_queue(store, active.id, worker.pid, pending.id)
                             assert worker.poll() is None
                             assert [path for path, _ in calls] == ["/embed"] * 3
                             assert client.shutdown()["shutdown"] is True
+                            assert second_route.pid is not None
                             _wait_dead(second_route.pid)
     assert worker.poll() is not None
     assert not (config.home / "data").exists()
@@ -214,7 +235,7 @@ while True:
 
 
 @pytest.mark.skipif(os.name != "nt", reason="POSIX abrupt-worker cleanup is tested by the outer runner")
-def test_owned_tree_is_reaped_after_assertion_failure(tmp_path):
+def test_owned_tree_is_reaped_after_assertion_failure(tmp_path: Path) -> None:
     receipt = tmp_path / "owned-tree.json"
     script = """
 import json,os,subprocess,sys,time

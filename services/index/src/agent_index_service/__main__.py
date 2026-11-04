@@ -7,9 +7,11 @@ import json
 import math
 import sys
 from pathlib import Path
+from typing import Any, cast
+from collections.abc import Callable
 
 from . import __version__
-from .config import ConfigurationError, load_config
+from .config import ConfigurationError, HostConfig, load_config
 
 
 def _timeout(value: str) -> float:
@@ -77,7 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _serve(config, *, passive: bool = False) -> int:
+def _serve(config: HostConfig, *, passive: bool = False) -> int:
     from agent_procutil.daemon_instances import admit_daemon_instance
 
     with admit_daemon_instance(
@@ -92,7 +94,7 @@ def _serve(config, *, passive: bool = False) -> int:
                 from agent_index.index_config import IndexConfig
                 from agent_index.store.source_layout import initialize_source_store
 
-                initialize_source_store(IndexConfig())
+                cast(Callable[[IndexConfig], Any], initialize_source_store)(IndexConfig())
             core.serve(Config(host="127.0.0.1", port=config.port), passive=passive)
     return 0
 
@@ -171,7 +173,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.command == "deploy":
                 require_installed_core()
                 config.home.mkdir(parents=True, exist_ok=True)
-                return core.cmd_deploy(args)
+                return cast(Callable[[argparse.Namespace], int], core.cmd_deploy)(args)
             payload = core._status_payload()
             payload["distribution"] = "agent-index-service"
             payload["invoked_version"] = __version__

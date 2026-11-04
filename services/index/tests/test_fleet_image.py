@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any, TYPE_CHECKING
+from collections.abc import Callable
+
 import hashlib
 import json
 
 import pytest
-import test_release as wheels
+if TYPE_CHECKING:
+    from services.index.tests import test_release as wheels
+    from services.index.tests.test_container import ContainerCase
+else:
+    import test_release as wheels
 
 from agent_index_service.__main__ import main
 from agent_index_service.container import (
@@ -19,7 +27,7 @@ from agent_index_service.release import ReleaseError, build_descriptor, verify_d
 
 
 @pytest.fixture
-def fleet(tmp_path, monkeypatch):
+def fleet(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ContainerCase:
     monkeypatch.setitem(wheels.EXTRAS, "agent-index-service", ["native", "fleet"])
     monkeypatch.setitem(wheels.EXTRAS, "agent-index", ["store", "server", "fleet"])
     monkeypatch.setitem(wheels.EXTRAS, "fleet-manager", ["auth"])
@@ -58,30 +66,31 @@ def fleet(tmp_path, monkeypatch):
     }
 
 
-def prepare(fleet, **changes):
-    values = {**fleet, **changes}
+def prepare(fleet: ContainerCase, **changes: Any) -> dict[str, Any]:
+    values: dict[str, Any] = {**fleet, **changes}
     descriptor = values.pop("descriptor_path")
     return prepare_container_context(descriptor, **values)
 
 
-def test_explicit_fleet_descriptor_round_trip_and_default_refusal(fleet):
+def test_explicit_fleet_descriptor_round_trip_and_default_refusal(fleet: ContainerCase) -> None:
     path = fleet["descriptor_path"]
     result = verify_descriptor(path, expected_source_commit=wheels.COMMIT, profile="fleet")
     assert result["schema_version"] == 2 and result["profile"] == "fleet"
     assert {item["distribution"] for item in result["artifacts"]} == (
         set(wheels.VERSIONS) | {"fleet-manager"}
     )
-    for operation in (
+    operations: tuple[Callable[[], dict[str, Any]], ...] = (
         lambda: verify_descriptor(path, expected_source_commit=wheels.COMMIT),
         lambda: build_descriptor(path.parent, source_commit=wheels.COMMIT),
         lambda: prepare(fleet, profile="native"),
-    ):
+    )
+    for operation in operations:
         with pytest.raises((ReleaseError, ContainerError)):
             operation()
     assert not fleet["output"].exists()
 
 
-def test_fleet_context_exact_extras_snapshot_and_replay(fleet):
+def test_fleet_context_exact_extras_snapshot_and_replay(fleet: ContainerCase) -> None:
     result = prepare(fleet)
     context = fleet["output"]
     contract = json.loads((context / "context.json").read_text())
@@ -112,7 +121,7 @@ def test_fleet_context_exact_extras_snapshot_and_replay(fleet):
     ("profile", "native"), ("profile", "unknown"), ("schema_version", 1),
     ("schema_version", True),
 ])
-def test_profile_and_schema_are_not_inferred(fleet, field, value):
+def test_profile_and_schema_are_not_inferred(fleet: ContainerCase, field: str, value: object) -> None:
     path = fleet["descriptor_path"]
     descriptor = json.loads(path.read_text())
     descriptor[field] = value
@@ -128,14 +137,14 @@ def test_profile_and_schema_are_not_inferred(fleet, field, value):
     ("agent-index", 'extra == "fleet"', 'extra == "other"'),
     ("agent-index", "fleet-manager[auth]>=0.1", "fleet-manager[auth]>=9"),
 ])
-def test_fleet_requires_declared_compatible_extra_chain(fleet, distribution, old, new):
+def test_fleet_requires_declared_compatible_extra_chain(fleet: ContainerCase, distribution: str, old: str, new: str) -> None:
     bundle = fleet["descriptor_path"].parent
     wheels._mutate_metadata(bundle, lambda text: text.replace(old, new), name=distribution)
     with pytest.raises(ReleaseError):
         build_descriptor(bundle, source_commit=wheels.COMMIT, profile="fleet")
 
 
-def test_missing_first_party_and_wrong_revision_refused(fleet):
+def test_missing_first_party_and_wrong_revision_refused(fleet: ContainerCase) -> None:
     path = fleet["descriptor_path"]
     with pytest.raises(ReleaseError, match="trusted revision"):
         verify_descriptor(path, expected_source_commit="b" * 40, profile="fleet")
@@ -144,14 +153,14 @@ def test_missing_first_party_and_wrong_revision_refused(fleet):
         build_descriptor(path.parent, source_commit=wheels.COMMIT, profile="fleet")
 
 
-def test_auth_transitive_closure_must_be_present(fleet):
+def test_auth_transitive_closure_must_be_present(fleet: ContainerCase) -> None:
     wheels._find(fleet["third_party_wheels"], "cryptography").unlink()
     with pytest.raises(ContainerError, match="closure"):
         prepare(fleet)
     assert not fleet["output"].exists()
 
 
-def test_fleet_manager_cannot_be_disguised_as_third_party(fleet):
+def test_fleet_manager_cannot_be_disguised_as_third_party(fleet: ContainerCase) -> None:
     wheel = wheels._make_wheel(fleet["third_party_wheels"], "fleet-manager", "0.1")
     with fleet["third_party_lock"].open("a") as stream:
         stream.write(f"fleet-manager==0.1 --hash=sha256:{hashlib.sha256(wheel.read_bytes()).hexdigest()}")
@@ -160,7 +169,7 @@ def test_fleet_manager_cannot_be_disguised_as_third_party(fleet):
     assert not fleet["output"].exists()
 
 
-def test_fleet_cli_selects_profile_at_both_release_boundaries(fleet, capsys):
+def test_fleet_cli_selects_profile_at_both_release_boundaries(fleet: ContainerCase, capsys: pytest.CaptureFixture[str]) -> None:
     path = fleet["descriptor_path"]
     assert main(["release", "describe", "--bundle", str(path.parent),
                  "--source-commit", wheels.COMMIT, "--profile", "fleet"]) == 0
@@ -173,7 +182,7 @@ def test_fleet_cli_selects_profile_at_both_release_boundaries(fleet, capsys):
     assert "agent-index-service:" in capsys.readouterr().err
 
 
-def test_fleet_cli_prepares_digest_pinned_context(fleet, capsys):
+def test_fleet_cli_prepares_digest_pinned_context(fleet: ContainerCase, capsys: pytest.CaptureFixture[str]) -> None:
     arguments = ["container", "prepare", "--profile", "fleet"]
     for name in ("descriptor_path", "expected_source_commit", "third_party_lock",
                  "third_party_wheels", "output", "base_image"):

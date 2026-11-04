@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import json
 import sys
 from types import SimpleNamespace
+import pytest
 
 from agent_index_service.__main__ import main
 
 
-def test_stage_cli_builds_only_explicit_candidate_request(tmp_path, monkeypatch, capsys):
+def test_stage_cli_builds_only_explicit_candidate_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     calls = []
 
-    def stage(descriptor, **kwargs):
+    def stage(descriptor: Path, **kwargs: Any) -> dict[str, Any]:
         calls.append((descriptor, kwargs))
         return {"state": "staged"}
 
@@ -42,10 +46,10 @@ def test_stage_cli_builds_only_explicit_candidate_request(tmp_path, monkeypatch,
     assert not any(path.exists() for path in paths.values())
 
 
-def test_candidate_inspection_is_not_host_status_or_runtime_selection(tmp_path, monkeypatch, capsys):
+def test_candidate_inspection_is_not_host_status_or_runtime_selection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     calls = []
 
-    def inspect(root, **kwargs):
+    def inspect(root: Path, **kwargs: Any) -> dict[str, Any]:
         calls.append((root, kwargs))
         return {"candidates": []}
 
@@ -59,8 +63,8 @@ def test_candidate_inspection_is_not_host_status_or_runtime_selection(tmp_path, 
     assert not root.exists()
 
 
-def test_staging_failure_is_explicit_not_success(tmp_path, monkeypatch, capsys):
-    def inspect(*args, **kwargs):
+def test_staging_failure_is_explicit_not_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    def inspect(*args: Any, **kwargs: Any) -> dict[str, Any]:
         raise ValueError("incomplete candidate")
 
     monkeypatch.setitem(sys.modules, "agent_index_service.staging", SimpleNamespace(

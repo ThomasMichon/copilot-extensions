@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any, TYPE_CHECKING
+
 import os
 import hashlib
 import stat
 from types import SimpleNamespace
 
 import pytest
-from test_staging import case as staging_case  # noqa: F401 - shared pytest fixture
-from test_staging import original_run, stage, tree
+if TYPE_CHECKING:
+    from services.index.tests.test_staging import StagingCase, original_run, stage, tree
+    from services.index.tests.test_staging import case as staging_case  # noqa: F401
+else:
+    from test_staging import case as staging_case  # noqa: F401 - shared pytest fixture
+    from test_staging import original_run, stage, tree
 
 from agent_index_service import staging
 from agent_index_service.staging import CandidateError
@@ -18,8 +25,8 @@ from agent_index_service.staging import CandidateError
 @pytest.mark.parametrize("interrupt", [False, True])
 @pytest.mark.parametrize("unlink_fails", [False, True])
 def test_teardown_failure_always_attempts_secret_output_removal(
-    staging_case, monkeypatch, interrupt, unlink_fails,  # noqa: F811 - imported fixture
-):
+    staging_case: StagingCase, monkeypatch: pytest.MonkeyPatch, interrupt: bool, unlink_fails: bool,  # noqa: F811 - imported fixture
+) -> None:
     import agent_procutil
 
     error = KeyboardInterrupt() if interrupt else TypeError("unexpected Job failure")
@@ -29,7 +36,7 @@ def test_teardown_failure_always_attempts_secret_output_removal(
     )
     output_paths = []
 
-    def spawn(argv, **kwargs):
+    def spawn(argv: list[str], **kwargs: Any) -> object:
         kwargs["stdout"].write(b"credential-output-sentinel")
         kwargs["stdout"].flush()
         output_paths.append(kwargs["stdout"].name)
@@ -40,7 +47,7 @@ def test_teardown_failure_always_attempts_secret_output_removal(
     actual_unlink = staging.Path.unlink
     attempts = []
 
-    def unlink(path, *args, **kwargs):
+    def unlink(path: Path, *args: Any, **kwargs: Any) -> None:
         if path.name.startswith(".build-output-"):
             attempts.append(path)
             if unlink_fails:
@@ -58,16 +65,17 @@ def test_teardown_failure_always_attempts_secret_output_removal(
     assert "credential-output-sentinel" not in str(raised.value)
     if unlink_fails:
         assert "output cleanup unconfirmed" in str(raised.value)
+        assert raised.value.__cause__ is not None
         assert raised.value.__cause__.__context__ is not None
     else:
         assert raised.value.__cause__ is error
 
 
-def test_receipt_creation_is_exclusive_private_at_open(tmp_path, monkeypatch):
+def test_receipt_creation_is_exclusive_private_at_open(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     actual_open = staging.os.open
     calls = []
 
-    def capture(path, flags, mode):
+    def capture(path: Path, flags: int, mode: int) -> int:
         calls.append((path, flags, mode))
         return actual_open(path, flags, mode)
 
@@ -82,13 +90,13 @@ def test_receipt_creation_is_exclusive_private_at_open(tmp_path, monkeypatch):
         assert stat.S_IMODE(destination.stat().st_mode) == 0o600
 
 
-def test_copy_final_path_revalidation_retains_source_change_diagnostic(tmp_path, monkeypatch):
+def test_copy_final_path_revalidation_retains_source_change_diagnostic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     source, target = tmp_path / "source.whl", tmp_path / "snapshot.whl"
     source.write_bytes(b"fixture")
     actual_path = staging._path
     checks = []
 
-    def changed(path, **kwargs):
+    def changed(path: Path, **kwargs: Any) -> Path:
         checks.append(path)
         if len(checks) == 2:
             raise CandidateError("source path became a symlink")
@@ -105,8 +113,8 @@ def test_copy_final_path_revalidation_retains_source_change_diagnostic(tmp_path,
     ("uv_config", "uv configuration must be UTF-8"),
 ])
 def test_invalid_policy_encoding_is_specific_without_mutation(
-    staging_case, kind, label,  # noqa: F811 - imported fixture
-):
+    staging_case: StagingCase, kind: str, label: str,  # noqa: F811 - imported fixture
+) -> None:
     getattr(staging_case.build, kind).write_bytes(b"\xff\xfeencoding-sentinel")
     with pytest.raises(CandidateError, match=label):
         stage(staging_case)
@@ -120,8 +128,8 @@ def test_invalid_policy_encoding_is_specific_without_mutation(
     ("identity", "candidate identity conflict"),
 ])
 def test_existing_completed_receipt_failure_is_contextual_and_preserved(
-    staging_case, kind, label,  # noqa: F811 - imported fixture
-):
+    staging_case: StagingCase, kind: str, label: str,  # noqa: F811 - imported fixture
+) -> None:
     first = stage(staging_case)
     slot = staging.Path(first["slot"])
     if kind == "missing":

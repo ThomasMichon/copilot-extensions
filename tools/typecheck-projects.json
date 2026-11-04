@@ -532,7 +532,8 @@
         "services/index"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict",
+      "requirements": "tools/typecheck-service-index-requirements.txt"
     },
     {
       "name": "service-pr",
