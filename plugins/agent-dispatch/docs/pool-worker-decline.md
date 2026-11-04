@@ -86,6 +86,9 @@ pool assignment and requests native retirement. Task-wide 1/3/6/12-hour
 cooldown preserves any later scheduled due time; startup history and the
 escalation stage are not reset. The original reservation remains `RELEASING`,
 startup-fenced and capacity-accountable until normal exact-native retirement.
+The existing startup snapshot client accepts the retained `worker_declined`
+exhaustion reason, with its finite exhaustion time and original budget binding.
+Unknown reasons and inconsistent exhaustion timestamps still refuse.
 No process is stopped and no checkout is removed. Direct worker claiming
 cannot bypass this allocator-owned history.
 

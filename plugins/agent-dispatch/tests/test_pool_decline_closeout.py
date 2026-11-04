@@ -7,9 +7,11 @@ import subprocess
 from dataclasses import asdict
 from threading import Barrier, Event
 
+import httpx
 import pytest
 
 from agent_dispatch import pool_decline_observation as observation
+from agent_dispatch.client import DispatchError
 from agent_dispatch.queue import TaskError, TaskQueue
 from agent_dispatch.queue_records import SpawnState, Status
 from tests import test_pool_placement_client as controls
@@ -191,6 +193,47 @@ def test_later_due_time_and_cooldown_stage_survive_decline(q, ready):
     q.close_pool_decline(task_id, **binding)
     assert q.get(task_id).not_before == 100000
     assert q.pool_startup(task_id).cooldown_stage == 4
+
+
+@pytest.mark.parametrize("corruption", [None, "exhaustion_reason", "exhausted_at"])
+def test_client_observes_declined_cooldown_without_accepting_invalid_budget(
+    q, api, ready, corruption,
+):
+    from tests.test_pool_placement import headers
+
+    task_id, binding, _, _ = ready
+    response = api.post(
+        f"/tasks/{task_id}/pool-decline/closeout", headers=headers(),
+        json={"version": 1, **binding},
+    )
+    assert response.status_code == 200
+    retained = q.pool_startup_snapshot(task_id)
+    requests = []
+
+    def rewrite(request: httpx.Request, response: httpx.Response) -> httpx.Response:
+        if corruption is None or request.url.path.endswith("/contract"):
+            return response
+        payload = response.json()
+        payload["result"]["budget"][corruption] = (
+            "unknown_reason" if corruption == "exhaustion_reason" else None
+        )
+        return httpx.Response(200, json=payload)
+
+    with controls.connected(api, requests, rewrite=rewrite) as client:
+        if corruption is not None:
+            with pytest.raises(DispatchError, match="invalid budget observation"):
+                client.pool_startup_snapshot(task_id)
+        else:
+            observed = client.pool_startup_snapshot(task_id)
+            assert observed == json.loads(json.dumps(retained))
+            assert observed["budget"]["exhaustion_reason"] == "worker_declined"
+            assert observed["budget"]["cooldown_stage"] == 1
+            assert observed["budget"]["startup_attempts"] == 1
+            assert observed["task"]["generation"] == binding["generation"] + 1
+            assert observed["reservation"]["state"] == SpawnState.RELEASING
+            assert observed["native_id"] == binding["native_id"]
+    assert all(request.method == "GET" for request in requests)
+    assert q.pool_startup_snapshot(task_id) == retained
 
 
 @pytest.mark.parametrize("original_driver", ["cli", "ordinary-bridge"])

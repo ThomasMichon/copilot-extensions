@@ -22,7 +22,8 @@ Its source merged in [#10306](https://github.com/ThomasMichon/copilot-extensions
 The [local coordinator observation and atomic routing/requeue slice](journal/2026/11.03-local-decline-closeout.md)
 is published in [#10319](https://github.com/ThomasMichon/copilot-extensions/pull/10319).
 Its drain, allocation-driver and replacement-creation review corrections have
-focused source controls passing; the revised review/merge gate remains open.
+focused source controls passing, including retained decline-budget snapshots
+through the existing client; the revised review/merge gate remains open.
 Ordinary/remote decline integration and installed/native
 qualification remain open.
 
