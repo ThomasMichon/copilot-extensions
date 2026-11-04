@@ -4200,9 +4200,9 @@ def _resident_hook_decision(
 
     cwd = _hook_payload_cwd(payload)
     if kind == "snapshot" and git_ops._windows_observation():
-        retained = segment_cache.project_for_observation_path(cwd)
-        if segment_cache.observation_blocked(retained or "", cwd) or segment_cache.observation_busy():
-            return {"segment": segment_cache.pending_segment_for_path(cwd)}
+        segment = segment_cache.snapshot(cwd)
+        if segment is not None:
+            return {"segment": segment}
     previous_project = cfg.active_project()
     segment_cache.activate_hook_project(cwd, _activate_project_for_path)
     try:

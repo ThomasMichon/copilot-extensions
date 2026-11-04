@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess
 import copy
 import threading
+import time
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
@@ -55,6 +56,49 @@ def test_active_observation_is_not_reported_as_unsettled_cleanup(owner, monkeypa
     owner.retain_cleanup(ticket, pt.ObservationCleanupError("retained"))
     assert owner.get("/repo/wt") == owner.pending_segment()
     assert owner.observation_counts() == (0, 1)
+
+
+@pytest.mark.parametrize("entry", ["segment", "snapshot"])
+def test_active_observation_keeps_fresh_completed_segment(owner, monkeypatch, entry):
+    path = "/repo/wt"
+    key = owner._key(path)
+    original = (time.monotonic(), "last completed status")
+    owner._entries[key] = original
+    owner._entry_projects[key] = "A"
+    owner._aliases[owner._key(path + "/nested")] = key
+    ticket = owner.begin_observation("A", "/repo", "/repo/other")
+    monkeypatch.setattr(core, "_find_record_for_path", lambda *a: pytest.fail("new Git lookup"))
+    monkeypatch.setattr(core, "_activate_project_for_path", lambda *a, **k: pytest.fail("activation"))
+    if entry == "segment":
+        result = owner.get(path + "/nested")
+    else:
+        result = core._resident_hook_decision(
+            "snapshot", {"cwd": path + "/nested"}, segment_cache=owner, policy=object(),
+        )["segment"]
+    assert result == original[1]
+    assert owner._entries[key] == original
+    assert next(iter(owner._observations.values())) is ticket
+    assert owner.observation_counts() == (1, 0)
+
+
+@pytest.mark.parametrize("condition", ["expired", "invalidated", "cleanup", "retiring"])
+def test_completed_segment_does_not_override_observation_fences(owner, monkeypatch, condition):
+    path = "/repo/wt"
+    key = owner._key(path)
+    observed = time.monotonic() - (owner.ttl + 1 if condition == "expired" else 0)
+    owner._entries[key] = original = (observed, "last completed status")
+    owner._entry_projects[key] = "A"
+    ticket = owner.begin_observation("A", "/repo", "/repo/other")
+    if condition == "invalidated":
+        owner.invalidate(path)
+    elif condition == "cleanup":
+        owner.retain_cleanup(ticket, pt.ObservationCleanupError("retained"))
+    elif condition == "retiring":
+        owner.close_observation_admission()
+    monkeypatch.setattr(core, "_find_record_for_path", lambda *a: pytest.fail("new Git lookup"))
+    assert owner.get(path).startswith("UNKNOWN (")
+    assert owner._entries[key] == original
+    assert next(iter(owner._observations.values())) is ticket
 
 
 def test_status_reason_follows_only_the_matching_observation_scope(owner):

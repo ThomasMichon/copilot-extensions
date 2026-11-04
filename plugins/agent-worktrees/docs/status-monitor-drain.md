@@ -39,6 +39,11 @@ The former means a matching observation is still running; the latter means its
 owner retained unsettled native cleanup. `observation retiring` identifies closed
 admission without a matching cleanup ticket. These labels do not release custody,
 refresh cached Git facts, or change drain readiness.
+An already completed, uninvalidated mux segment within its existing freshness
+window can still be read during ordinary observation and mutation-lock
+contention. This read-only snapshot neither renews its age nor acquires another
+observation. Cleanup custody, closed admission, expiry and invalidation still
+prevent reuse; an unavailable segment retains the explicit UNKNOWN reason.
 
 ## What actually happens
 
