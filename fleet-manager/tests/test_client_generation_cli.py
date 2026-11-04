@@ -443,7 +443,7 @@ def test_actual_installed_console_generation_transitions(
 
 @pytest.mark.timeout(90)
 @pytest.mark.parametrize("transition", [
-    "retry", "forward-missing", "forward-malformed", "higher", "uninstall", "foreign",
+    "retry", "forward-missing", "forward-malformed", "higher", "uninstall", "foreign", "legacy",
 ])
 def test_actual_installed_console_managed_lifecycle(tmp_path_factory, primitive, signed_wheel, transition):
     from fleet_manager import client_generation_frontdoor as frontdoor
@@ -478,12 +478,12 @@ def test_actual_installed_console_managed_lifecycle(tmp_path_factory, primitive,
     contract = json.loads(declared.stdout)
     assert contract["schema"] == "fleet-manager.client-lifecycle-contract" and contract["version"] == 1
     assert contract["capabilities"]["explicit-generation-installation-v1"]["requires_explicit_command_replacement"]
-    base = ["--root", str(root), "--identity", str(paths["identity"])]
 
-    def invoke(operation, *arguments, success=True):
+    def invoke(operation, *arguments, success=True, command="client-generation", location=root):
         started = time.monotonic()
         result = subprocess.run(
-            [str(console), "client-generation", operation, *base, *arguments],
+            [str(console), command, operation, "--root", str(location),
+             "--identity", str(paths["identity"]), *arguments],
             cwd=area, capture_output=True, text=True, timeout=45, **FLAGS,
         )
         print("MANAGED_CLI_TIMING " + json.dumps({
@@ -495,7 +495,22 @@ def test_actual_installed_console_managed_lifecycle(tmp_path_factory, primitive,
             return json.loads(result.stdout)
         assert not result.stdout and "fleet-manager" in result.stderr and "Traceback" not in result.stderr
 
-    def install(generation=FIRST, request="managed-1", *, replace=True, success=True):
+    legacy = area / "legacy" if transition == "legacy" else None
+    if legacy is not None:
+        assert contract["capabilities"]["explicit-legacy-generation-installation-v1"]["requires_explicit_legacy_root"]
+        private_directory(legacy)
+        invoke("initialize", command="client-state", location=legacy)
+        admitted = invoke(
+            "admit", *[
+                item for name in ("selection", "release", "proof", "policy", "sources")
+                for item in ("--" + name, str(paths[name]))
+            ], "--staging-parent", str(stage), command="client-state", location=legacy,
+        )["admitted"]
+        legacy_bytes = database_bytes(legacy)
+        legacy_settings = legacy / "configuration"
+        legacy_settings.write_bytes(b"preserved legacy configuration")
+
+    def install(generation=FIRST, request="managed-1", *, replace=True, success=True, origin=legacy):
         sources = [
             item for name in ("selection", "release", "proof", "policy", "sources", "target")
             for item in ("--" + name, str(paths[name]))
@@ -503,7 +518,8 @@ def test_actual_installed_console_managed_lifecycle(tmp_path_factory, primitive,
         return invoke(
             "install", *sources, "--staging-parent", str(stage),
             "--command-directory", str(directory), "--generation", generation, "--request", request,
-            *(["--replace-commands"] if replace else []), success=success,
+            *(["--replace-commands"] if replace else []),
+            *(["--legacy-root", str(origin)] if origin is not None else []), success=success,
         )
 
     install(replace=False, success=False)
@@ -518,7 +534,24 @@ def test_actual_installed_console_managed_lifecycle(tmp_path_factory, primitive,
     commands = states([Path(path) for path in first["commands"]])
     configuration = root / "configuration"
     configuration.write_bytes(b"preserved user configuration")
-    if transition == "foreign":
+    if transition == "legacy":
+        inspected = invoke("inspect")
+        assert inspected["admitted"] == inspected["origin"]["legacy"]["admitted"] == admitted
+        assert inspected["origin"]["legacy"]["location"]["path"] == str(legacy)
+        assert database_bytes(legacy) == legacy_bytes
+        install(origin=area / "unrelated-legacy", success=False)
+        assert database_bytes(root) == before
+        assert states([Path(path) for path in first["commands"]]) == commands
+        preserved = area / "retained-legacy"
+        legacy.rename(preserved)
+        assert not legacy.exists()
+        retry = install()
+        assert retry["construction_reused"] and retry["reused"] and not retry["mutations_performed"]
+        assert retry["publication"] == first["publication"] and retry["reservation"] == first["reservation"]
+        assert database_bytes(root) == before and database_bytes(preserved) == legacy_bytes
+        assert states([Path(path) for path in first["commands"]]) == commands
+        assert (preserved / "configuration").read_bytes() == b"preserved legacy configuration"
+    elif transition == "foreign":
         command = Path(first["commands"][0])
         replacement = directory / "foreign"
         replacement.write_bytes(command.read_bytes())

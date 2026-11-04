@@ -1,0 +1,9 @@
+{
+  "comment": "Compose explicit legacy-floor import with managed client generation install and predecessor-independent retry.",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}
