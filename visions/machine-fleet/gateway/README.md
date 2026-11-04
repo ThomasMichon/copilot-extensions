@@ -3,7 +3,7 @@
 - **Subject:** A reusable, live-configured Gateway for declared services and outbound role channels
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-26
+- **Last revised:** 2026-11-04
 
 ## Purpose & Intent
 
@@ -202,6 +202,15 @@ They supply supervision, persistent storage, bootstrap configuration and health
 integration rather than forking Gateway logic. Platform packaging is independent
 of the live service manifest, so changing a service does not require a wrapper
 release. Architecture and resource support are declared and qualified honestly.
+
+An adopter selects Gateway and SSH participation through ordinary role setup,
+not by assembling foreground commands or depending on an interactive client to
+keep services alive. The same lifecycle realizes installation, explicit update,
+stop and recovery for the selected roles, while client-only installation stays
+inert. Gateway provisioning, machine enrollment, local profile convergence and
+authenticated mesh readiness remain separately observable outcomes. A later
+machine joins the same declared fleet without a private implementation fork,
+copied identity cache or another installer.
 
 ## Behaviors
 

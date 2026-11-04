@@ -37,6 +37,7 @@ resource acquisition and identity bindings remain external adapters.
 | `squeaky-buckle` | Completed bounded foreground Fleet SSH directory/local-writer consumer after merged #8000; no installation or deployment | Merged #8910; bounded source reservation settled |
 | `restless-actuator` | Non-editable installed SSH runtime and source-denying native consumer qualification | #6681 source reservation6397956631 |
 | `patient-bearing` | Operator-allocated continuity/bootstrap source and the origin-owned remote allocation prerequisite | #6681 source allocation6408998175; [bootstrap boundary](continuity-bootstrap.md#selected-executable-slice); #5839 [allocation slice](origin-owned-allocation.md) |
+| `lopsided-staple` | Additive selected-role setup vision and contract proposal only; no executable path or effect reservation | #6681 comment6627714091; [role-host setup](role-host-setup.md) |
 
 ## Coordination
 
@@ -145,6 +146,12 @@ README/harness-context selection, already-authenticated user continuity,
 scoped Gateway enrollment before SSH and separate ordinary human sessions.
 It preserves the retained owners below and the separately selected
 [peer-approval policy](peer-approval.md); it is not delivered setup behavior.
+
+The [ordinary selected-role setup amendment](role-host-setup.md) connects
+foreground Gateway/SSH hosting to the existing release, construction,
+admission and lifecycle owners. It is an **agent-recommended proposal**,
+not another installer, an allocation of their source paths or a claim that
+normal role setup has been delivered.
 
 ### Portable setup modules and operation ownership
 
@@ -348,6 +355,9 @@ onboarded merely because its source is published.
 
 ### Phase 1 - Reviewed integration and ownership
 
+- [ ] Review the [selected-role setup contract](role-host-setup.md), then admit
+  its bounded implementation through the existing construction and lifecycle
+  owners rather than relabel client installation or foreground serving.
 - [x] Reconcile this proposal with the existing parent plans and current source.
 - [x] Obtain the retained construction/admission owner's exact policy/runtime
   leaf interface and exclusive-file agreement.
@@ -448,6 +458,9 @@ not installation, credential or live-adoption authority.
 
 ## Validation Plan
 
+- [ ] Complete the [selected-role setup acceptance](role-host-setup.md#validation-and-completion)
+  with actual role-selected installed artifacts, finite service ownership,
+  first-touch/repeat/update/recovery and thin-client-only negative evidence.
 - [x] Pair/schema: explicit roles, matching legacy projection, malformed and
   conflicting declarations, unchanged legacy scalar/project-only behavior,
   and no knowledge-only executable target.
