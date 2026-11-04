@@ -153,6 +153,13 @@ whole program, unsigned-candidate versus authenticated-delivery boundary and
 existing owners. The historical 118-text study and current 132-text qualification
 are distinct; publication is not accepted transfer or technical completion.
 
+The [sixteen frontier contracts](receiving-frontier-sixteen.md) retain five
+finite documentary proposals and eleven whole-contract outcomes. All sixteen
+complete metadata records match durable admission scopes, reusing 57 texts
+without a fresh source or native study. Delivered sweep/primitive credit,
+actual consumers, authorized closure, inherited execution-world obligations
+and existing source/resource custodians remain; publication is not acceptance.
+
 ## Request
 
 Operator request, with identifying organizational references redacted:
@@ -232,6 +239,13 @@ outcomes from agent-recommended research and prioritization mechanics.
   canonical, independent, actual-consumer, native and source-specific gates.
   Metadata-qualified reported progress does not authorize implementation,
   source closure, a competing owner or release of any existing hold.
+  The [frontier register](receiving-frontier-sixteen.md) retains five finite
+  same-home families: the diagnostic tail after a TEN-adopter hygiene sweep,
+  actual action-progress Inbox consumption, selected-service OR attributed
+  fallback, authorized dependency closure and the complete inherited venue
+  execution-world union. Eleven whole canonical, Draft, authority and
+  qualification gaps remain; current metadata and documentary delivery
+  neither appoint an implementer nor release source/resource custody.
 - [ ] Verify and publish supported dispositions, preserving source versus
   release versus rollout distinctions and all active ownership.
   The [roadmap follow-through register](roadmap-follow-through.md) records

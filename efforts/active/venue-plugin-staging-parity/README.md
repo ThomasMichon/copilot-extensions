@@ -30,6 +30,17 @@ should discover equivalent skills.
 
 ## Coordination
 
+The proposed #5072/#5286 direct families below retain the existing
+Coordinator/shared preparation, caller-affinity, runtime-install, SSH/
+privileged/native and centrally owned installation/deployment/rollout
+custodians and live claims. No new launcher, implementation appointment,
+blanket ACK, expiry or resource/source transfer follows. Normal review,
+complete actual direct Plan/local AND global Validation/Coordination/
+Journal delivery and permitted whole-current source/receiver/custody
+readback precede any separate administrative judgment. #5286 stays OPEN
+until its substantive acceptance is resolved; paper intake is not that
+outcome. #8245's particular direct-body/current-readback condition survives.
+
 - **Topology:** serial reviewed slices; generic shared preparation before
   provider-specific adapters.
 - **Host (owns PRs):** Coordinator.
@@ -269,6 +280,129 @@ below used those effective runtime versions, not a source-only patch.
 - [ ] Reconcile #5286, #5072, and #954 without closing broader unrelated scope.
 - [ ] Mark Done only after every Plan/Validation item is resolved or transferred.
 
+### Proposed complete authorized dependency closure from #5072
+
+_(Agent-recommended additive tracking proposal; selected-plugin delivery
+and native consumer credit remain at their demonstrated finite scope.)_
+
+- [ ] **P5072-1:** Reconcile ALL required authorized transitive local
+  dependencies across the relevant marketplace keys with the accepted
+  selection/eligibility boundary. Reflection, catalog, registration and
+  enablement must cover the complete accepted closure, not just top-level
+  directories or parsed dependencies. A manifest companion alone never
+  grants propagation of a host-only/disabled plugin or requires same-agent
+  execution; preserve explicit external-owner alternatives and diagnostics.
+- [ ] **P5072-2:** Build the purpose-specific MINIMAL catalog with exactly
+  the accepted closure, relative payload paths and manifest-name/
+  registration-key equality. Preserve logical `plugin@marketplace`
+  references across multiple sources and non-clobbering target-native
+  overrides; aliases must not silently retarget qualified dependencies.
+  Merged versus per-source catalogs remain a considered design alternative.
+- [ ] **P5072-3:** Keep local reflected delivery egress-free, without live
+  marketplace fetch or installed-cache fallback for missing authoritative
+  local bytes. Do not prohibit independently declared remote sources'
+  authorized acquisition. Session/checkout-local registration is a valid
+  equivalent to global settings, without unrelated preference changes.
+- [ ] **P5072-4:** Credit #7157 shared preparation/registration and actual
+  ACP/headed skill use, #7185 source/static/startup and #7505 reconciliation.
+  Preserve missing/disabled/outside-selection companion diagnostics;
+  selected-only proof does not settle the closure/identity/authority policy.
+- [ ] **V5072-1:** Use a bounded actual authorized multi-hop/multi-marketplace
+  positive graph through reflection/catalog/registration/enablement, with
+  every required accepted plugin, exact minimal relative paths and qualified
+  identity/collision controls. One graph is a witness, not a reduction of
+  the whole closure requirement.
+- [ ] **V5072-2:** Verify absent/disabled/out-of-selection refusal or explicit
+  external-owner disposition, eligible authorized closure, target-native
+  precedence and copy/missing-payload failure. No blanket auto-enable.
+- [ ] **V5072-3:** Qualify effective CLI/ACP source identity, local no-egress/
+  no-cache fallback, local overlay and unchanged unrelated preferences.
+  Keep independently declared remote acquisition and existing venue tiers;
+  no new generic native-host matrix or whole-parent prerequisite.
+
+### Proposed retained SSH/privileged and inherited union from #5286
+
+_(Agent-recommended additive tracking proposal. All current directly
+reproduced #1146 and #8245 obligations remain substantive acceptance;
+the original namespace-only mechanism is not restored.)_
+
+- [ ] **P5286-1:** Preserve the corrected direct static `SpawnTarget`
+  architecture and shared staging/copy/preparation owner rather than
+  requiring a new SSH namespace verb or duplicate launcher/provisioner.
+  Credit #5306 local matching, #7157 trusted registration, #7185 local/
+  startup, #7841 child-worktree precedence, #7856 static SSH ACP and this
+  ROOT's later #7920 headed/#7899 privileged source integration.
+- [ ] **P5286-2:** Qualify remaining actual remote/privileged/caller-affinity
+  consumers AFTER allocation/execution-profile resolution and BEFORE
+  productive work/readiness. Resolve the real receiver identity/account/
+  home/filesystem/world through its supported channel; plain SSH context
+  cannot stand in for privileged context. Preserve target-native selection,
+  explicit arguments, productive environment, source kinds, authored
+  local-versus-Git declarations and the selected controller checkout.
+- [ ] **P5286-3:** Retain #1146's simultaneous target-user-enabled AND
+  staged-repository capabilities in the SAME executing ACP child AND
+  supported headed CLI. Respect explicit disablement and target-local
+  precedence, without unrelated enablement or user-global preference writes.
+- [ ] **P5286-4:** Correlate effective settings, selected sources, launch
+  arguments, concrete cwd and readiness without credentials. Prove actual
+  capability/skill use in CodeSpace AND the trusted-container control.
+  Credit this ROOT's combined BOTH-mode CodeSpace and installed local-ACP
+  evidence only at its recorded tier; separate single-plugin results or
+  constructed directories do not complete the inherited union.
+- [ ] **P5286-5:** Preserve #8245-P1 actual venue-prepared Worktrees
+  provisioning success below ordinary OR linked-worktree Git administrative
+  directories, with truthful non-repository/staging-owned attribution,
+  not the enclosing product HEAD/branch.
+- [ ] **P5286-6:** Preserve #8245-P2 alternatives: inside-Git-dir/not-a-
+  worktree recognition, actual staged marketplace/source identity admission,
+  explicit dirty-probe failure with truthful attribution, and consideration
+  of staging outside administrative directories. They are alternative
+  strategies/considered layout, not four mandatory implementations.
+  Catching status failure while retaining the wrong commit is insufficient.
+- [ ] **P5286-7:** Preserve #8245-P3 valid explicit `SourceIdentity` no-Git
+  path and exact selected source/runtime identity, with malformed/substituted
+  identity refusal. Environment workarounds or arbitrary path classification
+  cannot confer provenance or bypass admission.
+- [ ] **P5286-8:** Preserve #8245-P4 BOTH administrative-directory forms,
+  with ABSENT AND ADMITTED identity, through the actual provisioning consumer;
+  retain ordinary checkout/archive/marketplace controls. The reported Windows
+  real-Git fixture proves the Git contract only, not provisioning/native adoption.
+- [ ] **P5286-9:** Preserve #8245-P5 SAME shared preparation/staging and
+  runtime-install owners; do not replace current caller-affinity work,
+  duplicate launch/provisioning or assume privileged/SSH filesystem parity.
+  Preserve P6 independent #8242 cold/warm acquisition/cache reuse and every
+  incumbent venue/native/startup/release/rollout gate, without making whole
+  parent duration/adoption a prerequisite for this finite correction.
+- [ ] **V5286-1:** Qualify actual supported remaining receiver consumers
+  before task readiness, preserving source/native/installed distinctions,
+  target authority/disablement, caller affinity and existing task/allocation/
+  operation identity. Later source credit must supersede obsolete absence
+  claims without converting failed or unavailable native observations to pass.
+- [ ] **V5286-2:** Match ALL FOUR #1146 rows through simultaneous skills
+  in the same ACP AND headed child, CodeSpace AND trusted container,
+  with explicit disables, precedence and correlated source/cwd/settings/
+  readiness. Existing CodeSpace proof remains credit; missing venue/control
+  evidence stays unresolved, not a new unrequested run.
+- [ ] **V5286-3:** Preserve #8245-V1 actual provisioning success AND truthful
+  attribution for ordinary/linked administrative staging, absent/admitted
+  identity, malformed identity and genuine checkout controls. Enclosing
+  `rev-parse` success or nonfatal status alone is not acceptance.
+- [ ] **V5286-4:** Preserve #8245-V2 staged-source/runtime/declared-marketplace
+  authority, supported failure and unchanged neighboring consumers through
+  existing bounded owning lanes. Keep Git-contract/provisioning/native/
+  release/installed tiers distinct, without a new all-host or timeout gate.
+- [ ] **V5286-5:** Preserve #8245-V3: BEFORE its separate supersession,
+  verify eligible current OPEN/unlocked #5286, EVERY numbered clause directly
+  in its BODY without replacing incumbent scope, and FULL CURRENT body/
+  continuing-custody readback. A corroboration comment, link, old PR or this
+  ROOT proposal is not that delivery.
+- [ ] **C5286-1:** Preserve #8245-C1/C2: SAME preparation/runtime/caller-
+  affinity/SSH-privileged/native holders, no new generic ACK or resource
+  handoff; actual direct intake and subsequent finite repair/proof remain
+  separate, parent and other claims/gates OPEN. If any acceptance/custody
+  cannot survive, KEEP #8245. No source/installer/runtime/environment/
+  worker/service action is authorized by tracking.
+
 ## Validation Plan
 
 - [x] Unit contracts cover first preparation, repeat preparation, settings
@@ -337,6 +471,21 @@ below used those effective runtime versions, not a source-only patch.
 - [x] Existing own-plugin, related-plugin, Session Host resume, and native
   repository settings behavior remain intact.
 
+- [ ] **G5072:** Resolve EVERY P5072/local Validation/continuing Coordination
+  clause for the WHOLE authorized transitive closure, minimal relative
+  catalog/name/key/qualified identity, actual registration/enablement and
+  original egress-free local delivery. Preserve selected-source credit,
+  eligibility/native override boundaries and all original alternatives/
+  venues/tiers/custodians; documentary intake is not closure implementation.
+- [ ] **G5286:** Resolve EVERY P5286/local Validation/C5286/continuing
+  Coordination clause: corrected actual shared receiver preparation,
+  ALL FOUR direct #1146 rows AND ALL #8245 P1-P6/V1-V3/C1-C2, including
+  original OR alternatives and source-specific complete-body/readback/
+  KEEP condition. Preserve completed source/CodeSpace/local-ACP credit,
+  actual remote/privileged/container/caller/native/release/rollout
+  obligations and live custody. #5286 remains OPEN; paper delivery
+  supplies no implementation, native result, parent completion or release.
+
 ## Proposal
 
 Keep selection and launch policy in agent-bridge or its existing shared
@@ -369,6 +518,17 @@ on malformed configuration. These are reliability details, not new authority
 or a reason to create a daemon.
 
 ## Journal
+
+### 2026-10-30 - Proposed whole closure and retained execution-world union
+
+Added unchecked direct #5072 and #5286 Plan/local AND actual global
+Validation with continuing same-owner coordination. Full authorized
+transitive closure remains distinct from selection authority and delivered
+selected-plugin consumers. Corrected static architecture and later source,
+combined CodeSpace and installed local-ACP credit remain finite; ALL direct
+#1146 and #8245 obligations/alternatives/transfer conditions survive.
+No new receiver, launcher, native execution, accepted receiving merge,
+implementation appointment, issue closure or source/resource release.
 
 ### 2026-10-25 - Land native-cache availability without claiming native acceptance
 

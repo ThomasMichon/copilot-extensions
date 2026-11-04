@@ -55,6 +55,16 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
+The proposed finite #5245 family continues through Phase7 migration-intake
+and Phase4's owning fixture/runner/hygiene wave. Preserve the existing
+primary, installer/test/process/GUI/native, audit/cohort/periodic-failure,
+release and resource custodians, OPEN #1303 and #6237/#6747/#7256/#7075
+reservations. Its completed ten-adopter sweep and cache repair stay credited.
+Normal review, actual complete direct Plan/local AND global Validation/
+Coordination/Journal delivery and permitted whole-current source/receiver/
+custody readback precede any separate administrative judgment. No new
+implementer, blanket ACK, expiry, execution or source/resource transfer follows.
+
 The finite #5115 Windows-hosted container route and #5140 five-case causal
 ledger below continue through the existing Phase7 migration-intake/domain
 review and Phase5 workflow/Phase4 Manager waves, respectively. Preserve
@@ -1168,6 +1178,52 @@ and their Linux/WSL2 context; do not assert that all still fail today.
   Preserve current containment, source/native distinctions and independent
   holds; a finite family does not wait on unrelated portfolio completion.
 
+### Proposed finite containment credit and diagnostic tail from #5245
+
+_(Agent-recommended additive tracking proposal; the original hygiene sweep
+is delivered, not work reopened by these unchecked accounting rows.)_
+
+- [ ] **P5245-1:** Preserve real Git fixtures rooted in their own throwaway
+  repository, explicit real shell/PowerShell subprocess bounds and contained
+  HOME/profile/XDG/temp/plugin/Python environments for provisioning,
+  snapshot and retry. Source-only mocks cannot replace these boundaries.
+- [ ] **P5245-2:** Account for ALL TEN original adopters: Logger first,
+  Bridge, Vault, SSH, CodeSpaces, Index, Dispatch, Containers, MCP and
+  Machines. Credit #5248's detailed Logger/Bridge/CodeSpaces repairs versus
+  bounded spot checks of the other seven; do not claim every subprocess
+  was rewritten or duplicate that completed finite sweep.
+- [ ] **P5245-3:** Retain both historical optional-native observations:
+  Worktrees sub-suite1/16 reached unchanged300s after progress/no reported
+  assertion failure; supported `--test-file`/25-file300s grouping passed
+  original group11 with793 passed/2 skipped, then group12 timed out near60%.
+  Group13 GUI-parent exit1 is separate. These are not a current production
+  diagnosis, passing group, deadlock proof or accepted flake.
+- [ ] **P5245-4:** Credit #6788's proven stale-wheel repair and actual
+  TWO-CYCLE windowless probe. It does not explain the retained group12
+  timeout or prove the complete native full suite. Focused four-case
+  project-scoping/#6763 and disjoint green groups remain distinct evidence.
+- [ ] **P5245-5:** Continue the explicitly retained bounded group/
+  partition/startup tail through its actual owners: #6747/#7256 PowerShell
+  fixture/startup and #7075 real-CLI provisioning cost. Preserve assertions,
+  process/GUI boundaries and reservations; #6800 source-safety containment
+  and unrelated workflow work are not harness closure receipts.
+- [ ] **P5245-6:** Obtain an accepted bounded source/fixture fix OR explicit
+  tracked disposition of the residual, without inventing a global failure.
+  Preserve actual installer/subprocess/native/GUI coverage, inventory,
+  assertions and current resource/deadline limits. No dropped boundaries,
+  skip, timeout growth, CI waiver or new every-native-host programme.
+- [ ] **V5245-1:** Keep an exact TEN-adopter delivered-versus-spot-check
+  ledger and cache/two-cycle credit, naming the actual remaining diagnostic
+  tail and custodian rather than reopening the original repairs.
+- [ ] **V5245-2:** Qualify the causal/partition/startup fix OR attributable
+  tracked disposition through the existing separately authorized bounded
+  owning lane with meaningful real controls and original assertions.
+  Progress without assertion failure proves neither pass nor deadlock.
+- [ ] **V5245-3:** Keep optional native full-profile, required Windows
+  launch, current required-unit/periodic and containing Linux release
+  evidence separate. Current policy need not preserve every historical
+  budget byte-for-byte; no relaxed retry or waiver is authorized.
+
 ## Validation Plan
 
 - [ ] G5921: Resolve EVERY direct #5921 P1-P6, V1-V5 and C1-C3 clause in the Phase4 finite clean-room verdict family at its ORIGINAL source/API consumer tier: actual Python AND Python-less version/schema/evidence-complete reduction and real caller shape, explicit malformed/incomplete/unjudged NON-PASS, correct valid control/classified-jam results/exits, literal-mode separation and source-safe diagnostics. Preserve all incumbent Plan/Validation, OPEN #1303, same owners and independent #5922/#8511/#4312/#688/#1475 gates. Administrative intake is not a reducer fix or executed evidence; no live box/model/all-host/native programme or unrelated whole-portfolio prerequisite is added, and this does not waive the ROOT's own whole completion gate.
@@ -1312,6 +1368,13 @@ and their Linux/WSL2 context; do not assert that all still fail today.
   passed. Preserve original Linux/WSL tier, same custodians and all
   incumbent parent obligations; no production kill or universal native gate.
 
+- [ ] **G5245:** Resolve EVERY P5245/local Validation/continuing Coordination
+  clause at its original finite scope: completed TEN-adopter sweep and cache
+  repair credited, retained bounded diagnostic tail fixed OR explicitly
+  tracked, real controls/assertions/current tiers and limits preserved by
+  the same holders. Tracking intake is not a native full pass, accepted
+  flake, implementation, parent completion or custody/resource release.
+
 ## Proposal
 
 Approve the vision, framework, and phased campaign as the repository's
@@ -1320,6 +1383,15 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-10-30 - Proposed retained hygiene diagnostic tail
+
+Added unchecked direct #5245 Plan/local and actual global Validation with
+continuing same-owner coordination. The original ten-adopter containment
+sweep and cache/two-cycle repair retain their finite credit; only the
+explicitly retained bounded group/partition/startup tail remains. This is
+documentary research, not source/native qualification, reviewed receiving
+delivery, assignment, issue closure or an execution grant.
 
 ### 2026-10-30 - Windows-hosted route and five-case causal tracking
 
