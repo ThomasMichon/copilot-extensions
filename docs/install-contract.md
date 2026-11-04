@@ -4266,6 +4266,11 @@ immutable bytes and direct dependency URLs are refused before UV sees it.
 Withdrawn files and wheel records with syntactically invalid tag components
 are not advertised as candidates. Unsafe filenames, mismatched projects and
 over-budget tag expansions still refuse the index.
+The guarded native index also omits wheels incompatible with the selected
+interpreter's actual tags. It first binds the retained UV interpreter and
+native target to that same interpreter, and validates incompatible records'
+filename, project, any present digest, metadata and duplicate-name evidence. Existing
+candidate, request and metadata budgets remain in force.
 Configured HTTPS feed redirects use that same owner's metadata and artifact
 delivery policy, including public-index refusal and cross-origin credential
 isolation. Explicit nonempty download-origin restrictions still constrain
