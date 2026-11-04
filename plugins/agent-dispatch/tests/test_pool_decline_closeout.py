@@ -23,6 +23,81 @@ q = controls.q
 api = controls.api
 
 
+def test_existing_supervisor_requests_independent_observation_without_finalizing(q, api, ready):
+    from agent_dispatch.supervisor import Supervisor
+    from agent_dispatch.supervisor_pool_startup import supervise_pool_startup
+
+    task_id, binding, _, calls = ready
+    requests = []
+    with controls.connected(api, requests) as client:
+        owner = Supervisor(
+            client, repo="example", machine="host-a", supervisor_id="allocator",
+            spawn_fn=lambda *a: pytest.fail("Decline observation must not spawn"),
+        )
+        reservation, assigned = asdict(q.get_reservation(binding["reservation_key"])), asdict(q.get(task_id))
+        assert supervise_pool_startup(owner, reservation, assigned) is True
+        assert supervise_pool_startup(owner, reservation, asdict(q.get(task_id))) is None
+    assert q.get(task_id).status == Status.QUEUED
+    assert q.get_reservation(binding["reservation_key"]).state == SpawnState.RELEASING
+    assert len(calls) == 1 and calls[0][0][2] == "record"
+    posts = [r for r in requests if r.method == "POST"]
+    assert len(posts) == 1 and posts[0].url.path == f"/tasks/{task_id}/pool-decline/closeout"
+    assert json.loads(posts[0].content) == {"version": 1, **binding}
+
+
+@pytest.mark.parametrize("hold", ["observe-only", "allocator", "task", "admission", "governance"])
+def test_decline_observation_respects_existing_supervisor_admission(q, api, ready, monkeypatch, hold):
+    from agent_dispatch.supervisor import Supervisor
+    from agent_dispatch import supervisor_pool_startup as startup
+
+    task_id, binding, _, calls = ready
+    requests = []
+    with controls.connected(api, requests) as client:
+        owner = Supervisor(
+            client, repo="example", machine="host-a", supervisor_id="allocator",
+            spawn_fn=lambda *a: pytest.fail("Decline observation must not spawn"),
+        )
+        if hold == "allocator":
+            owner.supervisor_id = "other-allocator"
+        elif hold == "task":
+            q.set_hold(task_id, reason="Operator hold", actor="operator")
+        elif hold == "admission":
+            monkeypatch.setattr(startup, "action_inhibited", lambda *a, **k: True)
+        elif hold == "governance":
+            owner._recheck_governance = lambda *a: {"status": "held"}
+        before = snapshot(q, task_id)
+        assert startup.supervise_pool_startup(
+            owner, asdict(q.get_reservation(binding["reservation_key"])), asdict(q.get(task_id)),
+            observe_only=hold == "observe-only",
+        ) is False
+    assert snapshot(q, task_id) == before and not calls
+    assert not any(r.method == "POST" for r in requests)
+
+
+def test_old_coordinator_and_unknown_closeout_response_never_replay(q, api, ready):
+    from agent_dispatch.client import DispatchUpgradeRequired
+
+    task_id, binding, _, _ = ready
+    original = asdict(q.pool_worker_decline(task_id))
+    for mode in ("old-provider", "lost-reply"):
+        requests = []
+
+        def rewrite(request, response):
+            if mode == "old-provider" and request.url.path == "/health":
+                value = response.json()
+                value["pool_placement"].pop("worker_decline_local_closeout_versions")
+                return httpx.Response(200, json=value)
+            if request.method == "POST":
+                return httpx.Response(200, json={"protocol": "pool_worker_decline/v1", "version": True})
+            return response
+
+        with controls.connected(api, requests, rewrite=rewrite) as client:
+            with pytest.raises(DispatchUpgradeRequired if mode == "old-provider" else DispatchError):
+                client.close_pool_decline(task_id, original)
+        assert sum(r.method == "POST" for r in requests) == (0 if mode == "old-provider" else 1)
+    assert q.get(task_id).status == Status.QUEUED
+
+
 @pytest.fixture
 def ready(q, monkeypatch, request):
     if getattr(request, "param", None):

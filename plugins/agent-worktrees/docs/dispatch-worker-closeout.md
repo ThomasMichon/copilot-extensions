@@ -3,8 +3,13 @@
 The executing Worktrees runtime exposes an additive provider at
 `python -m agent_worktrees.dispatch_worker_closeout`. Here `python` means
 the interpreter of the **selected Worktrees runtime**, not an ambient
-interpreter or a newer payload's source tree. No ordinary Dispatch caller
-selects this provider yet.
+interpreter or a newer payload's source tree. The canonical `finalize` CLI
+also delegates to this same provider using `--dispatch-task-id`,
+`--dispatch-reservation-key` and `--dispatch-native-id`; it retains JSON output
+and refuses ordinary worktree selectors, config overrides, dry-run, abandon,
+handoff, open-PR override or landing-explanation options in this mode.
+An explicit global project override is refused before it can change cwd.
+The caller's actual cwd alone selects the existing managed project.
 
 `--describe-contract` performs no finalization and returns
 `agent-worktrees.dispatch-worker-closeout`, version `1`, with operation
@@ -75,6 +80,9 @@ The selected Worktrees runtime also supports
 and version with operation `observe-finalized`. This additive read surface
 does not imply that an older runtime's ordinary `record` response contains
 closeout authority. Discovery never inspects or finalizes a checkout.
+The descriptor additionally advertises `own_finalization_cli_versions: [1]`
+for the canonical `finalize` form. Older observation-only descriptors remain
+valid for observation but cannot qualify the new effectful syntax.
 
 Observation uses the explicit project and exact `--worktree-id` together with
 `--closeout-task`, `--closeout-reservation` and `--closeout-native`. Partial or
@@ -98,13 +106,13 @@ physical retirement remains with its existing owner.
 
 ## Remaining integration and validation
 
-This provider expansion does not apply exclusions, requeue a task, retire a
-native runner or change
-ordinary worker CLI/prompts. A caller's copied JSON is not authoritative
+This provider expansion does not apply exclusions, requeue a task or retire a
+native runner. The ordinary Dispatch CLI/prompts and existing supervisor now
+consume the providers conditionally; a caller's copied JSON is not authoritative
 Dispatch release evidence. The
 [local coordinator boundary](../../agent-dispatch/docs/pool-worker-decline.md#coordinator-owned-local-closeout)
 observes this selected runtime before atomic routing/requeue; remote-host and
-ordinary-worker integration remain separate work under the
+installed/native worker qualification remain separate work under the
 [assignment/startup amendment](../../../efforts/active/agent-dispatch-monitor-and-confirmed-state/assignment-startup-amendment.md).
 
 Focused controls live in `tests/test_dispatch_worker_closeout.py` and

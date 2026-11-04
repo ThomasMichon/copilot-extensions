@@ -131,6 +131,39 @@ def test_real_ordinary_create_store_send_and_affirmative_worker_start(ordinary: 
     assert "ordinary-bridge" in pool_startup_contract()["supported_drivers"]
 
 
+def test_ordinary_worker_decline_keeps_distinct_bridge_and_native_custody(
+    ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_dispatch import __main__ as cli, pool_worker_decline_cli
+
+    o = ordinary
+    result = launch(o)
+    key = o.placed["reservation"]["key"]
+    o.client.record_spawn(
+        key, session_handle=result["session"], worktree=result["worktree"],
+        startup_complete=True, startup_revision=1, session_info=result["session_info"],
+    )
+    monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "native-a")
+    monkeypatch.setattr(cli, "_identity", lambda args: ("host-a", "worktree-a"))
+    monkeypatch.setattr(cli, "_client", lambda *a, **k: controls.connected(o.api, [], control=False))
+    own_finalizations = []
+    monkeypatch.setattr(pool_worker_decline_cli, "_finalize",
+                        lambda binding, worktree: own_finalizations.append((binding, worktree)))
+    args = cli.build_parser().parse_args([
+        "--shared", "decline", o.task["id"], "--pool-generation", "1",
+        "--owner-session-id", "native-a", "--exclude-self", "worktree",
+        "--note", "This worker lacks the required dependency.",
+    ])
+    assert args.func(args) == 0
+    assert own_finalizations == [({
+        "task_id": o.task["id"], "generation": 1, "startup_revision": 1,
+        "reservation_key": key, "native_id": "native-a",
+    }, "worktree-a")]
+    assert o.q.pool_worker_decline(o.task["id"]).native_id == "native-a"
+    assert o.q.get_reservation(key).session_handle == "local-body:bridge-a"
+    assert o.q.get(o.task["id"]).status == Status.CLAIMED
+
+
 @pytest.mark.parametrize("machine", [None, "host-b"])
 def test_wrong_or_unknown_launch_host_never_creates_or_sends(
     ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, machine: str | None,

@@ -375,6 +375,50 @@ def test_fresh_module_entrypoint_resolves_cwd_and_loads_real_configuration(cwd_p
     assert reply["task_release"] is False and reply["process_retirement"] is False
 
 
+def test_fresh_canonical_cli_reaches_cwd_bound_provider_without_module_rewriting(cwd_project) -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "agent_worktrees", "finalize",
+         "--dispatch-task-id", "task", "--dispatch-reservation-key", "reservation",
+         "--dispatch-native-id", NATIVE, "--json"],
+        capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    reply = json.loads(result.stdout)
+    assert result.returncode == 1 and reply["ok"] is False
+    assert reply["error"] == "Own-worker closeout requires its recorded Dispatch allocation"
+    assert reply["task_release"] is False and reply["process_retirement"] is False
+
+
+@pytest.mark.parametrize("extra", [
+    ["--dry-run"], ["other-worktree"], ["--worktree-id", "other-worktree"],
+    ["--config", "another.yaml"], ["--abandon", "--handoff-to", "other"],
+    ["--force-open-pr"], ["--explain-landing"],
+])
+def test_canonical_closeout_rejects_all_normal_finalize_overrides(monkeypatch, capfd, extra) -> None:
+    import argparse
+    from agent_worktrees import finalize_cli
+
+    monkeypatch.setattr(closeout, "main", lambda *a: pytest.fail("Override reached finalizer"))
+    parser = argparse.ArgumentParser()
+    finalize_cli.add_parsers(parser.add_subparsers(dest="command"))
+    args = parser.parse_args([
+        "finalize", "--dispatch-task-id", "task", "--dispatch-reservation-key", "reservation",
+        "--dispatch-native-id", NATIVE, "--json", *extra,
+    ])
+    assert finalize_cli.cmd_finalize(args) == 2
+    assert "without finalize overrides" in json.loads(capfd.readouterr().out)["error"]
+
+
+def test_canonical_closeout_cannot_chdir_to_an_explicit_project(monkeypatch, tmp_path) -> None:
+    from agent_worktrees.invocation_project import resolve_invocation_project
+
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match="actual cwd project"):
+        resolve_invocation_project(
+            ["finalize", "--dispatch-task-id=task"], "foreign",
+            lambda *a: pytest.fail("Override resolved"), lambda *a: False, lambda *a: False,
+        )
+
+
 def test_fresh_selected_cli_describes_observation_without_relying_on_worker_cwd(cwd_project, worker):
     result = subprocess.run(
         [sys.executable, "-m", "agent_worktrees", "--project", cwd_project,
@@ -383,6 +427,7 @@ def test_fresh_selected_cli_describes_observation_without_relying_on_worker_cwd(
     )
     descriptor = json.loads(result.stdout)
     assert result.returncode == 0 and descriptor["operations"] == ["observe-finalized"]
+    assert descriptor["own_finalization_cli_versions"] == [1]
     assert descriptor["task_release"] is False and descriptor["process_retirement"] is False
 
 

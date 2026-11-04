@@ -18,6 +18,7 @@ class PoolDeclineClientMixin:
         _http: httpx.Client
         _unwrap: Callable[[httpx.Response], Any]
         health: Callable[[], dict]
+        _control_headers: Callable[[], dict[str, str]]
 
     def _pool_decline_request(self, task_id: str, body: dict, *, blocker: bool = False) -> dict:
         binding = {
@@ -93,3 +94,38 @@ class PoolDeclineClientMixin:
             "startup_revision": startup_revision, "reservation_key": reservation_key,
             "detail": detail.strip(),
         }, blocker=True)
+
+    def close_pool_decline(self, task_id: str, decline: dict) -> dict:
+        """Request the coordinator's own observation, never send finalizer JSON."""
+        contract = _validate_contract(self.health().get("pool_placement"))
+        versions = contract.get("worker_decline_local_closeout_versions")
+        if not isinstance(versions, list) or not any(type(v) is int and v == 1 for v in versions):
+            raise DispatchUpgradeRequired("running coordinator lacks local worker decline closeout")
+        binding = {key: decline.get(key) for key in (
+            "worker_id", "native_id", "generation", "startup_revision", "reservation_key",
+        )}
+        if (
+            decline.get("task_id") != task_id
+            or any(not isinstance(binding[name], str) or not binding[name].strip()
+                   for name in ("worker_id", "native_id", "reservation_key"))
+            or any(type(binding[name]) is not int or binding[name] < 1
+                   for name in ("generation", "startup_revision"))
+        ):
+            raise DispatchError(400, "worker decline closeout requires its original exact binding")
+        result = self._unwrap(self._http.post(
+            f"/tasks/{task_id}/pool-decline/closeout",
+            json={"version": 1, **binding}, headers=self._control_headers(),
+        ))
+        receipt = result.get("closeout") if isinstance(result, dict) else None
+        if (
+            not isinstance(result, dict) or result.get("protocol") != "pool_worker_decline/v1"
+            or type(result.get("version")) is not int or result["version"] != 1
+            or not isinstance(receipt, dict) or receipt.get("task_id") != task_id
+            or receipt.get("binding") != binding
+            or any(type(receipt["binding"].get(key)) is not type(value) for key, value in binding.items())
+            or type(receipt.get("queued_generation")) is not int
+            or receipt["queued_generation"] != binding["generation"] + 1
+            or receipt.get("process_retirement") is not False
+        ):
+            raise DispatchError(502, "worker decline closeout response is unconfirmed; custody retained")
+        return receipt

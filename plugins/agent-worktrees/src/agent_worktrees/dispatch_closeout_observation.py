@@ -15,6 +15,7 @@ def describe_contract() -> dict:
     """Advertise this runtime's explicit, read-only observation boundary."""
     return {
         "contract": CONTRACT, "version": 1, "operations": ["observe-finalized"],
+        "own_finalization_cli_versions": [1],
         "platforms": ["linux", "wsl"], "paired_closeout": False,
         "task_release": False, "process_retirement": False,
     }

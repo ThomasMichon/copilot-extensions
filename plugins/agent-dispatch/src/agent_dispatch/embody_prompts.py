@@ -174,8 +174,14 @@ def pool_worker_prompt(
         "CLAIMED and unowned, and you independently ACCEPT its contract, use "
         f"`{ad} start {task_id} --pool-generation {generation}` with the actual retained "
         "native session identity supplied below. Startup or prompt delivery is not acceptance. "
-        "If you cannot accept, retain the assignment and report the blocker; do not use "
-        "legacy yield/abandon as a substitute for pool-aware decline and workspace closeout. "
+        "If you cannot accept, use "
+        f"`{ad} decline {task_id} --pool-generation {generation} --exclude-self worktree "
+        '--note "<why this worker cannot accept>"` with the actual retained '
+        "--owner-session-id supplied below. This records the decision and attempts only "
+        "your own normal workspace finalization; blocked or unsupported closeout retains custody. "
+        "The coordinator independently observes finalization before requeue; this command neither "
+        "releases the task nor stops the native process. Do not substitute legacy yield/abandon "
+        "or finalize another worker's workspace. "
         f"After acceptance, take steering with `{ad} steer take {task_id} --all`, record "
         f"status beats with `{ad} progress {task_id} --phase <phase> --summary "
         f'"<one line>", and only submit with `{ad} complete {task_id} --result-ref <ref>` '
