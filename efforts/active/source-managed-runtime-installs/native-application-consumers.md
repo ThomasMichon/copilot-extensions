@@ -275,3 +275,17 @@ clean-room lane cannot qualify Windows PowerShell console decoding; no new
 Windows clean-room venue is available here. The real first-touch uv fixtures
 and native child processes provide the Windows consumer control, while the
 unchanged Linux End/cache behavior retains R26's qualified evidence.
+
+While required Actions jobs awaited runners during the reported Actions
+incident, Dev advanced and introduced a real conflict. The reviewed source tip
+was backed up before native synchronization; a single owned rebase resolved
+only the derived footprint digest and unit-input declarations. Upstream
+post-hook lookup changes and immutable-environment admission remain intact.
+The exact End receivers, catalog generator and catalog output are unchanged
+through reconciliation. All declared source hashes match; the 4,061-node
+inventory, coverage targets and 300-second budget remain unchanged.
+
+Nine canonical recovery controls and ten post-hook controls pass (three
+post-hook platform skips). Module ceilings, strict runtime resolution and all
+13 generated manifests pass. This does not substitute for the new head's
+required hosted CI, review, merge or release.
