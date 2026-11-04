@@ -3,8 +3,43 @@
 from __future__ import annotations
 
 import sqlite3
+from typing import Literal
 
 from .task_obligations import ASSIGNMENT_PREDICATE
+
+
+def bound_relationship_condition(task: Literal["t", "NEW"]) -> str:
+    """Keep live checks and persisted rollback guards on the same assignment."""
+    return (
+        "EXISTS (SELECT 1 FROM task_events e"  # noqa: S608 -- fixed SQL aliases
+        f" WHERE e.task_id={task}.id AND e.task_relationship IS NOT NULL"
+        " AND json_extract(e.task_relationship, '$.state')='bound'"
+        f" AND json_extract(e.task_relationship, '$.request.generation')={task}.generation"
+        f" AND ({task}.owner IS NULL OR ("
+        f" lower(trim(substr({task}.owner, 1, instr({task}.owner, '/')-1)))"
+        "=lower(trim(substr(e.worker, 1, instr(e.worker, '/')-1)))"
+        f" AND substr({task}.owner, instr({task}.owner, '/')+1)"
+        "=substr(e.worker, instr(e.worker, '/')+1)))"
+        " AND ((json_extract(e.task_relationship, '$.request.reservation_key') IS NULL"
+        f" AND NOT EXISTS (SELECT 1 FROM task_pool_assignments a WHERE a.task_id={task}.id"
+        " AND a.assignment_released=0)) OR EXISTS ("
+        " SELECT 1 FROM task_pool_assignments a JOIN spawn_reservations s"
+        " ON s.key=a.reservation_key"
+        f" WHERE a.task_id={task}.id"
+        f" AND a.task_generation={task}.generation"
+        " AND s.task_id=e.task_id AND s.task_relationship_required=1"
+        " AND s.task_relationship_event_id=e.id"
+        f" AND s.task_relationship_generation={task}.generation"
+        " AND json_extract(e.task_relationship, '$.request.reservation_key')=s.key"
+        " AND json_extract(e.task_relationship, '$.request.workspace.worktree')=s.worktree"
+        " AND json_extract(e.task_relationship, '$.request.workspace.creation_nonce')"
+        "=s.creation_nonce"
+        " AND json_extract(e.task_relationship, '$.request.workspace.project')"
+        "=s.allocation_project"
+        " AND json_extract(e.task_relationship, '$.request.workspace.path')=s.worktree_path"
+        " AND lower(trim(json_extract(e.task_relationship, '$.request.workspace.machine')))"
+        "=lower(trim(s.execution_machine)))))"
+    )
 
 
 def migrate_relationships(conn: sqlite3.Connection) -> None:
@@ -66,7 +101,7 @@ def migrate_relationships(conn: sqlite3.Connection) -> None:
     # These guards survive a provider rollback. Older queue code cannot admit
     # a governed assignment by forgetting an optional Python field.
     conn.execute(
-        "CREATE TRIGGER IF NOT EXISTS task_relationship_execution_guard"
+        "CREATE TRIGGER IF NOT EXISTS task_relationship_execution_guard_v2"  # noqa: S608 -- fixed predicate
         " BEFORE UPDATE OF status, generation, owner ON tasks"
         " WHEN (EXISTS (SELECT 1 FROM task_events e WHERE e.task_id=NEW.id"
         " AND e.task_relationship IS NOT NULL) OR EXISTS (SELECT 1 FROM spawn_reservations s"
@@ -78,9 +113,8 @@ def migrate_relationships(conn: sqlite3.Connection) -> None:
         " AND e.worker=NEW.owner) AND NOT (NEW.owner IS NULL AND EXISTS ("
         " SELECT 1 FROM spawn_reservations s WHERE s.task_id=NEW.id"
         " AND s.task_relationship_required=1 AND s.task_relationship_generation=NEW.generation)))"
-        " OR (NEW.status IN ('started','submitted','completed') AND"
-        " (SELECT json_extract(e.task_relationship, '$.state') FROM task_events e"
-        " WHERE e.task_id=NEW.id AND e.task_relationship IS NOT NULL"
-        " ORDER BY e.id DESC LIMIT 1) IS NOT 'bound'))"
+        " OR (NEW.status IN ('started','submitted','completed') AND NOT "
+        + bound_relationship_condition("NEW")
+        + "))"
         " BEGIN SELECT RAISE(ABORT, 'task relationship protection is unconfirmed'); END"
     )

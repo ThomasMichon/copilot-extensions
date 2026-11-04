@@ -8,6 +8,18 @@ from typing import Protocol
 from .queue_records import TaskError
 
 
+def same_assignment_worker(left: object, right: object) -> bool:
+    if not isinstance(left, str) or not isinstance(right, str):
+        return False
+    left_host, left_sep, left_tree = left.partition("/")
+    right_host, right_sep, right_tree = right.partition("/")
+    return (
+        bool(left_sep and right_sep)
+        and left_tree == right_tree
+        and (left_host.strip().lower() == right_host.strip().lower())
+    )
+
+
 @dataclass(frozen=True)
 class AssignmentWorkspace:
     machine: str

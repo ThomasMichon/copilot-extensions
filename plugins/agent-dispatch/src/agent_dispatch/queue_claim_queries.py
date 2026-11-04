@@ -94,6 +94,16 @@ class QueueClaimQueriesMixin:
             for row in rows:
                 if repo is not None and row["repo"] != repo:
                     continue
+                if task_id is None:
+                    from .queue_task_relationships import latest_relationship
+
+                    previous = latest_relationship(conn, row["id"])
+                    if previous is not None and (
+                        self._relationship_writer is None
+                        or assignment_workspace is None
+                        or json.loads(previous["task_relationship"])["state"] not in {"closed", "absent"}
+                    ):
+                        continue
                 from .queue_pool_placement import pool_assignment
                 if pool_assignment(conn, row["id"], include_released=True) is not None:
                     if task_id is not None:

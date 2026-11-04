@@ -121,6 +121,8 @@ class AssignmentSubject:
 
     def verification(self, task: dict) -> dict:
         """Require one original-queue snapshot; missing and old providers never retire."""
+        from .assignment_workspace import same_assignment_worker
+
         value = task.get("task_obligation") if isinstance(task, dict) else None
         if (
             not valid_snapshot(value, task_id=self.task_id)
@@ -143,7 +145,7 @@ class AssignmentSubject:
         outcome = value["release_outcome"]
         retired = outcome == "completed" or (
             outcome == "unassigned_queued"
-            and value["unassignment"]["worker_id"] == self.worker_id
+            and same_assignment_worker(value["unassignment"]["worker_id"], self.worker_id)
             and value["unassignment"]["event_id"] > self.assignment_event_id
         )
         return {

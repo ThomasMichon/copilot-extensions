@@ -8,7 +8,7 @@ import secrets
 import sqlite3
 from dataclasses import asdict
 
-from .assignment_workspace import AssignmentWorkspace
+from .assignment_workspace import AssignmentWorkspace, same_assignment_worker
 from .queue_common import Task
 from .queue_records import Status, TaskError
 
@@ -51,9 +51,15 @@ def require_relationship(conn: sqlite3.Connection, task_id: str) -> None:
         " WHERE task_id=? AND task_relationship_required=1 LIMIT 1",
         (task_id,),
     ).fetchone()
-    if (row is not None or required is not None) and (
-        row is None or json.loads(row["task_relationship"])["state"] != "bound"
-    ):
+    if row is None and required is None:
+        return
+    from .queue_relationship_schema import bound_relationship_condition
+
+    protected = conn.execute(
+        "SELECT " + bound_relationship_condition("t") + " FROM tasks t WHERE t.id=?",  # noqa: S608 -- fixed predicate
+        (task_id,),
+    ).fetchone()
+    if protected is None or not protected[0]:
         raise TaskError(
             "task relationship protection is unconfirmed; reconcile its original assignment"
         )
@@ -220,9 +226,7 @@ class QueueTaskRelationshipsMixin:
         return event_id
 
     def task_relationship(self, task_id: str, *, event_id: int | None = None) -> dict | None:
-        if event_id is not None and (
-            type(event_id) is not int or not 1 <= event_id <= 2**63 - 1
-        ):
+        if event_id is not None and (type(event_id) is not int or not 1 <= event_id <= 2**63 - 1):
             raise TaskError("invalid original task relationship event")
         with self._connect() as conn:
             row = (
@@ -261,7 +265,7 @@ class QueueTaskRelationshipsMixin:
         retiring = snapshot["release_outcome"] in {"completed", "unassigned_queued"}
         if retiring and snapshot["release_outcome"] == "unassigned_queued":
             retiring = (
-                snapshot["unassignment"]["worker_id"] == workspace.worker_id
+                same_assignment_worker(snapshot["unassignment"]["worker_id"], workspace.worker_id)
                 and snapshot["unassignment"]["event_id"] > request["event_id"]
             )
         if not retiring and value["state"] == "bound":
@@ -273,7 +277,10 @@ class QueueTaskRelationshipsMixin:
                 current["id"] != request["event_id"]
                 or task.generation != request["generation"]
                 or task.status not in {Status.CLAIMED, Status.STARTED, Status.SUSPENDED}
-                or task.owner not in (None, workspace.worker_id)
+                or (
+                    task.owner is not None
+                    and not same_assignment_worker(task.owner, workspace.worker_id)
+                )
             ):
                 raise TaskError("original task assignment changed; relationship retained")
         common = {"expected_creation_nonce": workspace.creation_nonce}
@@ -350,7 +357,10 @@ class QueueTaskRelationshipsMixin:
                 latest_relationship(conn, task_id)["id"] != request["event_id"]
                 or task.generation != request["generation"]
                 or task.status not in {Status.CLAIMED, Status.STARTED, Status.SUSPENDED}
-                or task.owner not in (None, workspace.worker_id)
+                or (
+                    task.owner is not None
+                    and not same_assignment_worker(task.owner, workspace.worker_id)
+                )
             ):
                 raise TaskError(
                     "task changed during relationship write; original request retained"

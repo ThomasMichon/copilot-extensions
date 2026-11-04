@@ -190,9 +190,19 @@ in-flight reserve.
 Pending protection blocks the queue and pool start gates. Retained SQLite
 guards also reject execution or an unprotected new claim from older queue
 code; reopening the database without a writer cannot erase the requirement.
+The guards bind the current generation, worker and exact attached reservation,
+not any historical bound claim. Capacity retirement does not erase the retained
+assignment's task responsibility. Host aliases normalize only host whitespace
+and case; worktree identity and assignment events remain exact.
 The required workspace retry always revisits its owner even when recorded
 path/project facts already match. Creator/allocation custody and actual
 native-capacity retirement remain independent.
+
+With a qualified writer enabled, atomic `create(..., claim_as=...)` refuses
+before creating new work; create queued work and use the protected claim path
+with its original workspace instead. A queue without support skips governed
+tasks during unpinned selection so unrelated legacy work remains claimable;
+explicit selection of a governed task still reports the incompatibility.
 
 The running coordinator reports `task_relationships` version 1 through its
 existing health response, including whether a qualified writer is assembled
