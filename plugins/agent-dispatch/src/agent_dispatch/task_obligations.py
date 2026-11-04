@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING
 
 from .queue_records import SpawnState, Status
@@ -28,14 +29,22 @@ def _worktree_requirement(raw: str) -> bool:
     return any(item.startswith("worktree:") for item in requires)
 
 
-def read_snapshot(queue: TaskQueue, task_id: str) -> dict | None:
+def read_snapshot(
+    queue: TaskQueue, task_id: str, *, assignment_event_id: int | None = None,
+) -> dict | None:
     """Read task, logical assignment and disposition history in one snapshot."""
+    if assignment_event_id is not None and (
+        type(assignment_event_id) is not int or not 1 <= assignment_event_id <= 2**63 - 1
+    ):
+        raise ValueError("invalid task assignment event identity")
     conn = queue._connect()
     try:
         conn.execute("BEGIN")
         task = conn.execute(
             "SELECT id, status, generation, owner, owner_session_id, target_worktree, requires,"
-            " hold_reason, hold_actor, hold_at FROM tasks WHERE id=?", (task_id,),
+            " hold_reason, hold_actor, hold_at,"
+            " (SELECT identity FROM workspace_queue_identity WHERE singleton=1) AS queue_identity"
+            " FROM tasks WHERE id=?", (task_id,),
         ).fetchone()
         if task is None:
             return None
@@ -55,6 +64,13 @@ def read_snapshot(queue: TaskQueue, task_id: str) -> dict | None:
             " WHERE task_id=? AND from_status IS NOT to_status ORDER BY id DESC LIMIT 1",
             (task_id,),
         ).fetchone()
+        assigned = conn.execute(
+            "SELECT id, worker FROM task_events WHERE task_id=? AND to_status='claimed'"
+            " AND from_status IS NOT to_status"
+            + (" AND id=?" if assignment_event_id is not None else "")
+            + " ORDER BY id DESC LIMIT 1",
+            (task_id, assignment_event_id) if assignment_event_id is not None else (task_id,),
+        ).fetchone()
         unassignment = None
         if (
             transition is not None and transition["from_status"] in _UNASSIGNABLE
@@ -67,6 +83,11 @@ def read_snapshot(queue: TaskQueue, task_id: str) -> dict | None:
         result = {
             "schema": SCHEMA, "version": VERSION, "task_id": task["id"],
             "state": task["status"], "generation": task["generation"],
+            "queue_identity": task["queue_identity"],
+            "assignment": (
+                {"event_id": assigned["id"], "worker_id": assigned["worker"]}
+                if assigned is not None and assigned["worker"] else None
+            ),
             "bindings": {
                 "owner": task["owner"] is not None,
                 "native": task["owner_session_id"] is not None,
@@ -96,8 +117,12 @@ def _release_outcome(value: dict) -> str | None:
     return None
 
 
-def enrich_task_detail(queue: TaskQueue, detail: dict) -> dict:
-    return {**detail, "task_obligation": read_snapshot(queue, detail["id"])}
+def enrich_task_detail(
+    queue: TaskQueue, detail: dict, *, assignment_event_id: int | None = None,
+) -> dict:
+    return {**detail, "task_obligation": read_snapshot(
+        queue, detail["id"], assignment_event_id=assignment_event_id,
+    )}
 
 
 def valid_snapshot(value: object, *, task_id: str) -> bool:
@@ -114,6 +139,19 @@ def valid_snapshot(value: object, *, task_id: str) -> bool:
         or type(value["held"]) is not bool
         or not isinstance(value["bindings"], dict) or not _BINDINGS <= value["bindings"].keys()
         or any(type(value["bindings"][key]) is not bool for key in _BINDINGS)
+    ):
+        return False
+    if "queue_identity" in value and (
+        not isinstance(value["queue_identity"], str)
+        or re.fullmatch(r"[0-9a-f]{32}", value["queue_identity"]) is None
+    ):
+        return False
+    assignment = value.get("assignment")
+    if assignment is not None and (
+        not isinstance(assignment, dict) or set(assignment) != {"event_id", "worker_id"}
+        or type(assignment["event_id"]) is not int or not 1 <= assignment["event_id"] <= 2**63 - 1
+        or not isinstance(assignment["worker_id"], str)
+        or not 0 < len(assignment["worker_id"]) <= 4096
     ):
         return False
     unassignment = value["unassignment"]

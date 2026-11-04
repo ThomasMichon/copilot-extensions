@@ -16,12 +16,14 @@ remain separate implementation gates.
 ## Snapshot and outcomes
 
 The coordinator reads the task, logical pool assignment, unresolved spawn
-binding and latest state-changing audit event in one SQLite read snapshot.
+binding, queue identity and assignment/disposition audit events in one SQLite read snapshot.
 The object contains:
 
 | Field | Meaning |
 |---|---|
 | `task_id`, `generation`, `state` | Current task incarnation and lifecycle state |
+| `queue_identity` | Durable identity of the original queue, independent of endpoint configuration |
+| `assignment` | Exact event id and worker from an audited transition into claimed; otherwise null |
 | `bindings` | Boolean presence of task owner, native owner, explicit target worktree, hard worktree requirement, unreleased pool assignment and unresolved spawn binding |
 | `held` | Any retained task hold field |
 | `unassignment` | Latest transition from claimed, started or suspended to queued, with its event id, separately recorded former worker id and prior state; otherwise null |
@@ -80,9 +82,59 @@ references or retarget them through the current default. No ordinary
 claim-settlement caller is migrated by this provider expansion; upgrade and
 rollback must continue to treat missing support explicitly.
 
-Each detail read adds one connection/read transaction and four point-scoped
+Each detail read adds one connection/read transaction and five point-scoped
 SELECTs, with no child process, network request, scan of repository files or
 per-call schema migration. Task-event lookup uses a partial `(task_id, id)`
-transition index; pool assignment and spawn queries use existing task indexes.
+transition index and a separate partial assignment index; pool assignment and
+spawn queries use existing task indexes.
 This is bounded source/transport qualification, not an installed/native latency
 measurement or a complete assignment/finalization qualification.
+
+## Protected retained-relationship callback
+
+The existing explicit local/central `claim-status` callbacks also understand
+Worktrees' canonical `l1.` bound retained-relationship subjects. This is a
+provider expansion only: ordinary assignment callers do not create or release
+these claims yet. Legacy raw-task callbacks retain their previous behavior.
+
+The recovery object is exactly:
+
+```json
+{
+  "schema": "dispatch-task-assignment",
+  "version": 1,
+  "authority": "local",
+  "queue_identity": "<original 32-hex queue identity>",
+  "task_id": "<original 32-hex task id>"
+}
+```
+
+Its bound identity is exactly `{"assignment_event_id": 123, "worker_id":
+"machine/worktree"}`. The creator must be that worker's qualified
+`machine/project/worktree` owner. The surrounding version-2 metadata, token,
+request id, phase and canonical encoding remain the existing Worktrees
+retained-relationship contract, not another ledger.
+
+The callback reads that exact assignment using the additive
+`obligation_assignment_event_id` query on the existing task-detail route.
+The selected audit row, queue identity and current disposition share one
+SQLite snapshot. Another task's event, another queue at the same endpoint,
+an unaudited assignment, malformed data or missing provider support cannot
+produce retirement. The latest assignment is returned when the query is absent;
+older snapshot readers may ignore the two additive fields.
+
+An exact `relationship_verification` proves retirement only for `completed`,
+or for current unbound `unassigned_queued` whose later disposition names that
+same worker. A later assignment or another worker's unassignment does not
+retire the original claim. An eventual completion can settle any of that task's
+genuine earlier assignments. `quiescent` describes settled **task
+responsibility**, not native-process absence; Worktrees' separate native and
+cleanup gates still apply.
+
+No callback starts a coordinator or permits SSH failover. It uses only an
+explicit original local/central writer, additionally checks the durable queue
+identity, and never reconstructs original authority from a changed default.
+Pending subjects, unqualified/URL-selected authorities and unknown encodings
+fail visibly. A 404 for this protected relationship is unavailable evidence,
+not proof that its task responsibility disappeared. A supported provider
+rollback lacking exact assignment evidence likewise retains the obligation.

@@ -9,7 +9,7 @@ from collections.abc import Callable
 from dataclasses import asdict
 import uuid
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 
 from . import telemetry
 from .coordinator_auth import _make_control_auth
@@ -381,7 +381,12 @@ def register_task_routes(
         return {k: _bulk_tasks(v) for k, v in result.items()}
 
     @app.get("/tasks/{task_id}")
-    def get_task(task_id: str, native_restart_policy: bool = False) -> dict:
+    def get_task(
+        task_id: str, native_restart_policy: bool = False,
+        obligation_assignment_event_id: int | None = Query(None, ge=1, le=2**63 - 1),
+    ) -> dict:
+        if native_restart_policy and obligation_assignment_event_id is not None:
+            raise HTTPException(422, detail="task obligation and native restart observations are separate")
         if native_restart_policy:
             from .native_restart_policy import read_snapshot
 
@@ -389,7 +394,10 @@ def register_task_routes(
             if policy is None:
                 raise HTTPException(status_code=404, detail="no such task")
             return {"exists": True, "native_restart_policy": policy}
-        return enrich_task_detail(queue, _task_with_spawn_dict(queue, _require(queue.get(task_id))))
+        return enrich_task_detail(
+            queue, _task_with_spawn_dict(queue, _require(queue.get(task_id))),
+            assignment_event_id=obligation_assignment_event_id,
+        )
 
     @app.get("/tasks/{task_id}/result")
     def get_result(task_id: str) -> dict:
