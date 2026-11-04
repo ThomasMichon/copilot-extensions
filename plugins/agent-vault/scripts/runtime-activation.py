@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import traceback
 
 
 def main() -> int:
@@ -49,12 +50,16 @@ def main() -> int:
             "KeePassXC installation is required while inactive."
         )
         code = 0 if enabled else 2
-    except (ImportError, OSError, RuntimeError, TypeError, ValueError):
+    except (ImportError, OSError, RuntimeError, TypeError, ValueError) as error:
         state = "failed"
+        frames = ", ".join(
+            f"{frame.name}:{frame.lineno}"
+            for frame in traceback.extract_tb(error.__traceback__, limit=-4)
+        )
         detail = (
             "Agent Vault activation configuration could not be resolved. "
             "Correct the owning configuration, binding or payload; this is "
-            "not an unconfigured result."
+            f"not an unconfigured result. Reader failure: {type(error).__name__} ({frames})."
         )
         code = 3
     print(json.dumps({

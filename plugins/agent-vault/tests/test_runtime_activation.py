@@ -139,6 +139,50 @@ def test_actual_payload_reader_uses_bundled_sdk_without_site_packages(tmp_path):
     assert json.loads(result.stdout)["state"] == "configured"
 
 
+@pytest.mark.parametrize("shell", ["python", "powershell", "pwsh"])
+def test_invalid_activation_retains_safe_reader_diagnostic(tmp_path, shell):
+    if shell != "python" and (os.name != "nt" or shutil.which(shell) is None):
+        pytest.skip("native Windows PowerShell reader")
+    home = tmp_path / "home"
+    home.mkdir()
+    project = tmp_path / "project"
+    project.mkdir()
+    payload = _make_fake_plugin(tmp_path, "agent-vault")
+    (project / ".agent-vault.json").write_text(
+        '{"enabled":"private-configuration-sentinel"}', encoding="utf-8",
+    )
+    env = _clean_env({"HOME": str(home), "USERPROFILE": str(home)})
+    if shell == "python":
+        argv = [
+            sys.executable, "-I", "-B", str(payload / "scripts" / "runtime-activation.py"),
+            "--cwd", str(project),
+        ]
+    else:
+        entry = tmp_path / "read-activation.ps1"
+        entry.write_text(
+            "param($Reader, $Project, $Python)\n"
+            "$ErrorActionPreference = 'Stop'\n"
+            ". $Reader\n"
+            "Get-VaultRuntimeActivation -Project $Project -Python $Python\n",
+            encoding="utf-8",
+        )
+        argv = [
+            shutil.which(shell), "-NoProfile", "-NonInteractive", "-File", str(entry),
+            str(payload / "scripts" / "runtime-activation.ps1"), str(project), sys.executable,
+        ]
+    result = subprocess.run(
+        argv, cwd=project, env=env, capture_output=True, text=True,
+        encoding="utf-8", timeout=30, **no_window_kwargs(),
+    )
+    assert result.returncode != 0
+    diagnostic = json.loads(result.stdout)["detail"] if shell == "python" else result.stderr
+    assert "Reader failure: " in diagnostic, result.stdout + result.stderr
+    assert "_validate_config_data:" in diagnostic
+    assert "private-configuration-sentinel" not in diagnostic
+    assert str(project) not in diagnostic
+    assert not (home / ".agent-vault").exists()
+
+
 def test_relative_config_reader_retains_project_after_staging_to_home(tmp_path):
     home, project = tmp_path / "home", tmp_path / "project"
     home.mkdir()

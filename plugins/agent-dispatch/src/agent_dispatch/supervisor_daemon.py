@@ -319,6 +319,7 @@ class SupervisorDaemon(BoundedReconciliation):
         #: Set by ``_maybe_self_update`` the tick it triggers a handoff; read by
         #: ``serve`` to break its loop and pick the distinct return code.
         self.self_update_triggered = False
+        self._source_handoff = None
         self._governance = LoopGovernance()
         #: Cached canonical interpreter for spawning registration children --
         #: resolved once (not per-registration/per-tick) since the current-version
@@ -1564,10 +1565,13 @@ class SupervisorDaemon(BoundedReconciliation):
         if unit is None:
             return False
         proc = unit.proc
+        source_withdrawing = self._source_handoff is not None and self._source_handoff["phase"] == "withdrawing"
         if proc is not None and unit.kind == RegistrationKind.PLUGIN_COMPANION:
             try:
                 self._companion().stop(unit.companion_resolution, proc)
             except (CompanionError, CompanionIndeterminate, OSError, subprocess.SubprocessError):
+                if source_withdrawing:
+                    return False
                 if (
                     unit.companion_resolution is not None
                     and unit.companion_resolution.managed_snapshot is not None
@@ -1590,6 +1594,10 @@ class SupervisorDaemon(BoundedReconciliation):
                 proc.wait(timeout=10)
             except Exception:  # pragma: no cover -- best-effort teardown
                 log.exception("error stopping registration %s", rid)
+                if source_withdrawing:
+                    return False
+        if source_withdrawing and proc is not None and proc.poll() is None:
+            return False
         self._units.pop(rid, None)
         self._unmanaged_health_futures.pop(rid, None)
         self._managed_health_futures.pop(rid, None)
@@ -1861,6 +1869,11 @@ class SupervisorDaemon(BoundedReconciliation):
         """
         if not self.self_update_enabled:
             return False
+        if self._source_handoff is not None:
+            from .supervisor_source import advance_handoff
+
+            state = self._source_handoff
+            return advance_handoff(self, state["root"], state["version"], state["target"])
         now = self.clock()
         if now - self._self_update_last_check < self.self_update_poll_interval:
             return False
@@ -1880,6 +1893,12 @@ class SupervisorDaemon(BoundedReconciliation):
             return False
         if target is None:
             return False
+        from .self_update import read_current_version
+        from .supervisor_source import advance_handoff, is_profiled_application
+
+        selected = read_current_version(root)
+        if selected and is_profiled_application(root, selected, target):
+            return advance_handoff(self, root, selected, target)
         if action_inhibited(
             "supervisor-self-update", logger=log, root=root, automatic=True,
         ):
@@ -2008,6 +2027,7 @@ class SupervisorDaemon(BoundedReconciliation):
         on_cycle: Callable[[ReconcileSummary], None] | None = None,
         on_cycle_start: Callable[[int, float], None] | None = None,
         on_progress: Callable[[dict], None] | None = None,
+        source_admission=None,
     ) -> int:
         """Run the daemon: reconcile each tick until interrupted.
 
@@ -2028,7 +2048,12 @@ class SupervisorDaemon(BoundedReconciliation):
         (e.g. the runtime-status file) for programmatic staleness checks.
         """
         self._progress_callback = on_progress
-        if single_instance and not self.acquire_singleton():
+        if source_admission is not None:
+            from .supervisor_source import acquire_candidate
+
+            if not acquire_candidate(self, source_admission, once=once, single_instance=single_instance):
+                return 3
+        if source_admission is None and single_instance and not self.acquire_singleton():
             daemon_audit(self, "selection", "singleton-held-by-peer", outcome="skipped")
             log.info(
                 "another supervisor daemon already holds %s; standing down",
@@ -2038,6 +2063,12 @@ class SupervisorDaemon(BoundedReconciliation):
         daemon_audit(self, "start", "singleton-acquired" if single_instance else "unguarded-run", outcome="ok")
         try:
             while True:
+                if self._source_handoff is not None and self._source_handoff["phase"] == "withdrawing":
+                    if self._maybe_self_update():
+                        self.self_update_triggered = True
+                        break
+                    self.sleep(self.poll_interval)
+                    continue
                 from .diagnostic_logs import maintain_file_logging
                 maintain_file_logging()
                 boundary = self._recheck_governance("iteration-boundary")

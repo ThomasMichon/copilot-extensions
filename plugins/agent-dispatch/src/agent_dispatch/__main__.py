@@ -959,6 +959,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     register_execution_commands(sub)
 
+    from .source_start import command as source_start
+
+    p = sub.add_parser("__source-start", help=argparse.SUPPRESS, allow_abbrev=False)
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=source_start)
+
     return parser
 
 

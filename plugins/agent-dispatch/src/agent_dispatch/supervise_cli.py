@@ -25,6 +25,7 @@ from __future__ import annotations
 from agent_procutil.daemon_instances import daemon_entrypoint
 
 import argparse
+import contextlib
 import json
 import os
 import sys
@@ -32,12 +33,15 @@ import time
 from pathlib import Path
 from typing import Any
 
+from . import __version__
 from .client_authority import (
     locked_supervisor_status,
     supervisor_authority_target as _supervisor_authority_target,
 )
 from .loop_commands import _resolve_cli_module
 from .logging_setup import configure_file_logging
+from .supervisor_registration import registration_scope as _registration_scope
+from .supervisor_status_io import runtime_status_path as _supervisor_runtime_status_path
 
 
 def _proxy(name: str):
@@ -55,30 +59,6 @@ _scope_repo = _proxy("_scope_repo")
 _spawn_route = _proxy("_spawn_route")
 _parse_label_max_attempts = _proxy("_parse_label_max_attempts")
 
-def _registration_scope(args: argparse.Namespace) -> tuple[str | None, str]:
-    """Resolve the (machine, env) a registration is scoped to.
-
-    ``--machine`` / ``--env`` win; otherwise the machine is this host's resolved
-    alias and the env is ``AGENT_DISPATCH_ENV`` (default ``"default"``). This is
-    the *one supervisor per machine-and-environment* the registration binds to.
-    """
-    from .supervisor_pool_allocator import launch_scope
-
-    from . import remote_dispatch
-
-    if scope := launch_scope(args):
-        return scope
-    machine = getattr(args, "machine", None) or remote_dispatch.local_machine()
-    env = getattr(args, "env", None) or os.environ.get("AGENT_DISPATCH_ENV") or "default"
-    return machine, env
-
-
-def _supervisor_runtime_status_path(scope: str) -> Path:
-    from .supervisor_status_io import runtime_status_path
-
-    return runtime_status_path(scope)
-
-
 def _write_supervisor_runtime_status(scope: str, summary: Any) -> None:
     path = _supervisor_runtime_status_path(scope)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -88,6 +68,7 @@ def _write_supervisor_runtime_status(scope: str, summary: Any) -> None:
     # last cycle's own duration, not just "when did anything last happen."
     previous, _err = _read_supervisor_runtime_status(scope)
     payload = {
+        "runtime_version": __version__,
         "updated_at": getattr(summary, "completed_at", time.time()),
         "cycle_started_at": (previous or {}).get("cycle_started_at"),
         "cycle_id": (previous or {}).get("cycle_id"),
@@ -114,6 +95,7 @@ def _write_supervisor_cycle_start(
     payload = dict(previous or {})
     payload["cycle_started_at"] = started_at
     payload["cycle_id"] = cycle_id
+    payload["runtime_version"] = __version__
     from .companion import process_start_token
 
     payload["generation"] = {
@@ -424,13 +406,17 @@ def _ensure_supervisor_daemon(args: argparse.Namespace, machine: str | None, env
 
 
 @daemon_entrypoint("agent-dispatch-supervisor", source=__file__, purpose="production")
-def _cmd_supervise_serve(args: argparse.Namespace) -> int:
+def _cmd_supervise_serve(args: argparse.Namespace, *, source_guard=None, source_argv=None) -> int:
     """``supervise serve`` -- run the singleton supervisor daemon (foreground).
 
     One master per (machine, env): reads the registration registry and runs each
     active registration in its own subprocess, reconciling on every tick.
     Single-instance-guarded -- a second daemon for the same scope stands down.
     """
+    if source_guard is None and getattr(args, "source_candidate", None) is not None:
+        from .supervisor_source import entry
+
+        return entry(args)
     # Never hold the Copilot plugin payload dir as CWD (Windows locks it against
     # `copilot plugin update`); this daemon is lazy-started and inherits the
     # launching session's CWD. Relocate before the long-lived loop.
@@ -482,7 +468,8 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
 
     _su_enabled, _su_poll, _su_cooldown = _self_update_settings()
 
-    with _client(args) as c:
+    with contextlib.ExitStack() as clients:
+        c = None if source_guard is not None else clients.enter_context(_client(args))
         daemon = SupervisorDaemon(
             c,
             machine,
@@ -493,7 +480,10 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
             # Rebuild the client by re-resolving the coordinator endpoint after a
             # connection failure -- the coordinator's ephemeral port moves on
             # restart, so a cached one would wedge the daemon (#3825).
-            client_factory=lambda: _client(args, ensure=False),
+            client_factory=lambda: (
+                _client(args, ensure=False) if source_guard is None
+                else _client(args, ensure=False, allow_ssh_failover=False)
+            ),
             target_args=tuple(target_cli_args(args)),
             # Live self-update (#2259): default-ON / opt-out via
             # AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE=0. Reuses this process's own
@@ -503,8 +493,13 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
             self_update_enabled=_su_enabled,
             self_update_poll_interval=_su_poll,
             self_update_cooldown=_su_cooldown,
-            self_update_argv=list(sys.argv[1:]) if _su_enabled else None,
+            self_update_argv=source_argv or (list(sys.argv[1:]) if _su_enabled else None),
         )
+        admission = None
+        if source_guard is not None:
+            from .supervisor_source import configure_admission
+
+            admission = configure_admission(daemon, args, source_guard, clients)
 
         def _on_cycle_start(cycle_id: int, started_at: float) -> None:
             daemon.queue_cycle_start(cycle_id, started_at, lambda cycle, timestamp: _write_supervisor_cycle_start(
@@ -534,6 +529,7 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
             on_progress=lambda progress: _write_supervisor_progress(
                 supervisor_lease_scope(machine, env), progress,
             ),
+            **({"source_admission": admission} if admission is not None else {}),
         )
 
 

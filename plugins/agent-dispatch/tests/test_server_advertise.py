@@ -54,6 +54,49 @@ def test_clear_endpoint_removes_owned_record(tmp_path):
     assert rendezvous.read_endpoint(run) is None
 
 
+def test_passive_serve_preserves_incumbent_discovery_until_route_owned(monkeypatch, tmp_path):
+    import os
+    import pytest
+    from agent_dispatch import runtime_version
+    from zdd import routing
+
+    run = tmp_path / "run"
+    route = tmp_path / "routing"
+    install = tmp_path / "install"
+    install.mkdir()
+    version_file = install / runtime_version.RUNNING_VERSION_FILE
+    version_file.write_text('{"pid": 1001, "version": "incumbent"}', encoding="utf-8")
+    monkeypatch.setenv("AGENT_DISPATCH_RUN_DIR", str(run))
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(route))
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(install))
+    rendezvous.write_endpoint(run, "tcp", "127.0.0.1:41001", pid=1001)
+    endpoint_bytes = rendezvous.endpoint_file(run).read_bytes()
+    version_bytes = version_file.read_bytes()
+    table = {"active": None}
+    monkeypatch.setattr(routing, "read_table", lambda _: table)
+    monkeypatch.setattr(routing, "reap_stale_active", lambda *_args, **_kwargs: (
+        pytest.fail("passive candidate repaired routing before ownership")
+    ))
+    monkeypatch.setattr(server, "_clear_routing", lambda: None)
+
+    def fake_run(self, sockets=None):
+        assert rendezvous.endpoint_file(run).read_bytes() == endpoint_bytes
+        assert version_file.read_bytes() == version_bytes
+        assert server._owns_active_route() is False
+        assert rendezvous.endpoint_file(run).read_bytes() == endpoint_bytes
+        table["active"] = {"pid": os.getpid()}
+        assert server._owns_active_route() is True
+        assert rendezvous.read_endpoint(run).pid == os.getpid()
+        assert rendezvous.read_endpoint(run).tcp_host_port[1] == sockets[0].getsockname()[1]
+        assert version_file.read_bytes() != version_bytes
+        published = version_file.read_bytes()
+        assert server._owns_active_route() is True
+        assert version_file.read_bytes() == published
+
+    monkeypatch.setattr(uvicorn.Server, "run", fake_run)
+    server.serve(Config(host="127.0.0.1", db_path=str(tmp_path / "tasks.db")), passive=True)
+
+
 def test_clear_endpoint_preserves_successor_owned_record(tmp_path):
     run = tmp_path / "run"
     rendezvous.write_endpoint(run, "tcp", "127.0.0.1:41002", pid=2002)
