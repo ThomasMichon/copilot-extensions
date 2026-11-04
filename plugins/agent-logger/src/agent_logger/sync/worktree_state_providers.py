@@ -11,10 +11,10 @@ from pathlib import Path
 from typing import Any
 
 from agent_procutil import no_window_kwargs
-from plugin_activation import normalize_remote, resolve_active_plugins
+from plugin_activation import resolve_active_plugins
 
-from agent_logger import configuration_layers
-from agent_logger.aggregate import Admission
+from agent_logger import configuration_layers, repo_trust
+from agent_logger.aggregate import Admission, canonical_repository_identity
 from agent_logger.sync.worktree_state import WorktreeStateError, decode_object
 
 INVENTORY_CAPABILITY = "worktree-data-project-inventory-v1"
@@ -41,6 +41,7 @@ class ProjectInventory:
 
     repository: str
     project: str
+    owner_repository_identity: str
     placements: tuple[ManagedPlacement, ...]
 
 
@@ -238,6 +239,16 @@ def _placements(
     return tuple(result)
 
 
+def _checkout_repository_identity(admission: Admission) -> str:
+    remote = repo_trust._run_git(admission.authoritative_checkout, "remote", "get-url", "origin")
+    if not remote or canonical_repository_identity(remote) != admission.repository:
+        raise WorktreeStateError("actual checkout differs from the admitted repository")
+    identity = repo_trust._normalize_git_remote(remote)
+    if identity is None or not identity.startswith("network:"):
+        raise WorktreeStateError("actual checkout has no supported owner repository identity")
+    return identity
+
+
 def read_project_inventory(admission: Admission, home: Path) -> ProjectInventory:
     """Negotiate and read the actual admitted checkout's complete retained inventory.
 
@@ -285,15 +296,21 @@ def read_project_inventory(admission: Admission, home: Path) -> ProjectInventory
             "live_authority",
         },
     )
+    expected_repository = _checkout_repository_identity(admission)
     if (
         data["project"] != project
         or data["live_authority"] is not False
-        or data["repository_identity"] != normalize_remote("https://" + admission.repository)
+        or data["repository_identity"] != expected_repository
     ):
         raise WorktreeStateError("selected owner inventory differs from the admitted repository")
     marketplace = own["marketplaceId"] if own is not None else None
     scope = None if data["scope"] is None else _scope(data["scope"], project, marketplace)
-    return ProjectInventory(admission.repository, project, _placements(data["worktrees"], scope))
+    return ProjectInventory(
+        admission.repository,
+        project,
+        expected_repository,
+        _placements(data["worktrees"], scope),
+    )
 
 
 _SCRIPT_ENTRY = (

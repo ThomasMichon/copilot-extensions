@@ -81,6 +81,9 @@ foreign ambient project, including every retained store after canonical-record
 retirement. State bytes remain unchanged. Actual selected Efforts `info` calls,
 effective project/global activation and prior/malformed provider controls
 qualify negotiation without enabling exports, collection or a scheduler.
+Real checkout-origin controls preserve case-sensitive owner paths and meaningful
+ports, reject foreign case/port variants, and retain GitHub/default-port equivalence
+without changing the older aggregate-policy identity.
 The same-cell adapter reuses the already-qualified canonical peer launcher;
 its shared native two-cell matrix remains owned by the peer-launch portfolio.
 The preservation cases exercise actually eligible old sessions and a verified

@@ -37,8 +37,16 @@ alias. Its existing passive capabilities operation must advertise
 or refused provider is unsupported, never permission to bootstrap a runtime,
 scan another registry or fabricate an empty successful result.
 
-The complete inventory must match the admitted canonical repository and
-selected installation. Logger retains every registered agenda placement,
+The complete inventory must match the admitted repository's actual Git origin
+and selected installation. The existing aggregate policy identity is checked
+separately; it cannot reconstruct a lossless owner identity because it folds
+path case and omits ports. A fresh bounded Git read plus the existing local
+repository-trust normalizer preserves non-GitHub path case and non-default
+ports, folds GitHub path case and removes only protocol-default ports.
+`ProjectInventory.owner_repository_identity` retains that exact owner identity
+separately from the unchanged aggregate-policy identity. A case-distinct path
+or different non-default port is foreign, not a compatible alias.
+Logger retains every registered agenda placement,
 including retired worktrees with missing canonical records, while rejecting
 partial, duplicate, foreign or over-budget results. Limits remain 128 worktrees,
 32 stores per worktree and a 1 MiB response. Locations and registration fences

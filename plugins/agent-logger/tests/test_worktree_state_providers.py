@@ -81,14 +81,22 @@ def inventory(tmp_path: Path) -> dict[str, Any]:
 
 def transport(monkeypatch: pytest.MonkeyPatch, reply: dict[str, Any]) -> list[list[str]]:
     calls = []
+    native_run = subprocess.run
     prefix, environment = [sys.executable, "-m", "agent_worktrees"], {"selected": "owner"}
     monkeypatch.setattr(
         configuration_layers,
         "worktrees_owner_command",
         lambda home: (prefix, environment, None),
     )
+    monkeypatch.setattr(
+        providers,
+        "_checkout_repository_identity",
+        lambda selected: "network:" + REPOSITORY,
+    )
 
     def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        if argv[0] == "git":
+            return native_run(argv, **kwargs)
         calls.append(argv)
         assert kwargs["env"] == environment
         assert kwargs["cwd"].name == "checkout"
@@ -108,6 +116,44 @@ def transport(monkeypatch: pytest.MonkeyPatch, reply: dict[str, Any]) -> list[li
 
     monkeypatch.setattr(providers.subprocess, "run", run)
     return calls
+
+
+@pytest.mark.parametrize(
+    ("remote", "owner_identity", "accepted"),
+    [
+        ("https://git.example/Team/Repo.git", "network:git.example/Team/Repo", True),
+        ("https://git.example/Team/Repo.git", "network:git.example/team/repo", False),
+        ("ssh://git@git.example:2222/owner/repo.git", "network:git.example:2222/owner/repo", True),
+        (
+            "ssh://git@git.example:2222/owner/repo.git",
+            "network:git.example:2223/owner/repo",
+            False,
+        ),
+        ("https://git.example:443/Team/Repo.git", "network:git.example/Team/Repo", True),
+        ("ssh://git@git.example:22/Team/Repo.git", "network:git.example/Team/Repo", True),
+        ("https://github.com/Team/Repo.git", "network:github.com/team/repo", True),
+    ],
+)
+def test_actual_checkout_remote_preserves_owner_identity_distinctions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    remote: str,
+    owner_identity: str,
+    accepted: bool,
+) -> None:
+    selected = Admission(remote, tmp_path / "checkout")
+    init_git_repo(selected.authoritative_checkout, remote=remote)
+    original = providers._checkout_repository_identity
+    reply = inventory(tmp_path)
+    reply["data"]["repository_identity"] = owner_identity
+    transport(monkeypatch, reply)
+    monkeypatch.setattr(providers, "_checkout_repository_identity", original)
+    if not accepted:
+        with pytest.raises(WorktreeStateError):
+            providers.read_project_inventory(selected, tmp_path / "logger")
+    else:
+        result = providers.read_project_inventory(selected, tmp_path / "logger")
+        assert result.owner_repository_identity == owner_identity
 
 
 def test_inventory_uses_actual_checkout_and_retains_retired_stores(
@@ -265,6 +311,11 @@ def test_same_cell_inventory_reuses_existing_native_peer_launch(
     own = {"cellRoot": str(cell), "pluginRoot": str(home), "marketplaceId": "owned-cell"}
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", raw)
     monkeypatch.setattr(configuration_layers._peer_launch, "validate_owner", lambda *args: own)
+    monkeypatch.setattr(
+        providers,
+        "_checkout_repository_identity",
+        lambda selected: "network:" + REPOSITORY,
+    )
     monkeypatch.setattr(
         configuration_layers,
         "_legacy_owner_prefix",
