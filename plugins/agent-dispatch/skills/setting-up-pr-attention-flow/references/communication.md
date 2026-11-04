@@ -29,11 +29,17 @@ raw operator transcript, credentials or unrelated private context.
 ## Native in-session Task route
 
 Use the existing host's Task tool to launch a fresh independent reviewer for
-each unrelated PR, within the authorized lane cap. Retain its actually returned
+each unrelated PR, filling the authorized concurrency target within actual
+capacity and explicit limits. Retain its actually returned
 agent handle for same-PR follow-ups through `write_agent`; do not use a new Task
 for a genuine update or missing-input answer when that handle supports follow-up.
 A one-shot/unsupported follow-up surface is a named host limitation, not an
-invented retained session or Bridge installation requirement.
+invented retained session or Bridge installation requirement. Prefer the
+original reviewer for every genuine later round. Only actual unsupported
+follow-up or confirmed context loss permits supported recovery or a documented
+replacement carrying its prior findings, replies, receipts and unknown effects.
+Retain the original handle and replacement reason; a fresh context is not the
+same conversation, and a timeout alone does not establish context loss.
 
 While a background reviewer runs, continue independent work rather than polling
 it. Wait for automatic completion notification, then use `read_agent` once

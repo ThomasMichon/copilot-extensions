@@ -1,0 +1,9 @@
+{
+  "comment": "Make PR attention guidance capability-aware, preserve original reviewer continuity, and keep concurrency work-conserving.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
