@@ -6,9 +6,11 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
-from typing import Callable
+from types import SimpleNamespace
+from typing import Callable, cast
 
 import pytest
 
@@ -176,6 +178,8 @@ def test_import_roots_are_ordered_project_local_and_lease_cleaned(
     """Custody units inspect delivery, not actual MyPy contract enforcement."""
     for name in ("helpers", "other"):
         (tmp_path / name).mkdir()
+    for name in inventoried:
+        (tmp_path / name).write_text("value: int = 1\n", encoding="utf-8")
     (tmp_path / ".typecheck-prepared").write_text("test-context\n", encoding="utf-8")
     lease = Lease()
     calls: list[list[str]] = []
@@ -223,6 +227,140 @@ def test_import_roots_are_ordered_project_local_and_lease_cleaned(
         ) == expected
         assert len(calls) == 1
     assert lease.released and item.level == "pending"
+    assert not (tmp_path / "typecheck-targets.txt").exists()
+    assert not (tmp_path / "typecheck-mypy.ini").exists()
+
+
+def test_import_inputs_accept_owned_wip_and_namespace_members_only(tmp_path: Path) -> None:
+    """Namespace packages need no initializer; non-module fixture paths stay data."""
+    namespace = tmp_path / "helpers/contracts"
+    namespace.mkdir(parents=True)
+    member = "helpers/contracts/model.py"
+    (tmp_path / member).write_text("value: int = 1\n", encoding="utf-8")
+    fixtures = tmp_path / "helpers/negative-cases"
+    fixtures.mkdir()
+    (fixtures / "shadow.pyi").write_text("invalid fixture\n", encoding="utf-8")
+    (tmp_path / "helpers/not.a.module.pyi").write_text("invalid fixture\n", encoding="utf-8")
+    captured = typecheck._import_inputs(tmp_path, ("helpers",), (member,))
+    assert [name for name, _identity, _content in captured.files] == [member]
+    captured.verify(tmp_path)
+    added = "helpers/contracts/working.py"
+    (tmp_path / added).write_text("value: int = 2\n", encoding="utf-8")
+    updated = typecheck._import_inputs(tmp_path, ("helpers",), (member, added))
+    assert len(updated.files) == 2
+
+
+@pytest.mark.parametrize("change", ["bytes", "missing", "added", "stub", "replacement", "root"])
+def test_import_input_snapshot_refuses_member_and_root_changes(tmp_path: Path, change: str) -> None:
+    """Accepted identities, bytes and reachable membership remain analysis inputs."""
+    helpers = tmp_path / "helpers"
+    helpers.mkdir()
+    member = helpers / "contract.py"
+    member.write_text("value: int = 1\n", encoding="utf-8")
+    captured = typecheck._import_inputs(tmp_path, ("helpers",), ("helpers/contract.py",))
+    if change == "bytes":
+        member.write_text("value: int = 2\n", encoding="utf-8")
+    elif change == "missing":
+        member.unlink()
+    elif change == "added":
+        (helpers / "extra.py").write_text("value: int = 1\n", encoding="utf-8")
+    elif change == "stub":
+        (helpers / "contract.pyi").write_text("value: str\n", encoding="utf-8")
+    elif change == "replacement":
+        member.rename(helpers / "original.txt")
+        member.write_text("value: int = 1\n", encoding="utf-8")
+    else:
+        helpers.rename(tmp_path / "original")
+        helpers.mkdir()
+        member.write_text("value: int = 1\n", encoding="utf-8")
+    with pytest.raises(typecheck.TypecheckError):
+        captured.verify(tmp_path)
+
+
+@pytest.mark.parametrize("directory", [False, True])
+def test_import_inputs_refuse_indirect_members(
+    tmp_path: Path, native_file_symlink: Callable[..., None], directory: bool,
+) -> None:
+    """An importable alias cannot redirect namespace traversal or source bytes."""
+    helpers = tmp_path / "helpers"
+    helpers.mkdir()
+    (helpers / "contract.py").write_text("value: int = 1\n", encoding="utf-8")
+    target = tmp_path / "foreign"
+    target.mkdir()
+    (target / "contract.py").write_text("value: str = 'foreign'\n", encoding="utf-8")
+    native_file_symlink(
+        helpers / ("alias" if directory else "alias.py"),
+        target if directory else target / "contract.py", target_is_directory=directory,
+    )
+    with pytest.raises(typecheck.TypecheckError, match="ordinary repository"):
+        typecheck._import_inputs(tmp_path, ("helpers",), ("helpers/contract.py",))
+
+
+@pytest.mark.parametrize("mode, attributes", [(stat.S_IFREG, 0x400), (stat.S_IFIFO, 0)])
+def test_import_inputs_refuse_nonordinary_files_before_reading(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: int, attributes: int,
+) -> None:
+    """The Windows reparse attribute is independent of the apparent file mode."""
+    def lstat(_path: Path) -> os.stat_result:
+        return cast(os.stat_result, SimpleNamespace(
+            st_mode=mode, st_file_attributes=attributes, st_dev=1, st_ino=2,
+        ))
+
+    monkeypatch.setattr(Path, "lstat", lstat)
+    with pytest.raises(typecheck.TypecheckError, match="ordinary repository file"):
+        typecheck._import_identity(tmp_path / "contract.py")
+
+
+@pytest.mark.parametrize("outcome", ["success", "failure", "timeout", "cleanup"])
+def test_import_input_drift_is_refused_and_settles_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
+    """Neither a failed checker nor late cleanup can credit changed helper inputs."""
+    helpers = tmp_path / "helpers"
+    helpers.mkdir()
+    member = helpers / "contract.py"
+    member.write_text("value: int = 1\n", encoding="utf-8")
+    (tmp_path / ".typecheck-prepared").write_text("test-context\n", encoding="utf-8")
+    lease = Lease()
+    unlink = Path.unlink
+
+    def environment_path(
+        _root: Path, _project: typecheck.Project, *, captured_lock: bytes | None = None,
+    ) -> tuple[Path, str]:
+        return tmp_path, "test-context"
+
+    def environment_python(_path: Path) -> Path:
+        return Path(sys.executable)
+
+    def acquire(_wait: float, _path: Path) -> Lease:
+        return lease
+
+    def cleanup(path: Path, missing_ok: bool = False) -> None:
+        unlink(path, missing_ok=missing_ok)
+        if path.name == "typecheck-mypy.ini":
+            member.write_text("value: int = 2\n", encoding="utf-8")
+
+    def run(
+        argv: list[str], _root: Path, *, env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        if outcome != "cleanup":
+            member.write_text("value: int = 2\n", encoding="utf-8")
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(argv, 120)
+        return subprocess.CompletedProcess(argv, int(outcome == "failure"), "", "")
+
+    monkeypatch.setattr(typecheck, "environment_path", environment_path)
+    monkeypatch.setattr(typecheck, "environment_python", environment_python)
+    monkeypatch.setattr(typecheck, "acquire_environment", acquire)
+    monkeypatch.setattr(typecheck, "_run", run)
+    if outcome == "cleanup":
+        monkeypatch.setattr(Path, "unlink", cleanup)
+    with pytest.raises(typecheck.TypecheckError, match="inputs changed"):
+        typecheck.check_project(
+            tmp_path, replace(project(), import_roots=("helpers",)), ("sample.py",),
+            all_paths=("sample.py", "helpers/contract.py"),
+        )
+    assert lease.released
     assert not (tmp_path / "typecheck-targets.txt").exists()
     assert not (tmp_path / "typecheck-mypy.ini").exists()
 

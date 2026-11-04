@@ -321,6 +321,19 @@ Malformed, duplicate, missing, non-directory and redirected roots are refused;
 a checking root must contain Python source in the existing ownership inventory.
 Ambient `MYPYPATH`, `PYTHONPATH` and `PYTHONHOME` do not supply roots.
 
+For explicit roots, the checker captures the ordinary directory/file identities,
+bytes and membership of reachable Python source without executing it. Identifier
+directory components include namespace packages without requiring `__init__.py`;
+non-module fixture names and data paths do not become import interfaces.
+Importable `.py` members must belong to the existing inventory, including owned,
+nonignored developer WIP. Extra ignored/unowned Python, first-party `.pyi`
+shadows or substitutes, symbolic links, reparse points and nonordinary inputs
+are refused. Third-party SDK stubs outside these roots are unchanged.
+The ephemeral capture is verified before and after each platform analysis and
+again after checker-file cleanup, before releasing the environment lease.
+Changed or replaced roots/members and added/missing sources cannot credit a
+result, including when MyPy itself fails or times out.
+
 Import delivery does not add helper files to the project's owned targets or
 certify their bodies. MyPy retains ordinary module identities, duplicate-module
 diagnostics and `--follow-imports silent`: consumed helper contracts supply
@@ -334,8 +347,9 @@ Projects without roots retain their existing cache behavior and environment key.
 No new qualification receipt or committed-only source restriction is introduced.
 Local developer files retain the normal ownership inventory rules; frozen checks
 resolve roots relative to their candidate checkout. This does not replace the
-existing frozen-candidate owner's Git content-tree identity or qualify additional
-untracked, ignored or stub inputs by implication.
+existing frozen-candidate owner's Git content-tree identity. Additional imported
+source must satisfy the same inventory and ephemeral verification; ignored or
+stub inputs are not qualified by the candidate identity.
 
 ## Fixed fragment source views
 
