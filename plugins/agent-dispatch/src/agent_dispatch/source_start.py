@@ -321,10 +321,15 @@ def ensure_supervisor(root: Path, *, plan=_UNPLANNED) -> dict:
     deadline = time.monotonic() + 60.0
     while True:
         require_selected_source()
+        if child is not None and child.poll() is not None and not is_locked(lock):
+            raise RuntimeError("selected supervisor exited before application readiness")
         status, error = read_status(runtime_status_path(scope))
         generation = status.get("generation") if isinstance(status, dict) else None
         if error is not None:
-            raise RuntimeError("supervisor readiness observation is unavailable")
+            if error == "status-read-unavailable" and time.monotonic() < deadline:
+                time.sleep(0.1)
+                continue
+            raise RuntimeError(f"supervisor readiness observation is unavailable: {error}")
         if isinstance(generation, dict):
             pid = generation.get("pid")
             birth = process_start_token(pid) if type(pid) is int and pid > 0 else None
@@ -343,8 +348,6 @@ def ensure_supervisor(root: Path, *, plan=_UNPLANNED) -> dict:
                     if prepared.get("settings") != expected_settings:
                         raise RuntimeError("selected supervisor effective settings do not match startup plan")
                     return {"status": "ready", "pid": pid}
-        if child is not None and child.poll() is not None and not is_locked(lock):
-            raise RuntimeError("selected supervisor exited before application readiness")
         if time.monotonic() >= deadline:
             raise RuntimeError("selected supervisor native application readiness remains unconfirmed")
         time.sleep(0.1)

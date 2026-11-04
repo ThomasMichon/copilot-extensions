@@ -97,10 +97,21 @@ def test_enabled_source_master_independent_handoff_and_standalone(tmp_path, comp
         return None
 
     def status(ready, *, after_cycle=0):
+        from agent_dispatch.supervisor_status_io import read_status
+
         deadline = time.monotonic() + 10
+        last_error = None
         while time.monotonic() < deadline:
             for path in (root / "control").glob("*.status.json"):
-                document = json.loads(path.read_text(encoding="utf-8"))
+                document, error = read_status(path)
+                if error == "status-read-unavailable":
+                    last_error = error
+                    proof["status_io_retries"] = proof.get("status_io_retries", 0) + 1
+                    continue
+                if error is not None:
+                    raise RuntimeError(error)
+                if document is None:
+                    continue
                 if (
                     document.get("generation") == ready["generation"]
                     and document.get("runtime_version") == ready["runtime_version"]
@@ -110,7 +121,7 @@ def test_enabled_source_master_independent_handoff_and_standalone(tmp_path, comp
                 ):
                     return document
             time.sleep(0.02)
-        raise AssertionError("selected supervisor did not complete its native cycle")
+        raise AssertionError(f"selected supervisor did not complete its native cycle: {last_error}")
 
     def invoke(phase, command, arguments=(), *, success=True):
         started = time.monotonic()
@@ -200,7 +211,8 @@ def test_enabled_source_master_independent_handoff_and_standalone(tmp_path, comp
                 invoke("same-generation-coordinator-restart", slot / "install.ps1")
                 current = endpoint()
                 assert current.pid != raw_route["pid"]
-                pins.append(_NativeProcess(current.pid, "windows:" + current.process_start_time))
+                coordinator = _NativeProcess(current.pid, "windows:" + current.process_start_time)
+                pins.append(coordinator)
                 proof["same_generation_coordinator_restart"] = {
                     "confirmed_dead_route": raw_route, "ready_endpoint": current.to_dict(),
                     "supervisor_cycle": status(ready),
@@ -249,13 +261,15 @@ def test_enabled_source_master_independent_handoff_and_standalone(tmp_path, comp
             assert successor.running()
             proof["replacement_master_completed_cycle"] = status(replacement)
             until = time.monotonic() + 30
-            while master.running():
+            while master.running() or coordinator.running():
                 assert time.monotonic() < until
                 time.sleep(0.05)
             assert master.exit_code() == 42
+            assert coordinator.exit_code() == 0
             proof["independent_preparation_while_old_singleton_held"] = overlap
             proof["replacement_master"] = replacement
             proof["outgoing_master_native_exit"] = 42
+            proof["outgoing_coordinator_native_exit"] = 0
             current = endpoint()
             new_coordinator = _NativeProcess(current.pid, "windows:" + current.process_start_time)
             pins.append(new_coordinator)

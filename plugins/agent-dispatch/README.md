@@ -250,6 +250,9 @@ through guarded routing CAS; unavailable identity, a cutover breadcrumb or exist
 previous-generation custody still requires owner-led recovery.
 Native exit is checked separately from creation time: a retained Windows process
 handle can keep the original birth token queryable after the process has exited.
+Unavailable mutable status reads retain custody and retry only within the existing
+readiness deadline. Persistent I/O reports its reason at expiry; malformed status
+still refuses immediately, and no retry treats an unknown observation as absence.
 
 `tests/test_source_start_native.py` consumes an explicitly prepared canonical
 Source/profile snapshot; it never rebuilds one. Its opt-in generated-frontdoor
