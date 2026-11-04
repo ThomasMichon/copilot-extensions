@@ -42,6 +42,16 @@ agent-chat-driven flow).
 
 ## Coordination
 
+The proposed #5452 finite waiter transport family stays with existing
+task/waiter/bulk-lookup/coordinator/board/relay/source/UI and native custodians.
+Preserve #2453/#2802 and all earlier source-specific holds. #5410's actually
+governed constructed-header/transmission question remains separately owned,
+not an auth intake or new per-agent credential policy here. Normal review,
+complete actual direct Plan/local AND global Validation/Coordination/
+Journal delivery and permitted whole-current source/receiver/custody
+readback precede a separate administrative judgment; missing fit/clauses/
+custody means KEEP #5452. No new actor, blanket ACK, expiry or resource effect.
+
 The direct #2802 all-producer choice/multichoice family stays with this existing UX host
 and backend/source custodians. Preserve the same #2453 actual native
 Confirm-to-correct-coordinator hold; parsed-field progress does not discharge
@@ -1597,6 +1607,36 @@ universal ACK, every-host or whole-parent completion gate is introduced.
   and terminal cases, absent claimed_at/created_at, restart/reclaim, future/skew and
   narrow display at the original finite tier; no unrelated all-host programme.
 
+### Proposed finite same-waiter transport visibility from #5452
+
+_(Agent-recommended additive tracking proposal; #5400's local Tasks/
+Claims/bulk-endpoint delivery remains credited, not missing implementation.)_
+
+- [ ] **P5452-1:** Carry `run_waiters` AND the exact suspended-wait command
+  phrase from the SAME durable waiter through delegated CROSS-MACHINE
+  boards AND relay/subscribe INITIAL AND CACHED rebuilds. Preserve existing
+  full-detail views and reuse the shared bulk lookup/row builder rather
+  than generic suspended badges or per-transport competing truth.
+- [ ] **P5452-2:** Keep no-waiter/missing/unknown/failed/changed/stale
+  observations truthful and bounded under the actual task/waiter/source
+  authority. Rendering cannot clear exclusions, renew/release leases,
+  resume/replace workers or reinterpret an active external wait as death.
+- [ ] **P5452-3:** Keep #5410 authentication construction/transmission
+  separate from data threading. Header presence, no-token loopback success
+  or endpoint existence proves neither the governed auth case nor both
+  remaining data consumers. Preserve legitimate user-local no-token mode;
+  no new token, credentials, auth repair code or universal-placeholder claim.
+- [ ] **V5452-1:** At actual board/transport consumer boundaries, feed one
+  durable active waiter and assert the SAME exact wait command/detail on
+  the local positive control, delegated peer flow, relay INITIAL rebuild
+  AND cached/subscribe rebuild. Do not invent a cached mode for unrelated
+  delegated transports or count local-only map construction as remote proof.
+- [ ] **V5452-2:** Cover no waiter, missing/unknown/failed lookup, changed
+  identity and stale cache/fresh source with truthful status and existing
+  full views, not another store/poller or display-driven ownership refresh.
+  Keep actually governed auth controls separate and original finite
+  source/consumer/native tiers; no new every-host or whole-parent gate.
+
 ## Validation Plan
 
 - [ ] Resolve every directly retained #2802 Plan/Validation clause above at its original
@@ -1662,11 +1702,28 @@ universal ACK, every-host or whole-parent completion gate is introduced.
   implementation, current defect proof, native/release/installed acceptance, custody
   transfer or parent completion.
 
+- [ ] **G5452:** Resolve EVERY P5452/local Validation/continuing Coordination
+  clause for the complete delegated AND relay/subscribe initial/cached
+  waiter path union: SAME durable source, `run_waiters` AND exact phrase,
+  shared lookup/full views and bounded truthful unknowns without lifecycle/
+  lease/exclusion effects. Preserve local #5400 credit, independent #5410
+  and existing #2453/#2802/source/native holders. Documentary intake is
+  not auth/data implementation, native parity or custody/parent completion.
+
 ## Proposal
 
 _Pending operator review of the Phase 0 previews._
 
 ## Journal
+
+### 2026-10-30 - Proposed remaining waiter transport consumers
+
+Added unchecked direct #5452 Plan/local AND actual global Validation and
+same-custodian coordination. Local #5400 enrichment remains credit;
+delegated peer and relay initial/cached consumers retain the same durable
+waiter and exact display contract. #5410 stays independently owned.
+No peer/subscription/auth probe, source implementation, reviewed receiving
+acceptance, assignment, issue closure or custody/resource release occurred.
 
 ### 2026-10-22 - Direct retained acceptance from #2802
 
