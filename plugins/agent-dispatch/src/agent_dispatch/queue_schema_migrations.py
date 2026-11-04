@@ -99,8 +99,20 @@ def run_queue_schema_migrations(conn: sqlite3.Connection, *, now_fn) -> None:
         "  from_status TEXT,"
         "  to_status TEXT,"
         "  worker TEXT,"
+        "  unassigned_worker TEXT,"
         "  note TEXT"
         ")"
+    )
+    event_columns = {row[1] for row in conn.execute("PRAGMA table_info(task_events)")}
+    if "unassigned_worker" not in event_columns:
+        try:
+            conn.execute("ALTER TABLE task_events ADD COLUMN unassigned_worker TEXT")
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_events_transition ON task_events(task_id, id)"
+        " WHERE from_status IS NOT to_status"
     )
     conn.execute(
         "CREATE TABLE IF NOT EXISTS queue_migrations ("

@@ -772,13 +772,22 @@ alive-but-quiet worker rather than yanking its goal. See the **`agent-dispatch`*
 skill § *Goal-loop tasks* and the vision leaf (*resumable-goal*,
 *resume-the-goal-not-restart-it*) for the full contract.
 
+### Worktree-owned task obligation evidence
+
+Ordinary task detail and `claim-status` callbacks now expose optional version-1
+[task obligation evidence](docs/task-obligations.md) from the running coordinator.
+It distinguishes completed or confirmed unbound-queued responsibility from
+submission, suspension and retained assignments. This provider-first expansion
+does not yet journal or release ordinary assignment claims or change cleanup.
+
 ### Read-only native restart policy
 
 The claim-provider callback has an explicit opt-in for restart inspection:
 `agent-dispatch --local claim-status <task-id> --native-restart-policy`
 (or `--shared` for the original central writer). An unqualified/default task
 reference cannot select that writer from reachability or historical dispatch
-provenance. Ordinary `claim-status` output is unchanged.
+provenance. Ordinary callbacks retain their status fields and may include the
+separate optional task-obligation evidence above.
 
 The opt-in requests `GET /tasks/<id>?native_restart_policy=true`. The owner reads
 only reduced task fields and active/preparing waiter presence in one SQLite read
