@@ -63,11 +63,11 @@ def test_load_merges_canonical_and_legacy_disjoint_keys(tmp_path: Path):
     )
     _write(
         tmp_path / "machines.yaml",
-        "machines:\n  lambda-core:\n    display_name: Lambda-Core\n"
-        "  borealis:\n    display_name: Borealis\n",
+        "machines:\n  worker-alpha:\n    display_name: Worker Alpha\n"
+        "  worker-beta:\n    display_name: Worker Beta\n",
     )
     entries = cfg.load_machines_yaml(tmp_path)
-    assert set(entries) == {"container-fleet", "lambda-core", "borealis"}
+    assert set(entries) == {"container-fleet", "worker-alpha", "worker-beta"}
 
 
 def test_load_canonical_wins_on_key_collision(tmp_path: Path):
