@@ -1,0 +1,9 @@
+{
+  "comment": "Retain exact submission proposals and blockers without releasing task responsibility",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
