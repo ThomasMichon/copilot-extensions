@@ -40,6 +40,11 @@ Version-1 same-native retry invocations remain byte-for-byte compatible with
 retained invocations and independently updated peers. Decline guidance stays
 outside that immutable retry template; retained ordinary charters and routing
 remain intact.
+Initial invocation recovery also uses its original stored prompt rather than
+the current generated seed. It still validates the original allocation/native
+binding and requested agent/charter before reading the original receipt;
+changed source guidance neither creates a replacement invocation nor rewrites
+the retained assignment.
 
 The existing allocator supervisor consumes a pending decline before startup
 retry/nudge/exhaustion logic. Only its owning supervisor, outside observe-only

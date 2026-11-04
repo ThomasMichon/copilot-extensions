@@ -343,6 +343,43 @@ def test_exact_initial_receipt_replay_survives_worker_acceptance(ordinary: Simpl
     assert o.q.pool_startup(o.task["id"]).startup_attempts == 0
 
 
+@pytest.mark.parametrize("direction", ["upgrade", "rollback"])
+def test_initial_receipt_recovery_preserves_released_prompt_across_versions(
+    ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, direction: str,
+) -> None:
+    from agent_dispatch import embody_prompts
+
+    o = ordinary
+    current = embody_prompts.pool_worker_prompt
+
+    def legacy(*args: Any, **kwargs: Any) -> str:
+        before, separator, after = current(*args, **kwargs).partition("If you cannot accept, use ")
+        assert separator
+        _, separator, tail = after.partition("After acceptance,")
+        assert separator
+        return (
+            before
+            + "If you cannot accept, retain the assignment and report the blocker; do not use "
+            "legacy yield/abandon as a substitute for pool-aware decline and workspace closeout. "
+            + "After acceptance," + tail
+        )
+
+    monkeypatch.setattr(embody_prompts, "pool_worker_prompt", legacy if direction == "upgrade" else current)
+    seed = startup_seed(o.task, o.client, route=" --shared")
+    result = launch(o)
+    original = json.loads(o.calls[-1][1]["input"])
+    o.client.start_pool_task(o.task["id"], "host-a/worktree-a",
+                            owner_session_id="native-a", expected_generation=1)
+    before = o.q.get_reservation(o.placed["reservation"]["key"]), o.q.get(o.task["id"])
+    o.calls.clear()
+    monkeypatch.setattr(embody_prompts, "pool_worker_prompt", current if direction == "upgrade" else legacy)
+    assert startup_seed(o.task, o.client, route=" --shared") != seed
+    assert launch(o) == result
+    assert len(o.calls) == 1 and "--receipt-only" in o.calls[0][0]
+    assert json.loads(o.calls[0][1]["input"]) == original
+    assert (o.q.get_reservation(o.placed["reservation"]["key"]), o.q.get(o.task["id"])) == before
+
+
 def test_committed_storage_unknown_retains_native_without_sending(
     ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
