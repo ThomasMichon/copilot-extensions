@@ -4980,6 +4980,84 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
     )
 
 
+@pytest.mark.parametrize("invalidated", [False, True])
+def test_fresh_snapshot_survives_busy_mutation_admission(tmp_path, monkeypatch, invalidated):
+    import socket
+
+    from agent_worktrees import allocation_link_runtime, hook_ipc, resident_push
+    from agent_worktrees import status_monitor_cutover as smc
+
+    class Client:
+        def _load_sibling(self, _name):
+            return object()
+
+    monkeypatch.setattr(m, "_monitor_lock_path", lambda: tmp_path / "status-monitor.lock")
+    monkeypatch.setattr(m, "_load_hook_client_module", lambda: Client())
+    monkeypatch.setattr(m.git_ops, "_windows_observation", lambda: True)
+    monkeypatch.setattr(m.locks, "write_lock", lambda _path, extra=None: True)
+    monkeypatch.setattr(smc, "publish_route", lambda *a, **k: None)
+    _elect_monitor_for_one_iteration(monkeypatch)
+    monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
+    monkeypatch.setattr(m, "_runtime_superseded", lambda **kw: False)
+    monkeypatch.setattr(m, "_monitor_sweep", lambda *a, **k: pytest.fail("unexpected sweep"))
+    monkeypatch.setattr(m.time, "sleep", lambda *a: None)
+
+    class Governance:
+        def recheck(self, checkpoint):
+            return {"status": "backoff" if checkpoint == "iteration-boundary" else "ready"}
+
+    monkeypatch.setattr(m.loop_governance_mod, "LoopGovernance", Governance)
+    locks, caches, replies = [], [], []
+    real_linker = allocation_link_runtime.AllocationLinkRuntime
+    real_bind = resident_push.bind
+
+    def linker(*args, **kwargs):
+        locks.append(kwargs["context_lock"])
+        return real_linker(*args, **kwargs)
+
+    def bind(wake, cache):
+        caches.append(cache)
+        real_bind(wake, cache)
+
+    monkeypatch.setattr(allocation_link_runtime, "AllocationLinkRuntime", linker)
+    monkeypatch.setattr(resident_push, "bind", bind)
+    path = str(tmp_path / "worktree")
+
+    class Server(hook_ipc.HookIpcServer):
+        def start(self):
+            super().start()
+            cache = caches[0]
+            key = cache._key(path)
+            original = (time.monotonic(), "last completed status")
+            cache._entries[key] = original
+            cache._entry_projects[key] = "A"
+            ticket = cache.begin_observation("A", str(tmp_path), str(tmp_path / "other"))
+            if invalidated:
+                cache.invalidate(path)
+            try:
+                with locks[0], socket.create_connection(self.server.server_address, timeout=2) as conn:
+                    request = {
+                        "version": 1, "token": self.token, "kind": "snapshot",
+                        "payload": {"cwd": path}, "deadline": time.time() + 2,
+                    }
+                    conn.sendall(json.dumps(request).encode() + b"\n")
+                    with conn.makefile("rb") as stream:
+                        replies.append(json.loads(stream.readline(65536)))
+                assert cache._entries[key] == original
+                assert cache.observation_counts() == (1, 0)
+            finally:
+                cache.finish_observation(ticket)
+
+    monkeypatch.setattr(hook_ipc, "HookIpcServer", Server)
+    assert m.cmd_status_monitor(argparse.Namespace(interval=5)) == 0
+    assert len(replies) == 1
+    if invalidated:
+        assert replies[0]["fallback"] is True
+    else:
+        assert replies[0]["result"] == {"segment": "last completed status"}
+        assert "fallback" not in replies[0]
+
+
 def test_status_monitor_binds_and_unbinds_resident_push(tmp_path, monkeypatch):
     """resident_push must be bound to THIS run's real wake-event/segment-cache
     at startup (so a `status_disposition_write` verb served in-process during

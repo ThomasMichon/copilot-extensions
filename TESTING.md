@@ -3637,6 +3637,17 @@ controls do not qualify delegated document/config-source frontiers or reuse.
 The plugin's `test_machines_yaml_location.py` separately exercises the real
 file/parser/merge/report path and empty/overlay cases; execution-identity
 fixtures retain an explicit registered knowledge-path boundary.
+Fourteen original config-source controls use the real selector with synthetic
+Git, machine-root, state-root and file boundaries. They preserve registry versus
+ordinary precedence, default-root fallback, fatal exception types and negative
+native-probe uncertainty without calling the separate diagnostic reader.
+Same-globals, nested-request and self-restoring replacements retain uncertainty.
+The registry consumer retains its selected source callback across argument-time
+rebinding.
+Two real-file registry consumer cases separately prove one selected document
+read and one state-root call, including a self-restoring source callback; these
+are contained plugin tests, not actor-free required CI. Deeper child frontiers,
+stable witnesses and memo consumers remain unqualified.
 The runner selects pytest's `parametrize_long_str_id_strategy=legacy` to
 preserve the manifest's full-value parameter IDs across pytest 9.1 and 9.2.
 This keeps exact node admission; it does not truncate, rename or omit long

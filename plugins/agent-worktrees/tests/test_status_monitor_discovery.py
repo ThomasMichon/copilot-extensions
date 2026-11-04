@@ -245,7 +245,7 @@ def test_sweep_recovers_manual_native_attachments_without_launch_registration(
     (r"C:\Program Files\PSMux\psmux.exe", "wt-one"),
     ("/opt/mux/PSMUX.EXE", "wt-one"),
 ])
-def test_native_original_path_probe_uses_owner_target_contract(
+def test_native_pane_path_probe_uses_owner_target_contract(
     monkeypatch, tmp_path, matching_native_path, mux, target,
 ):
     calls = []
@@ -253,8 +253,49 @@ def test_native_original_path_probe_uses_owner_target_contract(
         calls.append((argv, kw)) or subprocess.CompletedProcess(argv, 0, stdout=str(tmp_path))
     ))
     assert matching_native_path(mux, "wt-one", str(tmp_path))
-    assert calls[0][0] == [mux, "display-message", "-p", "-t", target, "#{session_path}"]
+    assert calls[0][0] == [mux, "list-panes", "-s", "-t", target, "-F", "#{pane_current_path}"]
     assert calls[0][1]["timeout"] == 1
+
+
+@pytest.mark.parametrize("mux", ["tmux", "psmux"])
+@pytest.mark.parametrize("matching_pane", [True, False])
+def test_home_started_session_recovers_only_with_a_matching_inner_pane(
+    monkeypatch, tmp_path, matching_native_path, mux, matching_pane,
+):
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(discovery, "_tracked_worktrees",
+                        lambda: [("project", _record("one", worktree))])
+    monkeypatch.setattr(discovery, "_session_path_matches", matching_native_path)
+    monkeypatch.setattr(discovery, "discover_via_manager", lambda payload: None)
+
+    def probe(argv, **kwargs):
+        paths = [str(home)]
+        if argv[-1] == "#{pane_current_path}" and matching_pane:
+            paths.append(str(worktree))
+        return subprocess.CompletedProcess(argv, 0, stdout="\n".join(paths) + "\n")
+
+    monkeypatch.setattr(discovery.subprocess, "run", probe)
+    paths = {"wt-one": str(worktree)}
+    assert discovery.discover_connected_worktrees(
+        {"wt-one": (1, "$2:200")}, mux, None,
+        registered_paths=paths, registration_dir=tmp_path / "registry",
+    ) == ({"wt-one": str(worktree)} if matching_pane else {})
+
+
+@pytest.mark.parametrize("error", [
+    OSError("fixture unavailable"), subprocess.TimeoutExpired("mux", 1),
+])
+def test_unavailable_pane_probe_cannot_admit(
+    monkeypatch, tmp_path, matching_native_path, error,
+):
+    def unavailable(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(discovery.subprocess, "run", unavailable)
+    assert not matching_native_path("mux", "wt-one", str(tmp_path))
 
 
 @pytest.mark.parametrize("prior_incarnation", [None, "$1:100"])

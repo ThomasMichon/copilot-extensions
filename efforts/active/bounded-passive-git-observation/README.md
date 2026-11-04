@@ -175,6 +175,17 @@ or additional operator authorization.
 - [ ] Record review, CI, release and separately authorized installed proof
   independently; no rollout is authorized here.
 
+### Mux cache-only consumer correction
+
+- [x] Reuse completed, uninvalidated mux segments within their existing
+  freshness window during ordinary Git observation, without starting another
+  observation or waiting for mutation admission.
+- [x] Qualify direct/snapshot consumers, aliases, unchanged ages, retained
+  cleanup, invalidation, expiry and closed admission, including an actual
+  authenticated request while mutation admission is held.
+- [ ] Record reviewed source delivery, release and separately authorized
+  installed mux proof. This correction does not claim R1b lock separation.
+
 ### Direct retained acceptance from #7944/#7945
 
 These are **agent-recommended retention rows**, not implementation admission
@@ -606,3 +617,24 @@ incoming NUL-framed worktree-list behavior passes all 122 Git tests, and the
 incoming retirement-census base plus both deadline contracts passes 48
 controls. Generated assets retain the current default's source qualification
 selection and footprint semantics. Fresh provider review/CI still govern merge.
+
+### 2026-11-04 - Completed mux segments during ordinary contention
+
+- Taking only the cache-consumer correction recorded on #7944: an ordinary
+  active observation must not turn a completed, still-fresh segment into
+  `UNKNOWN (Git observation busy)`. This does not assign or redesign the
+  unimplemented R1b producer snapshot/publication boundary.
+- Two fail-first direct and resident-snapshot controls reproduce the lost
+  segment. Read-only reuse now checks the existing age, invalidation and
+  cleanup/retirement fences before observation admission. It does not renew
+  age, release a ticket, classify again or activate a project.
+- The authenticated resident request path can return those completed bytes
+  without waiting on the mutation-admission lock. A real lock-held transport
+  control returns the segment; its invalidated control still refuses reuse.
+- The complete segment/custody/monitor packet passes 295 cases with ordinary
+  contained cleanup. Ruff, shrink-only module ceilings, documentation and all
+  13 runtime installation contracts pass. No timeout or freshness budget was
+  widened; no installed runtime or live session was changed by source tests.
+- Current-head review/CI, release and actual installed mux behavior remain
+  open. Parent R1b/R2/platform and broader process/publication gates remain
+  with their existing owners.
