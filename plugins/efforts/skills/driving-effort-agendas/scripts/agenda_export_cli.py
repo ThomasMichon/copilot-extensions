@@ -11,6 +11,7 @@ from typing import Any
 from agenda import AgendaError
 
 CAPABILITY = "agenda-complete-export-v1"
+CONTRIBUTORS_CAPABILITY = "agenda-export-contributors-v1"
 SCHEMA = "efforts.agenda-export-cli"
 
 
@@ -18,7 +19,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("info", allow_abbrev=False)
-    for command in ("export", "verify"):
+    for command in ("export", "verify", "contributors"):
         selected = commands.add_parser(command, allow_abbrev=False)
         selected.add_argument("--destination", type=Path, required=True)
         selected.add_argument("--worktree", required=True)
@@ -31,7 +32,15 @@ def main(argv: list[str] | None = None) -> int:
     try:
         output: dict[str, Any]
         if args.command == "info":
-            output = {"ok": True, "capabilities": [CAPABILITY]}
+            output = {"ok": True, "capabilities": [CAPABILITY],
+                      "optional_capabilities": [CONTRIBUTORS_CAPABILITY]}
+        elif args.command == "contributors":
+            from agenda_export_contributors import read_contributors
+
+            output = {"ok": True, "contributors": read_contributors(
+                args.destination, worktree=args.worktree, store_id=args.store_id,
+                expected_revision=args.expected_revision,
+            )}
         else:
             from agenda_export import export_store, verify_export
 
