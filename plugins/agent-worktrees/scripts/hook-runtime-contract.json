@@ -1,0 +1,9 @@
+{
+  "schema": "agent-worktrees.hook-runtime",
+  "version": 1,
+  "capabilities": [
+    "session-lifecycle-v1",
+    "session-start-source-v1",
+    "session-end-source-v1"
+  ]
+}

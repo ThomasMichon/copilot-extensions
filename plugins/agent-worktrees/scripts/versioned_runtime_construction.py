@@ -1,4 +1,4 @@
-"""Finite attached construction protocol and native shell adapters."""
+"""Completion selection, finite attached construction and native shell adapters."""
 from __future__ import annotations
 
 import json
@@ -76,6 +76,44 @@ def read_completion(path: Path, *, object_pairs_hook: Callable) -> object:
     if len(content) > 65536:
         return None
     return json.loads(content.decode("utf-8"), object_pairs_hook=object_pairs_hook)
+
+
+def resolve_completed_python(
+    root: Path, *, current_version: Callable[[Path], str | None],
+    read_last_known_good: Callable[[Path], str | None],
+    is_complete: Callable[[Path, str], bool],
+    slot_python: Callable[[Path, str], Path | None],
+    list_versions: Callable[[Path], list[str]],
+    requires_exact_selection: Callable[[list[str]], bool],
+) -> Path | None:
+    """Skip unreadable candidates only during read-only completed-slot selection."""
+    def candidate(version: str) -> Path | None:
+        try:
+            return slot_python(root, version) if is_complete(root, version) else None
+        except OSError:
+            return None
+
+    try:
+        current = current_version(root) or ""
+    except OSError:
+        current = ""
+    selected = candidate(current)
+    if selected is not None:
+        return selected
+    selected = candidate(read_last_known_good(root) or "")
+    if selected is not None:
+        return selected
+    try:
+        versions = list_versions(root)
+    except OSError:
+        return None
+    if requires_exact_selection(versions):
+        return None
+    for version in reversed(versions):
+        selected = candidate(version)
+        if selected is not None:
+            return selected
+    return None
 
 
 @dataclass(frozen=True)

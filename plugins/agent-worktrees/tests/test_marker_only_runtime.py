@@ -8,10 +8,14 @@ runtime-resolution flow still reads a `.venv` link.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -31,8 +35,297 @@ def test_resolver_helpers_are_marker_only():
         text = (_SCRIPTS / name).read_text(encoding="utf-8")
         assert "current-version" in text, f"{name} must resolve via the marker"
         assert "versions" in text
-        # The resolver never resolves a python interpreter THROUGH a `.venv` path.
-        assert not re.search(r"\.venv[/\\]", text), f"{name} must not read a .venv link"
+
+
+def _native_resolver(root: Path, host: str, *, probe: str | None = None):
+    executable = shutil.which(host)
+    if host == "bash" and os.name == "nt":
+        git = shutil.which("git")
+        candidate = Path(git).parent.parent / "bin" / "bash.exe" if git else None
+        executable = str(candidate) if candidate and candidate.is_file() else None
+    if not executable:
+        pytest.skip(f"{host} unavailable")
+    if host == "bash":
+        def posix(path):
+            value = path.as_posix()
+            return "/" + value[0].lower() + value[2:] if os.name == "nt" else value
+
+        script = (
+            f"set -eu; AGENT_RT_ROOT='{posix(root)}'; "
+            f". '{posix(_SCRIPTS / 'resolve-runtime.sh')}'; "
+        )
+        script += (
+            f'"$AW_PY" -I -B -c \'{probe}\'' if probe else 'printf "%s" "$AW_PY"'
+        )
+        argv = [executable, "-c", script]
+    else:
+        literal_root = str(root).replace("'", "''")
+        resolver = str(_SCRIPTS / "resolve-runtime.ps1").replace("'", "''")
+        script = f"$env:AGENT_RT_ROOT='{literal_root}'; . '{resolver}'; "
+        script += (
+            "& $AwPy -I -B -c '" + probe.replace("'", "''") + "'; exit $LASTEXITCODE"
+            if probe else "[Console]::Out.Write($AwPy)"
+        )
+        argv = [executable, "-NoProfile", "-Command", script]
+    return subprocess.run(
+        argv, capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+
+
+@pytest.mark.parametrize("host", ["bash", "pwsh"])
+@pytest.mark.parametrize("layout", ["nested", "flat"])
+def test_native_resolver_executes_real_uv_environment(tmp_path, host, layout):
+    uv = shutil.which("uv")
+    if not uv:
+        pytest.skip("uv unavailable")
+    root = tmp_path / "runtime"
+    version = "1.2.3+source." + "a" * 40
+    slot = root / "versions" / version
+    environment = slot / ".venv" if layout == "nested" else slot
+    result = subprocess.run(
+        [uv, "venv", "--python", sys.executable, "--no-python-downloads", str(environment)],
+        capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stderr
+    assert (environment / "pyvenv.cfg").is_file()
+    python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    site = subprocess.run(
+        [str(python), "-I", "-B", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"],
+        capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert site.returncode == 0, site.stderr
+    (Path(site.stdout.strip()) / "consumer_probe.py").write_text("VALUE = 42\n", encoding="utf-8")
+    (slot / ".install-complete.json").write_text(json.dumps({
+        "version": version, "completed_at": "2026-11-04T00:00:00Z", "pid": 1,
+    }), encoding="utf-8")
+    (root / "current-version").write_text(version + "\n", encoding="utf-8")
+    probe = (
+        'import consumer_probe,json,sys; '
+        'print(json.dumps([sys.prefix,sys.base_prefix,consumer_probe.VALUE]))'
+    )
+    result = _native_resolver(root, host, probe=probe)
+    assert result.returncode == 0, result.stderr
+    prefix, base, value = json.loads(result.stdout)
+    assert Path(prefix) == environment and Path(base) != environment and value == 42
+
+
+@pytest.mark.parametrize("layout", ["nested", "flat"])
+@pytest.mark.parametrize("context_case", ["legacy", "valid", "invalid"])
+@pytest.mark.parametrize("native_shell", ["bash", "pwsh", "powershell.exe"])
+def test_session_end_uses_real_slot_without_path_python(tmp_path, layout, context_case, native_shell):
+    if (native_shell == "bash") == (os.name == "nt"):
+        pytest.skip("platform-native hook shell")
+    uv = shutil.which("uv")
+    shell = shutil.which(native_shell)
+    if not uv or not shell:
+        pytest.skip("uv and native hook shell required")
+    tmp_path = tmp_path / "caf\u00e9"
+    tmp_path.mkdir()
+    flags = {"creationflags": subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0}
+    payload = tmp_path / "payload"
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True)
+    for name in ("deregister-session.sh", "deregister-session.ps1", "hook_runtime.py",
+                 "resolve-runtime.sh", "resolve-runtime.ps1"):
+        shutil.copyfile(_SCRIPTS / name, scripts / name)
+    shutil.copytree(_SCRIPTS / "installation-context", scripts / "installation-context")
+    shutil.copyfile(_PLUGIN / "plugin.json", payload / "plugin.json")
+    (scripts / "hook_client.py").write_text(
+        "import consumer_probe,json,sys\n"
+        "print(json.dumps({'prefix':sys.prefix,'event':sys.argv[1],"
+        "'payload':json.load(sys.stdin),'cache':consumer_probe.__cached__,"
+        "'value':consumer_probe.VALUE,'utf8':sys.flags.utf8_mode,"
+        "'stdinEncoding':sys.stdin.encoding}))\n", encoding="utf-8",
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+    root = home / ".agent-worktrees"
+    env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home),
+           "COPILOT_PLUGIN_ROOT": str(payload), "PYTHONUTF8": "0", "PYTHONIOENCODING": "cp1252"}
+    for key in ("COPILOT_EXTENSIONS_CONTEXT", "AGENT_WORKTREES_PAYLOAD_ROOT",
+                "AGENT_RT_ROOT", "PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX"):
+        env.pop(key, None)
+    if context_case != "legacy":
+        common = ["-Action", "stamp", "-SourceJson",
+                  json.dumps({"source": "github", "repo": "example/marketplace"}),
+                  "-MarketplaceKey", "fixture", "-PluginId", "agent-worktrees",
+                  "-PayloadRoot", str(payload), "-PayloadVersion", "1.0.0",
+                  "-PayloadOrigin", "explicit", "-ExpectedNamespaceGeneration", "0",
+                  "-ExpectedInstallGeneration", "0", "-DurableHome", str(tmp_path / "durable")]
+        if os.name == "nt":
+            stamp = [shell, "-NoProfile", "-File",
+                     str(scripts / "installation-context/installation-context.ps1"), *common]
+        else:
+            options = ["stamp"]
+            names = {"-Action": None, "-SourceJson": "--source-json",
+                     "-MarketplaceKey": "--marketplace-key", "-PluginId": "--plugin-id",
+                     "-PayloadRoot": "--payload-root", "-PayloadVersion": "--payload-version",
+                     "-PayloadOrigin": "--payload-origin",
+                     "-ExpectedNamespaceGeneration": "--expected-namespace-generation",
+                     "-ExpectedInstallGeneration": "--expected-install-generation",
+                     "-DurableHome": "--durable-home"}
+            for name, value in zip(common[::2], common[1::2]):
+                if names[name]:
+                    options.extend([names[name], value])
+            stamp = [shell, str(scripts / "installation-context/installation-context.sh"), *options]
+        result = subprocess.run(
+            stamp, env=env, capture_output=True, text=True, encoding="utf-8", timeout=30, **flags,
+        )
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        context = json.loads(result.stdout)
+        root = Path(context["pluginRoot"])
+        receipt = Path(context["installReceipt"])
+        env["COPILOT_EXTENSIONS_CONTEXT"] = str(receipt)
+        if context_case == "invalid":
+            data = json.loads(receipt.read_text(encoding="utf-8"))
+            data["pluginId"] = "foreign-plugin"
+            receipt.write_text(json.dumps(data), encoding="utf-8")
+    version = "1.2.3+source." + "a" * 40
+    slot = root / "versions" / version
+    environment = slot / ".venv" if layout == "nested" else slot
+    result = subprocess.run(
+        [uv, "venv", "--python", sys.executable, "--no-python-downloads", str(environment)],
+        capture_output=True, text=True, timeout=30, **flags,
+    )
+    assert result.returncode == 0, result.stderr
+    python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    control = subprocess.run(
+        [str(python), "-X", "utf8=0", "-c",
+         "import json,sys; print(json.dumps([sys.flags.utf8_mode,sys.stdin.encoding]))"],
+        env=env, input="", capture_output=True, text=True, timeout=30, **flags,
+    )
+    assert control.returncode == 0, control.stderr
+    assert json.loads(control.stdout) == [0, "cp1252"]
+    result = subprocess.run(
+        [str(python), "-I", "-B", "-X", "utf8", "-c", "import sysconfig;print(sysconfig.get_path('purelib'))"],
+        capture_output=True, text=True, encoding="utf-8", timeout=30, **flags,
+    )
+    assert result.returncode == 0, result.stderr
+    site = Path(result.stdout.strip())
+    (site / "consumer_probe.py").write_text("VALUE=42\n", encoding="utf-8")
+    probe_hash = hashlib.sha256((site / "consumer_probe.py").read_bytes()).digest()
+    if context_case != "legacy":
+        owner = site / "agent_procutil"
+        owner.mkdir()
+        shutil.copyfile(
+            _PLUGIN.parents[1] / "libs/agent-procutil/src/agent_procutil/python_cache.py",
+            owner / "python_cache.py",
+        )
+        metadata = site / "consumer_probe-1.0.dist-info"
+        metadata.mkdir()
+        (metadata / "RECORD").write_text(
+            "consumer_probe.py,sha256="
+            + base64.urlsafe_b64encode(probe_hash).decode().rstrip("=")
+            + "," + str((site / "consumer_probe.py").stat().st_size) + "\n",
+            encoding="utf-8",
+        )
+    site_loaded = tmp_path / "site-loaded"
+    (site / "sitecustomize.py").write_text(
+        "from pathlib import Path\nPath(" + repr(str(site_loaded)) + ").touch()\n",
+        encoding="utf-8",
+    )
+    (slot / ".install-complete.json").write_text(json.dumps({
+        "version": version, "completed_at": "2026-11-04T00:00:00Z", "pid": 1,
+        "payload_hash": probe_hash.hex(),
+    }), encoding="utf-8")
+    (root / "current-version").write_text(version + "\n", encoding="utf-8")
+    legacy = home / ".agent-worktrees/bin"
+    legacy.mkdir(parents=True, exist_ok=True)
+    for suffix in ("sh", "ps1"):
+        (legacy / ("deregister-session." + suffix)).write_text("exit 91\n", encoding="utf-8")
+    if os.name == "nt":
+        env["PATH"] = str(Path(os.environ["SystemRoot"]) / "System32")
+    else:
+        tools = tmp_path / "tools"
+        tools.mkdir()
+        for name in ("bash", "dirname", "basename", "awk", "tr", "cat", "sort", "find",
+                     "date", "readlink", "realpath", "cut", "stat", "od", "grep", "sed",
+                     "head", "tail", "wc", "uname", "sha256sum", "shasum", "openssl",
+                     "mktemp", "rm", "sleep", "id"):
+            executable = shutil.which(name)
+            if not executable and name in {"realpath", "sha256sum", "shasum", "openssl"}:
+                continue
+            assert executable, name
+            (tools / name).symlink_to(executable)
+        env["PATH"] = str(tools)
+    hooks = json.loads((_PLUGIN / "hooks.json").read_text(encoding="utf-8"))
+    entry = hooks["hooks"]["sessionEnd"][0]
+    command = ([shell, "-NoProfile", "-Command",
+                "[Console]::OutputEncoding=[Text.Encoding]::GetEncoding(437); "
+                "$OutputEncoding=[Text.Encoding]::GetEncoding(437); " + entry["powershell"]] if os.name == "nt"
+               else [shell, "-c", entry["bash"]])
+    event = {"sessionId": "fixture-session", "cwd": str(tmp_path / "caf\u00e9"), "reason": "user_exit"}
+    result = subprocess.run(
+        command, input=json.dumps(event, ensure_ascii=False), env=env, capture_output=True, text=True,
+        encoding="utf-8", timeout=30, **flags,
+    )
+    assert result.returncode == 0, result.stderr
+    if context_case == "invalid":
+        assert not result.stdout
+        assert "closure is unconfirmed" in result.stderr
+        assert not site_loaded.exists()
+    else:
+        assert result.stdout, result.stderr
+        observed = json.loads(result.stdout)
+        assert Path(observed["prefix"]) == environment
+        assert observed["event"] == "sessionEnd" and observed["payload"] == event
+        assert observed["value"] == 42
+        assert observed["utf8"] == 1 and observed["stdinEncoding"].lower() == "utf-8"
+        cached = Path(observed["cache"].removeprefix("\\\\?\\"))
+        assert cached.is_relative_to(root / "cache/python") and cached.is_file()
+        if context_case == "valid":
+            before = cached.stat().st_mtime_ns
+            repeated = subprocess.run(
+                command, input=json.dumps(event, ensure_ascii=False), env=env,
+                capture_output=True, text=True, encoding="utf-8", timeout=30, **flags,
+            )
+            assert repeated.returncode == 0, repeated.stderr
+            assert json.loads(repeated.stdout) == observed
+            assert cached.stat().st_mtime_ns == before
+            assert cached.relative_to(root / "cache/python").parts[0].startswith("installed-")
+            assert not list((root / "cache/python").glob("unsealed-*"))
+        assert not list(slot.rglob("*.pyc"))
+
+
+@pytest.mark.parametrize("host", ["bash", "pwsh"])
+def test_native_resolver_missing_current_does_not_abort_fallback(tmp_path, host):
+    _make_slot(tmp_path, "1.2.3")
+    root = tmp_path / ".agent-worktrees"
+    (root / "current-version").write_text("9.9.9\n", encoding="utf-8")
+    (root / "last-known-good").write_text("1.2.3\n", encoding="utf-8")
+    result = _native_resolver(root, host)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.replace("\\", "/").endswith("/versions/1.2.3/bin/python")
+
+
+@pytest.mark.parametrize("host", ["bash", "pwsh"])
+def test_native_resolver_refuses_redirected_project_environment(tmp_path, host):
+    _make_slot(tmp_path, "1.2.3")
+    root = tmp_path / ".agent-worktrees"
+    environment = root / "versions/1.2.3/.venv"
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    if os.name == "nt":
+        pwsh = shutil.which("pwsh")
+        if not pwsh:
+            pytest.skip("PowerShell unavailable for unprivileged junction fixture")
+        link = str(environment).replace("'", "''")
+        target = str(foreign).replace("'", "''")
+        result = subprocess.run(
+            [pwsh, "-NoProfile", "-Command",
+             f"New-Item -ItemType Junction -Path '{link}' -Target '{target}' | Out-Null"],
+            capture_output=True, text=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        assert result.returncode == 0, result.stderr
+    else:
+        environment.symlink_to(foreign, target_is_directory=True)
+    (root / "current-version").write_text("1.2.3\n", encoding="utf-8")
+    result = _native_resolver(root, host)
+    assert result.returncode == 0, result.stderr
+    assert not result.stdout
 
 
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell is unavailable")

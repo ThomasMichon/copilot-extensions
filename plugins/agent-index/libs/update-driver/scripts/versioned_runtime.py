@@ -330,28 +330,13 @@ def resolve_python(root: Path) -> Path | None:
     Every tier requires a valid completion marker, so a partially built slot is
     never selected merely because it contains an interpreter-shaped file.
     """
-    # Tier 1: the current-version marker.
-    current = current_version(root) or ""
-    if is_complete(root, current):
-        p = slot_python(root, current)
-        if p is not None:
-            return p
-    # Tier 2: the last activated version (its slot, having been active, survives).
-    lkg = read_last_known_good(root) or ""
-    if is_complete(root, lkg):
-        p = slot_python(root, lkg)
-        if p is not None:
-            return p
-    versions = list_versions(root)  # sorted, newest last
-    if _runtime_component("versioned_runtime_source").requires_exact_selection(versions):
-        return None
-    # Tier 3: newest complete package-version slot.
-    for ver in reversed(versions):
-        if is_complete(root, ver):
-            p = slot_python(root, ver)
-            if p is not None:
-                return p
-    return None
+    return _runtime_component("versioned_runtime_construction").resolve_completed_python(
+        root, current_version=current_version, read_last_known_good=read_last_known_good,
+        is_complete=is_complete, slot_python=slot_python, list_versions=list_versions,
+        requires_exact_selection=lambda versions: _runtime_component(
+            "versioned_runtime_source"
+        ).requires_exact_selection(versions),
+    )
 
 
 # --------------------------------------------------------------------------

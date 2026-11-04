@@ -974,7 +974,7 @@ def test_command_binding_real_catalog_read_only(
 
 @pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")
 @pytest.mark.parametrize("launcher", [
-    "py", "python", "alias-only", "py-unavailable", "helper-failure", "empty-response",
+    "py", "python", "alias-only", "py-unavailable", "py-too-old", "helper-failure", "empty-response",
 ])
 def test_command_binding_catalog_python_launcher_avoids_app_alias(
     binding_fixture: dict, launcher: str, powershell_host,
@@ -994,6 +994,10 @@ def test_command_binding_catalog_python_launcher_avoids_app_alias(
         "[Console]::Error.WriteLine('fixture-launcher-run')\n"
         "if ($env:TEST_LAUNCHER -eq 'py-unavailable') { exit 3 }\n"
         "$pythonArgs=@($args[1..($args.Count-1)])\n"
+        "if ($env:TEST_LAUNCHER -eq 'py-too-old') {\n"
+        "    $pythonArgs[6] = 'import sys;sys.version_info=(3,9,0);exec(' + "
+        "($pythonArgs[6] | ConvertTo-Json -Compress) + ')'\n"
+        "}\n"
         "& $env:TEST_PYTHON @pythonArgs\n"
         "exit $LASTEXITCODE\n",
         encoding="utf-8",
@@ -1021,7 +1025,7 @@ def test_command_binding_catalog_python_launcher_avoids_app_alias(
         "    }\n"
         "    if ($Name -eq 'python3') { return $null }\n"
         "    if ($Name -eq 'python') {\n"
-        "        if ($env:TEST_LAUNCHER -in @('python','py-unavailable')) { return @{Source=$env:TEST_PYTHON} }\n"
+        "        if ($env:TEST_LAUNCHER -in @('python','py-unavailable','py-too-old')) { return @{Source=$env:TEST_PYTHON} }\n"
         "        return @{Source='C:\\Users\\example\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe'}\n"
         "    }\n"
         "}\n"
@@ -1037,10 +1041,10 @@ def test_command_binding_catalog_python_launcher_avoids_app_alias(
     )
     assert completed.stderr.count("phase=catalog-binding-complete ") == 1
     assert completed.stderr.count("phase=catalog-python-start ") == (
-        1 if launcher in {"py", "helper-failure", "empty-response"} else 0
+        0 if launcher == "alias-only" else 1
     )
     assert completed.stderr.count("phase=catalog-helper-start ") == (
-        1 if launcher in {"python", "py-unavailable"} else 0
+        1 if launcher in {"python", "py-unavailable", "py-too-old"} else 0
     )
     envelope = json.loads(completed.stdout)
     match = re.search(r"```json\n(.*)\n```", envelope["additionalContext"])
@@ -1056,6 +1060,47 @@ def test_command_binding_catalog_python_launcher_avoids_app_alias(
         assert binding["installation"] is None
     else:
         assert binding["status"] == "selected", binding
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows console encoding")
+@pytest.mark.parametrize("native_shell", ["powershell.exe", "pwsh"])
+def test_command_binding_catalog_decodes_unicode_interpreter(binding_fixture, native_shell):
+    shell, uv = shutil.which(native_shell), shutil.which("uv")
+    if not shell or not uv:
+        pytest.skip("native PowerShell and uv required")
+    _prepare_catalog(binding_fixture)
+    _publish(binding_fixture)
+    environment = _catalog_environment(binding_fixture)
+    venv = binding_fixture["home"] / "caf\u00e9" / "environment"
+    created = subprocess.run(
+        [uv, "venv", "--python", sys.executable, "--no-python-downloads", str(venv)],
+        capture_output=True, text=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert created.returncode == 0, created.stderr
+    environment["TEST_PYTHON"] = str(venv / "Scripts/python.exe")
+    wrapper = binding_fixture["home"] / "unicode-catalog.ps1"
+    wrapper.write_text(
+        "[Console]::OutputEncoding=[Text.Encoding]::GetEncoding(437)\n"
+        "$OutputEncoding=[Text.Encoding]::GetEncoding(437)\n"
+        "function Get-Command {\n"
+        "    param($Name,$CommandType,$ErrorAction)\n"
+        "    if ($Name -eq 'python') { return @{Source=$env:TEST_PYTHON} }\n"
+        "    return $null\n"
+        "}\n"
+        "& (Join-Path $env:COPILOT_PLUGIN_ROOT 'scripts/emit-command-catalog.ps1')\n",
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [shell, "-NoLogo", "-NoProfile", "-File", str(wrapper)], env=environment,
+        cwd=binding_fixture["home"], capture_output=True, text=True, encoding="utf-8",
+        timeout=30, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert completed.returncode == 0, completed.stderr
+    envelope = json.loads(completed.stdout)
+    match = re.search(r"```json\n(.*)\n```", envelope["additionalContext"])
+    assert match, completed.stdout
+    binding = json.loads(match.group(1))["binding"]
+    assert binding["status"] == "selected", binding
 
 
 @pytest.mark.parametrize("shell", [

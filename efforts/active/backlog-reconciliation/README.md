@@ -300,6 +300,18 @@ not whole selector/task-placement completion. The complete 14:58:01 UTC /
 credit. Research, receiving proposal and actual source disposition remain
 separate; every original parent check state and source/resource gate survives.
 
+The [whole PR-workflow core study](pr-workflow-cohort.md) now reads all ten
+unchanged admitted originals and sixteen comments. Current documentary fit
+separates canonical reviewer adoption/convergence, three-provider lifecycle,
+finite read-only wait planning, declared landing cadence, truthful records,
+historical rubric mining, installed skill conformance, model-guided discovery
+and Bridge consumer guidance. Eight independently qualified actual merged
+descriptions are bounded guidance/prototype/plan credit, not whole neighboring
+capability completion. A complete direct #6818 wait-planning matrix under the
+existing Active PR Lifecycle Conformance home is the next receiving candidate.
+No new closure, implementation appointment, parked-home resumption or source/
+resource transfer follows; changed #9535 remains withheld.
+
 - [x] Holistically sweep the initial eligible backlog and build an issue/effort
   relationship graph; use alignment and theme to identify consolidation groups.
   The [initial graph snapshot](graph-overview.md) accounts for all 695 assigned

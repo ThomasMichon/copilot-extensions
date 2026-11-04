@@ -532,6 +532,10 @@ def _fallback_legacy_session_start(
     encoded = json.dumps(payload, separators=(",", ":"))
     processes = []
     diagnostics = []
+    environment = {**os.environ, "PYTHONPATH": ""}
+    python = _runtime_python(Path.home())
+    if python is not None:
+        environment["PYTHONPYCACHEPREFIX"] = _RUNTIME.python_cache_arguments(python)[1].split("=", 1)[1]
     group_kwargs = (
         {"start_new_session": True}
         if os.name == "posix"
@@ -564,10 +568,7 @@ def _fallback_legacy_session_start(
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
-                    env={
-                        **os.environ,
-                        "PYTHONPATH": "",
-                    },
+                    env=environment,
                     **group_kwargs,
                 )
             )
@@ -674,10 +675,23 @@ def _fallback_session_start(payload: dict, home: Path) -> dict:
         if isinstance(metadata, dict)
         else ""
     )
-    runtime_version = python.parents[1].name
+    environment = python.parent.parent
+    runtime_version = (environment.parent if environment.name == ".venv" else environment).name
     source_aware = _source_aware_lifecycle(payload)
+    capabilities = _RUNTIME.lifecycle_capabilities(python)
+    required = {"session-lifecycle-v1"}
+    if source_aware:
+        required.add("session-start-source-v1")
+    if (capabilities is not None and not required <= set(capabilities)) or (
+        capabilities is None and environment.name == ".venv"
+    ):
+        return {"_stderr": (
+            "[agent-worktrees] Selected runtime does not declare the required sessionStart "
+            "contract; use explicit installation management to upgrade it. No lifecycle work was sent.\n"
+        )}
     if (
-        isinstance(payload_version, str)
+        capabilities is None
+        and isinstance(payload_version, str)
         and payload_version
         and _version_key(runtime_version) < _version_key(payload_version)
     ):
@@ -693,6 +707,7 @@ def _fallback_session_start(payload: dict, home: Path) -> dict:
     result = helper.run_start(
         python, payload, source_aware=source_aware,
         timeout=_SESSION_START_TIMEOUT_S, decision_timeout=_SESSION_START_DECISION_S,
+        python_arguments=["-I", *_RUNTIME.python_cache_arguments(python)],
     )
     return result if result is not None else (
         {} if contextual else _fallback_legacy_session_start(payload)
@@ -703,10 +718,21 @@ def _fallback_session_end(payload: dict, home: Path) -> dict:
     python = _runtime_python(home)
     if python is None:
         return {"_stderr": "[agent-worktrees] SessionEnd runtime is unavailable; closure is unconfirmed.\n"}
+    capabilities = _RUNTIME.lifecycle_capabilities(python)
+    if (capabilities is not None and "session-end-source-v1" not in capabilities) or (
+        capabilities is None and python.parent.parent.name == ".venv"
+    ):
+        return {"_stderr": (
+            "[agent-worktrees] Selected runtime does not declare the required sessionEnd "
+            "contract; use explicit installation management to upgrade it. Closure is unconfirmed.\n"
+        )}
     helper = _load_sibling("hook_lifecycle_runtime.py")
     if helper is None:
         return {"_stderr": "[agent-worktrees] Lifecycle transport is unavailable.\n"}
-    return helper.run_end(python, payload, timeout=_SESSION_END_TIMEOUT_S)
+    return helper.run_end(
+        python, payload, timeout=_SESSION_END_TIMEOUT_S,
+        python_arguments=["-I", *_RUNTIME.python_cache_arguments(python)],
+    )
 
 
 def _load_sibling(name: str):
