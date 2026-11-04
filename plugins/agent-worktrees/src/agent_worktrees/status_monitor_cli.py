@@ -780,6 +780,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             and not _drain_busy_reasons()
             and not allocation_linker.has_demand()
             and not retirements.pending
+            # A completed handler publishes demand before its busy count drops.
+            and (hook_server is None or not hook_server.has_recent_hook_demand())
         )
 
     try:

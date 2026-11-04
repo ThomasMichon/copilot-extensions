@@ -1,0 +1,9 @@
+{
+  "comment": "Retain recent authenticated completed tool-hook demand through voluntary resident idle checks.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

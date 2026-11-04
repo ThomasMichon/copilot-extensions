@@ -4533,6 +4533,112 @@ def test_idle_exit_rechecks_new_conditions_after_acquiring_cutover_guard(tmp_pat
     assert state["acquired"] and state["released"]
 
 
+@pytest.mark.parametrize("kind", ["preToolUse", "postToolUse"])
+def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, monkeypatch, kind):
+    from agent_worktrees import hook_ipc, monitor_roots, self_retire, status_monitor_cutover as smc
+    from agent_worktrees import runtime_monitor_retirements as retirements
+    from agent_worktrees.status_monitor_handover import MonitorHandover
+
+    clock = {"now": 0.0, "advanced": 0}
+    sweeps, servers, replies = [], [], []
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(m, "_monitor_lock_path", lambda: tmp_path / "status-monitor.lock")
+    monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
+    monkeypatch.setattr(m, "_load_hook_client_module", lambda: object())
+    monkeypatch.setattr(m.git_ops, "_windows_observation", lambda: False)
+    monkeypatch.setattr(smc, "publish_route", lambda *a, **k: None)
+    monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
+    monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: 42)
+    monkeypatch.setattr(self_retire, "is_superseded", lambda *a, **k: False)
+    monkeypatch.setattr("agent_worktrees.runtime_monitor_identity.publish_lock", lambda *a, **k: True)
+    monkeypatch.setattr(m.status_monitor_cli, "sweep_mux_pane_args", lambda: None)
+    monkeypatch.setattr(monitor_roots, "live_picker_projects", lambda: set())
+    monkeypatch.setattr(m.list_cache, "recent_demand_projects", lambda: set())
+    monkeypatch.setattr(retirements.ResidentRetirements, "refresh",
+                        lambda self, **kwargs: setattr(self, "pending", False))
+    monkeypatch.setattr(MonitorHandover, "idle_guard",
+                        lambda *a: types.SimpleNamespace(release=lambda: None))
+    monkeypatch.setattr(m, "_resident_hook_decision", lambda *a, **k: {})
+
+    class Policy:
+        def __init__(self, client):
+            pass
+
+        def ready(self):
+            return True
+
+        def plugin_related_anchors(self):
+            return []
+
+        def mutation_targets(self, payload):
+            return []
+
+    monkeypatch.setattr(m, "_ResidentHookPolicy", Policy)
+    endpoint = tmp_path / "hook-endpoint.json"
+
+    def dial(server):
+        replies.append(hook_ipc.send_best_effort(
+            kind, {"toolName": "edit" if kind == "preToolUse" else "view"},
+            lock_path=endpoint,
+        ))
+        deadline = time.monotonic() + 2
+        while server.active_handler_count():
+            assert time.monotonic() < deadline, "hook response did not settle"
+            time.sleep(.005)
+
+    class Server(hook_ipc.HookIpcServer):
+        def __init__(self, decide):
+            super().__init__(decide)
+            self._clock = lambda: clock["now"]
+            servers.append(self)
+
+        def start(self):
+            super().start()
+            endpoint.write_text(json.dumps(self.rendezvous()), encoding="utf-8")
+            dial(self)
+
+    monkeypatch.setattr(hook_ipc, "HookIpcServer", Server)
+
+    class Control:
+        port = 12345
+
+        def __init__(self, handle, **kwargs):
+            pass
+
+        def start(self):
+            pass
+
+        def current_read_count(self, action="worktrees-read"):
+            return 0
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(smc, "ControlServer", Control)
+
+    def sweep(*args, **kwargs):
+        sweeps.append(clock["now"])
+        return 0
+
+    monkeypatch.setattr(m, "_monitor_sweep", sweep)
+    deadline = time.monotonic() + 5
+
+    def wait(event, interval):
+        assert time.monotonic() < deadline, "monitor did not reach true idle expiry"
+        if len(sweeps) > clock["advanced"]:
+            clock["advanced"] = len(sweeps)
+            clock["now"] += 30
+            if clock["now"] == 90:
+                dial(servers[0])
+        else:
+            time.sleep(.005)
+
+    monkeypatch.setattr(m.status_monitor_cli, "_wake_interruptible_wait", wait)
+    assert m.cmd_status_monitor(argparse.Namespace(interval=1)) == 0
+    assert replies == [True, True]
+    assert sweeps == list(range(0, 271, 30))
+
+
 def test_idle_exit_releases_installer_guard_while_late_accepted_read_drains(tmp_path, monkeypatch):
     from agent_worktrees import monitor_roots, self_retire, status_monitor_cutover as smc
     from agent_worktrees import runtime_monitor_retirements as retirements
