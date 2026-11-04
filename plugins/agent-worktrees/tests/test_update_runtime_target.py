@@ -75,6 +75,9 @@ def _completed(selected, target):
     owner, artifact, root, source, helper = selected
     slot = root / "versions" / target.version
     slot.mkdir(parents=True)
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python.parent.mkdir()
+    python.touch()
     (slot / ".install-complete.json").write_text(json.dumps({
         "version": target.version, "completed_at": "2026-01-01T00:00:00Z",
         "pid": os.getpid(), "payload_hash": "d" * 64,
@@ -130,14 +133,16 @@ def test_prepared_profile_code_never_becomes_the_planning_authority(selected):
 
 @pytest.mark.parametrize("fault", [
     "", "outer-profile", "outer-version", "outer-source-type", "slot-profile", "slot-source",
-    "slot-source-type", "slot-hash", "completion",
+    "slot-source-type", "slot-hash", "completion", "interpreter",
 ])
 def test_currentness_requires_actual_profile_source_selector_and_completion(selected, fault):
     step = _plan(selected)
     slot = _completed(selected, step.source_target)
     root = selected[2]
     path = root / "deploy-manifest.json" if fault.startswith("outer") else slot / "runtime-profile.json"
-    if fault:
+    if fault == "interpreter":
+        (slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")).unlink()
+    elif fault:
         data = json.loads(path.read_text())
         if fault == "outer-profile":
             data["runtime_profile"] = "base"
