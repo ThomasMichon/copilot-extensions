@@ -145,6 +145,14 @@ auditability-selection delivery while preserving the original unqualified
 prototype and wider campaign. The current 64-text accounting, actual owner
 boundaries and literal alternatives remain distinct from technical acceptance.
 
+The [fifteen further contracts](receiving-tail-fifteen.md) retain four finite
+same-home documentary proposals and eleven whole-contract outcomes. Fourteen
+metadata records remain unchanged; #4876's fourteen new eligible refinements
+report bounded producer/consumer-prerequisite progress while preserving the
+whole program, unsigned-candidate versus authenticated-delivery boundary and
+existing owners. The historical 118-text study and current 132-text qualification
+are distinct; publication is not accepted transfer or technical completion.
+
 ## Request
 
 Operator request, with identifying organizational references redacted:
@@ -217,6 +225,13 @@ outcomes from agent-recommended research and prioritization mechanics.
   fixture OR exit-state correction. Thirteen whole-contract gaps retain
   complete inheritance, existing claims, attribution and native boundaries.
   A related home or reported bounded delivery is not accepted whole transfer.
+  The [further fifteen-contract register](receiving-tail-fifteen.md) retains
+  #5115's ONE Windows-hosted route, #5140's FIVE-case causal ledger, #5727's
+  THREE findings and #4959's complete defining-origin inheritance directly
+  under existing Active homes. Eleven whole-contract outcomes preserve
+  canonical, independent, actual-consumer, native and source-specific gates.
+  Metadata-qualified reported progress does not authorize implementation,
+  source closure, a competing owner or release of any existing hold.
 - [ ] Verify and publish supported dispositions, preserving source versus
   release versus rollout distinctions and all active ownership.
   The [roadmap follow-through register](roadmap-follow-through.md) records
