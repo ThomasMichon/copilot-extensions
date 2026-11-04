@@ -302,3 +302,21 @@ make an incompatible wheel installable or an incomplete promotion reusable.
 Do not add another version counter, builder, cache or fingerprint framework.
 This agreement changes the proposed source/update contract, not installed
 configuration, provider ownership or rollout authority.
+
+## Clean-break wheel/uv migration
+
+Operator clarification, 2026-11-03:
+
+> I don't really need back-compat with the old system; I'm planning on having a "force-fresh install" script declard publicly on the copilot-extensions readme, to help operators stuck on older arbitrary versions "blow away" that which came before. Once we move to the new system, I of course want to maintain back-compat. But the uv-from-first-party-wheel flow is a "clean break" that we are working toward.
+
+Settled summary: do not require the wheel-first/uv installation model to carry
+legacy installer protocols, source-packet formats or in-place compatibility
+with arbitrary pre-wheel versions. Provide a standalone force-fresh migration
+script discoverable from the public README. Preserve compatibility among
+supported generations of the new model after that cutover.
+
+This withdraws the proposed legacy-compatibility requirement; it does not
+authorize executing a wipe or change the retained configuration/data, protected
+session/connectivity and installation-resource boundaries.
+The exact script spelling, implementation and validation decomposition remain
+agent-recommended realization choices, not additional operator requirements.

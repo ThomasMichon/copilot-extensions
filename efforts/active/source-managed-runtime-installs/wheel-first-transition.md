@@ -44,6 +44,37 @@ unreviewed patches from another contributor.
 The [2026-10-31 refinement](inception-transcript.md#promotion-mediated-backing-checkouts-and-app-staging)
 requires this boundary and an install/activate split for every app.
 
+## Legacy cutover and future compatibility
+
+The [2026-11-03 direction](inception-transcript.md#clean-break-wheeluv-migration)
+makes the first-party-wheel/uv flow a clean break from the pre-wheel installation
+system. New installation code need not retain legacy source-packet formats,
+installer protocols or every historical runtime layout. This supersedes any
+inference that adding a new input contract requires preserving those old forms.
+
+A standalone force-fresh install script, published from the repository README
+after implementation and qualification, supplies the migration/rescue path for
+operators stuck on arbitrary legacy versions. It uses the canonical new
+installation flow without requiring healthy old commands or receipts. Replacing
+addressed disposable code/registrations does not mean replacing configuration or
+durable data, terminating protected sessions/connectivity, or clearing unrelated
+owners' resources. Preserve the authoritative replacement and manual/automatic
+admission boundaries; a future script is not current host-action permission.
+
+Compatibility is still required among supported generations of the new model.
+Declare that support window and qualify new/new-model upgrade and recovery.
+Temporary coexistence outside the addressed migration boundary does not require
+an indefinite legacy-protocol adapter or waive complete-flow acceptance.
+
+_(Agent-recommended validation decomposition:)_ exercise an absent legacy install,
+a broken legacy launcher, unsupported/unknown old metadata and a historical
+installation with retained configuration/data. Prove the standalone path reaches
+the new model without invoking old tooling, retains required state, and reports
+actual new readiness/selection separately from outgoing cleanup. Then exercise
+supported old/new generations **within the new model**, including rollback where
+state-compatible. Reconcile inherited legacy-only acceptance rows to this
+explicit boundary; do not silently mark them passed or waive unrelated gates.
+
 ## Source-input contract — proposed, not existing syntax
 
 The self-install entry separates **runtime source** from **repository adoption**.
@@ -59,10 +90,11 @@ not silently select a different Manager source.
 | Explicit source repository/ref | Override the default through the source owner; preserve Git credential ownership and reject embedded secrets, unsupported syntax and ambiguous source combinations. |
 | `--repository <HTTPS repository>` | After Manager installation, acquire/register the selected repository and hand off to trusted repository-owned setup. Omission permits an explicitly selected registered-repository sweep. |
 
-These proposed switches need provider-first support discovery and mixed-version
-parser/process tests before callers use them. Retain existing supported bootstrap
-overrides during migration. Unsupported old entrypoints report a precise
-prerequisite or capability gap; they do not reinterpret arguments.
+Within the new model's support window, these proposed switches need provider-first
+support discovery and mixed-version parser/process tests before callers use them.
+Legacy entrypoints need not understand them: migration uses the independent
+force-fresh front door rather than a legacy-format fallback. Unsupported
+invocations remain explicit and never reinterpret arguments.
 
 ### Configured Dev update and output reuse
 
@@ -142,9 +174,10 @@ first-install usability without requiring a separate manual command.
   from a running legacy CMD launcher must happen outside that launcher's mutable
   execution stream. Every owned consumer registration resolves through the
   stable, marker-aware entry after payload/staging removal.
-- An old installed global wrapper or connector must still reach the new
-  runtime, or a supported, explicitly authorized connector refresh precedes
-  activation. Never patch an installed payload ad hoc to manufacture compatibility.
+- Within the new model's support window, an old installed global wrapper or
+  connector still reaches the new runtime or receives a supported, authorized
+  refresh. Pre-wheel migration uses the independent force-fresh entry instead.
+  Never patch an installed payload ad hoc to manufacture compatibility.
 
 No new whole-source fingerprint framework or full-suite hash-attestation barrier
 is proposed. Reuse native Git source/release association, uv's package/lock
@@ -223,6 +256,7 @@ edit installed code, add privilege, or replace other contributors' open fixes.
 - [ ] Qualify each bounded app/integration slice locally, then submit it through required review/CI; retain complete-flow qualification without requiring one final implementation PR.
 
 ### W1 — Complete local promotion and Manager fast path
+- [ ] Implement and qualify the standalone force-fresh migration entry, then publish its actual invocation on the root README; it must not require a healthy old Manager, launcher or particular legacy version.
 - [ ] Reuse canonical official Main version seeding before source/wheel locking;
   local promotion preserves those package versions without local increments
   or unofficial changefile version composition.
@@ -236,6 +270,7 @@ edit installed code, add privilege, or replace other contributors' open fixes.
   on a valid reuse hit.
 
 ### W2 — Real whole-system Windows-container acceptance
+- [ ] Exercise the legacy migration and within-new-model compatibility matrix above, preserving existing configuration/data and keeping replacement success separate from outgoing cleanup and protected-resource survival.
 - [ ] Use local install-source snapshots for every container deployment, with no host credentials or mounts.
 - [ ] Install all selected daemons through supported fixture authentication and role configuration.
 - [ ] Prove real Manager and agent-command operations: repository/worktree and task/state round trips, required service health and installed new code.

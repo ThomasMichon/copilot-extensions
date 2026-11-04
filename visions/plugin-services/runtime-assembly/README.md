@@ -5,7 +5,7 @@
   needs, from an approved artifact source, under one provenance identity.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-30
+- **Last revised:** 2026-11-03
 - **Reality docs:** [`docs/install-contract.md`](../../../docs/install-contract.md) ·
   [`docs/pipelines.md`](../../../docs/pipelines.md) ·
   [`docs/architecture.md`](../../../docs/architecture.md)
@@ -77,6 +77,21 @@ uv identities with existing release authority. Assembly does not add a parallel
 whole-source fingerprint or a full-suite attestation barrier merely to copy
 already-selected applications. Native ownership, package integrity, immutable
 completion and readiness remain independent obligations.
+
+### clean-break-wheel-first-migration
+
+The first-party-wheel/uv installation model has an explicit migration boundary
+from the legacy runtime installation system. It need not preserve legacy
+installer protocols, source-packet formats or runtime layouts merely to make
+every historical installation update in place. Operators stranded on arbitrary
+legacy versions have a standalone force-fresh installation path, discoverable
+from the repository README and independent of a healthy legacy runtime.
+
+That migration replaces addressed disposable runtime code, not the operator's
+configuration, durable data, work or protected session/connectivity state.
+After adoption, supported generations of the new model retain declared
+upgrade, interoperability and state-compatible recovery guarantees. A deliberate
+one-time cutover is not permission for repeated unannounced compatibility breaks.
 
 ### adopter-supplied-complete-defaults
 
@@ -252,9 +267,10 @@ outcomes; success in one never impersonates the others.
 
 A generation is activatable only when assembly finished and its evidence
 matches the lock it claims. An interrupted or partial candidate is never
-selected and never mistaken for a usable runtime. Generations assembled under
-an earlier layout stay readable and selectable through a compatible resolver,
-so adopting a new release shape does not invalidate a working runtime. Which
+selected and never mistaken for a usable runtime. Within the new model's declared
+support window, generations assembled under an earlier layout stay readable and
+selectable through a compatible resolver. The legacy migration boundary above
+does not require indefinite support for pre-wheel layouts. Which
 environment a command or service runs in is an explicit property of the
 generation, never inferred from a path convention.
 
