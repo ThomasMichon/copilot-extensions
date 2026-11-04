@@ -1,0 +1,9 @@
+{
+  "comment": "Expose original configuration-source selection acquisition without discovery replay",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
