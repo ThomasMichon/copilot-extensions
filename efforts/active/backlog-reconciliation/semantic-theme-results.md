@@ -109,6 +109,15 @@ two members, #9375 and #10239, remain with their actual supported-uninstall
 callers and source custodians. Shared cache/process vocabulary is not proof
 of one defect, a common root cause or permission to clean anything up.
 
+The [complete nine-contract study](native-fixture-cohort.md) reads 21 whole
+texts and separates interpreter/profile fixtures, post-exit disposal,
+guarded-launch preconditions and production ownership. Current completed-work
+comparison independently verifies #9699's finite merged fixture correction;
+the other eight retain their individual conditions. The study also corrects
+one qualified-reference admission error: seven `pr:10236` match edges are
+explicitly invalid, not completion evidence. Historical target counts and
+scores are not silently presented as freshly requalified coverage.
+
 ## Completed-work matching
 
 The bounded pilot examines 300 recently updated merged PR metadata records,
