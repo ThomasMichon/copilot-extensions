@@ -5,6 +5,7 @@ import shutil
 import sys
 import tarfile
 import zipfile
+from typing import cast
 
 import pytest
 
@@ -15,7 +16,7 @@ from fleet_manager.role_bindings import parse_bindings
 
 
 @pytest.mark.parametrize("flag", ["--help", "--version"])
-def test_metadata_does_not_import_the_runtime_backend(flag):
+def test_metadata_does_not_import_the_runtime_backend(flag: str) -> None:
     script = """
 import builtins,runpy,sys
 original=builtins.__import__
@@ -38,7 +39,7 @@ runpy.run_module('agent_ssh_service',run_name='__main__')
         assert result.stdout.strip() == __version__
 
 
-def test_offline_wheel_and_sdist_do_not_require_a_checkout_or_marketplace(tmp_path, monkeypatch):
+def test_offline_wheel_and_sdist_do_not_require_a_checkout_or_marketplace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     source = Path(__file__).resolve().parents[1]
     project, output = tmp_path / "project", tmp_path / "artifacts"
     project.mkdir()
@@ -48,6 +49,7 @@ def test_offline_wheel_and_sdist_do_not_require_a_checkout_or_marketplace(tmp_pa
     shutil.copytree(source / "container", project / "container")
     shutil.copytree(source / "src", project / "src",
                     ignore=shutil.ignore_patterns("*.egg-info", "__pycache__"))
+    (project / "src").chmod(0o700)
     monkeypatch.chdir(project)
     result = run_caller_owned(
         [sys.executable, "-I", "-c",
@@ -62,10 +64,10 @@ def test_offline_wheel_and_sdist_do_not_require_a_checkout_or_marketplace(tmp_pa
         )).decode())
         assert metadata["Name"] == "agent-ssh-service"
         assert not any("@" in item or "file:" in item
-                       for item in metadata.get_all("Requires-Dist"))
+                       for item in cast(list[str], metadata.get_all("Requires-Dist")))
         assert "agent_ssh_service/hosting.py" in wheel.namelist()
         assert "agent_ssh_service/relay.py" in wheel.namelist()
-        assert "agent-procutil" in metadata.get_all("Requires-Dist")
+        assert "agent-procutil" in cast(list[str], metadata.get_all("Requires-Dist"))
     with tarfile.open(next(output.glob("*.tar.gz"))) as archive:
         assert any(name.endswith("/container/Dockerfile") for name in archive.getnames())
     monkeypatch.chdir(tmp_path)
@@ -76,7 +78,7 @@ def test_offline_wheel_and_sdist_do_not_require_a_checkout_or_marketplace(tmp_pa
     assert child.returncode == 0 and "--config" in child.stdout
 
 
-def test_container_is_nonroot_offline_and_uses_existing_role_provider():
+def test_container_is_nonroot_offline_and_uses_existing_role_provider() -> None:
     source = Path(__file__).resolve().parents[1]
     recipe = (source / "container" / "Dockerfile").read_text("utf-8")
     assert recipe.startswith("ARG PYTHON_BASE\nFROM ${PYTHON_BASE}")

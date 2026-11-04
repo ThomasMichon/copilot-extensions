@@ -1,39 +1,48 @@
 import asyncio
 from copy import deepcopy
+from typing import Any, TYPE_CHECKING, cast
+from collections.abc import Callable
 
 import pytest
 
-from agent_ssh_service.config import SSHServiceError
+from agent_ssh_service.config import ServiceConfig, SSHServiceError, canonical, decode
 from agent_ssh_service.gateway import SSHService
 from agent_ssh_service.store import DirectoryStore
 from fleet_manager.gateway_service_channel import TransportError
 from fleet_manager.gateway_service_handler import ServiceResponse
-from fleet_manager.planning import canonical, decode
-from fleet_manager.ssh_approval import EnrollmentResult, PeerEnrollmentClient
-from fleet_manager.ssh_directory import SSHDirectoryClient
+from fleet_manager.ssh_approval import EnrollmentResult, PeerEnrollmentClient as _PeerEnrollmentClient
+from fleet_manager.ssh_directory import SSHDirectoryClient as _SSHDirectoryClient
 
-from conftest import enrollment
-from test_approval import bootstrap, decision, selected, submit
-from test_notifications import request
+if TYPE_CHECKING:
+    from services.ssh.tests.conftest import enrollment
+    from services.ssh.tests.test_approval import bootstrap, decision, selected, submit
+    from services.ssh.tests.test_notifications import request
+else:
+    from conftest import enrollment
+    from test_approval import bootstrap, decision, selected, submit
+    from test_notifications import request
+
+PeerEnrollmentClient: Callable[..., _PeerEnrollmentClient] = _PeerEnrollmentClient
+SSHDirectoryClient: Callable[..., _SSHDirectoryClient] = _SSHDirectoryClient
 
 
 class Caller:
-    def __init__(self, service, principal):
+    def __init__(self, service: SSHService, principal: str) -> None:
         self.service, self.principal = service, principal
-        self.calls = []
+        self.calls: list[tuple[str, str, bytes]] = []
 
-    async def request(self, method, target, *, body=b"", response_limit=None):
+    async def request(self, method: str, target: str, *, body: bytes = b"", response_limit: int | None = None) -> ServiceResponse:
         self.calls.append((method, target, body))
         return await self.service.handle(request(
             self.principal, method, target.removeprefix("/ssh"), body,
         ))
 
 
-def client(service, principal):
+def client(service: SSHService, principal: str) -> _PeerEnrollmentClient:
     return PeerEnrollmentClient(Caller(service, principal))
 
 
-async def test_sdk_requires_explicit_recovery_then_exact_peer_approval(config):
+async def test_sdk_requires_explicit_recovery_then_exact_peer_approval(config: ServiceConfig) -> None:
     service = SSHService(DirectoryStore(selected(config)))
     first, second = (client(service, "principal-worker-" + name) for name in ("a", "b"))
     recovery = client(service, "recovery-owner")
@@ -41,7 +50,7 @@ async def test_sdk_requires_explicit_recovery_then_exact_peer_approval(config):
         pending = (await first.submit(enrollment())).to_dict()
         with pytest.raises(TransportError):
             await first.approve(**decision(pending))
-        assert not any(path.endswith("/recover") for _, path, _ in first.caller.calls)
+        assert not any(path.endswith("/recover") for _, path, _ in cast(Caller, first.caller).calls)
         active = await recovery.recover(
             **decision(pending), confirm=True, reason="first-peer")
         assert active.to_dict()["status"] == "active"
@@ -57,7 +66,7 @@ async def test_sdk_requires_explicit_recovery_then_exact_peer_approval(config):
         await service.close()
 
 
-async def test_old_directory_client_cannot_silently_bypass_selected_approval(config):
+async def test_old_directory_client_cannot_silently_bypass_selected_approval(config: ServiceConfig) -> None:
     service = SSHService(DirectoryStore(selected(config)))
     caller = Caller(service, "principal-worker-a")
     try:
@@ -70,11 +79,11 @@ async def test_old_directory_client_cannot_silently_bypass_selected_approval(con
 
 
 @pytest.mark.parametrize("legacy", [False, True])
-async def test_sdk_checks_running_policy_before_any_effectful_request(config, legacy):
+async def test_sdk_checks_running_policy_before_any_effectful_request(config: ServiceConfig, legacy: bool) -> None:
     service = SSHService(DirectoryStore(config))
 
     class PriorCaller(Caller):
-        async def request(self, method, target, **kwargs):
+        async def request(self, method: str, target: str, **kwargs: Any) -> ServiceResponse:
             if legacy:
                 self.calls.append((method, target, b""))
                 return ServiceResponse(404)
@@ -91,11 +100,11 @@ async def test_sdk_checks_running_policy_before_any_effectful_request(config, le
         await service.close()
 
 
-async def test_provider_rollback_after_discovery_refuses_required_policy(config):
+async def test_provider_rollback_after_discovery_refuses_required_policy(config: ServiceConfig) -> None:
     service = SSHService(DirectoryStore(config))
 
     class ChangedCaller(Caller):
-        async def request(self, method, target, **kwargs):
+        async def request(self, method: str, target: str, **kwargs: Any) -> ServiceResponse:
             if method == "GET":
                 self.calls.append((method, target, b""))
                 return ServiceResponse(200, (), canonical({
@@ -120,11 +129,11 @@ async def test_provider_rollback_after_discovery_refuses_required_policy(config)
     {"schema": "agent-ssh.enrollment-contract", "version": 1,
      "policy": "peer-approval", "peer_approval": 1},
 ])
-async def test_sdk_unknown_or_invalid_contract_does_not_submit(config, metadata):
+async def test_sdk_unknown_or_invalid_contract_does_not_submit(config: ServiceConfig, metadata: Any) -> None:
     service = SSHService(DirectoryStore(config))
 
     class UnsupportedCaller(Caller):
-        async def request(self, method, target, **kwargs):
+        async def request(self, method: str, target: str, **kwargs: Any) -> ServiceResponse:
             self.calls.append((method, target, b""))
             return ServiceResponse(200, (), canonical(metadata))
 
@@ -138,7 +147,7 @@ async def test_sdk_unknown_or_invalid_contract_does_not_submit(config, metadata)
         await service.close()
 
 
-async def test_sdk_missing_recovery_confirmation_does_not_contact_a_service(config):
+async def test_sdk_missing_recovery_confirmation_does_not_contact_a_service(config: ServiceConfig) -> None:
     service = SSHService(DirectoryStore(selected(config)))
     recovery = client(service, "recovery-owner")
     try:
@@ -147,12 +156,12 @@ async def test_sdk_missing_recovery_confirmation_does_not_contact_a_service(conf
                 "principal-worker-a", "join-worker-a", "SHA256:" + "A" * 43,
                 confirm=False, reason="first-peer",
             )
-        assert recovery.caller.calls == []
+        assert cast(Caller, recovery.caller).calls == []
     finally:
         await service.close()
 
 
-async def test_pending_submission_does_not_wake_directory_or_reconcile_relay(config):
+async def test_pending_submission_does_not_wake_directory_or_reconcile_relay(config: ServiceConfig) -> None:
     store = DirectoryStore(selected(config))
     original = bootstrap(store)
     calls = []
@@ -176,13 +185,13 @@ async def test_pending_submission_does_not_wake_directory_or_reconcile_relay(con
         await service.close()
 
 
-async def test_relay_failure_keeps_committed_decision_and_original_retry(config):
+async def test_relay_failure_keeps_committed_decision_and_original_retry(config: ServiceConfig) -> None:
     store = DirectoryStore(selected(config))
     bootstrap(store)
     pending = submit(store, 1)
     calls = []
 
-    def reconcile():
+    def reconcile() -> None:
         calls.append("attempt")
         if len(calls) == 1:
             raise SSHServiceError("fixture-write-unavailable")
@@ -212,7 +221,7 @@ async def test_relay_failure_keeps_committed_decision_and_original_retry(config)
 
 
 @pytest.mark.parametrize("mutation", ["candidate", "pending-decision", "pending-directory"])
-def test_sdk_rejects_inconsistent_fingerprint_or_pending_admission(config, mutation):
+def test_sdk_rejects_inconsistent_fingerprint_or_pending_admission(config: ServiceConfig, mutation: Any) -> None:
     pending = deepcopy(submit(DirectoryStore(selected(config))))
     if mutation == "candidate":
         pending["candidate"]["binding"]["alias"] = "different"

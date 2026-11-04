@@ -12,19 +12,44 @@ import subprocess
 import sys
 import tempfile
 import threading
+from typing import TYPE_CHECKING, Protocol, cast
 
-from fleet_manager.planning import canonical
-
-from .config import SSHServiceError, absolute, check
+from .config import Document, SSHServiceError, absolute, canonical, check
 from .store import DirectoryStore
 
+if TYPE_CHECKING:
+    from agent_procutil.native_child import NativeChildCustody
 
-def private(path: Path, *, directory=False) -> None:
+
+class PosixOperations(Protocol):
+    """Native APIs used only by the explicitly Linux relay and its fixtures."""
+
+    O_DIRECTORY: int
+    P_PID: int
+    WEXITED: int
+    WNOHANG: int
+    WNOWAIT: int
+
+    def getuid(self) -> int: ...
+    def geteuid(self) -> int: ...
+    def waitid(self, idtype: int, id: int, options: int) -> object | None: ...
+
+
+class Account(Protocol):
+    pw_name: str
+    pw_dir: str
+
+
+class AccountLookup(Protocol):
+    def getpwuid(self, uid: int) -> Account: ...
+
+
+def private(path: Path, *, directory: bool = False) -> None:
     absolute(str(path))
     info = path.stat()
     check((stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode))
           and (directory or info.st_nlink == 1)
-          and info.st_uid == os.geteuid() and info.st_mode & 0o077 == 0,
+          and info.st_uid == cast(PosixOperations, os).geteuid() and info.st_mode & 0o077 == 0,
           "unsafe-native-relay-artifact")
 
 
@@ -37,7 +62,7 @@ def write(path: Path, content: bytes) -> None:
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(pending, path)
-        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        directory = os.open(path.parent, os.O_RDONLY | cast(PosixOperations, os).O_DIRECTORY)
         try:
             os.fsync(directory)
         finally:
@@ -47,7 +72,7 @@ def write(path: Path, content: bytes) -> None:
             os.unlink(pending)
 
 
-def authorization(rows: list[dict]) -> bytes:
+def authorization(rows: list[Document]) -> bytes:
     """Never reuse target-login keys as relay credentials or allow session channels."""
     destinations = [f'permitopen="127.0.0.1:{row["reverse_port"]}"' for row in rows]
     lines = []
@@ -60,8 +85,8 @@ def authorization(rows: list[dict]) -> bytes:
     return "".join(lines).encode("ascii")
 
 
-def native_config(selected: dict, root: Path) -> bytes:
-    def quoted(path):
+def native_config(selected: Document, root: Path) -> bytes:
+    def quoted(path: str | Path) -> str:
         text = str(path)
         check(not any(char in text for char in '"%\r\n'), "invalid-native-relay-path")
         return '"' + text + '"'
@@ -113,17 +138,19 @@ def owns_listener(pid: int, host: str, port: int) -> bool:
 
 
 class NativeRelay:
-    def __init__(self, store: DirectoryStore):
-        check(sys.platform == "linux" and os.geteuid() != 0,
+    def __init__(self, store: DirectoryStore) -> None:
+        check(sys.platform == "linux" and cast(PosixOperations, os).geteuid() != 0,
               "native-relay-requires-nonroot-linux")
         import pwd
 
         self.store = store
         self.selected = store.config.to_dict()["relay"]
-        check(pwd.getpwuid(os.geteuid()).pw_name == self.selected["user"],
+        check(cast(AccountLookup, pwd).getpwuid(cast(PosixOperations, os).geteuid()).pw_name == self.selected["user"],
               "native-relay-login-user-mismatch")
         self.root = store.root / "relay"
         self.lock = threading.Lock()
+        self.process: subprocess.Popen[bytes] | None
+        self.custody: NativeChildCustody | None
         self.process = self.custody = None
 
     def prepare(self) -> None:
@@ -225,14 +252,18 @@ class NativeRelay:
             deadline = asyncio.get_running_loop().time() + 10
             while not stop.is_set():
                 self.custody.assert_owned()
-                exited = os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+                exited = cast(PosixOperations, os).waitid(
+                    cast(PosixOperations, os).P_PID, process.pid,
+                    cast(PosixOperations, os).WEXITED | cast(PosixOperations, os).WNOHANG | cast(PosixOperations, os).WNOWAIT)
                 check(exited is None, "native-relay-exited")
                 try:
                     listening = owns_listener(
                         process.pid, self.selected["listen_host"], self.selected["port"],
                     )
                 except (FileNotFoundError, PermissionError) as exc:
-                    exited = os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+                    exited = cast(PosixOperations, os).waitid(
+                        cast(PosixOperations, os).P_PID, process.pid,
+                        cast(PosixOperations, os).WEXITED | cast(PosixOperations, os).WNOHANG | cast(PosixOperations, os).WNOWAIT)
                     check(exited is None, "native-relay-exited")
                     raise SSHServiceError("native-relay-listener-unobservable") from exc
                 if listening:

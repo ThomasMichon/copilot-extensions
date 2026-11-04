@@ -8,27 +8,34 @@ import json
 import os
 from pathlib import Path
 import signal
-import subprocess
+import subprocess as subprocess
+from subprocess import Popen as PopenType
 import sys
 import sysconfig
 from types import SimpleNamespace
+from typing import Any, BinaryIO, TYPE_CHECKING, cast
+from collections.abc import Awaitable, Callable
 
 from cryptography.hazmat.primitives import serialization
 from joserfc.jwk import ECKey
 import pytest
 
-from agent_ssh_service.config import ServiceConfig
+from agent_ssh_service.config import Document, ServiceConfig
 from agent_ssh_service.hosting import run
 from fleet_manager.gateway_service_caller import ServiceCaller
 from fleet_manager.ssh_directory import SSHDirectoryClient
 from fleet_manager.ssh_machine import run as run_machine
 from fleet_manager.ssh_machine_config import SSHMachineConfig
 
-from conftest import RealtimeClock, document, enrollment, key
-from test_gateway_integration import Rig, eventually
+if TYPE_CHECKING:
+    from services.ssh.tests.conftest import RealtimeClock, document, enrollment, key
+    from services.ssh.tests.test_gateway_integration import Rig, eventually
+else:
+    from conftest import RealtimeClock, document, enrollment, key
+    from test_gateway_integration import Rig, eventually
 
 
-def test_consumer_packages_are_installed_not_loaded_from_source():
+def test_consumer_packages_are_installed_not_loaded_from_source() -> None:
     runtime = Path(sysconfig.get_path("purelib")).resolve()
     for name in ("fleet_manager", "agent_ssh"):
         selected = importlib.util.find_spec(name)
@@ -36,7 +43,7 @@ def test_consumer_packages_are_installed_not_loaded_from_source():
         assert Path(selected.origin).resolve().is_relative_to(runtime)
 
 
-def published_text(path):
+def published_text(path: Path) -> str | None:
     try:
         return path.read_text("utf-8")
     except (FileNotFoundError, PermissionError):
@@ -44,7 +51,7 @@ def published_text(path):
         return None
 
 
-def proof_file(path, key):
+def proof_file(path: Path, key: ECKey) -> str:
     path.write_bytes(key.get_op_key("sign").private_bytes(
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption(),
@@ -56,9 +63,9 @@ def proof_file(path, key):
     "config_d", "ssh_config", "authorization_dir", "source-state", "lock-state",
 ])
 def test_installed_cli_rejects_lease_tree_outputs_before_credentials(
-    tmp_path, monkeypatch, destination,
-):
-    value = {
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, destination: str,
+) -> None:
+    value: Document = {
         "schema": "fleet-manager.ssh-client", "version": 1,
         "gateway_origin": "https://gateway.example.test", "gateway_ca": None,
         "namespace": "/ssh", "machine": "worker-a", "environment": "linux",
@@ -79,7 +86,7 @@ def test_installed_cli_rejects_lease_tree_outputs_before_credentials(
     selected.write_text(json.dumps(value), encoding="utf-8")
     original_import = builtins.__import__
 
-    def guarded(name, *args, **kwargs):
+    def guarded(name: str, *args: Any, **kwargs: Any) -> Any:
         if name.rsplit(".", 1)[-1] in {
             "credential_references", "gateway_service_caller", "ssh_directory",
         }:
@@ -94,7 +101,7 @@ def test_installed_cli_rejects_lease_tree_outputs_before_credentials(
         [sys.executable, "-I", "-m", "fleet_manager", "serve",
          "--role", "ssh-client", "--config", str(selected)],
         cwd=tmp_path, capture_output=True, text=True, timeout=15,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=cast(Any, subprocess).CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert result.returncode == 1
     assert "requires a dedicated state directory" in result.stderr
@@ -102,7 +109,10 @@ def test_installed_cli_rejects_lease_tree_outputs_before_credentials(
     assert not Path(value["proof_key_file"]).exists()
 
 
-async def settle_resources(*, rig, diagnostic, service_owner, process_stop, second_owner):
+async def settle_resources(*, rig: Any, diagnostic: Any,
+                           service_owner: asyncio.Task[None] | None,
+                           process_stop: Callable[[], Awaitable[None]] | None,
+                           second_owner: asyncio.Task[None] | None) -> None:
     async with AsyncExitStack() as cleanup:
         cleanup.push_async_callback(rig.close)
         if diagnostic is not None:
@@ -115,10 +125,10 @@ async def settle_resources(*, rig, diagnostic, service_owner, process_stop, seco
             cleanup.push_async_callback(asyncio.wait_for, second_owner, 10)
 
 
-async def test_failed_consumer_still_settles_every_other_retained_resource():
-    settled = []
+async def test_failed_consumer_still_settles_every_other_retained_resource() -> None:
+    settled: list[str] = []
 
-    async def finish(name, *, fail=False):
+    async def finish(name: str, *, fail: bool = False) -> None:
         settled.append(name)
         if fail:
             raise PermissionError("fixture-second-consumer-refused")
@@ -136,7 +146,7 @@ async def test_failed_consumer_still_settles_every_other_retained_resource():
     assert service.done() and second.done()
 
 
-def machine_config(root, service, rig, index):
+def machine_config(root: Path, service: Document, rig: Any, index: int) -> tuple[Path, Document]:
     root.mkdir()
     name = "worker-a" if index == 0 else "worker-b"
     (root / "policy.json").write_text(json.dumps(service["policy"]), encoding="utf-8")
@@ -162,8 +172,8 @@ def machine_config(root, service, rig, index):
 
 @pytest.mark.parametrize("disconnected", [False, True])
 async def test_installed_fleet_role_converges_live_and_catches_up_after_restart(
-    tmp_path, disconnected,
-):
+    tmp_path: Path, disconnected: bool,
+) -> None:
     rig = Rig(tmp_path)
     rig.h.clock = RealtimeClock()
     rig.h.keys += (ECKey.generate_key("P-256"),)
@@ -179,24 +189,28 @@ async def test_installed_fleet_role_converges_live_and_catches_up_after_restart(
         "slots": ["service-a"], "methods": ["GET", "POST"],
     })
     stop, machine_stop = asyncio.Event(), asyncio.Event()
+    service_owner: asyncio.Task[None] | None
+    second_owner: asyncio.Task[None] | None
+    process: PopenType[bytes] | None
+    diagnostic: BinaryIO | None
     service_owner = second_owner = process = diagnostic = None
 
-    def launch(selected):
+    def launch(selected: Path) -> PopenType[bytes]:
         return subprocess.Popen(
             [sys.executable, "-I", "-m", "fleet_manager", "serve",
              "--role", "ssh-client", "--config", str(selected)],
             cwd=tmp_path, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
             stderr=diagnostic,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=cast(Any, subprocess).CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
 
-    async def stop_process():
-        if process.poll() is None:
+    async def stop_process() -> None:
+        if cast(PopenType[bytes], process).poll() is None:
             if os.name == "nt":
-                process.terminate()  # Windows termination deliberately tests kernel-lease recovery.
+                cast(PopenType[bytes], process).terminate()  # Windows termination deliberately tests kernel-lease recovery.
             else:
-                process.send_signal(signal.SIGTERM)
-        code = await asyncio.to_thread(process.wait, 5)
+                cast(PopenType[bytes], process).send_signal(signal.SIGTERM)
+        code = await asyncio.to_thread(cast(PopenType[bytes], process).wait, 5)
         if os.name != "nt":
             assert code == 0
 
@@ -212,9 +226,9 @@ async def test_installed_fleet_role_converges_live_and_catches_up_after_restart(
         service_owner = asyncio.create_task(run(ServiceConfig.from_dict(service), stop=stop))
         await eventually(lambda: "service-a" in rig.state.channels, timeout=30)
 
-        def client(index):
-            async def access():
-                return rig.access("caller-a" if index == 0 else "caller-b", index + 3)
+        def client(index: int) -> SSHDirectoryClient:
+            async def access() -> str:
+                return cast(str, rig.access("caller-a" if index == 0 else "caller-b", index + 3))
             return SSHDirectoryClient(ServiceCaller(
                 gateway_origin=rig.origin, gateway_ca=rig.ca,
                 access_token_callback=access, proof_key=rig.h.keys[index + 3].get_op_key("sign"),
@@ -227,11 +241,11 @@ async def test_installed_fleet_role_converges_live_and_catches_up_after_restart(
         process = launch(selected)
         authorized = tmp_path / "machine-a" / "authorization" / "authorized_keys.gateway"
 
-        def converged(peer_key):
-            if process.poll() is not None:
-                diagnostic.seek(0)
+        def converged(peer_key: str | None) -> bool:
+            if cast(PopenType[bytes], process).poll() is not None:
+                cast(BinaryIO, diagnostic).seek(0)
                 pytest.fail("Installed Fleet SSH role exited: "
-                            + diagnostic.read(4096).decode("utf-8", errors="replace"))
+                            + cast(BinaryIO, diagnostic).read(4096).decode("utf-8", errors="replace"))
             content = published_text(authorized)
             return content is not None and (peer_key is None or peer_key in content)
 
@@ -252,7 +266,7 @@ async def test_installed_fleet_role_converges_live_and_catches_up_after_restart(
             SSHMachineConfig.from_dict(second_config), stop=machine_stop,
         ))
         second_keys = tmp_path / "machine-b" / "authorization" / "authorized_keys.gateway"
-        def second_converged():
+        def second_converged() -> bool:
             if second_owner.done():
                 second_owner.result()
                 pytest.fail("Second Fleet consumer stopped before convergence")

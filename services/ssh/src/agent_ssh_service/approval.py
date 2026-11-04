@@ -4,19 +4,22 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import sqlite3
+from collections.abc import Callable
+from typing import TYPE_CHECKING, cast
 
-from fleet_manager.gateway_ssh_policy import GatewaySSHPolicy
 from fleet_manager.gateway_service_channel import BODY_BYTES
-from fleet_manager.planning import canonical, decode, identifier
+from .config import Document, canonical, check, decode, identifier, policy_from_dict
 
-from .config import check
+if TYPE_CHECKING:
+    from .store import DirectoryStore
 
 
 class PeerApproval:
-    def __init__(self, store):
+    def __init__(self, store: DirectoryStore) -> None:
         self.store = store
 
-    def contract(self) -> dict:
+    def contract(self) -> Document:
         return {
             "schema": "agent-ssh.enrollment-contract", "version": 1,
             "policy": self.store.config.enrollment_mode,
@@ -27,37 +30,37 @@ class PeerApproval:
         check(self.store.config.enrollment_mode == "peer-approval",
               "peer-approval-not-selected")
 
-    def _candidate(self, principal: str, request: dict) -> dict:
+    def _candidate(self, principal: str, request: Document) -> Document:
         binding = self.store._validate_enrollment(principal, request)
         selected = self.store.config.to_dict()
         return {
             "schema": "agent-ssh.enrollment-candidate", "version": 1,
             **{name: selected[name] for name in ("fleet", "gateway", "slot", "controller")},
             "requester": principal, "binding": binding,
-            "policy_digest": GatewaySSHPolicy.from_dict(selected["policy"]).policy_digest,
+            "policy_digest": policy_from_dict(selected["policy"]).policy_digest,
             "public_key": request["public_key"], "host_key": request["host_key"],
             "relay_public_key": request.get("relay_public_key"),
         }
 
     @staticmethod
-    def _fingerprint(candidate: dict) -> str:
+    def _fingerprint(candidate: Document) -> str:
         digest = hashlib.sha256(canonical(candidate)).digest()
         return "SHA256:" + base64.b64encode(digest).decode("ascii").rstrip("=")
 
-    def _active(self, db, principal: str) -> tuple | None:
+    def _active(self, db: sqlite3.Connection, principal: str) -> tuple[str, str | None, str | None] | None:
         binding = self.store.config.binding(principal)
-        policy = GatewaySSHPolicy.from_dict(self.store.config.to_dict()["policy"])
+        policy = policy_from_dict(self.store.config.to_dict()["policy"])
         if policy.resolve(binding["machine"], binding["environment"]).to_dict()["state"] != "configured":
             return None
-        return db.execute(
+        return cast(tuple[str, str | None, str | None] | None, db.execute(
             "SELECT e.public_key,e.host_key,r.public_key FROM enrollments e "
             "LEFT JOIN relay_keys r ON e.machine=r.machine AND e.environment=r.environment "
             "AND e.generation=r.generation "
             "WHERE e.machine=? AND e.environment=? AND e.generation=?",
             (binding["machine"], binding["environment"], binding["generation"]),
-        ).fetchone()
+        ).fetchone())
 
-    def _load(self, db, principal: str, request_id: str, *, current=True) -> tuple:
+    def _load(self, db: sqlite3.Connection, principal: str, request_id: str, *, current: bool = True) -> tuple[Document, Document, str, Document | None]:
         identifier(principal, "SSH enrollment requester")
         identifier(request_id, "SSH enrollment request")
         row = db.execute(
@@ -71,7 +74,7 @@ class PeerApproval:
             check(candidate == self._candidate(principal, request), "stale-pending-enrollment")
         return request, candidate, row[2], decision
 
-    def _retain(self, db, principal: str, fingerprint: str) -> dict:
+    def _retain(self, db: sqlite3.Connection, principal: str, fingerprint: str) -> Document:
         prior = db.execute(
             "SELECT decision FROM enrollment_pending "
             "WHERE principal=? AND fingerprint=? AND decision IS NOT NULL ORDER BY rowid LIMIT 1",
@@ -86,9 +89,9 @@ class PeerApproval:
             "WHERE principal=? AND fingerprint=? AND decision IS NULL",
             (canonical(decision), principal, fingerprint),
         )
-        return decision
+        return cast(Document, decision)
 
-    def _result(self, db, principal: str, request_id: str, *, current=True) -> dict:
+    def _result(self, db: sqlite3.Connection, principal: str, request_id: str, *, current: bool = True) -> Document:
         request, candidate, fingerprint, decision = self._load(
             db, principal, request_id, current=current)
         active = self._active(db, principal)
@@ -108,7 +111,7 @@ class PeerApproval:
         check(len(canonical(result)) <= BODY_BYTES, "enrollment-response-limit")
         return result
 
-    def submit(self, db, principal: str, request: dict) -> tuple[dict, bool]:
+    def submit(self, db: sqlite3.Connection, principal: str, request: Document) -> tuple[Document, bool]:
         self._require_policy()
         self.store._snapshot(db)
         candidate = self._candidate(principal, request)
@@ -128,7 +131,7 @@ class PeerApproval:
             ))
         return self._result(db, principal, request["request_id"]), False
 
-    def status(self, principal: str, request_id: str, *, checkpoint=lambda: None) -> dict:
+    def status(self, principal: str, request_id: str, *, checkpoint: Callable[[], None] = lambda: None) -> Document:
         self._require_policy()
         self.store.config.binding(principal)
         with self.store._transaction() as db:
@@ -138,7 +141,7 @@ class PeerApproval:
             checkpoint()
             return result
 
-    def pending(self, principal: str, *, after: str | None = None) -> dict:
+    def pending(self, principal: str, *, after: str | None = None) -> Document:
         self._require_policy()
         if after is not None:
             identifier(after, "SSH pending cursor")
@@ -151,6 +154,8 @@ class PeerApproval:
                 "SELECT principal,request_id,request,candidate,fingerprint "
                 "FROM enrollment_pending WHERE decision IS NULL ORDER BY rowid DESC"
             ).fetchall()
+            pending: dict[str, Document]
+            seen: set[str]
             pending, seen = {}, set()
             for requester, request_id, encoded, candidate, fingerprint in rows:
                 if requester in seen or (not privileged and requester != principal):
@@ -166,9 +171,9 @@ class PeerApproval:
                 pending[requester] = {
                     "request_id": request_id, "candidate": current, "fingerprint": fingerprint,
                 }
-            page = []
+            page: list[Document] = []
 
-            def response(cursor):
+            def response(cursor: str | None) -> Document:
                 return {
                     "schema": "agent-ssh.enrollment-pending", "version": 1,
                     "requests": page, "next": cursor,
@@ -185,8 +190,8 @@ class PeerApproval:
                     return response(page[-1]["candidate"]["requester"])
             return response(None)
 
-    def decide(self, principal: str, value: dict, *, recovery=False,
-               checkpoint=lambda: None) -> tuple[dict, bool]:
+    def decide(self, principal: str, value: Document, *, recovery: bool = False,
+               checkpoint: Callable[[], None] = lambda: None) -> tuple[Document, bool]:
         self._require_policy()
         fields = {"requester", "request_id", "fingerprint"}
         if recovery:

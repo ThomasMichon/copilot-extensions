@@ -1,5 +1,8 @@
 import ctypes
 import os
+import asyncio
+from pathlib import Path
+from typing import Any, TYPE_CHECKING, cast
 from types import SimpleNamespace
 import pytest
 from single_instance_lease import AlreadyRunningError, SingleInstance
@@ -8,33 +11,37 @@ from agent_ssh_service import hosting
 from agent_ssh_service.config import ServiceConfig
 from fleet_manager.planning import PlanError
 from fleet_manager.private_state import create_private_file, private_directory, windows_private
+from agent_ssh_service.relay import PosixOperations
 
-from conftest import document
+if TYPE_CHECKING:
+    from services.ssh.tests.conftest import document
+else:
+    from conftest import document
 
 
 class StoppedConnector:
-    def __init__(self, **_):
+    def __init__(self, **_: Any) -> None:
         pass
 
-    async def run(self, stop):
+    async def run(self, stop: asyncio.Event) -> None:
         stop.set()
 
 
-def test_native_private_creation_and_preserving_existing_refusal(tmp_path):
+def test_native_private_creation_and_preserving_existing_refusal(tmp_path: Path) -> None:
     root = tmp_path / "private-service"
     private_directory(root)
     private_directory(root)
     if os.name == "nt":
         windows_private(root)
     else:
-        assert root.stat().st_mode & 0o077 == 0 and root.stat().st_uid == os.getuid()
+        assert root.stat().st_mode & 0o077 == 0 and root.stat().st_uid == cast(PosixOperations, os).getuid()
 
 
-def shared_windows_acl(path):
+def shared_windows_acl(path: Path) -> None:
     from ctypes import wintypes as w
 
-    security = ctypes.WinDLL("advapi32", use_last_error=True)
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    security = cast(Any, ctypes).WinDLL("advapi32", use_last_error=True)
+    kernel = cast(Any, ctypes).WinDLL("kernel32", use_last_error=True)
     security.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
         w.LPCWSTR, w.DWORD, ctypes.POINTER(w.LPVOID), w.LPVOID,
     ]
@@ -58,8 +65,8 @@ def shared_windows_acl(path):
     "directory.sqlite3-wal", "directory.sqlite3-shm",
 ])
 async def test_shared_windows_state_refuses_before_credentials_lease_or_sqlite(
-    tmp_path, monkeypatch, shared,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shared: str,
+) -> None:
     root = tmp_path / "selected-service"
     private_directory(root)
     selected = root if shared == "root" else root / shared
@@ -81,8 +88,8 @@ async def test_shared_windows_state_refuses_before_credentials_lease_or_sqlite(
 
 @pytest.mark.skipif(os.name != "nt", reason="Actual native Windows owner and ACL inheritance")
 async def test_actual_host_restart_retains_token_user_owned_database_and_writer_lease(
-    tmp_path, monkeypatch,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     root = tmp_path / "restartable-service"
     selected = ServiceConfig.from_dict(document(root))
 
@@ -102,8 +109,8 @@ async def test_actual_host_restart_retains_token_user_owned_database_and_writer_
 
 
 async def test_interrupted_first_start_retries_with_only_its_validated_lease_file(
-    config, monkeypatch,
-):
+    config: ServiceConfig, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from pathlib import Path
 
     root = Path(config.to_dict()["data_dir"])
@@ -112,7 +119,7 @@ async def test_interrupted_first_start_retries_with_only_its_validated_lease_fil
     monkeypatch.setattr(hosting, "load_service_credentials",
                         lambda **_: SimpleNamespace(access_token=None, proof_key=None))
 
-    def interrupted(_config):
+    def interrupted(_config: ServiceConfig) -> None:
         raise OSError("synthetic interruption before SQLite")
 
     monkeypatch.setattr(hosting, "DirectoryStore", interrupted)
@@ -124,7 +131,7 @@ async def test_interrupted_first_start_retries_with_only_its_validated_lease_fil
     assert (root / "directory.sqlite3").is_file()
 
 
-async def test_lease_only_retry_does_not_displace_an_actual_live_writer(config, monkeypatch):
+async def test_lease_only_retry_does_not_displace_an_actual_live_writer(config: ServiceConfig, monkeypatch: pytest.MonkeyPatch) -> None:
     from pathlib import Path
 
     root = Path(config.to_dict()["data_dir"])
@@ -145,7 +152,7 @@ async def test_lease_only_retry_does_not_displace_an_actual_live_writer(config, 
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Native POSIX ownership/mode boundary")
-async def test_shared_posix_directory_is_not_repaired_or_used(tmp_path, monkeypatch):
+async def test_shared_posix_directory_is_not_repaired_or_used(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = tmp_path / "shared-service"
     root.mkdir(mode=0o777)
     root.chmod(0o777)

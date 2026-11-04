@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from typing import Any, BinaryIO, TYPE_CHECKING, cast
 
 from cryptography.hazmat.primitives import serialization
 from joserfc.jwk import ECKey
@@ -13,15 +14,23 @@ import pytest
 
 from fleet_manager.gateway_service_caller import ServiceCaller
 from fleet_manager.gateway_service_channel import TransportError
-from fleet_manager.ssh_approval import PeerEnrollmentClient
-from fleet_manager.ssh_directory import SSHDirectoryClient
+from fleet_manager.ssh_directory import DirectoryUpdate
 
-from conftest import RealtimeClock, document, enrollment
-from test_approval import decision
-from test_gateway_integration import Rig, eventually
+if TYPE_CHECKING:
+    from services.ssh.tests.conftest import RealtimeClock, document, enrollment
+    from services.ssh.tests.test_approval import decision
+    from services.ssh.tests.test_approval_client import PeerEnrollmentClient
+    from services.ssh.tests.test_notifications import SSHDirectoryClient
+    from services.ssh.tests.test_gateway_integration import Rig, eventually
+else:
+    from conftest import RealtimeClock, document, enrollment
+    from test_approval import decision
+    from test_gateway_integration import Rig, eventually
+    from fleet_manager.ssh_approval import PeerEnrollmentClient
+    from fleet_manager.ssh_directory import SSHDirectoryClient
 
 
-async def test_registered_peer_approval_recovery_and_restart(tmp_path):
+async def test_registered_peer_approval_recovery_and_restart(tmp_path: Path) -> None:
     rig = Rig(tmp_path)
     # Restarted native processes use real time, not the unit rig's frozen proof clock.
     rig.h.clock = RealtimeClock()
@@ -39,8 +48,10 @@ async def test_registered_peer_approval_recovery_and_restart(tmp_path):
             "principal": principal, "key_source": principal,
             "slots": ["service-a"], "methods": ["GET", "POST"],
         })
+    process: subprocess.Popen[bytes] | None
+    waiting: asyncio.Task[DirectoryUpdate | None] | None
     process, waiting = None, None
-    diagnostic = None
+    diagnostic: BinaryIO | None = None
     try:
         await rig.start()
         value = document(tmp_path / "ssh-state")
@@ -62,25 +73,25 @@ async def test_registered_peer_approval_recovery_and_restart(tmp_path):
         selected.write_text(json.dumps(value), encoding="utf-8")
         diagnostic = (tmp_path / "service.stderr").open("w+b")
 
-        async def start_owner():
+        async def start_owner() -> None:
             nonlocal process
             process = subprocess.Popen(
                 [sys.executable, "-I", "-m", "agent_ssh_service", "--config", str(selected)],
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=diagnostic,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                creationflags=cast(Any, subprocess).CREATE_NO_WINDOW if os.name == "nt" else 0,
                 cwd=tmp_path,
             )
 
-            def registered():
+            def registered() -> bool:
                 if process is not None and process.poll() is not None:
-                    diagnostic.seek(0)
+                    cast(BinaryIO, diagnostic).seek(0)
                     pytest.fail("Disposable SSH owner exited: "
-                                + diagnostic.read(2048).decode("utf-8", errors="replace"))
+                                + cast(BinaryIO, diagnostic).read(2048).decode("utf-8", errors="replace"))
                 return "service-a" in rig.state.channels
 
             await eventually(registered, timeout=30)
 
-        async def stop_owner():
+        async def stop_owner() -> None:
             nonlocal process
             if process is not None:
                 if process.poll() is None:
@@ -90,9 +101,9 @@ async def test_registered_peer_approval_recovery_and_restart(tmp_path):
 
         await start_owner()
 
-        def caller(principal, key):
-            async def access():
-                return rig.access(principal, key)
+        def caller(principal: str, key: int) -> ServiceCaller:
+            async def access() -> str:
+                return cast(str, rig.access(principal, key))
 
             return ServiceCaller(
                 gateway_origin=rig.origin, access_token_callback=access,
@@ -125,7 +136,7 @@ async def test_registered_peer_approval_recovery_and_restart(tmp_path):
             await first.approve(**decision(pending, fingerprint="SHA256:" + "A" * 43))
         active = await first.approve(**decision(pending))
         notice = await asyncio.wait_for(waiting, 5)
-        assert notice.revision == revision + 1
+        assert cast(DirectoryUpdate, notice).revision == revision + 1
         assert (await first.approve(**decision(pending))).encoded == active.encoded
         assert (await second.status(pending["request_id"])).encoded == active.encoded
         async with rig.session.get(rig.origin + "/api/enrollment/pending") as anonymous:

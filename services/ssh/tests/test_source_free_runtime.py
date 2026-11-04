@@ -6,13 +6,17 @@ from pathlib import Path
 import subprocess
 import sys
 import sysconfig
+from typing import Any, TYPE_CHECKING, cast
 
 import pytest
 
-import test_machine_consumer as consumer
+if TYPE_CHECKING:
+    import services.ssh.tests.test_machine_consumer as consumer
+else:
+    import test_machine_consumer as consumer
 
 CHECKOUT = Path(__file__).resolve().parents[3]
-FLAGS = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+FLAGS = {"creationflags": cast(Any, subprocess).CREATE_NO_WINDOW} if os.name == "nt" else {}
 PROBE = r"""
 import json, os, runpy, sys
 from pathlib import Path
@@ -65,7 +69,7 @@ else:
 """
 
 
-def probe_command(*arguments):
+def probe_command(*arguments: str) -> list[str]:
     context = {
         "checkout": str(CHECKOUT),
         "runtime": sys.prefix,
@@ -74,7 +78,7 @@ def probe_command(*arguments):
     return [sys.executable, "-I", "-S", "-c", PROBE, json.dumps(context), *arguments]
 
 
-def test_source_import_control_is_physically_refused(tmp_path):
+def test_source_import_control_is_physically_refused(tmp_path: Path) -> None:
     result = subprocess.run(
         probe_command("--source-import-control"), cwd=tmp_path, capture_output=True,
         text=True, timeout=15, **FLAGS,
@@ -85,12 +89,12 @@ def test_source_import_control_is_physically_refused(tmp_path):
 
 @pytest.mark.parametrize("disconnected", [False, True])
 async def test_source_free_fleet_role_converges_and_catches_up(
-    tmp_path, monkeypatch, disconnected,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, disconnected: bool,
+) -> None:
     actual = subprocess.Popen
-    launches = []
+    launches: list[tuple[str, ...]] = []
 
-    def launch(command, **options):
+    def launch(command: list[str], **options: Any) -> subprocess.Popen[bytes]:
         if command[:4] == [sys.executable, "-I", "-m", "fleet_manager"]:
             launches.append(tuple(command))
             command = probe_command(*command[4:])

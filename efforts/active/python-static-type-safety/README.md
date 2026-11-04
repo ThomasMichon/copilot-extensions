@@ -8,7 +8,7 @@
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
 - **Coverage:** [Portfolio tracker and merged lockdown records](coverage.md)
-- **Current slice:** Independent PR service (#10204), SSH service (#10211) and retained effort-helper (#10215) qualification. Index service (#10206), Credential Relay (#10222), Harness Knowledge (#10185), Context Handoff (#10179), Dispatch service (#10184), Devcontainer (#10183), AI Attribution (#10171), Venue Copilot (#10166), Plugin Resolve (#10141), Plugin Activation (#10108), Machine Transport (#10107), Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
+- **Current slice:** Independent SSH service (#10211), Versioned Runtime and persistent dual-version checker (#10331), and retained effort-helper (#10215) qualification. PR service (#10204), Index service (#10206), Credential Relay (#10222), Harness Knowledge (#10185), Context Handoff (#10179), Dispatch service (#10184), Devcontainer (#10183), AI Attribution (#10171), Venue Copilot (#10166), Plugin Resolve (#10141), Plugin Activation (#10108), Machine Transport (#10107), Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -32,7 +32,7 @@ definition of success.
 
 - **Topology:** Independent per-slice PRs, never a concurrently edited shared staging branch. The lead may integrate non-overlapping test cohorts into one bounded reviewed slice after their isolated validation.
 - **Host (owns PRs):** `lead` owns its PRs and verifies completion of delegated PRs.
-- **Delegates:** PR and SSH service slice owners qualify independently in dedicated worktrees; the Index admission has merged. Heavy unit/native qualification is staggered for actual test capacity, not a shared PR merge queue. Each owner receives an explicit bounded qualification and publication assignment; the lead retains integration, shared coverage/global documentation, the effort and full completion judgment. Completed children are finalized only after their merged evidence returns to this tracker.
+- **Delegates:** SSH service and Versioned Runtime/checker slice owners qualify independently in dedicated worktrees; PR and Index service admissions have merged. Heavy unit/native qualification is staggered for actual test capacity, not a shared PR merge queue. Each owner receives an explicit bounded qualification and publication assignment; the lead retains integration, shared coverage/global documentation, the effort and full completion judgment. Completed children are finalized only after their merged evidence returns to this tracker.
 - **Handoff:** A merged slice returns to the canonical README, updates its Plan/Validation/Journal, then selects the next unresolved item. A continuation retains #9807, this README, the current slice, live PRs and exactly one next action.
 - Existing contributor PRs are reviewed/coordinated, not superseded. Shared-library changes precede dependent activations; unrelated leaf activations may proceed independently.
 
@@ -84,6 +84,10 @@ Confirmed operator responses:
   lock while the same lock pins its requiring stable SDK to `1.45.1`.
   Seven-day artifact age, non-yanked/known-timestamp checks and mandatory
   installation hashes remain. This is not a general prerelease allowance.
+- `versioned_runtime_contract=dual-version-checking`: preserve existing runtime
+  behavior and minimums while extending the existing checker to persistently
+  qualify Python 3.10 and 3.11. No runtime TOML backport or interpreter-floor
+  increase is authorized by this selection.
 
 ## Scope Approvals
 
@@ -104,6 +108,11 @@ Confirmed operator responses:
   the existing local Docker Desktop installation and preparing isolated test
   tooling. This is bounded test capacity, not installed plugin rollout, product
   Docker lifecycle acceptance or a new CI lane.
+- For #10331, the operator selected qualification-only dual-version checking.
+  The existing 3.11 TOML path must remain statically qualified without changing
+  actual 3.10 behavior. A type-only guard without persistent 3.11 enforcement
+  is insufficient. Directly dependent canonical generated copies retain their
+  normal ownership and release checks; their consumers are not thereby admitted.
 
 ## Plan
 
@@ -136,6 +145,7 @@ rewrite.
 - [x] Expose the faithful composed Installation Context dependency to normal consumer checks without stubs or target reassignment (#10048).
 - [ ] Make executed source fragments statically visible with source-mapped composition or genuine typed modules; qualify every source line and byte-identical copy without suppressing errors.
 - [ ] Resolve tooling module identities, independent package environments, dependency/stub versions and declared interpreter/platform targets.
+- [ ] Persist additional interpreter qualification versions through the existing local/source/candidate checker, preserving the minimum target and default behavior (#10331).
 - [ ] Qualify generated templates and release-materialized copies against the actually checked canonical source, including negative drift controls.
 
 ### Phase 3 - Shared-library ratchet
@@ -160,6 +170,7 @@ rewrite.
 - [x] Strictly admit all canonical Plugin Resolve source/test/installer-fixture modules (#10141).
 - [x] Strictly admit all canonical Venue Copilot source/test modules (#10166).
 - [x] Strictly admit all 22 canonical Credential Relay source/test files with Python 3.10 native/copy qualification (#10222 / merged #10310); keep consumer projects independently pending.
+- [ ] Strictly admit Versioned Runtime's complete source/test/helper scope with unchanged runtime behavior, persistent 3.10/3.11 qualification and canonical generated-copy correspondence (#10331).
 - [ ] Admit near-clean leaf libraries through small annotation/narrowing PRs; activate directly in strict mode when possible.
 - [ ] Admit remaining shared libraries in basic mode, then close their stricter deltas in separate PRs until every shared library is strict.
 - [ ] Replace loose generics and unchecked boundary results with honest callable, protocol and validated data contracts; rerun affected consumer checks/tests.
@@ -168,6 +179,7 @@ rewrite.
 
 - [x] Strictly admit the complete unchanged Dispatch service Python source/test project (#10184 / merged #10189).
 - [x] Strictly admit all 27 Index service source/test/helper files on its existing Python 3.10 minimum, preserving independent core-plugin ownership (#10206 / merged #10327).
+- [x] Strictly admit all nine PR service source/test files on its existing Python 3.10 minimum, preserving original assertions and installed-runtime behavior (#10204 / merged #10332).
 - [ ] Activate each runtime plugin and standalone service independently, using basic mode only where needed and recording its remaining strict delta.
 - [ ] Tighten each activated runtime/service to strict through component-sized PRs; cover source, optional extras and platform-specific implementations.
 - [ ] Converge the larger Worktrees, Worktree Manager and Fleet Manager surfaces through subsystem-sized PRs, preserving lazy-loading and native behavior.
@@ -203,6 +215,8 @@ rewrite.
 - [ ] Each typing change preserves behavior through the smallest existing focused tests plus directly relevant integration/native checks. Skips are explicitly justified in that PR.
 - [x] Credential Relay preserves its production behavior, assertions and deadlines across both strict targets, Python 3.10 native/copy tests and fresh exact-input source CI (#10310).
 - [x] Index service preserves its original function/assertion contracts across both strict targets, Python 3.10 native/copy tests, composed-source qualification and fresh exact-input source CI; the eight original skips receive no additional credit (#10327).
+- [x] PR service preserves all 81 original functions and 114 assertion expressions across both strict targets, actual Python 3.10 installed/native tests and fresh exact-input source CI (#10332).
+- [ ] Persistent dual-version controls reject a type error confined to the 3.11 TOML branch on both platforms through local/source/candidate entry points while preserving 3.10 runtime behavior (#10331).
 - [x] Fresh checker preparation and a credential-free local subprocess check exercise the real developer command without executing product code or collecting tests.
 - [x] Required source gate actually rejects a type regression on activated code.
 - [x] Required exact-candidate release gate rejects a type regression on activated code.
@@ -2556,3 +2570,47 @@ composition prerequisites, and review/validation rules.
   service and effort-helper qualification continue independently; this effort,
   its Plan and its Validation Plan remain Active until every remaining project
   and cross-cutting gate is resolved.
+
+### 2026-11-03 - PR service merged; dual-version qualification selected
+
+- #10332 merged as `628738bf021f2bcbadd8e1e06bd940a398843997` after
+  actual Copilot approval on exact head
+  `18b000b114a1c6cda37817f27a6a67e16b1076a7`, green required CI run
+  `41776492365` and zero open review threads. Both required commit trailers
+  are verified on the actual merge. #10204 is closed; #9807 remains open.
+- Fresh provider source evidence passes **3,964 units in 95.456 seconds**,
+  all 571 admitted inputs, 236 positive coverage targets and zero effects.
+  This is not either older 3,940-node source evidence or the pre-publication
+  157.120-second composed packet relabeled for a new head. The actual merged
+  input blobs and modes match all 571 admitted sources; installed native
+  service-module hashes also match the merge. Intervening Dispatch/documentation
+  changes alter the whole tree outside those qualified inputs.
+- Actual Linux Python 3.10.22 passes all **49 native cases without skips**
+  in 22.573 seconds against eight fresh first-party wheels and a genuine
+  35-distribution noneditable closure. Both nine-file strict targets pass.
+  All 81 original functions, 28 original test definitions and 114 original
+  assertion expressions remain; original fault deadlines are unchanged.
+  Exact test resources and canonical candidate scratch are retired. The
+  separately copied public interpreter bundle has its own verified custody,
+  so the producer archive no longer gates child finalization.
+- Current upstream admission data contained one stale expected fingerprint
+  for `worktree-manager/scripts/versioned_runtime_source.py`. Its actual
+  committed bytes match the canonical family, whose synchronization check
+  passes. The reviewed one-field data correction changes no source membership,
+  positive node, coverage target, controller, eligibility policy or 300-second
+  budget. Canonical manifest/source verification and fresh CI pass.
+- The complete Plan and Validation Plan were reread. Every tracker row matches
+  the refreshed inventory: **38 / 68 strict projects (55.9%)** and
+  **351 / 7,816 physical Python files (4.5%)**. Thirty projects remain pending
+  and none are basic. The new admission adds nine locked service files;
+  ten new Dispatch/repository-tool files remain pending under their owners.
+  The preceding Index admission journal is now upstream.
+- The operator selected **persistent 3.10/3.11 qualification** for #10331,
+  preserving Versioned Runtime's actual TOML availability/error behavior and
+  minimums rather than adding a runtime backport. The proposed source-owned
+  checker extension must cover the existing local, source-PR and exact-candidate
+  entry points, cache identity, real negative controls and canonical generated
+  copies. No library or consumer admission is claimed before review/merge.
+- SSH service, Versioned Runtime/checker and retained effort-helper work
+  continue independently. This effort, its Plan and its Validation Plan remain
+  Active until every remaining project and cross-cutting gate is resolved.
