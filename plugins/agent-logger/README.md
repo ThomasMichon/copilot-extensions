@@ -34,7 +34,8 @@ session-to-log pipeline out of any single bespoke service:
   or systemd user timer (Linux).
   The provider-first [typed worktree-state collection library](docs/worktree-state.md)
   separately supports explicitly admitted owner exports, optional complete
-  contributor provenance and fresh local readback;
+  contributor provenance, fresh local readback and explicit passive
+  exact-repository provider discovery;
   scheduled discovery/collection and remote archive acknowledgment remain open.
 - **Background chronicling core** (`agent_logger.chronicle`) — an optional
   `agent-logger chronicle status | scan | tick` pass over a *synced* corpus. It

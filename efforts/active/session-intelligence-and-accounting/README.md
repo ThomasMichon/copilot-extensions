@@ -28,6 +28,26 @@ usage charts and use the digests for later cross-machine retrieval.
 
 ## Coordination
 
+The complete #5677 Phases 2/3 and #5678 Phases 4/5 contracts continue under
+this SAME canonical driver and the existing reserved backend/accounting and
+synthetic compatibility lanes. Their direct Plan and global Validation rows
+retain the unfinished work if phase-issue tracking is consolidated into #5665;
+consolidation is not implementation completion, reassignment or acceptance of
+a source/resource handoff. Preserve all existing owners, claims, platform,
+release and consumer-adoption gates. #5676's separate complete-mapping AND
+accepted owner-preserving handoff condition remains independent.
+
+For #5678, preserve legitimate same-holder retries and deterministic manifest
+preparation. Conditional shared-backend effects require HOST-owned
+single-flight/fencing OR equivalent safe active-call semantics: failure in
+one invocation must not silently release another still-active invocation's
+responsibility for the same holder and segment. Reuse the existing external
+host scheduling/lease authority; do not introduce a parallel lease. Reaching
+`ManifestWriter` with `log_paths=[]` is not a duplicate rendered/landed-log
+incident. This retention authorizes no live tick, renderer, corpus, store,
+rollout or custody change. Ordinary reviewed delivery, full readback and
+fresh source/actor judgments precede any separate tracking disposition.
+
 The finite #5727 three-finding ledger below continues through this SAME
 Active preservation Plan and actual global Validation under the existing
 canonical driver's held source/destination/compatibility lane. Preserve
@@ -175,6 +195,17 @@ validation gates are in [process-log reclamation](process-log-reclamation.md).
   sessions, verified container captures, and existing cold session archives.
 
 ### Phase 2 - All-session derivation and durable catalog
+- [ ] **P5677:** Retain the complete claimed Phases 2/3 catalog and
+  chart-complete accounting contract through this same canonical programme:
+  all-session derivation independent of prose, stable IDs, continuations,
+  source-qualified duplicate/conflict handling, watermarks/revisions/rebuild,
+  exact meters versus labeled estimates, integer token/nano-credit quantities,
+  model intervals and active-minute rate variance/coverage, subagent lineage,
+  temporal Dispatch classification and Bridge/provider/venue provenance.
+  Versioned vendorable query/export preserves unknowns, privacy, distinct rate
+  bases, filters AND pagination and additive consumer workflow state. Keep
+  #6439's best-effort historical estimates with measured uncertainty, not a
+  new accuracy threshold; usage capture or inventory alone is not completion.
 - [ ] Produce versioned digests and evidence-backed per-session statistics
   independently of chronicle readiness, rendering, and already-journaled status.
 - [ ] Extract and host generic catalog, source watermarks, continuation identity,
@@ -195,6 +226,16 @@ validation gates are in [process-log reclamation](process-log-reclamation.md).
   out of accounting stores and exports.
 
 ### Phase 4 - Assignable fleet daily aggregation
+- [ ] **P5678:** Retain the complete claimed Phases 4/5 elected-role,
+  adjacent versioned daily-product, late/corrected-day revision, catch-up/
+  rebuild and pinned standalone/container adoption contract. Preserve
+  midnight/DST, rescues, late continuations, partial sources, crash/retry,
+  absent optional siblings, additive APIs/UX and Linux/Windows release-backed
+  acceptance. Before shared-backend effects, provide host-owned single-flight/
+  fencing OR equivalent safe active-call semantics so one same-holder writer
+  failure cannot release another active call's segment responsibility.
+  Preserve intentional same-holder retries and deterministic manifest
+  preparation; reuse existing external host authority, not a parallel lease.
 - [ ] Add independently configurable local-derivation and elected aggregation
   roles through the existing service/scheduled execution surfaces.
 - [ ] Publish daily products adjacent to the configured sessions root with
@@ -256,6 +297,23 @@ retain only the actual unfinished boundary; documentation is not remediation.
   every-host or unrelated whole-parent gate.
 
 ## Validation Plan
+
+- [ ] **G5677:** Resolve the complete P5677 and Phases 2/3 contract against a
+  fixed synthetic corpus: event/session IDs, integer tokens/nano-credits,
+  intervals, weighted model active-minute variance, attribution/provenance,
+  exact-versus-estimated/unknown values, filters AND pagination, coverage and
+  incremental-versus-rebuild parity. Preserve bounded archives, privacy,
+  documented float tolerance, consumer workflow and existing owner lanes;
+  prose readiness, evidence preservation and inventory are not full parity.
+- [ ] **G5678:** Resolve P5678 and Phases 4/5 daily/config/consumer obligations,
+  including original timezone/DST, corrected/resumed/late-source, retry,
+  optional-sibling, platform, release and adoption controls. Use synthetic
+  overlapping calls with the SAME holder and segment plus injected writer
+  I/O failure to prove one failure does not revoke the other's active
+  responsibility. Preserve legitimate same-holder retry and deterministic
+  manifest preparation, existing external host authority and no parallel
+  lease; do not substitute a duplicate-landed-log claim for this conditional
+  active-call test.
 
 - [ ] Session-local usage evidence and transcript estimates meet the bounded
   preservation, privacy, replay, archive, calibration and uncertainty checks in

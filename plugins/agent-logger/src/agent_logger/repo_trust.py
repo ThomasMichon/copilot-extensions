@@ -27,7 +27,9 @@ import os
 import platform
 import subprocess
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
+from agent_procutil import no_window_kwargs
 from plugin_activation import normalize_remote
 
 try:
@@ -52,7 +54,18 @@ def _normalize_git_remote(url: str) -> str | None:
     GitHub itself is known case-insensitive for ``owner/repo``, so -- exactly
     mirroring ``agent_worktrees.project_state._normalized_repository_remote``
     -- a ``github.com`` remote gets a further full casefold on top.
+    Explicit protocol-default ports are equivalent to their omitted form;
+    non-default ports remain part of the identity.
     """
+    try:
+        parsed = urlsplit(url)
+        default_port = {
+            "http": 80, "https": 443, "ssh": 22, "git": 9418,
+        }.get(parsed.scheme.casefold())
+        if default_port is not None and parsed.port == default_port:
+            url = urlunsplit(parsed._replace(netloc=parsed.netloc.rsplit(":", 1)[0]))
+    except ValueError:
+        return None
     normalized = normalize_remote(url)
     if normalized is None or normalized.startswith("file-relative:"):
         # A relative/unparseable value has no stable, comparable identity.
@@ -99,6 +112,7 @@ def _run_git(root: Path, *args: str) -> str | None:
             timeout=5,
             check=False,
             env=env,
+            **no_window_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return None

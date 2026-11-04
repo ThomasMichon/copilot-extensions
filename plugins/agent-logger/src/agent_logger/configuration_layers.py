@@ -37,7 +37,8 @@ def _legacy_owner_prefix():
     )
 
 
-def _owner_report(root: Path, home: Path):
+def worktrees_owner_command(home: Path) -> tuple[list[str], dict[str, str] | None, dict | None]:
+    """Select the existing optional native owner boundary without provisioning."""
     raw = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
     if not raw and (
         home.name == "agent-logger" and home.parent.name == "plugins"
@@ -45,11 +46,6 @@ def _owner_report(root: Path, home: Path):
     ):
         raw = str(home / "install.json")
     own = _peer_launch.validate_owner("agent-logger", home, raw) if raw else None
-    report = delivered_context(repository_root=root)
-    if report is not None:
-        reported_cell = context_from_owner(report)["installation_cell"]
-        if own is not None and reported_cell != str(own["cellRoot"]):
-            raise ValueError("configuration projection belongs to another installation cell")
     if raw:
         receipt = Path(own["cellRoot"]) / "plugins" / "agent-worktrees" / "install.json"
         prefix = _peer_launch.launch_prefix(
@@ -63,6 +59,16 @@ def _owner_report(root: Path, home: Path):
 
         environment = _peer_launch.legacy_peer_environment(dict(os.environ))
         environment["AGENT_HOME"] = str(_default_repos_yaml_root().parent)
+    return prefix, environment, own
+
+
+def _owner_report(root: Path, home: Path):
+    prefix, environment, own = worktrees_owner_command(home)
+    report = delivered_context(repository_root=root)
+    if report is not None:
+        reported_cell = context_from_owner(report)["installation_cell"]
+        if own is not None and reported_cell != str(own["cellRoot"]):
+            raise ValueError("configuration projection belongs to another installation cell")
     fresh = read_owner_context(prefix, root, required=report is not None, environment=environment)
     if fresh is not None:
         context = context_from_owner(fresh)

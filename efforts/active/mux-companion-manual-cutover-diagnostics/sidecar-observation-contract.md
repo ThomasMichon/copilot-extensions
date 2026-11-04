@@ -25,9 +25,12 @@ history/live and lifecycle fences. #10447 adds Logger's
 not owner discovery or scheduled orchestration. #10488 adds passive project-wide
 retained inventory at the Worktrees owner, not contributor discovery or a logger
 consumer. #10495 adds separately negotiated Efforts-owned contributor provenance
-from the same complete verified export cut, without changing its manifest or
-enabling a Logger consumer. Logger integration, complete source coverage, qualified
-current answerability/PRE, installed and native acceptance remain open.
+from the same complete verified export cut, without changing its manifest.
+#10500 adds the explicit Logger library consumer for that negotiated projection,
+including complete nullable attribution and fresh retained-metadata verification;
+automatic owner/provider discovery, existing-tick orchestration, complete source
+coverage, qualified current answerability/PRE, installed and native acceptance
+remain open.
 Providers advertise actual running support before independently installed
 callers use new syntax. Existing roster, agenda-v1/v2 and raw Bridge event
 contracts remain unchanged.
