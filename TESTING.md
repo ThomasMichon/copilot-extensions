@@ -23,7 +23,9 @@ native venv. It covers equivalent pending coalescing, separate active arrivals
 and arguments, changed SDK inputs, preserved nonzero whole-operation results and birth-pinned loss of the
 waiting Python caller. A prepared legacy payload without bootstrap scripts
 separately exercises current-controller compatibility and a saved acquisition
-budget. Authentication inspection retains valid caller-stdout JSON without
+budget. The caller-loss case uses a relative configured source through real
+acquisition, participant validation and the suite's source locator.
+Authentication inspection retains valid caller-stdout JSON without
 installation, and request controls preserve an interrupted fence until explicit
 recovery outside the install transaction. A POSIX-only non-update entry resolves source dependencies without creating a
 queue. Runner-owned containment
@@ -35,6 +37,10 @@ and blocking retention time as test properties. It exercises canonical
 freezing/readback against the complete declared Manager/SDK graph, not the
 full acquisition/installation latency of an ordinary update.
 Required unit-only CI does not gain these process controls.
+The actor-free bootstrap packet additionally submits a caller-relative Manager
+source, removes the submitting directory, and validates/acquires its locator
+from the retained controller directory. The saved source anchor does not change
+the runner's retained working directory; changed source policy still refuses.
 
 The optional `agent-worktrees --test-file tests/test_update_write_activity_native.py
 --allow-explicit-tiers` packet uses private synthetic Windows writers under the

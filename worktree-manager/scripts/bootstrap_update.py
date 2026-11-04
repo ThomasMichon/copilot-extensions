@@ -23,6 +23,7 @@ def execute(args, driver, *, source_digest: str) -> int:
         request_context,
     )
     from worktree_manager.engine_acquisition_budget import TIMEOUT_ENV, acquisition_timeout
+    from worktree_manager.source_config import SOURCE_ANCHOR_ENV
 
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     options, forwarded = parse_options(command[1:])
@@ -35,6 +36,9 @@ def execute(args, driver, *, source_digest: str) -> int:
         selected_budget = str(acquisition_timeout({TIMEOUT_ENV: budget}))
         if options.engine_acquisition_timeout is None:
             command = [*command, "--engine-acquisition-timeout", selected_budget]
+    source_anchor = os.environ.get(SOURCE_ANCHOR_ENV) or str(Path.cwd().resolve())
+    if not Path(source_anchor).is_absolute():
+        raise ValueError("update request source anchor must be absolute")
     context = {**request_context(), "WORKTREE_MANAGER_ROOT": str(args.root.resolve())}
     _update_context_directory(context)
     admitted_source = _source_key()
@@ -62,7 +66,8 @@ def execute(args, driver, *, source_digest: str) -> int:
     arguments.extend(["--", *command])
     spec = driver.RequestSpec(
         "manager", tuple(command[1:]),
-        project=str(args.root.resolve()), cwd=str(payload),
+        project=str(args.root.resolve()),
+        cwd=source_anchor,
         source=admitted_source, context=tuple(context.items()),
         repair=not options.auto,
         killswitch_path=hold_path,

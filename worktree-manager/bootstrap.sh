@@ -26,6 +26,8 @@ if [ "$#" -eq 1 ] && [ "${1-}" = --describe-source-inputs ]; then
     exit 0
 fi
 
+source_anchor="${WORKTREE_MANAGER_SOURCE_ANCHOR:-$(pwd -P)}"
+
 _bootstrap_progress() {
     local message="$1" state="${2:-running}" stamp line
     stamp="$(date -u '+%H:%M:%SZ' 2>/dev/null)" || stamp="time unavailable"
@@ -264,6 +266,7 @@ else
 fi
 
 cd "$payload_parent/worktree-manager"
+export WORKTREE_MANAGER_SOURCE_ANCHOR="$source_anchor"
 # Version-install the fetched payload (idempotent, version-gated): publishes the
 # versions/<ver> slot + current-version marker + ~/.local/bin binstub.
 if ! PYTHON="$(uv python find --no-project '>=3.11' 2>/dev/null)"; then
