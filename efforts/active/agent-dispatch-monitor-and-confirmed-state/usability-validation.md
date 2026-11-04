@@ -106,6 +106,24 @@ nudges preserve keyed acquisition and mixed-reader recovery. This closes the
 bounded ordinary local source integration, not remote/no-worktree applicability,
 complete cohort adoption or actual native decline/closeout acceptance.
 
+Ordinary allocation attribution and same-key creation recovery subsequently
+merged in #10334 as `ab29b82b0a`, after exact-head approval and successful CI.
+The [source receipt](journal/2026/11.03-local-decline-closeout.md#ordinary-allocation-source-merged)
+separates the passing source packets and distinct five-stage negative witness.
+Actual ground ownership now retains the original Dispatch attempt; worker
+decline reaches the unsupported container-native proof boundary, and repeated
+supervisor observations preserve the original claim and capacity without
+acceptance or release. This qualifies failed-closeout retention, not successful
+native finalization, remote/no-managed-worktree or complete-cohort adoption.
+
+The [affirmative suspended-recovery source](journal/2026/11.03-affirmative-suspended-recovery.md)
+keeps requested continuation suspended until revision-bound current-worker
+acceptance. It reuses assignment counters, wake custody and coordinator cadence
+for hold-aware deadlines and fenced exhaustion without freeing unknown
+capacity. The final coupled source controls pass; normal review/merge and
+actual installed/native recovery remain pending. This does not close the
+recovery row or finalize-before-submission contract.
+
 The following is an **agent-recommended execution/validation sequence** under
 the existing reviewed five-outcome contract. It does not create an operational
 grant, a second effort or a requirement to wait for a marketplace release

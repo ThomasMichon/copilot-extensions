@@ -308,10 +308,33 @@ class QueueExecutionWakesMixin:
             if isinstance(wake, RunWaiterWakeOperation) and wake.sender == CLAIM_RELEASE_SENDER:
                 raise TaskError("claim-release bookkeeping must not request execution custody")
             require_execution_admission(conn, task.id)
+            local_recovery = isinstance(wake, WakeOperation) and wake.pool_recovery_revision is not None
+            if local_recovery:
+                from .queue_pool_recovery import recovery_assignment, recovery_wake
+                assignment = recovery_assignment(conn, task.id)
+                if (
+                    not recovery_wake(conn, task, wake.id)
+                    or assignment["recovery_revision"] != wake.pool_recovery_revision
+                ):
+                    raise TaskError("pool recovery send incarnation changed")
             if provenance is None:
                 if execution_scope_qualified(conn, task.repo, task.source):
                     raise TaskError("qualified wake send requires coordinator provenance")
-                return WakeSendAdmission(None, True)
+                if not local_recovery:
+                    return WakeSendAdmission(None, True)
+                identity = json.dumps({
+                    "protocol": "pool_recovery_wake/v1",
+                    "reservation_key": assignment["reservation_key"],
+                    "recovery_revision": wake.pool_recovery_revision,
+                    "outbox": table, "wake_id": wake.id, "delivery_token": wake.delivery_token,
+                    "task_generation": task.generation, "owner_session_id": wake.owner_session_id,
+                }, sort_keys=True, separators=(",", ":"))
+                conn.execute(
+                    f"UPDATE {table} SET execution_send=?, execution_send_state='pending',"
+                    " execution_send_detail='' WHERE id=?", (identity, wake.id),
+                )
+                conn.commit()
+                return WakeSendAdmission(identity, True)
             binding, runtime_id = provenance
             key = _scope_key(binding.scope)
             self._require_execution_scope(conn, binding.scope)
@@ -376,4 +399,9 @@ class QueueExecutionWakesMixin:
                 f"UPDATE {table} SET execution_send_state = ?, execution_send_detail = ? WHERE id = ?",
                 (outcome, detail, wake.id),
             )
+            if isinstance(wake, WakeOperation) and wake.pool_recovery_revision is not None and outcome == "sent":
+                conn.execute(
+                    "UPDATE wake_outbox SET delivered_at=COALESCE(delivered_at, ?) WHERE id=?",
+                    (self._now(None), wake.id),
+                )
             conn.commit()

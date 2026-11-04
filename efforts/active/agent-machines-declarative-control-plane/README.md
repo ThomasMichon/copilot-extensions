@@ -56,6 +56,17 @@ actions are derived views rather than separately maintained inventories.
   owners. It does not reopen #1418, change #3115's separate condition, assign
   implementation or release a source/resource hold.
 
+<!-- backlog-reconciliation:7556:qualified-thirteen:3115-4075:Coordination -->
+
+The proposed finite #3115 and #4075 families below retain existing schema,
+resource/module/provider, scheduler, setup and native/permission custodians.
+#3115's actual separate LIVE owning-umbrella requirement is unchanged:
+closed #1418 is nonaccepting history, not a claim token, and this Active
+directory or another slice's source claim does not satisfy it. #4075 is the
+distinct selected documentation/maintenance-safe admission tail, not
+Linux/macOS scheduler acceptance. Neither source receives a replacement owner,
+automatic opt-in, host repair or resource release through this proposal.
+
 ## Context
 
 Machine setup commonly drifts into parallel inventories: declared hosts,
@@ -393,6 +404,44 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
 - [ ] **#1438** agent-machines: WSL restore hangs in ssh -G validation
   - A hang during WSL restore's ssh -G validation is directly this effort's control-plane scope.
 
+<!-- backlog-reconciliation:7556:qualified-thirteen:3115-4075:Plan -->
+
+### Proposed finite self-update scheduler and admission contracts
+
+_Agent-recommended direct tracking clarifications; the existing Phase 5 row,
+Request, status, participants, checked credit and first unresolved gates stay
+unchanged. These are two distinct outcomes, not a source-to-source fold._
+
+- [ ] **M3115-P1:** Retain equivalent unattended POSIX self-update scheduling
+  through the EXISTING declarative resource/tier model, with the original
+  systemd timer/service AND/OR launchd primitive choice and Windows tier
+  reference. Cover install, update, drift, status and removal, stable owned
+  entrypoints and removal when declaration/opt-in changes.
+- [ ] **M3115-P2:** Credit #3049's Linux/WSL systemd render/register/status/
+  removal and #3181's corrected dry-run/backend/unavailable reporting.
+  Preserve original representative Linux/systemd AND macOS/launchd
+  acceptance. Unsupported/skipped Darwin or an unreachable systemd user
+  manager is not a positive matching/registered scheduler result. Linger,
+  privilege or other settings require separate authorization.
+- [ ] **M3115-P3:** Keep standalone #3115 pending its actual LIVE ACTIVE
+  owning umbrella. Preserve source-selected opt-in, more-specific local
+  override, genuine OS scheduler, explicitly authorized privilege and
+  opt-out removal. Closed #1418, distinct #2684 Windows mesh and the
+  done-with-this-slice Windows watchdog do not absorb this objective.
+- [ ] **M4075-P1:** Complete the exact selected ongoing-convergence
+  DOCUMENTATION/resource-to-actor admission path OR an explicitly owned
+  accepted alternative; both mechanisms are not required. Credit #2656's
+  declarative-resource-before-one-time-registration guidance and #3089's
+  literal-command-flag versus path-normalization repair. The remaining
+  documented example/actor question is explicit `maintenance_safe: true`
+  consent for a mutating resource under `restore --maintenance-safe`, not
+  an absent resource or blanket task-matching failure.
+- [ ] **M4075-P2:** Preserve opt-out, permissions, existing task ownership
+  and query uncertainty. Reconcile the selected example/instructions with
+  actual opted-in ongoing admission at the appropriate existing consumer
+  tier. Do not add host repair, task reset, automatic registration, another
+  updater or a broad native/platform matrix to this finite docs alternative.
+
 ## Validation Plan
 
 - [ ] G1: Resolve EVERY directly retained #4137 topology-location/portability Plan,
@@ -472,6 +521,26 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
   no-op, provider invocation, and payload-command synchronization on supported
   platforms (#1961).
 
+<!-- backlog-reconciliation:7556:qualified-thirteen:3115-4075:Validation-Plan -->
+
+- [ ] **M3115-V1:** Resolve every direct M3115-P1/P2/P3 original/refined
+  scheduler lifecycle/status/opt-in/removal clause at its ORIGINAL
+  representative native Linux/systemd AND macOS/launchd tier, preserving
+  install/update/drift/remove/declaration-change positives, honest
+  unavailable/permission/unsupported negatives, stable owned entrypoints
+  and Windows-equivalent tiers. Preserve #3049/#3181 credit, primitive
+  AND/OR choice, local override and authorized privilege/opt-out. DOC,
+  fixture, Windows-only or skipped results are not both native positives.
+  The separate LIVE-umbrella/closed-#1418 condition remains unsatisfied by
+  this proposal; no all-host/control-plane or generic ACK gate is added.
+- [ ] **M4075-V1:** Resolve the chosen finite documentation/consent-to-actor
+  route at its original docs/appropriate existing consumer tier: selected
+  maintenance-safe ongoing admission is explicit and usable OR an explicitly
+  owned alternative supplies ongoing convergence. Preserve #2656/#3089
+  credit, opt-out, permissions, task ownership and unknown-query handling;
+  do not require both alternatives, historical-host repair or #3115's
+  distinct native platform programme.
+
 ## Proposal
 
 Establish the versioned resource graph and deterministic projection contract
@@ -479,6 +548,20 @@ first, then migrate reconcilers and retire shadow inventories only after
 behavioral parity is demonstrated.
 
 ## Journal
+
+<!-- backlog-reconciliation:7556:qualified-thirteen:3115-4075:Journal -->
+
+### 2026-10-29 - Proposed two distinct finite scheduler/admission families
+
+Added direct unchecked Plan and actual global Validation after complete
+current own-contract qualification. #3115 preserves delivered Linux/dry-run
+credit, Linux AND macOS native acceptance and its literal separate live-umbrella
+condition. #4075 preserves delivered guidance/comparator credit and only the
+selected maintenance-safe documentation/admission tail OR owned alternative.
+No implementation, current missing-code diagnosis, scheduler
+query/registration, owner transfer, source closure or installed/native
+result occurred. Review, actual delivery and complete current readback
+remain outstanding.
 
 ### 2026-10-24 - Finite topology-location acceptance proposed
 

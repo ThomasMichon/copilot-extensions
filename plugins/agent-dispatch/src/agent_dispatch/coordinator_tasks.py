@@ -562,6 +562,7 @@ def register_task_routes(
                 task_id, worker_id, owner_session_id=owner_session_id,
                 expected_owner_session_id=expected_owner, expected_generation=generation,
                 require_pool_assignment=body.pool_placement_version is not None,
+                pool_recovery_revision=body.pool_recovery_revision,
             ),
             "task.started",
         )

@@ -87,12 +87,19 @@ class QueueSuspendMixin:
             if current is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
+            if expected_generation is not None and (
+                current.generation != expected_generation
+                or current.owner_session_id != expected_owner_session_id
+            ):
+                raise TaskError(f"task {task_id!r} ownership incarnation changed")
             try:
                 _check_expected_status(current, expected_status)
             except TaskError:
                 conn.execute("COMMIT")
                 raise
             if current.status == Status.SUSPENDED and current.owner == worker_id:
+                from .queue_pool_recovery import pause_recovery
+                pause_recovery(conn, task_id)
                 conn.execute(
                     "UPDATE tasks SET monitor_kind = ?, monitor_not_before = ?,"
                     " updated_at = ? WHERE id = ?",
@@ -143,8 +150,29 @@ class QueueSuspendMixin:
         expected_generation: int | None = None,
         now: float | None = None,
     ) -> Task:
-        """Wake an owned ``suspended`` task back to ``started``."""
+        """Request pool recovery, or resume a legacy non-pool owner."""
         ts = self._now(now)
+        from .queue_pool_recovery import recovery_assignment, request_recovery
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            current = self._fetch(conn, task_id)
+            if current is not None and recovery_assignment(conn, task_id) is not None:
+                if current.owner != worker_id or (
+                    expected_generation is not None and (
+                        current.generation != expected_generation
+                        or current.owner_session_id != expected_owner_session_id
+                    )
+                ) or adopt_owner_session_id not in (None, current.owner_session_id):
+                    raise TaskError("pool recovery cannot replace its owner or native incarnation")
+                result = request_recovery(
+                    self, conn, current, ts=ts, wake_requested=wake_requested,
+                    message=wake_message,
+                )
+                conn.commit()
+                self._notify_wake()
+                self._notify_owned_transition()
+                return result
+            conn.commit()
         extra: dict[str, object] = {
             "lease_expires_at": ts + self.lease_seconds,
             "last_seen_at": ts,
@@ -194,7 +222,8 @@ class QueueSuspendMixin:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT id, owner FROM tasks WHERE status = ? AND monitor_kind = ?"
-                " AND monitor_not_before IS NOT NULL AND monitor_not_before <= ?",
+                " AND monitor_not_before IS NOT NULL AND monitor_not_before <= ?"
+                " AND resume_requested=0",
                 (Status.SUSPENDED, MonitorKind.COOLDOWN.value, ts),
             ).fetchall()
         resumed = 0

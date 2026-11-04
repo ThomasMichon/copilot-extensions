@@ -138,6 +138,8 @@ class QueueSteeringMixin:
                         "posting a request-input steering card -- this task type "
                         "owns its own resume path and has no human to hand a card to"
                     )
+                from .queue_pool_recovery import pause_recovery
+                pause_recovery(conn, task_id)
             to_status = Status.SUSPENDED if awaiting else task.status
             lease_expires_at = None if awaiting else ts + self.lease_seconds
             conn.execute(
@@ -267,9 +269,21 @@ class QueueSteeringMixin:
                 (task_id, ts, payload, sender, idempotency_key, fingerprint),
             )
             resumed = task.status == Status.SUSPENDED
+            from .queue_pool_recovery import recovery_assignment, request_recovery
+            pool_recovery = resumed and recovery_assignment(conn, task_id) is not None
             cold_headless = bool(resumed and self._has_headless_reservation(conn, task_id))
             notify_owned_transition = resumed
-            if cold_headless:
+            if pool_recovery:
+                conn.execute(
+                    "UPDATE tasks SET awaiting_steer=0, card_draft=NULL WHERE id=?", (task_id,),
+                )
+                if task.hold_reason is None:
+                    request_recovery(
+                        self, conn, self._fetch(conn, task_id), ts=ts,
+                        wake_requested=wake_requested, message=wake_message,
+                    )
+                    wake_enqueued = wake_requested
+            elif cold_headless:
                 conn.execute(
                     "UPDATE tasks SET awaiting_steer = 0, resume_requested = 1,"
                     " card_draft = NULL, updated_at = ?"
@@ -305,7 +319,7 @@ class QueueSteeringMixin:
                 from_status=task.status,
                 to_status=(
                     Status.SUSPENDED
-                    if cold_headless
+                    if cold_headless or pool_recovery
                     else Status.STARTED
                     if resumed
                     else task.status
@@ -314,14 +328,21 @@ class QueueSteeringMixin:
                 note=(
                     f"steer submitted{f' by {sender}' if sender else ''}"
                     f"{'; resume requested for cold body' if cold_headless else ''}"
-                    f"{'; resumed' if resumed and not cold_headless else ''}"
+                    f"{'; recovery held' if pool_recovery and task.hold_reason is not None else ''}"
+                    f"{'; recovery requested' if pool_recovery and task.hold_reason is None else ''}"
+                    f"{'; resumed' if resumed and not cold_headless and not pool_recovery else ''}"
                 ),
             )
             result = self._fetch(conn, task_id)
             wake = None
+            if pool_recovery and wake_requested and result.wake_operation_id is not None:
+                row = conn.execute(
+                    "SELECT * FROM wake_outbox WHERE id=?", (result.wake_operation_id,),
+                ).fetchone()
+                wake = WakeOperation._from_row(row) if row is not None else None
             if (
                 wake_requested
-                and not cold_headless
+                and not cold_headless and not pool_recovery
                 and result is not None
                 and result.owner
                 and result.owner_session_id is not None
@@ -338,7 +359,8 @@ class QueueSteeringMixin:
                 raise TaskError(f"no such task {task_id!r}")
             wake_status = (
                 "not_requested" if not wake_requested
-                else "resume_requested" if cold_headless
+                else "held" if pool_recovery and task.hold_reason is not None
+                else "resume_requested" if cold_headless or pool_recovery
                 else wake.status if wake is not None
                 else "no_owner" if result is not None and not result.owner
                 else "no_owner_session"
@@ -560,7 +582,11 @@ class QueueSteeringMixin:
     def _wake_is_current(task: Task | None, wake: WakeOperation) -> bool:
         return bool(
             task is not None
-            and task.status == Status.STARTED
+            and (
+                task.status == Status.STARTED and wake.pool_recovery_revision is None
+                or task.status == Status.SUSPENDED and task.resume_requested
+                and wake.pool_recovery_revision is not None
+            )
             and task.owner == wake.owner
             and wake.owner_session_id is not None
             and task.owner_session_id == wake.owner_session_id
@@ -586,6 +612,22 @@ class QueueSteeringMixin:
             ).fetchall()
             for row in rows:
                 wake = WakeOperation._from_row(row)
+                if wake.pool_recovery_revision is not None:
+                    accepted = row["execution_send_state"] == "sent"
+                    conn.execute(
+                        "UPDATE wake_outbox SET status=?, delivery_token=NULL,"
+                        " delivery_expires_at=NULL, last_error=?,"
+                        " delivered_at=CASE WHEN ? THEN COALESCE(delivered_at, ?) ELSE delivered_at END,"
+                        " updated_at=? WHERE id=?",
+                        ("delivered" if accepted else "failed",
+                         None if accepted else "recovery interrupted before send admission",
+                         accepted, ts, ts, wake.id),
+                    )
+                    conn.execute(
+                        "UPDATE tasks SET wake_status=? WHERE id=? AND wake_operation_id=?",
+                        ("delivered" if accepted else "failed", wake.task_id, wake.id),
+                    )
+                    continue
                 conn.execute(
                     "UPDATE wake_outbox SET status = 'pending',"
                     " delivery_token = NULL, delivery_expires_at = NULL,"
@@ -627,6 +669,9 @@ class QueueSteeringMixin:
                 row = conn.execute(
                     "SELECT * FROM wake_outbox"
                     " WHERE status = 'pending' AND not_before <= ?"
+                    " AND (pool_recovery_revision IS NULL OR NOT EXISTS ("
+                    " SELECT 1 FROM tasks held WHERE held.id=wake_outbox.task_id"
+                    " AND (held.hold_reason IS NOT NULL OR held.awaiting_steer=1)))"
                     " AND (execution_send_state = 'sent' OR ("
                     + wake_custody_clear_sql("wake_outbox") +
                     " AND NOT EXISTS (SELECT 1 FROM execution_admission_closures c"
@@ -715,6 +760,8 @@ class QueueSteeringMixin:
             if row["execution_send_state"] == "sent":
                 delivered = True
             task = self._fetch(conn, wake.task_id)
+            from .queue_pool_recovery import recovery_wake
+            managed_recovery = task is not None and recovery_wake(conn, task, wake.id)
             if not self._wake_is_current(task, wake):
                 status = "stale"
                 note = f"wake stale ({wake.id})"
@@ -730,12 +777,12 @@ class QueueSteeringMixin:
                 note = f"wake delivered ({wake.id})"
                 conn.execute(
                     "UPDATE wake_outbox SET status = 'delivered', updated_at = ?,"
-                    " delivered_at = ?, delivery_token = NULL,"
+                    " delivered_at = COALESCE(delivered_at, ?), delivery_token = NULL,"
                     " delivery_expires_at = NULL, last_error = NULL"
                     " WHERE id = ?",
                     (ts, ts, wake.id),
                 )
-            elif wake.attempts >= max(1, max_attempts):
+            elif managed_recovery or wake.attempts >= max(1, max_attempts):
                 status = "failed"
                 note = f"wake failed ({wake.id})"
                 conn.execute(

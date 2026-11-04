@@ -107,6 +107,14 @@ direct draft amendments, one withheld amendment under a parked receiving
 effort, and fifteen source-specific outcomes. Existing claimant acceptance,
 resumption and source/resource boundaries remain separate from publication.
 
+The [next thirteen qualified contracts](receiving-qualified-thirteen.md)
+retain five finite direct documentation families and eight canonical,
+Draft/home or source-specific gaps. The original 40-text research snapshot
+and current 49-text metadata qualification are distinct. Existing custodians,
+literal alternatives, #3115's separate live-umbrella requirement and #9535's
+current reserved source continuation remain intact; publication is not
+technical completion, receiving acceptance or source disposition.
+
 ## Request
 
 Operator request, with identifying organizational references redacted:
@@ -408,6 +416,10 @@ outcomes from agent-recommended research and prioritization mechanics.
   substitutes for requirement preservation.
 - [ ] No implementation, rollout, private identifiers or unreviewed policy
   changes were introduced by this campaign.
+  The thirteen-contract unit additionally preserves all five original
+  finite evidence tiers, eight canonical/home retentions and #9532/#9535's
+  source/receipt boundaries. Its historical 923-open starting census
+  remains distinct from later observations; no closure is claimed.
 
 ## Proposal
 
