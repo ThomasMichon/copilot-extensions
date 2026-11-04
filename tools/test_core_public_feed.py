@@ -1,0 +1,52 @@
+"""Native producer proof for a stable, explicitly nonsecret feed identity."""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import shutil
+import time
+
+import pytest
+
+from test_core_native_delivery import (
+    _configure_native_tls,
+    _offline_target,
+    local_tls_feed,  # noqa: F401
+    tls_source,  # noqa: F401
+)
+
+
+def test_guarded_public_feed_produces_the_same_candidate_in_fresh_homes(
+    tmp_path, monkeypatch, tls_source,  # noqa: F811
+):
+    import governed_feed_trust
+
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("native uv is required")
+    producer, wheels, manifest, state, _wheel, _digest = tls_source
+    _configure_native_tls(tmp_path, monkeypatch, state)
+    home_key = "LOCALAPPDATA" if os.name == "nt" else "XDG_STATE_HOME"
+
+    def machine_identity(value):
+        return hashlib.sha256((os.environ[home_key] + "\0" + value).encode()).hexdigest()
+
+    monkeypatch.setattr(governed_feed_trust, "_opaque_index_identity", machine_identity)
+    source = {"source_commit": "a" * 40, "source_tree": "b" * 40, "main_head": "c" * 40}
+    results = []
+    for index in (1, 2):
+        home = tmp_path / f"home-{index}"
+        home.mkdir()
+        monkeypatch.setenv(home_key, str(home))
+        deadline = time.monotonic() + 180
+        destination = tmp_path / f"candidate-{index}.zip"
+        result = producer._build_from_snapshot(
+            tmp_path, source, json.dumps(manifest).encode(), wheels,
+            _offline_target(producer, deadline), uv=uv, download_origins=(),
+            materials={}, material_paths={}, destination=destination, deadline=deadline,
+            max_bytes=4 << 20, guarded_feed=True, nonsecret_feed_url=state["origin"] + "/simple",
+        )
+        results.append((result, destination.read_bytes()))
+    assert results[0] == results[1]
+    assert results[0][0]["approval"] == "unattested"

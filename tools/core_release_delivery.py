@@ -95,7 +95,7 @@ def prepare_release_delivery(
     materials: dict, material_paths: dict, destination: Path, uv: str,
     download_origins: tuple[str, ...], deadline: float, max_bytes: int, max_wheels: int = 256,
     native_lock: Path | None = None, offline_wheel_pool: Path | None = None,
-    guarded_feed: bool = False,
+    guarded_feed: bool = False, nonsecret_feed_url: str | None = None,
 ) -> dict:
     """Stage a candidate until all authenticated-release custody checks have finished."""
     _check_deadline(deadline)
@@ -105,6 +105,8 @@ def prepare_release_delivery(
         (native_lock is not None, offline_wheel_pool is not None, guarded_feed),
     ) != 1:
         raise ProfileError("release delivery requires exactly one native selection mode")
+    if nonsecret_feed_url is not None and (not guarded_feed or download_origins):
+        raise ProfileError("public feed identity requires delegated guarded-feed selection")
     destination = Path(os.path.abspath(destination))
     if os.path.lexists(destination):
         raise FileExistsError("release delivery output already exists")
@@ -132,7 +134,7 @@ def prepare_release_delivery(
                 materials, material_paths, stage, uv=uv, download_origins=download_origins,
                 deadline=deadline, max_bytes=max_bytes, native_lock=native_lock,
                 offline_wheel_pool=offline_wheel_pool, guarded_feed=guarded_feed,
-                artifact_index=core.index_path,
+                artifact_index=core.index_path, nonsecret_feed_url=nonsecret_feed_url,
             )
         before = _ordinary(stage)
         with _open(stage) as stream:
@@ -160,6 +162,10 @@ def main(argv: list[str] | None = None) -> int:
     selection.add_argument("--offline-wheel-pool", type=Path)
     selection.add_argument("--guarded-feed", action="store_true")
     parser.add_argument("--download-origin", action="append", default=[])
+    parser.add_argument(
+        "--nonsecret-feed-url",
+        help="opt in to reproducible identity for this explicitly nonsecret anonymous HTTPS feed",
+    )
     parser.add_argument("--timeout", type=float, default=600)
     parser.add_argument("--max-bytes", type=int, default=512 << 20)
     parser.add_argument("--max-wheels", type=int, default=256)
@@ -176,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
             destination=args.output, uv=args.uv, download_origins=tuple(args.download_origin),
             deadline=deadline, max_bytes=args.max_bytes, max_wheels=args.max_wheels,
             native_lock=args.native_lock, offline_wheel_pool=args.offline_wheel_pool,
-            guarded_feed=args.guarded_feed,
+            guarded_feed=args.guarded_feed, nonsecret_feed_url=args.nonsecret_feed_url,
         )
         print(json.dumps(result, sort_keys=True))
         return 0
