@@ -59,6 +59,8 @@ with that name is neither adopted nor hidden. Fleet health excludes only a
 positively identified collection namespace, so retained revisions do not consume
 the machine-directory scan budget. Ordinary session pushes cannot enter that
 owned namespace.
+The session-shaped archive-source enumerator also excludes that positively
+identified namespace instead of reporting it as an empty unknown machine.
 Namespace claiming and potentially overlapping ordinary publication share a
 domain guard held through session, process-log and archive publication as well
 as heartbeat and mutating retention/compaction operations. Read-only maintenance
