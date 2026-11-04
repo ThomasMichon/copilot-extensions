@@ -216,6 +216,8 @@ or redirected-slot refusal. Supervisor intent is captured before coordinator
 publication: foreign scopes, unknown declarations, classic child profiles and
 invalid poll intervals fail before replacement. A modern cohort does not
 implicitly opt into the legacy environment bridge.
+Unreadable, malformed or wrong-type supervisor configuration also refuses
+preflight; only genuinely missing optional files/directories count as absent.
 
 An enabled user-mode Source supervisor prepares independently before it takes
 the original singleton scope. Its existing status format is published at an
@@ -227,6 +229,13 @@ unsettled; a process PID or SDK `running` record alone is not readiness.
 Currentness also requires a completed cycle from the selected native owner.
 Unconfirmed legacy declaration sources and native-service-owned transitions
 remain explicit holds rather than an invented readiness or service manager.
+Selection changes settle the exact owned candidate and local retirement work
+before retargeting or resuming the original owner. Unknown creation outcomes
+remain held; discovered peers are never terminated as owned children.
+Managed uncertainty continues normal reconciliation before withdrawal.
+Confirmed-dead/reused preparation records do not hide a later healthy candidate,
+but unavailable identity observations still refuse readiness without deleting
+unowned artifacts.
 
 `tests/test_source_start_native.py` consumes an explicitly prepared canonical
 Source/profile snapshot; it never rebuilds one. Its opt-in generated-frontdoor

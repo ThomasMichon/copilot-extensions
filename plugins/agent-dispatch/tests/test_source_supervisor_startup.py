@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import pytest
 
@@ -102,3 +103,51 @@ def test_startup_uses_one_captured_supervisor_plan(monkeypatch, tmp_path):
     ))
     assert source_start.command(argparse.Namespace(json=True)) == 0
     assert calls == ["preflight", "coordinator", ("supervisor", plan)]
+
+
+@pytest.mark.parametrize("kind", ["primary-read", "primary-directory", "profiles-file", "profiles-list", "profile-read", "profile-malformed"])
+def test_supervisor_intent_io_failure_refuses_before_coordinator_mutation(monkeypatch, tmp_path, kind):
+    _sources(monkeypatch)
+    primary = tmp_path / "supervisor.env"
+    profiles = tmp_path / "supervisors"
+    if kind == "primary-directory":
+        primary.mkdir()
+    else:
+        primary.write_text("AGENT_DISPATCH_SUPERVISE_MODE=serve\n", encoding="utf-8")
+    if kind == "profiles-file":
+        profiles.write_text("not a profile directory", encoding="utf-8")
+    else:
+        profiles.mkdir()
+    if kind in {"profile-read", "profile-malformed"}:
+        primary.write_text(
+            "AGENT_DISPATCH_SUPERVISE_MODE=serve\nAGENT_DISPATCH_SUPERVISE_LABELS=known\n",
+            encoding="utf-8",
+        )
+        (profiles / "fixture.env").write_text("unsupported-line\n", encoding="utf-8")
+    original_read, original_iterdir = Path.read_text, Path.iterdir
+
+    def read(path, *args, **kwargs):
+        if (kind == "primary-read" and path == primary) or (
+            kind == "profile-read" and path == profiles / "fixture.env"
+        ):
+            raise PermissionError("fixture configuration read denied")
+        return original_read(path, *args, **kwargs)
+
+    def iterdir(path):
+        if kind == "profiles-list" and path == profiles:
+            raise PermissionError("fixture profile enumeration denied")
+        return original_iterdir(path)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    monkeypatch.setattr(Path, "iterdir", iterdir)
+    from agent_dispatch.registrar import RegistrarError
+
+    with pytest.raises((OSError, RegistrarError)):
+        _command(monkeypatch, tmp_path)()
+
+
+def test_missing_optional_supervisor_configuration_is_absent(monkeypatch, tmp_path):
+    from agent_dispatch import source_start
+
+    _sources(monkeypatch)
+    assert source_start.supervisor_plan(tmp_path) is None

@@ -201,18 +201,29 @@ def supervisor_plan(root: Path) -> SupervisorStartupPlan | None:
     from .supervise_cli import _registration_scope
     from .supervisor_registration import supervisor_lease_scope
 
-    environment = _parse_env_file(root / "supervisor.env")
+    primary = root / "supervisor.env"
+    try:
+        primary.lstat()
+    except FileNotFoundError:
+        environment = {}
+    else:
+        environment = _parse_env_file(primary, strict=True)
     declarations = read_supervisor_declarations(RegistrarSources())
     if not declarations.complete:
         raise RuntimeError("supervisor declaration source is unconfirmed")
     mode = environment.get("AGENT_DISPATCH_SUPERVISE_MODE", "").strip().lower()
     legacy = bool(environment.get("AGENT_DISPATCH_SUPERVISE_LABELS", "").strip())
     profiles = root / "supervisors"
-    if profiles.is_dir():
-        legacy = legacy or any(
-            _parse_env_file(path).get("AGENT_DISPATCH_SUPERVISE_LABELS", "").strip()
-            for path in profiles.glob("*.env")
-        )
+    try:
+        profiles.lstat()
+    except FileNotFoundError:
+        pass
+    else:
+        for path in sorted(profiles.iterdir()):
+            if path.suffix == ".env":
+                profile = _parse_env_file(path, strict=True)
+                if profile.get("AGENT_DISPATCH_SUPERVISE_LABELS", "").strip():
+                    legacy = True
     if mode not in ("", "serve") or (legacy and mode != "serve"):
         raise RuntimeError("classic supervisor requires its existing owner-led migration")
     if not declarations.declarations and mode != "serve":

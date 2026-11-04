@@ -214,3 +214,186 @@ def test_passive_admission_waits_for_original_scope_before_any_reconcile(monkeyp
         daemon, admission, once=False, single_instance=True,
     )
     assert calls == ["prepared", "check", "acquire", "wait", "check", "acquire", "check", "probe", "admitted"]
+
+
+@pytest.mark.parametrize("phase", ["preparing", "withdrawing"])
+@pytest.mark.parametrize("selected", ["rollback", "new-source"])
+def test_changed_selection_settles_only_owned_candidate_then_resumes_or_retargets(
+    tmp_path, monkeypatch, phase, selected,
+):
+    from agent_procutil import daemon_instances
+
+    daemon, source = _incumbent(tmp_path, monkeypatch)
+    newer = VERSION.replace("a" * 40, "f" * 40)
+    candidate = SimpleNamespace(instance_receipt=object(), poll=lambda: None)
+    daemon._source_handoff = {
+        "root": tmp_path, "version": VERSION, "target": Path("old-incoming"),
+        "phase": phase, "child": candidate,
+    }
+    calls = []
+
+    def cleanup(receipt, *, terminate):
+        assert receipt is candidate.instance_receipt and terminate is True
+        calls.append("settled-owned")
+        return SimpleNamespace(status="settled")
+
+    monkeypatch.setattr(daemon_instances, "cleanup_instance", cleanup)
+    monkeypatch.setattr(source, "spawn_candidate", lambda target, *_args, **_kwargs: (
+        calls.append(("spawn", target)) or SimpleNamespace(instance_receipt=object(), poll=lambda: None)
+    ))
+    version = "old" if selected == "rollback" else newer
+    (tmp_path / "current-version").write_text(version, encoding="utf-8")
+    daemon._self_update_stale_target = lambda *_: None if selected == "rollback" else Path("new-incoming")
+    assert daemon._maybe_self_update() is False
+    assert calls == ["settled-owned"]
+    assert daemon._source_handoff is None
+    assert not daemon._lock.released
+    assert daemon._maybe_self_update() is False
+    if selected == "new-source":
+        assert calls[-1] == ("spawn", Path("new-incoming"))
+        assert daemon._source_handoff["version"] == newer
+    else:
+        assert calls == ["settled-owned"]
+
+
+def test_changed_selection_keeps_unknown_creation_without_freezing_reconciliation(tmp_path, monkeypatch):
+    daemon, _ = _incumbent(tmp_path, monkeypatch)
+    state = {
+        "root": tmp_path, "version": VERSION, "target": Path("incoming"),
+        "phase": "unconfirmed", "child": None,
+    }
+    daemon._source_handoff = state
+    (tmp_path / "current-version").write_text("old", encoding="utf-8")
+    assert daemon._maybe_self_update() is False
+    assert daemon._source_handoff is state
+    assert state["phase"] != "withdrawing"
+    assert not daemon._lock.released
+
+
+@pytest.mark.parametrize("observation", ["matching", "unknown", "dead"])
+def test_retarget_never_terminates_discovered_peer(tmp_path, monkeypatch, observation):
+    from agent_procutil import _daemon_instance_identity, daemon_instances
+
+    daemon, _ = _incumbent(tmp_path, monkeypatch)
+    state = {
+        "root": tmp_path, "version": VERSION, "target": Path("incoming"),
+        "phase": "preparing", "prepared": {"generation": {"pid": 901}, "birth": "peer-birth"},
+    }
+    daemon._source_handoff = state
+    (tmp_path / "current-version").write_text("old", encoding="utf-8")
+    monkeypatch.setattr(daemon_instances, "cleanup_instance", lambda *_args, **_kwargs: pytest.fail("foreign cleanup"))
+    monkeypatch.setattr(_daemon_instance_identity, "identity_state", lambda *_: observation)
+    assert daemon._maybe_self_update() is False
+    assert (daemon._source_handoff is None) is (observation == "dead")
+    assert not daemon._lock.released
+
+
+@pytest.mark.parametrize("reselected", [False, True])
+def test_withdrawal_rollback_reopens_same_owner_only_after_local_work_settles(
+    tmp_path, monkeypatch, reselected,
+):
+    from agent_procutil import daemon_instances
+
+    daemon, _ = _incumbent(tmp_path, monkeypatch)
+    pool = daemon._runtime_pool()
+    pool.submit(lambda: 19).result(timeout=2)
+    pool.shutdown(wait=True)
+    state = {
+        "root": tmp_path, "version": VERSION, "target": Path("incoming"),
+        "phase": "withdrawing", "child": SimpleNamespace(instance_receipt=object(), poll=lambda: 1),
+        "pools": {pool},
+    }
+    daemon._source_handoff = state
+    daemon._close_pool_metadata_admission()
+    daemon._shutdown_drained = False
+    pending = Future()
+    daemon._probe_inflight.add(pending)
+    custody = daemon._pool_publisher_custody
+    (tmp_path / "current-version").write_text("old", encoding="utf-8")
+    monkeypatch.setattr(daemon_instances, "cleanup_instance", lambda *_args, **_kwargs: SimpleNamespace(status="settled"))
+    assert daemon._maybe_self_update() is False
+    assert daemon._source_handoff is state
+    assert daemon._pool_metadata_closed.is_set()
+    if reselected:
+        (tmp_path / "current-version").write_text(VERSION, encoding="utf-8")
+    pending.set_result(None)
+    assert daemon._maybe_self_update() is False
+    assert daemon._source_handoff is None
+    assert daemon._pool_publisher_custody is custody
+    assert not daemon._pool_metadata_closed.is_set()
+    assert daemon._shutdown_drained
+    assert not daemon._lock.released
+    replacement = daemon._runtime_pool()
+    try:
+        assert replacement is not pool
+        assert replacement.submit(lambda: 23).result(timeout=2) == 23
+    finally:
+        replacement.shutdown(wait=True)
+
+
+def test_retarget_unsettled_owned_candidate_retains_original_scope(tmp_path, monkeypatch):
+    from agent_procutil import daemon_instances
+
+    daemon, source = _incumbent(tmp_path, monkeypatch)
+    state = {
+        "root": tmp_path, "version": VERSION, "target": Path("incoming"),
+        "phase": "withdrawing", "child": SimpleNamespace(instance_receipt=object()),
+    }
+    daemon._source_handoff = state
+    (tmp_path / "current-version").write_text("old", encoding="utf-8")
+    monkeypatch.setattr(daemon_instances, "cleanup_instance", lambda *_args, **_kwargs: SimpleNamespace(status="refused"))
+    monkeypatch.setattr(source, "spawn_candidate", lambda *_args, **_kwargs: pytest.fail("unsettled successor replay"))
+    assert daemon._maybe_self_update() is False
+    assert daemon._source_handoff is state
+    assert not daemon._lock.released
+
+
+def test_managed_uncertainty_defers_withdrawal_so_normal_reconciliation_can_refresh(tmp_path, monkeypatch):
+    daemon, source = _incumbent(tmp_path, monkeypatch)
+    monkeypatch.setattr(source, "read_prepared", lambda *_args, **_kwargs: {"instance_id": "d" * 32})
+    daemon._managed_uncertain.add("foreign-or-unknown-native-work")
+    monkeypatch.setattr(daemon, "shutdown", lambda: pytest.fail("uncertainty must reconcile before withdrawal"))
+    assert daemon._maybe_self_update() is False
+    assert daemon._source_handoff is None or daemon._source_handoff["phase"] != "withdrawing"
+    assert not daemon._lock.released
+    daemon._managed_uncertain.clear()
+    monkeypatch.setattr(daemon, "shutdown", lambda: True)
+    assert daemon._maybe_self_update() is True
+    assert daemon._lock.released
+
+
+@pytest.mark.parametrize("native_state", ["dead", "reused", "unknown"])
+def test_stale_preparation_does_not_mask_later_healthy_candidate_or_unknown_identity(
+    tmp_path, monkeypatch, native_state,
+):
+    from agent_dispatch import companion, supervisor_source
+    from agent_procutil import _daemon_instance_identity, daemon_instances
+
+    directory = tmp_path / "run" / "supervisor-candidates"
+    directory.mkdir(parents=True)
+    records, native = [], []
+    for index, identity in enumerate(("a" * 32, "b" * 32)):
+        path = directory / (identity + ".json")
+        document = {
+            "runtime_version": VERSION, "scope": "fixture",
+            "generation": {"pid": 100 + index, "start_token": "start"},
+            "progress": {"phase": "prepared"}, "instance_id": identity,
+            "registry_root": str(tmp_path / "registry"), "birth": "birth",
+        }
+        path.write_text(json.dumps(document), encoding="utf-8")
+        device, inode = _daemon_instance_identity.path_identity(path)
+        records.append(document)
+        native.append({
+            "instance_id": identity, "state": "running", "runtime_root": str(tmp_path),
+            "pid": str(100 + index), "birth": "birth", "artifact_count": "1",
+            "artifact_0_path": str(path), "artifact_0_device": device, "artifact_0_inode": inode,
+        })
+    monkeypatch.setattr(daemon_instances, "inspect_instances", lambda _: native)
+    monkeypatch.setattr(companion, "process_start_token", lambda pid: "start" if pid == 101 else None)
+    monkeypatch.setattr(_daemon_instance_identity, "identity_state", lambda pid, _: native_state if pid == 100 else "matching")
+    if native_state == "unknown":
+        with pytest.raises(RuntimeError, match="native"):
+            supervisor_source.read_prepared(tmp_path, VERSION, "fixture")
+    else:
+        assert supervisor_source.read_prepared(tmp_path, VERSION, "fixture") == records[1]
+    assert len(list(directory.iterdir())) == 2

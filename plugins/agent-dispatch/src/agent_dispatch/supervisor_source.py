@@ -67,10 +67,14 @@ def read_prepared(root: Path, version: str, scope: str, *, authority=None, insta
             or not isinstance(generation, dict)
             or type(generation.get("pid")) is not int
             or not generation.get("start_token")
-            or process_start_token(generation["pid"]) != generation["start_token"]
             or not isinstance(document.get("birth"), str)
         ):
             raise RuntimeError("supervisor preparation does not bind its native generation")
+        observed = identity_state(generation["pid"], document["birth"])
+        if observed in {"dead", "reused"}:
+            continue
+        if observed != "matching" or process_start_token(generation["pid"]) != generation["start_token"]:
+            raise RuntimeError("supervisor preparation native generation is unavailable")
         registry = Path(document.get("registry_root", ""))
         if not registry.is_absolute():
             raise RuntimeError("supervisor preparation has no instance custody")
@@ -268,6 +272,46 @@ def _authority(daemon):
     return supervisor_authority_target(cli.build_parser().parse_args(daemon._self_update_argv))
 
 
+def _retarget_handoff(daemon, state):
+    from agent_procutil.daemon_instances import cleanup_instance
+    from .supervisor_retirement import _retire_owned_workers, _tracked_work
+    from .supervisor_daemon import _SHUTDOWN_GRACE_SECONDS
+
+    child = state.get("child")
+    if child is None:
+        ready = state.get("prepared")
+        if ready is None:
+            return False
+        from agent_procutil._daemon_instance_identity import identity_state
+
+        # A discovered peer is not ours to terminate, even while we hold the lock.
+        if identity_state(ready["generation"]["pid"], ready["birth"]) not in {"dead", "reused"}:
+            return False
+    else:
+        receipt = getattr(child, "instance_receipt", None)
+        if receipt is None:
+            return False
+        try:
+            settled = cleanup_instance(receipt, terminate=True).status in {"settled", "missing"}
+        except (OSError, RuntimeError, ValueError):
+            log.warning("obsolete supervisor candidate custody is unconfirmed", exc_info=True)
+            return False
+        if not settled:
+            return False
+    pools = state.get("pools", set())
+    if any(not future.done() for future in _tracked_work(daemon)):
+        return False
+    if pools and not _retire_owned_workers(pools, time.monotonic() + _SHUTDOWN_GRACE_SECONDS):
+        return False
+    if daemon._owns_runtime_executor and daemon._runtime_executor in pools:
+        daemon._runtime_executor = None
+    daemon._shutdown_drained = True
+    with daemon._pool_metadata_admission_lock:
+        daemon._pool_metadata_closed.clear()
+    daemon._source_handoff = None
+    return False
+
+
 def advance_handoff(daemon, root, version, target):
     from .action_controls import action_inhibited
     from .self_update import read_current_version
@@ -275,7 +319,11 @@ def advance_handoff(daemon, root, version, target):
     from .supervisor_daemon import _SHUTDOWN_GRACE_SECONDS
     from .supervisor_daemon import native_restart_unit
 
-    if read_current_version(root) != version:
+    state = daemon._source_handoff
+    if read_current_version(root) != version or (state is not None and state.get("retargeting")):
+        if state is not None:
+            state["retargeting"] = True
+            return _retarget_handoff(daemon, state)
         return False
     if action_inhibited("supervisor-self-update", root=root, automatic=True, logger=log):
         return False
@@ -322,8 +370,11 @@ def advance_handoff(daemon, root, version, target):
                 daemon._source_handoff = None
         return False
     if state is None:
-        state = {"root": root, "version": version, "target": target}
+        state = {"root": root, "version": version, "target": target, "phase": "preparing"}
         daemon._source_handoff = state
+    state["prepared"] = ready
+    if daemon._managed_uncertain:
+        return False
     state["phase"] = "withdrawing"
     if any(not future.done() for future in _tracked_work(daemon)):
         return False
