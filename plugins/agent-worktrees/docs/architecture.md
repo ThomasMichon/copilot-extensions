@@ -57,6 +57,19 @@ available through these reports. A COMPLETE operation is not global discovery
 completeness, stability, authorization or permission to reuse facts. No hook or
 protected-write consumer is migrated by this provider-first expansion.
 
+Full-config reports also observe the original execution-machine selection:
+ordered config-source anchors, short-circuited registry candidate checks,
+the selected resolver and its original registry callback. Failed legacy
+boolean presence checks remain uncertain, not confirmed absence. Originally
+suppressed registry failures retain type-only diagnostics, and fatal errors
+still propagate unchanged. The no-registry fallback delegates to the existing
+machine detector and stays indeterminate without selected-callback provenance.
+Replaced callbacks remain opaque even when they
+restore the original function during execution. Completion describes only
+the selection decision; delegated source/registry frontiers stay opaque and
+the report remains non-reusable. No additional discovery or callback replay
+is performed to construct these observations.
+
 This realizes the harness-guidance vision's reusable-facts/current-decisions
 separation at the acquisition boundary and follows the circumstantial-hook and
 resilient-registry patterns without claiming their full frontier qualification.

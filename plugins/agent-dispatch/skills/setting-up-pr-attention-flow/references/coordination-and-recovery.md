@@ -89,7 +89,10 @@ readback. A qualifying round does not stop at analysis-ready for coordinator
 blessing, content co-signing or a release handshake; the coordinator neither
 relays reviewer JSON nor rewrites/posts the verdict on its behalf. Return the
 actual verified posted receipt or real blocker asynchronously, then let the
-coordinator independently audit current forge authority after publication.
+coordinator monitor outcomes, coverage and unresolved obligations. It is not a
+mandatory interceptor or duplicate per-write auditor. Additional checks must
+address a concrete risk or integration need; the reviewer remains responsible
+for its required publication safeguards and authoritative readback.
 
 Genuine candidate changes stay with the same reviewer for owner-bound
 reprepare/delta/full-gate analysis and direct posting. Hold/escalate only actual

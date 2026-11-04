@@ -263,7 +263,8 @@ details, not additional operator quotations or live deployment authority.
 
 _Operator-required outcome; agent-recommended slices and validation._
 
-- [ ] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence).
+- [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
+  (merged in #10380; implementation, provider and adoption gates remain).
 - [ ] Complete P1 normalized candidate/conversation/cursor and inert attention
   foundation, then P2 existing-owner central intake, bounded journal and
   terminal tombstone recovery.
@@ -897,6 +898,22 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-03 - Land Author/Reviewer intent and qualify the existing baseline
+
+- #10380 merged as `fd6ddccd35e6448f2b6de8fd6ff6ca442283a795` after
+  current-head Copilot approval with no findings and required green checks.
+  Re-read the canonical Plan/Validation and preserved unfinished parent scope.
+- An isolated, network-disconnected test-container baseline passed 79 cases
+  with five explicit platform skips across the existing native CLI, workspace
+  integration and Gateway transport packets. The bounded supervisor confirmed
+  cleanup. This qualifies those existing synthetic/source paths, not a new
+  service perspective, three live providers, image delivery or live shadow.
+- Added the initial [CLI parity inventory](cli-parity-inventory.md), explicitly
+  distinguishing existing four-verb native composition, default GitHub paths,
+  unsupported flags and still-open full HTTP/consumer migration.
+- Next admitted runtime slice remains the inert normalized attention
+  foundation. No installed backend, service, credential or reviewer changed.
 
 ### 2026-11-03 - Propose Author/Reviewer service perspectives
 

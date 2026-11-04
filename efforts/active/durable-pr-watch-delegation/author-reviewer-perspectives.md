@@ -196,6 +196,10 @@ gap; they cannot apply old feedback or claims to the new candidate.
 
 ## CLI/API convergence and qualification
 
+The [source-backed parity inventory](cli-parity-inventory.md) records the
+initial legacy operation families, explicit native differences and remaining
+HTTP/consumer qualification. It is not a replacement parser reference.
+
 Keep CLI parsing strict. The eventual Author CLI covers every current
 `create-pr`, `*-pr` and `pr-*` behavior, including body/labels/reviewers, foreign
 already-pushed creation, ready/update, claims/attribution, status/wait/watch,

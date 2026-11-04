@@ -21,6 +21,11 @@ REFUSALS = (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_discovery() -> None:
+    """Static guidance checks do not use runtime endpoint discovery."""
+
+
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
@@ -211,7 +216,8 @@ def test_reviewer_posts_directly_without_per_round_coordinator_release() -> None
         "do not require a coordinator's per-round approval or release handshake",
         "asynchronously returns its actual posted, verified receipt or real blocker",
         "never the normal verdict relay/editor",
-        "after publication",
+        "monitors outcomes, coverage and unresolved obligations",
+        "concrete risk or integration need",
         "no author-fix, merge, consent or resource-custody authority",
     ):
         assert requirement in skill, requirement
@@ -223,10 +229,18 @@ def test_reviewer_posts_directly_without_per_round_coordinator_release() -> None
         "Hold/escalate only actual required-input",
         "adapter exception, not a mandatory per-round middleman",
         "not transfer custody",
+        "not a mandatory interceptor or duplicate per-write auditor",
+        "reviewer remains responsible for its required publication safeguards",
     ):
         assert requirement in coordination, requirement
     assert "without mandatory per-round coordinator approval/release" in charter
     assert "not verdict relay" in charter
+    assert "outcome monitoring" in charter
+    assert "not a mandatory duplicate per-write forge audit" in charter
+    for text in (skill, coordination, charter):
+        assert "independently audits forge authority" not in text
+        assert "independently audit current forge authority" not in text
+        assert "post-publication audit" not in text
 
 
 @pytest.mark.parametrize("gate", REFUSALS)
