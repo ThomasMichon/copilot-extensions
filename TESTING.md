@@ -2925,13 +2925,29 @@ refuses a missing sibling. The real application handoff and changed-wheel,
 installed-content and origin controls in `tools/test_local_install_source.py`
 exercise that companion loading through staged nested environments.
 
-The same file's `application_adapter` packet qualifies the explicit prepared
-downstream composition API. Four refusal controls stop changed selection,
+The same file's `application_adapter` refusal controls check the explicit prepared
+downstream composition API. Four controls stop changed selection,
 missing application, mismatched construction and Manager-native ownership
-before construction. Its contained synthetic application executes real UV
+before construction. `tools/test_application_adapter_journey.py` retains the
+contained synthetic application journey: real UV
 construction, setup/start, unchanged repeat, changed-declaration refusal before
-callbacks, failed-start selector rollback, distinct repair with the new
-declaration and the published stable command. The source receipt and application are fixtures,
+callbacks, a failed-start selected generation with unchanged last-known-good, distinct repair
+with the new declaration and the published stable command.
+The `application-adapter` contract in `tools/run-manager-runtime-acceptance.py`
+explicitly selects the ordered preparation, selection, install, repeat, refusal,
+failed-start, retry and physical-command items for both plugin and standalone
+forms. Each form retains one disposable source/application/runtime across its
+phases. Every item has 30 seconds, including its fixture work; one contained
+300-second group includes all application preparation, both forms and cleanup.
+The existing managed `agent-worktrees` test environment must already be prepared;
+this contract never bootstraps tooling or prepares an application outside that group.
+It is a changed per-phase allocation, **not** an original single-30-second pass.
+The runner supplies exact node order and requires all 16 unique, successful
+JUnit cases before accepting the journey. A later phase without its predecessors
+refuses; an independently selected phase reports only partial coverage.
+Function-scoped environment restoration and canonical group cleanup retain
+custody on failure and timeout. Native child and routing deadlines are unchanged.
+The source receipt and application are fixtures,
 not authenticated release/deployment evidence. Native Windows qualification
 does not qualify Linux, resident-service readiness or an adopter's host rollout;
 these cases do not expand required unit-only CI.
@@ -7387,6 +7403,20 @@ outside ordinary unit discovery; pure asset and registry controls remain in
 their owning unit suites.
 
 Manager's cold canonical-adopter acceptance has an explicit native lane:
+
+The separate `tools/run-manager-runtime-acceptance.py --contract provider
+--root <ignored-output> --venv-root <managed-native-environments>` packet builds
+the actual Manager wheel with its canonical resource hooks, installs it into a
+fresh dependency-free environment, removes its disposable build checkout, and
+invokes the installed provider through an explicitly prepared native tooling
+interpreter. The complete-profile/compiler, admission and offline application
+lock pipeline runs without mocked producer calls. Synthetic associated
+first-party inputs have no registry dependencies; this is not production-feed
+transport or the full real Manager dependency closure. Wrong source identity
+and corrupt wheel inputs refuse without changing completed output or activating
+a runtime. The existing 300-second group, 180-second native child and 30-second
+assertion limits remain unchanged. This packet does not qualify the separate
+multi-install adapter's existing deadline failure, default routing or rollout.
 
 The focused `tests/native/test_manager_runtime_install.py -k
 preparation_completed_units` packet separately connects the real Manager copy

@@ -213,8 +213,13 @@ def _build_workspace(source: Path, output: Path, selected: tuple[str, ...], buil
 def build_projects(
     output: Path, record: dict, *, projects: tuple[str, ...] | None = None,
     source_policy: str = "governed", min_age_days: int | None = None,
+    uv: str | Path | None = None, deadline: float | None = None,
 ) -> dict:
-    """Use the existing project roster and one seasoned build-tool closure."""
+    """Use the existing project roster and one seasoned build-tool closure.
+
+    Explicit UV/deadline selections also bound wheel work in the isolated
+    builder; omitted selections retain the legacy construction path.
+    """
     import build_python_artifacts as builder
     from build_toolchain_lock import resolve_toolchain_lock
     from promotion_python_artifacts import candidate_projects, project_key
@@ -223,6 +228,8 @@ def build_projects(
         SOURCE_FILE, SourceIdentity, assembly_hash, payload_package_version, runtime_version,
     )
 
+    if deadline is not None:
+        preparation._remaining(deadline)
     output = Path(native_retained_path(output))
     source = output / "source"
     roster = candidate_projects(source)
@@ -251,6 +258,23 @@ def build_projects(
         )
         identities[key] = identity
     builder = _load_module(Path(builder.__file__), "_local_install_artifact_builder")
+    toolchain_options = {}
+    if uv is not None:
+        toolchain_options["uv"] = uv
+    if deadline is not None:
+        toolchain_options["deadline"] = deadline
+    if toolchain_options:
+        build_wheel = builder.build_wheel
+
+        def bounded_build_wheel(*args, **kwargs):
+            if uv is not None:
+                kwargs["uv"] = str(uv)
+            if deadline is not None:
+                preparation._remaining(deadline)
+                kwargs["deadline"] = min(deadline, time.monotonic() + 180)
+            return build_wheel(*args, **kwargs)
+
+        builder.build_wheel = bounded_build_wheel
     builder.REPO, builder.PLUGINS_DIR, builder.LIBS_DIR = source, source / "plugins", source / "libs"
     with _build_workspace(source, output, selected, builder) as (build_source, toolchain_dir):
         builder.REPO = build_source
@@ -258,9 +282,12 @@ def build_projects(
         toolchain = resolve_toolchain_lock(
             toolchain_dir, python=sys.executable,
             source_policy=source_policy, min_age_days=min_age_days,
+            **toolchain_options,
         )
         prepared = {}
         for key in selected:
+            if deadline is not None:
+                preparation._remaining(deadline)
             if key == "composition:core":
                 from core_python_artifacts import build_core_artifacts
 
@@ -291,8 +318,12 @@ def build_projects(
             ):
                 raise ValueError("local artifact builder returned another project, version or toolchain")
             prepared["worktree-manager" if key == "standalone:worktree-manager" else key] = project
+        if deadline is not None:
+            preparation._remaining(deadline)
         if any(assembly_hash(payloads[key]) != identity.assembly_hash for key, identity in identities.items()):
             raise ValueError("local artifact construction changed its associated source payload")
+    if deadline is not None:
+        preparation._remaining(deadline)
     record["projects"].update(prepared)
     (output / MANIFEST).write_text(
         json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8",

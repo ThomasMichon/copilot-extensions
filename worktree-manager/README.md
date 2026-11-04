@@ -824,6 +824,16 @@ remain associated build inputs, and the sdist carries the inputs needed to
 rebuild without the original checkout. This does not qualify cold construction,
 serving, cutover or rollout.
 
+Installed wheels expose the non-routing
+`runtime_source_prepare.prepare_application_inputs` API for completing an
+already-admitted first-party snapshot through the canonical native profile
+pipeline. Its declared multi-root toolkit is independent of the original
+checkout. Callers explicitly supply their prepared tooling interpreter,
+absolute native Python/UV, source identity and remaining deadline; no host
+dependency bootstrap, runtime selection or activation is implicit. This is
+provider reachability, not adoption by default/configured-source update.
+See the [installation contract](../docs/install-contract.md#local-wheel-applications).
+
 A complete snapshot additionally carries its prepared native profile and exact
 wheel closure. The adapter retains and inspects those bytes through the existing
 constructor and real installed-health gate. It does not resolve dependencies,

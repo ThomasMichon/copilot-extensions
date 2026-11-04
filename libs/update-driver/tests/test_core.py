@@ -950,6 +950,25 @@ def test_completed_installed_runtime_never_uses_source_fallback(area, monkeypatc
         runtime_command("some.adapter")
 
 
+@pytest.mark.parametrize("script", [False, True])
+def test_runtime_invocation_preserves_core_command_seam(area, monkeypatch, script):
+    from update_driver import core
+
+    entry = area / "entry.py" if script else "some.adapter"
+    arguments = ("", "two words", "\u03b1")
+    expected = (("retained-command",), {"selected": "runtime"})
+    calls = []
+
+    def command(selected, args):
+        calls.append((selected, args))
+        return expected
+
+    monkeypatch.setattr(core, "_runtime_command", command)
+    invoke = runtime_script_command if script else runtime_command
+    assert invoke(entry, arguments) is expected
+    assert calls == [((str(entry),) if script else ("-m", entry), arguments)]
+
+
 def test_linked_installed_bootstrap_refuses(area, monkeypatch):
     import agent_procutil
     monkeypatch.setattr(sys, "prefix", str(area))

@@ -2,17 +2,22 @@
 
 Prepare real installed candidates before pytest's unchanged 30-second item
 checks, then execute those checks through the canonical plugin runner.
+The application-adapter contract instead times application preparation and
+every consumer as separate 30-second items inside one 300-second group.
 """
 
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import json
 import os
 import runpy
+import shutil
 import subprocess
 import sys
 import time
+import xml.etree.ElementTree as ET
 from contextlib import ExitStack
 from pathlib import Path
 
@@ -21,6 +26,95 @@ from _admission_protocol import acquire
 from plugin_test_resources import record_owner, run_prefix, runs_root, venv_root
 
 REPO = Path(__file__).resolve().parents[1]
+APPLICATION_ADAPTER_VARIANTS = ("plugin", "standalone")
+APPLICATION_ADAPTER_PHASES = (
+    "prepare", "selection", "install", "repeat", "refusal", "fail-start", "retry", "command",
+)
+
+
+def _application_adapter_nodes() -> list[str]:
+    return [
+        "tools/test_application_adapter_journey.py::TestApplicationAdapterJourney::"
+        f"test_{phase.replace('-', '_')}[{variant}]"
+        for variant in APPLICATION_ADAPTER_VARIANTS
+        for phase in APPLICATION_ADAPTER_PHASES
+    ]
+
+
+def _application_adapter_complete(report: Path) -> bool:
+    if not report.is_file() or report.stat().st_size > 4 << 20:
+        return False
+    expected = Counter(node.split("::")[-1] for node in _application_adapter_nodes())
+    try:
+        cases = list(ET.parse(report).getroot().iter("testcase"))
+    except (OSError, ET.ParseError):
+        return False
+    return (
+        Counter(case.get("name") for case in cases) == expected
+        and all(
+            case.get("classname", "").split(".")[-1] == "TestApplicationAdapterJourney"
+            and all(case.find(outcome) is None for outcome in ("failure", "error", "skipped"))
+            for case in cases
+        )
+    )
+
+
+def _application_adapter_acceptance(root: Path, venv_root: Path) -> int:
+    """One contained 300-second group; every application phase remains a 30-second item."""
+    started = time.monotonic()
+    if any((root / name).exists() or (root / name).is_symlink() for name in (
+        "application-adapter.xml", "application-adapter-result.json",
+    )):
+        raise ValueError("application-adapter requires fresh acceptance reports")
+    python = venv_root / "agent-worktrees" / (
+        "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    )
+    if not python.is_file():
+        raise ValueError("application-adapter requires the already-prepared agent-worktrees test environment")
+    result = 1
+    evidence = {"complete": False, "allocation": "phase-30/group-300", "required_nodes": _application_adapter_nodes()}
+    try:
+        with ExitStack() as ownership:
+            lease = acquire(0, python.parent.parent)
+            ownership.callback(lease.release)
+            # Report-directory nesting must not lengthen native repair-slot cwd.
+            sandbox = Path(ownership.enter_context(TestSandbox(prefix="adapter-", dir=REPO)))
+            env = isolated_environment(os.environ, sandbox, allow_explicit_tiers=True)
+            env["PYTHONPATH"] = str(REPO / "tools")
+            env.pop("PYTEST_ADDOPTS", None)
+            report = sandbox / "application-adapter.xml"
+            remaining = 300 - (time.monotonic() - started)
+            if remaining <= 0:
+                result = 124
+            else:
+                result = run_contained(
+                    [
+                        str(python), "-m", "pytest", "-q", "-x", "-p", "pytest_portfolio_guard",
+                        "--timeout=30", "-o", "timeout_func_only=false", "-o", "addopts=",
+                        f"--basetemp={sandbox / 't'}", f"--junitxml={report}",
+                        *_application_adapter_nodes(),
+                    ],
+                    cwd=REPO, env=env, sandbox=sandbox, limits=Limits(wall_seconds=remaining),
+                )
+            full_packet = result == 0 and _application_adapter_complete(report)
+            if report.is_file():
+                shutil.copyfile(report, root / "application-adapter.xml")
+        # A failed cleanup never reaches this assignment.
+        evidence["complete"] = full_packet
+        if result == 0 and not full_packet:
+            result = 1
+    except Exception as error:
+        evidence["error"] = f"{type(error).__name__}: {error}"
+        result = 1
+    finally:
+        evidence["elapsed_seconds"] = time.monotonic() - started
+        if evidence["elapsed_seconds"] > 300:
+            result, evidence["complete"] = 124, False
+        evidence["returncode"] = result
+        (root / "application-adapter-result.json").write_text(
+            json.dumps(evidence, indent=2), encoding="utf-8",
+        )
+    return result
 
 
 def _engine_routing(root: Path, venv_root: Path, *, prepare_only: bool = False) -> int:
@@ -102,11 +196,62 @@ def _engine_routing(root: Path, venv_root: Path, *, prepare_only: bool = False) 
         return result
 
 
+def _provider_acceptance(root: Path, venv_root: Path) -> int:
+    namespace = runpy.run_path(str(REPO / "tools" / "run-plugin-tests.py"))
+    runner = namespace["main"]
+    runner.__globals__["VENV_ROOT"] = venv_root
+    result = runner(["worktree-manager", "--prepare-only"])
+    if result:
+        return result
+    python = venv_root / "worktree-manager" / (
+        "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    )
+    fixture = REPO / "worktree-manager" / "tests" / "native" / "test_manager_input_provider.py"
+    lease = acquire(0, python.parent.parent)
+    try:
+        with TestSandbox(prefix="mi-") as raw:
+            sandbox = Path(raw)
+            env = isolated_environment(os.environ, sandbox, allow_explicit_tiers=True)
+            env["MANAGER_INPUT_PROVIDER_DATA"] = str(sandbox / "fixtures.json")
+            env["PYTHONPATH"] = str(REPO / "tools")
+            started = time.monotonic()
+            commands = [
+                [str(python), "-I", "-B", str(fixture), "--prepare", str(sandbox)],
+                [str(python), "-m", "pytest", "-q", "-p", "pytest_portfolio_guard",
+                 "--timeout=30", f"--basetemp={sandbox / 'assertions'}", str(fixture)],
+            ]
+            for command in commands:
+                remaining = 300 - (time.monotonic() - started)
+                if remaining <= 0:
+                    return 124
+                result = run_contained(
+                    command, cwd=REPO, env=env, sandbox=sandbox,
+                    limits=Limits(wall_seconds=remaining),
+                )
+                if result:
+                    return result
+            (root / "provider-fixtures.json").write_text(
+                (sandbox / "fixtures.json").read_text(encoding="utf-8"), encoding="utf-8",
+            )
+            data = json.loads((sandbox / "fixtures.json").read_text(encoding="utf-8"))
+            artifacts = root / "artifacts"
+            artifacts.mkdir()
+            shutil.copyfile(
+                Path(data["provider_wheel"]), artifacts / Path(data["provider_wheel"]).name,
+            )
+            shutil.copytree(
+                Path(data["complete_snapshot"]), artifacts / "complete-snapshot", symlinks=True,
+            )
+    finally:
+        lease.release()
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument(
-        "--contract", choices=("runtime", "callbacks", "updater", "source", "engine-source", "uninstall", "engine-routing"),
+        "--contract", choices=("runtime", "callbacks", "updater", "source", "engine-source", "uninstall", "engine-routing", "provider", "application-adapter"),
         default="runtime",
     )
     parser.add_argument("--venv-root", type=Path, default=REPO / ".test-venvs" / sys.platform)
@@ -120,6 +265,10 @@ def main() -> int:
     root.mkdir(parents=True, exist_ok=True)
     if args.contract == "engine-routing":
         return _engine_routing(root, args.venv_root.resolve(), prepare_only=args.prepare_only)
+    if args.contract == "provider":
+        return _provider_acceptance(root, args.venv_root.resolve())
+    if args.contract == "application-adapter":
+        return _application_adapter_acceptance(root, args.venv_root.resolve())
     prepared = subprocess.run(
         [sys.executable, str(REPO / "tools" / "run-plugin-tests.py"), "worktree-manager", "--prepare-only"],
         cwd=REPO, check=False, **no_window_kwargs(),

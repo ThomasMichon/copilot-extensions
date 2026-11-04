@@ -361,7 +361,10 @@ def test_local_source_can_retain_explicit_existing_provenance_without_a_remote(r
 
 
 @pytest.mark.parametrize("deep", [False, True])
-def test_suite_build_preserves_roster_versions_and_uses_one_toolchain(tmp_path, monkeypatch, deep):
+@pytest.mark.parametrize("remaining", [None, 60, 240])
+def test_suite_build_preserves_roster_versions_and_uses_one_toolchain(
+    tmp_path, monkeypatch, deep, remaining,
+):
     import build_python_artifacts
     import build_toolchain_lock
     import promotion_python_artifacts
@@ -415,11 +418,14 @@ def test_suite_build_preserves_roster_versions_and_uses_one_toolchain(tmp_path, 
         __file__=build_python_artifacts.__file__, uer=build_python_artifacts.uer,
         resolve_vendored_libs=lambda root: [],
     )
+    wheel_calls = []
+    builder.build_wheel = lambda *args, **kwargs: wheel_calls.append(kwargs)
     monkeypatch.setattr(local, "_load_module", lambda *a: builder)
     admitted_toolchain = toolchain
 
     def build(component, *, out_dir, toolchain, builder=builder):
         assert toolchain is admitted_toolchain
+        builder.build_wheel(component, out_dir, toolchain=toolchain)
         if os.name == "nt":
             assert builder.REPO != source
             assert builder.REPO.parent == Path(local.native_retained_path(resolutions[0][0])).parent
@@ -455,8 +461,24 @@ def test_suite_build_preserves_roster_versions_and_uses_one_toolchain(tmp_path, 
         "schema": local.SCHEMA, "version": 1, "kind": "source",
         "source_commit": "a" * 40, "source_tree": "b" * 40, "projects": {},
     }
-    local.build_projects(output, record)
+    uv = tmp_path / "uv.exe"
+    deadline = time.monotonic() + (remaining or 240)
+    options = {"uv": uv, "deadline": deadline} if remaining is not None else {}
+    local.build_projects(output, record, **options)
     assert builds == list(projects) and len(resolutions) == 1
+    assert resolutions[0][1] == {
+        "python": sys.executable, "source_policy": "governed", "min_age_days": None, **options,
+    }
+    for call in wheel_calls:
+        assert call["toolchain"] is admitted_toolchain
+        if remaining is not None:
+            assert call["uv"] == str(uv)
+            assert time.monotonic() < call["deadline"] <= deadline
+            assert call["deadline"] <= time.monotonic() + 180
+            if remaining == 60:
+                assert call["deadline"] == deadline
+        else:
+            assert set(call) == {"toolchain"}
     if os.name == "nt":
         assert len(set(build_roots)) == 1
         assert not build_roots[0].exists()
@@ -466,6 +488,22 @@ def test_suite_build_preserves_roster_versions_and_uses_one_toolchain(tmp_path, 
         version = payload_package_version(payload, component)
         assert read_source_identity(payload, version, plugin=component).document() == project["source"]
         assert project["artifact"]["version"] == version
+
+
+def test_suite_build_expired_deadline_refuses_before_source_writes(tmp_path, monkeypatch):
+    import build_toolchain_lock
+
+    monkeypatch.setattr(
+        build_toolchain_lock, "resolve_toolchain_lock",
+        lambda *args, **kwargs: pytest.fail("expired caller reached toolchain preparation"),
+    )
+    output = tmp_path / "not-created"
+    with pytest.raises(local.preparation.SourcePreparationError, match="deadline exceeded"):
+        local.build_projects(
+            output, {"projects": {}}, uv=tmp_path / "uv.exe",
+            deadline=time.monotonic() - 1,
+        )
+    assert not output.exists()
 
 
 def test_local_builder_load_keeps_controller_and_module_state_independent(tmp_path, monkeypatch):
@@ -487,6 +525,37 @@ def test_local_builder_load_keeps_controller_and_module_state_independent(tmp_pa
     builder.REPO = tmp_path
     assert build_python_artifacts.REPO == original_root
     assert builder.resolve_vendored_libs is not build_python_artifacts.resolve_vendored_libs
+
+
+def test_manager_provider_rejects_foreign_native_target_before_profile(tmp_path, monkeypatch):
+    import build_toolchain_lock
+    import installer_packaging_seed
+    import install_source
+    import local_install_profile
+    import prepare_manager_application
+
+    uv = tmp_path / "uv"
+    uv.write_bytes(b"fixture, never executed")
+    monkeypatch.setattr(install_source, "select", lambda *a: SimpleNamespace(
+        identity=SimpleNamespace(document=lambda: {}),
+    ))
+    monkeypatch.setattr(build_toolchain_lock, "_query_marker_environment", lambda *a, **k: {})
+    monkeypatch.setattr(
+        installer_packaging_seed, "_target",
+        lambda python, *a: {"base_prefix": str(python)},
+    )
+    monkeypatch.setattr(
+        local_install_profile, "prepare_registry_lock",
+        lambda *a, **k: pytest.fail("foreign tooling target prepared a profile"),
+    )
+    output = tmp_path / "output"
+    with pytest.raises(ValueError, match="selected native target"):
+        prepare_manager_application.main([
+            "--install-source", str(tmp_path), "--output", str(output),
+            "--identity", "{}", "--python", str(tmp_path / "foreign-python"),
+            "--uv", str(uv), "--deadline", str(time.monotonic() + 10),
+        ])
+    assert not output.exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows compact build workspace")
@@ -808,6 +877,10 @@ def test_native_profile_preserves_duplicate_selected_feed_evidence(monkeypatch):
 
 @pytest.fixture
 def native_source(tmp_path, request):
+    return prepare_native_source(tmp_path, request)
+
+
+def prepare_native_source(tmp_path, request):
     import local_install_profile as native
     from packaging.markers import default_environment
     from wheel_input_fixture import wheel_bytes

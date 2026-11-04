@@ -1,0 +1,7 @@
+{
+  "schema": "copilot-extensions.manager-application-input-provider",
+  "version": 1,
+  "component": "worktree-manager",
+  "input": "associated-first-party-snapshot",
+  "entry": "prepare_manager_application.py"
+}

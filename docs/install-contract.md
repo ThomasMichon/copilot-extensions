@@ -4981,6 +4981,33 @@ not yet support this bounded entry and refuses before requests; existing callers
 without a deadline retain their prior policy and behavior. These preparation
 primitives do not change Manager's ordinary bootstrap or source routing.
 
+Manager wheels also carry an explicit, non-routing complete-profile provider.
+`runtime_source_prepare.prepare_application_inputs` accepts an independently
+admitted, immutable first-party snapshot and identity, fresh output, selected
+absolute native Python/UV and an explicitly prepared tooling interpreter.
+The installed provider invokes canonical `local_install_profile` compilation,
+admission, wheel inspection and application emission from its own declared
+assets, never tools from the acquired checkout. It preserves the caller deadline
+and existing 180-second native child cap. The caller retains source/feed authority
+and consumes the returned actual snapshot through `manager_inputs`; returned
+paths and consistency checks do not grant approval or install a runtime.
+
+The tooling interpreter must already supply the canonical preparation
+dependencies, including `packaging`; the provider does not install host
+dependencies. This boundary completes associated first-party inputs, not Git
+acquisition or first-party wheel production. Missing assets report provider
+unavailability; invalid declarations, conflicting source/target/wheel facts and
+worker failures refuse without source/PATH substitution. Authentic resource
+repair and immutable candidate health remain with their existing owners.
+Ordinary bootstrap, configured-source routing and automatic policy are unchanged.
+
+The existing packaged-assets receiver supports explicit version-two `groups`
+for these multiple canonical roots. Each group retains basename-only files,
+contained relative roots, link refusal and no-overwrite publication. All groups
+are preflighted before copying. Version-one declarations and the separate
+legacy source-only preparer remain supported; a single-group-only receiver
+refuses a multi-group declaration instead of silently omitting resources.
+
 `tools/local_install_profile.py --prepare-profile` completes one selected
 component's native dependency closure through the existing configured-feed
 compiler and acquisition owners. Supply `--component worktree-manager` or
