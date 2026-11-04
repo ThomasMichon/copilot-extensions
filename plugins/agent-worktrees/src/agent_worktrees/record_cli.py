@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 
 from . import output
+from .git_errors import GitError
 from .record_read import RecordReadError, read_exact_record, read_workspace_record
 
 
@@ -97,7 +99,7 @@ def cmd_record(args: argparse.Namespace) -> int:
             "error": {"code": exc.code, "message": str(exc)},
         })
         return 1
-    except (OSError, RuntimeError, ValueError) as exc:
+    except (GitError, OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
         output._json_output({"ok": False, "error": str(exc)})
         return 1
     output._json_output({"ok": True, "worktree": worktree})

@@ -232,6 +232,31 @@ def test_record_refuses_changed_readiness_and_preserves_task_claim(prepared, mon
     assert prepared.record.resources[0].is_unsettled
 
 
+@pytest.mark.parametrize("probe", ["snapshot", "refs"])
+@pytest.mark.parametrize("failure", ["git", "timeout"])
+def test_record_normalizes_failed_readiness_probes_without_releasing_custody(
+    prepared, monkeypatch, probe, failure,
+):
+    error = (
+        ready.git_ops.GitError(["git", "status"], 128, "index unreadable")
+        if failure == "git"
+        else subprocess.TimeoutExpired(["git", "status"], 5)
+    )
+
+    def failed(*args, **kwargs):
+        raise error
+
+    if probe == "snapshot":
+        monkeypatch.setattr(ready.finalized_checkout, "snapshot", failed)
+    else:
+        monkeypatch.setattr(ready, "_refs", failed)
+    before = deepcopy(prepared.record)
+    rc, result = _record(_request(prepared))
+    assert rc == 1 and result == {"version": 1, "ok": False, "error": str(error)}
+    assert prepared.record == before and prepared.record.resources[0].is_unsettled
+    assert prepared.lock_depth == 0
+
+
 @pytest.mark.parametrize("missing", [
     "operation", "task", "reservation", "native",
     "creation-nonce", "head-revision", "task-claim-ref",
