@@ -98,7 +98,9 @@ def test_source_start_callback_never_deploys_or_succeeds_after_failed_coordinato
     ))
     monkeypatch.setattr(source_start, "ensure_supervisor", lambda root: pytest.fail("failed coordinator"))
     assert source_start.command(argparse.Namespace(json=True)) == 1
-    assert calls == [{"source_replacement": True}]
+    assert len(calls) == 1
+    assert calls[0]["source_replacement"] is True
+    assert calls[0]["source_environment"]["AGENT_DISPATCH_INSTALL_DIR"] == "app"
 
 
 def test_source_start_callback_reports_supervisor_failure_as_failure(monkeypatch):
@@ -171,9 +173,9 @@ def test_source_supervisor_never_treats_unknown_declarations_as_disabled(tmp_pat
             source_start.ensure_supervisor(tmp_path)
 
 
-@pytest.mark.parametrize("ready", [False, True])
+@pytest.mark.parametrize("ready,stale", [(False, False), (True, False), (True, True)])
 def test_source_coordinator_uses_actual_guarded_publication_and_reuses_owner(
-    tmp_path, monkeypatch, ready,
+    tmp_path, monkeypatch, ready, stale,
 ):
     import os
     from agent_dispatch import client, source_start
@@ -198,6 +200,15 @@ def test_source_coordinator_uses_actual_guarded_publication_and_reuses_owner(
             self.exited = True
 
     handle = Handle()
+    if stale:
+        routing.publish_active(
+            tmp_path, bind="127.0.0.1", port=43101, pid=handle.pid,
+            version=source_start.__version__, process_start_time=birth,
+        )
+        monkeypatch.setattr(source_start, "_route_owner_state", lambda owner: (
+            "dead" if owner.port == 43101 else "matching"
+        ))
+        monkeypatch.setattr(routing, "_listening", lambda *_args, **_kwargs: False)
 
     def spawn(port):
         spawned.append(port)

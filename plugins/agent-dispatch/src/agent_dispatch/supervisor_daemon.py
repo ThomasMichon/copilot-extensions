@@ -1894,12 +1894,10 @@ class SupervisorDaemon(BoundedReconciliation):
         if target is None:
             return False
         from .self_update import read_current_version
-        from .source_build import _SOURCE_VERSION
+        from .supervisor_source import advance_handoff, is_profiled_application
 
         selected = read_current_version(root)
-        if selected and _SOURCE_VERSION.fullmatch(selected) is not None:
-            from .supervisor_source import advance_handoff
-
+        if selected and is_profiled_application(root, selected, target):
             return advance_handoff(self, root, selected, target)
         if action_inhibited(
             "supervisor-self-update", logger=log, root=root, automatic=True,

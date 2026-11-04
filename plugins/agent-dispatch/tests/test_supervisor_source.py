@@ -51,6 +51,7 @@ def _incumbent(tmp_path, monkeypatch):
         self_update_running_version="old",
     )
     monkeypatch.setattr(daemon, "_recheck_governance", lambda _: None)
+    monkeypatch.setattr(supervisor_source, "is_profiled_application", lambda _root, version, _target: ".profile." in version)
     monkeypatch.setattr(supervisor_source, "read_prepared", lambda *_args, **_kwargs: None)
     return daemon, supervisor_source
 
@@ -233,7 +234,7 @@ def test_changed_selection_settles_only_owned_candidate_then_resumes_or_retarget
     calls = []
 
     def cleanup(receipt, *, terminate):
-        assert receipt is candidate.instance_receipt and terminate is True
+        assert receipt is candidate.instance_receipt and terminate is False
         calls.append("settled-owned")
         return SimpleNamespace(status="settled")
 

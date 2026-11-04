@@ -236,6 +236,18 @@ Managed uncertainty continues normal reconciliation before withdrawal.
 Confirmed-dead/reused preparation records do not hide a later healthy candidate,
 but unavailable identity observations still refuse readiness without deleting
 unowned artifacts.
+Owned live candidates are cancelled through native identity checks before SDK
+settlement; ordinary production cleanup alone is not cancellation. Candidate
+exit restores the original owner's admission only after local work settles,
+including when selection has not changed. Confirmed non-starts with settled
+reservations retry under normal cooldown; unknown outcomes retain their identity.
+The passive application lane requires a profiled nested `.venv`; ordinary Source
+layouts retain their existing handoff. Preparation attests machine/environment,
+interval and legacy-source mode, which startup must match to its captured plan.
+Startup strictly captures `service.env` before planning either service and reuses
+that snapshot. A confirmed-dead/reused same-generation coordinator can be withdrawn
+through guarded routing CAS; unavailable identity, a cutover breadcrumb or existing
+previous-generation custody still requires owner-led recovery.
 
 `tests/test_source_start_native.py` consumes an explicitly prepared canonical
 Source/profile snapshot; it never rebuilds one. Its opt-in generated-frontdoor

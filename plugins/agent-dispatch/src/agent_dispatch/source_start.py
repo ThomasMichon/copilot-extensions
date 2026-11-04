@@ -93,6 +93,18 @@ def accept_readiness(payload, *, handle, version: str, config_identity: str, act
     )
 
 
+def _route_owner_state(endpoint):
+    from zdd.diagnostics import process_start_time
+    from .companion import _process_exists
+
+    if type(endpoint.pid) is not int or endpoint.pid <= 0 or not endpoint.process_start_time:
+        return "unknown"
+    observed = process_start_time(endpoint.pid)
+    if observed is not None:
+        return "matching" if observed == endpoint.process_start_time else "reused"
+    return "unknown" if _process_exists(endpoint.pid) else "dead"
+
+
 def run_coordinator(cfg, routing_root, *, token, spawn_passive, pick_free_port, timeout=60.0):
     from types import SimpleNamespace
     from zdd import breadcrumb, routing
@@ -108,6 +120,26 @@ def run_coordinator(cfg, routing_root, *, token, spawn_passive, pick_free_port, 
         raise ValueError("Source startup cannot interpret incumbent routing ownership")
     identity = config_identity(cfg)
     handles = {}
+
+    if old is not None and old.version == __version__ and _route_owner_state(old) in {"dead", "reused"}:
+        if breadcrumb.read_breadcrumb(routing_root) is not None or table.get("previous") is not None:
+            raise RuntimeError("previous cutover remains unsettled; owner-led recovery is required")
+        stale = old
+
+        def refuse_stale(current):
+            require_selected_source()
+            if (
+                current != raw or routing.read_table(routing_root, strict=True) != table
+                or _route_owner_state(stale) not in {"dead", "reused"}
+            ):
+                return "stale coordinator ownership changed or is unconfirmed"
+            return None
+
+        routing.withdraw_active_guarded(
+            routing_root, expected_active=stale, refuse_current=refuse_stale,
+            lock_deadline=time.monotonic() + 5.0,
+        )
+        old, raw = None, None
 
     def probe(host, port, *, active=False):
         with DispatchClient(
@@ -254,7 +286,7 @@ def ensure_supervisor(root: Path, *, plan=_UNPLANNED) -> dict:
     from .config import run_dir
     from .single_instance import is_locked, lock_path_for, read_holder_pid
     from .supervisor_status_io import read_status, runtime_status_path
-    from .supervisor_source import read_prepared, spawn_candidate
+    from .supervisor_source import effective_settings, read_prepared, spawn_candidate
     from .client_authority import supervisor_authority_target
 
     if plan is _UNPLANNED:
@@ -273,6 +305,9 @@ def ensure_supervisor(root: Path, *, plan=_UNPLANNED) -> dict:
     authority = supervisor_authority_target(args)
     child = None
     prepared = read_prepared(root, __version__, scope, authority=authority)
+    expected_settings = effective_settings(args)
+    if prepared is not None and prepared.get("settings") != expected_settings:
+        raise RuntimeError("selected supervisor effective settings do not match startup plan")
     if prepared is None and not is_locked(lock):
         child = spawn_candidate(sys.executable, argv, root=root, version=__version__)
     deadline = time.monotonic() + 60.0
@@ -297,6 +332,8 @@ def ensure_supervisor(root: Path, *, plan=_UNPLANNED) -> dict:
             ):
                 prepared = read_prepared(root, __version__, scope, authority=authority, pid=pid)
                 if prepared is not None and prepared["generation"]["pid"] == pid:
+                    if prepared.get("settings") != expected_settings:
+                        raise RuntimeError("selected supervisor effective settings do not match startup plan")
                     return {"status": "ready", "pid": pid}
         if child is not None and child.poll() is not None and not is_locked(lock):
             raise RuntimeError("selected supervisor exited before application readiness")
@@ -307,14 +344,22 @@ def ensure_supervisor(root: Path, *, plan=_UNPLANNED) -> dict:
 
 def command(args: argparse.Namespace) -> int:
     from .coordinator_cli import _cmd_cutover
+    from .install_paths import capture_service_environment
 
     root = _path_name(require_selected_source())
-    plan = supervisor_plan(root)
-    result = _cmd_cutover(
-        argparse.Namespace(json=True, health_timeout=60.0, drain_timeout=60.0, force=False, recover=False),
-        source_replacement=True,
-    )
-    if result != 0:
-        return result
-    ensure_supervisor(root, plan=plan)
-    return 0
+    captured = capture_service_environment(root)
+    previous = dict(os.environ)
+    try:
+        os.environ.update(captured)
+        plan = supervisor_plan(root)
+        result = _cmd_cutover(
+            argparse.Namespace(json=True, health_timeout=60.0, drain_timeout=60.0, force=False, recover=False),
+            source_replacement=True, source_environment=captured,
+        )
+        if result != 0:
+            return result
+        ensure_supervisor(root, plan=plan)
+        return 0
+    finally:
+        os.environ.clear()
+        os.environ.update(previous)

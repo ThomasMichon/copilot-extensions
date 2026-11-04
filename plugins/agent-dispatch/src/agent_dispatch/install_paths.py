@@ -5,13 +5,19 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import sys
 from pathlib import Path
 
 INSTALL_DIR_ENV = "AGENT_DISPATCH_INSTALL_DIR"
 LEGACY_INSTALL_DIRNAME = ".agent-dispatch"  # marketplace-isolation: allow legacy-compatibility
 SCOPED_SERVICE_HASH_LENGTH = 12
 
-_POSIX_ENV_REFERENCE = re.compile(r"\$(\w+|\{[^}]*\})", re.ASCII)
+# Python 3.14's native POSIX scanner preserves an unterminated brace tail.
+_POSIX_ENV_REFERENCE = re.compile(
+    r"\$(\w+|\{[^}]*\})"
+    + (r"|(?P<unclosed>\$\{[^}]*$)" if sys.version_info >= (3, 14) else ""),
+    re.ASCII,
+)
 _WINDOWS_ENV_REFERENCE = re.compile(
     r"'[^']*(?:'|$)|\$\$|%%|\$\{([^}]*)\}|\$([A-Za-z0-9_-]+)|%([^%]*)%"
     r"|(?P<unclosed>\$\{[^}]*$|%[^%]*$)"
@@ -31,6 +37,8 @@ def _expand_service_env_value(value: str, env: dict[str, str]) -> str:
                 return token[0]
             name = next(group for group in match.groups() if group is not None).upper()
         else:
+            if match.lastgroup == "unclosed":
+                return token
             name = match.group(1)
             if name.startswith("{"):
                 name = name[1:-1]
@@ -73,7 +81,9 @@ def installation_suffix(path: Path | None = None) -> str:
     ]
 
 
-def apply_service_env_overlay(env: dict[str, str], install_dir_path: Path) -> dict[str, str]:
+def apply_service_env_overlay(
+    env: dict[str, str], install_dir_path: Path, *, strict: bool = False,
+) -> dict[str, str]:
     """Overlay ``service.env`` (token / host-port pins) onto ``env`` in place.
 
     Every detached coordinator spawn -- the first-use bootstrap in
@@ -97,6 +107,16 @@ def apply_service_env_overlay(env: dict[str, str], install_dir_path: Path) -> di
     Returns ``env`` for convenient chaining; mutates it in place.
     """
     env_file = install_dir_path / "service.env"
+    if strict:
+        try:
+            env_file.lstat()
+        except FileNotFoundError:
+            return env
+        from .registrar_discovery import _parse_env_file
+
+        for key, value in _parse_env_file(env_file, strict=True).items():
+            env[key.upper() if os.name == "nt" else key] = _expand_service_env_value(value, env)
+        return env
     if env_file.is_file():
         try:
             for line in env_file.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -111,3 +131,24 @@ def apply_service_env_overlay(env: dict[str, str], install_dir_path: Path) -> di
         except OSError:
             pass
     return env
+
+
+def capture_service_environment(root: Path) -> dict[str, str]:
+    from . import config
+
+    original = dict(os.environ)
+    effective = apply_service_env_overlay(dict(original), root, strict=True)
+    if effective.get(INSTALL_DIR_ENV) != original.get(INSTALL_DIR_ENV) and (
+        not effective.get(INSTALL_DIR_ENV) or Path(effective[INSTALL_DIR_ENV]).expanduser() != root
+    ):
+        raise ValueError("service.env cannot redirect the selected installation")
+    key = "COPILOT_EXTENSIONS_CONTEXT"
+    if effective.get(key, "").strip() != original.get(key, "").strip():
+        raise ValueError("service.env cannot change installation context")
+    routing = config.routing_dir()
+    key = config.ROUTING_DIR_ENV
+    if effective.get(key) != original.get(key) and Path(effective.get(key) or root).expanduser() != routing:
+        raise ValueError("service.env cannot redirect the selected routing directory")
+    effective[INSTALL_DIR_ENV] = str(root)
+    effective[key] = str(routing)
+    return effective

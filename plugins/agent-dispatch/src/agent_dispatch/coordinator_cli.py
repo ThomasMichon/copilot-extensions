@@ -346,6 +346,7 @@ def _cmd_cutover(
     args: argparse.Namespace, *, conditional: ConditionalCutover | None = None,
     routing_dir: Path | None = None, install_root: Path | None = None,
     source_replacement: bool = False,
+    source_environment: dict[str, str] | None = None,
 ) -> int:
     """Zero-downtime graceful cutover -- shared by ``deploy`` and ``_cutover``."""
     from zdd import breadcrumb
@@ -428,8 +429,9 @@ def _cmd_cutover(
     from .install_paths import apply_service_env_overlay
     runtime_root = policy_root
     captured_routing_dir = _config.routing_dir()
-    effective_env = dict(os.environ)
-    apply_service_env_overlay(effective_env, runtime_root)
+    effective_env = dict(os.environ if source_environment is None else source_environment)
+    if source_environment is None:
+        apply_service_env_overlay(effective_env, runtime_root)
     proposed_root = effective_env.get(INSTALL_DIR_ENV)
     if proposed_root != os.environ.get(INSTALL_DIR_ENV) and (
         not proposed_root or Path(proposed_root).expanduser() != policy_root
