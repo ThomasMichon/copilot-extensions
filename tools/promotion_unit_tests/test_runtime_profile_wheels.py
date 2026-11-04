@@ -228,6 +228,45 @@ def test_compatible_target_release_adapter_retains_the_authenticated_profile(mon
     assert selected.subject_sha256 == "sha256:" + "6" * 64
 
 
+def test_compatible_target_planner_keeps_strict_default_and_refusal(monkeypatch):
+    import runtime_profile_policy as planner
+    import runtime_profile_release as authority
+
+    record = _record()
+    record.update(
+        mode="artifact", approval_source=authority.APPROVAL_SOURCE,
+        artifact={"artifact_id": "sha256:" + "4" * 64, "manifest_sha256": "sha256:" + "5" * 64},
+    )
+    index = {
+        "artifacts": [{"artifact_id": record["artifact"]["artifact_id"]}],
+        "runtime_profiles": {"schema": authority.SCHEMA, "version": 1, "profiles": [record]},
+    }
+    monkeypatch.setattr(authority, "_attested_index", lambda *_args, **_kwargs: (index, "sha256:" + "6" * 64))
+    monkeypatch.setattr(planner, "resolve_runtime_profile_policy", lambda **_kwargs: {
+        "runtimeProfiles": {"status": "ready", "selection": {"backend": "cpu", "allowSourceFallback": True}},
+    })
+    target = deepcopy(record["target"])
+    target["environment"]["platform_version"] = "10.0.2"
+    arguments = dict(
+        installation={}, release_index=Path("selected-index.json"), repository="example/plugins",
+        signer_digest="a" * 40, source_digest="a" * 40, source_ref="refs/heads/main",
+        release=record["release"], artifact=record["artifact"], target=target,
+        component=record["component"], roots=record["roots"], max_subject_bytes=1 << 20,
+    )
+    strict = planner.plan_installation_profile(**arguments)
+    assert strict.source_trigger == "approved-profile-unavailable"
+    selected = planner.plan_installation_profile(**arguments, allow_compatible_target=True)
+    assert selected.release_selection.selected.profile == validate_profile(record)
+    target["tags"] = ["cp312-cp312-win_amd64"]
+    assert planner.plan_installation_profile(
+        **arguments, allow_compatible_target=True,
+    ).source_trigger == "approved-profile-unavailable"
+    with pytest.raises(ProfileError, match="must be explicit"):
+        planner.plan_installation_profile(
+            **(arguments | {"release_index": None}), allow_compatible_target="yes",
+        )
+
+
 def test_shared_token_parser_retains_builder_numeric_version_policy():
     from pathlib import Path
     from artifact_source_build import PromotionArtifactError, parse_wheel_identity
