@@ -196,12 +196,21 @@ installer.register_project(sys.argv[3], Path(sys.argv[4]), 'main')
 
 
 def test_registry_install_manifest_git_probes_remain_headless(authority_state, monkeypatch):
+    from agent_worktrees import _command_binding
+
     _config, _record, root, _registry, _ledgers = authority_state
     monkeypatch.setattr(installer, "install_dir", lambda: root)
     monkeypatch.setattr(installer, "find_package_source", lambda *a: root / "plugin" / "src" / "agent_worktrees")
     monkeypatch.setattr(installer, "_source_kind", lambda *a: "local")
     monkeypatch.setattr(installer, "_payload_root", lambda *a: root / "missing-payload")
     observed = []
+    manifests = []
+
+    def publish(_primitive, manifest, **kwargs):
+        manifests.append(manifest)
+        return {"status": "unresolved", "reason": "isolated headless-probe fixture"}
+
+    monkeypatch.setattr(_command_binding, "write_legacy_manifest", publish)
     monkeypatch.setenv("GIT_DIR", str(root / "another-repository" / ".git"))
     monkeypatch.setenv("GIT_WORK_TREE", str(root / "another-repository"))
 
@@ -216,6 +225,7 @@ def test_registry_install_manifest_git_probes_remain_headless(authority_state, m
     monkeypatch.setattr(installer.subprocess, "run", run)
     installer.write_deploy_manifest(root, "example-machine")
     assert len(observed) == 3
+    assert len(manifests) == 1 and manifests[0]["source"]["kind"] == "local"
 
 
 def test_doctor_repairs_hold_full_registry_authority(authority_state, monkeypatch):

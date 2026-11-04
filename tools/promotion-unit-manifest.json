@@ -4558,7 +4558,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/output.py": "c8bdaf7841a20e3884acde928326a38ea4bf448f2d818d7e7010262139e8429a",
         "plugins/agent-worktrees/src/agent_worktrees/pr_observation_config.py": "ee6c3fde312e21f30c9825c131628c15683c9cd0deab2ae1d219deaa1d7c4eaf",
         "plugins/agent-worktrees/src/agent_worktrees/pr_publication_config.py": "90a5caff767b47717774f41e2cfae2d91aa0a15c10efd59903a75c9d3de41558",
-        "plugins/agent-worktrees/src/agent_worktrees/pr_publish.py": "1ccbfd740bb0b3aa035c33566d61c326d84b7df5d2f49f32b4c9054f6f086382",
+        "plugins/agent-worktrees/src/agent_worktrees/pr_publish.py": "af2466bd58d2c543ed647340a6554d039602af20a3cea4803b8995e4374ed626",
         "plugins/agent-worktrees/src/agent_worktrees/pr_related_binding.py": "9f15a66b015b1ca0dfb29f9bf483f4b4baed868647d2f8334627ae3803fa6822",
         "plugins/agent-worktrees/src/agent_worktrees/project_state.py": "599ee5165a9e7e825de150bda88931cac943d1cc66cae6990231127339ad662b",
         "plugins/agent-worktrees/src/agent_worktrees/publication_deadline.py": "6cf2c2553dd588fc3d32f42549c6c8d77646ac20c80c6e6d3f1395e4b2df735b",
