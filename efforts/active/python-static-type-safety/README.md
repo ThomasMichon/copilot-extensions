@@ -8,7 +8,7 @@
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
 - **Coverage:** [Portfolio tracker and merged lockdown records](coverage.md)
-- **Current slice:** Versioned Runtime and persistent dual-version checker (#10331), and retained effort-helper (#10215) qualification. SSH service (#10211), PR service (#10204), Index service (#10206), Credential Relay (#10222), Harness Knowledge (#10185), Context Handoff (#10179), Dispatch service (#10184), Devcontainer (#10183), AI Attribution (#10171), Venue Copilot (#10166), Plugin Resolve (#10141), Plugin Activation (#10108), Machine Transport (#10107), Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
+- **Current slice:** Versioned Runtime and persistent dual-version checker (#10331), and the Copilot Extensions Harness payload helpers/tests (#10362). Retained effort helpers (#10215), SSH service (#10211), PR service (#10204), Index service (#10206), Credential Relay (#10222), Harness Knowledge (#10185), Context Handoff (#10179), Dispatch service (#10184), Devcontainer (#10183), AI Attribution (#10171), Venue Copilot (#10166), Plugin Resolve (#10141), Plugin Activation (#10108), Machine Transport (#10107), Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -32,7 +32,7 @@ definition of success.
 
 - **Topology:** Independent per-slice PRs, never a concurrently edited shared staging branch. The lead may integrate non-overlapping test cohorts into one bounded reviewed slice after their isolated validation.
 - **Host (owns PRs):** `lead` owns its PRs and verifies completion of delegated PRs.
-- **Delegates:** The Versioned Runtime/checker slice owner qualifies independently in a dedicated worktree; SSH, PR and Index service admissions have merged. Heavy unit/native qualification is staggered for actual test capacity, not a shared PR merge queue. Each owner receives an explicit bounded qualification and publication assignment; the lead retains integration, shared coverage/global documentation, the effort and full completion judgment. Completed children are finalized only after their merged evidence returns to this tracker.
+- **Delegates:** Versioned Runtime/checker and the Copilot Extensions Harness payload helpers/tests qualify independently in dedicated worktrees; retained effort-helper, SSH, PR and Index service admissions have merged. Heavy unit/native qualification is staggered for actual test capacity, not a shared PR merge queue. Each owner receives an explicit bounded qualification and publication assignment; the lead retains integration, shared coverage/global documentation, the effort and full completion judgment. Completed children are finalized only after their merged evidence returns to this tracker.
 - **Handoff:** A merged slice returns to the canonical README, updates its Plan/Validation/Journal, then selects the next unresolved item. A continuation retains #9807, this README, the current slice, live PRs and exactly one next action.
 - Existing contributor PRs are reviewed/coordinated, not superseded. Shared-library changes precede dependent activations; unrelated leaf activations may proceed independently.
 
@@ -191,6 +191,8 @@ rewrite.
 - [x] Strictly admit Context Handoff's complete six-file Python helper/test portfolio (#10179 / merged #10192), preserving native continuity and sync controls.
 - [x] Strictly admit all three devcontainer helper/test files on their existing Python 3.11 minimum (#10183 / merged #10193).
 - [x] Strictly admit all nine Harness Knowledge binding/overlay helper and test files, preserving Python 3.10 copied-helper compatibility (#10185 / merged #10201).
+- [x] Strictly admit all five retained effort-helper source/test files on their existing Python 3.11 minimum, preserving native measurement and refusal controls (#10215 / merged #10360).
+- [ ] Strictly admit the Copilot Extensions Harness plugin's complete Python helper/test scope, preserving its actual helper minimums and payload ownership (#10362).
 - [ ] Admit repository tools and CI helpers with unambiguous module identities and strict local/CI behavior.
 - [ ] Admit tests in bounded package/fixture-family PRs, typing fixtures, doubles and monkeypatch interfaces without weakening assertions.
 - [ ] Admit installer/bootstrap, hooks, payload-only Python, `.devcontainer`, effort-hosted executable helpers and every remaining inventory path.
@@ -218,6 +220,7 @@ rewrite.
 - [x] Index service preserves its original function/assertion contracts across both strict targets, Python 3.10 native/copy tests, composed-source qualification and fresh exact-input source CI; the eight original skips receive no additional credit (#10327).
 - [x] PR service preserves all 81 original functions and 114 assertion expressions across both strict targets, actual Python 3.10 installed/native tests and fresh exact-input source CI (#10332).
 - [x] SSH service preserves all 254 original function contracts, 299 assertion expressions and four embedded literals across both strict targets, actual Python 3.10 Linux/Windows qualification and fresh exact-input source CI (#10348).
+- [x] Retained effort helpers preserve all 39 original function contracts and 31 assertion expressions across both strict targets, actual Python 3.11 Linux/Windows controls, composed-source qualification and fresh exact-input source CI (#10360).
 - [ ] Persistent dual-version controls reject a type error confined to the 3.11 TOML branch on both platforms through local/source/candidate entry points while preserving 3.10 runtime behavior (#10331).
 - [x] Fresh checker preparation and a credential-free local subprocess check exercise the real developer command without executing product code or collecting tests.
 - [x] Required source gate actually rejects a type regression on activated code.
@@ -2656,3 +2659,40 @@ composition prerequisites, and review/validation rules.
   remains prepared and independently uncredited while its metadata and native,
   copied-source and composed qualification gates are resolved. This effort,
   every unfinished Plan/Validation item and #9807 remain Active.
+
+### 2026-11-03 - Retained effort helpers merged; payload helpers selected
+
+- #10360 merged as `78d562784d698cba676f95d50169a994f33b932d` after
+  actual Copilot approval on exact head
+  `efbfd3fec5d67f0fdfb68d714e1216fedc01ace2`, green required CI run
+  `41785715387` and zero review threads. The actual merged commit retains
+  both required trailers. The source-attribution and normal publication
+  checks pass; no CI gate is bypassed.
+- Fresh provider packet `0a86b543a1c0eafb2f47b08f44bd324232ed0e56`
+  passes **3,972 units in 63.509 seconds**, 571 admitted input fingerprints,
+  236 positive coverage targets and zero effects. Canonical verification
+  uses the actual provider Git manifest and merge-candidate parent identity.
+  All 571 actual merged input blobs also match, and all five actual merged
+  helper/test files equal the independently native-qualified source bytes.
+- Both five-file strict analysis targets pass on the existing Python 3.11
+  minimum. Actual Linux and Windows Python 3.11 each pass all **15 native
+  controls**, including disposable-runtime payload ownership and optimized
+  interpreter refusal checks. All 39 original function/default/decorator
+  contracts and 31 assertion expressions remain. The unfiltered `RECORD`
+  read repairs a coupled refusal gap rather than weakening a negative test.
+- Refreshed composed-source qualification passes the current **3,972-node**
+  packet against 571 development inputs, 1,907 materialized candidate inputs
+  and 720 canonical/copied targets, with caller-derived admission and zero
+  effects. Exact disposable containers and volumes are retired. This is
+  current source qualification, not a rerun or relabeling of the historical
+  two-consumer installation experiment.
+- The complete Plan and Validation Plan were reread. Every tracker row matches
+  the refreshed merged inventory: **40 / 68 strict projects (58.8%)** and
+  **382 / 7,818 physical Python files (4.9%)**. Twenty-eight projects remain
+  pending and none are basic. Five helper files are newly locked; two newly
+  inventoried Codespaces-plugin files remain pending under that owner's row.
+- #10362 selects the independent Copilot Extensions Harness payload-helper
+  project, initially 17 files, for bounded source preparation. It excludes
+  the shared checker and generated runtime family already owned by #10331.
+  Both slices remain uncredited until their own review, applicable native/
+  emitted-copy qualification and merge. This effort and #9807 remain Active.
