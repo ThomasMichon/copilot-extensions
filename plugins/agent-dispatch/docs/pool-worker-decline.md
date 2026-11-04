@@ -11,6 +11,13 @@ provider boundary, not complete remote-host or installed/native qualification.
 
 ## Ordinary worker and existing supervisor
 
+Fresh ordinary pool workers receive a workspace allocated through the
+Dispatch-aware Worktrees owner, with immutable attempt attribution and
+coordinator `created` ownership. Bridge embodies that exact workspace rather
+than allocating an unattributed standalone one. Historical standalone
+allocations without those facts remain blocked; they are not relabeled or
+retroactively adopted by a decline request.
+
 The ordinary `decline` command requires `--pool-generation`,
 `--owner-session-id`, a meaningful `--note`, and either repeatable exact
 `--exclude` scopes or `--exclude-self worktree|machine`. It resolves its own

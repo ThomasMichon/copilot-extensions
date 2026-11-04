@@ -78,6 +78,26 @@ back to the legacy reservation API. A malformed successful reply reports
 HTTP-style `502` with an explicitly unknown outcome; a committed claim remains
 retained at its provider.
 
+Fresh ordinary Bridge pool startup allocates its workspace through the existing
+Dispatch-aware Worktrees creation owner before asking Bridge to embody the
+exact workspace. The original task, reservation, attempt, supervisor and driver
+are recorded at creation; the coordinator records `created` ownership before
+any native process. The existing per-allocation no-pair option is applied by
+that same owner, not forwarded as an unsupported Bridge argument.
+Both owners retain the original creation key. A conflicting older creation or
+an unconfirmed owner reply retains the claim without another key, replacement
+workspace or native launch. Existing retained agents keep their original
+invocation and allocation; missing historical attribution is not retrofitted.
+The same-key Bridge owner retains the original positively sessionless allocation
+snapshot. A lost creation reply or uncommitted coordinator storage does not
+force a new sessionless read against the native just created: recovery first
+asks that original owner for its keyed result, then validates the complete
+original attempt, incarnation and returned native before storing or sending.
+Bridge still refuses an unrelated live holder, changed head or conflicting key.
+Owned creation also rechecks current task admission immediately before calling
+Bridge, including when hosting lookup retained a workspace but the task became
+held. A keyed recovery receipt cannot authorize a newly held task's launch.
+
 ## Managed ordinary allocator (opt-in)
 
 `AGENT_DISPATCH_POOL_ALLOCATION` is default **off**, independent of

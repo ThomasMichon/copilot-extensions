@@ -695,14 +695,13 @@ def make_headless_spawn(
         from .ordinary_invocation import startup_seed
         try:
             seed = startup_seed(task, client, route=route, all_repos=all_repos)
-            if no_pair:
-                raise bridge.BridgeUnavailable("ordinary Bridge create cannot express the no-pair allocation override")
             handle = ordinary_bridge.start(
                 task, client=task.get("_spawn_client"),
                 agent=agent,
                 charter=charter,
                 prompt=seed,
                 project=task.get("spawn_allocation_project") or embody.project_for_task(task),
+                no_pair=no_pair,
             )
         except ordinary_bridge.CreatedAgentUnrecorded as exc:
             return False, {"error": str(exc), "retained": True}
