@@ -42,6 +42,22 @@ def copy_workspace(tmp_path, monkeypatch, _copy_workspace_seed):
     return root, home
 
 
+@pytest.fixture
+def registered_copy_workspace(copy_workspace, monkeypatch):
+    from agent_worktrees import repos
+
+    root, home = copy_workspace
+    monkeypatch.setenv("AGENT_HOME", str(home))
+    write_json(home / ".agent-worktrees" / "repos.yaml", {
+        "repos": {"example": {
+            "class": "worktree",
+            repos._current_platform(): str(root),
+        }},
+    })
+    write_json(root / ".copilot-extensions" / "agent-worktrees" / "config.yaml", {})
+    return root, home
+
+
 @pytest.fixture(scope="session")
 def _copy_workspace_seed(tmp_path_factory):
     """Reuse only empty Git setup, never payloads or publication state."""
@@ -289,10 +305,10 @@ def test_partial_publication_can_update_its_proven_existing_source(copy_workspac
 @pytest.mark.parametrize("publisher", [
     "backup", "foreground", "foreground-partial", "post-copy-failure",
 ])
-def test_late_worker_completion_reaches_actual_post_tool_hook(copy_workspace, monkeypatch, publisher):
+def test_late_worker_completion_reaches_actual_post_tool_hook(registered_copy_workspace, monkeypatch, publisher):
     from agent_worktrees import local_cache_worker
 
-    root, home = copy_workspace
+    root, home = registered_copy_workspace
     _, output = provider(root, home, content=b"fresh guidance")
     session = home / ".copilot" / "session-state" / "example-session"
     session.mkdir(parents=True)
@@ -365,11 +381,11 @@ def test_sessionstart_does_not_probe_instruction_or_git_fingerprints(copy_worksp
     assert (session / "local-guidance-watch.json").is_file()
 
 
-def test_notice_observes_publication_after_backup_result(copy_workspace):
+def test_notice_observes_publication_after_backup_result(registered_copy_workspace):
     from agent_worktrees import local_cache_worker
     from test_nudge_status import nudge
 
-    root, home = copy_workspace
+    root, home = registered_copy_workspace
     template, _ = provider(root, home)
     initial = lcr.prepare_for_launch(root)
     session = home / ".copilot/session-state/later-publication"
@@ -875,10 +891,10 @@ def test_publication_resolves_sources_after_acquiring_lock(copy_workspace, monke
     assert output.read_bytes() == b"new snapshot"
 
 
-def test_active_worker_repeats_copy_for_overlapping_sessionstart(copy_workspace, monkeypatch):
+def test_active_worker_repeats_copy_for_overlapping_sessionstart(registered_copy_workspace, monkeypatch):
     from agent_worktrees import local_cache_worker as worker
 
-    root, home = copy_workspace
+    root, home = registered_copy_workspace
     template, output = provider(root, home, content=b"old instructions")
     directory = lcr._worker_directory(root)
     directory.mkdir()

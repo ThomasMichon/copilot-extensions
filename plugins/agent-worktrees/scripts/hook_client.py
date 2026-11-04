@@ -779,9 +779,24 @@ def _fallback_pre(
 def _fallback_post(payload: dict, home: Path) -> dict:
     contexts = []
     nudge = _load_sibling("nudge_status.py")
+    tracking_lookup = None
+    find_tracking = getattr(nudge, "_find_tracking_yaml", None)
+    if callable(find_tracking):
+        records = {}
+
+        def tracking_lookup(cwd, home):
+            key = cwd or os.getcwd()
+            if key not in records:
+                found = find_tracking(cwd, home)
+                # The legacy resolver also returns None for resolution failures.
+                if found is None:
+                    return None
+                records[key] = found
+            return records[key]
+
     if nudge is not None:
         try:
-            text = nudge.decide(payload, home=home)
+            text = nudge.decide(payload, home=home, tracking_lookup=tracking_lookup)
             if text:
                 contexts.append(text)
         except Exception:
@@ -789,7 +804,7 @@ def _fallback_post(payload: dict, home: Path) -> dict:
     binding = _load_sibling("bind_nudge.py")
     if binding is not None:
         try:
-            text = binding.decide(payload, home=home)
+            text = binding.decide(payload, home=home, tracking_lookup=tracking_lookup)
             if text:
                 contexts.append(text)
         except Exception:
