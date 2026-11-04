@@ -55,6 +55,27 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
+The six finite native-timeout families #6662/#6663/#6690/#6900/#9442/#9815
+below continue through the SAME primary maintainer, Phase 4 Dispatch/
+Worktrees/Manager/Bridge fixture waves, Phase 5 owning-runner accounting and
+Phase 7 migration-intake/domain review. Preserve OPEN #1303, all 240
+incumbent check states/13 checked, complete history, original alternatives
+and actual fixture, runner, production, platform, source/audit/cohort/
+periodic-failure/native/release and resource custodians. #9815's broader
+PR-watch service/source duties remain separate; this intake does not appoint
+an implementer, merge different causes, enroll execution or transfer custody.
+
+Ordinary review and ACTUAL complete direct Plan/local AND level-two ROOT
+global Validation/Coordination/dated Journal delivery, followed by permitted
+whole-current receiving/history/source/actor/custody readback, precede EACH
+separate administrative source judgment. Unknown scope, condition, delivery,
+owner or retained OPEN obligation means KEEP. Documentation is not a repaired
+test or native/installed PASS. Required CI stays unit-only; hosted Windows
+execution remains quiesced, with separately admitted periodic/explicit/native
+tiers and all original process, time, storage and cleanup budgets unchanged.
+No new whole-portfolio, every-host or generic acknowledgement prerequisite
+is added to a finite family; this ROOT's own completion gate remains intact.
+
 The four finite fixture/runner contracts below use the SAME primary
 maintainer and existing Phase 4 Logger/shared-fixture waves (#7243/#9614),
 Phase 5 owning runner/cache/disposal work (#9436/#10225), and Phase 7
@@ -366,6 +387,179 @@ This finite case enters the existing Phase4 payload/harness/tools wave through P
 
 Sources: https://github.com/ThomasMichon/copilot-extensions/issues/5921 and https://github.com/ThomasMichon/copilot-extensions/issues/5921#issuecomment-6331529524 . Existing OPEN #1303 remains the live portfolio coordination token.
 
+
+#### Six distinct finite native-timeout families
+
+These are direct unchecked tracking obligations under the existing Phase 4
+waves and Phase 7 intake, not a common-cause claim or a new native programme.
+The [whole-contract comparison](../backlog-reconciliation/native-timeout-cohort.md)
+records original failures, completed diagnostic/source gains and the limited
+meaning of sixteen completed-work relations. Same-source isolated or broad
+passes remain evidence, not proof of the unknown cause.
+
+##### #6662 - Dispatch completion boundary
+
+- [ ] **N6662-P1:** Retain Windows
+  `test_completion_records_worker_failure_and_clears_inherited_staging`,
+  both original 15-second waits for `completed_at` in
+  `reconcile-status.json`, and every producer/consumer, failure-result,
+  inherited-staging and cleanup assertion. Keep the focused and broader
+  passes distinct from the original two failures.
+- [ ] **N6662-P2:** Credit completed #6665 bounded stderr, last-status,
+  synthetic-receipt and log-tail diagnostics; do not request the same patch
+  again. Through the existing owner, resolve the finite remaining failing
+  boundary/correction OR record an attributable requirement-preserving
+  disposition of its unknown cause. Silence does not identify disk,
+  filesystem, allocator or service failure.
+- [ ] **N6662-P3:** Use the least expensive faithful existing fixture/runner
+  boundary, preserving real completion/result delivery and unchanged
+  deadlines. #9347 Index recovery, #10144 Bridge mutation fixtures and
+  #10264 extracted installer admission are different contracts, not this
+  completion receipt or authority to run hosted Windows.
+- [ ] **N6662-V1:** When separately authorized, qualify the actual original
+  completion/status consumer with bounded failure and successful controls;
+  retain source/selection, last status, actual elapsed stage, primary and
+  cleanup outcomes. A passing retry alone cannot explain the earlier
+  failures; no new native run is required by documentary intake.
+- [ ] **N6662-V2:** Record the causal correction OR explicit retained unknown
+  disposition, preserve all original assertions and 15 seconds, and distinguish
+  completed diagnostic credit from actual test acceptance. No deadline
+  increase, omitted test or generic CI pass substitutes for this finite result.
+
+##### #6663 - Real twelve-allocator lock admission
+
+- [ ] **N6663-P1:** Preserve
+  `test_concurrent_allocation_serializes_bag_positions`, twelve ACTUAL
+  allocator subprocesses, both original two-second lock-admission failures,
+  all two-generation/six-profile-per-generation position, capacity and
+  containment assertions, and the production two-second bound.
+- [ ] **N6663-P2:** Keep the original 210-pass/two-failure observation,
+  same-source isolated 1.78-second pass and later complete 211-case pass
+  distinct. Diagnose the actual lock boundary IF the failure recurs,
+  under its existing owner; do not create a fresh mandatory native campaign,
+  infer CPU/filesystem/SQLite causality or widen the deadline.
+- [ ] **N6663-P3:** Preserve the real-process concurrency contract rather
+  than replacing it with #6667's six reader fixtures, #9693 generation-cache
+  work, #10319 decline closeout or #10262's actor-free/faked lease controls.
+  Their bounded credit neither repairs nor duplicates this admission case.
+- [ ] **N6663-V1:** On an authorized recurrence, retain actual per-allocator
+  admission/position, source, elapsed and cleanup evidence for all twelve,
+  both generations and six profiles, without weakening capacity/uniqueness
+  assertions or the two-second production limit.
+- [ ] **N6663-V2:** Distinguish reproduced failure/causal correction from
+  unchanged passing observations and an unavailable or non-recurrent case.
+  Preserve the source's CONDITIONAL recurrence requirement and existing
+  containment/tier/owner boundaries; no newly unconditional trial is added.
+
+##### #6690 - Version-change Bash registration child
+
+- [ ] **N6690-P1:** Preserve the exact Windows `subprocess.communicate()`
+  timeout at the version-change Bash registration child and original source
+  `fa0c29604ef05beb867a567e6c539eb771bc46b8`, verified cleanup and unchanged
+  bounds. Same-source isolated 46.57-second and 159-case selection passes
+  are not causal repairs; #6682's Linux authority-reader fixture is separate.
+- [ ] **N6690-P2:** Diagnose the actual child, captured-stream/pipe and
+  registration boundary before selecting a supported correction. Preserve
+  real Bash consumption, producer-version/session/CWD coalescing identity,
+  same-launch reuse, version invalidation, empty context on replay and owning
+  shutdown. Do not mock past the child or infer cause from empty output.
+- [ ] **N6690-P3:** Keep #10305's opt-in native unit-packet tooling and
+  #10065's prerequisite diagnostic credit separate. Protected whole-message/
+  source holds remain in force; no linked subset retry, whole Picker
+  completion or new execution/deployment authority follows from intake.
+- [ ] **N6690-V1:** In the existing separately authorized bounded lane,
+  exercise the actual version-change child and unchanged coalescing/replay/
+  stream/cleanup controls. Attribute stage/exit/timeout and primary/cleanup
+  outcomes to the real consumer; fixture collection or an unrelated pass
+  cannot qualify this Windows boundary.
+- [ ] **N6690-V2:** Retain exact source/selection, original failing and passing
+  observations, unknown cause and all original limits until an attributable
+  finite correction or requirement-preserving disposition is established.
+  No threshold increase, skip, held-source study or installed acceptance is
+  licensed by this tracking amendment.
+
+##### #6900 - ConciseView error latency and pane acceptance
+
+- [ ] **N6900-P1:** Preserve measured 13.272-second `WriteError`,
+  15.188-second total against 15 seconds, approximately 47-millisecond lock
+  and six-millisecond catch. Those measurements contradict lock-delay
+  attribution, not every native cause. Retain NormalView/minimal-File
+  2.453-second total/0.355-second inside and ConciseView/Command
+  2.391-second controls as DIFFERENT invocations.
+- [ ] **N6900-P2:** Diagnose the ACTUAL error-output/pane boundary through a
+  minimal faithful regression OR owning isolated-fixture correction. Preserve
+  exit 3, sanitized stderr, pane exclusivity, deletion/receipt behavior,
+  consumer 15 seconds and original item 30 seconds; do not replace broader
+  lifecycle acceptance or silently change a host's default error view.
+- [ ] **N6900-P3:** Credit #6904's merged timing/sink work only at its actual
+  nonpassing pane scope; #9470's literal pane environment and #9896's
+  process-only/desktop distinction and `pump()` are different contracts.
+  Persistent User-scope OneDrive environment drift remains unattributed:
+  no rollback, environment mutation, causal assertion or protected retry.
+- [ ] **N6900-V1:** In an independently authorized existing lane, exercise
+  actual sanitized error emission and pane/result/receipt assertions with
+  the original consumer/item budgets. Keep primary, diagnostic and cleanup
+  outcomes distinct; timing instrumentation alone is not pane acceptance.
+- [ ] **N6900-V2:** Compare faithful invocation/error-view controls without
+  altering machine settings, preserve failed measurements and unknowns, and
+  record the narrow correction OR explicitly retained causal uncertainty.
+  Neither an isolated green nor a broader lifecycle result waives this case.
+
+##### #9442 - Individual queued-handoff worker budget
+
+- [ ] **N9442-P1:** Preserve
+  `actual_queued_engine_keeps_each_scope_and_original_invocation`, both
+  original native worker failures at the INDIVIDUAL 20-second limit,
+  intervening 72-case pass and later two-case 21.64-second aggregate.
+  Keep actual scope/original-invocation, Job, process and cleanup assertions.
+- [ ] **N9442-P2:** Through the existing owner, diagnose actual monotonic
+  stage boundaries and child/queue/pipe/import/installer handoff without
+  inferring any cause or child absence from empty output. Resolve that finite
+  boundary OR retain an attributable requirement-preserving unknown
+  disposition; #9436's cached-rebuild/preparation denial remains separate.
+- [ ] **N9442-P3:** Credit ONLY the later aggregate item-30 to item-60
+  correction for two up-to-20-second workers. It neither increases each
+  worker's 20 seconds nor explains their original failures. #10167 history
+  avoidance, #9669 bootstrap holds and #9913's Python-free plan are not
+  causal receipts or permission to relax required CI.
+- [ ] **N9442-V1:** At the separately authorized actual queued-engine
+  consumer, retain both scope/invocation identities, monotonic stages,
+  individual elapsed limits and Job/cleanup outcomes; distinguish individual
+  timeout from aggregate runner interruption without launching a new programme.
+- [ ] **N9442-V2:** Preserve original failures, intervening and later passes,
+  the finite aggregate-budget credit and unresolved individual cause.
+  Empty output, a passing aggregate or a source-only plan cannot establish
+  absent child, repaired preparation or unchanged per-worker acceptance.
+
+##### #9815 - Four real readers entering before stop
+
+- [ ] **N9815-P1:** Retain the three-second wait for FOUR real readers to
+  enter and both combined 210-case/209-pass/one-timeout failures. Keep the
+  unchanged isolated pass, 45-case service pass, coupled remainder 165
+  and earlier combined 205/207 passes distinct from the failed selections.
+- [ ] **N9815-P2:** Correct deterministic real-thread startup/scheduling
+  through the owning fixture, retaining writer ownership until ALL reads
+  settle and the actual drain/cancellation assertions. Preserve watchdog,
+  operation, process and cleanup bounds; do not raise the three-second
+  deadline, skip a selected case or mock away real concurrency.
+- [ ] **N9815-P3:** Preserve #9795's actual current-head required CI as an
+  independent gate; isolated packets do not waive it. #9641's generation
+  plan, #9762's installer progress and #10264's extracted installer updates
+  do not test this entry condition. Broader PR-watch service/source/resource
+  obligations stay with their existing owners outside this finite fixture.
+- [ ] **N9815-V1:** In the separately authorized existing lane, reproduce
+  actual four-reader startup and full writer/drain/cancel settlement with
+  unchanged deadlines, original isolated and combined selected controls and
+  truthful failure/cleanup reporting. No isolated pass is a combined PASS.
+- [ ] **N9815-V2:** Record exact source/selection and available current-head
+  required CI independently from fixture outcomes; keep failed, skipped,
+  unavailable and unexecuted cases explicit. Tracking delivery, a different
+  service repair or unrelated whole-portfolio progress is not this acceptance.
+
+Sources: #6662, #6663, #6690, #6900, #9442 and #9815, each with its complete
+original and refinement. OPEN #1303 remains the live portfolio coordination
+token; historical source trackers are not required live claim tokens after
+a separately qualified administrative supersession.
 
 ### Phase 5 — Tiered developer and review workflows
 
@@ -1440,6 +1634,45 @@ Phase 7 intake; this is not #7643's already-attributed external mapping.
 
 ## Validation Plan
 
+- [ ] **N6662-G:** Resolve EVERY N6662 Plan/local Validation and the six-family
+  Coordination clauses at the original 15-second Dispatch completion consumer:
+  retained result/staging/cleanup assertions, credited #6665 diagnostics and
+  attributable causal correction OR explicit requirement-preserving unknown
+  disposition. Different fixtures and isolated/broad passes are not causal proof.
+- [ ] **N6663-G:** Resolve EVERY N6663 Plan/local Validation and Coordination
+  clause while preserving CONDITIONAL IF-RECURRENCE diagnosis, twelve real
+  allocators, both generations/six profiles, actual positions/capacity and
+  production two-second admission/containment. No fresh unconditional native
+  programme, mocked lease substitute or inferred CPU/filesystem cause is added.
+- [ ] **N6690-G:** Resolve EVERY N6690 Plan/local Validation and Coordination
+  clause at the actual version-change Bash child/stream/registration boundary,
+  preserving coalescing identity, reuse/invalidation/replay and owning cleanup.
+  Retain original source, bounds, failed/passing distinctions and protected
+  holds; Linux fixture/tooling/prerequisite gains are not native child acceptance.
+- [ ] **N6900-G:** Resolve EVERY N6900 Plan/local Validation and Coordination
+  clause through the original error/pane consumer and minimal faithful
+  regression OR owning-fixture correction: exact timing/invocation distinctions,
+  exit 3/sanitized stderr/pane/deletion/receipt and consumer-15/item-30 limits.
+  Preserve unattributed environment drift, no host mutation and prior failed
+  pane outcome; instrumentation is not acceptance.
+- [ ] **N9442-G:** Resolve EVERY N9442 Plan/local Validation and Coordination
+  clause for BOTH individual 20-second queued workers, scope/invocation/Job/
+  cleanup and actual monotonic cause OR retained unknown disposition. Preserve
+  ONLY the distinct aggregate item-30 to item-60 correction, original failures
+  and later passes; no child-absence, preparation or per-worker repair inference.
+- [ ] **N9815-G:** Resolve EVERY N9815 Plan/local Validation and Coordination
+  clause: deterministic entry of FOUR real readers within the unchanged three
+  seconds, writer ownership through settlement and drain/cancel/cleanup, truthful
+  isolated AND combined selection outcomes and separate actual required CI.
+  Broader PR-watch service/source custody and all incumbent portfolio gates
+  remain; a passing isolated packet or intake is not a complete fixture result.
+
+All six global entries preserve unit-only required CI, quiesced hosted Windows
+execution, independently admitted periodic/explicit/native tiers, original
+budgets, every incumbent check state and actual source/resource holders.
+They add no unrelated whole-parent prerequisite to a finite source outcome
+and waive none of this ROOT's own whole completion obligations.
+
 - [ ] **F7243-G:** Resolve EVERY F7243 Plan/local Validation and F4
   Coordination clause: both Bash reconcile cases, independent cold-store
   publication, isolation-OR-matching-PATH, separate failed-probe decision
@@ -1626,6 +1859,29 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-11-04 - Six finite timeout contracts retained directly
+
+Added direct unchecked N6662/N6663/N6690/N6900/N9442/N9815 Plan and local
+Validation families, six entries in this ROOT's ACTUAL global Validation Plan,
+and continuing Coordination under existing Phase 4/5/7 owners. All 240 earlier
+states/13 checked and full history remain. The original issue bodies and
+refinements retain their authority: diagnostic/fixture partial credit, exact
+limits, distinct failed/passing observations and unknown causes are not erased.
+#6663 diagnosis stays conditional on recurrence; no new native programme is
+required. #9442's aggregate-only budget credit cannot relax individual limits;
+#9815's broader service/source duties and required CI remain independent.
+
+The complete pre-amendment ROOT and unchanged previously whole-read framework/
+intake/vision/linked historical journal supported this proposal, not a repair.
+Sixteen bounded comparisons do not supply a common cause. The independent
+#7820 source completion retains its unresolved broader startup finding and
+does not add an acceptance row here. Review, actual complete delivery, permitted
+whole-current readback and separate source-specific judgments remain necessary
+before administrative supersession. No test, collection, native/installer/
+environment action, implementation assignment, rollout or custody transfer
+occurred. OPEN #1303, unit-only CI, hosted Windows quiescence and all incumbent
+source/audit/cohort/periodic-failure/native/release/resource holders remain.
 
 ### 2026-11-04 - Four finite fixture and runner contracts
 

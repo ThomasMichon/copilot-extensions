@@ -73,11 +73,30 @@ acceptance are **not** claimed from a graph, title, list or link.
 | group-009: session/task observation consumers | 8 historical; 7 admitted | Existing Bridge/Dispatch/interface and actual source/resource owners; whole effort receivers unqualified | [Seven-contract study](session-task-observation-cohort.md); #6462 withheld before new rendering, twenty bounded comparisons and one withheld relation. The finite report-design documentation proposal needs reviewed delivery and a separate judgment. |
 | group-010: measurement, preservation and exact completion | 8 historical; 7 admitted | Existing Logger, Index, metadata-repair and producer-discovery owners; whole current receivers unqualified | [Seven-contract study](measurement-preservation-cohort.md); inherited-held member excluded, seventeen bounded comparisons and four withheld relations. Two whole functions confirm only #6026's retained per-call type pattern; repair, native, installed and handoff residuals remain. |
 | group-011: common venue/runtime adapters | 7 historical; 5 admitted | Existing venue, assigned protocol and restricted runtime/custody owners; whole current receivers unqualified | [Five-contract study](venue-runtime-cohort.md); two inherited-held members excluded, fourteen bounded completed-work comparisons and one withheld description. Specific wrapper mapping conditions and all incumbent claims remain. |
-| group-013: interpreter and construction inputs | 7 historical; 6 admitted | Existing installer, constructor, updater and helper owners; whole Vendored Installer bundle read, feed bundle withheld | [Six-contract study](interpreter-construction-cohort.md); seventeen bounded comparisons and two withheld descriptions. Only the finite three-path first-use contract has a direct installer intake proposed; all sources remain OPEN. |
-| group-014: native CI timeout evidence | 7 | [Test Portfolio](../test-portfolio-rationalization/README.md), existing release/fixture owners | Match actual failed boundaries and unchanged budgets before repair or duplicate judgments; neither an isolated retry nor broad CI success proves the finite cause. |
+| group-013: interpreter and construction inputs | 7 historical; 6 admitted; 1 tracking wrapper superseded | Existing installer, constructor, updater and helper owners; whole Vendored Installer bundle read, feed bundle withheld | [Six-contract study](interpreter-construction-cohort.md); seventeen bounded comparisons and two withheld descriptions. Reviewed direct three-path intake and separate current readback support #5955's administrative tracking fold, not implementation; five sources remain OPEN. |
+| group-014: native CI timeout evidence | 7 admitted; 1 finite source completed | [Test Portfolio](../test-portfolio-rationalization/README.md), existing release/fixture owners | [Seven-contract study](native-timeout-cohort.md); fourteen whole texts, sixteen bounded comparisons and two withheld messages. #7820's same-owner finite source completion is independent of broader startup review; six original timeout contracts remain OPEN with unchanged bounds and causal uncertainty. |
 | group-015: session intelligence and accounting | 6 historical; 5 admitted | Existing Session Intelligence and Large-Corpus Sync owners; five whole receiving documents read without a source/resource transfer | [Five-contract study](session-intelligence-cohort.md); eighteen whole texts, fifteen bounded comparisons and eleven complete source functions. CLOSED historical issue stays metadata-only, not an invented reference STOP. Two same-owner phase-tracking proposals have unchecked direct retention, pending reviewed delivery and separate judgments. |
 | group-018: attention and history readers | 5 | [Operator Attention](../operator-attention-contract/README.md), actual Bridge reader owners | Keep wait/deadline, history paging and event coverage separate; an attention home does not automatically receive the complete history contract. |
 | group-021: head succession | 4 | [Head Succession](../worktree-head-succession-hardening/README.md) | The home remains Draft; #84's OPEN canonical and #912's actual claim conditions survive. No automatic transfer or session operation. |
+
+### Native timeout and connection-lifetime core
+
+#6662, #6663, #6690, #6900, #7820, #9442 and #9815.
+
+The [seven-contract study](native-timeout-cohort.md) preserves fourteen whole
+texts and distinguishes diagnostic progress, different native boundaries and
+the assigned connection-lifetime repair. Ten whole messages and five whole
+merged descriptions support sixteen bounded relations; two whole messages
+remain withheld. Similarity does not prove a shared cause or completed repair.
+
+The complete current portfolio ROOT has been read with unchanged whole-read
+framework/intake/vision/history reuse and unchanged current #1303 custody
+metadata. Six finite direct families are authored under its existing owning
+waves, still pending review, actual complete delivery and separate current
+source judgments. Required-unit CI, quiesced hosted Windows execution, original
+deadlines and all source/resource holders remain. #7820 is separately verified
+COMPLETED at its original source tier; no clean whole-PR verdict, broader #7805
+acceptance or installed adoption is implied.
 
 ### Interpreter/construction core
 
@@ -91,7 +110,10 @@ Vendored Installer documents support only a finite #5955 direct proposal;
 the feed receiver stays wholly withheld. Preserve constructor/updater/helper
 ownership, actual-child proof, urgent UV source credit, finite diagnostic
 acceptance and public post-update inheritance as distinct unfinished work.
-No actual receiving delivery or source disposition is claimed by this study.
+The subsequent reviewed #10510 delivery and separate current readback qualify
+only #5955's administrative tracking supersession, recorded in the dated
+journal. Its three acceptance rows stay unchecked; the other five sources
+remain OPEN. No technical or native acceptance follows from that fold.
 
 ### Session-intelligence core
 
