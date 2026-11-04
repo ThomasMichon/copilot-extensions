@@ -128,6 +128,32 @@ def test_invalid_or_strengthened_evidence_is_rejected_before_publication(mutatio
         MembershipCodec("example", "selected", OWNER).decode(raw(frame))
 
 
+@pytest.mark.parametrize("field", [
+    "registry", "link_qualification", "retirement", "relationship_qualification",
+])
+@pytest.mark.parametrize("value", [[], {}, True])
+def test_malformed_member_qualifications_are_contract_errors(field: str, value: object) -> None:
+    frame = snapshot()
+    row = frame["members"][0]
+    if field == "relationship_qualification":
+        row.update(
+            registry="relationship", member_id="relationship:relation",
+            relationship_id="relation", uncertain_remote_outcome=False,
+            incarnation={"relationship_id": "relation"},
+        )
+    row[field] = value
+    with pytest.raises(TimelineContractError):
+        MembershipCodec("example", "selected", OWNER).decode(raw(frame))
+
+
+@pytest.mark.parametrize("field", ["kind", "operation"])
+def test_unhashable_frame_and_change_kinds_are_contract_errors(field: str) -> None:
+    frame = delta()
+    (frame if field == "kind" else frame["changes"][0])[field] = []
+    with pytest.raises(TimelineContractError):
+        MembershipCodec("example", "selected", OWNER).decode(raw(frame))
+
+
 def test_conflicting_native_identity_is_not_hidden_by_a_new_display_epoch() -> None:
     codec, token, window = admitted()
     frame = codec.decode(raw(delta()))

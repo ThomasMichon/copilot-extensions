@@ -85,14 +85,14 @@ class TimelineAttachment:
     def _error(self, token: SourceToken | None, message: str) -> None:
         if not self._renderable():
             return
-        if self._status is not None:
-            self._status(message)
         tokens = (token,) if token is not None else tuple(
             state.token for state in self.panel.window.sources.values()
             if state.token.identity.provider is self.provider
         )
         for selected in tokens:
             self.panel.source_error(selected, message)
+        if self._status is not None:
+            self._status(message)
         if not tokens and self._status is None:
             self.panel.query_one(".timeline-state", Static).update(Text(
                 "Timeline unavailable; history unknown. " + message,

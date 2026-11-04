@@ -91,6 +91,7 @@ class MembershipCommands:
                     # The selected payload's gate resolves and validates its own
                     # installation; a receipt for the parent plugin is not its context.
                     "COPILOT_EXTENSIONS_CONTEXT": "",
+                    "COPILOT_PLUGIN_ROOT": "",
                 },
                 startup_timeout=BRIDGE_STARTUP_TIMEOUT, idle_timeout=BRIDGE_IDLE_TIMEOUT,
             )

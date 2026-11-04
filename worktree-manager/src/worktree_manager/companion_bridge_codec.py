@@ -91,6 +91,8 @@ class MembershipCodec:
         if not isinstance(source, dict) or source.get("owner_ref") != self.owner:
             raise TimelineContractError("Bridge membership response belongs to another owner")
         kind = frame.get("kind")
+        if not isinstance(kind, str):
+            raise TimelineContractError("invalid Bridge membership frame kind")
         if kind in {"error", "gap"}:
             if not isinstance(frame.get("code"), str) or not isinstance(frame.get("message"), str):
                 raise TimelineContractError("Bridge membership failure omitted its diagnostic")
@@ -158,6 +160,7 @@ class MembershipCodec:
             sequence = offset(change["id"], source)
             if (
                 sequence <= previous or sequence > offset(frame["position"], source)
+                or not isinstance(change["operation"], str)
                 or change["operation"] not in {"upsert", "tombstone"}
                 or change["evidence_kind"] != "observed-change"
                 or change["grants_claim_release"] is not False
@@ -176,6 +179,11 @@ class MembershipCodec:
         }
         if not isinstance(member, dict) or not required <= member.keys() or set(member) - MEMBER_FIELDS:
             raise TimelineContractError("invalid Bridge member fields")
+        for field in ("registry", "link_qualification", "retirement", "relationship_qualification"):
+            if field == "retirement" and member[field] is None:
+                continue
+            if field in member and not isinstance(member[field], str):
+                raise TimelineContractError("invalid Bridge member " + field)
         if (
             member["owner_ref"] != self.owner or member["registry"] not in {"owned", "represented", "relationship"}
             or member["head_session_id"] is not None or member["current_answerability"] != "unknown"

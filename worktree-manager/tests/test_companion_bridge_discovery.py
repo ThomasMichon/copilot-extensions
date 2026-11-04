@@ -79,7 +79,8 @@ def test_real_bridge_payload_gate_does_not_inherit_the_worktrees_receipt(tmp_pat
         if key.startswith(("AGENT_BRIDGE_", "AGENT_RT_", "COPILOT_EXTENSIONS_")):
             monkeypatch.delenv(key)
     monkeypatch.setenv("COPILOT_HOME", str(home / ".copilot"))
-    monkeypatch.delenv("COPILOT_PLUGIN_ROOT", raising=False)
+    foreign_root = str(ROOT / "plugins/agent-worktrees")
+    monkeypatch.setenv("COPILOT_PLUGIN_ROOT", foreign_root)
     foreign = str(home / "agent-worktrees-receipt.json")
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", foreign)
     settings = checkout / ".github/copilot/settings.json"
@@ -94,4 +95,5 @@ def test_real_bridge_payload_gate_does_not_inherit_the_worktrees_receipt(tmp_pat
     with pytest.raises(OwnerReadError, match="passive observation; no self-provision"):
         list(commands.frames(Event()))
     assert os.environ["COPILOT_EXTENSIONS_CONTEXT"] == foreign
+    assert os.environ["COPILOT_PLUGIN_ROOT"] == foreign_root
     assert not (home / ".agent-bridge").exists()

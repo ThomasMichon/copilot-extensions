@@ -27,7 +27,7 @@ from worktree_manager.companion_worktree_source import WorktreeTimelineSource
 from test_agenda_end_to_end import ROOT, SOURCE_PATHS
 from test_companion_agenda_live import current_data, until
 from test_companion_agenda_rich import managed as managed, current_managed_data
-from test_companion_bridge_codec import OWNER, raw
+from test_companion_bridge_codec import OWNER, raw, snapshot
 from _worktree_timeline_fixtures import (
     JOIN_COMMAND_CLEANUP, JOIN_PREPARATION_SECONDS, JoinPhase, resident_join,
 )
@@ -418,9 +418,14 @@ def test_bridge_only_head_change_retires_reader_without_a_head_qualified_token(
     asyncio.run(check())
 
 
-def test_slow_bridge_preparation_does_not_block_published_rich_agenda(managed, monkeypatch) -> None:
+@pytest.mark.parametrize("reconcile", [False, True])
+def test_slow_bridge_preparation_does_not_block_published_rich_agenda(managed, monkeypatch, reconcile) -> None:
     entered, release = asyncio.Event(), asyncio.Event()
     reads = []
+    sync = companion.MuxCompanionApp._sync_timeline
+
+    def selected_sync(self, **kwargs):
+        return sync(self, reconcile=reconcile)
 
     def data():
         result = current_managed_data(managed)
@@ -442,6 +447,7 @@ def test_slow_bridge_preparation_does_not_block_published_rich_agenda(managed, m
     monkeypatch.setattr(companion.MuxCompanionApp, "_poll_attention", lambda *args, **kwargs: None)
     monkeypatch.setattr(WorktreeTimelineSource, "prepare", unavailable)
     monkeypatch.setattr(bridge.BridgeMembershipSource, "prepare", slow)
+    monkeypatch.setattr(companion.MuxCompanionApp, "_sync_timeline", selected_sync)
 
     async def check() -> None:
         app = companion.MuxCompanionApp(cwd=str(managed["cwd"]))
@@ -451,6 +457,15 @@ def test_slow_bridge_preparation_does_not_block_published_rich_agenda(managed, m
             app._receive_agenda(
                 app._data, app._agenda_generation, app._agenda_cancel, managed["publication"](), None,
             )
+            if reconcile:
+                # The exhausted Bridge baseline must be refreshed first, but
+                # that preparation still cannot gate independent Agenda reads.
+                codec = MembershipCodec("example", "selected", OWNER)
+                frame = codec.decode(raw(snapshot()))
+                token = codec.token(frame, 0)
+                app._timeline_panel.bind_source(token)
+                app._timeline_panel.apply_snapshot(codec.apply(frame, token))
+                app._timeline_panel.window.reconciliation_required |= {token.identity.source_key}
             app.query_one("#views", TabbedContent).active = "timeline-tab"
             await until(pilot, entered.is_set)
             await until(pilot, lambda: app._rich_agenda_attachment.token is not None)
@@ -460,6 +475,65 @@ def test_slow_bridge_preparation_does_not_block_published_rich_agenda(managed, m
             await until(pilot, release.is_set)
             await until(pilot, lambda: all(stop.is_set() for stop in reads))
             await until(pilot, lambda: app._rich_agenda_attachment.selection is None)
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("failure", ["retention-gap", "source-stopping", "timeout", "malformed-bootstrap"])
+def test_bridge_failure_removes_current_member_status_without_disabling_summary(
+    native_bridge, tmp_path, monkeypatch, failure,
+) -> None:
+    def data():
+        result = current_data()
+        result.worktree["path"] = str(tmp_path)
+        result.bundle = {"facts": {"claims": {"value": {"owner_ref": OWNER}, "confirmed": True}}}
+        return result
+
+    monkeypatch.setattr(companion, "_load_current_worktree", lambda *args, **kwargs: data())
+    monkeypatch.setattr(companion.MuxCompanionApp, "_start_agenda", lambda self: None)
+    monkeypatch.setattr(companion.MuxCompanionApp, "_poll_attention", lambda *args, **kwargs: None)
+    if failure == "malformed-bootstrap":
+        frame = native_bridge["source"].frame(OWNER, None)
+        frame["members"][0]["registry"] = []
+        native_bridge["outgoing"].append(frame)
+
+    async def check() -> None:
+        app = companion.MuxCompanionApp(cwd=str(tmp_path))
+        async with app.run_test(size=(110, 40)) as pilot:
+            await until(pilot, lambda: not app._loading)
+            app.query_one("#views", TabbedContent).active = "timeline-tab"
+            if failure == "malformed-bootstrap":
+                await until(pilot, lambda: "Bridge member" in str(
+                    app.query_one("#timeline-bridge-status", Static).content,
+                ))
+            else:
+                await membership_ready(app, pilot, native_bridge)
+                assert "child: starting" in str(app.query_one("#timeline-bridge-status", Static).content)
+                if failure == "timeout":
+                    monkeypatch.setattr(bridge, "BRIDGE_IDLE_TIMEOUT", 0.1)
+                    # The active transport already holds its timeout. Reattach
+                    # once so this case exercises a real bounded idle read.
+                    await app._bridge_attachment.set_selection(("example", "selected", "head-a"))
+                else:
+                    frame = {
+                        "schema": "bridge-owner-membership-v1", "version": 1,
+                        "kind": "going-away" if failure == "source-stopping" else "gap",
+                        "source": native_bridge["source"].frame(OWNER, None)["source"],
+                    }
+                    if failure == "retention-gap":
+                        frame.update(code=failure, message="fixture retention gap")
+                    native_bridge["outgoing"].append(frame)
+                    native_bridge["changed"].set()
+                await until(pilot, lambda: any(
+                    state.token.identity.provider is Provider.BRIDGE
+                    and state.availability.value == "unavailable"
+                    for state in app._timeline_panel.window.sources.values()
+                ))
+            assert "child:" not in str(app.query_one("#timeline-bridge-status", Static).content)
+            assert app._data.error is None
+            assert native_bridge["db"].get_session("child")["status"] == "starting"
+            app.query_one("#views", TabbedContent).active = "summary-tab"
+            await until(pilot, lambda: app._bridge_attachment.controller is None)
 
     asyncio.run(check())
 
