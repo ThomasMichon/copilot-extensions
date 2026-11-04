@@ -48,6 +48,12 @@ Snapshot: **2026-11-03**, merged Dev policy
   composed-source qualification and fresh exact-input source CI. Two additional
   Codespaces-plugin files remain pending rather than increasing this admission.
 
+Current preparation tracks the shared real-import-root/additional-version
+checker foundation in #10400, independently of the pending Versioned Runtime
+(#10331), Copilot Extensions Harness (#10362) and Payload Invocation (#10371)
+admissions. The snapshot above remains the last accepted historical snapshot;
+checker preparation does not credit those consumers or their copies.
+
 Project percentages are not code-volume or runtime-test percentages. Small
 shared-library projects and large plugins have very different sizes. Physical
 copies count under their own owners rather than disappearing through
