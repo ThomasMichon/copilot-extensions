@@ -29,7 +29,7 @@ NAMES = [
 def test_fresh_client_oracle_requires_all_non_skipped_consumers(tmp_path, fault, managed):
     names = [
         f"test_actual_installed_console_managed_lifecycle[{transition}]"
-        for transition in ("retry", "forward-missing", "forward-malformed", "higher", "uninstall", "foreign", "legacy")
+        for transition in ("retry", "forward-missing", "forward-malformed", "higher", "uninstall", "foreign", "legacy", "installed-owner")
     ] if managed else NAMES
     root = ET.Element("testsuites")
     suite = ET.SubElement(root, "testsuite")

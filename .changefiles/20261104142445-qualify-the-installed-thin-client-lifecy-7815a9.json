@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify the installed thin-client lifecycle dependency boundary and prepared-owner forward installation.",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}
