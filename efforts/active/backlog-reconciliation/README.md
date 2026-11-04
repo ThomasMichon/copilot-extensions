@@ -251,12 +251,12 @@ held rollout and pending source/release lanes remain OPEN. The complete
 campaign closures; no technical, native or custody completion follows.
 
 The exact eight-document attention/history research and outcome delta merged
-in #10522 after its PR-description Documentation impact assessment was
-corrected, genuine current-head approval reported no active findings and
-required CI passed. All actual merged blobs match reviewed content; only its
-publication child finalized, retained. All 101 canonical/39 public parent
-states remain unchanged. Documentary delivery is not the fixed whole-queue
-checkpoint; continue the ranked graph and actual provider comparisons.
+in #10522; the [dated delivery journal](<journal/2026/11.04 attention-history-contracts.md>)
+records its validation and delivery history. All actual merged blobs match
+reviewed content; only its publication child finalized, retained. All 101
+canonical/39 public parent states remain unchanged. Documentary delivery is
+not the fixed whole-queue checkpoint; continue the ranked graph and actual
+provider comparisons.
 
 The [attention/history study](attention-history-cohort.md) retains five whole
 originals/two refinements and fifteen message-level comparisons. Eight complete
