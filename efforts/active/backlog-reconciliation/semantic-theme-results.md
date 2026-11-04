@@ -66,6 +66,7 @@ acceptance are **not** claimed from a graph, title, list or link.
 | group-002: Picker/provider presentation | 17 | [Manager](../worktree-manager-control-plane/README.md), [Tasks UX](../agent-dispatch-tasks-pane-ux-overhaul/README.md) | Separate shared presentation/provider observation from task lifecycle and native Confirm delivery; retain credited extraction and existing phase owners. |
 | group-003: runtime entry, construction and helpers | 15 historical; 14 admitted | Existing entry, construction, helper and bootstrap owners; complete receiver fit unqualified | [Four-family contract study](runtime-entry-cohort.md); #810 excluded, #10061 separately completed, thirteen contracts retain conditions and incomplete home/history comparison. Held ROOT material is withheld. |
 | group-004: PR/review workflow | 14 | [PR Lifecycle](../pr-lifecycle-conformance/README.md), [Durable PR Watch](../durable-pr-watch-delegation/README.md) | Keep reviewer mechanics, workflow composition and contributor conformance distinct. Preserve #5183/#5211's recorded parked-home resumption gate; this route does not resume or receive that work. |
+| group-005: Bridge observation, discovery and continuity | 11 | [Producer Work Reuse](../producer-work-reuse/README.md) for #7948 plan coverage only; other home references unqualified | [Five-family contract study](bridge-observation-cohort.md); preserve original ORs, typed outcomes, actual owners and native gaps. Partial held-home material is withheld; three merged-description relations address different contracts. |
 | group-006: native fixture/cache disposal | 11 | [Test Portfolio](../test-portfolio-rationalization/README.md), original supported-uninstall owners | Start with the nine fixture/runner cases listed below. #9375/#10239 retain their separate uninstall-caller authority; no deletion, reaping, deadline relaxation or new native run follows. |
 | group-007: mux/client lifetime and input | 9 | [Manager](../worktree-manager-control-plane/README.md), [Installation-Independent Sessions](../installation-independent-sessions/README.md) | Preserve current restart, source, hosting and client owners; native terminal, input and retained-session gates are not historical relocation credit. |
 | group-009: session/task observation consumers | 8 | [Task Lifecycle](../agent-dispatch-monitor-and-confirmed-state/README.md), [Worker Observation](../worker-status-observability-hooks/README.md) | Distinguish CLI/API parity, observation, steering and actual session effects. Worker Observation is Draft, not an accepted implementation receiver. |
@@ -75,6 +76,27 @@ acceptance are **not** claimed from a graph, title, list or link.
 | group-015: session intelligence and accounting | 6 | [Session Intelligence](../session-intelligence-and-accounting/README.md), [Large-Corpus Sync](../large-corpus-session-sync/README.md) | Preserve the canonical backend, independently claimed daily adoption and #4976's remaining-home question. Do not equate related data paths with completed accounting or retirement. |
 | group-018: attention and history readers | 5 | [Operator Attention](../operator-attention-contract/README.md), actual Bridge reader owners | Keep wait/deadline, history paging and event coverage separate; an attention home does not automatically receive the complete history contract. |
 | group-021: head succession | 4 | [Head Succession](../worktree-head-succession-hardening/README.md) | The home remains Draft; #84's OPEN canonical and #912's actual claim conditions survive. No automatic transfer or session operation. |
+
+### Bridge-observation core
+
+#4035, #5531, #5532, #5616, #5761, #5969, #7948, #7978, #8451,
+#8774 and #8775.
+
+The [eleven-contract study](bridge-observation-cohort.md) integrates 34 whole
+texts and three independently qualified complete merged descriptions. Saved
+work, event observation, idle-stop handling, reconcile diagnosis, knowledge
+overlays, discovery truth, producer cost, immutable caching, live correlation
+and requested preferences remain distinct. All eleven sources stay OPEN.
+
+The complete current Producer Work Reuse ROOT/S1/validation retains #7948's
+plan but leaves its implementation, exact slice admission, native cost/
+membership, release and installed acceptance unresolved. Other homes remain
+unqualified; all partial related-ROOT material is withheld after a history
+hold, with no neighboring-source retry or retroactive admission.
+The three #5532/#9620, #5616/#10293 and #7948/#10119 relations retain their
+original scores and explicit different-contract outcomes. Commit-message
+candidates remain unresearched and earlier invalid targets remain invalid.
+No receiving transfer, new appointment, closure or rollout follows.
 
 ### Runtime-entry core
 

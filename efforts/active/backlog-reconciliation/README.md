@@ -326,6 +326,22 @@ Continue through a changed, bounded eligible evidence question rather than
 repeating the unsuccessful broad documentary reads. All incumbent parent
 Plan/Validation states and the fixed whole-queue completion gate remain.
 
+The [eleven-contract Bridge-observation study](bridge-observation-cohort.md)
+integrates 34 complete unchanged original/discussion texts and three qualified
+merged descriptions. Five families retain their distinct alternatives, typed
+outcomes, current claims and native gaps. Producer Work Reuse is currently
+Active; its whole ROOT, S1 annex and validation directly retain #7948's plan,
+not implementation or native qualification. Other proposed homes remain
+unqualified; all partial related-session ROOT material is withheld after a
+history hold, with no neighboring-source retry or retroactive admission.
+Three completed-description relations address different contracts, not source
+completion. All eleven originals remain OPEN under their existing custodians.
+The complete 17:38:04 UTC / 09:38:04 PST census counts 1,021 whole open,
+292 above 729: 747 eligible, 274 excluded, 681 original-cohort and 340 inflow.
+New #10474 is metadata-only, with no departure or closure credit. Continue
+bounded graph-backed research without changing any incumbent parent check
+state, source/resource responsibility or no-implementation boundary.
+
 - [x] Holistically sweep the initial eligible backlog and build an issue/effort
   relationship graph; use alignment and theme to identify consolidation groups.
   The [initial graph snapshot](graph-overview.md) accounts for all 695 assigned
@@ -583,6 +599,16 @@ Plan/Validation states and the fixed whole-queue completion gate remain.
   normal publication flow.
 
 ## Validation Plan
+
+The [Bridge-observation study](bridge-observation-cohort.md) preserves eleven
+whole contracts across five families. Three complete merged descriptions
+address different contracts, not verified completion. Only #7948's existing
+whole ROOT/S1/validation has qualified plan coverage; implementation, exact
+slice admission, native cost/membership, release and installed acceptance
+remain OPEN. The partial related-home attempt is wholly withheld and its
+admission-order error retained, not retried through another source. Other
+homes remain unqualified. Every incumbent parent check state and source/
+resource custodian survives; no closure or deployment follows.
 
 The [semantic consolidation method](semantic-density-consolidation.md)
 requires whole-queue coverage accounting, measured weighted communities,
