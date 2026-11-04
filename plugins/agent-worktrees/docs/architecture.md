@@ -3207,6 +3207,23 @@ owning slot. A missing/invalid cell or unavailable owning interpreter produces
 nonblocking recovery context, without substituting an ambient Python lacking the
 owned-process SDK or asserting that installation validation succeeded.
 
+### Ordinary hook demand and idle retirement
+
+The existing resident retains a two-minute monotonic grace period after an
+authenticated pre/post-tool response is successfully written before its request
+deadline. Completion is recorded before the active-handler count drops; idle
+retirement observes that grace after its in-flight checks. Rejected, malformed,
+failed, late and non-tool requests do not renew it.
+
+This observation is transient server-local state, not a client read receipt,
+session-liveness assertion or ownership grant. It starts no monitor, scans no
+CLI processes, writes no demand file and does not wake a sweep or add projects
+to refresh. After completed traffic stops, normal empty-sweep retirement resumes.
+Admission closure, accepted-work draining, supersession, governance and explicit
+shutdown keep their existing independent rules. An absent endpoint still uses
+the existing fallback; ordinary missing-endpoint recovery is not supplied by
+this retention path.
+
 ### Opt-in resident pre-tool pilot
 
 `AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION` is a launch-time choice shared by
