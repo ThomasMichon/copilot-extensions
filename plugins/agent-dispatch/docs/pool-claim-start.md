@@ -94,6 +94,9 @@ force a new sessionless read against the native just created: recovery first
 asks that original owner for its keyed result, then validates the complete
 original attempt, incarnation and returned native before storing or sending.
 Bridge still refuses an unrelated live holder, changed head or conflicting key.
+Owned creation also rechecks current task admission immediately before calling
+Bridge, including when hosting lookup retained a workspace but the task became
+held. A keyed recovery receipt cannot authorize a newly held task's launch.
 
 ## Managed ordinary allocator (opt-in)
 

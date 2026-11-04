@@ -508,6 +508,8 @@ def start(
             raise BridgeCarriedSessionBusy("legacy allocation has no exact current workspace/native facts")
         # Bridge's existing repo@venue target selects the harness, not the task's lane.
         if not info:
+            if owned_creation:
+                current_task(client, task)
             target = f"{project}@{agent}" if project and "@" not in agent else agent
             from .ordinary_invocation import KEYED_NATIVE_PROTOCOL
             argv = ["--json", "create", target, "--require-agent-hosting",

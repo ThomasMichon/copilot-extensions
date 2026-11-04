@@ -279,6 +279,33 @@ def test_owned_native_recovers_same_key_after_lost_reply_or_storage(
     assert o.q.get_reservation(original.key).agent_info["connection"]["native_session_id"] == "native-a"
 
 
+def test_owned_creation_rechecks_hold_after_hosting_lookup(
+    ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_dispatch import hosting_policy, ordinary_pool_startup
+
+    o = ordinary
+    key = o.placed["reservation"]["key"]
+    original = ordinary_pool_startup.prepare_owned_workspace(
+        o.task, o.client.get_reservation(key), client=o.client, project="example",
+        machine="host-a", no_pair=False, timeout=180,
+    )
+    assert original["worktree_ownership"] == "created" and original["agent_info"] is None
+
+    def hosting(**kwargs: Any) -> None:
+        assert kwargs["worktree_id"] == original["worktree"]
+        o.q.set_hold(o.task["id"], reason="operator", actor="operator")
+
+    monkeypatch.setattr(hosting_policy, "require_execution_harness", hosting)
+    with pytest.raises(ordinary_bridge.BridgeCarriedSessionBusy, match="admission fence"):
+        launch(o)
+    retained = o.q.get_reservation(key)
+    assert not o.calls and len(o.allocations) == 1
+    assert retained.agent_info is None and retained.worktree_ownership == "created"
+    assert retained.creation_key == original["creation_key"]
+    assert o.ground["session_count"] == 0
+
+
 @pytest.mark.parametrize("failure", ["foreign-holder", "changed-admission"])
 def test_owned_creation_does_not_resume_or_prompt_an_unproven_holder(
     ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, failure: str,
