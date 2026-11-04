@@ -14,13 +14,18 @@ def bound_relationship_condition(task: Literal["t", "NEW"]) -> str:
         "EXISTS (SELECT 1 FROM task_events e"  # noqa: S608 -- fixed SQL aliases
         f" WHERE e.task_id={task}.id AND e.task_relationship IS NOT NULL"
         " AND json_extract(e.task_relationship, '$.state')='bound'"
-        f" AND json_extract(e.task_relationship, '$.request.generation')={task}.generation"
+        " AND COALESCE(json_extract(e.task_relationship, '$.continuation.generation'),"
+        f" json_extract(e.task_relationship, '$.request.generation'))={task}.generation"
+        " AND (json_type(e.task_relationship, '$.continuation.owner_session_id') IS NULL"
+        " OR json_extract(e.task_relationship, '$.continuation.owner_session_id')"
+        f" IS {task}.owner_session_id)"
         f" AND ({task}.owner IS NULL OR ("
         f" lower(trim(substr({task}.owner, 1, instr({task}.owner, '/')-1)))"
         "=lower(trim(substr(e.worker, 1, instr(e.worker, '/')-1)))"
         f" AND substr({task}.owner, instr({task}.owner, '/')+1)"
         "=substr(e.worker, instr(e.worker, '/')+1)))"
-        " AND ((json_extract(e.task_relationship, '$.request.reservation_key') IS NULL"
+        " AND ((COALESCE(json_extract(e.task_relationship, '$.continuation.reservation_key'),"
+        " json_extract(e.task_relationship, '$.request.reservation_key')) IS NULL"
         f" AND NOT EXISTS (SELECT 1 FROM task_pool_assignments a WHERE a.task_id={task}.id"
         " AND a.assignment_released=0)) OR EXISTS ("
         " SELECT 1 FROM task_pool_assignments a JOIN spawn_reservations s"
@@ -30,7 +35,8 @@ def bound_relationship_condition(task: Literal["t", "NEW"]) -> str:
         " AND s.task_id=e.task_id AND s.task_relationship_required=1"
         " AND s.task_relationship_event_id=e.id"
         f" AND s.task_relationship_generation={task}.generation"
-        " AND json_extract(e.task_relationship, '$.request.reservation_key')=s.key"
+        " AND COALESCE(json_extract(e.task_relationship, '$.continuation.reservation_key'),"
+        " json_extract(e.task_relationship, '$.request.reservation_key'))=s.key"
         " AND json_extract(e.task_relationship, '$.request.workspace.worktree')=s.worktree"
         " AND json_extract(e.task_relationship, '$.request.workspace.creation_nonce')"
         "=s.creation_nonce"
@@ -101,15 +107,16 @@ def migrate_relationships(conn: sqlite3.Connection) -> None:
     # These guards survive a provider rollback. Older queue code cannot admit
     # a governed assignment by forgetting an optional Python field.
     conn.execute(
-        "CREATE TRIGGER IF NOT EXISTS task_relationship_execution_guard_v2"  # noqa: S608 -- fixed predicate
-        " BEFORE UPDATE OF status, generation, owner ON tasks"
+        "CREATE TRIGGER IF NOT EXISTS task_relationship_execution_guard_v3"  # noqa: S608 -- fixed predicate
+        " BEFORE UPDATE OF status, generation, owner, owner_session_id ON tasks"
         " WHEN (EXISTS (SELECT 1 FROM task_events e WHERE e.task_id=NEW.id"
         " AND e.task_relationship IS NOT NULL) OR EXISTS (SELECT 1 FROM spawn_reservations s"
         " WHERE s.task_id=NEW.id AND s.task_relationship_required=1)) AND ("
         " (NEW.status='claimed' AND OLD.status='queued' AND NOT EXISTS ("
         " SELECT 1 FROM task_events e WHERE e.task_id=NEW.id"
         " AND e.task_relationship IS NOT NULL"
-        " AND json_extract(e.task_relationship, '$.request.generation')=NEW.generation"
+        " AND COALESCE(json_extract(e.task_relationship, '$.continuation.generation'),"
+        " json_extract(e.task_relationship, '$.request.generation'))=NEW.generation"
         " AND e.worker=NEW.owner) AND NOT (NEW.owner IS NULL AND EXISTS ("
         " SELECT 1 FROM spawn_reservations s WHERE s.task_id=NEW.id"
         " AND s.task_relationship_required=1 AND s.task_relationship_generation=NEW.generation)))"
@@ -118,3 +125,5 @@ def migrate_relationships(conn: sqlite3.Connection) -> None:
         + "))"
         " BEGIN SELECT RAISE(ABORT, 'task relationship protection is unconfirmed'); END"
     )
+    # Install the continuation-aware guard before removing its stricter predecessor.
+    conn.execute("DROP TRIGGER IF EXISTS task_relationship_execution_guard_v2")

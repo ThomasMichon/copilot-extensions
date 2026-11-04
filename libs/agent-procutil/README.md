@@ -516,6 +516,16 @@ descriptor numbers never participate in automatic fork cleanup: an error can
 follow actual closure and number reuse. A failure is not permission to retry a
 possibly closed handle.
 
+Bounded Windows capture failures also retain every attempted pipe worker and
+its completion event. When that capture supplies a complete settlement
+operation, `OwnedCleanupError.retry_cleanup(deadline=<monotonic instant>)`
+retries only those exact process, Job and worker objects, then closes their
+streams and process handle. Successful settlement is idempotent. Missing retry
+support or additional unknown resources refuses without dropping custody.
+Consumers must retain the error independently of exception translation and
+settle it before launching another attempt; this API never replays the child
+command or asserts that an interrupted mutation failed.
+
 For an explicitly enclosing finite POSIX owner, opt-in
 `borrow_parent_scope=True` keeps observations in that owner's native group
 instead of creating a separate guardian. Admission requires the caller's actual

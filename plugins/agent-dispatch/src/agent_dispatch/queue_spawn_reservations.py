@@ -597,6 +597,10 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                 governed = latest_relationship(conn, task.id) is not None
                 if governed and self._relationship_writer is None:
                     raise TaskError("governed allocator assignment requires its original relationship writer")
+                if governed:
+                    from .queue_relationship_continuation import continue_pool_startup
+
+                    continue_pool_startup(conn, task, key, authority=self._relationship_authority)
                 if self._relationship_writer is not None or governed:
                     conn.execute(
                         "UPDATE spawn_reservations SET task_relationship_required=1,"

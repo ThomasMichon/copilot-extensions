@@ -176,6 +176,13 @@ worker and allocation; it cannot report a successfully admitted assignment.
 Exact direct-claim retries and required workspace retries reconcile that same
 request rather than allocating another claim.
 
+Unconfirmed native capture cleanup is retained by the adapter's resident owner
+before queue or HTTP error translation, including failures during construction.
+Subsequent adapter calls first attempt bounded settlement of those exact
+resources within the same call deadline. They cannot launch another capture
+while cleanup remains unconfirmed. Cleanup without a complete supported retry
+operation stays retained; an exception cause alone is not custody.
+
 Recovery version 2 adds `assignment_event_id` and `worker_id` to the version-1
 recovery object. Those facts also bind pending subjects, permitting exact
 disposition after an interrupted reserve or bind. The callback checks the
@@ -197,6 +204,18 @@ and case; worktree identity and assignment events remain exact.
 The required workspace retry always revisits its owner even when recorded
 path/project facts already match. Creator/allocation custody and actual
 native-capacity retirement remain independent.
+
+Successor-session adoption records a separately fenced continuation on the same
+assignment event in the resume transaction. The original request, receipt and
+worktree claim remain unchanged; execution must match the continuation's current
+generation and native session.
+An exhausted pool episode can likewise continue the original relationship into
+a new reservation only after exact retirement of its accountable attempts, with
+the same writer authority, creation lineage, workspace and creation nonce.
+The new generation and reservation binding are recorded atomically with pool
+placement, without closing or replacing the claim. An unrelated unsettled
+relationship refuses placement before committing a task claim or consuming a
+slot. Timeout itself never settles responsibility.
 
 With a qualified writer enabled, atomic `create(..., claim_as=...)` refuses
 before creating new work; create queued work and use the protected claim path

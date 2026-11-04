@@ -11,10 +11,14 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Callable, Protocol
 from collections.abc import Mapping
+from typing import Callable, Protocol
 
-from agent_procutil import SyncProcessLaunchError, no_window_kwargs, spawn_sync_in_kill_on_close_job
+from agent_procutil import (
+    SyncProcessLaunchError,
+    no_window_kwargs,
+    spawn_sync_in_kill_on_close_job,
+)
 from agent_procutil.owned_budget import OwnedExecutionBudget
 
 
@@ -38,11 +42,35 @@ class OutputLimitExceeded(subprocess.SubprocessError):
 class OwnedCleanupError(subprocess.SubprocessError):
     """Cleanup is unconfirmed; retain exact process/Job custody for the owner."""
 
-    def __init__(self, process: UnreapedChild | None, job=None, *, cleanup_resources=()) -> None:
+    def __init__(
+        self, process: UnreapedChild | None, job=None, *, cleanup_resources=(),
+        cleanup_retry: Callable[[float], None] | None = None,
+    ) -> None:
         self.process = process
         self.job = job
         self.cleanup_resources = tuple(cleanup_resources)
+        self._retry_resources = self.cleanup_resources
+        self._cleanup_retry = cleanup_retry
+        self._cleanup_lock = threading.Lock()
+        self._cleanup_complete = False
         super().__init__("native child cleanup did not complete")
+
+    def retry_cleanup(self, *, deadline: float) -> None:
+        """Settle retained native objects, never infer cleanup from their absence."""
+        if not math.isfinite(deadline) or deadline <= time.monotonic():
+            raise TimeoutError("owned cleanup retry deadline expired")
+        if not self._cleanup_lock.acquire(timeout=max(0.0, deadline - time.monotonic())):
+            raise TimeoutError("owned cleanup retry is still in progress")
+        try:
+            if self._cleanup_retry is None or self.cleanup_resources != self._retry_resources:
+                raise RuntimeError("retained native cleanup has no complete retry operation")
+            if not self._cleanup_complete:
+                self._cleanup_retry(deadline)
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("owned cleanup retry deadline expired")
+                self._cleanup_complete = True
+        finally:
+            self._cleanup_lock.release()
 
 
 class _PreparationTimeout(subprocess.TimeoutExpired):
@@ -52,6 +80,7 @@ class _PreparationTimeout(subprocess.TimeoutExpired):
 def _require_windows_job() -> None:
     import ctypes
     from ctypes import wintypes
+
     from agent_procutil import _kernel32
 
     kernel = _kernel32()
@@ -282,26 +311,39 @@ def _communicate_windows_bounded(
     retirement = threading.Lock()
     retiring = threading.Event()
     retirement_error: list[BaseException] = []
+    retired = False
 
     def note(error: BaseException) -> None:
         with error_lock:
             if not primary:
                 primary.append(error)
 
-    def retire() -> None:
-        acquired = retirement.acquire(timeout=budget.cleanup_timeout()) if budget else retirement.acquire()
+    def cleanup_timeout(retry_deadline: float | None = None) -> float:
+        if retry_deadline is None:
+            return budget.cleanup_timeout() if budget else 2.0
+        remaining = retry_deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("owned cleanup retry deadline expired")
+        return min(2.0, remaining)
+
+    def retire(retry_deadline: float | None = None) -> None:
+        nonlocal retired
+        acquired = retirement.acquire(timeout=cleanup_timeout(retry_deadline))
         if not acquired:
             raise TimeoutError("owned retirement lock did not settle")
         try:
-            if retiring.is_set():
-                if retirement_error:
-                    raise retirement_error[0]
+            if retired:
                 return
+            if retiring.is_set():
+                if retirement_error and retry_deadline is None:
+                    raise retirement_error[0]
             retiring.set()
             try:
-                process.retire_job(job, budget.cleanup_timeout() if budget else 2.0)
+                process.retire_job(job, cleanup_timeout(retry_deadline))
+                retired = True
+                retirement_error.clear()
             except BaseException as error:
-                retirement_error.append(error)
+                retirement_error[:] = [error]
                 raise
         finally:
             retirement.release()
@@ -365,6 +407,23 @@ def _communicate_windows_bounded(
     workers = []
     attempted = []
     cleanup_error = None
+
+    def retry_cleanup(retry_deadline: float) -> None:
+        retire(retry_deadline)
+        for worker, completed in attempted:
+            if not completed.wait(cleanup_timeout(retry_deadline)):
+                raise RuntimeError("native child pipe worker completion is unconfirmed")
+            worker.join(timeout=cleanup_timeout(retry_deadline))
+            if worker.is_alive():
+                raise RuntimeError("native child pipe worker did not settle")
+        process.wait(timeout=cleanup_timeout(retry_deadline))
+        for stream in (process.stdin, process.stdout, process.stderr):
+            if stream is not None:
+                cleanup_timeout(retry_deadline)
+                stream.close()
+        cleanup_timeout(retry_deadline)
+        process.close()
+
     try:
         for index, stream in enumerate((process.stdout, process.stderr)):
             if stream is not None:
@@ -414,7 +473,11 @@ def _communicate_windows_bounded(
             if cleanup_error is None:
                 cleanup_error = error
     if cleanup_error is not None:
-        raise OwnedCleanupError(process, job) from cleanup_error
+        raise OwnedCleanupError(
+            process, job, cleanup_resources=[
+                ("pipe-worker", (worker, completed)) for worker, completed in attempted
+            ], cleanup_retry=retry_cleanup,
+        ) from cleanup_error
     if primary:
         if isinstance(primary[0], subprocess.TimeoutExpired):
             # Readers have joined and retirement succeeded; preserve raw,
@@ -608,11 +671,14 @@ def _run_owned(
                         raise OwnedCleanupError(
                             process, cleanup_resources=(("output", stream_capture),),
                         ) from error
-                for stream in (process.stdin, process.stdout, process.stderr):
-                    if stream is not None:
-                        stream.close()
-                if bounded_windows:
-                    process.close()
+                try:
+                    for stream in (process.stdin, process.stdout, process.stderr):
+                        if stream is not None:
+                            stream.close()
+                    if bounded_windows:
+                        process.close()
+                except BaseException as error:
+                    raise OwnedCleanupError(process, job) from error
                 if on_settled is not None:
                     on_settled()
     if streaming and capture and not binary:

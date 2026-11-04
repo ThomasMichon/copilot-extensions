@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
+import time
 from collections.abc import Callable, Sequence
+
+from agent_procutil.owned_process import OwnedCleanupError
 
 from .assignment_workspace import AssignmentWorkspace
 from .procutil import agent_worktrees_environment, run_background_capture
 from .queue_records import TaskError
 from .queue_task_relationships import valid_record_writer
+
+_pending_cleanup: list[OwnedCleanupError] = []
+_cleanup_lock = threading.Lock()
 
 
 class WorktreeRelationshipWriter:
@@ -50,25 +57,52 @@ class WorktreeRelationshipWriter:
             )
 
     def _run(self, arguments: list[str], payload: dict | None = None) -> dict:
+        deadline = time.monotonic() + self.timeout
+        if not _cleanup_lock.acquire(timeout=max(0.0, deadline - time.monotonic())):
+            raise TaskError("selected Worktrees cleanup is still owned by another request")
         try:
-            result = run_background_capture(
-                [*self.prefix, *arguments],
-                input_text=json.dumps(payload) if payload is not None else None,
-                timeout=self.timeout,
-                env=agent_worktrees_environment(),
-            )
-            if result is None:
-                raise TaskError(
-                    "selected Worktrees request is unresolved; retain the original assignment"
+            for failure in tuple(_pending_cleanup):
+                try:
+                    failure.retry_cleanup(deadline=deadline)
+                except Exception as exc:
+                    raise TaskError(
+                        "selected Worktrees cleanup is unresolved; native custody retained"
+                    ) from exc
+                _pending_cleanup.remove(failure)
+            try:
+                input_text = json.dumps(payload) if payload is not None else None
+                env = agent_worktrees_environment()
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TaskError("selected Worktrees request budget expired during cleanup")
+                result = run_background_capture(
+                    [*self.prefix, *arguments],
+                    input_text=input_text,
+                    timeout=remaining,
+                    env=env,
                 )
-            value = json.loads(result.stdout or "{}")
-            if result.returncode or not isinstance(value, dict) or value.get("error"):
-                raise TaskError("selected Worktrees relationship result is unconfirmed")
-            return value
-        except (OSError, subprocess.SubprocessError, ValueError, TypeError) as exc:
-            raise TaskError(
-                "selected Worktrees relationship request is unresolved; retain and reconcile"
-            ) from exc
+                if result is None:
+                    raise TaskError(
+                        "selected Worktrees request is unresolved; retain the original assignment"
+                    )
+                value = json.loads(result.stdout or "{}")
+                if result.returncode or not isinstance(value, dict) or value.get("error"):
+                    raise TaskError("selected Worktrees relationship result is unconfirmed")
+                return value
+            except OwnedCleanupError as exc:
+                # This module outlives failed construction, queue/HTTP translation
+                # and the writer instance. Keep the actual native objects first.
+                if not any(pending is exc for pending in _pending_cleanup):
+                    _pending_cleanup.append(exc)
+                raise TaskError(
+                    "selected Worktrees cleanup is unresolved; native custody retained"
+                ) from exc
+            except (OSError, subprocess.SubprocessError, ValueError, TypeError) as exc:
+                raise TaskError(
+                    "selected Worktrees relationship request is unresolved; retain and reconcile"
+                ) from exc
+        finally:
+            _cleanup_lock.release()
 
     def __call__(
         self,

@@ -879,6 +879,12 @@ class QueueLifecycleMixin(QueueProgressMixin):
             sets = ["status = ?", "updated_at = ?"]
             params: list[object] = [to, ts]
             if bump_generation:
+                if note == "resume":
+                    from .queue_relationship_continuation import continue_owner_session
+
+                    continue_owner_session(
+                        conn, task, (extra or {}).get("owner_session_id", task.owner_session_id),
+                    )
                 sets.append("generation = generation + 1")
             if to not in Status.HELD:
                 sets.extend(["activity = NULL", "activity_updated_at = ?"])

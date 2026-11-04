@@ -273,9 +273,12 @@ class QueueTaskRelationshipsMixin:
         with self._connect() as conn:
             task = self._fetch(conn, task_id)
             current = latest_relationship(conn, task_id)
+            from .queue_relationship_continuation import current_binding
+
+            binding = current_binding(value)
             if not retiring and (
                 current["id"] != request["event_id"]
-                or task.generation != request["generation"]
+                or task.generation != binding["generation"]
                 or task.status not in {Status.CLAIMED, Status.STARTED, Status.SUSPENDED}
                 or (
                     task.owner is not None
@@ -355,7 +358,7 @@ class QueueTaskRelationshipsMixin:
             task = self._fetch(conn, task_id)
             if state == "bound" and (
                 latest_relationship(conn, task_id)["id"] != request["event_id"]
-                or task.generation != request["generation"]
+                or task.generation != binding["generation"]
                 or task.status not in {Status.CLAIMED, Status.STARTED, Status.SUSPENDED}
                 or (
                     task.owner is not None
@@ -365,7 +368,7 @@ class QueueTaskRelationshipsMixin:
                 raise TaskError(
                     "task changed during relationship write; original request retained"
                 )
-            result = {"request": request, "state": state, "receipt": receipt}
+            result = {**value, "state": state, "receipt": receipt}
             conn.execute(
                 "UPDATE task_events SET task_relationship=? WHERE id=?",
                 (_encoded(result), request["event_id"]),
