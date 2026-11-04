@@ -21,11 +21,12 @@ adds exact local-native admission around normal finalization without task releas
 Its source merged in [#10306](https://github.com/ThomasMichon/copilot-extensions/pull/10306).
 The [local coordinator observation and atomic routing/requeue slice](journal/2026/11.03-local-decline-closeout.md)
 is published in [#10319](https://github.com/ThomasMichon/copilot-extensions/pull/10319).
-Its drain, allocation-driver and replacement-creation review corrections have
-focused source controls passing, including retained decline-budget snapshots
-through the existing client; the revised review/merge gate remains open.
-Ordinary/remote decline integration and installed/native
-qualification remain open.
+It merged after exact-head approval and required CI as `7b0d58030f`.
+Its drain, allocation-driver, replacement-creation and retained-budget snapshot
+corrections pass 546 Dispatch and 256 unchanged Worktrees controls.
+Ordinary consumer source integration is being validated through the canonical
+Worktrees CLI, worker decline command/prompts and existing allocator supervision.
+Remote decline and installed/native qualification remain open.
 
 **Current consumer-adoption prerequisite (2026-11-03):** the
 [independent resident lifetime slice](journal/2026/11.03-independent-resident-lifetime.md)
@@ -427,6 +428,20 @@ live claim token. No new blanket ACK or executor appointment is created.
       finalize-before-submission contracts through existing wake, worker,
       submission/evaluation and Worktrees owners; preserve every unrelated
       conversation/confirmation and native-custody gate.
+- [x] Land coordinator-owned local decline observation and atomic routing/requeue
+      in [#10319](https://github.com/ThomasMichon/copilot-extensions/pull/10319)
+      after exact-head approval and required CI. The
+      [source receipt](journal/2026/11.03-local-decline-closeout.md) retains
+      546 Dispatch and 256 Worktrees passing controls, preserved native capacity
+      and replacement history. Ordinary worker/supervisor callers, remote and
+      no-managed-worktree applicability, complete cohort and installed/native
+      acceptance remain open.
+- [ ] Land ordinary decline consumers through the canonical Worktrees finalization
+      CLI, data-authenticated worker command/prompts and control-authenticated
+      existing supervisor observation. Qualify unsupported/failed/unknown
+      closeout, retained original retry instructions and unchanged task-only
+      credentials. Remote/no-worktree and installed/native acceptance remain
+      separate gates.
 
 ### Phase 1 — The monitor vocabulary only (data only, no `Status`/table change)
 _(agent-recommended: sequencing shape, revised 2026-09-25 after actually

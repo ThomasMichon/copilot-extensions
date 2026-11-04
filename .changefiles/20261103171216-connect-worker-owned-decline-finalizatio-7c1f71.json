@@ -1,0 +1,13 @@
+{
+  "comment": "Connect worker-owned decline finalization to canonical CLI and independent supervisor observation",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

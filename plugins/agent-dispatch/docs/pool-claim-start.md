@@ -10,7 +10,8 @@ See the [lifecycle architecture](spawn-supervisor.md#assignment-lifecycle-curren
 and [complete catalog owner](pool-publication.md) for those separate boundaries.
 The separate [worker decline provider](pool-worker-decline.md) retains a
 current decision and failed-closeout blocker, with an explicit coordinator-owned
-local observation/requeue boundary. Ordinary and remote closeout remain separate.
+local observation/requeue boundary. Ordinary consumers negotiate this boundary;
+remote closeout and installed/native qualification remain separate.
 
 ## Configured-cohort legacy reservation fence
 

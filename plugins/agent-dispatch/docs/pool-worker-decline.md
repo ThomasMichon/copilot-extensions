@@ -7,7 +7,55 @@ requeue permission or native retirement. The
 `worker_decline_preparation_versions: [1]` separately from
 `worker_decline_local_closeout_versions: [1]` and
 `worker_decline_closeout_complete: false`. Local observation is an additive
-provider boundary, not complete ordinary-worker or remote-host integration.
+provider boundary, not complete remote-host or installed/native qualification.
+
+## Ordinary worker and existing supervisor
+
+The ordinary `decline` command requires `--pool-generation`,
+`--owner-session-id`, a meaningful `--note`, and either repeatable exact
+`--exclude` scopes or `--exclude-self worktree|machine`. It resolves its own
+machine/worktree and requires the actual current native session environment.
+Host comparison uses existing normalization; machine self-exclusions retain
+the exact pool-assignment machine from task detail, not the caller's spelling.
+It reads the original coordinator's current task/reservation, negotiates
+preparation and records the decision before attempting its own closeout.
+Task-only credentials remain outside this pre-acceptance operation.
+
+The command selects the existing Worktrees launcher without rewriting a Python
+module name or assuming a launcher shape. Its read-only `record` descriptor
+must advertise `own_finalization_cli_versions: [1]` before the command emits
+the canonical own-worker `finalize` form. Missing support records a blocker
+without an effectful fallback. The selected provider derives the actual cwd
+project and enforces all normal finalization and native-preservation gates.
+The discovery and finalization calls retain the same opaque launcher prefix;
+an intervening provider rollback cannot authorize legacy finalization.
+Failures, malformed replies and timeouts retain custody and record a blocker.
+A lost preparation response never starts finalization or automatically repeats
+the decision POST.
+
+Successful worker output reports `workspace_closeout: finalized`, not task
+release or native retirement. Independently admitted decision nudges describe
+this explicit decline path, including routing preservation.
+Initial prompts and version-1 same-native retry invocations remain byte-for-byte compatible with
+retained invocations and independently updated peers. Decline guidance stays
+outside those immutable templates; retained ordinary charters and routing
+remain intact.
+Initial invocation recovery also uses its original stored prompt rather than
+the current generated seed. It still validates the original allocation/native
+binding and requested agent/charter before reading the original receipt;
+changed source guidance neither creates a replacement invocation nor rewrites
+the retained assignment.
+Stable initial templates also preserve keyed CLI acquisition requests and
+ordinary recovery through pre-change readers during rollback.
+
+The existing allocator supervisor consumes a pending decline before startup
+retry/nudge/exhaustion logic. Only its owning supervisor, outside observe-only
+mode and after existing task, action and installation-governance admission,
+may request the coordinator's independently observed closeout. This client
+negotiates the running coordinator's local-closeout capability and sends only
+the original decline binding. Neither this supervisor nor the worker copies a
+finalizer reply into release evidence. No new loop, timer, finalizer owner or
+process-retirement mechanism is introduced.
 
 ## Current boundary
 
@@ -49,9 +97,9 @@ and exact binding at `POST /tasks/{task_id}/pool-decline/blocker`, adding
 without changing the original decision. Identical blocker replay is a no-op.
 
 While this claim is pending closeout, acceptance, startup retry/nudge/exhaustion
-and reservation release/retirement cannot bypass it. Existing supervision
-observes the decline and retains custody rather than sending another decision
-nudge or falling into legacy recovery. No new timer or cleanup owner is added.
+and reservation release/retirement cannot bypass it. Existing supervision requests independently observed closeout and retains
+custody on failure rather than sending another decision nudge or falling into
+legacy recovery. No new timer or cleanup owner is added.
 An explicitly authorized terminal task disposition retains the historical
 decline without deadlocking normal reservation retirement.
 
@@ -117,11 +165,6 @@ hard targets so later startup retries cannot revive stale carry.
 
 ## Remaining integration
 
-Ordinary CLI/prompts and supervision do not invoke closeout yet. The next
-consumer boundary must negotiate support, finalize only the
-declining worker's own correct workspace through its normal source/PR,
-outbound-claim, foreign/shared-session, pairing and follow-up gates, then
-request coordinator observation rather than copying the finalizer's reply.
 Selected remote-host transport, no-managed-worktree applicability and the
 complete ordinary/native matrix remain open. Local source controls do not
 qualify those boundaries or authorize physical cleanup.

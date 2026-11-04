@@ -15,6 +15,9 @@ POOL_DECLINE_PROTOCOL = "pool_worker_decline/v1"
 
 
 def enrich_task(queue: TaskQueue, task_id: str, result: dict) -> dict:
+    assignment = queue.task_pool_assignment(task_id)
+    if assignment is not None:
+        result["pool_assignment"] = asdict(assignment)
     decline = queue.pool_worker_decline(task_id)
     if decline is not None:
         result["worker_decline"] = asdict(decline)
