@@ -165,6 +165,37 @@ def test_currentness_requires_actual_profile_source_selector_and_completion(sele
     assert _plan(selected).status == ("" if fault else "SKIPPED (current)")
 
 
+@pytest.mark.parametrize("profile", ["base", "provider-exec"])
+@pytest.mark.parametrize("fault", ["", "intent", "completion", "interpreter"])
+def test_marketplace_profile_currentness_uses_owning_target_policy(selected, profile, fault):
+    owner, _, root, _, _ = selected
+    version = f"1.0.0+{profile}"
+    slot = root / "versions" / version
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True)
+    if fault != "interpreter":
+        python.touch()
+    (slot / ".install-complete.json").write_text(json.dumps(
+        {} if fault == "completion" else {
+            "version": version, "completed_at": "2026-01-01", "pid": 0,
+        },
+    ))
+    (root / "current-version").write_text(version)
+    (root / "deploy-manifest.json").write_text(json.dumps({
+        "source": {"version": "1.0.0"}, "runtime_version": version,
+        "runtime_profile": profile, "venv": str(slot),
+    }))
+    (root / "runtime-profile.json").write_text(json.dumps({
+        "schema": "copilot-extensions.agent-containers.runtime-profile",
+        "version": 1,
+        "profile": ("provider-exec" if profile == "base" else "base") if fault == "intent" else profile,
+    }))
+    before = {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    step = update_runtime_plan.plan_registered("agent-containers", "linux", force=False)
+    assert step.status == ("" if fault else "SKIPPED (current)")
+    assert before == {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
+
+
 @pytest.mark.parametrize("fault", [
     "missing-owner", "both-missing", "old-version", "unsafe-path", "boolean-version",
 ])

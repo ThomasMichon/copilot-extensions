@@ -1521,6 +1521,11 @@ manifest, and service restart (see "What NOT to Do" and "Deploying: one command
 > (`check-changefile-presence.py`) makes the same-version-drift case rare in
 > the first place, so `--force` stays a last resort.
 
+Containers' marketplace `base` and `provider-exec` generations use their owning
+profile selector rather than the generic unprofiled package-version rule.
+Changed desired profile still reaches its installer; prepared-source profile
+qualification remains separate.
+
 The explicit updater collects the engine, selected modules and other required
 registered runtime commands once after payload acquisition. Before launching
 any runtime installer, its `runtime_preflight` checks the whole selected set's

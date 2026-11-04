@@ -202,7 +202,7 @@ additional recovery command is introduced. Source/profile identity checks,
 legacy selector-free venv support and Bridge's mandatory serving reconciliation
 remain intact.
 
-The focused Windows source packets passed 243 tests with three explicit platform
+The focused Windows source packets passed 251 tests with three explicit platform
 skips. Four native selected-target controls also prove real shell invocation,
 usable fixture-venv Python, preserved configuration bytes, unchanged healthy
 slot bytes on immediate repeat and a failed repair remaining failed. These
@@ -233,3 +233,19 @@ existing footprints. Linux/macOS native and installed/external-venue operations
 were not run in this Windows source-only lane. No host rollout, service,
 credential, queue, protected-session or retirement effect is claimed. The
 parent effort and #10377/#6389 remain open.
+
+### 2026-11-04 - Marketplace profile currentness
+
+Ordinary Containers installations select `+base` or `+provider-exec` generations,
+not the unprofiled package version. Applying the generic source/repair generation
+helper to those healthy selections unnecessarily reached the installer on every
+repeat. Both healthy marketplace profiles reproduced that miss; six changed
+intent, incomplete and missing-interpreter controls retained reconstruction.
+
+The footprint probe now uses the owning Containers target selector for ordinary
+marketplace profiles, binding desired profile, package/source identity and
+deployed generation before the same completion/interpreter check. Prepared-source
+targets retain their existing qualification. The changed profile and native
+target-consumer packet passes 76 tests with three platform skips; the other
+already-qualified packets are unchanged. This corrects healthy reuse without
+loosening incomplete selection or source identity.

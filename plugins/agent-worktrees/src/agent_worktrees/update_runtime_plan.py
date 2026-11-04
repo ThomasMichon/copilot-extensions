@@ -179,8 +179,20 @@ from versioned_runtime_readiness import deployment_runtime_version
 payload, root = Path(sys.argv[2]), Path(sys.argv[3])
 package, plugin, prepared = sys.argv[4:]
 deployment = json.loads((root / "deploy-manifest.json").read_text(encoding="utf-8-sig"))
-expected = (deployment.get("runtime_version") if prepared == "1" else
-            deployment_runtime_version(payload, package, plugin, deployment))
+if prepared == "1":
+    expected = deployment.get("runtime_version")
+elif plugin == "agent-containers":
+    import runtime_profile
+    target = runtime_profile._select_target(root, payload, None, None, None)
+    if (target.package_version != package
+            or deployment.get("runtime_profile") != target.profile
+            or deployment.get("runtime_version") != target.runtime_version
+            or deployment.get("runtime_source") !=
+               runtime_profile.source.manifest_fields(target.identity).get("runtime_source")):
+        sys.exit(1)
+    expected = target.runtime_version
+else:
+    expected = deployment_runtime_version(payload, package, plugin, deployment)
 marker = root / "current-version"
 if marker.exists() or marker.is_symlink():
     ready = (marker.read_text(encoding="utf-8-sig").strip() == expected
