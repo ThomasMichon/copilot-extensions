@@ -20,6 +20,24 @@ from . import finalize_open_pr_gate as pr_gate
 from .dispatch_worker_closeout import OwnWorker, _text
 from .record_read import read_exact_record, read_workspace_record
 
+CONTRACT = "agent-worktrees.dispatch-worker-readiness"
+OPERATIONS = ("observe-ready", "check-own-ready")
+
+
+def describe_contract() -> dict:
+    """Describe only the readiness operations provided by this executing runtime."""
+    return {
+        "contract": CONTRACT,
+        "version": 1,
+        "operations": list(OPERATIONS),
+        "native_proof": "inuse-hold-v1",
+        "platforms": ["linux", "wsl"],
+        "paired_readiness": False,
+        "finalized": False,
+        "task_release": False,
+        "process_retirement": False,
+    }
+
 
 def require_task_claim(
     record: tracking.WorktreeRecord,
@@ -222,8 +240,8 @@ def observe_ready(
 ) -> dict:
     """Independently read current readiness, never accept a worker's receipt.
 
-    Internal source seam only: callers must later bind this observation to their
-    immutable preparation and recheck queue admission outside this provider.
+    Callers must bind this observation to their immutable preparation and
+    separately recheck queue admission; readiness grants no transition authority.
     """
     for name, value in (
         ("task ID", task_id),
@@ -297,6 +315,9 @@ def observe_ready(
         ):
             raise ValueError("Readiness custody or checkout changed during observation")
         return {
+            "contract": CONTRACT,
+            "version": 1,
+            "operation": "check-own-ready" if own_caller else "observe-ready",
             "ready": True,
             "task_id": task_id,
             "reservation_key": reservation_key,

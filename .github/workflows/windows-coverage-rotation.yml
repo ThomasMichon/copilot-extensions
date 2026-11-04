@@ -39,6 +39,11 @@ on:
         required: false
         type: boolean
         default: false
+      post_tool_fallback:
+        description: "Run only contained Worktrees advisory post-tool and late-guidance consumers (Linux only)."
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   # A scheduled run and a manually dispatched run could otherwise overlap;
@@ -75,7 +80,13 @@ jobs:
           # instead of being treated as inert data.
           EVENT_NAME: ${{ github.event_name }}
           INPUT_REF: ${{ inputs.ref }}
+          LAUNCH_MAINTENANCE: ${{ inputs.launch_maintenance }}
+          POST_TOOL_FALLBACK: ${{ inputs.post_tool_fallback }}
         run: |
+          if [ "$LAUNCH_MAINTENANCE" = true ] && [ "$POST_TOOL_FALLBACK" = true ]; then
+            echo "::error::select only one focused qualification scope" >&2
+            exit 1
+          fi
           ref="${INPUT_REF:-dev}"
           if [ "$EVENT_NAME" != "workflow_dispatch" ]; then
             ref="dev"
@@ -155,7 +166,7 @@ jobs:
         run: python tools/run-plugin-tests.py ${{ matrix.plugin }}
 
   linux-full:
-    name: ${{ inputs.launch_maintenance && 'launch maintenance' || 'full' }} (Linux isolated) - ${{ matrix.plugin }}
+    name: ${{ inputs.post_tool_fallback && 'post-tool fallback' || inputs.launch_maintenance && 'launch maintenance' || 'full' }} (Linux isolated) - ${{ matrix.plugin }}
     needs: select
     if: needs.select.outputs.sha != ''
     runs-on: ubuntu-latest
@@ -163,9 +174,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        plugin: ${{ fromJSON(inputs.launch_maintenance && '["agent-worktrees","worktree-manager","update-driver"]' || '["agent-bridge","agent-codespaces","agent-containers","agent-dispatch","agent-logger","agent-mcp","agent-ssh","agent-vault","agent-worktrees"]') }}
+        plugin: ${{ fromJSON(inputs.post_tool_fallback && '["agent-worktrees"]' || inputs.launch_maintenance && '["agent-worktrees","worktree-manager","update-driver"]' || '["agent-bridge","agent-codespaces","agent-containers","agent-dispatch","agent-logger","agent-mcp","agent-ssh","agent-vault","agent-worktrees"]') }}
     env:
-      TEST_SELECTOR: ${{ inputs.launch_maintenance && (matrix.plugin == 'update-driver' && 'test_core or test_participant_transport or test_real_product_exit_cannot_hide_abandoned_execution_custody' || 'test_update_launch_cli or test_update_driver_json or test_update_stage or test_reconcile_status or test_launch_update_requests or test_launch_preparation_progress or test_launch_session_unwrap or test_standalone_provisioning') || '' }}
+      POST_TOOL_FALLBACK: ${{ inputs.post_tool_fallback }}
+      TEST_SELECTOR: ${{ inputs.post_tool_fallback && 'test_post_tool_shell or test_nudge_status or test_bind_nudge_script or test_late_worker_completion_reaches_actual_post_tool_hook' || inputs.launch_maintenance && (matrix.plugin == 'update-driver' && 'test_core or test_participant_transport or test_real_product_exit_cannot_hide_abandoned_execution_custody' || 'test_update_launch_cli or test_update_driver_json or test_update_stage or test_reconcile_status or test_launch_update_requests or test_launch_preparation_progress or test_launch_session_unwrap or test_standalone_provisioning') || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -277,6 +289,7 @@ jobs:
           inventory = Path("tools/periodic-integration-inventory.json")
           exit_code = directory / "exit-code"
           selector = os.environ.get("TEST_SELECTOR", "")
+          post_tool = os.environ.get("POST_TOOL_FALLBACK") == "true"
           command = ["python", "tools/run_tests_in_devcontainer.py", os.environ["PLUGIN"]]
           if selector:
               command += ["-k", selector]
@@ -286,6 +299,8 @@ jobs:
               "tested_sha": os.environ["TESTED_SHA"],
               "platform": "linux",
               "qualification_scope": (
+                  "Linux advisory post-tool fallback only; no native host, Windows or throughput qualification"
+                  if post_tool else
                   "Linux launch-maintenance selection only; no Windows or broker qualification"
                   if selector else "Linux default-full only; Windows execution unavailable and not validated"
               ),
@@ -298,10 +313,13 @@ jobs:
               "inventory": str(inventory),
               "inventory_sha256": hashlib.sha256(inventory.read_bytes()).hexdigest() if inventory.is_file() else None,
               "scope": (
+                  "selected post-tool and late-guidance consumers; explicit-tier/environment-gated skips are not passes"
+                  if post_tool else
                   "selected launch-maintenance tests; explicit-tier/environment-gated skips are not passes"
                   if selector else "default full plugin invocation; explicit-tier/environment-gated skips are not passes"
               ),
               "failure_owner": (
+                  "Post-tool fallback discovery #6086" if post_tool else
                   "Coordinated Launch Maintenance #7694" if selector
                   else "Test Portfolio Rationalization #1303"
               ),
@@ -333,7 +351,7 @@ jobs:
     # about `dev`'s own health, and must not pollute that issue.
     if: >-
       always() && (needs.select.result == 'failure' || needs.test.result == 'failure' || needs.linux-full.result == 'failure') &&
-      (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.launch_maintenance && (inputs.ref == '' || inputs.ref == 'dev')))
+      (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.launch_maintenance && !inputs.post_tool_fallback && (inputs.ref == '' || inputs.ref == 'dev')))
     runs-on: ubuntu-latest
     permissions:
       contents: read

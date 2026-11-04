@@ -698,6 +698,23 @@ qualification before deciding any administrative tracking supersession. Until
 then KEEP #5861. All finite implementation and validation residuals remain open
 under their existing authorities; unrelated parent tasks are not new blockers.
 
+### 2026-11-04 - Client authoritative replacement acceptance reviewed
+
+#10415 merged the existing client-lifecycle plan's authoritative replacement
+reconciliation at `7275048aab45fd77ceaa09569e5a4df93c4d2d4f`, after actual
+current-head approval and required green checks. GitHub publication and merge
+server errors were reconciled before bounded retries; neither a failed response
+nor an approval was credited as merge evidence.
+
+The retained forward-generation candidate remains preserved and unpublished.
+Its construction isolation and physical publication evidence are useful, but
+historical receipt recovery cannot veto complete incoming invocation selection.
+The next client-owned integration reuses the common publication owner, preserves
+strict old-object deletion custody and proves the real default-command consumer
+alongside incoming health. No broad Plan or Validation item closes from this
+reviewed intent. Controller, connector, substrate, credentials, actual adopter
+qualification and authorized rollout remain with their existing owners.
+
 ### 2026-11-01 UTC - Keyed attribution source plan accepted
 
 #8795 merged the [keyed attribution continuation](telemetry-attribution.md)
@@ -728,5 +745,8 @@ See the [source qualification and remaining release/adopter gates](komodo-substr
 
 See the [preserved source history and unresolved acceptance boundaries](journal/2026/10.28-retained-boundaries.md).
 
+- [2026-11-04 - Incoming client selection qualification](journal/2026/11.04-client-incoming-selection.md)
+- [2026-10-23 - Forward client generations](journal/2026/10.23-forward-generations.md)
+- [2026-10-22 through 2026-10-23 - Client retained recovery](journal/2026/10.22-client-recovery.md)
 - [2026-10-22 - Client lifecycle](journal/2026/10.22-client-lifecycle.md)
 - [2026-10-10 through 2026-10-21 - Foundation and client admission](journal/2026/10.10-foundation.md)

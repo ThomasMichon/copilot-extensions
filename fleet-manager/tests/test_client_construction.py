@@ -89,6 +89,34 @@ def candidate(root, fixture, primitive):
     return primitive.version_dir(root / construction.NAMESPACE, version)
 
 
+@pytest.mark.parametrize("location", ["outside", "relative", "invalid"])
+def test_candidate_import_policy_refuses_nonlocal_site_directory(tmp_path, monkeypatch, location):
+    slot = tmp_path / "candidate"
+    slot.mkdir(mode=0o700)
+    outside = tmp_path / "preserved"
+    outside.mkdir(mode=0o700)
+    value = {"outside": str(outside), "relative": "site-packages", "invalid": None}[location]
+    monkeypatch.setattr(construction, "_run", lambda *args, **kwargs: json.dumps(value).encode())
+    with pytest.raises(PlanError, match="import directory leaves"):
+        construction._import_policy(slot, {}, None)
+    assert list(slot.iterdir()) == list(outside.iterdir()) == []
+
+
+def test_candidate_import_policy_never_overwrites_an_existing_file(tmp_path, monkeypatch):
+    slot = tmp_path / "candidate"
+    site = slot / "site-packages"
+    site.mkdir(mode=0o700, parents=True)
+    policy = site / "immutable_runtime.pth"
+    policy.write_bytes(b"preserved foreign import policy\n")
+    monkeypatch.setattr(
+        construction, "_run", lambda *args, **kwargs: json.dumps(str(site)).encode(),
+    )
+    with pytest.raises(FileExistsError):
+        construction._import_policy(slot, {}, None)
+    assert policy.read_bytes() == b"preserved foreign import policy\n"
+    assert not (slot / construction.BOOTSTRAP).exists()
+
+
 @pytest.mark.client_distribution_full
 def test_owned_wheel_snapshot_stability(tmp_path, signed_wheel):
     from fleet_manager import artifacts
@@ -178,6 +206,14 @@ def test_real_offline_wheel_console_doctor_constructs_a_standard_immutable_slot(
     library = (slot / "Lib" if os.name == "nt"
                else slot / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}")
     assert not (library / "site-packages" / "pip").exists()
+    console = slot / ("Scripts/fleet-manager.exe" if os.name == "nt" else "bin/fleet-manager")
+    invoked = subprocess.run(
+        [str(console), "doctor", "--role", "client"],
+        cwd=root, capture_output=True, text=True, timeout=30,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert invoked.returncode == 0, invoked.stderr
+    assert construction._tree(primitive, slot) == report["runtime_sha256"]
     assert user.read_bytes() == b"preserved configuration\n"
     assert database_bytes(root) == before
 
@@ -436,12 +472,18 @@ def test_sanitized_child_environment_preserves_native_custody_tools_without_host
 ):
     monkeypatch.setenv("PATH", "not-the-native-toolchain")
     monkeypatch.setenv("CONSTRUCTION_TEST_SECRET", "must-not-reach-the-child")
-    environment = construction._environment(tmp_path)
-    assert environment["HOME"] == str(tmp_path / "health-home")
+    slot = tmp_path / "runtime" / "versions" / "candidate"
+    slot.mkdir(parents=True, mode=0o700)
+    environment = construction._environment(slot)
+    assert environment["HOME"] == str(slot / "health-home")
+    temporary = Path(environment["TEMP"])
+    assert environment["TMP"] == environment["TMPDIR"] == str(temporary)
+    assert temporary.is_relative_to(tmp_path / "runtime")
     assert "CONSTRUCTION_TEST_SECRET" not in environment
     assert "not-the-native-toolchain" not in environment["PATH"]
     if os.name == "nt":
         assert environment["PATH"] == os.path.dirname(sys.executable)
+        assert not temporary.is_relative_to(slot)
     else:
         assert set(os.defpath.split(os.pathsep)) <= set(environment["PATH"].split(os.pathsep))
 
