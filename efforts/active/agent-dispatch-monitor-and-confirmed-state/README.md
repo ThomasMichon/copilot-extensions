@@ -469,12 +469,19 @@ restoration of historical terminal enums follows.
       request custody, actionable blockers and rollback-safe completion refusal.
       Provider observation, guarded submission, caller migration and rejected
       resubmission remain separate gates; ordinary activation stays disabled.
-- [ ] Land the bounded [nonfinalizing Worktrees readiness source](journal/2026/11.04-nonfinalizing-readiness.md),
+- [x] Land the bounded [nonfinalizing Worktrees readiness source](journal/2026/11.04-nonfinalizing-readiness.md)
+      in [#10455](https://github.com/ThomasMichon/copilot-extensions/pull/10455),
+      merged as `10ad45e92a` after current-head independent approval and required CI,
       retaining only the exact stored own-task responsibility while checking
       normal preservation, fresh PR state and actual committed/dirty content.
       Keep normal finalization blocked by that claim. Negotiated callers,
       queue advancement, manual/absent-worktree applicability and installed/native
       qualification remain separate gates.
+- [ ] Land the bounded [selected-runtime readiness transport](journal/2026/11.04-readiness-transport.md):
+      separate executing-provider descriptor, strict complete record requests
+      and independent/own-native observation without finalization or task release.
+      Keep version-1 finalized-closeout meaning unchanged. Consumer negotiation,
+      queue advancement and ordinary/native activation remain separate gates.
 - [x] Land read-only [task-obligation provider evidence](journal/2026/11.03-task-obligation-provider.md)
       in [#10365](https://github.com/ThomasMichon/copilot-extensions/pull/10365),
       merged as `e9c3c3f9bd` after exact-head approval and required CI.

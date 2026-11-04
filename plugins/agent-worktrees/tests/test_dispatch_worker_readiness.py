@@ -1,5 +1,7 @@
 """Readiness keeps exact task custody without weakening normal finalization."""
 
+import argparse
+import json
 import os
 import subprocess
 from contextlib import contextmanager
@@ -14,7 +16,7 @@ from test_dispatch_worker_closeout import worker as worker
 
 from agent_worktrees import dispatch_worker_closeout as closeout
 from agent_worktrees import dispatch_worker_readiness as ready
-from agent_worktrees import finalize_obligations, finalized_checkout, tracking
+from agent_worktrees import finalize_obligations, finalized_checkout, output, record_cli, tracking
 
 TASK = "a" * 32
 
@@ -141,6 +143,169 @@ def _observe(worker, **kwargs):
         task_claim_ref=worker.ref,
         **kwargs,
     )
+
+
+def _record(argv):
+    parser = argparse.ArgumentParser()
+    record_cli.add_parsers(parser.add_subparsers(dest="command"))
+    args = parser.parse_args(["record", *argv, "--json"])
+    with output.capture_json_output() as captured:
+        rc = record_cli.cmd_record(args)
+    return rc, json.loads(captured.getvalue())
+
+
+def _request(worker, operation="observe-ready"):
+    return [
+        "--worktree-id", "worker",
+        "--readiness-operation", operation,
+        "--readiness-task", TASK,
+        "--readiness-reservation", "reservation",
+        "--readiness-native", NATIVE,
+        "--readiness-creation-nonce", "created-worker",
+        "--readiness-head-revision", "0",
+        "--readiness-task-claim-ref", worker.ref,
+    ]
+
+
+def test_record_descriptors_are_distinct_and_never_inspect_a_checkout(monkeypatch):
+    from agent_worktrees import dispatch_closeout_observation
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Contract discovery inspected or changed a workspace")
+
+    for module, name in (
+        (ready, "observe_ready"), (ready, "read_exact_record"),
+        (record_cli, "read_exact_record"), (record_cli, "read_workspace_record"),
+        (tracking, "load_record"), (tracking, "save_record"),
+    ):
+        monkeypatch.setattr(module, name, forbidden)
+    rc, descriptor = _record(["--describe-readiness-contract"])
+    assert rc == 0 and descriptor == ready.describe_contract()
+    assert descriptor["contract"] == ready.CONTRACT and descriptor["version"] == 1
+    assert descriptor["operations"] == ["observe-ready", "check-own-ready"]
+    assert descriptor["platforms"] == ["linux", "wsl"]
+    assert all(descriptor[key] is False for key in (
+        "paired_readiness", "finalized", "task_release", "process_retirement",
+    ))
+    rc, legacy = _record(["--describe-closeout-contract"])
+    assert rc == 0 and legacy == dispatch_closeout_observation.describe_contract()
+    assert legacy["contract"] != descriptor["contract"]
+    assert legacy["operations"] == ["observe-finalized"] and legacy["version"] == 1
+
+
+@pytest.mark.parametrize("operation", ["observe-ready", "check-own-ready"])
+def test_record_readiness_traverses_real_owner_without_concluding_workspace(
+    prepared, monkeypatch, operation,
+):
+    before = deepcopy(prepared.record)
+    if operation == "observe-ready":
+        monkeypatch.chdir(prepared.root)
+        monkeypatch.delenv("COPILOT_AGENT_SESSION_ID")
+    rc, result = _record(_request(prepared, operation))
+    assert rc == 0 and result["ok"] is True and result["ready"] is True
+    assert result["contract"] == ready.CONTRACT and result["version"] == 1
+    assert result["operation"] == operation
+    assert result["allocation"] == prepared.record.dispatch_attempt.to_dict()
+    assert result["head_revision"] == 0 and result["creation_nonce"] == "created-worker"
+    assert result["task_claim_ref"] == prepared.ref
+    assert result["checkout_retained"] is True
+    assert result["finalized"] is result["task_release"] is result["process_retirement"] is False
+    assert prepared.record == before
+
+
+@pytest.mark.parametrize("case", ["dirty", "head", "claim", "own-native"])
+def test_record_refuses_changed_readiness_and_preserves_task_claim(prepared, monkeypatch, case):
+    request = _request(prepared)
+    if case == "dirty":
+        (prepared.binding.path / "unfinished.txt").write_text("WIP", encoding="utf-8")
+    elif case == "head":
+        request[request.index("--readiness-head-revision") + 1] = "1"
+    elif case == "claim":
+        request[request.index("--readiness-task-claim-ref") + 1] = "foreign"
+    else:
+        request = _request(prepared, "check-own-ready")
+        monkeypatch.setattr(closeout, "_native_source", lambda native: "foreign")
+    before = deepcopy(prepared.record)
+    rc, result = _record(request)
+    assert rc == 1 and result["ok"] is False and result["error"]
+    assert "ready" not in result and prepared.record == before
+    assert prepared.record.resources[0].is_unsettled
+
+
+@pytest.mark.parametrize("probe", ["snapshot", "refs"])
+@pytest.mark.parametrize("failure", ["git", "timeout"])
+def test_record_normalizes_failed_readiness_probes_without_releasing_custody(
+    prepared, monkeypatch, probe, failure,
+):
+    error = (
+        ready.git_ops.GitError(["git", "status"], 128, "index unreadable")
+        if failure == "git"
+        else subprocess.TimeoutExpired(["git", "status"], 5)
+    )
+
+    def failed(*args, **kwargs):
+        raise error
+
+    if probe == "snapshot":
+        monkeypatch.setattr(ready.finalized_checkout, "snapshot", failed)
+    else:
+        monkeypatch.setattr(ready, "_refs", failed)
+    before = deepcopy(prepared.record)
+    rc, result = _record(_request(prepared))
+    assert rc == 1 and result == {"version": 1, "ok": False, "error": str(error)}
+    assert prepared.record == before and prepared.record.resources[0].is_unsettled
+    assert prepared.lock_depth == 0
+
+
+@pytest.mark.parametrize("missing", [
+    "operation", "task", "reservation", "native",
+    "creation-nonce", "head-revision", "task-claim-ref",
+])
+def test_partial_record_readiness_never_reaches_observer(prepared, monkeypatch, missing):
+    monkeypatch.setattr(ready, "observe_ready", lambda *a, **k: pytest.fail("Partial request"))
+    request = _request(prepared)
+    offset = request.index(f"--readiness-{missing}")
+    del request[offset:offset + 2]
+    rc, result = _record(request)
+    assert rc == 1 and result["ok"] is False
+    assert "Readiness requires an exact" in result["error"]
+
+
+@pytest.mark.parametrize("case", [
+    "cwd", "describe", "legacy-describe", "closeout-task",
+    "closeout-reservation", "closeout-native",
+])
+def test_mixed_record_operations_refuse_before_observation(prepared, monkeypatch, case):
+    from agent_worktrees import dispatch_closeout_observation
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Mixed request reached an owner")
+
+    monkeypatch.setattr(ready, "observe_ready", forbidden)
+    monkeypatch.setattr(dispatch_closeout_observation, "observe", forbidden)
+    request = _request(prepared)
+    if case in {"cwd", "describe", "legacy-describe"}:
+        request[:2] = {
+            "cwd": ["--cwd", str(prepared.binding.path)],
+            "describe": ["--describe-readiness-contract"],
+            "legacy-describe": ["--describe-closeout-contract"],
+        }[case]
+    else:
+        request += [f"--{case}", "legacy"]
+    rc, result = _record(request)
+    assert rc == 1 and result["ok"] is False
+
+
+@pytest.mark.parametrize("extra", [
+    ["--typo"], ["--readiness-head-revision", "not-an-integer"],
+    ["--readiness-operation", "finalize"],
+    ["--worktree-id", "worker", "--describe-readiness-contract"],
+])
+def test_readiness_record_keeps_strict_parser_rejection(monkeypatch, extra):
+    monkeypatch.setattr(ready, "observe_ready", lambda *a, **k: pytest.fail("Invalid syntax"))
+    with pytest.raises(SystemExit) as exc:
+        _record(extra)
+    assert exc.value.code == 2
 
 
 def test_independent_observation_retains_exact_claim_and_never_finalizes(prepared, monkeypatch):

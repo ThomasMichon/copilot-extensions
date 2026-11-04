@@ -1,0 +1,9 @@
+{
+  "comment": "Expose a separate selected-runtime nonfinalizing worker readiness record contract while preserving finalized closeout semantics",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
