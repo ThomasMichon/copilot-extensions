@@ -2,7 +2,7 @@
 
 Back to the [canonical effort](README.md).
 
-**Agent-proposed bounded execution plan; review precedes behavior changes.**
+**Reviewed bounded execution plan; released-consumer acceptance remains open.**
 Coordination stays on #7030 under #7028. The implementation source handle is
 `weathered-diode`; existing construction, artifact/profile, application,
 command, cache and historical-migration owners retain their scopes.
@@ -55,26 +55,26 @@ and retained-wheel/profile changes are not taken over.
 
 - [x] Land this intent and bounded plan through normal source review before
   changing runtime behavior.
-- [ ] Trace the advertised catalog entry, native shell/PowerShell adapters,
+- [x] Trace the advertised catalog entry, native shell/PowerShell adapters,
   command binding and hook execution against the actual installed generation.
   Establish normal preparation/adoption prerequisites through their owners;
   do not manufacture metadata to silence an unqualified fixture.
-- [ ] Reuse canonical physical-environment selection in affected consumers,
+- [x] Reuse canonical physical-environment selection in affected consumers,
   including standard POSIX/Windows interpreter paths and real venv prefix
   behavior. Preserve completion, explicit source-generation selection,
   physical-path and foreign-scope checks; do not flatten or alias the project.
-- [ ] Resolve application-owned command/readiness integration through the
+- [x] Resolve application-owned command/readiness integration through the
   existing installation and command owners. Do not synthesize a legacy
   deployment receipt or infer ownership from a name or package-version match.
   Prefer the existing operation and immutable installed descriptor; if the
   boundary needs expansion, declare it provider-first under the
   [contract-evolution pattern](../../../docs/patterns/service-contract-evolution.md)
   before migrating consumers.
-- [ ] Preserve valid managed-deployment denial and supported standalone
+- [x] Preserve valid managed-deployment denial and supported standalone
   behavior. A healthy selected application remains callable despite payload
   skew; unsupported or missing requirements produce actionable diagnostics,
   not silent exits, runtime reconstruction or whole-hook suppression.
-- [ ] Route affected hook/command imports through the existing external-cache
+- [x] Route affected hook/command imports through the existing external-cache
   owner. Preserve caching and normal non-deployment hook duties without new
   slot files, cache exemptions, site-startup hooks or deletion of prior state.
 - [ ] Qualify the exact native consumer, then publish source changes through
@@ -83,13 +83,13 @@ and retained-wheel/profile changes are not taken over.
 
 ## Validation plan
 
-- [ ] Focused controls distinguish completed physical nested environments,
+- [x] Focused controls distinguish completed physical nested environments,
   supported flat compatibility, bad/redirected environments, source-qualified
   selection and unchanged fallback meaning. Use real UV-created venvs to check
   `pyvenv.cfg`, `sys.prefix`/`sys.base_prefix`, installed imports and both
   platform interpreter layouts; no activation-policy or symlink privilege
   changes.
-- [ ] Exercise the actual command/binding parser boundary across supported
+- [x] Exercise the actual command/binding parser boundary across supported
   old/new callers and providers, explicit rollback, missing or incompatible
   metadata, managed refusal and strict unknown-argument rejection. Do not add
   a whole native matrix to the required unit-only packet.
@@ -112,6 +112,82 @@ and retained-wheel/profile changes are not taken over.
   application in the contributor matrix.
 
 ## Journal
+
+### 2026-11-04 - Released catalog works; backup guidance worker remains
+
+#10473 promoted the exact admitted Dev source
+`dc17081d864e826110b7e4444dbae669e8213410` to Main
+`913dcc766be9d434efb414945dea283f060bcb8c` at `2026-11-04T17:08:51Z`.
+The seven critical native adapter, lifecycle-contract and catalog-generator
+blobs match the reviewed implementation.
+
+A distinct fresh Linux consumer acquired the ordinary default-head payload
+before constructing the backend pair from actual released Git inputs through
+the canonical artifact/profile owners. Both complete installations, installed
+commands/imports, authenticated Worktrees monitor serving, unavailable-source
+and refusal-preservation controls pass. Canonical project registration and
+worktree creation pass. The exact delivered catalog command now passes
+`--help` and `--version`.
+
+The full hook/first-use/end interval nevertheless adds 59 bytecode files inside
+the selected Worktrees environment. Existing files, generations, selectors and
+redirects are unchanged; refresh is not reached. The backup local-guidance
+worker starts a fresh interpreter without external-cache arguments, so that
+remaining path is reopened under the existing cache owner and reviewed scope.
+The failed guest is confirmed absent and watched host state is unchanged.
+
+The native lifecycle source independently refuses container epochs. Preserve
+that supported-platform boundary: project registration is not native process
+qualification, and this result does not authorize a fabricated source witness,
+container admission changes or a full native-activation claim. Source
+acceptance, changed-input refresh and installed-host rollout remain distinct.
+
+The follow-up passes the selected runtime root to the existing external-cache
+owner when constructing the backup worker's Python argv. It does not change
+worker admission, environment scrubbing, headless/process flags, metadata
+custody or native-source policy. The focused regression fails on the previous
+plain `-m` invocation, then all 45 affected lifecycle controls pass after the
+correction. Python lint, the 13-plugin install contract and whitespace pass.
+Released-consumer cache/update acceptance remains open; the earlier failed
+guest is not repaired into a pass.
+
+The distinct committed-source candidate
+`0c178b2a71407f584b68dd06531baa37f9232155` then passes actual Git-bundle
+acquisition, canonical pair construction and both complete installations in a
+fresh guest, with ordinary unpinned native payload `1.24.460-dev1`. Cold and
+repeated exact hook/catalog/end intervals preserve all 3,546 compared backend
+files and selected generations. The cold interval creates 571 external
+bytecode files, and the repeated interval reuses all 571 without rewrite.
+No prewarming, bytecode suppression or backend-file exclusions are used.
+The changed-default-input wait is still pending at this observation; this
+candidate result is not released-backend, full native-activation or host-rollout
+evidence. All 40 already-admitted typing projects also pass their Linux and
+Windows target checks; pending projects are not relabeled as typed.
+
+The candidate witness subsequently ends with three passing stages and one
+failed aggregate native stage: nine successful default-head observations find
+no changed release within the unchanged 480-second bound. No native refresh is
+performed or counted. The cache and complete-file observations above remain
+valid bounded results, not a passing update witness. The exact guest is
+confirmed absent and all four watched host states are unchanged.
+
+### 2026-11-04 - Implementation merged; release and native acceptance continue
+
+#10438 is provider-confirmed merged to Dev at `2026-11-04T16:44:33Z`,
+commit `dc17081d864e826110b7e4444dbae669e8213410`. Genuine Copilot approval
+`5772112561` and required hosted CI passed on reviewed head
+`5b40b77e62ae71148112e16f06b2ce22444eb7e7`; all six published findings are
+resolved, and the additional cache/catalog/documentation assessments are recorded.
+The authorized Maintainer path bypassed only the separate review-count gate,
+not CI or feedback.
+
+The implementation and focused source-control items above are complete.
+Actual Main promotion, ordinary independently sourced native acquisition,
+complete backend-file/cache observations and changed-input refresh remain open.
+Next is promotion tracking followed by a distinct fresh consumer, with no
+frontend ref override, forged preparation metadata or host rollout. The failed
+R17 fixture remains unchanged. This does not close #7028, #7030, other apps or
+the broader adopter objective.
 
 ### 2026-11-04 - Bounded proposal
 

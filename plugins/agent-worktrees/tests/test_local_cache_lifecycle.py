@@ -112,8 +112,11 @@ class TestSessionstartDiagnostic:
 
     def test_worker_is_headless_survivable_and_reaped(self, tmp_path, monkeypatch):
         from agent_worktrees import status_monitor_runtime, local_cache_worker
+        from agent_worktrees import config as cfg
 
         (tmp_path / ".git").mkdir()
+        runtime = tmp_path / "selected-runtime"
+        monkeypatch.setattr(cfg, "install_dir", lambda: runtime)
         calls = []
         waits = []
         monkeypatch.setattr(lcr, "_worker_directory", lambda root: tmp_path / "worker")
@@ -138,11 +141,14 @@ class TestSessionstartDiagnostic:
         assert "not yet delivered" in result.detail
         assert calls[0] == {"breakaway": True}
         argv, kwargs = calls[1]
-        assert argv[:5] == [
-            sys.executable, "-m", "agent_worktrees.local_cache_worker",
+        assert argv[:2] == [sys.executable, "-X"]
+        prefix = Path(argv[2].removeprefix("pycache_prefix=").removeprefix("\\\\?\\"))
+        assert prefix.is_relative_to(runtime / "cache" / "python")
+        assert argv[3:7] == [
+            "-m", "agent_worktrees.local_cache_worker",
             str(tmp_path.resolve()), str(tmp_path / "worker"),
         ]
-        assert len(argv[5]) == 32
+        assert len(argv[7]) == 32
         assert kwargs["stdin"] == subprocess.DEVNULL
         assert kwargs["stdout"] == kwargs["stderr"] == subprocess.DEVNULL
         assert kwargs["start_new_session"]
