@@ -173,6 +173,28 @@ def test_reconstruction_holds_its_subject_until_exit(reconstruction):
         path.write_bytes(b"changed")
 
 
+def test_reconstruction_obeys_its_own_deadline_during_final_wheel_check(reconstruction, monkeypatch):
+    options, _server, _proofs = reconstruction
+    deadline = time.monotonic() + 10
+    assert deadline < options["wheels"]._deadline
+    verify = intake.WheelSnapshot.verify
+    calls = []
+
+    def expire_during_final_check(snapshot):
+        calls.append(None)
+        if len(calls) == 3:
+            with monkeypatch.context() as scope:
+                scope.setattr(time, "monotonic", lambda: deadline + 1)
+                return verify(snapshot)
+        return verify(snapshot)
+
+    monkeypatch.setattr(intake.WheelSnapshot, "verify", expire_during_final_check)
+    with pytest.raises(ValueError, match="deadline"):
+        with intake.retain_reconstructed_core(**(options | {"deadline": deadline})):
+            pass
+    assert len(calls) == 3
+
+
 def test_reconstruction_rejects_a_different_retained_wheel(reconstruction, tmp_path):
     options, _server, _proofs = reconstruction
     original = options["wheels"]

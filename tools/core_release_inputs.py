@@ -11,7 +11,7 @@ import time
 import zipfile
 import zlib
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from artifact_attestation import (
@@ -95,7 +95,7 @@ def retain_reconstructed_core(
     expected = _selected_hashes(expected, max_wheels, deadline)
     if not isinstance(wheels, WheelSnapshot):
         raise WheelError("core reconstruction requires a retained wheel snapshot")
-    retained = wheels.subset(tuple(expected))
+    retained = replace(wheels, _deadline=min(wheels._deadline, deadline)).subset(tuple(expected))
     if dict(retained.digests) != expected:
         raise WheelError("retained wheels differ from the selected core manifest")
     total = len(manifest_data)

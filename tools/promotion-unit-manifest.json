@@ -4015,7 +4015,7 @@
         "tools/core_native_feed_resolution.py": "3082da86e4d492876ce6918084b4219c3749f5ae2d2b48216ed4a1861bd07aac",
         "tools/core_native_delivery.py": "dad4b689bcae1a50179741280801038ef569dfa43c3b9002b0d89f59dbd9fd18",
         "tools/core_release_delivery.py": "1cf1a5655bb29733b40a6cf0864710557e642958d6d9f9dd2a57b416dcaf4b56",
-        "tools/core_release_inputs.py": "ed112b9227b0a9ec3f8b57294f4fd9ecb5f49c94556205fa4296751a5afd4bfb",
+        "tools/core_release_inputs.py": "b4f14520dd52527eb0b5608bb366b00ce6a58a5c6037e5c027b530e94f2f3867",
         "tools/local_install_profile.py": "0665bab7db0f8f1bb4f941609bb1588d68f6c5e8ca25588ded837be069e5229c",
         "tools/local_install_source.py": "9119fc8ced3bb13380097350dc51db1c2ddea95b83b4c8ee5711f3830c5ca7b0",
         "tools/prepare_runtime_source.py": "ac7fe12bbac0b13fba9339c1fd2a6e6669c95c3ba5695c55ab21ba5f72fb92ce",
