@@ -518,3 +518,37 @@ def test_checkout_agenda_created_during_failed_git_removal_stops_fallback(
     assert failures == 1 and any(".effort-agenda" in warning for warning in warnings)
     assert path.read_bytes() == original
     assert (home / "agenda.sqlite3").read_bytes() == b"late source"
+
+
+def test_checkout_agenda_created_during_registration_probe_stops_nonforced_git_remove(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    from agent_worktrees import reap_cli
+
+    harness = CleanupHarness(monkeypatch, tmp_path)
+    record = make_record(tmp_path)
+    path = harness.seed(record)
+    original = path.read_bytes()
+    home = Path(record.worktree_path) / ".effort-agenda"
+    monkeypatch.setattr(reap_cli.sessions, "has_mux_session", lambda *_a: False)
+    monkeypatch.setattr(
+        reap_cli.sessions, "scan_sessions_fast", lambda *_a: SimpleNamespace(active_sessions={}),
+    )
+    monkeypatch.setattr(reap_cli.git_ops, "current_branch", lambda *_a: record.branch)
+
+    def registration(*_args, **_kwargs):
+        home.mkdir()
+        (home / "agenda.sqlite3").write_bytes(b"late source")
+        return [record.worktree_path]
+
+    monkeypatch.setattr(reap_cli.git_ops, "list_worktree_paths", registration)
+    monkeypatch.setattr(
+        reap_cli.git_ops, "git",
+        lambda *_a, **_k: pytest.fail("raw nonforced removal reached late agenda"),
+    )
+    removed, warnings = reap_cli._remove_managed_worktree(
+        record, harness.repo, path.parent, force=False,
+    )
+    assert not removed and any(".effort-agenda" in warning for warning in warnings)
+    assert path.read_bytes() == original
+    assert (home / "agenda.sqlite3").read_bytes() == b"late source"

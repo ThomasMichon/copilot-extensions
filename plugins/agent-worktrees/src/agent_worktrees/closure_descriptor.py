@@ -118,6 +118,7 @@ _BUCKET_TO_ACTION_DISPOSITION: dict[str, str] = {
     "unmerged": "unsafe",
     "claimed": "blocked",
     "paired-pending": "blocked",
+    "retained-data": "blocked",
 }
 
 
@@ -332,6 +333,7 @@ def assemble_closure_descriptor(
         and held_claims == 0
         and open_follow_ups == 0
         and not blockers
+        and disposition.cleanable
         and info.state != S.ACTIVE
     )
 

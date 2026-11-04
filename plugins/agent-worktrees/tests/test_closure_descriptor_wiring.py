@@ -56,6 +56,26 @@ def test_closure_reports_merged_when_held_claim_present():
     assert {"code": "held-claims", "count": 1} in row["closure"]["blockers"]
 
 
+def test_retained_agenda_descriptor_round_trip_keeps_finalized_display_not_safe_action(tmp_path):
+    checkout = tmp_path / "checkout"
+    (checkout / ".effort-agenda").mkdir(parents=True)
+    record = _rec(worktree_path=str(checkout))
+    state = git_ops.WorktreeStateInfo(
+        state=git_ops.WorktreeState.COMPLETED, fetch_requested=True,
+    )
+
+    row = cli._worktree_to_dict(record, state_info=state)
+    interpreted = prune.interpret_descriptor_payload(row["closure"])
+
+    assert row["cleanup_bucket"] == "retained-data"
+    assert row["closure"]["git"]["upstream_complete"] is True
+    assert row["closure"]["closure"]["final"] is False
+    assert interpreted["supported"] is True
+    assert interpreted["finalized_display"] is True and interpreted["label"] == "FINAL"
+    assert interpreted["final"] is False and interpreted["action_disposition"] == "blocked"
+    assert record.status == "finalized"
+
+
 def test_closure_wires_cross_machine_claims_through_production_call_site():
     # The production list --json --classify path (_worktree_to_dict) must
     # carry the cross-machine claim count into the engine <-> Picker

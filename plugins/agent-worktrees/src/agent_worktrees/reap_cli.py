@@ -281,6 +281,8 @@ def _remove_managed_worktree(
                     if force:
                         removed = False
                     else:
+                        if reason := preservation_reason(rec.worktree_path):
+                            return False, [reason]
                         removed = (
                             git_ops.git(
                                 "worktree",
