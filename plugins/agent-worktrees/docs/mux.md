@@ -88,6 +88,13 @@ The Manager restores its original launch directory after success or failure.
 This does not disable warm sessions, edit global PSMux configuration, change
 POSIX launch behavior, or move an already-running standby.
 
+Connected-session status recovery checks the inner panes' working directories,
+not the server's `session_path`. A matching pane lets an already-attributable
+worktree session recover its missing status registration even when the server
+started in home. Exact tracked identity, current incarnation and Manager
+ownership gates still apply; an unavailable probe or no matching pane does not
+authorize recovery.
+
 `tmux` (Linux/WSL) and `psmux` (Windows) are different implementations of the
 **same** model — a named, detachable session with a status bar. The launcher
 (relocated to Worktree Manager's `bin/` in Phase 3b Sub-slice 2a Step 2)

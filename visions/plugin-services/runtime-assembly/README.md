@@ -5,7 +5,7 @@
   needs, from an approved artifact source, under one provenance identity.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-11-03
+- **Last revised:** 2026-11-04
 - **Reality docs:** [`docs/install-contract.md`](../../../docs/install-contract.md) ·
   [`docs/pipelines.md`](../../../docs/pipelines.md) ·
   [`docs/architecture.md`](../../../docs/architecture.md)
@@ -77,6 +77,19 @@ uv identities with existing release authority. Assembly does not add a parallel
 whole-source fingerprint or a full-suite attestation barrier merely to copy
 already-selected applications. Native ownership, package integrity, immutable
 completion and readiness remain independent obligations.
+
+### standard-python-environments
+
+Python runtimes follow modern uv project management and standard Python
+virtual-environment conventions consistently across construction, installed
+commands and service consumers. Ordinary tools observe the same physical
+environment that the installation owner selected; historical consumer
+assumptions do not force divergent environment layouts or implicit rebuilding.
+
+Application inputs remain reproducible independently of the environment built
+from them. Runtime caches preserve normal import performance without mutating
+immutable application code, and plugin delivery remains independent of runtime
+construction and selection.
 
 ### clean-break-wheel-first-migration
 

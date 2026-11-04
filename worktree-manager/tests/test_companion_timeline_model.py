@@ -1,12 +1,13 @@
 """Pure admission, bounded-window and lineage display controls."""
 
 from dataclasses import replace
+from datetime import datetime, timezone
 
 import pytest
 
 from worktree_manager.companion_timeline_contract import (
     Availability, Completeness, HistoryPage, LiveDelta, MAX_EXPANDED_GROUPS,
-    MAX_LANES, Qualification, RelationKind, TimelineRelation,
+    MAX_LANES, Provider, Qualification, RelationKind, SourceToken, TimelineRelation,
 )
 from worktree_manager.companion_timeline_model import ResultCode, TimelineWindow
 from _companion_timeline_fixtures import event, position, snapshot, token
@@ -482,3 +483,77 @@ def test_changed_history_scope_invalidates_pending_page(change: str) -> None:
         source, before, None, (event(source, 2),), Completeness.COMPLETE,
     ))
     assert not result.applied and result.code is ResultCode.STALE_TOKEN
+
+
+def test_bridge_reconciliation_preserves_other_sources_and_their_next_publications() -> None:
+    worktree = token(key="worktree")
+    agenda = SourceToken(replace(worktree.identity, provider=Provider.AGENDA, source_key="agenda"), 0)
+    bridge = SourceToken(replace(
+        worktree.identity, provider=Provider.BRIDGE, source_key="bridge",
+        head_session_id=None, owner_ref="fixture-owner",
+    ), 0)
+    model = TimelineWindow(max_proofs=6)
+    for source in (worktree, agenda, bridge):
+        assert model.bind(source).applied
+        assert model.apply_snapshot(snapshot(source, (event(source, 0),))).applied
+    before = position(worktree, "older-0")
+    assert model.request_history(worktree, before).applied
+    saved = {source.identity.source_key: model.sources[source.identity.source_key] for source in (worktree, agenda)}
+    proofs = {ref: digest for ref, digest in model._proofs.items() if ref.source_key != "bridge"}
+    model.set_follow_live(False)
+    assert model.toggle_expansion(event(worktree, 0).ref).applied
+    assert model.apply_delta(LiveDelta(
+        bridge, position(bridge, "live-0"), position(bridge, "overflow"),
+        tuple(event(bridge, number) for number in range(1, 8)),
+    )).code is ResultCode.LIMIT
+    renewed = replace(bridge, request_epoch=1)
+    candidate = model.reconciliation_window(replace(
+        snapshot(renewed, (), cursor="fresh"), as_of=datetime.now(timezone.utc), facts_json='{"members":[]}',
+    ))
+    assert all(candidate.sources[key] == state for key, state in saved.items())
+    assert all(candidate._proofs[ref] == digest for ref, digest in proofs.items())
+    assert candidate.context() == model.context()
+    assert candidate.expanded == model.expanded and not candidate.follow_live
+    for source in (worktree, agenda):
+        assert candidate.apply_delta(LiveDelta(
+            source, position(source, "live-0"), position(source, "live-1"), (event(source, 1),),
+        )).applied
+    assert candidate.prepend_page(HistoryPage(
+        worktree, before, None, (event(worktree, -1),), Completeness.COMPLETE,
+    )).applied
+    assert model.reconciliation_required == frozenset({"bridge"})
+
+
+@pytest.mark.parametrize("budget", ["proof", "cursor", "bytes"])
+def test_exhausted_owner_cannot_starve_an_empty_bridge_baseline(monkeypatch, budget: str) -> None:
+    from worktree_manager import companion_timeline_model as implementation
+
+    if budget == "cursor":
+        monkeypatch.setattr(implementation, "MAX_EVENT_PROOFS", 6)
+    if budget == "bytes":
+        monkeypatch.setattr(implementation, "MAX_WINDOW_BYTES", 3000)
+    model = TimelineWindow(max_proofs=6 if budget == "bytes" else 2, max_bytes=3000)
+    owner = token()
+    bridge = SourceToken(replace(
+        owner.identity, provider=Provider.BRIDGE, source_key="bridge",
+        head_session_id=None, owner_ref="fixture-owner",
+    ), 0)
+    for source in (owner, bridge):
+        assert model.bind(source).applied
+        assert model.apply_snapshot(snapshot(source, ())).applied
+    before = position(owner, "live-0")
+    for number in range(1, 10):
+        after = position(owner, f"live-{number}")
+        result = model.apply_delta(LiveDelta(
+            owner, before, after, () if budget == "cursor" else (event(owner, number),),
+        ))
+        if not result.applied:
+            break
+        before = after
+    assert result.code is ResultCode.LIMIT
+    assert {"proof": "proof budget", "cursor": "cursor integrity", "bytes": "byte budget"}[budget] in result.reason
+    assert model.reconciliation_required == frozenset({owner.identity.source_key})
+    assert model.apply_delta(LiveDelta(
+        bridge, position(bridge, "live-0"), position(bridge, "bridge-change"), (event(bridge, 0),),
+    )).applied
+    assert model.sources[bridge.identity.source_key].availability is Availability.OBSERVED

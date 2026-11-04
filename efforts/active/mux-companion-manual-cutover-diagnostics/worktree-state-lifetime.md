@@ -5,8 +5,9 @@ Sidecar dependency: [S2 and its validation](sidecar-live-timeline.md).
 Standing intent: [worktree data](../../../visions/plugins/agent-worktrees/worktree-data/README.md).
 
 **Status: design reviewed in #10199; D1 placement/discovery source merged in
-#10224; D2 managed initialization/export source merged in #10238.** Native
-durability and D3-D5 remain open. No source merge performs a live data move,
+#10224; D2 managed initialization/export source merged in #10238; D3 Manager
+consumer source merged in #10251.** Native durability and D4-D5 remain open.
+No source merge performs a live data move,
 export, collection, cleanup or rollout. The
 [D1 readback](journal/2026/11.03-sidecar-durable-placement.md) and
 [D2 readback](journal/2026/11.03-sidecar-managed-agenda-export.md) record exact
@@ -35,16 +36,16 @@ and store ID. The resident retains the observation, not the agenda directory.
 
 The rich reader can inspect an explicitly selected home and expected store.
 It cannot derive a path from the store ID. Store format 2 and reader contract 1
-are separate versions. The current Manager and resident cannot discover a rich
-home through that interface.
+are separate versions. The coarse publication alone does not discover a rich home.
 
 #10224 adds the worktree owner's bounded descriptor and exact-store passive
 discovery outside the checkout. The owning
 [worktree-data contract](../../../plugins/agent-worktrees/docs/worktree-data.md)
 records allocation and filesystem refusal semantics. #10238 composes explicit
 new managed initialization with complete consistent context-qualified export
-and local readback. Manager consumption, logger collection and legacy rescue
-remain separate, unfinished integrations.
+and local readback. #10251 connects Manager to that discovery and the owning rich reader,
+using the existing single permanent Agenda subscription. Logger collection and
+legacy rescue remain separate, unfinished integrations.
 
 Existing cleanup can remove a checkout while retaining a lifecycle tombstone.
 That tombstone does not preserve arbitrary checkout-local agenda bytes.
@@ -165,8 +166,10 @@ not consequences of a reviewed design.
   operation; do not automatically migrate an active lane.
   #10238 merged as `ca938fd8f998933624accae2ce8371001f58f24c`; this is
   source and isolated process delivery, not installed/native or archive proof.
-- [ ] D3. Connect Manager to that discovery and existing push revisions, then
+- [x] D3. Connect Manager to that discovery and existing push revisions, then
   the owning rich reader, retaining one permanent Agenda subscription.
+  #10251 merged as `8b01db9aff9064434c839d2275eada0d27f876da`; source and
+  isolated real-process/Textual qualification only, not installed/native proof.
 - [ ] D4. Extend the existing logger collection and readback flow for exported
   worktree state under its actual repository/privacy/destination policy. Retain
   the existing Session Sync/accounting owners; no parallel scheduler or service.
@@ -196,9 +199,11 @@ not consequences of a reviewed design.
   accepted operation/record under concurrent mutation. #10238 covers malformed
   stored requests, integrity/completeness faults and exact retries. This is not
   remote archival acknowledgment, restoration or native Windows acceptance.
-- [ ] A real producer-to-CLI-to-Manager join follows committed agenda revisions,
+- [x] A real producer-to-CLI-to-Manager join follows committed agenda revisions,
   pages backward while browsing and cancels all owned reads; unrelated views and
   the existing coarse subscription remain usable.
+  #10251 qualifies the actual isolated owner/publisher/resident/CLI/reader/widget
+  chain and retained-source lifecycle controls. Native and archival gates remain.
 - [ ] Owner export and archive readback preserve the complete declared ledger,
   immutable records, original identity and revision under concurrent mutation.
   Omitted/truncated/rewritten members fail the hash/completeness oracle.

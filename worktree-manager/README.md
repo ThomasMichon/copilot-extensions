@@ -131,14 +131,49 @@ and unread updates; retention gaps preserve their source, floor, reason and
 reconciliation information without accepting a new live position. Head,
 resident, record-incarnation and journal replacement failures remain explicit;
 Refresh obtains a new qualified selection. Hiding Timeline retires its optional
-reader and pages, and reopening obtains a fresh snapshot. One worktree reader
-fits the controller's three-provider composition; no panel fleet poller, agenda
-or Bridge timeline adapter is added. Source support is not installed/native
+reader and pages, and reopening obtains a fresh snapshot. The selected worktree
+reader, existing coarse Agenda subscription and optional Bridge membership
+reader provide three-source composition without a panel fleet poller. Rich
+Agenda reads reuse coarse publication demand and the
+[owner-managed placement/reader](../plugins/efforts/skills/driving-effort-agendas/references/managed-placement.md);
+they do not create another permanent feed. Source support is not installed/native
 qualification or rollout.
+
+The optional Bridge adapter selects the enabled payload through shared plugin
+activation, uses the selected worktree's qualified Claims owner reference, and
+invokes its passive `observe-owner` operation across a process boundary.
+The owning CLI negotiates the running capability and resolves its own validated
+installation, without inheriting another plugin's installation receipt or root. A
+child-local no-provision fence also covers older payloads. Missing support preserves Summary and the
+independent sources. Current membership appears separately from history:
+bootstrap facts do not become fabricated creation or activity events.
+Owner upserts/tombstones retain their exact observed-change and retirement
+qualifications, never claim release. Source head, liveness, freshness and
+answerability stay unknown; the independently selected worktree/head fence
+controls admission and retires the reader when that selection is invalidated.
+Paginated replacement stages bounded intermediate membership without publishing
+it as current facts; current members remain unknown until replay completes.
+Already-published rich Agenda work is admitted before optional Bridge startup
+waits. Worktrees and Bridge preparations start independently, including after
+Refresh while Bridge evidence is exhausted. A blocked optional bootstrap cannot
+delay the healthy Worktrees reader or its live updates; each attachment retains
+its selected-head and revision fences. Unrelated-owner heartbeat progress retains
+transport continuity without a productive milestone. This adapter does not attach known-session event/history
+readers or infer pending input, SDK execution or compaction capacity.
+See the [owning membership contract](../plugins/agent-bridge/docs/owner-membership.md).
 Integrity-budget exhaustion does not discard evidence on ordinary reconnect or
 tab reopening. With Timeline visible, explicit Refresh or Reconcile source first
 obtains a fresh owner-qualified snapshot and admits a separate bounded observation
-window before replacing the exhausted one. Failed, unqualified, stale or
+window before replacing the exhausted one. Only the exhausted source receives a
+fresh baseline: other providers retain their exact bindings, accepted cursors,
+facts, rows and immutable proofs. Proof count, cursor count and integrity-byte
+budgets have fixed equal partitions for Worktrees, Agenda and Bridge within the
+unchanged total bounds. An exhausted owner cannot consume another owner's
+admission capacity, including Agenda commits while its fresh baseline is pending.
+Explicit reconciliation also refreshes an exhausted rich Agenda from its actual
+latest owner page, retaining the admitted store identity and revision. Simultaneous
+owner exhaustion is recovered independently in either completion order.
+Failed, unqualified, stale or
 conflicting snapshots leave the old proof fence and cached rows intact. A retained
 browsing anchor and unread state carry into the new window where available.
 This replaces ephemeral viewer evidence, not owner history or work/resource budgets.
@@ -158,7 +193,8 @@ anchor rather than shifting it as bottom padding shrinks.
 Timeline adapters receive independent request-local stop events. Teardown waits
 for their bounded cleanup, including a naturally completed read already being
 finalized, without canceling adapter tasks or discarding their handles. Cleanup
-errors remain explicit after selection retirement.
+errors remain explicit after selection retirement. A terminal cleanup failure
+also stops automatic head-change rescheduling and retains its diagnostic.
 Disconnects, frame deadlines and invalid source replies are read failures:
 after successful resource retirement, Refresh or tab reopening can subscribe
 again. Only a typed failure of owned process/pipe retirement latches cleanup

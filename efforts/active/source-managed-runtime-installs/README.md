@@ -77,6 +77,7 @@ service-supervision ownership changes.
 | Independent reviewer | Reviews each coherent proposal or implementation change | Repository PR review |
 | Wheel-first transition coordinator | Owns the reviewed proposal, prioritized independently releasable app slices and whole-flow qualification | #7028 and #9688; app assignments/evidence in the contributor matrix; existing custodians and separate deployment ownership remain |
 | Fresh recovery dispatcher implementer | Owns the bounded fresh-bootstrap/selected-source composition and disposable entry qualification | #7028; source handle `greased-latch`; existing application, footprint and execution owners retain their scopes |
+| Native application consumer implementer | Owns the bounded standard-environment discovery, command/readiness and cache-adapter slice, not the remaining application portfolio | #7030; source handle `weathered-diode`; [bounded plan](native-application-consumers.md) |
 
 ## Coordination
 
@@ -537,6 +538,11 @@ publication and command-ownership boundaries; it does not disable whole hooks.
 - [x] **Agent-recommended retained-binding follow-up:** qualify Bridge's actual scoped stamp preserving existing global commands byte-for-byte or leaving them absent, plus ordinary-shell active-cell dispatch and publisher/pointer-loss/deactivation controls under #7030; do not assume its scoped installer emits cell-bound globals.
 - [x] **Agent-recommended cross-platform contention follow-up:** qualify Dispatch's PowerShell/POSIX provisioning-lock contention and healthy-owner reuse under #7030; preserve explicit refusal of unrelated I/O failures and the separate scoped-publication capability gate.
 - [ ] Keep adapters thin and enforce drift-compatible service interaction without implicit runtime replacement.
+- [ ] **Agent-proposed native application slice:** review and qualify the
+  [standard-environment consumer plan](native-application-consumers.md),
+  reusing existing physical-environment and external-cache owners. Preserve
+  independent payload/runtime sources and the other app/migration scopes;
+  direct installed commands alone do not qualify native catalog consumers.
 
 ### Phase 4 - Integrate Manager-owned runtime source selection
 - [ ] Replace Main/release code through the existing global installation roots, binstubs and service registrations with immutable merged-Dev slots, preserving the same existing runtime configuration, databases and durable state; do not introduce custom roots, installation cells or a parallel data store for this cutover.

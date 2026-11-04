@@ -16,15 +16,16 @@ does not initialize agendas or complete rich consumer/archival integration.
 #10238 adds the optional efforts-owned
 [managed initialization](../../../plugins/efforts/skills/driving-effort-agendas/references/managed-placement.md)
 and [complete export/readback](../../../plugins/efforts/skills/driving-effort-agendas/references/agenda-export.md)
-contracts. They do not change the coarse observation wire or complete Manager,
-logger, installed or native acceptance.
+contracts. #10251 connects Manager discovery, rich reads and the existing coarse
+push subscription without changing that observation wire. Logger, three-source,
+installed and native acceptance remain open.
 Providers advertise actual running support before independently installed
 callers use new syntax. Existing roster, agenda-v1/v2 and raw Bridge event
 contracts remain unchanged.
 
 The rich-agenda source reader is documented in its
 [owning passive-reader contract](../../../plugins/efforts/skills/driving-effort-agendas/references/agenda-history.md).
-Its source qualification is not installed adoption or Manager integration.
+Its Manager integration is source-qualified in #10251, not installed adoption.
 The [known-session Bridge contract](../../../plugins/agent-bridge/docs/session-observations.md)
 owns its implemented coverage and lifetime limits; the
 [merge readback](journal/2026/11.02-sidecar-owner-consumers.md) records the source

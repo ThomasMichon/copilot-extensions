@@ -262,13 +262,13 @@ if __name__=="__main__":
 
 
 @contextmanager
-def resident_join(root: Path, monkeypatch):
+def resident_join(root: Path, monkeypatch, *, with_agenda: bool = False):
     """Actual record projection -> resident -> owning CLI, with private discovery."""
     with ExitStack() as cleanup:
-        yield from _resident_join(root, monkeypatch, cleanup)
+        yield from _resident_join(root, monkeypatch, cleanup, with_agenda=with_agenda)
 
 
-def _resident_join(root: Path, monkeypatch, cleanup: ExitStack):
+def _resident_join(root: Path, monkeypatch, cleanup: ExitStack, *, with_agenda: bool):
     import importlib
     import os
     from threading import Event
@@ -283,8 +283,10 @@ def _resident_join(root: Path, monkeypatch, cleanup: ExitStack):
     profile, records, checkout, route, bootstrap = [
         root / name for name in ("profile", "records", "checkout", "route", "bootstrap")
     ]
+    if with_agenda:
+        records = root / "project-data/worktrees"
     for path in (profile, records, checkout, route, bootstrap):
-        path.mkdir()
+        path.mkdir(parents=True)
     monkeypatch.setenv("AGENT_HOME", str(profile))
     config = importlib.import_module("agent_worktrees.config")
     tracking = importlib.import_module("agent_worktrees.tracking")
@@ -299,6 +301,8 @@ def _resident_join(root: Path, monkeypatch, cleanup: ExitStack):
     monkeypatch.setattr(config, "project_name", lambda: "example")
     monkeypatch.setattr(config, "tracking_dir", lambda: records)
     monkeypatch.setattr(config, "install_dir", lambda: route)
+    if with_agenda:
+        monkeypatch.setattr(config, "project_dir", lambda project: records.parent)
     monkeypatch.setattr(tracking, "_owning_tracking_dir", lambda wid, repo=None: records)
     forbidden = root / "forbidden-starts"
 
@@ -401,12 +405,14 @@ def _resident_join(root: Path, monkeypatch, cleanup: ExitStack):
             return owner.observation_read(payload)
         if action == "worktree-observations-history":
             return owner.observation_history(payload)
+        if with_agenda and action.startswith("agenda-"):
+            return owner.agenda_handle(action, payload)
         raise AssertionError(f"unexpected private point action: {action}")
 
     def stream(action, payload, disconnected):
         mark("feed.request")
         streams.append((action, payload.copy()))
-        assert action == "worktree-observations-feed"
+        assert action == "worktree-observations-feed" or with_agenda and action == "agenda-feed"
         return owner.stream(action, payload, disconnected)
 
     server = control.ControlServer(handle, token="private-worktree-join", stream_handle=stream)
@@ -420,7 +426,8 @@ import json,os,sys,time
 from pathlib import Path
 from types import SimpleNamespace
 sys.path[:0]={list(map(str, SOURCE_PATHS))!r}
-from agent_worktrees import config,front_door_cli,invocation_project,locks,worktrees_client
+from agent_worktrees import agenda_cli,config,front_door_cli,invocation_project,locks,worktrees_client
+from agent_worktrees.status_monitor_cutover import ControlClient
 from agent_worktrees import installer,status_monitor_runtime
 def refuse(*args,**kwargs):
     Path({str(forbidden)!r}).write_text("ensure/start was attempted",encoding="utf-8")
@@ -438,7 +445,10 @@ invocation_project._resolve_active_project=resolve
 config.set_active_project("example")
 config.tracking_dir=lambda:Path({str(records)!r})
 config.install_dir=lambda:Path({str(route)!r})
+if {with_agenda!r}:
+    config.project_dir=lambda project:Path({str(records.parent)!r})
 worktrees_client.resident_endpoint=lambda root:SimpleNamespace(base_url={endpoint!r})
+agenda_cli._control_client=lambda:ControlClient({endpoint!r},token={server.token!r},timeout=2)
 with Path({str(trace)!r}).open("a",encoding="utf-8") as out:
     out.write(json.dumps({{"pid":os.getpid(),"birth":locks.process_start_time(os.getpid()),
                          "argv":sys.argv[1:],"monotonic":time.monotonic()}})+"\\n")
@@ -461,7 +471,8 @@ with Path({str(trace)!r}).open("a",encoding="utf-8") as out:
     monkeypatch.setattr(mux_companion, "_load_current_worktree", lambda *args, **kwargs: mux_companion._CompanionData(
         worktree=first.copy(), sessions=[{"id": record.resolved_head_session, "is_head": True}],
     ))
-    monkeypatch.setattr(mux_companion.MuxCompanionApp, "_start_agenda", lambda self: None)
+    if not with_agenda:
+        monkeypatch.setattr(mux_companion.MuxCompanionApp, "_start_agenda", lambda self: None)
     monkeypatch.setattr(mux_companion.MuxCompanionApp, "_poll_attention", lambda *args, **kwargs: None)
 
     def settled():

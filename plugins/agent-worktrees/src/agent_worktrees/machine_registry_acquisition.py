@@ -77,9 +77,11 @@ def overlay(repo_dir, *, config=None):
                 return None
             if not default_anchor or os.path.abspath(default_anchor) != os.path.abspath(str(repo_dir)):
                 return None
-            acquisition.opaque_source("machine-registry-config-sources")
-            sources = state_root.config_source_anchors(
-                config, base_anchor=str(repo_dir), family="registry",
+            from .config_sources import _CONFIG_SOURCE_ANCHORS_OWNER
+
+            sources = acquisition.owner_call(
+                state_root.config_source_anchors, _CONFIG_SOURCE_ANCHORS_OWNER,
+                config, base_anchor=str(repo_dir), family="registry", source="machine-registry-config-sources",
             )
         except Exception as exc:
             failed(acquisition.current_observations(), "machine-registry-overlay", "machine-registry-overlay",
@@ -157,7 +159,7 @@ def load(repo_dir, *, config=None, require_alias=True):
 
 
 def load_machines_yaml_report(repo_dir, *, config=None, require_alias=True):
-    """Report one original load; delegated document and source frontiers stay opaque."""
+    """Report one original load; delegated document and input frontiers stay opaque."""
     from . import config as cfg
 
     with acquisition.capture_config_observations() as observations:
