@@ -4104,6 +4104,10 @@ dependencies and extras must still yield the same complete closure. The
 returned profile and approval identity remain the original signed record.
 This pure selection does not prove that the target belongs to the actual
 interpreter, inspect wheel bytes, or enable an installer.
+The installation-policy planner accepts the same explicit opt-in and forwards
+it to the authenticated selector; it rejects a non-boolean option even when
+the release is unavailable. The caller still independently identifies the target
+and admits the bytes, and source fallback retains the resolved owner policy.
 
 `tools/artifact_release_discovery.py` owns the existing read-only source
 artifact-channel lookup separately from publication tooling. Promotion reuse,

@@ -36,6 +36,7 @@ def plan_installation_profile(
     roots: list[str], max_subject_bytes: int,
     backend: str | None = None, retained_backend: str | None = None,
     existing_installation: bool = False, preference: tuple[str, ...] = (),
+    allow_compatible_target: bool = False,
 ) -> InstallationProfilePlan:
     """Apply the real owner-bound policy without a second configuration reader.
 
@@ -44,6 +45,8 @@ def plan_installation_profile(
     only the selector's typed absence can request permitted source fallback.
     """
     validate_profile_preference(preference)
+    if type(allow_compatible_target) is not bool:
+        raise ProfileError("compatible target selection must be explicit")
     resolution = resolve_runtime_profile_policy(
         **installation, backend=backend, retained_backend=retained_backend,
         existing_installation=existing_installation,
@@ -65,6 +68,7 @@ def plan_installation_profile(
                 release=release, artifact=artifact, target=target,
                 component=component, roots=roots, max_subject_bytes=max_subject_bytes,
                 backend=selection["backend"], preference=preference,
+                allow_compatible_target=allow_compatible_target,
             )
         except ProfileUnavailable:
             trigger = "artifact-unavailable" if artifact is None else "approved-profile-unavailable"

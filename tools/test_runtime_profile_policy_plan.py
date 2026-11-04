@@ -1,6 +1,7 @@
 """Real installation policy composed with retained release authentication."""
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 import os
 from pathlib import Path
@@ -56,6 +57,33 @@ def test_fresh_owner_baseline_selects_authenticated_release_without_approval_fil
     assert len(calls) == 1 and not calls[0].exists()
 
 
+def test_compatible_target_requires_explicit_planner_opt_in(adopter, release, monkeypatch):
+    calls = _verification(monkeypatch, release)
+    target = deepcopy(release[2]["target"])
+    target["environment"]["platform_version"] = "10.0.2"
+    strict = plan(adopter, release, target=target)
+    assert strict.release_selection is None
+    assert strict.source_trigger == "approved-profile-unavailable"
+
+    compatible = plan(adopter, release, target=target, allow_compatible_target=True)
+    assert compatible.release_selection.selected.profile.record() == release[2]
+    assert compatible.source_trigger is None
+
+    target["tags"] = ["cp312-cp312-win_amd64"]
+    unavailable = plan(adopter, release, target=target, allow_compatible_target=True)
+    assert unavailable.release_selection is None
+    assert unavailable.source_trigger == "approved-profile-unavailable"
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize("invalid", [None, 1, "true"])
+@pytest.mark.parametrize("missing", [{}, {"release_index": None}])
+def test_invalid_compatible_target_option_never_requests_source(adopter, release, invalid, missing):
+    with pytest.raises(ProfileError, match="compatible target selection must be explicit") as raised:
+        plan(adopter, release, allow_compatible_target=invalid, **missing)
+    assert not isinstance(raised.value, ProfileUnavailable)
+
+
 @pytest.mark.parametrize("missing,trigger", [
     ({"release_index": None}, "release-index-unavailable"),
     ({"artifact": None}, "artifact-unavailable"),
@@ -94,12 +122,16 @@ def test_owned_policy_can_disable_source_fallback(adopter, release, monkeypatch,
     ("cancel", KeyboardInterrupt),
 ])
 @pytest.mark.parametrize("missing_artifact", [False, True])
+@pytest.mark.parametrize("compatible", [False, True])
 def test_failed_authentication_never_requests_source(
-    adopter, release, monkeypatch, failure, error, missing_artifact,
+    adopter, release, monkeypatch, failure, error, missing_artifact, compatible,
 ):
     calls = _verification(monkeypatch, release, failure=failure)
     with pytest.raises(error):
-        plan(adopter, release, **({"artifact": None} if missing_artifact else {}))
+        plan(
+            adopter, release, allow_compatible_target=compatible,
+            **({"artifact": None} if missing_artifact else {}),
+        )
     assert len(calls) == 1 and not calls[0].exists()
 
 
