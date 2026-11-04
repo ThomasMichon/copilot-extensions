@@ -284,7 +284,15 @@ def test_existing_supervision_retains_decline_instead_of_nudging_or_exhausting(
         startup_revision=1, reservation_key=reservation.key,
         exclusions=["worktree:worktree"], note="Not for this worker.",
     )
+    from agent_dispatch import pool_decline_observation
+
+    def blocked(*args):
+        raise TaskError("Workspace remains unfinalized")
+
+    monkeypatch.setattr(pool_decline_observation, "observe", blocked)
     before = snapshot(q, requested.id)
     with owner.client:
         assert supervision.cycle(owner, clock, 10000) == 0
-    assert not probes and not nudges and snapshot(q, requested.id) == before
+    after = snapshot(q, requested.id)
+    assert not probes and not nudges and after[:4] == before[:4]
+    assert "unfinalized" in after[4].blocker

@@ -82,3 +82,17 @@ def retry_invocation(binding: dict, revision: int, *, reservation: dict | None =
             + ordinary_prompt(binding, reservation)
         )
     return result
+
+
+def decline_guidance(task_id: str, generation: int, native_id: str) -> str:
+    """Current decision instructions also cover retained prompts from older callers."""
+    return (
+        "\n\nIf you cannot accept, preserve the original coordinator routing flags and use "
+        f"`agent-dispatch decline {task_id} --pool-generation {generation} "
+        f"--owner-session-id {native_id} --exclude-self worktree "
+        '--note "<why this worker cannot accept>"`. '
+        "This retains the decision and attempts only your own normal workspace finalization. "
+        "A blocked or unconfirmed closeout retains custody; no legacy yield/abandon, new claim, "
+        "foreign finalization or process stop is permitted. The coordinator independently observes "
+        "finalization before requeue. Prompt delivery is not acceptance."
+    )

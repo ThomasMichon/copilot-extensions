@@ -24,7 +24,16 @@ def resolve_invocation_project(args_list, explicit, resolve_project, contains_cw
         return False
     from . import config as cfg
 
-    if args_list and args_list[0] == "record":
+    own_closeout = args_list[:1] == ["finalize"] and any(
+        len(option) > 2 and option.startswith("--") and any(
+            name.startswith(option) for name in (
+                "--dispatch-task-id", "--dispatch-reservation-key", "--dispatch-native-id",
+            )
+        ) for option in (arg.partition("=")[0] for arg in args_list[1:])
+    )
+    if own_closeout and explicit:
+        raise ValueError("Own-worker closeout cannot override its actual cwd project")
+    if args_list and (args_list[0] == "record" or own_closeout):
         from .record_config import metadata_project
 
         cfg.set_active_project(metadata_project(explicit))

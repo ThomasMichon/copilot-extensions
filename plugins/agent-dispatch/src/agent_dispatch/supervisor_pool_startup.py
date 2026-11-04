@@ -44,7 +44,7 @@ def supervise_pool_startup(
         if snapshot is None:
             return None
         if snapshot.get("worker_decline") is not None:
-            return False
+            return _close_decline(owner, reservation, task, snapshot, observe_only=observe_only)
         budget, current, assigned = (
             snapshot["budget"], snapshot["reservation"], snapshot["task"],
         )
@@ -183,6 +183,8 @@ def supervise_pool_startup(
             "a notification is not acceptance. Record a blocker if you cannot decide. "
             "Do not acquire a second claim or release another owner's assignment."
         )
+        from .pool_startup_retry_contract import decline_guidance
+        message += decline_guidance(task["id"], budget["generation"], native)
         key = (
             f"pool-startup:{current['key']}:{budget['generation']}:"
             f"{current['startup_revision']}:{slot['next_nudge_at']}"
@@ -210,3 +212,33 @@ def supervise_pool_startup(
         log.warning("pool startup supervision unavailable or changed for %s; legacy recovery refused",
                     reservation.get("key"), exc_info=True)
         return False
+
+
+def _close_decline(
+    owner: Supervisor, reservation: dict, task: dict, snapshot: dict, *, observe_only: bool,
+) -> bool:
+    """Only the existing allocator may ask the coordinator to observe; never finalize here."""
+    current, assigned, decline = snapshot["reservation"], snapshot["task"], snapshot["worker_decline"]
+    if (
+        observe_only or current.get("reserved_by") != owner.supervisor_id
+        or current.get("key") != reservation.get("key")
+        or current.get("startup_revision") != reservation.get("startup_revision")
+        or current.get("driver") != reservation.get("driver")
+        or assigned.get("generation") != task.get("generation")
+        or assigned.get("status") != Status.CLAIMED or assigned.get("owner") is not None
+        or assigned.get("hold_reason") is not None or assigned.get("awaiting_steer")
+        or decline.get("task_id") != task["id"]
+        or decline.get("generation") != assigned.get("generation")
+        or decline.get("startup_revision") != current.get("startup_revision")
+        or decline.get("reservation_key") != current.get("key")
+        or decline.get("native_id") != snapshot.get("native_id")
+    ):
+        return False
+    if action_inhibited("worker-admission", logger=log):
+        return False
+    governance = owner._recheck_governance("pre-mutation:pool-decline-closeout")
+    if governance is not None and governance.get("status") != "ready":
+        return False
+    owner.client.close_pool_decline(task["id"], decline)
+    log.info("worker decline closeout observed for %s; native retirement remains pending", current["key"])
+    return True
