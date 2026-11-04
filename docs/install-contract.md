@@ -4078,6 +4078,16 @@ artifact/manifest pair, target, component, roots and capability. Returned
 evidence identifies the attested subject digest and producer; it is not feed
 admission or an installed-generation receipt.
 
+Exact target equality remains the default. An explicit
+`allow_compatible_target` selection revalidates the signed profile's complete
+closure against an independently supplied target: platform/architecture,
+implementation, Python minor and device remain in the same family, every
+wheel must support the requested tags and Python version, and marker-dependent
+dependencies and extras must still yield the same complete closure. The
+returned profile and approval identity remain the original signed record.
+This pure selection does not prove that the target belongs to the actual
+interpreter, inspect wheel bytes, or enable an installer.
+
 `tools/artifact_release_discovery.py` owns the existing read-only source
 artifact-channel lookup separately from publication tooling. Promotion reuse,
 tag lookup and readiness retain compatibility adapters over this owner, and

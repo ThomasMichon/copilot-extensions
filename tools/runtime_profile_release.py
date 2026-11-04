@@ -211,6 +211,7 @@ def select_release_profile(
     component: str, roots: list[str], max_subject_bytes: int,
     backend: str | None = None, retained_backend: str | None = None,
     existing_installation: bool = False, preference: tuple[str, ...] = (),
+    allow_compatible_target: bool = False,
 ) -> ReleaseSelection:
     """Authenticate whole records before selection; accept no caller approval map.
 
@@ -234,5 +235,6 @@ def select_release_profile(
         release=release, target=target, component=component, roots=roots, mode="artifact",
         backend=backend, retained_backend=retained_backend,
         existing_installation=existing_installation, preference=preference,
+        allow_compatible_target=allow_compatible_target,
     )
     return ReleaseSelection(selected, digest, **identity)
