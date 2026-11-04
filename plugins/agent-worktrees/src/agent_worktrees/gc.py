@@ -129,6 +129,8 @@ class OrphanVerdict:
 
 def classify_orphan(d: Path, *, min_settle_secs: float = _MIN_SETTLE_SECS) -> OrphanVerdict:
     """Decide what to do with one orphan directory, without touching it."""
+    if reason := preservation_reason(d):
+        return OrphanVerdict(str(d), "skip", reason)
     if _age_secs(d) < min_settle_secs:
         return OrphanVerdict(str(d), "skip", "too recent (may be mid-creation)")
     if _has_real_files(d):

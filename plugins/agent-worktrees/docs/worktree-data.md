@@ -141,7 +141,8 @@ that contain `.effort-agenda`. Cleanup reports `retained-data`; ordinary and for
 managed removal, the owner's Git-removal helper and directory-removal fallbacks refuse
 before their destructive steps. Presence is conservative, including an empty,
 partial, malformed or linked home. An inspection error is unknown, not absence.
-Batch reports name the hold. A validated finalized display remains distinct from
+Batch reports and orphan/managed dry runs name the hold instead of claiming the
+checkout would be removed. A validated finalized display remains distinct from
 blocked deletion eligibility; its descriptor round trip does not turn the hold
 into an unsafe `FINAL` action or an unsupported-looking result.
 The guard probes only this documented fallback with `lstat`; it opens no database,

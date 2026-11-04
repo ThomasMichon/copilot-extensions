@@ -467,6 +467,30 @@ def test_managed_sweep_reaps_dead_final_bridge_dry_run():
     assert "would remove" in report["removed"][0]["reason"]
 
 
+def test_managed_sweep_dry_run_reports_agenda_preservation(tmp_path):
+    from agent_worktrees import git_ops
+
+    record = _mgd("retained")
+    record.worktree_path = str(tmp_path / "checkout")
+    home = Path(record.worktree_path) / ".effort-agenda"
+    home.mkdir(parents=True)
+    (home / "agenda.sqlite3").write_bytes(b"synthetic ignored agenda")
+    with patch(
+        "agent_worktrees.git_ops.classify_worktree",
+        return_value=git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED),
+    ), patch(
+        "agent_worktrees.__main__._remove_managed_worktree",
+        side_effect=AssertionError("dry run must not remove preserved data"),
+    ):
+        report = _managed_sweep([record], dry_run=True)
+
+    assert report["removed"] == []
+    assert len(report["skipped"]) == 1
+    assert report["skipped"][0]["id"] == "retained"
+    assert ".effort-agenda" in report["skipped"][0]["reason"]
+    assert (home / "agenda.sqlite3").read_bytes() == b"synthetic ignored agenda"
+
+
 def test_managed_sweep_spares_follow_up_and_live():
     recs = [
         _mgd("keep-fu", follow_up=True),          # follow-up -> spared

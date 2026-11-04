@@ -410,6 +410,7 @@ def sweep_managed_worktrees(
     Returns ``{removed: [{id, reason}], skipped: [{id, reason}]}``.
     """
     from . import gc as gc_mod
+    from .checkout_data import preservation_reason
 
     if min_idle_secs is None:
         min_idle_secs = gc_mod.MANAGED_GC_GRACE_SECS
@@ -483,6 +484,9 @@ def sweep_managed_worktrees(
         )
         if verdict.action == "skip":
             result["skipped"].append({"id": rec.worktree_id, "reason": verdict.reason})
+            continue
+        if rec.worktree_path and (reason := preservation_reason(rec.worktree_path)):
+            result["skipped"].append({"id": rec.worktree_id, "reason": reason})
             continue
         # Resolved HERE, before any lock is taken (issue #4556 review): a
         # cross-machine owner probe can take up to the remote-probe timeout,
