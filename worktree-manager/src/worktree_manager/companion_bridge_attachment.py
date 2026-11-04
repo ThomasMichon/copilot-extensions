@@ -104,10 +104,10 @@ class BridgeTimelineAttachment(TimelineAttachment):
         self, selection: tuple[str, str, str] | None, *, reconcile: bool = False,
         reset_membership: bool = True,
     ) -> None:
+        if reconcile and reset_membership:
+            self.choice, self._chosen, self._members = "membership", None, {}
         if selection is not None:
-            if (reconcile and reset_membership) or (
-                self.selection is not None and selection != self.selection
-            ):
+            if self.selection is not None and selection != self.selection:
                 self.choice, self._chosen, self._members = "membership", None, {}
             self.selection = selection
         # Retain events and integrity proofs, but never present an inactive

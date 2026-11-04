@@ -508,7 +508,7 @@ class MuxCompanionApp(App):
         self._bridge_attachment.stop_now()
         await self._rich_agenda_attachment.set_selection(None)
         await self._timeline_attachment.set_selection(None)
-        await self._bridge_attachment.set_selection(None)
+        await self._bridge_attachment.set_selection(None, reconcile=reconcile_timeline)
         self._read_cancel.set()
         self._agenda_cancel.set()
         self._agenda_generation += 1

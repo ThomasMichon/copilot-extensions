@@ -15,7 +15,7 @@ from test_companion_bridge_codec import OWNER
 from test_companion_bridge_session_source import semantic_peer as semantic_peer, pytestmark as pytestmark
 
 
-@pytest.mark.parametrize("mode", ["hosting-replaced", "proof-exhausted"])
+@pytest.mark.parametrize("mode", ["hosting-replaced", "hosting-replaced-hidden-refresh", "proof-exhausted"])
 def test_refresh_reacquires_membership_then_selected_session(
     semantic_peer, tmp_path, monkeypatch, mode: str,
 ) -> None:
@@ -48,7 +48,11 @@ def test_refresh_reacquires_membership_then_selected_session(
             old_window = app._timeline_panel.window
             initial_epoch = old_window.sources[key].token.request_epoch
             old_proofs = dict(old_window._proofs)
-            if mode == "hosting-replaced":
+            hidden = mode == "hosting-replaced-hidden-refresh"
+            if hidden:
+                app.query_one("#views", TabbedContent).active = "summary-tab"
+                await until(pilot, lambda: app._bridge_attachment.controller is None)
+            if mode.startswith("hosting-replaced"):
                 semantic_peer["manager"]._generation_id = "replacement-generation"
             else:
                 old_window.max_proofs = 1
@@ -56,12 +60,18 @@ def test_refresh_reacquires_membership_then_selected_session(
                 await until(pilot, lambda: key in old_window.reconciliation_required)
                 with semantic_peer["log"]._lock:
                     semantic_peer["log"]._events = semantic_peer["log"]._events[-1:]
+            request_count = len(semantic_peer["requests"])
             app.action_refresh()
+            if hidden:
+                await until(pilot, lambda: not app._loading and app._bridge_attachment.choice == "membership")
+                assert app._bridge_attachment._chosen is None
+                assert len(semantic_peer["requests"]) == request_count
+                app.query_one("#views", TabbedContent).active = "timeline-tab"
             await until(pilot, lambda: not app._loading and app._bridge_attachment.choice == "membership"
                         and "child: starting" in str(app.query_one("#timeline-bridge-status", Static).content))
             assert app._bridge_attachment._chosen is None
             app.query_one("#bridge-feed", Select).value = "owned:child"
-            expected_event = "event:1" if mode == "hosting-replaced" else "event:2"
+            expected_event = "event:1" if mode.startswith("hosting-replaced") else "event:2"
 
             def ready() -> bool:
                 state = app._timeline_panel.window.sources.get(key)
@@ -76,7 +86,7 @@ def test_refresh_reacquires_membership_then_selected_session(
             await until(pilot, ready)
             state = app._timeline_panel.window.sources[key]
             assert state.availability.value == "observed"
-            if mode == "hosting-replaced":
+            if mode.startswith("hosting-replaced"):
                 assert state.token.identity.generation != initial.source.generation
                 assert app._bridge_attachment._chosen[1] == "replacement-generation"
             else:
