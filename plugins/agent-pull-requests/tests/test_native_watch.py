@@ -94,6 +94,22 @@ def test_decoder_preserves_native_evidence_without_interpreting_approval():
     assert len(snap.observation["votes"]) == 2
 
 
+def test_decoder_preserves_optional_target_and_accepts_prior_snapshots():
+    legacy = report()
+    assert "base_sha" not in decode_snapshot(legacy, "project/repo", 7).native_snapshot
+    legacy["base_sha"] = "c" * 40
+    assert decode_snapshot(legacy, "project/repo", 7).native_snapshot["base_sha"] == "c" * 40
+    legacy["base_sha"] = ""
+    assert decode_snapshot(legacy, "project/repo", 7).native_snapshot["base_sha"] == ""
+
+
+@pytest.mark.parametrize("target", [None, 42, "main", "bad", "g" * 40])
+def test_decoder_rejects_malformed_optional_target(target):
+    value = {**report(), "base_sha": target}
+    with pytest.raises(ValueError, match="target identity"):
+        decode_snapshot(value, "project/repo", 7)
+
+
 @pytest.mark.parametrize("change", [
     {"version": 2}, {"version": True}, {"repo": "foreign/repo"}, {"pr": True},
     {"mergeable": "yes"}, {"merged": 1}, {"observation": {}},
@@ -124,11 +140,12 @@ def test_native_fetch_is_one_bounded_headless_operation(tmp_path, monkeypatch):
 
 
 def test_native_fetch_crosses_real_cli_process_boundary(tmp_path):
+    value = {**report(), "base_sha": "c" * 40}
     script = tmp_path / "snapshot.py"
     script.write_text(
         "import json,sys\n"
         "assert sys.argv[1:] == ['pr-watch','snapshot','project/repo','7','--json']\n"
-        f"print({json.dumps(report())!r})\n",
+        f"print({json.dumps(value)!r})\n",
         encoding="utf-8",
     )
     command = tmp_path / ("worktrees command.ps1" if os.name == "nt" else "worktrees")
@@ -141,7 +158,9 @@ def test_native_fetch_crosses_real_cli_process_boundary(tmp_path):
     )
     if os.name != "nt":
         command.chmod(0o700)
-    assert fetch_snapshot("project/repo", 7, str(command)).provider == "azure-devops"
+    fetched = fetch_snapshot("project/repo", 7, str(command))
+    assert fetched.provider == "azure-devops"
+    assert fetched.native_snapshot["base_sha"] == "c" * 40
 
 
 def test_native_fetch_forwards_only_explicit_credential_command(tmp_path):

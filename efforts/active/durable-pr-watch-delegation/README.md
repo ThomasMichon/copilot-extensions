@@ -279,6 +279,9 @@ _Operator-required outcome; agent-recommended slices and validation._
   [existing-owner conversation metadata journal](../../../plugins/agent-pull-requests/docs/conversation-journal.md)
   and opt-in event reader merged in #10401; full body acquisition, coordinated terminal
   retention, notifications and normal host adoption remain separate.
+  Existing normalized ADO load/sync acquisition feeds the explicitly enabled
+  journal after confirmed cache publication (#10405); native observation and
+  standalone-host adoption remain distinct prerequisites.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -916,6 +919,23 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-04 - Continue native candidate evidence after normalized acquisition
+
+- #10405 merged as `9cbe45b8f3e83e95022994c811f756170a7409f9` after
+  current-head Copilot approval with no findings and required green checks.
+  Managed completion reconciled the source worktree.
+- Re-read the complete parent Plan/Validation and workspace companion. The
+  standalone observer still lacks journal intake; the existing native snapshot
+  exports only a base branch, not the exact target-tip candidate required by
+  the journal. Continue that bounded metadata prerequisite without another read.
+- The new candidate/native ADO/CLI packet passed 123 isolated cases. The
+  broader provider packet exposed 14 unrelated publication-fixture failures
+  tracked in #10408; the native-watch packet exposed three synthetic
+  lost-child/cleanup assertion failures tracked in #10410. Those packets are
+  not reported as passing; no publication or cleanup contract was weakened.
+- Installed/provider/shadow and whole P1/P2 acceptance remain open. No live
+  backend, credential or service authority moved.
 
 ### 2026-11-04 - Qualify normalized workspace-to-journal acquisition
 

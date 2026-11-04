@@ -155,3 +155,11 @@ This is not executable bootstrap, installed host registration, autonomous
 acquisition, shared selection intake, a full body reader, terminal outbox
 compaction, three live providers or live shadow evidence. Production deployment,
 retained-service activation and independent source/effect ownership stay gated.
+
+The existing native snapshot bridge now preserves an optional `base_sha`
+alongside `head_sha` in its detached native metadata. A prior snapshot without
+the field is still accepted; an explicitly malformed nonempty value refuses.
+This closes one metadata prerequisite for future native acquisition, not that
+adapter itself: the standalone observer still does not feed these snapshots
+into the conversation journal. Native target evidence is not a review verdict,
+credential or permission to compact another owner's state.

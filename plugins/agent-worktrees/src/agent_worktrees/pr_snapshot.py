@@ -51,6 +51,8 @@ class PRSnapshot:
     checks_complete: bool | None = None
     check_failures_omitted: int = 0
     observation: Observation | None = None
+    base_sha: str = ""
+    """Provider-returned target tip, not the merge base or synthetic merge commit."""
 
     @property
     def max_review_id(self) -> int:
