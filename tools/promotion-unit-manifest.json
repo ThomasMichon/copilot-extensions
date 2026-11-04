@@ -4058,7 +4058,7 @@
         "worktree-manager/src/worktree_manager/maintenance_policy.py": "956786f3f5a8006b468deca8e3f1e9c86ca5e87c0e284d6f9995508bbb7a0c56",
         "worktree-manager/src/worktree_manager/bootstrap_policy.py": "353885a8167ea7ab3cee115a4ed42c904d8c18f247aab33fe2d2accc1c7f6c51",
         "tools/promotion_unit_tests/test_daemon_instance_creation.py": "ddaea149e0f95383bdc4e8af15ee8e6609da3096a8df2d8d1fa03d02eb2635cb",
-        "plugins/agent-dispatch/src/agent_dispatch/procutil.py": "0f579b4171af4277e527c27fb4bfc810e970a3bfc92f67e5b879c9b1e222ac44",
+        "plugins/agent-dispatch/src/agent_dispatch/procutil.py": "368e47b4843e5e314f30e69f01a20e254b6dd202b73fd5c82164c9531ce3a1d2",
         "tools/promotion_unit_tests/test_dispatch_runtime_resolution.py": "9a7fe55b700db622145650a2ea0842259a8598fb19a5df932ddc35547df8bfa5",
         "libs/configuration-layers/src/configuration_layers/__init__.py": "13aadb4ed2d4fb4f65f968080a3e45e2a96a6cea8e369c148b606821472fedee",
         "libs/configuration-layers/src/configuration_context/__init__.py": "6d9852981306ec138b9ef2a7dbc5756961f1a53781fe827c4f36a9e795173bd0",
