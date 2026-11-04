@@ -13,12 +13,13 @@ from agent_worktrees.providers import base as providers
 
 
 class _FakePull:
-    def __init__(self, *, url, number, state="open", label_error=""):
+    def __init__(self, *, url, number, state="open", label_error="", draft=None):
         self.url = url
         self.number = number
         self.state = state
         self.label_error = label_error
         self.base_ref = "dev"
+        self.draft = draft
 
 
 class _FakeProvider:
@@ -156,6 +157,26 @@ def test_ado_retry_requires_the_authoritative_configured_base(monkeypatch, _trac
 
 
 class TestCreateForeignPrFromBranch:
+    @pytest.mark.parametrize("reuse", [False, True])
+    @pytest.mark.parametrize("observed", [False, True])
+    def test_reports_observed_draft_for_new_and_reused_ado_pr(
+        self, monkeypatch, _tracking_setup, reuse, observed,
+    ):
+        _, wid = _tracking_setup
+        monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug",
+                            lambda *_: _foreign_resolution(provider="azure-devops"))
+        pull = _FakePull(url="https://forge.invalid/7", number=7, draft=observed)
+        backend = _FakeProvider(existing=pull) if reuse else _FakeProvider(result=pull)
+        monkeypatch.setattr(providers, "get_provider", lambda *_: backend)
+        monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: None)
+        result = pr_foreign_create.create_foreign_pr_from_branch(
+            wid, _config(), target_repo="owner/other-repo", from_branch="topic",
+            title="fix", draft=not observed,
+        )
+        assert result["draft"] is observed
+        assert result["number"] == 7 and result["claimed"]
+        assert len(backend.calls) == (0 if reuse else 1)
+
     @pytest.mark.parametrize("reuse", [False, True])
     def test_explicit_origin_uses_target_binding_and_preserves_create_labels(
         self, monkeypatch, _tracking_setup, reuse,

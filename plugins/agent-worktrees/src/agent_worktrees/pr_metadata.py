@@ -14,10 +14,15 @@ class MetadataPullResult(PullResult):
 
 
 def include_publication_metadata(result: dict, pull) -> None:
+    if type(getattr(pull, "draft", None)) is bool:
+        result["draft"] = pull.draft
     if getattr(pull, "label_error", ""):
         result["pr_label_error"] = pull.label_error
     if getattr(pull, "metadata", None):
         result["author_metadata"] = pull.metadata
+        if pull.metadata.get("actions", {}).get("draft", {}).get("status") == "unknown":
+            result["draft"] = False
+            result["draft_unconfirmed"] = True
 
 
 def update_metadata(config, repo: str, number: int, *, title: str | None = None,

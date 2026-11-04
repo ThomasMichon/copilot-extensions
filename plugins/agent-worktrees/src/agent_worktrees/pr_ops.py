@@ -1275,10 +1275,7 @@ def _open_via_provider(
     result["url"] = pull.url
     result["number"] = pull.number
     result["state"] = pull.state or result.get("state")
-    # Reflect what THIS call actually did: a draft was created only when we asked
-    # the provider to open one. (The caller pre-seeds result["draft"] with the
-    # request intent for the dry-run/no-open paths; here we make it authoritative
-    # for the opened PR so "opened as a DRAFT" can never be reported falsely.)
+    # Provider-observed draft state overrides this legacy default below.
     result["draft"] = bool(draft)
     labels = pr_publication_labels.refresh(config, record, target_pr)
     if labels is not None:

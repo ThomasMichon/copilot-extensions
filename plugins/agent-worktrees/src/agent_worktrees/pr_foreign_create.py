@@ -271,11 +271,7 @@ def create_foreign_pr_from_branch(
         "url": pull.url,
         "number": pull.number,
         "state": normalized_state,
-        # A reused PR's draft state is whatever the provider already
-        # reports it as, not the caller's OWN --draft request for a PR
-        # that was never actually created this call -- mirrors the local
-        # path's own retry contract (draft is only ever true for a PR
-        # THIS call just opened as one).
+        # Provider-observed draft state overrides this legacy default below.
         "draft": False if reused else bool(draft),
         "head": from_branch,
         "base": base_branch,
