@@ -1,0 +1,9 @@
+{
+  "comment": "Add an explicitly adopted bounded conversation metadata journal and optional read-only workspace event cursor API",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

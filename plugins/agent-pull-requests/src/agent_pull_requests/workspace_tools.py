@@ -13,7 +13,7 @@ from .review_workspace import MAX_GENERATION_BYTES, _generation, _scope
 from .review_intent import identifier
 
 TOOL_PROTOCOL = "agent-pull-requests.workspace-tools/v1"
-COMMANDS = ("capabilities", "load", "sync", "materialize", "source", "source-read", "submit", "inspect")
+COMMANDS = ("capabilities", "load", "sync", "materialize", "source", "source-read", "submit", "inspect", "events")
 FIELDS = {
     "capabilities": (),
     "load": ("number", "expected_current", "budget_seconds"),
@@ -23,6 +23,7 @@ FIELDS = {
     "source-read": ("number", "generation_id", "budget_seconds", "source_attachment", "path", "side"),
     "submit": ("number", "intent", "source_attachment", "budget_seconds"),
     "inspect": ("number", "operation_id"),
+    "events": ("number", "after", "limit"),
 }
 READ_CONTRACT = {
     "schema": "agent-pull-requests.local-source-read-contract", "version": 1,
@@ -69,7 +70,7 @@ class WorkspaceTools:
             if not isinstance(backend, dict) or backend.get("protocol") != PROTOCOL:
                 raise WorkspaceToolUnavailable("workspace_contract_unsupported")
             available = backend.get("operations", [])
-            operations += [name for name in ("load", "sync", "submit", "inspect") if name in available]
+            operations += [name for name in ("load", "sync", "submit", "inspect", "events") if name in available]
             if all(name in available for name in ("lookup", "chunk")):
                 operations.append("materialize")
                 source_contract = getattr(self.source_owner, "contract", None)
@@ -107,6 +108,13 @@ class WorkspaceTools:
             "path": {"type": "string", "pattern": "^/"},
             "side": {"enum": ["before", "after"]},
             "operation_id": {"type": "string", "minLength": 1, "maxLength": 128},
+            "after": {"anyOf": [{"type": "null"}, {
+                "type": "object", "properties": {
+                    "epoch": {"type": "integer", "minimum": 1},
+                    "sequence": {"type": "integer", "minimum": 0},
+                }, "required": ["epoch", "sequence"], "additionalProperties": False,
+            }]},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 16},
         }
         return [{
             "name": "pr_workspace_" + command.replace("-", "_"),
@@ -132,7 +140,7 @@ class WorkspaceTools:
         capabilities = await self.capabilities()
         if command not in capabilities["operations"]:
             raise WorkspaceToolUnavailable("workspace_operation_unsupported")
-        if command in ("load", "sync", "submit", "inspect"):
+        if command in ("load", "sync", "submit", "inspect", "events"):
             return await _call(self.client.exchange, command, copy.deepcopy(request))
         required = {"number", "generation_id"}
         if command in ("source", "source-read"):
