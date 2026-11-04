@@ -23,9 +23,13 @@ an independent unfinished integration.
 ## Admission before effects
 
 Collection requires an actual nonpassive, authorized **enforce-mode** aggregate
-plan for the executing machine. A valid diagnostic/observe plan is not
+plan for the executing machine's complete name/platform/role identity, using the
+same normalization as plan selection. A valid diagnostic/observe plan is not
 permission. Exactly one collection claim must cover the canonical source
-repository and bind the actual active target's filesystem root.
+repository and bind the actual active target's filesystem root. The supplied
+target must also match the current configured target. Native path equality
+preserves case; the compiler's conservative case-folded collision identity alone
+cannot grant access to a distinct case-sensitive path.
 
 The selected sync configuration remains authoritative. Secret redaction or
 essential-session-only publication blocks this lossless database collection;

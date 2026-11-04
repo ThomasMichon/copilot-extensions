@@ -20,6 +20,7 @@ from agent_logger.aggregate import (
     ResolvedPlan, ResourceBinding, SourceSet, compile_aggregate,
 )
 from agent_logger.config import Config
+from agent_logger.aggregate_machine import default_machine_identity
 from agent_logger.sync.targets.filesystem import LocalTarget, OneDriveTarget
 from agent_logger.sync.worktree_state import (
     WorktreeStateError, WorktreeStateReceipt, WorktreeStateRevision, canonical_bytes,
@@ -44,7 +45,7 @@ def plan_for(root: Path, *, mode: ExecutionMode = ExecutionMode.ENFORCE) -> Reso
         )),
     )
     return compile_aggregate(AggregateInputs(
-        machine=MachineIdentity("worker", "linux"), mode=mode,
+        machine=replace(default_machine_identity(), name="worker"), mode=mode,
         admissions=(Admission(REPOSITORY, checkout, collection_targets={
             "archive": ResourceBinding("filesystem", str(root)),
         }),),
@@ -70,7 +71,8 @@ def fake_owner(directory: Path, *, worktree: str, store_id: str, expected_revisi
 @pytest.fixture
 def packet(tmp_path: Path) -> Packet:
     root = tmp_path / "archive"
-    cfg = Config({"sync": {"target": "local"}, "machine": {"name": "worker"}},
+    cfg = Config({"sync": {"target": "local", "targets": {"local": {"path": str(root)}}},
+                  "machine": {"name": "worker"}},
                  home=tmp_path / "logger-home")
     target = LocalTarget({"path": str(root)})
     source = tmp_path / "export"
@@ -300,6 +302,63 @@ def test_changed_privacy_rejects_receipt_readback_before_the_owner(packet: Packe
 
     with pytest.raises(WorktreeStateError, match="privacy"):
         readback_worktree_state(cfg, target, plan, IDENTITY, forbidden)
+
+
+@pytest.mark.parametrize("kind", ["role", "platform", "malformed-role", "malformed-machine"])
+def test_complete_current_machine_identity_is_required_before_any_owner_read(
+    packet: Packet, kind: str,
+) -> None:
+    cfg, target, plan, source = packet
+    if kind == "role":
+        cfg._data["machine"]["role"] = "different-role"
+    elif kind == "platform":
+        plan.machine = replace(plan.machine, platform="different-platform")
+    elif kind == "malformed-role":
+        cfg._data["machine"]["role"] = 12
+    else:
+        cfg._data["machine"] = []
+
+    def forbidden(*args: Any, **kwargs: Any) -> dict:
+        pytest.fail("stale or malformed machine identity reached the owner")
+
+    with pytest.raises(ValueError):
+        collect_worktree_state(cfg, target, plan, source, IDENTITY, ("session-1",), forbidden)
+    assert not target._root().exists()
+
+
+def test_stale_target_and_case_folded_claim_cannot_admit_another_native_root(
+    packet: Packet,
+) -> None:
+    cfg, target, plan, source = packet
+
+    def forbidden(*args: Any, **kwargs: Any) -> dict:
+        pytest.fail("unselected or case-distinct destination reached the owner")
+
+    configured = cfg._data["sync"]["targets"]["local"]
+    configured["path"] = str(source.parent / "new-approved-destination")
+    with pytest.raises(WorktreeStateError, match="current sync configuration"):
+        collect_worktree_state(cfg, target, plan, source, IDENTITY, ("session-1",), forbidden)
+    configured["path"] = str(target._root())
+    old_binding = plan.claims[0].resource
+    different_case = target._root().with_name(target._root().name.upper())
+    new_binding = ResourceBinding("filesystem", str(different_case))
+    assert new_binding.canonical_identity == old_binding.canonical_identity
+    plan.claims = [replace(plan.claims[0], resource=new_binding)]
+    with pytest.raises(WorktreeStateError, match="admitted collection destination"):
+        collect_worktree_state(cfg, target, plan, source, IDENTITY, ("session-1",), forbidden)
+    assert not target._root().exists() and not different_case.exists()
+
+
+def test_readback_requalifies_changed_role_and_configured_destination(packet: Packet) -> None:
+    cfg, target, plan, _ = packet
+    collect(packet)
+    cfg._data["machine"]["role"] = "other-role"
+    with pytest.raises(WorktreeStateError, match="different executing machine"):
+        readback_worktree_state(cfg, target, plan, IDENTITY, fake_owner)
+    cfg._data["machine"]["role"] = None
+    cfg._data["sync"]["targets"]["local"]["path"] = str(target._root().with_name("other"))
+    with pytest.raises(WorktreeStateError, match="current sync configuration"):
+        readback_worktree_state(cfg, target, plan, IDENTITY, fake_owner)
 
 
 _PRODUCE = r"""

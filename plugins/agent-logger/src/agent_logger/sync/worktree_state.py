@@ -15,7 +15,8 @@ from agent_logger.aggregate import (
     canonical_repository_identity,
 )
 from agent_logger.config import Config
-from agent_logger.segmenter.platform import detect_machine
+from agent_logger.aggregate_machine import resolve_machine_identity
+from agent_logger.sync.targets import build_target
 from agent_logger.sync.targets.base import Target
 
 MAX_MANIFEST_BYTES = 16384
@@ -126,13 +127,20 @@ def contributing_sessions(sessions: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(sorted(set(sessions)))
 
 
+def _native_root(value: Path) -> Path:
+    path = value.expanduser().absolute()
+    if ".." in path.parts:
+        raise WorktreeStateError("collection destination cannot contain parent traversal")
+    return path
+
+
 def admit_collection(
     cfg: Config, target: Target, plan: ResolvedPlan, identity: WorktreeStateRevision,
 ) -> Path:
     """Resolve the actual target only after all supported policies admit effects."""
     if plan.mode != ExecutionMode.ENFORCE or not plan.authorized or plan.passive:
         raise WorktreeStateError("worktree collection requires a nonpassive authorized enforce plan")
-    if plan.machine.name != (cfg.machine_name or detect_machine()):
+    if plan.machine != resolve_machine_identity(cfg):
         raise WorktreeStateError("collection plan belongs to a different executing machine")
     if os.name != "posix":
         raise WorktreeStateError("typed worktree collection has no qualified native durability adapter")
@@ -145,7 +153,11 @@ def admit_collection(
     root = target.worktree_state_root()
     if root is None:
         raise WorktreeStateError("active target does not support typed worktree-state collection")
-    root = root.expanduser().absolute()
+    root = _native_root(root)
+    configured = build_target(cfg.sync_target, cfg.target_options(cfg.sync_target))
+    configured_root = configured.worktree_state_root()
+    if configured_root is None or _native_root(configured_root) != root:
+        raise WorktreeStateError("supplied destination differs from the current sync configuration")
     destination = ResourceBinding("filesystem", str(root)).canonical_identity
     matches = [
         claim for claim in plan.claims
@@ -161,6 +173,8 @@ def admit_collection(
     if (
         not claim.resource.ready or claim.resource.kind != "filesystem"
         or claim.resource.canonical_identity != destination
+        or not Path(claim.resource.identity.strip()).is_absolute()
+        or _native_root(Path(claim.resource.identity.strip())) != root
     ):
         raise WorktreeStateError("admitted collection destination differs from the active target")
     if any(value is not None for value in (
