@@ -53,7 +53,9 @@ class AgendaReader:
     ) -> list[dict[str, Any]]:
         self.commands.discover(cancelled)
         if self.revision == 0:
-            self.codec.info(_raw(self.commands.read(cancelled)))
+            info = self.commands.read(cancelled)
+            self.codec.info(_raw(info))
+            self._retain_revision(info["revision"], publication["revision"])
         page = self.codec.decode(_raw(self.commands.read(cancelled, history=True)))
         if page["type"] != "history-page" or page["before_cursor"] is not None:
             raise TimelineContractError("latest agenda read did not return a latest history page")
@@ -365,7 +367,9 @@ class AgendaTimelineAttachment:
     def history(self, message: SubwayTimeline.HistoryRequested) -> None:
         if message.token.identity.provider is not Provider.AGENDA:
             return
-        if self.token != message.token or self.reader is None or self._stop.is_set() or self._cleanup_failure is not None:
+        if self.token != message.token:
+            return
+        if self.reader is None or self._stop.is_set() or self._cleanup_failure is not None:
             self._failure("history request belongs to an inactive agenda")
             return
         if not self._head_current():

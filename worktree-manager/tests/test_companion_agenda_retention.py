@@ -178,6 +178,66 @@ def test_newer_publication_does_not_starve_an_already_completed_rich_read(manage
     asyncio.run(check())
 
 
+def test_reader_info_revision_fences_a_rewind_before_the_first_page(managed, monkeypatch) -> None:
+    reader = AgendaReader(
+        ("example", "selected", "head-a"), "b" * 32,
+        cwd=str(managed["cwd"]), project_root=str(managed["cwd"]),
+    )
+    reader.commands.discover(Event())
+    publication = managed["publication"]()["observation"]
+    older = reader.commands.read(Event(), history=True)
+    managed["update"]()
+    original = reader.commands.read
+
+    def rewind(cancelled, *, history=False, before=None):
+        return older if history else original(cancelled)
+
+    monkeypatch.setattr(reader.commands, "read", rewind)
+    with pytest.raises(OwnerReadError, match="source-replaced"):
+        reader.latest(publication, Event(), None)
+    assert reader.revision == publication["revision"] + 1
+
+
+def test_retired_viewer_history_message_cannot_invalidate_healthy_source(managed, monkeypatch) -> None:
+    configure(managed, monkeypatch)
+    for _ in range(35):
+        managed["update"]()
+    monkeypatch.setattr(SubwayTimeline, "action_request_history", lambda self: None)
+
+    async def check() -> None:
+        app = companion.MuxCompanionApp(cwd=str(managed["cwd"]))
+        async with app.run_test(size=(110, 40)) as pilot:
+            await until(pilot, lambda: not app._loading)
+            app._agenda_cancel = Event()
+            publish(app, managed["publication"]())
+            app.query_one("#views", TabbedContent).active = "timeline-tab"
+            attachment = app._rich_agenda_attachment
+            await until(pilot, lambda: attachment.token is not None)
+            old = attachment.token
+            before = app._timeline_panel.window.sources[old.identity.source_key].before
+            assert before is not None
+            await attachment.set_selection(None)
+            await attachment.set_selection(
+                ("example", "selected", "head-a"), managed["publication"](),
+                project_root=str(managed["cwd"]),
+            )
+            await until(pilot, lambda: attachment.token is not None)
+            current = attachment.token
+            assert current != old
+            window = app._timeline_panel.window
+            state = window.sources[current.identity.source_key]
+            assert state.availability is Availability.OBSERVED
+            assert window.request_history(current, state.before).applied
+            requested = window.sources[current.identity.source_key].requested_before
+            assert requested is not None
+            attachment.history(SubwayTimeline.HistoryRequested(old, before))
+            state = window.sources[current.identity.source_key]
+            assert state.availability is Availability.OBSERVED
+            assert state.requested_before == requested
+
+    asyncio.run(check())
+
+
 @pytest.mark.parametrize("kind", ["latest", "history"])
 def test_agenda_conflict_is_rejected_against_actual_reconciled_window_archive(managed, monkeypatch, kind) -> None:
     real_selection = worktree_attachment.TimelineAttachment.set_selection

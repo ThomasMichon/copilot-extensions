@@ -239,7 +239,8 @@ request. Each history read captures its minimum admitted revision before
 starting, so a concurrent live advance cannot falsely turn that older atomic
 page into a rewound-store error or move the independent live boundary.
 Every admitted latest, catch-up and historical page monotonically retains its
-observed store revision under one reader lock. A later lower revision cannot
+observed store revision under one reader lock. Initial reader-info admission
+retains its revision before the separate first page command. A later lower revision cannot
 pass merely because the higher revision arrived through a backward read.
 An already in-flight historical page still uses its start-time floor without
 lowering that shared fence. Display status reports the displayed latest page,
@@ -249,6 +250,8 @@ before the first Agenda token exists. An explicit refresh selecting a different
 canonical head supersedes the retired viewer scope without depending on optional
 Worktree observations; a same-head retry cannot clear that head fence.
 Retired history results and errors cannot downgrade a recovered source. A
+queued history request carrying a retired viewer token is ignored without
+changing the current source's health or pending request. A
 display-failure epoch distinguishes a renewed request for the same cursor;
 renewed viewport demand waits for the old owned child to settle before starting
 one fresh page read.
