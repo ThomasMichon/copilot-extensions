@@ -202,7 +202,7 @@ additional recovery command is introduced. Source/profile identity checks,
 legacy selector-free venv support and Bridge's mandatory serving reconciliation
 remain intact.
 
-The focused Windows source packets passed 251 tests with three explicit platform
+The focused Windows source packets passed 257 tests with three explicit platform
 skips. Four native selected-target controls also prove real shell invocation,
 usable fixture-venv Python, preserved configuration bytes, unchanged healthy
 slot bytes on immediate repeat and a failed repair remaining failed. These
@@ -249,3 +249,14 @@ targets retain their existing qualification. The changed profile and native
 target-consumer packet passes 76 tests with three platform skips; the other
 already-qualified packets are unchanged. This corrects healthy reuse without
 loosening incomplete selection or source identity.
+
+### 2026-11-04 - Selector-free legacy directory qualification
+
+A stale `.venv` or `venv` link can survive a missing selector while pointing to
+an older completed runtime. Following that link does not prove that the matching
+manifest's requested generation exists. Six controls using actual Windows
+junctions reproduced false current skips across the engine/module/registered
+planners. The legacy fallback now uses the canonical link classifier to exclude
+symlinks and junctions while retaining real-directory reuse. The affected native
+consumer and serving/footprint packet passes 78 tests with three platform skips,
+including unchanged old-slot evidence and real legacy-directory controls.

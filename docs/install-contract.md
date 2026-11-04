@@ -1506,7 +1506,8 @@ manifest, and service restart (see "What NOT to Do" and "Deploying: one command
 > selected completed runtime and interpreter. Equal versions retain the quick
 > skip only after the owning payload's read-only generation/completion helpers
 > confirm that footprint. A fallback slot cannot stand in for a broken current
-> selector; selector-free legacy venvs remain supported. An unavailable or
+> selector; selector-free real legacy venv directories remain supported, but
+> symlinks and Windows junctions cannot certify that fallback. An unavailable or
 > unsuccessful footprint probe reaches the normal installer rather than
 > certifying currentness or requiring a separate recovery command. This is
 > footprint validation, not a package-import or service-health guarantee.

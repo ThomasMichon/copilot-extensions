@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 import shutil
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -103,6 +104,31 @@ def test_current_legacy_runtime_without_selector_retains_reuse(current_payload, 
     assert _plan(kind, payload, "agent-example").status == "SKIPPED (current)"
     python.unlink()
     assert _plan(kind, payload, "agent-example").status == ""
+
+
+@pytest.mark.parametrize("kind", ["engine", "module", "registered"])
+@pytest.mark.parametrize("link_name", [".venv", "venv"])
+def test_stale_legacy_link_cannot_certify_missing_current_slot(current_payload, kind, link_name):
+    payload, root = current_payload
+    (root / "current-version").unlink()
+    older = root / "versions" / "0.9.0"
+    (root / "versions" / "1.2.3").rename(older)
+    (older / ".install-complete.json").write_text(json.dumps({
+        "version": "0.9.0", "completed_at": "2026-01-01", "pid": 0,
+    }))
+    link = root / link_name
+    if os.name == "nt":
+        result = subprocess.run(
+            [os.environ["COMSPEC"], "/c", "mklink", "/J", str(link), str(older)],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+    else:
+        link.symlink_to(older, target_is_directory=True)
+    step = _plan(kind, payload, "agent-example")
+    assert step.status == "" and "update" in step.argv
+    assert (older / ".install-complete.json").is_file()
+    assert link.is_dir() and not (root / "versions" / "1.2.3").exists()
 
 
 def test_failed_bridge_serving_reconcile_cannot_be_laundered_by_install(current_payload, monkeypatch):

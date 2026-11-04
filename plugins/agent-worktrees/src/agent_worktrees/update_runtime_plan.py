@@ -200,7 +200,7 @@ if marker.exists() or marker.is_symlink():
              and runtime.slot_python(root, expected) is not None)
 else:
     ready = (prepared == "0" and expected == package
-             and any((root / name / sub).is_file()
+             and any(not runtime._is_link(root / name) and (root / name / sub).is_file()
                      for name in (".venv", "venv") for sub in runtime.SLOT_PYTHON_SUBPATHS))
 sys.exit(0 if ready else 1)
 """
