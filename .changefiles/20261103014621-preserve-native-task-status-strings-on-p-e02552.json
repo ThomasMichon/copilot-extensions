@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve task status strings and UTC timestamp semantics at the Python 3.10 minimum",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import importlib
+import sys
+from datetime import datetime, timezone
 
 import httpx
 import pytest
@@ -185,10 +188,43 @@ def test_invalid_saved_plan_refuses_before_item_acquisition(change):
 
 def test_explicit_reconciliation_has_a_start_timestamp():
     provider = connector(lambda _: pytest.fail("timestamp must precede discovery HTTP"))
-    from datetime import UTC, datetime
+    UTC = timezone.utc
 
     before = datetime.now(UTC)
     assert before <= datetime.fromisoformat(provider.current_commit()) <= datetime.now(UTC)
+
+
+@pytest.mark.parametrize("module_name", [
+    "agent_index.sources.azure_devops",
+    "agent_index.sources.github",
+    "agent_index.sources.github_poll",
+    "agent_index.indexing.backup",
+    "agent_index.store.repair",
+])
+def test_supported_minimum_utc_alias_is_native_timezone(module_name: str) -> None:
+    module = importlib.import_module(module_name)
+    assert module.UTC is timezone.utc
+    if sys.version_info >= (3, 11):
+        from datetime import UTC
+
+        assert module.UTC is UTC
+
+
+def test_utc_alias_preserves_existing_timestamp_interpretation() -> None:
+    from agent_index.sources import azure_devops, github, github_poll
+
+    naive = "2026-01-01T00:00:00"
+    aware = "2026-01-01T02:00:00+02:00"
+    azure_naive = azure_devops._parse_datetime(naive)
+    github_naive = github._parse_datetime(naive)
+    assert azure_naive is not None and azure_naive.tzinfo is timezone.utc
+    assert github_naive is not None and github_naive.tzinfo is timezone.utc
+    azure_aware = azure_devops._parse_datetime(aware)
+    github_aware = github._parse_datetime(aware)
+    assert azure_aware is not None and azure_aware.isoformat() == "2026-01-01T00:00:00+00:00"
+    assert github_aware is not None and github_aware.isoformat() == aware
+    assert github_poll._checkpoint("1767225600").isoformat() == "2026-01-01T00:00:00+00:00"
+    assert GitHubConnector._since_marker(aware) == "2025-12-31T23:59:00Z"
 
 
 def test_shared_engine_defers_all_store_effects_until_acquisition_completes(tmp_path, monkeypatch):

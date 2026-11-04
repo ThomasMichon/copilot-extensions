@@ -6,6 +6,9 @@ import os
 import subprocess
 import sys
 from contextlib import contextmanager
+from collections.abc import Iterator
+from pathlib import Path
+from typing import IO
 
 from agent_procutil import (
     contained_test_mode,
@@ -17,7 +20,10 @@ from agent_procutil import (
 
 
 @contextmanager
-def owned_python(arguments, *, cwd, stdout, stderr=None, env=None):
+def owned_python(
+    arguments: list[str], *, cwd: Path, stdout: IO[str] | IO[bytes],
+    stderr: IO[str] | IO[bytes] | None = None, env: dict[str, str] | None = None,
+) -> Iterator[subprocess.Popen[bytes]]:
     child_env = dict(os.environ) if env is None else dict(env)
     child_env.update(windowless_python_env(sys.executable))
     kwargs = no_window_kwargs()

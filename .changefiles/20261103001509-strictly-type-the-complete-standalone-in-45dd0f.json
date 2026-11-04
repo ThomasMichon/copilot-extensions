@@ -1,0 +1,9 @@
+{
+  "comment": "Strictly type the complete standalone index service and preserve minimum-Python malformed archive refusal",
+  "changes": [
+    {
+      "plugin": "services/index",
+      "type": "patch"
+    }
+  ]
+}

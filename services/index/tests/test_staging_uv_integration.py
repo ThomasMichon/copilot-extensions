@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 import hashlib
 import json
 import os
@@ -14,7 +15,7 @@ from agent_procutil import no_window_kwargs
 from agent_index_service.staging import NativeBuildConfig, inspect_candidates, stage_candidate
 
 
-def _snapshot(root):
+def _snapshot(root: Path) -> dict[Path, str]:
     hashes = {}
     for path in root.rglob("*"):
         if path.is_file():
@@ -26,7 +27,7 @@ def _snapshot(root):
     return hashes
 
 
-def test_real_uv_first_touch_and_replay_preserve_host_and_activation_markers(tmp_path):
+def test_real_uv_first_touch_and_replay_preserve_host_and_activation_markers(tmp_path: Path) -> None:
     manifest = os.environ.get("STANDALONE_STAGING_TEST_FIXTURE")
     if not manifest:
         pytest.skip("real uv fixture must be prepared through an approved package source")
