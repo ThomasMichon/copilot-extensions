@@ -40,7 +40,7 @@ on:
         type: boolean
         default: false
       post_tool_fallback:
-        description: "Run only contained Worktrees advisory post-tool and late-guidance consumers (Linux only)."
+        description: "Run only contained Worktrees post-tool, late-guidance and guard-publication consumers (Linux only)."
         required: false
         type: boolean
         default: false
@@ -177,7 +177,7 @@ jobs:
         plugin: ${{ fromJSON(inputs.post_tool_fallback && '["agent-worktrees"]' || inputs.launch_maintenance && '["agent-worktrees","worktree-manager","update-driver"]' || '["agent-bridge","agent-codespaces","agent-containers","agent-dispatch","agent-logger","agent-mcp","agent-ssh","agent-vault","agent-worktrees"]') }}
     env:
       POST_TOOL_FALLBACK: ${{ inputs.post_tool_fallback }}
-      TEST_SELECTOR: ${{ inputs.post_tool_fallback && 'test_post_tool_shell or test_nudge_status or test_bind_nudge_script or test_late_worker_completion_reaches_actual_post_tool_hook' || inputs.launch_maintenance && (matrix.plugin == 'update-driver' && 'test_core or test_participant_transport or test_real_product_exit_cannot_hide_abandoned_execution_custody' || 'test_update_launch_cli or test_update_driver_json or test_update_stage or test_reconcile_status or test_launch_update_requests or test_launch_preparation_progress or test_launch_session_unwrap or test_standalone_provisioning') || '' }}
+      TEST_SELECTOR: ${{ inputs.post_tool_fallback && 'test_post_tool_shell or test_nudge_status or test_bind_nudge_script or test_late_worker_completion_reaches_actual_post_tool_hook or test_inrepo_completion_keeps_optional_absence_publishable' || inputs.launch_maintenance && (matrix.plugin == 'update-driver' && 'test_core or test_participant_transport or test_real_product_exit_cannot_hide_abandoned_execution_custody' || 'test_update_launch_cli or test_update_driver_json or test_update_stage or test_reconcile_status or test_launch_update_requests or test_launch_preparation_progress or test_launch_session_unwrap or test_standalone_provisioning') || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -299,7 +299,7 @@ jobs:
               "tested_sha": os.environ["TESTED_SHA"],
               "platform": "linux",
               "qualification_scope": (
-                  "Linux advisory post-tool fallback only; no native host, Windows or throughput qualification"
+                  "Linux post-tool and guard-publication consumers only; no native host, Windows or throughput qualification"
                   if post_tool else
                   "Linux launch-maintenance selection only; no Windows or broker qualification"
                   if selector else "Linux default-full only; Windows execution unavailable and not validated"
@@ -313,7 +313,7 @@ jobs:
               "inventory": str(inventory),
               "inventory_sha256": hashlib.sha256(inventory.read_bytes()).hexdigest() if inventory.is_file() else None,
               "scope": (
-                  "selected post-tool and late-guidance consumers; explicit-tier/environment-gated skips are not passes"
+                  "selected post-tool, late-guidance and guard-publication consumers; explicit-tier/environment-gated skips are not passes"
                   if post_tool else
                   "selected launch-maintenance tests; explicit-tier/environment-gated skips are not passes"
                   if selector else "default full plugin invocation; explicit-tier/environment-gated skips are not passes"

@@ -1,8 +1,8 @@
 # Testing copilot-extensions
 
 The manual `windows-coverage-rotation.yml` selector `post_tool_fallback=true`
-runs only Worktrees' post-tool shell, status/bind reminder and late-guidance
-consumer packet through the canonical hardened Linux container. Supply `ref`
+runs only Worktrees' post-tool shell, status/bind reminder, late-guidance and
+guard-publication consumer packet through the canonical hardened Linux container. Supply `ref`
 to select a published candidate; execution records its immutable checkout,
 selector, container profile and actual result. It cannot be combined with
 `launch_maintenance`. Required unit-only CI and the scheduled full portfolio
@@ -10,6 +10,12 @@ are unchanged. The packet proves request-local lookup counts, reminder
 accounting/cooldowns, separate cwd inputs, callback freshness and actual Python
 entry output; skipped PowerShell/native-host cases are not passes. It does not
 qualify whole-hook latency, ACP/model admission, installed state or throughput.
+The guard-publication controls call the original in-repository config loader
+and actual map producer with absent, empty, invalid and unreadable sources.
+Confirmed optional absence must publish without losing guarded targets;
+invalid/unreadable inputs must still withdraw the affected views. The actor-free
+acquisition packet separately retains child uncertainty and non-reusability;
+the existing strict-read disappearance control keeps an all-absent report absent.
 
 Procutil's explicit `tests/test_caller_owned_native.py -k
 controller_imports_do_not_write_bytecode` packet copies the package into a
