@@ -9,11 +9,13 @@ from pathlib import Path
 import stat
 from threading import Event, current_thread
 from collections.abc import Iterator
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from agent_logger.sync import worktree_state_namespace as namespace
+from agent_logger.sync import publication_directory as publication
 from agent_logger import source_roots
 from agent_logger.corpus_inventory import inventory_corpus
 from agent_logger.source_roots import iter_archive_sources
@@ -236,10 +238,11 @@ def test_native_case_alias_is_refused_before_any_session_publication(
     real_directory = namespace.publication_directory
 
     @contextmanager
-    def native_case_directory(path: Path, *, create: bool = True) -> Iterator[Any]:
+    def native_case_directory(path: Path, *, create: bool = True,
+                              inspect: Any = None) -> Iterator[Any]:
         if path.name == "Worktree-State":
             path = path.with_name(namespace.DIRECTORY)
-        with real_directory(path, create=create) as directory:
+        with real_directory(path, create=create, inspect=inspect) as directory:
             yield directory
 
     monkeypatch.setattr(namespace, "publication_directory", native_case_directory)
@@ -374,6 +377,57 @@ def test_namespace_prefix_budget_refuses_before_creating_destinations(packet: Pa
     result = target.push(source, "/".join([namespace.DIRECTORY] * 33))
     assert not result.ok and "too many namespace prefixes" in result.detail
     assert not target._root().exists()
+
+
+@pytest.mark.parametrize("depth", [1, 8, 24])
+def test_namespace_ancestry_admission_uses_one_pinned_walk_without_caching(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, depth: int,
+) -> None:
+    directory = tmp_path.joinpath(*(f"level-{number}" for number in range(depth)))
+    directory.mkdir(parents=True)
+    real_open = os.open
+    opened: list[Any] = []
+
+    def counted_open(path: Any, flags: int, mode: int = 0o777, *,
+                     dir_fd: int | None = None) -> int:
+        if flags & os.O_DIRECTORY:
+            opened.append(path)
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "open", counted_open)
+    assert not namespace.namespace_overlap(directory, "")
+    assert len(opened) <= len(directory.parts)
+    (directory.parent / ".collection-namespace.json").write_bytes(b"partial")
+    assert namespace.namespace_overlap(directory, "")
+
+
+def test_windows_ancestry_inspector_visits_each_child_while_its_chain_is_held(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = tmp_path / "outer" / "inner"
+    held: list[Path] = []
+    seen: list[Path] = []
+
+    @contextmanager
+    def held_directory(path: Path) -> Iterator[None]:
+        held.append(path)
+        try:
+            yield
+        finally:
+            assert held.pop() == path
+
+    def inspect(directory: publication.PublicationDirectory) -> None:
+        assert held[-1] == directory.path
+        assert directory.fd is None
+        seen.append(directory.path)
+
+    monkeypatch.setattr(publication, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(publication, "_windows_directory", held_directory)
+    with publication.publication_directory(destination, create=False, inspect=inspect) as pinned:
+        assert pinned.path == destination
+        expected = list(reversed(destination.parents)) + [destination]
+        assert held == expected and seen == expected[1:]
+    assert held == []
 
 
 def test_unmarked_ordinary_ancestors_do_not_require_out_of_root_guard_writes(

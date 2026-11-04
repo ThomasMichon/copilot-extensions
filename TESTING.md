@@ -30,6 +30,8 @@ Collections renamed to qualified or legacy provider-group names are excluded
 before expansion, preserving the source-discovery budget for ordinary peers.
 Invalid group markers report per-entry failures while preserving healthy inventory
 peers; actual group-enumeration budget failures still abort traversal.
+Actual directory-open counts at three path depths require one pinned ancestry
+walk per admission, and a newly written marker must be observed on the next call.
 
 The opt-in Manager `tests/test_companion_visual.py` packet compares actual
 Textual timeline renders against synthetic live-following and history-browsing

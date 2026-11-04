@@ -80,6 +80,11 @@ collection namespaces during fleet discovery.
 Admission checks every reserved destination prefix and every existing marked
 ancestor, including prefixes above a configured target root. Marker recognition
 does not depend on the directory retaining its original name.
+Each admission inspects markers during one pinned ancestry walk rather than
+reopening every prefix from the filesystem root. Checks are fresh for each call:
+there is no cross-file absence cache that could hide a newly retained marker.
+Ordinary unchanged-file admission still performs synchronous metadata checks;
+this source qualification does not establish native or remote-filesystem latency.
 Potentially overlapping writers take the guard inside the namespace directory,
 not its parent, so an existing writable namespace-shaped root below a read-only
 parent remains usable. Claiming may create that directory; only the internal

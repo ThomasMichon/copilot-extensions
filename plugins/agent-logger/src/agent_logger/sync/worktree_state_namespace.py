@@ -78,18 +78,49 @@ def _marked(root: Path, name: str) -> bool:
         raise OSError(f"destination directory is unsafe: {root / name}: {error}") from error
 
 
-def _prefixes(destination: Path) -> list[tuple[Path, str]]:
+def _prefixes(destination: Path, *, markers_only: bool = False) -> list[tuple[Path, str]]:
     if ".." in destination.parts:
         raise OSError("unsafe destination path: parent traversal is not supported")
     current = Path(destination.anchor)
-    prefixes: list[tuple[Path, str]] = []
+    prefixes: dict[Path, tuple[Path, str]] = {}
+    marked: set[Path] = set()
     for name in destination.parts[1:]:
-        if name.casefold() == DIRECTORY.casefold() or _marked(current, name):
-            prefixes.append((current, name))
+        if name.casefold() == DIRECTORY.casefold():
+            prefixes[current / name] = current, name
         current /= name
     if len(prefixes) > _MAX_PREFIXES:
         raise OSError("publication path has too many namespace prefixes")
-    return prefixes
+
+    def inspect(directory: PublicationDirectory) -> None:
+        try:
+            directory.stat(_MARKER)
+        except FileNotFoundError:
+            return
+        path = directory.path
+        prefixes[path] = path.parent, path.name
+        marked.add(path)
+        if len(prefixes) > _MAX_PREFIXES:
+            raise OSError("publication path has too many namespace prefixes")
+
+    try:
+        probe = destination
+        try:
+            info = destination.lstat()
+        except FileNotFoundError:
+            pass
+        else:
+            if stat.S_ISREG(info.st_mode) and not is_link_or_reparse(destination, info.st_mode):
+                probe = destination.parent
+        with publication_directory(probe, create=False, inspect=inspect):
+            pass
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError) as error:
+        raise OSError(f"destination directory is unsafe: {destination}: {error}") from error
+    return [
+        prefixes[path] for path in sorted(prefixes, key=lambda path: len(path.parts))
+        if not markers_only or path in marked
+    ]
 
 
 def _destination(root: Path, machine: str) -> Path:
@@ -100,7 +131,7 @@ def _destination(root: Path, machine: str) -> Path:
 
 
 def namespace_overlap(root: Path, machine: str) -> bool:
-    return any(_marked(parent, name) for parent, name in _prefixes(_destination(root, machine)))
+    return bool(_prefixes(_destination(root, machine), markers_only=True))
 
 
 def _existing_ancestor(root: Path) -> Path:
