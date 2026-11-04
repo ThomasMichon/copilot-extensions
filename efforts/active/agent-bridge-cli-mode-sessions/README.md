@@ -61,6 +61,25 @@ connection and lifecycle management for the bound Session Host lives in
 agent-bridge's daemon or the Session Host process, never held open inside the
 CLI extension.
 
+## Participants
+
+No new implementation participant is appointed by the finite #3323 tracking
+proposal. Existing Bridge/session, shared SSH transport/descriptor and
+native/venue custodians retain their scopes; concrete implementation work
+still requires the existing owner's bounded contribution claim.
+
+## Coordination
+
+<!-- backlog-reconciliation:7556:qualified-sixteen:3323:Coordination -->
+
+The proposed Phase 4-consuming Windows transport family preserves existing
+shared transport/descriptor/native and actual venue/session custody.
+#3342's pre-SSH store/identity/caller cost and #7212's direct interactive
+attachment remain separate. Completed assigned #7094 repair stays credited,
+not reopened; no worker recovery, cleanup, lifetime or resource authority
+is transferred. Review, actual delivery and full current readback remain
+separate from any source-specific judgment.
+
 ## Context
 
 Two known, already-documented gaps currently block treating a CLI-driven
@@ -753,6 +772,41 @@ back in the existing reviewed Active receiver; the old link-only bug row is
 insufficient. No live SSH, bootstrap, model, task or source operation is authorized by
 this tracking change.
 
+<!-- backlog-reconciliation:7556:qualified-sixteen:3323:Plan -->
+
+### Proposed finite Windows nonmultiplexed execution and teardown contract
+
+_Agent-recommended additive planning retention, not another implementation
+or a claim that the historical failure was newly reproduced._
+
+- [ ] **S3323-P1:** Preserve ALL THREE original outcomes: intermittent
+  fast reset failure, silent hang and post-output teardown tax. Compare
+  native bare-provider AND exact-built-SSH controls with attributable
+  source/environment and setup/command/teardown timings. Historical venue/
+  call counts and timings are evidence, not new universal limits.
+- [ ] **S3323-P2:** Preserve direct/proxy stdout AND stderr bytes, EOF and
+  exact exit status across cold/warm starts and explicit/ambient/empty
+  environment. Fake-child and warm argv controls supplement, not replace,
+  actual native Windows execution.
+- [ ] **S3323-P3:** Keep authenticated readiness, BOTH pumps and child
+  lifetime truthful under load. Reset is ordinary EOF only where safe;
+  preserve auth/protocol/invalid-readiness failures. Pooling, EOF,
+  handshake and cleanup directions remain candidates, not mandated
+  architecture or a newly fixed readiness timer.
+- [ ] **S3323-P4:** Bound command execution AND post-output teardown/
+  cancellation/drain while retaining actual owned child/stream cleanup.
+  Bounded ambient waiting is not confirmed completion of underlying owned
+  cleanup; uncertainty never licenses duplicate-effect replay.
+- [ ] **S3323-P5:** Record repeatable stage-attributed native comparison
+  and pinned environment, including post-output/load/cancel controls.
+  Keep #3342's PRE-SSH originating owner/store/identity cost separate;
+  timeout reduction or budget inflation cannot mask a causal branch.
+- [ ] **S3323-P6:** Credit #3340 reset/ambient-wait, #3352 drain and #7105
+  inherited-descriptor repairs at actual source/native/external tiers.
+  Earlier Phase 4 TUI/venue proof is not every later intermittent
+  performance case. Do not reopen #7094 or assert same cause/whole
+  reception by #7212, retry caller mutations or terminate unrelated work.
+
 ## Validation Plan
 
 - [ ] Complete every directly retained #1167 Plan/Validation row above at its
@@ -847,6 +901,21 @@ this tracking change.
       on exit (`agent-bridge --json live-sessions cli-mode status` empty
       afterward) and the tmux session tore down on `/exit`.
 
+<!-- backlog-reconciliation:7556:qualified-sixteen:3323:Validation-Plan -->
+
+- [ ] **S3323-V1:** Resolve every S3323-P1 through P6 at the original native
+  Windows consumer tier: all THREE failure classes and native baseline/
+  exact-SSH controls, direct/proxy/cold/warm/environment bytes/exit/EOF,
+  real readiness under load, cancellation/drain and owned settlement,
+  with end-to-end AND phase timing. Retain fake controls separately.
+- [ ] **S3323-V2:** Preserve exact cleanup custody on uncertainty and
+  distinguish a returning ambient watcher from a whole-tree settlement
+  receipt. Keep #3342 cost, #7212 attachment and completed #7094 source
+  separate; source presence, historical Phase 4 success, one repaired
+  error or a configured timeout is not the whole result. No native run,
+  forced recovery, new fixed limits or unrelated whole-parent gate is
+  authorized by this proposal.
+
 ## Proposal
 
 Realized for the local case: worktree-keyed reservation + server-side claim
@@ -857,6 +926,19 @@ symmetric venue-launch surface (needed once a venue's own daemon differs
 from the host's).
 
 ## Journal
+
+<!-- backlog-reconciliation:7556:qualified-sixteen:3323:Journal -->
+
+### 2026-10-29 - Proposed finite Windows transport qualification
+
+Added direct unchecked #3323 Plan, actual global Validation and explicit
+continuing custodians after complete current original/refinement and
+fixed-ROOT qualification. Credited historical Phase 4 and #3340/#3352/
+#7105 evidence at its stated bounds while retaining all three original
+Windows execution/teardown outcomes and both native comparison paths.
+No new failure, source reopening, SSH/venue/process operation, implementation
+or source disposition occurred. Review, actual delivery and complete current
+readback remain outstanding.
 
 ### 2026-10-26 - Exact worktree CLI selection merged
 
