@@ -120,8 +120,8 @@ The [affirmative suspended-recovery source](journal/2026/11.03-affirmative-suspe
 keeps requested continuation suspended until revision-bound current-worker
 acceptance. It reuses assignment counters, wake custody and coordinator cadence
 for hold-aware deadlines and fenced exhaustion without freeing unknown
-capacity. The final coupled source controls pass; normal review/merge and
-actual installed/native recovery remain pending. This does not close the
+capacity. The source merged in #10338 after exact-head approval and required CI;
+actual installed/native recovery remains pending. This does not close the
 recovery row or finalize-before-submission contract.
 
 The following is an **agent-recommended execution/validation sequence** under
@@ -141,8 +141,11 @@ before an otherwise authorized source-backed test.
 2. **Finish worker-side lifecycle behavior.** Structured decline must retain
    objective exclusions and owned-worktree closeout. Suspended recovery must
    affirm `STARTED` or fence exhausted recovery back to `QUEUED` with the selected
-   attempts/backoff. Worktree finalization must precede `SUBMITTED` and evaluator
-   execution. Failures remain visible without surrendering unknown capacity.
+   attempts/backoff. Mechanical worktree readiness must precede `SUBMITTED`;
+   retain its task claim through review, resume the same worker on rejection
+   and permanently finalize only after `COMPLETED`. Confirmed unassignment to
+   unbound queued work can settle that assignment's claim separately.
+   Failures remain visible without surrendering unknown capacity.
 3. **Complete ordinary/mixed-driver integration.** Reconcile remaining direct
    legacy definitions, qualify managed CLI first-prompt ordering on a real
    native, preserve restricted and legacy compatibility, and enable only the intended complete cohort through
@@ -168,9 +171,9 @@ before an otherwise authorized source-backed test.
 | Allocation integrity | Concurrent placement, full pool, retained assignment affinity and no duplicate replacement capacity |
 | Startup/decision | Three completed failures/refusals or deadline exhaustion; five-minute same-native prods; thirty-minute decision clock survives restart |
 | Unknown/race | Lost admission/send reply, stopped/changed native and provider rollback never cause blind replay, forbidden resume or wrong-queue acceptance |
-| Decline | Objective filters and note; worker-owned workspace closeout before relinquishment |
+| Decline | Objective filters and note; readiness before confirmed unassignment/unbound requeue, task-claim settlement and permanent finalization; unknown relinquishment preserves cleanup protection |
 | Suspended recovery | Affirmative current-native `STARTED` or fenced `QUEUED` exhaustion; preserved task-wide cooldown and late-result fencing |
-| Submission | Actual owner finalization before `SUBMITTED`; failed closeout prevents evaluation/false completion |
+| Submission | Readiness before `SUBMITTED`; worktree-owned task claim blocks cleanup through review/rejection; same-worker retry; permanent finalization only after `COMPLETED`, or exact claim settlement after unassignment to unbound queued work |
 | Workload continuity | Independent candidate result and changed-candidate continuation in the same task/native, without duplicate output |
 | Operational control | Actual selected runtime, pause/hold/drain and intended cohort activation; original/foreign effects remain accountable |
 

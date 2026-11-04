@@ -7,7 +7,7 @@
 - **Scope:** branch (a per-plugin vision under the
   [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-30
+- **Last revised:** 2026-11-03
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's `plugins/agent-dispatch/` (skill `agent-dispatch`, `pick-and-claim`)
 
@@ -247,8 +247,9 @@ supervisor own bringing the assignment to **started**, including workspace
 allocation, session startup and an explicit worker acceptance decision.
 An existing agent/pool assignment waits for capacity in that pool instead of
 silently switching pools. A worker can decline with an explanation and
-structured routing exclusions, but finalizes its own workspace before putting
-the assignment down. Startup exhaustion and worker decline are distinct
+structured routing exclusions, after checking its workspace's readiness.
+Confirmed unassignment and unbound requeue settle its task obligation before
+permanent workspace finalization. Startup exhaustion and worker decline are distinct
 outcomes; neither silently loses the task or its prior effects.
 **submitted** is a deliberate review gap: it is the worker's *claim* that the
 goal is met, not a request for another instruction. Workers uniformly submit;
@@ -905,10 +906,12 @@ assignment or permission to launch twice.
 A worker's "not me" carries an explanation and machine-readable exclusions
 scoped to the unsuitable worktree, pool or machine. Every allocation boundary
 honors those exclusions, so the next selection does not repeat the rejected
-placement. The declining worker finalizes its own workspace before
-relinquishing the assignment; failed closeout retains an explicit accountable
-blocker. Finalization readiness does not authorize removal while its runner is
-still alive, or bypass unrelated worktree obligations.
+placement. The declining worker establishes its own workspace's closeout readiness before
+relinquishing the assignment. Its task obligation protects the workspace until
+unassignment and unbound requeue are confirmed; permanent finalization follows
+that settlement. Failed readiness or uncertain relinquishment retains an
+explicit accountable blocker. Readiness does not authorize removal while its
+runner is still alive, or bypass unrelated worktree obligations.
 
 ### retry-eligibility-prevents-placement-churn
 
@@ -952,6 +955,11 @@ exception is a **continuation baton**: a handoff task is spent the moment it is
 picked up, because the continuing *work* is tracked by its own effort or issue,
 not by the handoff record.
 
+An abandoned or dead-letter task does not by itself authorize discarding
+unfinished workspace responsibility. Its retained obligation and rightful owner
+remain visible until an authorized disposition resolves or explicitly transfers
+that responsibility; no silent terminal-status cleanup releases it.
+
 ### verify-the-completion-claim
 A worker's submission is a **claim to review**, not authority to confirm
 itself. Every task records who may accept its outcome: its operator, its
@@ -970,8 +978,13 @@ submission being judged, and rejected outcomes remain in history.
 
 ### self-tracked-review-is-not-a-lane
 A **submitted** task holds no lane and blocks no pool slot —
-the worker that submitted it has already finished and released its claim; only
+the worker that submitted it has finished its execution turn; only
 the *review* remains outstanding, and review is a caller act, not agent work.
+Its worktree still holds the task as an outstanding obligation, preserving
+the same workspace and conversation for a rejected submission. That durable
+claim is not an active execution slot and does not permit permanent finalization
+or cleanup before accepted completion or explicit unassignment to unbound
+queued work. See the [submission responsibility contract](task-outputs-and-review/README.md#submission-retains-worktree-responsibility).
 An arbitrary backlog of submissions may sit for as long as the
 caller needs before being accepted, re-queued, or abandoned, exactly the way
 a *queued*, not-yet-embodied task may sit before a worker binds to it — waiting
