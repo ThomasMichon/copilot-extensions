@@ -380,6 +380,10 @@ def _github_create(
 def _cmd_create(args: argparse.Namespace) -> int:
     if args.worktrees_command is not None:
         return _cmd_native(args)
+    if any(getattr(args, field, None) for field in ("source_workspace", "expected_head", "body_file")):
+        message = "Delegated creation requires an explicit --worktrees-command; no GitHub fallback was attempted."
+        print(json.dumps({"error": message, "repo": args.repo})) if args.json else print(message, file=sys.stderr)
+        return 2
     worktree_id = _resolve_claimant_worktree_id()
     if not worktree_id:
         if args.json:
@@ -828,8 +832,12 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument("--head", required=True, help="head branch (must already be pushed)")
     create.add_argument("--base", default=None, help="base branch (defaults to the repo default)")
     create.add_argument("--title", required=True, help="pull request title")
-    create.add_argument("--body", default="", help="pull request body (default: empty)")
+    create_body = create.add_mutually_exclusive_group()
+    create_body.add_argument("--body", default="", help="pull request body (default: empty)")
+    create_body.add_argument("--body-file", help="UTF-8 body file read by the native owner")
     create.add_argument("--draft", action="store_true", help="open as a draft pull request")
+    create.add_argument("--source-workspace", help="Exact reachable delegated Git root (native only)")
+    create.add_argument("--expected-head", help="Full reviewed source commit (native only)")
     create.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     create.set_defaults(handler=_cmd_create)
 
@@ -870,6 +878,34 @@ def build_parser() -> argparse.ArgumentParser:
             "--worktrees-command", type=validate_selector,
             help="absolute attributable Worktrees command for native configured PR operations",
         )
+
+    for name in ("author-capabilities", "update", "push"):
+        author = subparsers.add_parser(name, help={
+            "author-capabilities": "read target-qualified native author capabilities",
+            "update": "repair existing native PR metadata without pushing",
+            "push": "publish a pinned admitted source workspace through Worktrees",
+        }[name], allow_abbrev=False)
+        author.add_argument("--repo", required=True, type=_validate_repo_slug)
+        author.add_argument("--worktrees-command", required=True, type=validate_selector)
+        author.add_argument("--json", action="store_true")
+        author.set_defaults(handler=_cmd_native)
+        if name == "author-capabilities":
+            continue
+        author.add_argument("--publication-origin")
+        author.add_argument("--publication-label", action="append", default=[])
+        if name == "update":
+            author.add_argument("--number", required=True, type=int)
+            author.add_argument("--title")
+            body = author.add_mutually_exclusive_group()
+            body.add_argument("--body")
+            body.add_argument("--body-file")
+            author.add_argument("--reviewer", action="append", default=[])
+            author.add_argument("--work-item", action="append", default=[])
+        else:
+            author.add_argument("--workspace", required=True)
+            author.add_argument("--head", required=True)
+            author.add_argument("--expected-head", required=True)
+            author.add_argument("--expected-remote-head", default=None)
 
     watch = subparsers.add_parser(
         "watch", help="non-blocking subscription against the shared watch daemon"

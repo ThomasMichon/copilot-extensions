@@ -13,6 +13,114 @@ import pytest
 
 from agent_pull_requests import __main__ as cli
 from agent_pull_requests import native_cli, native_command
+from agent_pull_requests import native_author
+
+
+def author_capabilities():
+    return {
+        "schema": "agent-worktrees.pr-author-capabilities", "version": 1,
+        "repo": "project/repo",
+        "operations": {"metadata-update": True, "source-push": True, "qualified-create": True},
+    }
+
+
+def test_native_metadata_preserves_markdown_and_partial_identity(command, monkeypatch, capsys, tmp_path):
+    body = '# Title\r\n\r\n"quotes", \u03bb and `code`\r\n'
+    path = tmp_path / "body.md"
+    path.write_bytes(body.encode("utf-8"))
+    value = {"repo": "project/repo", "number": 7, "ok": False,
+             "actions": {"body": {"state": "unknown"}}}
+    calls = []
+
+    def run(argv, *, timeout):
+        calls.append((argv, timeout))
+        return subprocess.CompletedProcess(
+            argv, 0 if len(calls) == 1 else 1,
+            json.dumps(author_capabilities() if len(calls) == 1 else value), "",
+        )
+
+    monkeypatch.setattr(native_author, "run_command", run)
+    assert cli.main(arguments(
+        "update", command, "--body-file", str(path),
+        "--reviewer", "expert-id", "--work-item", "other/42",
+    )) == 1
+    assert json.loads(capsys.readouterr().out) == value
+    assert f"--body-file={path}" in calls[1][0]
+    assert all(body not in argument for argument in calls[1][0])
+    assert "--reviewer=expert-id" in calls[1][0] and "--work-item=other/42" in calls[1][0]
+    assert calls[0][1] == 20.0 and calls[1][1] == 90.0
+    assert not any("pr-create" in call[0] or "pr-push" in call[0] for call in calls)
+
+
+@pytest.mark.parametrize("capabilities", [{}, {"schema": "old"}, {
+    **author_capabilities(), "operations": {"metadata-update": False},
+}])
+def test_native_metadata_old_peer_refuses_without_effect_or_fallback(
+    command, monkeypatch, capsys, capabilities,
+):
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, json.dumps(capabilities), "")
+
+    monkeypatch.setattr(native_author, "run_command", run)
+    assert cli.main(arguments("update", command, "--title", "new")) == 1
+    assert "does not advertise" in json.loads(capsys.readouterr().out)["error"]
+    assert len(calls) == 1 and calls[0][1] == "pr-author-capabilities"
+
+
+def test_native_qualified_create_forwards_only_after_capability(command, monkeypatch, capsys):
+    value = {"repo": "project/repo", "number": 7, "pr_opened": True, "url": "https://forge.invalid/7"}
+    calls = stub(monkeypatch, value)
+    monkeypatch.setattr(
+        native_author, "run_command",
+        lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, json.dumps(author_capabilities()), ""),
+    )
+    assert cli.main(arguments(
+        "create", command, "--source-workspace", str(Path(command).parent), "--expected-head", "a" * 40,
+    )) == 0
+    assert json.loads(capsys.readouterr().out)["number"] == 7
+    assert f"--expected-head={'a' * 40}" in calls[0][0]
+
+
+def test_native_source_push_preserves_lease_and_unknown_effect(command, monkeypatch, capsys, tmp_path):
+    value = {"ok": False, "repo": "project/repo", "head": "a" * 40,
+             "publication_state": "unknown", "expected_remote_head": ""}
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(
+            argv, 0 if len(calls) == 1 else 1,
+            json.dumps(author_capabilities() if len(calls) == 1 else value), "",
+        )
+
+    monkeypatch.setattr(native_author, "run_command", run)
+    assert cli.main([
+        "push", "--repo", "project/repo", "--head", "users/demo/fix",
+        "--workspace", str(tmp_path), "--expected-head", "a" * 40, "--expected-remote-head=",
+        "--worktrees-command", command, "--json",
+    ]) == 1
+    assert json.loads(capsys.readouterr().out) == value
+    assert calls[1][1] == "pr-push" and "--expected-remote-head=" in calls[1]
+    assert "--branch=users/demo/fix" in calls[1]
+
+
+def test_native_create_body_file_is_not_expanded_into_process_arguments(command, monkeypatch, capsys, tmp_path):
+    path = tmp_path / "long-description.md"
+    body = '# "quoted"\r\n\r\n\u03bb\r\n' * 4000
+    path.write_bytes(body.encode("utf-8"))
+    value = {"repo": "project/repo", "number": 7, "pr_opened": True, "url": "https://forge.invalid/7"}
+    calls = stub(monkeypatch, value)
+    monkeypatch.setattr(
+        native_author, "run_command",
+        lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, json.dumps(author_capabilities()), ""),
+    )
+    assert cli.main(arguments("create", command, "--body-file", str(path))) == 0
+    assert json.loads(capsys.readouterr().out)["number"] == 7
+    assert f"--body-file={path}" in calls[0][0]
+    assert all(len(argument) < 32768 for argument in calls[0][0])
 
 
 @pytest.fixture

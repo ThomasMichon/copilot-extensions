@@ -38,6 +38,7 @@ native/fleet switch alone does not deliver this service intake model.
 | PR-service plan steward | First-class plugin/service and fleet-consumer scope amendment, review and integration | Separate managed planning worktree; #7188 |
 | Author-publication plan steward | Bounded author-publication proposal and vision amendment only | Public coordination issue #6007; existing runtime owners retained |
 | PR-perspectives steward | Author/Reviewer domain amendment, bounded inert attention source and isolated qualification; no live activation | #6007 and the Author/Reviewer perspectives plan |
+| Author-publication implementation driver | Finite A0-A5 authorship contribution, integration, validation and PR stewardship | Bounded implementation claim #10383; existing broader owners retained |
 
 ## Coordination
 
@@ -100,8 +101,10 @@ and reviewer task owners remain unchanged; this is not a new generic producer
 framework, fleet controller or permission to activate a live backend.
 
 The [author-publication amendment](author-publication.md) refines the existing
-checkout-free/client-convergence lane. Its steward owns planning only; Worktrees
-publication/claim, #7051 conformance and #7188 service custody remain unchanged.
+checkout-free/client-convergence lane. Its original steward owns the planning
+amendment; the subsequently assigned implementation driver works under #10383.
+Worktrees publication/claim, #7051 conformance and #7188 service custody remain
+unchanged.
 
 The [Author/Reviewer amendment](author-reviewer-perspectives.md) extends this
 same canonical effort with role-aware attention, a bounded live conversation

@@ -107,7 +107,6 @@ class AzureDevOpsProvider:
             "--source-branch", scope.head,
             "--target-branch", scope.base,
             "--title", scope.title,
-            "--description", scope.body,
             "--output", "json",
         ]
         for label in scope.labels:
@@ -121,12 +120,67 @@ class AzureDevOpsProvider:
         data = json.loads(proc.stdout)
         number = data.get("pullRequestId")
         state = self._canonical_state(str(data.get("status", "active")).lower())
-        return PullResult(
+        from ..pr_metadata import MetadataPullResult
+
+        result = MetadataPullResult(
             url=self._web_url(scope.api_base, project, name, number),
             number=int(number) if number is not None else None,
             state=state,
             merged=state == "merged",
         )
+        if result.number is not None:
+            try:
+                result.metadata = self.update_pull_metadata(
+                    scope.repo, result.number, description=scope.body,
+                    api_base=scope.api_base, token=token,
+                )
+            except (ProviderError, OSError, ValueError, TypeError) as exc:
+                result.metadata = {
+                    "ok": False, "repo": scope.repo, "number": result.number,
+                    "url": result.url, "publication_retained": True,
+                    "actions": {"description": {"status": "unknown", "error": str(exc)}},
+                }
+        return result
+
+    def update_pull_metadata(self, repo, number, **kwargs):
+        """Verify author metadata on an existing PR, preserving partial outcomes."""
+        from ..pr_metadata_azure import update
+
+        return update(self, repo, number, **kwargs)
+
+    def observe_branch(self, repo, branch, *, api_base="", token=None):
+        """Read an exact authoritative remote branch tip, never local Git state."""
+        import re
+        from urllib.parse import quote
+
+        if not api_base:
+            raise ProviderError("Azure DevOps branch observation needs the org URL")
+        project, name = self._split_repo(repo)
+        branch = branch.removeprefix("refs/heads/")
+        if (not branch or branch.startswith("refs/")
+                or any(ord(char) < 33 for char in branch)):
+            raise ProviderError("Branch observation needs a nonempty branch name")
+        auth, error = self._auth_header(token)
+        if error:
+            raise ProviderError(error)
+        url = (f"{api_base.rstrip('/')}/{quote(project, safe='')}/_apis/git/repositories/"
+               f"{quote(name, safe='')}/refs?filter={quote('heads/' + branch, safe='')}"
+               "&api-version=7.1")
+        status, body = self._rest_call("GET", url, auth)
+        if status != 200:
+            raise ProviderError(f"ADO branch observation returned HTTP {status}")
+        try:
+            data = json.loads(body)
+            values = data["value"]
+            if not isinstance(values, list) or any(not isinstance(row, dict) for row in values):
+                raise ValueError("malformed refs")
+            matches = [row for row in values if row.get("name") == "refs/heads/" + branch]
+            sha = matches[0].get("objectId", "") if len(matches) == 1 else ""
+            if not isinstance(sha, str) or not re.fullmatch(r"[a-fA-F0-9]{40}", sha) or sha == "0" * 40:
+                raise ValueError("missing exact branch tip")
+        except (ValueError, KeyError, TypeError) as exc:
+            raise ProviderError("ADO branch observation did not return one exact valid branch tip") from exc
+        return {"head_sha": sha.lower(), "repository": repo, "branch": branch}
 
     @staticmethod
     def _web_url(org: str, project: str, repo: str, number) -> str:
@@ -652,7 +706,8 @@ class AzureDevOpsProvider:
         return f"Authorization: Bearer {proc.stdout.strip()}", ""
 
     def _rest_call(
-        self, method: str, url: str, auth_header: str, payload: str | None = None
+        self, method: str, url: str, auth_header: str, payload: str | None = None,
+        *, content_type: str = "application/json",
     ) -> tuple[int, str]:
         args = [
             "curl", "-sS", "-X", method, url,
@@ -660,8 +715,8 @@ class AzureDevOpsProvider:
             "-H", auth_header,
         ]
         if payload is not None:
-            args += ["-H", "Content-Type: application/json", "-d", payload]
-        proc = run_cli(args)
+            args += ["-H", "Content-Type: " + content_type, "--data-binary", "@-"]
+        proc = run_cli(args, input_text=payload) if payload is not None else run_cli(args)
         if proc.returncode != 0 and not proc.stdout:
             return 0, proc.stderr.strip()
         out = proc.stdout or ""

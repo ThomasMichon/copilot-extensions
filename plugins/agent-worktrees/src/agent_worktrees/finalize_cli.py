@@ -25,6 +25,9 @@ def cmd_publication_labels(args):
 
 
 def _warn_publication_labels(result):
+    metadata = result.get("author_metadata")
+    if metadata and not metadata.get("ok"):
+        output.warn("PR retained, but author metadata needs repair through pr-update; do not recreate or push.")
     status = result.get("publication_labels")
     if status and not status.get("ok"):
         output.warn(f"Publication retained, but origin labels need repair: {status.get('error')}. "
@@ -32,7 +35,8 @@ def _warn_publication_labels(result):
 
 
 def add_parsers(sub) -> None:
-    from . import pr_publication_labels_cli
+    from . import pr_author_cli, pr_publication_labels_cli
+    pr_author_cli.add_parsers(sub)
     pr_publication_labels_cli.add_parser(sub)
     p = sub.add_parser("post-exit", help="Post-exit worktree checks (idempotent)")
     p.add_argument("worktree_id", nargs="?", default=None)
@@ -151,6 +155,10 @@ def add_parsers(sub) -> None:
         action="store_true",
         help="Force a brand-new PR (fresh branch) even if a live PR is open",
     )
+    p.add_argument("--source-workspace",
+                   help="Exact reachable delegated Git root for --from-branch checks")
+    p.add_argument("--expected-head",
+                   help="Full reviewed source commit for --source-workspace")
     p.add_argument(
         "--body",
         default=None,
@@ -606,8 +614,8 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
         body_file = getattr(args, "body_file", None)
         if body_file:
             try:
-                body = Path(body_file).read_text(encoding="utf-8")
-            except OSError as e:
+                body = Path(body_file).read_bytes().decode("utf-8")
+            except (OSError, UnicodeError) as e:
                 msg = f"Could not read --body-file '{body_file}': {e}"
                 return output._json_error(msg) if use_json else (output.err(msg) or 1)
 
@@ -621,6 +629,11 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             from_branch and resolution is not None and resolution.resolved
             and not resolution.same_as_active
         )
+        if not is_foreign_from_branch and (
+            getattr(args, "source_workspace", None) or getattr(args, "expected_head", None)
+        ):
+            msg = "Delegated source inputs require --repo and foreign --from-branch."
+            return output._json_error(msg) if use_json else (output.err(msg) or 2)
         if from_branch and not is_foreign_from_branch:
             msg = (
                 "create-pr: --from-branch requires --repo naming a "
@@ -660,11 +673,12 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                 new=getattr(args, "new", False),
                 publication_origin=getattr(args, "publication_origin", None),
                 publication_labels=tuple(getattr(args, "publication_label", ())),
+                source_workspace=getattr(args, "source_workspace", None),
+                expected_head=getattr(args, "expected_head", None),
             )
             if result.get("error"):
-                return output._json_error(result["error"]) if use_json else (
-                    output.err(result["error"]) or 2
-                )
+                output._json_output(result) if use_json else output.err(result["error"])
+                return 2
             if use_json:
                 output._json_output(result)
             else:

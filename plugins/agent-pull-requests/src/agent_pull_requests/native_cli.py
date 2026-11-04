@@ -36,10 +36,14 @@ def _mutation(args: argparse.Namespace, prefix: list[str]) -> tuple[int, dict]:
             )
         argv = [
             "pr-create", f"--repo={args.repo}", f"--from-branch={args.head}",
-            f"--title={args.title}", f"--body={args.body}", "--json",
+            f"--title={args.title}", "--json",
         ]
+        body_file = getattr(args, "body_file", None)
+        argv.insert(-1, f"--body-file={body_file}" if body_file else f"--body={args.body}")
         if args.draft:
             argv.append("--draft")
+        from .native_author import create_options
+        argv.extend(create_options(args, prefix))
     else:
         if args.method_explicit or args.delete_branch or args.auto:
             raise ValueError(
@@ -107,10 +111,14 @@ def run(
 ) -> int:
     try:
         launch = prefix_factory() if prefix_factory is not None else [command_path(args.worktrees_command)]
-        code, payload = (
-            _mutation(args, launch) if args.command in ("create", "merge")
-            else _read(args, launch)
-        )
+        if args.command in ("author-capabilities", "update", "push"):
+            from .native_author import run as author_run
+            code, payload = author_run(args, launch)
+        else:
+            code, payload = (
+                _mutation(args, launch) if args.command in ("create", "merge")
+                else _read(args, launch)
+            )
     except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as exc:
         code, payload = 1, {"error": str(exc), "repo": args.repo}
     if args.json:
