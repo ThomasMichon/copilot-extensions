@@ -588,3 +588,65 @@ blobs in the source merge, qualified Dev and released Main. This completes
 the qualification packet's containing-release observation for U8/U9; it is
 not another native run or an installed/runtime/service acceptance result.
 The remaining matrix boundaries and parent Plan/Validation gates stay open.
+
+### 2026-11-04 - Windows venue source merged; remaining ownership reconciled
+
+#10456 merged to Dev as `affb395f47114f88671c4aecd75c17b1000b74bd`
+at 15:10:45 UTC. Copilot approved exact head
+`8c92f789c9c9f1fcfc77089280bbf9c206fb48b8` in review 5770571274.
+Required CI 41852993195 passed all source/contract, eligible-unit, identifier
+and PR gates; there were no review threads. All thirteen authored paths match
+the squash merge and the continuing source worktree pulled forward.
+The seven native/identity and 234 preparation controls remain the functional
+evidence. All forty admitted strict type-check projects also pass for both
+declared platforms; pending inventory scopes are not implied to be strict.
+Containing release remains due. Nothing was installed or activated.
+
+The bounded default-layout reservation on #10451 is complete at the source
+tier, not whole-host acceptance. The next reconciliation preserves an existing
+owner rather than opening a duplicate comparator task: #2404's newer-local/
+older-marketplace launch requirement is retained as seven explicit clauses in
+still-open #7030. Its current stage derives version drift from inequality
+separately from publication policy. Delivered #7564/#7576 and the current
+physical-environment consumer PR #10438 do not establish the complete monotonic
+source-selection/native-apply requirement. This is read-only classification;
+no downgrade was attempted and no source claim or held ownership was cleared.
+The existing managed-deployment, source construction, first-entry and lifecycle
+owners remain canonical while this workstream selects its next unconflicted
+consumer/recovery unit. The parent stays Active.
+
+### 2026-11-04 - Windows venue release and remaining construction boundary
+
+The exact Dev commit for #10456 passed CI 41855027461, then promotion
+41857182391 qualified `affb395f47114f88671c4aecd75c17b1000b74bd`.
+Release #10463 merged as Main
+`5861bb058f0905d2f0dab16f7d1e56684b8f8b6b`. The canonical preparation
+and registration bodies, maintained vendored copy and native regression have
+identical source/release blobs. Bridge's materialized resolver copies match
+canonical source too. Released Bridge is `0.9.299-dev1`, Codespaces
+`0.5.250-dev1`, Containers `0.2.198-dev1`, Worktrees `1.24.458-dev1`
+and Customizing Copilot `0.2.63-dev1`. #10451 is closed at its bounded
+source/ordinary-contained-consumer contract; #10377 and other acceptance
+owners remain open. No runtime was installed or activated.
+
+Current source-wheel reconciliation preserves #9290's existing owner.
+The delivered #9572 correction excludes changing Job ancestry from the cache
+binding while retaining it for owned children. The distinct lifecycle and
+publication-envelope correction remains claimed; no competing patch is taken.
+Four existing native constructor controls pass in 187.69 seconds under the
+unchanged 180-second item and 300-second group bounds: fresh-workspace
+per-project reuse, changed-leaf invalidation, request-witness/Job key stability
+and meaningful build-environment invalidation. Actual UV uses a synthetic
+backend and loopback fixture feed. This is neither varying lifecycle-ticket
+qualification nor a full ordinary-update, real-feed or latency pass.
+The remaining owner/handle request is
+[comment 6635053007](https://github.com/ThomasMichon/copilot-extensions/issues/9290#issuecomment-6635053007).
+
+The original immutable-UV contribution #9501 is merged and contained in that
+qualified release source; its exact-head native bootstrap/UV results remain
+the original contributor's evidence. Fresh-entry, existing-queue and public
+Python prerequisite work stay with #7743/#7758/#9448/#10186 rather than a
+second repair entry. #3004's first actual restarted-model prompt is distinct
+from #1159's completed stateless write guard. Source, containing release,
+contained consumers and affected-host readiness remain separate facts. The
+remaining selected Plan/Validation items and original holds are unchanged.

@@ -98,7 +98,7 @@ def test_pending_non_snapshot_hook_keeps_policy_without_git_discovery(owner, mon
     assert active == ["previous"]
     if kind == "preToolUse":
         assert result == {"permissionDecision": "deny"}
-        assert calls == [("statelessness_guard.py", "A")]
+        assert calls == [("statelessness_guard.py", "previous")]
     else:
         assert result == {"additionalContext": "accounted"}
         assert calls == [("mutation", "A"), ("nudge_status.py", "A"), ("binding", "A")]

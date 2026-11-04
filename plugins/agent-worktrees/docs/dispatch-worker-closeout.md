@@ -107,9 +107,10 @@ physical retirement remains with its existing owner.
 ## Internal nonfinalizing readiness
 
 `dispatch_worker_readiness.observe_ready` is a source-only expansion for an
-active allocator-created Linux/WSL workspace. It is not exposed by the CLI,
-advertised by either version-1 descriptor, or consumed by ordinary Dispatch
-submission. It never calls finalization, saves a record, settles a claim,
+active allocator-created Linux/WSL workspace. The selected runtime exposes it
+through the separate readiness contract below; neither existing version-1
+closeout descriptor changes meaning. Ordinary Dispatch submission does not
+consume it yet. It never calls finalization, saves a record, settles a claim,
 changes task state or retires a process.
 
 The observer requires the original creation nonce, native head revision and
@@ -148,9 +149,45 @@ to its retained preparation outside the SQLite write transaction, then recheck
 task admission and ownership inside that transaction.
 
 Focused source controls are in `tests/test_dispatch_worker_readiness.py`.
-Negotiated transport/caller support, manual or absent-worktree applicability,
+Negotiated caller support, manual or absent-worktree applicability,
 Windows/native qualification, rejected-worker recovery and decline ordering
 remain pending. The ordinary assignment writer remains disabled.
+
+### Selected-runtime readiness transport
+
+`record --describe-readiness-contract` returns
+`agent-worktrees.dispatch-worker-readiness`, version `1`, with operations
+`observe-ready` and `check-own-ready`, native proof `inuse-hold-v1`, platforms
+`linux`/`wsl`, and explicit false paired-readiness, finalization, task-release
+and process-retirement facts. Discovery does not inspect a workspace.
+Use the **selected Worktrees runtime's** canonical command, with the explicit
+project; a newer payload's package version or descriptor is not support.
+
+Both operations require exact `--worktree-id` and all of:
+`--readiness-operation`, `--readiness-task`, `--readiness-reservation`,
+`--readiness-native`, `--readiness-creation-nonce`,
+`--readiness-head-revision` (an integer) and `--readiness-task-claim-ref`.
+`observe-ready` is an independent owner observation; `check-own-ready` adds
+the invoking native-process/cwd check. The latter is not a worker-supplied
+receipt that the coordinator may trust in place of its own observation.
+Partial requests, discovery combined with request fields, initialization-directory
+selection, mixed finalized-closeout requests and unknown syntax refuse.
+
+Success exits zero with JSON `ok: true`, the readiness contract/version and
+selected operation, plus the observer's actual allocation, workspace/head,
+retained claim and current checkout/landing evidence. `ready: true` remains
+distinct from `finalized: false`; the claim and checkout remain retained.
+Refusal exits nonzero with `ok: false` and an actionable `error`, not a
+success-shaped legacy observation.
+
+This is provider-first expansion, not ordinary caller activation. Existing
+record/initialization and finalized-closeout forms retain their meanings.
+Consumers must negotiate this separate contract before emitting readiness
+syntax. Older or rolled-back providers lack that declaration; their finalized
+observation/finalizer is **not** an equivalent fallback. Preserve responsibility
+and surface unsupported readiness before queue effects. Caller migration,
+compatibility selection and guarded queue advancement remain separate gates;
+no old form is retired by this expansion.
 
 ## Remaining integration and validation
 

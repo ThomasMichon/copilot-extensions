@@ -277,7 +277,7 @@ def test_snapshot_reads_require_current_trust_and_selected_authentic_bytes(
             frozen.read_artifact(component, trusted, clock=lambda: now)
 
 
-@pytest.mark.parametrize("operation", ["reverify", "read"])
+@pytest.mark.parametrize("operation", ["reverify", "read", "reservation"])
 def test_context_shutdown_waits_for_inflight_reverification(
     tmp_path, primitive, monkeypatch, operation,
 ):
@@ -294,7 +294,10 @@ def test_context_shutdown_waits_for_inflight_reverification(
 
     def serialization(value):
         if isinstance(value, dict) and value.get("schema") == "fleet-manager.staged-artifacts":
-            if threading.current_thread().name == "stage-verification-fixture":
+            if (
+                operation != "reservation"
+                and threading.current_thread().name == "stage-verification-fixture"
+            ):
                 entered.set()
                 assert release.wait(5), "verification fixture was not released"
         return original_canonical(value)
@@ -313,8 +316,13 @@ def test_context_shutdown_waits_for_inflight_reverification(
         try:
             if operation == "reverify":
                 results.append(frozen.reverify(trusted, clock=lambda: 151))
-            else:
+            elif operation == "read":
                 results.append(frozen.read_artifact(frozen.artifacts[0], trusted, clock=lambda: 151))
+            else:
+                with frozen._retained_authentication(trusted, clock=lambda: 151) as (_, authenticate):
+                    entered.set()
+                    assert release.wait(5), "reservation fixture was not released"
+                    results.append(authenticate(trusted, clock=lambda: 151))
         except BaseException as error:
             failures.append(error)
 
@@ -345,8 +353,10 @@ def test_context_shutdown_waits_for_inflight_reverification(
     assert len(results) == 1
     if operation == "reverify":
         assert results[0]["retention_held"]
-    else:
+    elif operation == "read":
         assert type(results[0]) is bytes and results[0]
+    else:
+        assert results[0]["authenticity_verified"]
     assert frozen._closed.is_set() and not frozen._slot.exists()
     with pytest.raises(PlanError, match="retention has ended"):
         frozen.reverify(trusted, clock=lambda: 152)

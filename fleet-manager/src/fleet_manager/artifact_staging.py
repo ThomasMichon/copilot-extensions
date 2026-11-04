@@ -271,6 +271,33 @@ class StagedArtifacts:
         with self._operation_lock:
             self._closed.set()
 
+    @contextmanager
+    def _retained_authentication(self, policy, *, clock):
+        """Consume verified snapshots before short custody, retaining live authentication."""
+        with self._operation_lock:
+            snapshots = self.read_artifacts(policy, clock=clock)
+            active = True
+
+            def authenticate(current_policy, *, clock):
+                if not active or self._closed.is_set():
+                    raise PlanError("artifact staging retention has ended")
+                if _directory(self._root) != self._root_identity:
+                    raise PlanError("artifact staging ownership changed")
+                result = authenticate_release(
+                    self._manifest_bytes, decode(self._proof_bytes), current_policy,
+                    authority=self.authority, installation=self.installation,
+                    role=self.role, now=clock(),
+                )
+                if self._closed.is_set() or _directory(self._root) != self._root_identity:
+                    raise PlanError("artifact staging retention or ownership changed")
+                return result
+
+            try:
+                yield self._manifest_bytes, authenticate
+            finally:
+                active = False
+                snapshots.clear()
+
     def _reverify(self, policy: object, *, clock: Callable[[], int]) -> dict:
         if self._closed.is_set():
             raise PlanError("artifact staging retention has ended")

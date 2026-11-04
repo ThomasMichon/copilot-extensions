@@ -156,6 +156,12 @@ def _wheel(staged, snapshots):
 def _environment(slot):
     home = slot / "health-home"
     home.mkdir(mode=0o700, exist_ok=True)
+    temporary = home
+    if os.name == "nt":
+        # Native launcher/console startup can hang on a slot-length TEMP path.
+        temporary = slot.parent.parent / "process-tmp"
+        temporary.mkdir(mode=0o700, exist_ok=True)
+        artifact_staging._directory(temporary)
     environment = {name: os.environ[name] for name in (
         "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "LANG", "LC_ALL",
     ) if name in os.environ}
@@ -165,8 +171,8 @@ def _environment(slot):
         ),
         "HOME": str(home), "USERPROFILE": str(home),
         "XDG_CONFIG_HOME": str(home), "XDG_DATA_HOME": str(home),
-        "XDG_CACHE_HOME": str(home), "TEMP": str(home), "TMP": str(home),
-        "TMPDIR": str(home), "PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE": "1",
+        "XDG_CACHE_HOME": str(home), "TEMP": str(temporary), "TMP": str(temporary),
+        "TMPDIR": str(temporary), "PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE": "1",
         "PYTHONSAFEPATH": "1", "PIP_CONFIG_FILE": os.devnull,
     })
     return environment
@@ -247,7 +253,9 @@ def _run(argv, slot, phase, *, descriptor, resource_evidence=None):
                 )},
             } if os.name == "nt" else None
             result = owner.run_owned(
-                [str(value) for value in argv], cwd=slot, env=_environment(slot),
+                [str(value) for value in argv],
+                # CreateProcess still limits cwd for long-path-aware executables.
+                cwd=slot.parent.parent if os.name == "nt" else slot, env=_environment(slot),
                 timeout=45, deadline=deadline, procutil=procutil, construction_fd=descriptor,
                 runtime_root=slot.parent.parent, runtime_version=slot.name,
                 runtime_path=Path(__file__).absolute().with_name("_versioned_runtime.py"),
@@ -264,6 +272,27 @@ def _run(argv, slot, phase, *, descriptor, resource_evidence=None):
 
 def _python(slot):
     return slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+
+def _import_policy(slot, evidence, descriptor):
+    purelib = decode(_run([
+        _python(slot), "-I", "-B", "-c",
+        "import json,sysconfig; print(json.dumps(sysconfig.get_path('purelib')))",
+    ], slot, "candidate import policy", descriptor=descriptor, resource_evidence=evidence))
+    if (
+        not isinstance(purelib, str) or not Path(purelib).is_absolute()
+        or not Path(purelib).is_relative_to(slot) or Path(purelib).resolve() != Path(purelib)
+    ):
+        raise PlanError("client candidate import directory leaves its owned runtime")
+    purelib = Path(purelib)
+    artifact_staging._directory(purelib)
+    # Native console entry points cannot pass -B before their first package import.
+    with (purelib / "immutable_runtime.pth").open("xb") as stream:
+        os.chmod(stream.name, 0o600)
+        stream.write(b"import sys; sys.dont_write_bytecode = True\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    client_admission._sync_directory(purelib)
 
 
 def _bootstrap(slot, evidence):
@@ -468,6 +497,35 @@ def construct_client_release(root, identity, selection, staged, *,
     identity, selection, binding = _request(
         identity, selection, staged, current_policy, current_target,
     )
+    return _construct_client_release(
+        identity, selection, staged, binding=binding, clock=clock,
+        custody=lambda: _admitted_custody(
+            root, identity, selection, binding, staged, current_policy, current_target, clock,
+        ),
+    )
+
+
+@contextmanager
+def _admitted_custody(root, identity, selection, binding, staged, current_policy,
+                      current_target, clock):
+    with (
+        client_admission._owned(root) as (path, database_root, unchanged),
+        client_admission._connection(
+            path, database_root=database_root, readonly=False,
+        ) as connection,
+    ):
+        connection.execute("BEGIN IMMEDIATE")
+
+        def checkpoint():
+            return _checkpoint(
+                connection, identity, selection, binding, staged,
+                current_policy, current_target, clock, unchanged,
+            )
+
+        yield path, unchanged, checkpoint
+
+
+def _construct_client_release(identity, selection, staged, *, binding, custody, clock):
     try:
         metadata.distribution("pip")
     except metadata.PackageNotFoundError:
@@ -476,20 +534,7 @@ def construct_client_release(root, identity, selection, staged, *,
         raise PlanError("client construction toolchain metadata could not be read") from None
     resource_evidence = artifact_staging.diagnose_client()
     try:
-        with (
-            client_admission._owned(root) as (path, database_root, unchanged),
-            client_admission._connection(
-                path, database_root=database_root, readonly=False,
-            ) as connection,
-        ):
-            connection.execute("BEGIN IMMEDIATE")
-
-            def checkpoint():
-                return _checkpoint(
-                    connection, identity, selection, binding, staged,
-                    current_policy, current_target, clock, unchanged,
-                )
-
+        with custody() as (path, unchanged, checkpoint):
             policy, _, _ = checkpoint()
             filename, content = _wheel(staged, staged.read_artifacts(policy, clock=clock))
             namespace = _namespace(path, identity)
@@ -550,6 +595,7 @@ def construct_client_release(root, identity, selection, staged, *,
                                   "--no-index", "--no-deps", "--no-compile", "--no-cache-dir",
                                   wheel], slot, "offline wheel installation",
                                  descriptor=descriptor, resource_evidence=resource_evidence)
+                            _import_policy(slot, resource_evidence, descriptor)
                             _bootstrap(slot, resource_evidence)
                         checkpoint()
                         before_health = _tree(primitive, slot)

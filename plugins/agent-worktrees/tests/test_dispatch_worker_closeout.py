@@ -425,15 +425,24 @@ def test_canonical_closeout_cannot_chdir_to_an_explicit_project(monkeypatch, tmp
     assert Path.cwd() == tmp_path
 
 
-def test_fresh_selected_cli_describes_observation_without_relying_on_worker_cwd(cwd_project, worker):
+@pytest.mark.parametrize("kind", ["closeout", "readiness"])
+def test_fresh_selected_cli_describes_observation_without_relying_on_worker_cwd(
+    cwd_project, worker, kind,
+):
     result = subprocess.run(
         [sys.executable, "-m", "agent_worktrees", "--project", cwd_project,
-         "record", "--describe-closeout-contract", "--json"],
+         "record", f"--describe-{kind}-contract", "--json"],
         cwd=worker.root, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
     )
     descriptor = json.loads(result.stdout)
-    assert result.returncode == 0 and descriptor["operations"] == ["observe-finalized"]
-    assert descriptor["own_finalization_cli_versions"] == [1]
+    assert result.returncode == 0 and descriptor["version"] == 1
+    if kind == "closeout":
+        assert descriptor["operations"] == ["observe-finalized"]
+        assert descriptor["own_finalization_cli_versions"] == [1]
+    else:
+        assert descriptor["contract"] == "agent-worktrees.dispatch-worker-readiness"
+        assert descriptor["operations"] == ["observe-ready", "check-own-ready"]
+        assert descriptor["finalized"] is False and "own_finalization_cli_versions" not in descriptor
     assert descriptor["task_release"] is False and descriptor["process_retirement"] is False
 
 

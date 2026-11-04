@@ -61,10 +61,19 @@ Authoritative observation and guarded advancement remain the next integration.
 
 The [nonfinalizing Worktrees source](journal/2026/11.04-nonfinalizing-readiness.md)
 adds a bounded internal readiness observation without concluding the workspace
-or releasing its task claim. Its
+or releasing its task claim. It merged in #10455 after current-head independent
+approval and required CI. Its
 [provider reference](../../../plugins/agent-worktrees/docs/dispatch-worker-closeout.md#internal-nonfinalizing-readiness)
 owns applicability and limitations. Negotiated transport, queue advancement,
 ordinary activation and installed/native qualification remain pending.
+
+The [selected-runtime readiness transport](../../../plugins/agent-worktrees/docs/dispatch-worker-closeout.md#selected-runtime-readiness-transport)
+adds a distinct version-1 readiness descriptor and strict record operations
+without changing version-1 finalized-closeout semantics. Its
+[source packet](journal/2026/11.04-readiness-transport.md) covers independent
+and own-native observation, partial/mixed refusal and unchanged legacy reads.
+Consumer negotiation, guarded queue advancement and ordinary activation remain
+pending; a finalized observation is not a readiness fallback.
 
 The CLI's completion command and client reach the coordinator's `/complete`
 route. Its queue transition records `SUBMITTED` and clears the task owner.

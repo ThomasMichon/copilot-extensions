@@ -274,7 +274,7 @@ def _late_guidance_notice(payload: dict, home: Path) -> str | None:
 
 def decide(
     payload: dict, *, env=None, home=None, now: float | None = None,
-    tracking_record=_UNSET, deadline: float | None = None,
+    tracking_record=_UNSET, deadline: float | None = None, tracking_lookup=None,
 ) -> str | None:
     """Return the ``additionalContext`` reminder string, or None for a no-op.
 
@@ -296,7 +296,7 @@ def decide(
     cwd = str(payload.get("cwd") or "") or os.getcwd()
     aw = home / ".agent-worktrees"
     found = (
-        _find_tracking_yaml(cwd, home)
+        (tracking_lookup or _find_tracking_yaml)(cwd, home)
         if tracking_record is _UNSET else tracking_record
     )
     if not found:

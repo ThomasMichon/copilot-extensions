@@ -78,6 +78,18 @@ these bytes. [Explicit command registration](client-frontdoor.md) uses that
 bootstrap to retain the runtime before site imports; it never patches an
 already completed candidate or implicitly registers a command during construction.
 
+The constructor queries the candidate interpreter's own site directory and
+installs an exclusive `immutable_runtime.pth` there before fingerprinting.
+It disables bytecode writes before native console entry-point imports, including
+ordinary invocations without inherited environment flags. Otherwise a successful
+direct command could create `__pycache__` files and invalidate its own completed
+runtime. The policy is part of the immutable fingerprint, not an exclusion for
+unverified cache content; a nonlocal site directory or existing policy file
+refuses rather than being overwritten.
+Installing this interpreter policy is separate from copying the RECORD-bound
+launcher resources. Construction requires both before health and fingerprinting;
+copy-only synthetic fixtures need no interpreter or process descriptor.
+
 Each candidate's private input receipt lives under `client-runtime/client-inputs`,
 outside the removable slot. It binds installation identity, selected decision
 and decision digest. This placement matters: a failed native removal can
@@ -90,6 +102,10 @@ from the ephemeral stage. A copied, separate venv receives only the selected
 wheel. Fixed probes run its actual console `--version` and `doctor --role client`
 outside the checkout, plus the offline installed dependency check. Their
 environment excludes inherited credentials and uses a candidate-local home.
+On Windows, `TEMP`, `TMP` and `TMPDIR` instead use the owning runtime
+namespace's ordinary `process-tmp` directory. Keeping these private paths out
+of the long immutable slot avoids native launcher/console startup hangs;
+the candidate-local home and existing process deadlines are unchanged.
 The trusted base interpreter and its standard library remain prerequisites;
 this is not a hermetic interpreter or hostile-code sandbox.
 
@@ -180,6 +196,196 @@ adopt an existing missing/unframed proof. Once pending intent exists, failures
 remain explicit unknown outcomes and require the existing owned recovery path.
 
 ## Reports and remaining transitions
+
+### Independent generation prerequisite
+
+`construct_client_generation` uses a separately initialized version-2 lineage,
+not the version-1 command path above. That single SQLite authority retains the
+physical lineage origin, an optional read-only import of the legacy admitted
+floor, exact request/generation reservations and physical generation-root intents.
+Each new request advances the current-request fence atomically with admission;
+an exact retry never makes an older request current again. Same-release
+generations can finish preparing independently, but only the current,
+nonretired request can authorize future shared publication. A newer admitted
+selection still fences lower-release construction.
+
+The private retirement transition writes an exact reservation-bound tombstone.
+It prevents later construction or shared publication for that generation without
+deleting its runtime, withdrawing commands, waiting for its retention holders or
+resetting the admission floor. An already running/directly usable immutable
+runtime is preserved. A selected owner must first complete owned shared
+withdrawal; a newer forward request does not need that retirement to finish.
+Malformed fences, changed identities and same-byte root replacements refuse
+rather than being repaired or adopted.
+
+Generation construction reports its actual direct command with `installed` and
+`started` true and `selected` and `registered` false. The selected-generation
+field is not populated from construction health or a reservation.
+
+`publish_client_generation` in `client_generation_frontdoor` is the separate
+source-level default-command transition. It requires the exact reserved,
+completed generation and an explicit existing private command directory. It
+uses the existing retained-runtime launchers, canonical copy producer and
+target custody, not a version-1 admission database fabricated in each generation.
+The lineage binds one physical default directory and the latest immutable
+publication attempt. Attempts link retained producer history; a distinct
+selected-publication pointer binds the acknowledged generation to its attempt.
+Neither a same-byte replacement nor a historical command's bytes alone is
+ownership evidence.
+
+Command-target custody is acquired before brief central writer custody. Intent
+is committed after the canonical context/proof header is durable and before the
+first command effect. The central lock and SQLite writer are released before
+installed default-command health; acknowledgement reacquires them under the
+still-held command targets and rechecks the request, retirement, current trust,
+stage, target and actual physical copies. New generations can reserve and start
+while that health is running. A superseded publisher cannot acknowledge or
+restore over a winner. Failures after durable intent retain exact producer
+proofs and report an unknown command outcome, not a failed runtime start.
+An exact successful-copy retry can acknowledge its original objects without
+republishing; a partial/recovered attempt requires a new attributed copy attempt.
+Legacy command adoption reads the imported origin and existing physical
+registration proofs without taking the predecessor's construction lease.
+Corrupt legacy/shared proofs can refuse default cutover without blocking
+independent construction in another generation.
+
+For an explicitly authorized incoming replacement, the caller can instead supply
+`replacement_targets` to `publish_client_generation`. This is the exact current
+physical target observation from `inspect_command_targets`, bound to the
+installation identity, generation reservation and private command directory.
+The CLI exposes `client-generation inspect-command-targets --root ... --identity
+... --reservation ... --command-directory ...` and accepts that JSON through
+`register-commands --replacement-targets <file>`. Inspection does not acquire
+credentials, execute a runtime or authorize replacement. The trusted invoking
+owner must already have authority to replace that exact fixed command family;
+do not automatically feed an arbitrary discovered directory into this flow.
+
+Initial incoming publication rechecks the entire observed family under the common native
+target leases. An unaccounted changed object, different reservation,
+installation or directory refuses without rewriting commands. With unchanged
+explicit targets, historical producer receipt recovery is not a cutover
+prerequisite. The common copy owner captures fresh physical baselines, preserves
+backups and creates incoming receipts; actual installed default-command health
+still precedes acknowledgement. Existing predecessor bytes and damaged receipts
+are not repaired, deleted or treated as incoming execution authority.
+Ordinary registration without explicit incoming targets retains its strict
+historical-ownership behavior. Old withdrawal/removal APIs retain their own
+physical proof requirements.
+
+An incoming attempt records an optional `replacement_targets_digest` in its
+existing publication intent. This correlates the original observation; it is
+not effect authority. Repeating the same input can verify the current
+producer's unchanged objects and acknowledge the original publication without
+republishing, including an interrupted acknowledgement. Partial/recovered
+progress may continue only from that attempt's captured baseline or native
+producer proofs; foreign and same-byte replacement objects still refuse.
+A fresh observation that matches current targets can start a new authorized
+attempt without requiring old proof recovery. This continuation does not walk
+predecessor-copy receipts or reacknowledge a withdrawing attempt.
+
+This is a fixed command-publication boundary, not the complete authoritative
+installer. Corrupt authoritative lineage/application state, full setup
+composition, automatic-versus-explicit classification and complete applicable
+installation registration still require their owning integration and
+qualification. A directly healthy runtime or this observation alone is not
+whole-installation readiness.
+
+Publication results include the exact `publication` attempt ID.
+`unregister_client_generation` requires that ID, the exact reservation and the
+same physical command directory. It withdraws only objects proved by that
+attempt's canonical producer receipts, through native recovery with an
+explicitly absent baseline: it never restores predecessor commands. An older
+anchored attempt reports `superseded` without touching a successor's commands,
+even when both attempts belong to the same generation. Same-byte foreign
+objects refuse before any removal.
+
+Withdrawal retains an attempt-local intent and context before effects. Both
+documents are fully written and synced in unique staging files, then published
+through the common atomic no-replace primitive. The context is durably published
+before the intent. Interrupted staging files remain evidence, never final
+metadata or a reason to block the next exact retry; a foreign final-name winner
+is preserved and refused.
+Withdrawal holds command targets but releases the central writer during proof
+reads, native removal and durability work, so another generation can reserve and start
+independently. Only after proving the command family absent does it briefly
+reacquire the writer and clear selection. Interrupted effects or acknowledgement
+retain evidence for exact retry. Publishing after a removal intent always uses
+a new attempt, never reacknowledges the withdrawing attempt. Neither withdrawal
+nor supersession lowers admission, retires or deletes a runtime, modifies local
+runtime selectors, waits for retention holders or edits user configuration.
+
+`remove_client_generation` separately retires the exact reservation, then uses
+the existing native completed-runtime remover under only that generation's
+ownership lease. A selected generation refuses before retirement until owned
+shared withdrawal completes. Cleanup verifies the retained physical root and
+exact generation construction binding without reauthenticating an old release
+or requiring it to match the newer admission floor.
+
+Before deletion, cleanup briefly acquires the latest command targets and
+rechecks the lineage. Present commands must belong to another generation's
+canonical producer objects and match that generation's expected command
+digests. Pending commands and recovery-restored predecessor baselines are not
+mistaken for successor ownership. Absent commands need no producer attribution.
+The central lease and SQLite transaction are released before waiting for old
+generation custody, reading command proofs, walking runtime trees or deleting
+files; command targets are released before native runtime removal. A successor
+can reserve, start and publish while old deletion is paused.
+
+Partial deletion retains the native intent, physical claims and outcomes for
+exact retry. Foreign objects, changed root/owner/input, canonical retention and
+live-process references still refuse. Cleanup preserves the generation root,
+owner, external inputs and removal history, the lineage and admitted floor,
+other runtimes and user configuration. Results distinguish
+`generation_retired: true` and `runtime_removed: true` from
+`installation_retired: false`; this is not whole-installation retirement.
+
+### Explicit generation CLI
+
+`fleet-manager client-generation` is separate from the version-1 `client-state`
+commands. Every operation requires explicit `--root` and `--identity` paths.
+The root must already be an existing private directory; only `initialize`
+creates the lineage database. Optional `initialize --legacy-root <path>` imports
+the exact legacy origin and admitted floor without cleaning up or rewriting it.
+Retries must name the same origin. No other command implicitly initializes,
+chooses a release, allocates a generation/request or replays predecessor work.
+
+| Operation | Additional explicit inputs | Outcome |
+|---|---|---|
+| `inspect` | Optional `--generation` or `--after` | Read-only bounded reservation/retirement page and global floor/fences/publication; no runtime or command health claim |
+| `construct` | `--generation`, `--request`, `--selection`, authenticated inputs below | Independently healthy direct command and exact `reservation`; no default cutover |
+| `register-commands` | `--reservation`, `--command-directory`, authenticated inputs below | Owned default-command publication; returns its exact `publication` ID |
+| `unregister-commands` | `--reservation`, `--publication`, `--command-directory` | Exact-attempt withdrawal; does not remove a runtime |
+| `remove-runtime` | `--reservation` | Exact-generation retirement and native runtime cleanup; never installation retirement |
+
+Authenticated inputs are `--release`, `--proof`, `--policy`, `--sources`,
+`--target` and a separate existing private `--staging-parent`. Policy and target
+files are reread at execution checkpoints. `--reservation` names a JSON file
+containing the exact reservation object, not a construction or inspection
+report. Save the construction result's `reservation`, or recover it from
+`inspect`'s `reservations` mapping after an interrupted construction. Inspection
+does not repair a corrupt journal, initialize missing state or execute a runtime;
+stored selection/publication metadata is not fresh physical health evidence.
+Save `register-commands`' returned `publication` ID for exact withdrawal.
+
+Inspection returns at most 64 reservations in generation-ID order. The
+`retired` mapping covers that same page; `reservation_count` reports the total
+retained requests. Pass a non-null `next_after` value to `inspect --after` for
+the next page, or use `inspect --generation` to retrieve one exact reservation
+without walking history. Global current/selected generation IDs remain visible
+even when their reservations are outside the displayed page.
+Each call observes a fresh read-only snapshot, not one stable transcript across
+concurrent writes. History is neither deleted nor capped, and existing JSON
+limits remain unchanged. Incoming command-target inspection resolves its exact
+reservation independently from the displayed page.
+Expected target-proof, native lease and I/O failures use the normal
+`fleet-manager:` CLI refusal with no inspection JSON, rather than a traceback;
+no target or foreign object is adopted or changed by that refusal.
+
+A refused publication does not undo an independently started direct command.
+Retry the same explicit request rather than silently allocating new identifiers.
+No command changes PATH, deletes the lineage, retires the installation or grants
+live rollout. Complete installation retirement and installer integration remain
+separate work.
 
 A successful `fleet-manager.client-construction`, version `1`, reports
 `constructed: true`, `healthy: true`, the candidate/runtime fingerprint,

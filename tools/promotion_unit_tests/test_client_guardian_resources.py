@@ -42,14 +42,20 @@ test_client_resource_preparation_consumes_shared_startup_deadline = (
 
 @pytest.fixture(autouse=True)
 def _portable_artifact_open(tmp_path, monkeypatch):
-    from fleet_manager import artifacts
+    from fleet_manager import artifacts, artifact_staging
 
     def open_fixture(path):
         assert Path(path).resolve().is_relative_to(tmp_path.resolve())
         return os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
 
-    # Native Windows sharing is qualified separately; retained byte checks stay real.
+    def directory_fixture(path):
+        assert Path(path).resolve().is_relative_to(tmp_path.resolve())
+        info = Path(path).lstat()
+        return info.st_dev, info.st_ino
+
+    # Native sharing/identity is separate; framing, byte checks and path checks stay real.
     monkeypatch.setattr(artifacts, "_open_artifact", open_fixture)
+    monkeypatch.setattr(artifact_staging, "directory_identity", directory_fixture)
 
 
 class _ValueStructure:
@@ -277,6 +283,10 @@ def test_guardian_receives_admitted_pair_after_disk_replacement(
                     stdio.setattr(sys, "stdin", SimpleNamespace(buffer=io.BytesIO(input.encode("ascii"))))
                     exec(compile(self.bootstrap, "<guardian-bootstrap>", "exec"), namespace)
                 with namespace["_load_guardian_resources"](namespace["_guardian_sources"]) as (runtime, module):
+                    private_modules = {
+                        name for name in sys.modules
+                        if name.startswith((runtime.__name__, module.__name__))
+                    }
                     assert module.__path__ == []
                     assert module._job_child_environment({}, inherit_current=False) == {}
                     assert module.__name__ in sys.modules
@@ -292,7 +302,8 @@ def test_guardian_receives_admitted_pair_after_disk_replacement(
                         "ActiveProcesses", "TotalTerminatedProcesses",
                     ]
                     assert runtime._runtime_component("versioned_runtime_leases").__name__ in sys.modules
-                assert set(sys.modules) == before
+                assert before <= set(sys.modules)
+                assert not private_modules.intersection(sys.modules)
                 self.completed = True
                 if failed:
                     raise failure

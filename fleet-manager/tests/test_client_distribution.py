@@ -109,6 +109,8 @@ def test_wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies
         for member_source in (
             "fleet_manager/client_command_removal.py", "fleet_manager/client_deactivation.py",
             "fleet_manager/client_runtime_removal.py", "fleet_manager/client_recovery.py",
+            "fleet_manager/client_generations.py",
+            "fleet_manager/client_generation_frontdoor.py",
         ):
             removal_source = (Path(__file__).parents[1] / "src" / member_source).read_bytes()
             assert archive.read(member_source) == removal_source
@@ -140,12 +142,14 @@ def test_wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies
             for line in archive.read(metadata).decode().splitlines()
             if line.startswith("Requires-Dist:")
         ]
+        environments = ({}, {"python_version": "3.10", "python_full_version": "3.10.0"})
         assert all(requirement.marker is not None
-                   and not requirement.marker.evaluate({"extra": ""})
-                   and any(requirement.marker.evaluate({"extra": extra})
+                   and not any(requirement.marker.evaluate({**environment, "extra": ""})
+                               for environment in environments)
+                   and any(requirement.marker.evaluate({**environment, "extra": extra})
+                           for environment in environments
                            for extra in ("dev", "release-verification", "construction", "auth", "server",
-                                         "service-gateway", "ssh-client",
-                                         "komodo-host",
+                                         "service-gateway", "ssh-client", "komodo-host",
                                          "runtime-authentication"))
                    for requirement in requirements)
         verification = [requirement for requirement in requirements
