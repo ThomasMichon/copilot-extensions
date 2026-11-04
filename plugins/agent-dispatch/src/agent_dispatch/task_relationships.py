@@ -61,7 +61,7 @@ class AssignmentSubject:
                 type(envelope["version"]) is not int or envelope["version"] != 2
                 or envelope["phase"] != "bound"
                 or not isinstance(envelope["token"], str)
-                or re.fullmatch(r"[A-Za-z0-9_-]{43}", envelope["token"]) is None
+                or re.fullmatch(r"[A-Za-z0-9_-]{32,128}", envelope["token"]) is None
                 or not isinstance(envelope["request_id"], str)
                 or re.fullmatch(r"[A-Za-z0-9_-]{1,128}", envelope["request_id"]) is None
             ):

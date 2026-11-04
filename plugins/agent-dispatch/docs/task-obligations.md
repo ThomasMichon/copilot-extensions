@@ -114,6 +114,8 @@ Its bound identity is exactly `{"assignment_event_id": 123, "worker_id":
 `machine/project/worktree` owner. The surrounding version-2 metadata, token,
 request id, phase and canonical encoding remain the existing Worktrees
 retained-relationship contract, not another ledger.
+Opaque tokens retain Worktrees' full 32-128-character contract; the callback
+does not infer their valid range from the current token generator.
 
 The callback reads that exact assignment using the additive
 `obligation_assignment_event_id` query on the existing task-detail route.

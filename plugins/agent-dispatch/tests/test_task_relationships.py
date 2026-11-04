@@ -108,6 +108,20 @@ def test_qualified_owner_aliases_preserve_exact_worktrees_worker_identity(assign
     assert verify(queue, task_id, envelope)["relationship_verification"]["retired"]
 
 
+@pytest.mark.parametrize("length", [31, 32, 128, 129])
+def test_canonical_token_range_preserves_completed_relationship_settlement(assigned, length):
+    queue, task_id, envelope = assigned
+    envelope["token"] = "t" * length
+    queue.start(task_id, "machine/worktree")
+    queue.complete(task_id, "machine/worktree")
+    queue.confirm(task_id)
+    if length in (32, 128):
+        assert verify(queue, task_id, envelope)["relationship_verification"]["retired"]
+    else:
+        with pytest.raises(DispatchError, match="refused"):
+            verify(queue, task_id, envelope)
+
+
 @pytest.mark.parametrize("state", ["suspended", "abandoned", "dead_letter", "unknown"])
 def test_other_states_never_retire_task_responsibility(assigned, state):
     queue, task_id, envelope = assigned
