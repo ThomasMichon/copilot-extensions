@@ -21,6 +21,7 @@ def _slot_descriptor(app_state: Any) -> dict:
     import os as _os
 
     from zdd import routing
+    from zdd.diagnostics import process_start_time
 
     from .config import routing_dir
 
@@ -44,6 +45,7 @@ def _slot_descriptor(app_state: Any) -> dict:
         role = "passive"
     return {
         "pid": my_pid,
+        "process_start_time": process_start_time(my_pid),
         "role": role,
         "active": active if isinstance(active, dict) else None,
         "previous": previous if isinstance(previous, dict) else None,
@@ -77,6 +79,7 @@ def register_status_routes(
         return {
             "status": "draining" if gate.draining else "ok",
             "version": __version__,
+            "runtime_config_identity": getattr(request.app.state, "runtime_config_identity", None),
             "draining": gate.draining,
             "subscribers": bus.subscriber_count,
             "backlog": queue.backlog_health(repo=repo),

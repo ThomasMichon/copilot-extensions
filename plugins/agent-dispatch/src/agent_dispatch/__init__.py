@@ -32,13 +32,23 @@ def _resolve_version() -> str:
     (mirrors agent-worktrees), so the running CLI / coordinator report it with
     no dependency on installed package metadata. Resolution order:
 
-    1. ``_build_info.BUILD_INFO['version']`` -- the deploy-stamped value (the
+    1. Matching standalone-wrapper metadata for an installed Source generation;
+    2. ``_build_info.BUILD_INFO['version']`` -- the deploy-stamped value (the
        committed repo copy leaves this empty, so an un-stamped checkout falls
        through rather than reporting a stale literal);
-    2. ``importlib.metadata`` -- the packaged version (present for any pip
+    3. ``importlib.metadata`` -- the packaged version (present for any pip
        install, incl. editable/CI), still ultimately derived from pyproject;
-    3. a ``dev`` sentinel for a bare source tree with neither.
+    4. a ``dev`` sentinel for a bare source tree with neither.
     """
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        wrapper = version("agent-dispatch-service")
+    except PackageNotFoundError:
+        pass
+    else:
+        if effective_runtime_version(wrapper) != wrapper:
+            return wrapper
     try:
         from ._build_info import BUILD_INFO
 
@@ -48,8 +58,6 @@ def _resolve_version() -> str:
     if stamped:
         return stamped
     try:
-        from importlib.metadata import PackageNotFoundError, version
-
         try:
             return version("agent-dispatch")
         except PackageNotFoundError:

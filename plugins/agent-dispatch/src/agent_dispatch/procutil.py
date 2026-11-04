@@ -252,6 +252,19 @@ def resolve_own_runtime_python() -> str:
     never returns ``None`` to a caller that needs *some* interpreter to spawn.
     """
     from .runtime_version import install_dir
+    from agent_procutil._daemon_instance_identity import runtime_slot_paths
+
+    prefix = Path(os.path.abspath(sys.prefix))
+    paths = runtime_slot_paths(prefix)
+    if (
+        prefix.name == ".venv" and paths is not None
+        and Path(__file__).resolve().is_relative_to(prefix.resolve())
+    ):
+        root = Path(paths[2])
+        resolved = _slot_python(root, _read_marker(root, "current-version") or "")
+        if resolved is None:
+            raise RuntimeError("Selected Dispatch application interpreter is unavailable")
+        return str(resolved)
 
     resolved = resolve_runtime_python(install_dir())
     return str(resolved) if resolved is not None else sys.executable

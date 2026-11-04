@@ -415,6 +415,16 @@ async def _governance_backoff(
     return True
 
 
+async def _route_active(is_active: Callable[[], bool] | None) -> bool:
+    if is_active is None:
+        return True
+    try:
+        return bool(await asyncio.to_thread(is_active))
+    except Exception:
+        log.warning("coordinator active-route check failed", exc_info=True)
+        return False
+
+
 async def _gc_loop(
     queue: TaskQueue,
     interval: float,
@@ -426,6 +436,7 @@ async def _gc_loop(
     run_supervised_cycle: Callable[..., Any] = _run_supervised_cycle,
     governance_backoff: Callable[..., Any] = _governance_backoff,
     pool_source: CoordinatorPoolSource | None = None,
+    is_active: Callable[[], bool] | None = None,
 ) -> None:
     """Maintain diagnostics; garbage-collect tasks only when interval is enabled."""
     from .diagnostic_logs import MAINTENANCE_SECONDS, maintain_file_logging
@@ -449,6 +460,8 @@ async def _gc_loop(
         await asyncio.to_thread(maintain_file_logging)
         if not gc_enabled:
             continue
+        if not await _route_active(is_active):
+            continue
         if await governance_backoff(
             governance,
             "iteration-boundary:liveness-gc",
@@ -466,6 +479,8 @@ async def _gc_loop(
                 await pool_source.maintain(timeout=min(interval, 3.0))
             except Exception:
                 log.exception("configured cohort maintenance unresolved; original custody retained")
+        if not await _route_active(is_active):
+            continue
         counts = await run_supervised_cycle(
             health,
             queue.reconcile_liveness,
@@ -497,14 +512,20 @@ async def _gc_loop(
         # unconditional "never just sit there" guarantee liveness GC already
         # gives held tasks, so it shares this loop rather than needing its
         # own opt-in toggle (unlike handoff_fallback, below).
+        if not await _route_active(is_active):
+            continue
         resumed = await asyncio.to_thread(queue.reconcile_cooldowns)
         if resumed:
             log.info("cooldown reconcile auto-resumed %d suspended task(s)", resumed)
             bus.publish({"type": "task.reconciled", "cooldown_resumed": resumed})
+        if not await _route_active(is_active):
+            continue
         from .queue_pool_recovery import reconcile_recoveries
         recovered = await asyncio.to_thread(reconcile_recoveries, queue)
         if recovered:
             bus.publish({"type": "task.reconciled", "pool_recovery_changed": recovered})
+        if not await _route_active(is_active):
+            continue
         reviewer_resumed = await run_supervised_cycle(
             reviewer_deadline_health,
             queue.reconcile_reviewer_deadlines,
@@ -532,10 +553,13 @@ async def _orphan_reap_loop(
     governance: LoopGovernance | None = None,
     run_supervised_cycle: Callable[..., Any] = _run_supervised_cycle,
     governance_backoff: Callable[..., Any] = _governance_backoff,
+    is_active: Callable[[], bool] | None = None,
 ) -> None:
     """Reap orphaned target pins without blocking held-task liveness GC."""
     while True:
         await asyncio.sleep(health.current_interval)
+        if not await _route_active(is_active):
+            continue
         if await governance_backoff(
             governance,
             "iteration-boundary:orphan-reap",
@@ -547,6 +571,8 @@ async def _orphan_reap_loop(
             "pre-mutation:reap-orphans",
             loop_name="orphan reaper",
         ):
+            continue
+        if not await _route_active(is_active):
             continue
         reaped = await run_supervised_cycle(
             health,
@@ -688,11 +714,15 @@ async def _worktree_status_relay_loop(
     governance: LoopGovernance | None = None,
     run_supervised_cycle: Callable[..., Any] = _run_supervised_cycle,
     governance_backoff: Callable[..., Any] = _governance_backoff,
+    is_active: Callable[[], bool] | None = None,
 ) -> None:
     """Keep per-worktree relay entries warm off the request/render path."""
     first_pass = True
     pending_refs: list[tuple[str, str]] = []
     while True:
+        if not await _route_active(is_active):
+            await asyncio.sleep(health.current_interval)
+            continue
         if not pending_refs:
             if not first_pass:
                 try:
@@ -713,7 +743,8 @@ async def _worktree_status_relay_loop(
                 await asyncio.sleep(_GOVERNANCE_BACKOFF_SECONDS)
                 continue
         if not pending_refs:
-            relay.prune()
+            if await _route_active(is_active):
+                relay.prune()
             continue
         current_ref = [pending_refs.pop(0)]
         if await governance_backoff(
@@ -728,6 +759,9 @@ async def _worktree_status_relay_loop(
             "pre-mutation:worktree-status-relay",
             loop_name="worktree-status relay",
         ):
+            pending_refs = current_ref + pending_refs
+            continue
+        if not await _route_active(is_active):
             pending_refs = current_ref + pending_refs
             continue
         counts = await run_supervised_cycle(
@@ -842,10 +876,13 @@ async def _handoff_fallback_loop(
     governance: LoopGovernance | None = None,
     run_supervised_cycle: Callable[..., Any] = _run_supervised_cycle,
     governance_backoff: Callable[..., Any] = _governance_backoff,
+    is_active: Callable[[], bool] | None = None,
 ) -> None:
     """Periodically reconcile a stale unclaimed ``handoff`` task into a fallback launch."""
     while True:
         await asyncio.sleep(health.current_interval)
+        if not await _route_active(is_active):
+            continue
         if await governance_backoff(
             governance,
             "iteration-boundary:handoff-fallback",
@@ -857,6 +894,8 @@ async def _handoff_fallback_loop(
             "pre-mutation:handoff-fallback",
             loop_name="handoff fallback",
         ):
+            continue
+        if not await _route_active(is_active):
             continue
         counts = await run_supervised_cycle(
             health,

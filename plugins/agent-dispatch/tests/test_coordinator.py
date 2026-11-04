@@ -41,6 +41,43 @@ def api(app):
         yield client
 
 
+def test_passive_http_admission_preserves_work_then_follows_route_owner(tmp_path):
+    queue = TaskQueue(tmp_path / "tasks.db")
+    held = queue.create("held", repo=TEST_REPO)
+    owner = queue.claim_one("worker-held", repo=TEST_REPO)
+    queued = queue.create("queued", repo=TEST_REPO)
+    reservation, _ = queue.reserve_spawn(queued.id)
+    before = [queue.get(task_id) for task_id in (held.id, queued.id)]
+    active = False
+    app = create_app(queue, sweep_interval=0, verification_interval=0, wake_is_active=lambda: active)
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+        assert client.post("/claim", json={"worker_id": "intruder", "repo": TEST_REPO}).status_code == 503
+        assert client.post("/tasks", json={"title": "not admitted", "repo": TEST_REPO}).status_code == 503
+        assert client.post(f"/tasks/{held.id}/complete", json={"worker_id": "worker-held"}).status_code == 503
+        assert [queue.get(task_id) for task_id in (held.id, queued.id)] == before
+        assert queue.latest_reservation(queued.id).key == reservation.key
+        active = True
+        assert client.get(f"/tasks/{held.id}").status_code == 200
+        assert client.post("/tasks", json={"title": "admitted", "repo": TEST_REPO}).status_code == 200
+        active = False
+        assert client.get(f"/tasks/{held.id}").status_code == 503
+        assert queue.get(held.id).owner == owner.owner
+
+
+def test_passive_http_admission_refuses_unknown_ownership(tmp_path):
+    def unavailable():
+        raise OSError("routing unavailable")
+
+    app = create_app(
+        TaskQueue(tmp_path / "tasks.db"), sweep_interval=0,
+        verification_interval=0, wake_is_active=unavailable,
+    )
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+        assert client.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO}).status_code == 503
+
+
 def _registration_machine() -> str:
     return remote_dispatch.local_machine() or "test-host"
 

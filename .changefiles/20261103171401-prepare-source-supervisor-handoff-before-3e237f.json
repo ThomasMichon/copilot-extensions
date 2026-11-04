@@ -1,0 +1,13 @@
+{
+  "comment": "Prepare Source supervisor handoff before singleton release and expose the independent standalone frontdoor",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/dispatch",
+      "type": "patch"
+    }
+  ]
+}

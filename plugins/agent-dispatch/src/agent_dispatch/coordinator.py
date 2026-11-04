@@ -27,7 +27,7 @@ from fastapi.responses import JSONResponse
 from . import __version__
 from . import coordinator_loops as _coordinator_loops
 from .config import DEFAULT_HANDOFF_FALLBACK_GRACE, DEFAULT_ORPHAN_GRACE
-from .coordinator_auth import _make_auth
+from .coordinator_auth import _make_auth, install_scope_boundary
 from .coordinator_directory import register_directory_routes
 from .coordinator_loops import (
     DrainGate,
@@ -68,7 +68,6 @@ from .run_waiter_recovery import (
 from .waiter_maintenance import WaiterMaintenance
 from .satellites import FleetDirectory
 from .worktree_status_relay import WorktreeStatusRelayStore
-from .task_scope import TASK_SCOPE_HEADER
 
 log = logging.getLogger("agent-dispatch.coordinator")
 
@@ -396,6 +395,7 @@ def create_app(
                 bus,
                 health=sweeper_health,
                 governance=governance,
+                is_active=wake_is_active,
                 **({"pool_source": cohort_source} if pool_publication_enabled else {}),
             )
         )
@@ -408,6 +408,7 @@ def create_app(
                     orphan_grace=orphan_grace,
                     health=orphan_health,
                     governance=governance,
+                    is_active=wake_is_active,
                 )
             )
             if sweep_interval and sweep_interval > 0
@@ -422,6 +423,7 @@ def create_app(
                     grace=handoff_fallback_grace,
                     health=handoff_fallback_health,
                     governance=governance,
+                    is_active=wake_is_active,
                 )
             )
             if handoff_fallback_enabled and sweep_interval and sweep_interval > 0
@@ -437,6 +439,7 @@ def create_app(
                     signal=worktree_status_signal,
                     health=worktree_status_health,
                     governance=governance,
+                    is_active=wake_is_active,
                 )
             )
             if sweep_interval and sweep_interval > 0
@@ -915,19 +918,7 @@ def create_app(
     )
     app.state.pool_cohort_source = cohort_source
 
-    @app.middleware("http")
-    async def deny_scoped_non_task_surfaces(request: Request, call_next):
-        # Mounted MCP and FastAPI's generated documentation bypass APIRoute
-        # dependencies, including the coordinator's narrow-credential gate.
-        path = request.url.path
-        if TASK_SCOPE_HEADER in request.headers and (
-            path == "/mcp" or path.startswith("/mcp/")
-            or path in {app.docs_url, app.redoc_url, app.openapi_url, "/docs/oauth2-redirect"}
-        ):
-            return JSONResponse(
-                status_code=403, content={"detail": "route does not accept task authority"},
-            )
-        return await call_next(request)
+    install_scope_boundary(app, wake_is_active)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, exc: RequestValidationError):

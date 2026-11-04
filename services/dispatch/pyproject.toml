@@ -36,6 +36,9 @@ dependencies = [
     "agent-dispatch>=0.1.2.dev205",
 ]
 
+[project.scripts]
+agent-dispatch-service = "agent_dispatch_service.__main__:main"
+
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 
