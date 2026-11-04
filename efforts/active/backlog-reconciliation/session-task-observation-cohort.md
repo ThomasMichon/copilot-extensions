@@ -91,6 +91,16 @@ or unrelated native/installed gate is claimed. Normal reviewed actual delivery
 and current readback must precede a separate finite source judgment; this local
 proposal alone does not close #3557.
 
+Subsequent reviewed delivery in #10485 corrects the proposed history recipe:
+ACP `--range`/`--tail` reads are cursor-neutral, whereas `--no-follow`
+consumes pending delivery and represented reads return result snapshots.
+Genuine final-head approval resolves that finding, required CI passes and
+all eight actual merged/current blobs equal the reviewed head. Fresh complete
+source/two-discussion qualification and whole current playbook readback then
+support a separate finite #3557 completion judgment. This completes the
+documented design alternative only; it creates no fused command or represented
+history capability and does not complete the other six contracts.
+
 **#4049 - supported nonallocating selected-target reachability.** Preserve
 minimal version/uptime and bounded target selection for all three uses:
 pre-dispatch, health monitoring and startup wait. An owner-accepted equivalent
