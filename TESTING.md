@@ -3542,8 +3542,31 @@ Missing state is never initialized by construction; selected-runtime removal
 refuses before retirement. These cases retain the 90-second item, 120-second
 caller and 45-second child bounds; they do not prove full installer integration,
 whole-installation retirement or live rollout.
-Each native case uses a short factory-owned root to avoid pip's separate Win32
-command-token limit; this is not arbitrary long-executable-path qualification.
+Each native case uses short factory-owned and lineage root names to stay below
+the native Win32 console-launcher path limit. The hosted Windows fixture's
+longer temporary prefix otherwise made its console path 263 characters while
+its interpreter remained within the limit. This is not arbitrary
+long-executable-path qualification.
+
+The manually selected `fleet-client-generations` portfolio in
+`installation-context-full.yml` runs these consumers on native Linux and Windows
+at the exact dispatch SHA. Admission and each of the four generation transitions
+use separate canonical standalone-runner invocations with the existing
+120-second caller, 90-second item and 45-second child bounds. The existing
+strict six-consumer oracle checks the combined reports, refusing missing,
+duplicate, skipped, errored or failed cases. Reports are retained per platform.
+This optional portfolio does not expand required unit CI or qualify a complete
+installer, fresh-OS scenario, controller or live adopter.
+Positive roots and staging directories use the existing native private-state
+creator rather than treating POSIX mode bits as Windows ownership evidence.
+The installed consumers exercise explicit owner-private database and generation
+metadata creation without weakening the existing ACL or hot-journal checks.
+The Windows removal consumer also introduces an explicit public-read directory
+grant, requires refusal with the runtime retained, then removes only that
+fixture-introduced grant before exact removal/retry. Runtime directories use
+the same canonical held-handle current-principal proof as runtime files plus
+the existing strict private-grant allowlist; roots and metadata retain their
+TokenUser-owner requirement.
 
 The agent-free `fleet-manager-client-admission` clean-room scenario includes
 those four actual generation consumers alongside admission/revocation/reopen

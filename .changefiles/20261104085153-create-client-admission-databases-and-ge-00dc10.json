@@ -1,0 +1,9 @@
+{
+  "comment": "Create client state and rollback journals with explicit native owner-private security; use canonical held-handle native principal proof and strict private grants for runtime directory cleanup.",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

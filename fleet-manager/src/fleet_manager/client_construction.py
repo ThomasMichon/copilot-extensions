@@ -18,6 +18,7 @@ import zipfile
 
 from . import artifact_staging, client_admission
 from .planning import MAX_BYTES, PlanError, canonical, decode, digest, integer, record
+from .private_state import create_private_file, private_directory
 from .release import validate_release
 from .release_selection import ReleaseSelection
 
@@ -34,9 +35,7 @@ def _not_removing(namespace):
 
 
 def _write_exclusive(path, value):
-    descriptor = os.open(
-        path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0), 0o600,
-    )
+    descriptor = create_private_file(path)
     try:
         content = canonical(value)
         while content:
@@ -83,7 +82,7 @@ def _namespace(root, identity):
         for entry in entries:
             entry.unlink()
         temporary.rmdir()
-    temporary.mkdir(mode=0o700)
+    private_directory(temporary)
     _write_exclusive(temporary / OWNER, expected)
     client_admission._sync_directory(temporary)
     os.rename(temporary, namespace)
@@ -383,7 +382,7 @@ def _construction_intent(namespace, version, slot, binding):
     if os.path.lexists(directory):
         artifact_staging._directory(directory)
     else:
-        directory.mkdir(mode=0o700)
+        private_directory(directory)
         client_admission._sync_directory(namespace)
     if os.path.lexists(intent):
         if _read(intent) != binding:
@@ -514,7 +513,7 @@ def _admitted_custody(root, identity, selection, binding, staged, current_policy
             path, database_root=database_root, readonly=False,
         ) as connection,
     ):
-        connection.execute("BEGIN IMMEDIATE")
+        client_admission._begin_write(connection, path)
 
         def checkpoint():
             return _checkpoint(
