@@ -640,6 +640,11 @@ def test_gateway_build_inputs_deliver_the_complete_runtime_family(
 ) -> None:
     repository = PROJECT.parent
     recipe = repository / "fleet-manager" / "containers" / "gateway"
+    package_inputs = {
+        path.relative_to(repository).as_posix()
+        for path in (PROJECT / "src" / "fleet_manager").iterdir()
+        if path.is_file() and path.suffix in {".py", ".json"}
+    }
     if context_kind == "repository":
         project, library = project_at(tmp_path / "context")
     else:
@@ -649,7 +654,7 @@ def test_gateway_build_inputs_deliver_the_complete_runtime_family(
         source = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(source)
         checkout = tmp_path / "checkout"
-        for name in source.REQUIRED:
+        for name in source.REQUIRED | package_inputs:
             target = checkout / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(repository / name, target)
@@ -658,13 +663,17 @@ def test_gateway_build_inputs_deliver_the_complete_runtime_family(
         environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
         environment.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
 
-        def git(root: Path, *arguments: str) -> bytes:
+        committed_blobs = {}
+
+        def git(root: Path, *arguments: str, input: bytes | None = None) -> bytes:
+            if arguments[:2] == ("cat-file", "blob"):
+                return committed_blobs[arguments[2]]
             return subprocess.run(
                 ["git", "-C", str(root), "-c", "core.autocrlf=false",
                  "-c", f"core.hooksPath={hooks}", "-c", "commit.gpgsign=false",
                  "-c", "user.name=Gateway test", "-c", "user.email=gateway-test@example.invalid",
                  *arguments],
-                env=environment, capture_output=True, timeout=30, check=True, **FLAGS,
+                env=environment, input=input, capture_output=True, timeout=30, check=True, **FLAGS,
             ).stdout
 
         git(checkout, "init", "-q", "--template", str(hooks))
@@ -674,6 +683,19 @@ def test_gateway_build_inputs_deliver_the_complete_runtime_family(
         )
         git(checkout, "add", "--all")
         git(checkout, "commit", "-qm", "Gateway build input fixture")
+        # Retain actual Git blobs without one native child per package member.
+        names = sorted(source.REQUIRED | package_inputs)
+        batch = io.BytesIO(git(
+            checkout, "cat-file", "--batch",
+            input="".join(f"HEAD:{name}\n" for name in names).encode(),
+        ))
+        for _ in names:
+            oid, kind, size = batch.readline().split()
+            assert kind == b"blob" and 0 <= int(size) <= 2 * 1024 * 1024
+            committed_blobs[oid.decode()] = batch.read(int(size))
+            assert len(committed_blobs[oid.decode()]) == int(size)
+            assert batch.read(1) == b"\n"
+        assert batch.read() == b""
         run_root = tmp_path / "pinned"
         run_root.mkdir()
         monkeypatch.setattr(source, "git", git)
@@ -692,6 +714,10 @@ def test_gateway_build_inputs_deliver_the_complete_runtime_family(
         f"libs/{relative.as_posix()}": library.parent / relative
         for relative in PROCESS_RESOURCES.values()
     })
+    resources.update({
+        name: project / "src" / "fleet_manager" / Path(name).name
+        for name in package_inputs
+    })
     for name, resource in resources.items():
         if not gateway_context_supplies(name, copied, patterns):
             resource.unlink()
@@ -704,15 +730,12 @@ def test_gateway_build_inputs_deliver_the_complete_runtime_family(
     runtime = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(runtime)
     with zipfile.ZipFile(next(output.glob("*.whl"))) as artifact:
-        for module in sorted((PROJECT / "src" / "fleet_manager").glob("*.py")):
-            assert artifact.read("fleet_manager/" + module.name) == module.read_bytes()
-        contract = PROJECT / "src/fleet_manager/ssh-client-contract.json"
-        assert gateway_context_supplies(
-            "fleet-manager/src/fleet_manager/ssh-client-contract.json", copied, patterns,
-        )
+        for name in sorted(package_inputs):
+            member = "fleet_manager/" + Path(name).name
+            assert artifact.namelist().count(member) == 1, member
+            assert artifact.read(member) == (repository / name).read_bytes(), member
         assert not gateway_context_supplies(
             "fleet-manager/src/fleet_manager/unregistered-contract.json", copied, patterns,
         )
-        assert artifact.read("fleet_manager/" + contract.name) == contract.read_bytes()
         for name, member in runtime.RUNTIME_RESOURCES.items():
             assert artifact.read(f"fleet_manager/{member}") == (LIBRARY / name).read_bytes()
