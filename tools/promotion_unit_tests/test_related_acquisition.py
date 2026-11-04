@@ -549,6 +549,8 @@ def test_committed_config_report_preserves_canonical_acquisition_and_snapshot_me
     assert report.value == expected_value
     expected = "complete" if mode == "snapshot" else "indeterminate"
     assert report.authority.value == expected
+    completion = next(o for o in report.observations if o.stage == "inrepo-config-base")
+    assert completion.authority is ScanAuthority.COMPLETE
     assert report.reusable is False
     assert api.config.current_observations() is None
 

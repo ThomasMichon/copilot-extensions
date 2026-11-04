@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-04 - Independently verified finite caller-context and routed-probe completions; Python prerequisite acceptance remains unqualified](<journal/2026/11.04 finite-caller-and-probe-completions.md>)
+- [2026-11-04 - Eleven Bridge contracts, one qualified existing plan and three different-contract merged-description matches](<journal/2026/11.04 bridge-observation-contracts.md>)
 - [2026-11-04 - Fourteen runtime-entry contracts; incomplete receiving fit, four merged-description comparisons and one finite completion](<journal/2026/11.04 runtime-entry-contracts.md>)
 - [2026-11-04 - Ten PR-workflow contracts, distinct capability homes and fourteen bounded match comparisons](<journal/2026/11.04 pr-workflow-contracts.md>)
 - [2026-11-04 - Twenty-five Fleet contracts, existing receiving homes and two partial completed-work matches](<journal/2026/11.04 fleet-core-contracts.md>)

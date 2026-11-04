@@ -30,6 +30,10 @@ be published as complete. Optional presence observations must be positively
 absent, not merely unreadable or changed during acquisition. Missing stable
 owner-input provenance remains a documented qualification limit, not evidence
 that a readable value is a reusable snapshot.
+The in-repository configuration owner's completion is separate from its child
+input verdicts: confirmed optional absence can publish, while unreadable or
+invalid inputs still withdraw the affected view. All-absent acquisition reports
+remain absent; completion does not manufacture positive input evidence.
 Launch/session preparation updates only that caller's view, not every prepared
 worktree. Initial resident preparation and explicit refresh cover prepared views.
 Managed launch preparation is synchronous before launch. SessionStart reuses
