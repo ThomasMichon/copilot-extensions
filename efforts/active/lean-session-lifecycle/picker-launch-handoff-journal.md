@@ -613,3 +613,9 @@
   Native ARM test preparation cannot build the existing cryptography extra
   without OpenSSL; the existing x64 interpreter runs these controls under
   the ordinary contained runner with successful cleanup.
+- Address the diagnostic-preservation review finding: unavailable retained
+  input and settled probe timeout/output overflow become secondary diagnostics.
+  The original assertion and `check=False` outcome remain intact; unconfirmed
+  execution or cleanup still propagates with its exact custody. Eight focused
+  controls pass under the canonical contained native runner, including the
+  real reader and retained cleanup-error identity.

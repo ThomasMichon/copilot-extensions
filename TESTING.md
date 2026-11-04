@@ -5932,6 +5932,10 @@ runs the retained payload's read-only activation reader under a bounded native
 owner. Caught payload exceptions and a refused configuration owner's bounded
 stderr become diagnostics without changing the reader, opt-in, original
 failure or settlement requirements.
+Missing payloads and settled probe timeouts/output-limit failures are secondary
+diagnostics: the original assertion or `check=False` result remains intact.
+Unconfirmed execution or cleanup still propagates with its exact process/Job
+custody rather than being reduced to a diagnostic result.
 
 The Index host role is written as YAML readable by both native and
 dependency-free role resolvers. Preparation explicitly provisions its full

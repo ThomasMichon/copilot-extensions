@@ -298,21 +298,34 @@ def retain_driver_logs(case: Path, output: str) -> None:
 
 def activation_probe(case: Path, environment: dict[str, str]) -> dict[str, Any]:
     """Read the retained fixture payload; never change activation or the failure."""
-    from agent_procutil.owned_process import run_caller_owned
+    from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
 
-    setup = json.loads((case / "setup.json").read_text(encoding="utf-8"))
-    reader = (
-        case / "h" / ".copilot" / "installed-plugins" / "copilot-extensions"
-        / "agent-vault" / "scripts" / "runtime-activation.py"
-    )
-    if not reader.resolve(strict=True).is_relative_to(case.resolve()):
-        raise ValueError("Activation diagnostic reader escapes the owned fixture")
-    result = run_caller_owned(
-        [setup["base"], "-I", "-B", "-X", "utf8", "-c", _ACTIVATION_PROBE,
-         str(reader), str(case / "project")],
-        cwd=case / "project", env=environment, timeout=30,
-        max_stdout_bytes=64 * 1024, max_stderr_bytes=64 * 1024,
-    )
+    started = settled = False
+
+    def on_settled() -> None:
+        nonlocal settled
+        settled = True
+
+    try:
+        setup = json.loads((case / "setup.json").read_text(encoding="utf-8"))
+        reader = (
+            case / "h" / ".copilot" / "installed-plugins" / "copilot-extensions"
+            / "agent-vault" / "scripts" / "runtime-activation.py"
+        )
+        if not reader.resolve(strict=True).is_relative_to(case.resolve()):
+            raise ValueError("Activation diagnostic reader escapes the owned fixture")
+        started = True
+        result = run_caller_owned(
+            [setup["base"], "-I", "-B", "-X", "utf8", "-c", _ACTIVATION_PROBE,
+             str(reader), str(case / "project")],
+            cwd=case / "project", env=environment, timeout=30,
+            max_stdout_bytes=64 * 1024, max_stderr_bytes=64 * 1024,
+            on_settled=on_settled,
+        )
+    except Exception as error:
+        if isinstance(error, OwnedCleanupError) or (started and not settled):
+            raise
+        return {"activation_probe_error": f"{type(error).__name__}: {str(error)[:1024]}"}
     return {
         "activation_probe_returncode": result.returncode,
         "stdout": result.stdout, "stderr": result.stderr,
