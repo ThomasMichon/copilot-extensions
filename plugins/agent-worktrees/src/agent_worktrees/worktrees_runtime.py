@@ -33,6 +33,7 @@ _FIELDS = frozenset(
         "status_filter",
         "platform_filter",
         "include_missing",
+        "bootstrap",
     }
 )
 
@@ -55,6 +56,8 @@ def request_selection(payload: dict) -> tuple[str, dict]:
     if type(include_missing) is not bool:
         raise ProjectionError("invalid include_missing")
     selection["include_missing"] = include_missing
+    if "bootstrap" in payload and type(payload["bootstrap"]) is not bool:
+        raise ProjectionError("invalid bootstrap")
     Selection(**selection)
     if selection["worktree_id"] is not None and selection["codename"] is not None:
         raise ProjectionError("current-roster selectors are mutually exclusive")
@@ -180,12 +183,13 @@ class WorktreesRuntime:
         self.observations.close_admission(reason)
 
     def health(self) -> dict:
-        from .worktrees_feed import FEED_CAPABILITY
+        from .worktrees_feed import BOOTSTRAP_CAPABILITY, FEED_CAPABILITY
 
         with self._lock:
             result = {
                 "capabilities": [
-                    CAPABILITY, FEED_CAPABILITY, observations.CAPABILITY, "picker-bootstrap-v1",
+                    CAPABILITY, FEED_CAPABILITY, BOOTSTRAP_CAPABILITY,
+                    observations.CAPABILITY, "picker-bootstrap-v1",
                     "worktree-agendas-v1",
                     "worktree-agendas-v2",
                 ],
@@ -337,7 +341,9 @@ class WorktreesRuntime:
             )
         except ProjectionUnavailable as exc:
             self.register_project_demand(project, unready=True)
-            return self._failure("unready", publication_error or str(exc))
+            return self._failure(
+                "unavailable" if publication_error else "unready", publication_error or str(exc),
+            )
         except ProjectionError as exc:
             return self._failure("invalid-request", str(exc))
         result = {"ok": True, "contract_version": payload["contract_version"], **result}

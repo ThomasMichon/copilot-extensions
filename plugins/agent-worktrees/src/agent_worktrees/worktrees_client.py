@@ -35,7 +35,7 @@ def __getattr__(name: str):
     raise AttributeError(name)
 
 
-def validate_result(result: dict, request: dict) -> dict:
+def validate_result(result: dict, request: dict, *, quality: str = "current") -> dict:
     if not isinstance(result, dict) or type(result.get("contract_version")) is not int:
         raise ProjectionUnavailable("resident lacks worktrees-current-v1; update the engine")
     if result["contract_version"] not in (CONTRACT_VERSION, observations.VERSION) or (
@@ -69,7 +69,7 @@ def validate_result(result: dict, request: dict) -> dict:
     generation, revision = head.get("generation"), head.get("revision")
     observed_at, count = head.get("observed_at"), head.get("roster_count")
     if (
-        head.get("quality") != "current"
+        head.get("quality") != quality
         or type(head.get("schema_version")) is not int
         or head["schema_version"] != SCHEMA_VERSION
         or not isinstance(generation, str)
@@ -90,12 +90,14 @@ def validate_result(result: dict, request: dict) -> dict:
     availability = result.get("availability")
     if availability is not None and (
         not isinstance(availability, dict)
-        or availability.get("status") != "stale"
+        or availability.get("status") != ("advisory" if quality == "advisory" else "stale")
         or not isinstance(availability.get("reason"), str)
         or not availability["reason"]
         or len(availability["reason"].encode("utf-8")) > 4096
     ):
         raise ProjectionUnavailable("invalid resident current-roster availability")
+    if quality == "advisory" and availability is None:
+        raise ProjectionUnavailable("unlabeled advisory current-roster result")
     try:
         if result["contract_version"] == observations.VERSION:
             observations.validate_rows(rows, result.get("observations"), revision)
@@ -173,7 +175,25 @@ def read_health() -> dict:
 
 
 def _resident(request: dict) -> dict:
-    return validate_result(_control_client().worktrees_read(request), request)
+    point_request = {key: value for key, value in request.items() if key != "bootstrap"}
+    return validate_result(_control_client().worktrees_read(point_request), request)
+
+
+def saved_result(request: dict, reason: str, *, db_path=None) -> dict:
+    """Read the bounded saved publication without starting or computing anything."""
+    project, selection = request_selection(request)
+    result = read_advisory(
+        cfg.install_dir() / "worktrees-current.sqlite3" if db_path is None else db_path,
+        project, **selection,
+        contract_version=request["contract_version"],
+    )
+    result.update(
+        ok=True, contract_version=request["contract_version"],
+        availability={"status": "advisory", "reason": reason},
+    )
+    if request["contract_version"] == observations.VERSION:
+        result["project"] = project
+    return result
 
 
 def read_current(request: dict, *, recover: bool = True) -> dict:
@@ -193,6 +213,11 @@ def read_current(request: dict, *, recover: bool = True) -> dict:
         unavailable = str(exc)
         if recover and monitor._status_monitor_enabled():
             started = monitor._ensure_status_monitor()
+            if started:
+                try:
+                    return saved_result(request, "Resident starting; showing saved worktrees")
+                except (ProjectionError, ProjectionUnavailable):
+                    pass
             deadline = time.monotonic() + RECOVERY_WAIT if started else 0.0
             while time.monotonic() < deadline:
                 try:
@@ -270,7 +295,10 @@ def emit_current(args) -> int:
         from .worktrees_feed_client import FeedFailure, relay
 
         try:
-            return relay(request)
+            return (
+                relay(request, bootstrap=True) if getattr(args, "cache_only", False)
+                else relay(request)
+            )
         except BrokenPipeError:
             return 0
         except (OSError, ValueError, RecursionError, ProjectionError, ProjectionUnavailable) as exc:

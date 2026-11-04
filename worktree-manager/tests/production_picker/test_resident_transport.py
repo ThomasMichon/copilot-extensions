@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import socketserver
+import sys
 import threading
 from contextlib import contextmanager
 
@@ -57,6 +58,8 @@ def server(root, *, mode="normal", values=None, payloads=None):
                     release.wait(5)
                     return
                 capabilities = [] if mode == "old" else ["worktrees-feed-v1"]
+                if mode == "bootstrap":
+                    capabilities.append("worktrees-feed-bootstrap-v1")
                 result = {
                     "status": "ready",
                     "capabilities": "worktrees-feed-v1" if mode == "malformed" else capabilities,
@@ -125,6 +128,33 @@ def test_socket_feed_preserves_default_cli_selection(tmp_path, monkeypatch, plat
         "codename": None, "status_filter": None,
         "platform_filter": platform, "include_missing": False,
     }]
+
+
+def test_bootstrap_is_requested_only_from_the_advertised_resident(tmp_path):
+    payloads = []
+    with server(tmp_path, mode="bootstrap", payloads=payloads):
+        list(resident_transport.frames(tmp_path, "sample", alive=lambda: True, startup_timeout=2))
+    assert payloads[0]["bootstrap"] is True
+
+
+def test_missing_resident_binding_uses_cli_recovery_without_rebinding(monkeypatch, tmp_path):
+    from worktree_manager.production_picker.picker_tui import loader_current_feed
+
+    monkeypatch.setattr(resident_picker, "root_for", lambda project: tmp_path)
+    monkeypatch.setattr(data_ssh, "_project", lambda: "sample")
+    source = data_ssh.Source("fixture-host", "Win", None, local=True)
+    loader = data_ssh.LiveLoader([source])
+    script = (
+        "import json\n"
+        f"frames={transactions()[:3]!r}\n"
+        "for frame in frames: print(json.dumps(frame), flush=True)\n"
+    )
+    monkeypatch.setattr(loader_current_feed, "feed_argv",
+                        lambda source: [sys.executable, "-u", "-c", script])
+    with pytest.raises(FeedUnavailable, match="disconnected"):
+        loader._feed_once(source, 0)
+    assert loader.records()[0]["id"] == "one"
+    assert source.cache_key in loader._feed_complete
 
 
 def test_feed_reads_and_publication_never_call_synchronous_launch_tracing(tmp_path, monkeypatch):

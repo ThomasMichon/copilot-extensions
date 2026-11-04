@@ -124,6 +124,112 @@ def request(**selection):
     return {"contract_version": 1, "project": "project", **selection}
 
 
+@pytest.mark.parametrize("saved", [False, True])
+def test_cold_bootstrap_socket_serves_saved_rows_before_live_publication(tmp_path, saved):
+    from agent_worktrees import worktrees_projection as projection
+
+    path = tmp_path / "current.sqlite3"
+    if saved:
+        previous = WorktreesRuntime(path)
+        previous.activate()
+        previous.publish("project", [{"id": "saved", "dirty": 7}], observed_at=1)
+        previous.shutdown()
+    owner = WorktreesRuntime(path)
+    owner.activate()
+    payload = request(bootstrap=True)
+    server = control.ControlServer(
+        lambda action, body: owner.health() if action == "health" else owner.handle(body),
+        token="fixture",
+        stream_handle=lambda action, body, disconnected: owner.feed.stream(body, disconnected),
+    )
+    server.start()
+    frames = client.transport(
+        control.ControlClient(f"http://127.0.0.1:{server.port}", token="fixture"),
+        payload,
+    )
+    receiver = client.FeedReceiver(payload)
+    try:
+        started = time.monotonic()
+        if saved:
+            result = apply(receiver, transaction(frames))
+            assert result["projection"]["quality"] == "advisory"
+            assert result["projection"]["observed_at"] == 1
+            assert result["worktrees"] == [{"id": "saved", "dirty": 7}]
+            assert result["availability"]["status"] == "advisory"
+        pending = next(frames)
+        assert pending["type"] == "pending"
+        assert receiver.receive(pending) == [pending]
+        assert time.monotonic() - started < 2
+        assert owner.handle(request())["error"]["code"] == "unready"
+        owner.publish("project", [{"id": "live", "dirty": 0}], observed_at=2)
+        result = apply(receiver, transaction(frames))
+        assert result["projection"]["quality"] == "current"
+        assert result["projection"]["generation"] == owner.store.generation
+        assert result["worktrees"] == [{"id": "live", "dirty": 0}]
+        assert projection.read_advisory(path, "project")["worktrees"] == result["worktrees"]
+    finally:
+        frames.close()
+        server.close()
+        owner.shutdown()
+
+
+def test_bootstrap_retains_real_producer_failure_instead_of_waiting_forever(tmp_path):
+    owner = WorktreesRuntime(tmp_path / "current.sqlite3")
+    owner.activate()
+    owner.publication_failed("project", RuntimeError("fixture producer failure"))
+    stream = owner.feed.stream(request(bootstrap=True), lambda: False)
+    try:
+        frame = next(stream)
+        assert frame["type"] == "error"
+        assert frame["error"] == {"code": "unavailable", "message": "fixture producer failure"}
+    finally:
+        stream.close()
+        owner.shutdown()
+
+
+def test_legacy_feed_never_receives_unnegotiated_bootstrap(tmp_path):
+    owner = WorktreesRuntime(tmp_path / "current.sqlite3")
+    owner.activate()
+    stream = owner.feed.stream(request(), lambda: False)
+    try:
+        frame = next(stream)
+        assert frame["type"] == "error" and frame["error"]["code"] == "unready"
+    finally:
+        stream.close()
+        owner.shutdown()
+
+
+def test_cli_saved_bootstrap_flushes_bounded_transactions_before_connecting(
+    tmp_path, monkeypatch, capsys,
+):
+    from agent_worktrees import worktrees_client, worktrees_projection
+
+    monkeypatch.setattr(worktrees_client.cfg, "install_dir", lambda: tmp_path)
+    store = worktrees_projection.WorktreesProjection(tmp_path / "worktrees-current.sqlite3")
+    rows = [{"id": f"row-{i}", "title": "saved " * 100} for i in range(300)]
+    store.publish("project", rows, observed_at=1)
+    before_connect = []
+
+    def connect(payload):
+        before_connect.extend(json.loads(line) for line in capsys.readouterr().out.splitlines())
+        raise client.FeedFailure("starting", code="unready", retry=True)
+
+    monkeypatch.setattr(client, "_client", connect)
+    with pytest.raises(client.FeedFailure, match="starting"):
+        client.relay(request(), bootstrap=True)
+    assert before_connect[0]["type"] == "begin"
+    assert before_connect[-2]["type"] == "done"
+    assert before_connect[-1]["type"] == "pending"
+    assert all(len(json.dumps(frame).encode()) < client.MAX_FRAME_BYTES for frame in before_connect)
+    receiver = client.FeedReceiver(request(bootstrap=True))
+    for frame in before_connect:
+        receiver.receive(frame)
+    assert receiver.current["projection"]["quality"] == "advisory"
+    assert receiver.current["worktrees"] == rows
+    with pytest.raises(ProjectionUnavailable, match="invalid cursor"):
+        client.FeedReceiver(request()).receive(before_connect[0])
+
+
 @pytest.fixture
 def owner(tmp_path):
     runtime = WorktreesRuntime(tmp_path / "current.sqlite3")

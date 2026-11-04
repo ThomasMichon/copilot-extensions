@@ -151,6 +151,51 @@ def test_current_feed_refreshes_time_fields_for_reused_and_changed_rows(monkeypa
     assert loader.records()[0]["asset_hints"] is before["asset_hints"]
 
 
+def test_saved_bootstrap_is_visible_but_not_current_and_live_replacement_is_atomic():
+    source = data_ssh.Source("host", "Win", None, local=True)
+    loader = data_ssh.LiveLoader([source])
+    receiver = CurrentFeed()
+    cached = snapshot([{"id": "saved", "dirty": 7}])
+    cached[0]["projection"]["quality"] = "advisory"
+    cached[0]["availability"] = {"status": "advisory", "reason": "Resident starting"}
+    rows = receive(receiver, cached)
+    loader._feed_commit(source, 0, rows, availability=receiver.availability)
+    assert loader.records()[0]["id"] == "saved"
+    assert loader.state_for_source(source.source_id) == "loading"
+    assert source.source_id not in loader.authoritative_source_ids()
+    assert receiver.receive({"type": "pending", "reason": "Waiting for live publication"}) is None
+    live = snapshot([{"id": "live", "dirty": 0}], generation="b" * 32)
+    for frame in live[:-1]:
+        assert receiver.receive(frame) is None
+        assert loader.records()[0]["id"] == "saved"
+    rows = receiver.receive(live[-1])
+    loader._feed_commit(source, 0, rows)
+    assert loader.records()[0]["id"] == "live"
+    assert source.source_id in loader.authoritative_source_ids()
+    loader._feed_commit(source, 0, receive(CurrentFeed(), cached))
+    assert loader.records()[0]["id"] == "live"
+    with pytest.raises(ValueError, match="unexpected reset"):
+        receiver.receive(cached[0])
+
+
+def test_retryable_cold_resident_is_loading_not_a_failed_source(monkeypatch):
+    source = data_ssh.Source("host", "Win", None, local=True)
+    loader = data_ssh.LiveLoader([source])
+    receiver = CurrentFeed()
+
+    def wait_for_resident(*args):
+        receiver.receive({
+            "type": "error",
+            "error": {"code": "unready", "message": "Resident starting", "retry": True},
+        })
+
+    monkeypatch.setattr(loader, "_feed_once", wait_for_resident)
+    monkeypatch.setattr(loader._cancelled, "wait", lambda _: True)
+    loader._load_current_feed(source, 0)
+    assert loader.state_for_source(source.source_id) == "loading"
+    assert not loader.authoritative_source_ids()
+
+
 @pytest.mark.parametrize("order", [[], ["unknown"], ["one", "one"], [False]])
 def test_current_feed_rejects_invalid_order_and_preserves_last_good_rows(order):
     receiver = CurrentFeed()

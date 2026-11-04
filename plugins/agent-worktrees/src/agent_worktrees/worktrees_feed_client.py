@@ -9,7 +9,7 @@ import time
 
 from . import worktrees_observation_contract as observations
 from .worktrees_client import READ_TIMEOUT, validate_result
-from .worktrees_feed import FEED_ACTION, FEED_CAPABILITY
+from .worktrees_feed import BOOTSTRAP_CAPABILITY, FEED_ACTION, FEED_CAPABILITY
 from .worktrees_projection import MAX_COLLECTION_ITEMS, MAX_ROW_BYTES, _identity
 from .worktrees_projection_index import ProjectionUnavailable
 
@@ -35,7 +35,7 @@ def transport(client, payload: dict):
     with socket.create_connection((client.host, client.port), timeout=client.timeout) as sock:
         sock.sendall(body)
         pending = bytearray()
-        in_transaction = True
+        in_transaction = False
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -70,7 +70,7 @@ def transport(client, payload: dict):
                 if kind in {"done", "commit"}:
                     in_transaction = False
                     deadline = time.monotonic() + IDLE_TIMEOUT
-                elif not in_transaction and kind in {"heartbeat", "availability"}:
+                elif not in_transaction and kind in {"heartbeat", "availability", "pending"}:
                     deadline = time.monotonic() + IDLE_TIMEOUT
             if len(pending) > MAX_FRAME_BYTES:
                 raise ProjectionUnavailable("resident feed frame exceeds its byte bound")
@@ -95,6 +95,14 @@ class FeedReceiver:
         if not isinstance(frame, dict):
             raise ProjectionUnavailable("resident feed emitted a non-object frame")
         kind = frame.get("type")
+        if kind == "pending":
+            if not self.request.get("bootstrap") or self._begin is not None or (
+                self.current is not None and self.current["projection"]["quality"] == "current"
+            ):
+                raise ProjectionUnavailable("unexpected resident bootstrap frame")
+            if not isinstance(frame.get("reason"), str) or not frame["reason"]:
+                raise ProjectionUnavailable("resident pending frame omitted its reason")
+            return [frame]
         if kind == "error":
             error = frame.get("error")
             if (
@@ -116,6 +124,10 @@ class FeedReceiver:
             head = frame.get("projection")
             if (
                 not isinstance(head, dict)
+                or head.get("quality") not in (
+                    {"current", "advisory"} if self.request.get("bootstrap") else {"current"}
+                )
+                or (head.get("quality") == "advisory" and kind != "begin")
                 or type(frame.get("cursor")) is not int
                 or frame["cursor"] != head.get("revision")
                 or type(frame.get("selected_count")) is not int
@@ -125,7 +137,9 @@ class FeedReceiver:
             ):
                 raise ProjectionUnavailable("resident feed has an invalid cursor")
             if kind == "begin":
-                if self.current is not None or frame.get("base_cursor") is not None:
+                if (
+                    self.current is not None and self.current["projection"]["quality"] != "advisory"
+                ) or frame.get("base_cursor") is not None:
                     raise ProjectionUnavailable("resident feed sent an unexpected reset")
                 self._rows = {}
             else:
@@ -133,7 +147,8 @@ class FeedReceiver:
                     raise ProjectionUnavailable("resident feed update has no initial snapshot")
                 old = self.current["projection"]
                 if (
-                    head.get("generation") != old["generation"]
+                    old["quality"] != "current"
+                    or head.get("generation") != old["generation"]
                     or type(frame.get("cursor")) is not int
                     or frame["cursor"] <= old["revision"]
                     or frame.get("base_cursor") != old["revision"]
@@ -259,7 +274,9 @@ class FeedReceiver:
         }
         if self.request["contract_version"] == observations.VERSION:
             result["observations"] = list(self._observations.values())
-        self.current = validate_result(result, self.request)
+        self.current = validate_result(
+            result, self.request, quality=self._begin["projection"]["quality"],
+        )
         if self._begin.get("selected_count") != len(self._rows):
             raise ProjectionUnavailable("resident feed did not complete its declared roster")
         frames = [*self._frames, frame]
@@ -282,7 +299,7 @@ def _client(request: dict):
         endpoint = resident_endpoint(runtime_home)
     except ConnectionError:
         restored = read_current(request)
-        if restored["projection"]["quality"] != "current":
+        if restored["projection"]["quality"] != "current" and not request.get("bootstrap"):
             raise FeedFailure(
                 restored["availability"]["reason"], code="unready", retry=True,
             )
@@ -290,7 +307,7 @@ def _client(request: dict):
             endpoint = resident_endpoint(runtime_home)
         except ConnectionError as exc:
             raise FeedFailure(
-                "resident feed endpoint disappeared after recovery", code="disconnected", retry=True,
+                "Resident starting; waiting for its API", code="unready", retry=True,
             ) from exc
     with control.control_token_path(runtime_home).open(encoding="utf-8") as token_file:
         token = token_file.read(4097).strip()
@@ -303,7 +320,7 @@ def _client(request: dict):
         # A retained route whose listener actually refused/reset the connection
         # is a crash/recovery case. A slow, malformed or old live peer is not.
         restored = read_current(request)
-        if restored["projection"]["quality"] != "current":
+        if restored["projection"]["quality"] != "current" and not request.get("bootstrap"):
             raise FeedFailure(
                 restored["availability"]["reason"], code="unready", retry=True,
             ) from exc
@@ -323,10 +340,29 @@ def _client(request: dict):
         health.get("capabilities", [])
     ):
         raise FeedFailure("resident lacks worktrees-observations-v2", code="incompatible")
+    if request.get("bootstrap") and BOOTSTRAP_CAPABILITY not in health.get("capabilities", []):
+        request.pop("bootstrap")
     return client
 
 
-def relay(request: dict) -> int:
+def relay(request: dict, *, bootstrap: bool = False) -> int:
+    request = dict(request)
+    if bootstrap:
+        from .worktrees_client import saved_result
+        from .worktrees_projection_index import ProjectionError
+
+        request["bootstrap"] = True
+        try:
+            saved = saved_result(request, "Resident connecting; showing saved worktrees")
+        except (ProjectionError, ProjectionUnavailable):
+            pass
+        else:
+            from .worktrees_feed import publication_frames
+
+            for frame in publication_frames(saved):
+                print(json.dumps(frame, separators=(",", ":"), ensure_ascii=False))
+            sys.stdout.flush()
+        print(json.dumps({"type": "pending", "reason": "Connecting to the resident"}), flush=True)
     client = _client(request)
     receiver = FeedReceiver(request)
     frames = transport(client, request)

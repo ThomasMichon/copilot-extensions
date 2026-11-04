@@ -272,7 +272,7 @@ def test_worktrees_runtime_initial_producer_failure_surfaces_the_actual_reason(t
     owner.publication_failed("project", OSError("fixture producer cannot enumerate mux sessions"))
     result = owner.handle(request())
     assert result["ok"] is False and result["error"] == {
-        "code": "unready", "message": "fixture producer cannot enumerate mux sessions",
+        "code": "unavailable", "message": "fixture producer cannot enumerate mux sessions",
     }
     owner.shutdown()
 
