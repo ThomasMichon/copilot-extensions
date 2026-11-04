@@ -453,6 +453,16 @@ restoration of historical terminal enums follows.
       owners. Then qualify submission readiness, preserved rejected results,
       same-workspace/native recovery and permanent finalization at their
       respective source and installed/native boundaries.
+- [x] Land read-only [task-obligation provider evidence](journal/2026/11.03-task-obligation-provider.md)
+      in [#10365](https://github.com/ThomasMichon/copilot-extensions/pull/10365),
+      merged as `e9c3c3f9bd` after exact-head approval and required CI.
+      The 662-control source batch preserves former-worker identity, hard
+      worktree routing, concurrent migration and unknown legacy custody.
+      Ordinary claim admission/settlement, readiness, rejected-worker recovery
+      and installed/native qualification remain open.
+- [ ] Land the [exact retained-task callback provider](journal/2026/11.03-task-relationship-provider.md),
+      preserving original queue identity and audited assignment continuity.
+      Provider proof is not ordinary assignment admission or live claim migration.
 - [x] Land [worker-decline preparation](journal/2026/11.03-worker-decline-preparation.md)
       in [#10298](https://github.com/ThomasMichon/copilot-extensions/pull/10298),
       preserving native-fenced pending closeout and capacity. This provider

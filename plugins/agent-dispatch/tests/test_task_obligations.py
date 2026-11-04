@@ -274,7 +274,7 @@ def test_snapshot_uses_bounded_task_transition_lookup_without_mutation(q, monkey
 
     monkeypatch.setattr(q, "_connect", traced)
     read_snapshot(q, task_id)
-    assert sum(query.startswith("SELECT") for query in queries) == 4
+    assert sum(query.startswith("SELECT") for query in queries) == 5
     assert not any(query.startswith(("UPDATE", "INSERT", "DELETE", "CREATE")) for query in queries)
     with connect() as conn:
         plan = conn.execute(

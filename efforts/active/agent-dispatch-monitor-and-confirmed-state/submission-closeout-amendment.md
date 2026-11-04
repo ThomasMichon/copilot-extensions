@@ -1,6 +1,6 @@
 # Mechanical closeout readiness before submission
 
-Status: **reviewed design; implementation and qualification pending**.
+Status: **reviewed design; provider evidence landed; assignment integration and qualification pending**.
 Parent: [monitor and confirmed-state effort](README.md).
 Requirement: [assignment/startup outcome five](assignment-startup-amendment.md#prioritized-lifecycle-clarification).
 Coordination: [#9709](https://github.com/ThomasMichon/copilot-extensions/issues/9709).
@@ -33,6 +33,14 @@ generation, native binding, assignment and accountable capacity. It neither
 queues evaluation nor reports successful submission.
 
 ## Current source boundary
+
+The read-only [task-obligation provider evidence](journal/2026/11.03-task-obligation-provider.md)
+merged in #10365. Its atomic current-state/disposition facts do not themselves
+journal ordinary assignment claims or qualify readiness, rejection recovery
+or cleanup. Those existing-owner integrations remain below.
+The [exact retained-task callback provider](journal/2026/11.03-task-relationship-provider.md)
+adds original-queue and audited-assignment continuity to that evidence.
+Its source validation does not enable ordinary assignment callers.
 
 The CLI's completion command and client reach the coordinator's `/complete`
 route. Its queue transition records `SUBMITTED` and clears the task owner.
