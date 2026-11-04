@@ -378,7 +378,7 @@ class MuxCompanionApp(App):
         )
         self._rich_agenda_attachment = AgendaTimelineAttachment(
             self._timeline_panel, cwd=self._cwd or os.getcwd(),
-            status=self._rich_agenda_status,
+            status=self._rich_agenda_status, reconcile_snapshot=self._timeline_attachment.reconcile_snapshot,
             validate_events=self._timeline_attachment.validate_events,
             head_changed=lambda selection: self._bridge_attachment.invalidate_head(selection),
         )
@@ -688,7 +688,7 @@ class MuxCompanionApp(App):
             for key, state in self._timeline_panel.window.sources.items()
         )
         await self._rich_agenda_attachment.set_selection(
-            selection, data.agenda, data.agenda_error, project_root=data.worktree.get("path"),
+            selection, data.agenda, data.agenda_error, reconcile=reconcile, project_root=data.worktree.get("path"),
         )
         if (
             revision != self._timeline_sync_revision or data is not self._data or self._loading

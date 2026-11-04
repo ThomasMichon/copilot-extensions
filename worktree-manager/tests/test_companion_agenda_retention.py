@@ -482,3 +482,110 @@ def test_agenda_integrity_and_backward_history_survive_reconciled_window(managed
             assert all("rewritten retained content" not in (row.data_json or "") for row in window.events)
 
     asyncio.run(check())
+
+
+@pytest.mark.parametrize("delay_worktree", [False, True])
+def test_refresh_reconciles_both_exhausted_owners_and_preserves_healthy_bridge(
+    managed, monkeypatch, delay_worktree,
+) -> None:
+    real_selection = worktree_attachment.TimelineAttachment.set_selection
+    configure(managed, monkeypatch)
+    monkeypatch.setattr(SubwayTimeline, "action_request_history", lambda self: None)
+    for _ in range(35):
+        managed["update"]()
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class Source:
+        async def prepare(self, epoch, *, stop):
+            entered.set()
+            if delay_worktree:
+                await release.wait()
+            self.initial = owner_snapshot(epoch)
+            return self.initial
+
+        async def observe(self, token, *, stop):
+            yield self.initial
+            await stop.wait()
+
+    async def no_bridge(*args, **kwargs):
+        return None
+
+    async def check() -> None:
+        app = companion.MuxCompanionApp(cwd=str(managed["cwd"]))
+        async with app.run_test(size=(110, 40)) as pilot:
+            try:
+                await until(pilot, lambda: not app._loading)
+                app._agenda_cancel = Event()
+                app._timeline_panel.replace_window(TimelineWindow(max_proofs=64))
+                owner = owner_snapshot(0)
+                app._timeline_panel.bind_source(owner.token)
+                app._timeline_panel.apply_snapshot(owner)
+                bridge = SourceToken(replace(
+                    owner.token.identity, provider=Provider.BRIDGE,
+                    source_key="healthy-bridge", head_session_id=None,
+                ), 0)
+                app._timeline_panel.bind_source(bridge)
+                bridge_row = event(bridge, 0)
+                app._timeline_panel.apply_snapshot(TimelineSnapshot(
+                    bridge, bridge_row.position, Availability.OBSERVED, Completeness.PARTIAL,
+                    events=(bridge_row,),
+                ))
+                publish(app, managed["publication"]())
+                app.query_one("#views", TabbedContent).active = "timeline-tab"
+                attachment = app._rich_agenda_attachment
+                await until(pilot, lambda: attachment.token is not None)
+                old = app._timeline_panel.window
+                agenda_key = attachment.token.identity.source_key
+                bridge_state = old.sources[bridge.identity.source_key]
+                previous = old.sources[agenda_key].position
+                for _ in range(40):
+                    managed["update"]()
+                publish(app, managed["publication"]())
+                await until(pilot, lambda: old.sources[agenda_key].position != previous)
+                for _ in range(30):
+                    managed["update"]()
+                publish(app, managed["publication"]())
+                await until(pilot, lambda: agenda_key in old.reconciliation_required)
+                assert not app._timeline_panel.apply_delta(LiveDelta(
+                    owner.token, owner.position,
+                    SourcePosition(owner.token.identity.source_key, owner.token.identity.generation, "overflow"),
+                    tuple(event(owner.token, number) for number in range(1, 65)),
+                )).applied
+                assert old.reconciliation_required == frozenset({agenda_key, owner.token.identity.source_key})
+                monkeypatch.setattr(worktree_attachment.TimelineAttachment, "set_selection", real_selection)
+                monkeypatch.setattr(worktree_attachment, "WorktreeTimelineSource", lambda *args, **kwargs: Source())
+                monkeypatch.setattr(app._bridge_attachment, "set_selection", no_bridge)
+                app._sync_timeline(reconcile=True)
+                await until(pilot, entered.is_set)
+
+                async def recovered(predicate):
+                    try:
+                        await until(pilot, predicate)
+                    except AssertionError as error:
+                        raise AssertionError({
+                            "agenda": str(app.query_one("#timeline-agenda-status", Static).content),
+                            "worktree": str(app.query_one(".timeline-state", Static).content),
+                            "fences": app._timeline_panel.window.reconciliation_required,
+                            "states": app._timeline_panel.window.sources,
+                        }) from error
+
+                if delay_worktree:
+                    await recovered(lambda: agenda_key not in app._timeline_panel.window.reconciliation_required)
+                    assert owner.token.identity.source_key in app._timeline_panel.window.reconciliation_required
+                    release.set()
+                await recovered(lambda: not app._timeline_panel.window.reconciliation_required)
+                window = app._timeline_panel.window
+                assert window is not old and len(app._timeline_attachment.retained_windows) == 2
+                assert app._timeline_attachment.retained_windows[0] is old
+                assert window.sources[bridge.identity.source_key] == bridge_state
+                assert window._proofs[bridge_row.ref] == old._proofs[bridge_row.ref]
+                assert bridge_row in window.events
+                assert all(state.availability is Availability.OBSERVED for state in window.sources.values())
+                previous = window.sources[agenda_key].position
+                publish(app, managed["update"]())
+                await until(pilot, lambda: window.sources[agenda_key].position != previous)
+                assert not window.reconciliation_required
+            finally:
+                release.set()
+
+    asyncio.run(check())

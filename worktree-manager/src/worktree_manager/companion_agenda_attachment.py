@@ -102,10 +102,12 @@ class AgendaTimelineAttachment:
         self, panel: CompanionTimelinePanel, *, cwd: str, status: Callable[[str], None],
         validate_events: Callable[[SourceToken, tuple[TimelineEvent, ...]], None],
         head_changed: Callable[[Selection], None] | None = None,
+        reconcile_snapshot: Callable[[TimelineSnapshot], None] | None = None,
     ) -> None:
         self.panel, self.cwd, self.status = panel, cwd, status
         self._validate_events = validate_events
         self._head_changed = head_changed
+        self._reconcile_snapshot, self._reconcile = reconcile_snapshot, False
         self.selection: Selection | None = None
         self._last_selection: Selection | None = None
         self._invalidated_selection: Selection | None = None
@@ -245,6 +247,7 @@ class AgendaTimelineAttachment:
     async def set_selection(
         self, selection: Selection | None, frame: dict[str, Any] | None = None,
         error: str | None = None, *, project_root: str | None = None,
+        reconcile: bool = False,
     ) -> None:
         async with self._lock:
             if self.selection is not None and self._renderable():
@@ -252,7 +255,7 @@ class AgendaTimelineAttachment:
             if (
                 selection is not None and selection == self.selection
                 and project_root == self.project_root and self._task is not None and not self._task.done()
-                and not self._stop.is_set()
+                and not self._stop.is_set() and not reconcile
             ):
                 return
             self.selection = None
@@ -271,6 +274,7 @@ class AgendaTimelineAttachment:
                 return
             self.prepare_selection(selection)
             self.project_root = project_root
+            self._reconcile = reconcile
             self._stop = asyncio.Event()
             self.publication(frame, error)
             self._task = asyncio.create_task(self._observe(), name="sidecar-agenda-rich")
@@ -325,7 +329,11 @@ class AgendaTimelineAttachment:
                 reader = self.reader
                 token = reader.codec.token(self._epoch)
                 state = self.panel.window.sources.get(token.identity.source_key)
-                previous = state.position.cursor if state is not None and state.position is not None else None
+                reconciling = self._reconcile and token.identity.source_key in self.panel.window.reconciliation_required
+                self._reconcile = False
+                previous = state.position.cursor if (
+                    not reconciling and state is not None and state.position is not None
+                ) else None
                 self.status("Rich Agenda: reading accepted operations")
                 cancelled = Event()
                 pages = await owned(
@@ -339,6 +347,11 @@ class AgendaTimelineAttachment:
                 page_events = tuple(reader.codec.events(page, token) for page in pages)
                 for events in page_events:
                     self._validate_events(token, events)
+                snapshot = reader.codec.snapshot(pages[-1], token)
+                if reconciling:
+                    if self._reconcile_snapshot is None:
+                        raise TimelineSourceError("Explicit Agenda reconciliation has no retained-evidence owner")
+                    self._reconcile_snapshot(snapshot)
                 state = self.panel.window.sources.get(token.identity.source_key)
                 if state is None or state.token != token:
                     result = self.panel.bind_source(token)
@@ -347,7 +360,6 @@ class AgendaTimelineAttachment:
                 self.token = token
                 state = self.panel.window.sources[token.identity.source_key]
                 replay: list[LiveDelta] = []
-                snapshot = reader.codec.snapshot(pages[-1], token)
                 if state.position is not None:
                     base = state.position
                     for events in page_events:

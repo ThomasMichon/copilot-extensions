@@ -167,6 +167,9 @@ facts, rows and immutable proofs. Proof count, cursor count and integrity-byte
 budgets have fixed equal partitions for Worktrees, Agenda and Bridge within the
 unchanged total bounds. An exhausted owner cannot consume another owner's
 admission capacity, including Agenda commits while its fresh baseline is pending.
+Explicit reconciliation also refreshes an exhausted rich Agenda from its actual
+latest owner page, retaining the admitted store identity and revision. Simultaneous
+owner exhaustion is recovered independently in either completion order.
 Failed, unqualified, stale or
 conflicting snapshots leave the old proof fence and cached rows intact. A retained
 browsing anchor and unread state carry into the new window where available.

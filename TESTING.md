@@ -184,6 +184,10 @@ new Agenda revision during exhausted-Bridge reconciliation. Model controls
 exhaust another provider's proof, cursor and byte partitions without starving
 an empty Bridge baseline. Malformed relationship IDs fail as contract errors;
 terminal cleanup failures retain their diagnostic without rescheduling cleanup.
+The rich Agenda retention packet exhausts both Worktrees and Agenda, reconciles
+their actual fresh baselines in both completion orders, preserves healthy Bridge
+bindings/proofs and accepts the next Agenda revision. Repeated head-change
+notifications cannot replace a latched cleanup-failure diagnostic.
 These controls do not establish native performance, rollout or known-session
 event/history consumption, and do not expand required unit-only CI.
 

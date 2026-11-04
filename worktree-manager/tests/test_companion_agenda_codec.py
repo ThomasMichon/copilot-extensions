@@ -111,7 +111,12 @@ def test_actual_reader_snapshot_retains_accepted_identity_not_current_session(ow
     assert codec.revision(event.position.cursor) == accepted["revision"]
     assert event.occurred_at.isoformat() == accepted["committed_at"].replace("Z", "+00:00")
     assert event.observed_at == event.occurred_at
-    assert snapshot.facts_json is None and snapshot.creation_context is None
+    assert token.identity.owner_ref == "agenda-store:" + codec.store_id
+    assert snapshot.creation_context is None
+    assert json.loads(snapshot.facts_json) == {
+        "source": frame["source"], "revision": accepted["revision"],
+        "history_scope": "accepted-operations", "completeness": "partial",
+    }
     detail = json.loads(event.data_json)
     assert detail["result"] == accepted and detail["actor"]["qualification"] == "caller-asserted"
 

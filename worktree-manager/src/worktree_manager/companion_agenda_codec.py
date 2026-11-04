@@ -124,6 +124,7 @@ class AgendaCodec:
         """Return a selected-head token; store identity does not assert a restore epoch."""
         return SourceToken(SourceIdentity(
             Provider.AGENDA, self._key, self.project, self.worktree, self.session, self.store_id,
+            owner_ref="agenda-store:" + self.store_id,
         ), epoch)
 
     def _cursor(self, revision: int, source: dict[str, Any] | None = None) -> str:
@@ -371,6 +372,10 @@ class AgendaCodec:
             token, self.position(frame["cursor"]), Availability.OBSERVED, Completeness.PARTIAL,
             self.events(frame, token), as_of=stamp(frame["committed_at"]),
             before=self.position(frame["next_before"]) if frame["has_more"] else None,
+            facts_json=encoded({
+                "source": frame["source"], "revision": self.revision(frame["cursor"]),
+                "history_scope": frame["history_scope"], "completeness": "partial",
+            }),
         )
 
     def page(

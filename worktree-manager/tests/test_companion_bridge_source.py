@@ -543,6 +543,11 @@ def test_terminal_bridge_retirement_does_not_reschedule_head_change_cleanup(
                 for _ in range(5):
                     await pilot.pause()
                 assert calls == [1] and app._timeline_sync_revision == revision
+                app._receive_agenda(
+                    app._data, app._agenda_generation, app._agenda_cancel, app._data.agenda, None,
+                )
+                await pilot.pause()
+                assert calls == [1] and app._timeline_sync_revision == revision
                 assert "terminal cleanup failure" in str(app.query_one("#timeline-bridge-status", Static).content)
                 assert native_bridge["db"].get_session("child")["status"] == "starting"
             finally:

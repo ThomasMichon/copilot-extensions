@@ -147,6 +147,14 @@ class TimelineAttachment:
                             "in active or retained exhausted-window evidence."
                         )
 
+    def reconcile_snapshot(self, snapshot: TimelineSnapshot) -> None:
+        """Replace only an explicitly exhausted owner's baseline, retaining old evidence."""
+        window = self.panel.window
+        viewport = self.panel.capture_viewport()
+        candidate = window.reconciliation_window(snapshot)
+        self._retain_exhausted(window)
+        self.panel.replace_window(candidate, viewport=viewport)
+
     async def set_selection(
         self, selection: tuple[str, str, str] | None, *, reconcile: bool = False,
     ) -> None:
@@ -211,9 +219,7 @@ class TimelineAttachment:
                     reconcile and key in window.reconciliation_required
                     and window.sources[key].token.identity == initial.token.identity
                 ):
-                    candidate = window.reconciliation_window(initial)
-                    self._retain_exhausted(window)
-                    self.panel.replace_window(candidate, viewport=viewport)
+                    self.reconcile_snapshot(initial)
                 if any(
                     (state.token.identity.project, state.token.identity.worktree_id) != (project, worktree)
                     for state in self.panel.window.sources.values()
@@ -303,6 +309,9 @@ class TimelineAttachment:
 
     def invalidate_head(self, selection: tuple[str, str, str]) -> None:
         """Fence headless owner observations even before a head-qualified source binds."""
+        if self._cleanup_error is not None:
+            self._error(None, self._cleanup_error)
+            return
         self.stop_now()
         for state in tuple(self.panel.window.sources.values()):
             identity = state.token.identity
