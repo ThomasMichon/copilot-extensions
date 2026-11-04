@@ -865,7 +865,9 @@ def create_pr(
     # keeps those commits intact to avoid rewriting published history (#5300).
     surviving_commits = len(ahead)
     squashed = False
+    squash_backup = ""
     if not reusing and surviving_commits > 1:
+        squash_backup = _rev("HEAD", cwd=worktree_path)
         squashed, squash_reason = git_ops.squash_branch(
             upstream, squash_msg, cwd=worktree_path
         )
@@ -902,7 +904,7 @@ def create_pr(
         return {**base, "error": push_diagnostics.missing_expected_sha_error(
             feature_branch=feature_branch, retry_command="agent-worktrees create-pr")}
     try:
-        pr_creation_state.start_publication(record, target_pr, remote=publish_remote, source_ref=wt_branch if use_refspec else feature_branch, head_sha=head_sha, base_sha=base_sha)
+        pr_creation_state.start_publication(record, target_pr, remote=publish_remote, source_ref=wt_branch if use_refspec else feature_branch, head_sha=head_sha, base_sha=base_sha, backup_sha=squash_backup)
     except ValueError as exc:
         return {**base, "error": str(exc)}
     expected_publication = replace(target_pr) if target_pr is not None else None
@@ -982,7 +984,7 @@ def create_pr(
         target_pr.provider = target_pr.provider or prcfg.provider
         pr_publish.persist_publication(config, record, target_pr, expected=expected_publication)
 
-    git_ops.delete_backup_ref(cwd=worktree_path)
+    pr_creation_state.release_backup(squash_backup, cwd=worktree_path)
 
     result = {
         **base, "success": True, "state": "open",
@@ -2351,6 +2353,7 @@ def _push_existing_feature(
     except ValueError as exc:
         return {**base, "error": str(exc)}
     expected_publication = replace(target) if target is not None else None
+    squash_backup = target.creation.get("push_backup", "") if pr_publication_state.unpublished(target) else ""
     with hooks.allow_pr_push():
         pushed = pr_publish.push_checked(
             record, remote, f"{source_ref}:refs/heads/{feature_branch}", cwd=worktree_path,
@@ -2383,6 +2386,7 @@ def _push_existing_feature(
             target.base_sha, head_sha, cwd=worktree_path)
         target.provider = target.provider or prcfg.provider
         pr_publish.persist_publication(config, record, target, expected=expected_publication)
+        pr_creation_state.release_backup(squash_backup, cwd=worktree_path)
     base_sha = target.base_sha if target else ""
     patch_id = target.patch_id if target else ""
     result = {

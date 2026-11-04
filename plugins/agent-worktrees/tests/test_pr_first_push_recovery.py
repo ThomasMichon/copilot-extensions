@@ -215,3 +215,31 @@ def test_settled_prepared_attempt_becomes_active_after_interleaving(pr_repo, mon
     current = tracking.load_record(path)
     assert current.active_pr().pr_id == selected.pr_id
     assert current.prs[1] == sibling
+
+
+@pytest.mark.parametrize("foreign_backup", [False, True])
+def test_recovery_releases_only_its_recorded_squash_backup(pr_repo, monkeypatch, foreign_backup):
+    config, wid, wt, remote, path, record, calls = uncertain_push(pr_repo, monkeypatch)
+    owned = record.pr.creation["push_backup"]
+    assert git_ops.git("rev-parse", "refs/pre-squash-backup", cwd=wt).stdout.strip() == owned
+    other = wt.parent / "other-worktree"
+    if foreign_backup:
+        git_ops.git("worktree", "add", "-b", "worktree/other", str(other), "HEAD", cwd=wt)
+        (other / "other.txt").write_text("independent work\n")
+        git_ops.git("add", "other.txt", cwd=other)
+        git_ops.git("commit", "-m", "Independent work", cwd=other)
+        expected_backup = git_ops.git("rev-parse", "HEAD", cwd=other).stdout.strip()
+        squashed, reason = git_ops.squash_branch("origin/master", "Other contribution", cwd=other)
+        assert squashed, reason
+        other_head = git_ops.git("rev-parse", "HEAD", cwd=other).stdout.strip()
+        assert expected_backup != owned
+    result = pr_ops.create_pr(wid, config, title="Example contribution", open_pr=False)
+    assert result["success"], result
+    backup = git_ops.git("rev-parse", "--verify", "refs/pre-squash-backup", cwd=wt, check=False)
+    if foreign_backup:
+        assert backup.returncode == 0 and backup.stdout.strip() == expected_backup
+        assert git_ops.git("rev-parse", "HEAD", cwd=other).stdout.strip() == other_head
+        assert pr_ops.create_pr(wid, config, title="Example contribution", open_pr=False)["success"]
+        assert git_ops.git("rev-parse", "refs/pre-squash-backup", cwd=wt).stdout.strip() == expected_backup
+    else:
+        assert backup.returncode != 0

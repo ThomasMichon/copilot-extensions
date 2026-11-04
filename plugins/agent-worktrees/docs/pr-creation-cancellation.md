@@ -81,6 +81,9 @@ rebase, resquash or choose a replacement head.
 Transport uses the prepared commit rather than a mutable local branch and retains
 its exact remote lease without a permissive fallback. Successful settlement makes
 that attempt current even when another head was allocated in the meantime.
+An actual squash also retains its original backup value in the bound intent.
+Successful settlement compare-and-deletes only that value; a changed backup is
+retained, and ordinary later updates never reuse the old cleanup receipt.
 
 Changed source, worktree ownership, destination, provider endpoint or remote head,
 and unavailable observations, refuse before transport. The owner rechecks tracking

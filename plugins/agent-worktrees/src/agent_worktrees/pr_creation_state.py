@@ -101,6 +101,7 @@ def _publication_binding(pr: tracking.PRRecord) -> str:
     return _digest([
         pr.creation.get("binding", ""),
         *(pr.creation.get(k, "") for k in ("push_head", "push_source", "push_base")),
+        *([pr.creation["push_backup"]] if "push_backup" in pr.creation else []),
     ])
 
 
@@ -114,7 +115,10 @@ def publication_source(
     if not _PUBLICATION_KEYS.intersection(pr.creation):
         return ""
     if (
-        record is None or set(pr.creation) != _RESERVATION_KEYS | _PUBLICATION_KEYS
+        record is None or set(pr.creation) not in (
+            _RESERVATION_KEYS | _PUBLICATION_KEYS,
+            _RESERVATION_KEYS | _PUBLICATION_KEYS | {"push_backup"},
+        )
         or not _bound(pr) or pr.creation["phase"] != "publishing"
         or pr.creation["owner"] != owner(record)
         or pr.creation["remote"] != remote
@@ -142,6 +146,7 @@ def publication_source(
 def start_publication(
     record: tracking.WorktreeRecord, pr: tracking.PRRecord | None, *,
     remote: str = "", source_ref: str = "", head_sha: str = "", base_sha: str = "",
+    backup_sha: str = "",
 ) -> None:
     """Invalidate cancellation and retain first-push intent before transport."""
     if pr is None:
@@ -165,8 +170,24 @@ def start_publication(
                         **current.creation, "push_head": head_sha,
                         "push_source": source_ref, "push_base": base_sha,
                     }
+                    if backup_sha:
+                        current.creation["push_backup"] = backup_sha
                     current.creation["push_binding"] = _publication_binding(current)
             current.creation = {**current.creation, "phase": "publishing"}
             current.pr_revision += 1
             tracking.save_record(fresh)
         pr_publication_state.copy_pr(pr, current)
+
+
+def release_backup(expected: str, *, cwd: str) -> None:
+    """Release only the recorded backup of a successfully published squash."""
+    if not expected:
+        return
+    result = git_ops.git(
+        "update-ref", "-d", "refs/pre-squash-backup", expected, cwd=cwd,
+        check=False, isolated_repository=True,
+    )
+    if result.returncode:
+        from . import output
+
+        output.warn("Publication succeeded; the changed or unconfirmed pre-squash backup was retained.")
