@@ -224,6 +224,15 @@ placement, without closing or replacing the claim. An unrelated unsettled
 relationship refuses placement before committing a task claim or consuming a
 slot. Timeout itself never settles responsibility.
 
+The durable execution guard applies to execution and first-result admission,
+not metadata-only detachment after qualified native retirement. Existing
+administrative recovery can therefore detach an already submitted or completed
+agent without changing the original relationship, result or claim. A submitted
+task retains protection until independent acceptance; later acceptance may
+complete it without readmitting execution. Reopening execution still requires
+current-generation protection. The replacement guard installs before its
+stricter predecessors are removed.
+
 With a qualified writer enabled, atomic `create(..., claim_as=...)` refuses
 before creating new work; create queued work and use the protected claim path
 with its original workspace instead. A queue without support skips governed

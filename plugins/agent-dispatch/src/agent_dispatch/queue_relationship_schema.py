@@ -107,7 +107,7 @@ def migrate_relationships(conn: sqlite3.Connection) -> None:
     # These guards survive a provider rollback. Older queue code cannot admit
     # a governed assignment by forgetting an optional Python field.
     conn.execute(
-        "CREATE TRIGGER IF NOT EXISTS task_relationship_execution_guard_v3"  # noqa: S608 -- fixed predicate
+        "CREATE TRIGGER IF NOT EXISTS task_relationship_execution_guard_v4"  # noqa: S608 -- fixed predicate
         " BEFORE UPDATE OF status, generation, owner, owner_session_id ON tasks"
         " WHEN (EXISTS (SELECT 1 FROM task_events e WHERE e.task_id=NEW.id"
         " AND e.task_relationship IS NOT NULL) OR EXISTS (SELECT 1 FROM spawn_reservations s"
@@ -120,10 +120,14 @@ def migrate_relationships(conn: sqlite3.Connection) -> None:
         " AND e.worker=NEW.owner) AND NOT (NEW.owner IS NULL AND EXISTS ("
         " SELECT 1 FROM spawn_reservations s WHERE s.task_id=NEW.id"
         " AND s.task_relationship_required=1 AND s.task_relationship_generation=NEW.generation)))"
-        " OR (NEW.status IN ('started','submitted','completed') AND NOT "
+        " OR ((NEW.status='started'"
+        " OR (NEW.status='submitted' AND OLD.status<>'submitted')"
+        " OR (NEW.status='completed' AND OLD.status NOT IN ('submitted','completed'))) AND NOT "
         + bound_relationship_condition("NEW")
         + "))"
         " BEGIN SELECT RAISE(ABORT, 'task relationship protection is unconfirmed'); END"
     )
-    # Install the continuation-aware guard before removing its stricter predecessor.
+    # Recovery metadata and submitted-result acceptance do not admit execution.
+    # Install the admission guard before removing its stricter predecessors.
+    conn.execute("DROP TRIGGER IF EXISTS task_relationship_execution_guard_v3")
     conn.execute("DROP TRIGGER IF EXISTS task_relationship_execution_guard_v2")

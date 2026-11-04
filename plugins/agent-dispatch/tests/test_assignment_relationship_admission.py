@@ -26,6 +26,20 @@ def test_qualified_atomic_create_claim_refuses_without_creating_work(assignment)
     assert len(queue.list()) == before
 
 
+@pytest.mark.parametrize("destination", [Status.SUBMITTED, Status.COMPLETED])
+def test_unprotected_assignment_cannot_bypass_first_result_admission(assignment, destination):
+    queue, owner, workspace, task = assignment
+    owner.lose_reply = "bind"
+    with pytest.raises(TaskError, match="unresolved"):
+        claim(queue, workspace, task)
+    with queue._connect() as conn, pytest.raises(sqlite3.IntegrityError, match="unconfirmed"):
+        conn.execute(
+            "UPDATE tasks SET status=?, owner=NULL WHERE id=?", (destination, task.id),
+        )
+    assert queue.get(task.id).status == Status.CLAIMED
+    assert queue.task_relationship(task.id)["state"] == "pending"
+
+
 @pytest.mark.parametrize("settled", [False, True])
 def test_unpinned_legacy_claim_skips_governed_work_without_starving_other_tasks(
     assignment, settled
@@ -69,7 +83,7 @@ def test_previous_bound_assignment_cannot_protect_another_pool_workspace_after_r
             " allocation_project='example', worktree_path='/different' WHERE key=?",
             (reservation.key,),
         )
-        conn.execute("DROP TRIGGER task_relationship_execution_guard_v3")
+        conn.execute("DROP TRIGGER task_relationship_execution_guard_v4")
         conn.execute(
             "CREATE TRIGGER task_relationship_execution_guard BEFORE UPDATE ON tasks"
             " BEGIN SELECT 1; END"
@@ -288,4 +302,77 @@ def test_submission_keeps_exact_relationship_after_execution_capacity_retires(as
         require_relationship(conn, task.id)
     assert queue.reconcile_task_relationship(task.id)["state"] == "bound"
     queue.confirm(task.id)
+    assert queue.reconcile_task_relationship(task.id)["state"] == "closed"
+
+
+@pytest.mark.parametrize("state,closed,legacy_guard", [
+    (Status.SUBMITTED, False, False), (Status.COMPLETED, False, False),
+    (Status.COMPLETED, True, False), (Status.SUBMITTED, False, True),
+])
+def test_retired_agent_detachment_does_not_readmit_execution_or_release_submitted_work(
+    assignment, state, closed, legacy_guard,
+):
+    queue, owner, workspace, task = assignment
+    publish(queue, pool())
+    reservation, _ = place(queue, task)
+    queue.record_spawn_worktree(
+        reservation.key, workspace.worktree, ownership="created",
+        execution_machine=workspace.machine, allocation_project=workspace.project,
+        worktree_path=workspace.path, driver="cli", creation_nonce=workspace.creation_nonce,
+    )
+    queue.record_spawn(
+        reservation.key, session_handle="native", worktree=workspace.worktree,
+        startup_complete=True, startup_revision=reservation.startup_revision,
+    )
+    queue.start(
+        task.id, workspace.worker_id, owner_session_id="native",
+        expected_generation=queue.get(task.id).generation,
+    )
+    queue.complete(task.id, workspace.worker_id, result={"answer": "retained"})
+    if state == Status.COMPLETED:
+        queue.confirm(task.id)
+    if closed:
+        queue.reconcile_task_relationship(task.id)
+    queue.request_spawn_release(reservation.key, disposition="settled")
+    queue.retire_spawn(reservation.key, exact_absence=True)
+    if legacy_guard:
+        with queue._connect() as conn:
+            conn.execute("DROP TRIGGER task_relationship_execution_guard_v4")
+            conn.execute(
+                "CREATE TRIGGER task_relationship_execution_guard_v3"
+                " BEFORE UPDATE OF status, generation, owner, owner_session_id ON tasks"
+                " WHEN NEW.status IN ('started','submitted','completed')"
+                " BEGIN SELECT RAISE(ABORT, 'legacy relationship guard'); END"
+            )
+        queue = TaskQueue(
+            queue.db_path, relationship_writer=owner, relationship_authority="local",
+        )
+        owner.queue = queue
+    before = queue.get(task.id)
+    original = copy.deepcopy(queue.task_relationship(task.id))
+    snapshot = queue.task_diagnostics(task.id)
+    assert snapshot["actions"]["detach_agent"]["allowed"]
+    request = {
+        "operation": "detach_agent", "expected_revision": snapshot["revision"],
+        "request_id": "detach-retired-native", "actor": "operator",
+        "reason": "qualified native retirement complete",
+    }
+    detached = queue.recover_task(task.id, **request)
+    assert detached["task"]["status"] == state
+    assert detached["task"]["generation"] == before.generation + 1
+    assert detached["task"]["owner"] is None and detached["task"]["owner_session_id"] is None
+    assert queue.get(task.id).result == before.result
+    assert queue.task_relationship(task.id) == original
+    assert len(owner.claims) == 1
+    assert queue.recover_task(task.id, **request) == {**detached, "replayed": True}
+    with queue._connect() as conn, pytest.raises(sqlite3.IntegrityError, match="unconfirmed"):
+        conn.execute(
+            "UPDATE tasks SET status='started', owner=?, owner_session_id='native' WHERE id=?",
+            (workspace.worker_id, task.id),
+        )
+    if state == Status.SUBMITTED:
+        assert read_snapshot(queue, task.id)["release_outcome"] is None
+        assert queue.reconcile_task_relationship(task.id)["state"] == "bound"
+        assert next(iter(owner.claims.values()))["phase"] == "bound"
+        queue.confirm(task.id)
     assert queue.reconcile_task_relationship(task.id)["state"] == "closed"
