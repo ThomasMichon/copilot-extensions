@@ -35,6 +35,16 @@ through it anymore.
 
 ## Coordination
 
+The proposed #5293 amendment refines this SAME canonical migration, not
+another receiver or implementation appointment. Preserve the sole existing
+migration driver, serial per-name slices, unpublished `_apply_tracking_override`
+work and every current source/test/validation hold. The driver reconciles that
+work before choosing the next name; no duplicate extraction, discarded WIP,
+delegation, generic ACK or custody expiry follows. Normal review, complete
+direct Plan/local AND actual global Validation/Coordination/Journal delivery
+and permitted current readback remain distinct from original acceptance.
+#5293 stays OPEN for its whole retirement program.
+
 - **Topology:** independent per-slice PRs (no shared feature branch) --
   each migration slice (one or a small batch of names) is its own PR
   against `dev`, opened from its own worktree, reviewed and merged
@@ -389,6 +399,34 @@ Any change that makes these files slightly smaller is a win."
       root" section's now-unneeded legacy-support guidance from the
       `componentizing-modules` skill (keep only the design invariant).
 
+### Proposed same-canonical #5293 acceptance clarification
+
+_(Agent-recommended tracking refinement; no migration is performed here.)_
+
+- [ ] **C5293-P1:** Preserve the original incremental by-name, highest-traffic
+  first, handful-at-a-time program alongside module componentization,
+  not a mass rewrite or mere line-count reduction. Retire ALL applicable
+  accessors after their last caller moves: original 47-to-zero finish line.
+- [ ] **C5293-P2:** For each name, establish the actual shared-module home
+  when genuinely shared, convert EVERY production `core().<name>` caller
+  to direct imports, repoint EVERY test monkeypatch to the actual definition
+  module, remove dead root re-exports, and retire each sibling accessor
+  only at ZERO callers. Preserve decorator/bare-name/source-string test
+  gotchas, behavior and supported public interfaces.
+- [ ] **C5293-P3:** Credit completed invariant/tooling/helper slices and
+  existing measurements at their actual historical tiers. Original
+  47/317/112/704, later lexical 41 and later aggregate 39/209/156/992
+  are different dated measurements, not today's census or proof each
+  lexical definition has live callers. Preserve the current unpublished
+  `_apply_tracking_override` reconciliation as the next owned decision.
+- [ ] **C5293-LV:** Through the existing per-name validation and richer
+  call/alias/patch-aware census, prove all callers/patches and dead exports
+  move, behavior remains correct, retired accessors reach zero, and the
+  aggregate eventually reaches zero. Re-measure after each slice and moved
+  base; lexical grep, tooling availability or one smaller root is not the
+  whole result. Preserve existing source/test/CI tiers without restoring
+  historical exhaustive testing as new required-PR integration policy.
+
 ## Validation Plan
 
 - [ ] Each migration slice: `python tools/run-plugin-tests.py agent-worktrees`
@@ -415,11 +453,27 @@ Any change that makes these files slightly smaller is a win."
       migrated (confirmed: PR #5313 landed mid-slice and added fresh
       `core._json_output` call sites a post-sync rescan alone caught).
 
+- [ ] **C5293-G:** Resolve ALL C5293 Plan/local Validation and incumbent
+  per-name/aggregate validation: genuine definition-module ownership,
+  every caller/test patch, dead re-export removal and final ZERO applicable
+  accessors. Preserve serial custody, unpublished work and historical credit.
+  Same-canonical documentary delivery does not complete #5293, retire its
+  open coordination token, authorize migration or release resources.
+
 ## Proposal
 
 _Pending._
 
 ## Journal
+
+### 2026-10-30 - Proposed same-canonical retirement clarification
+
+The whole eligible #5293 contract and complete fixed-pin ROOT were admitted.
+Unchecked clarification preserves original per-name/full-caller/test/export
+and 47-to-zero acceptance, historical delivered slices and the sole driver's
+unpublished next work. No census, source migration, test or execution occurred.
+The original canonical stays OPEN; normal review, actual delivery and
+complete current readback remain separate from technical acceptance.
 
 ### 2026-10-19 - Reconcile completed slices and remaining migration
 

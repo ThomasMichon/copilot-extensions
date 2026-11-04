@@ -55,6 +55,16 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
+The proposed #4217/#4233 families use existing Phase 7 migration-intake/domain
+review and Phase 2/4 scenario and Bridge/repository waves, preserving primary,
+rig/scenario/runner, dependency/fixture/platform/source/audit/cohort,
+periodic-failure/native/release and resource custodians, OPEN #1303 and
+all prior claims/holds. No new runner, transfer, budget or generic ACK is
+appointed. Normal reviewed complete direct Plan/local AND actual global
+Validation/Coordination/Journal delivery and permitted whole-current
+readback precede any separate source judgment; intake is not technical
+PASS, implementation, acceptance or resource release.
+
 <!-- backlog-reconciliation:7556:qualified-sixteen:4128:Coordination -->
 
 The proposed #4128 family retains its finite filesystem-registry owner and
@@ -971,6 +981,50 @@ is not a finding that every test is uncontained or a live escape occurred._
   owned. No blanket context-disabling workaround, real OS mutation or
   whole-portfolio prerequisite substitutes for this finite authority proof.
 
+### Proposed finite intake: clean-room enrollment and client warnings
+
+_(Agent-recommended documentary refinement; no test, CI, package or
+implementation operation is authorized.)_
+
+- [ ] **T4217-P1:** Map ALL FOUR deterministic original outcomes to actual
+  owning scenarios AND jobs: plugin installation, actual first-use runtime
+  provisioning, installed-command health AND chosen core-lifecycle round
+  trips. Reuse the existing disposable rig, not another runner. Manual
+  scenario capability or one passing run is not automated enrollment.
+- [ ] **T4217-P2:** Enroll missing chosen coverage through authorized bounded
+  periodic/disposable lanes with prerequisites, source/profile, reporting,
+  failure AND owning cleanup. Missing capacity, skip or unavailable remains
+  non-PASS; default full-plugin selection does not imply a clean-room matrix.
+- [ ] **T4217-P3:** Preserve unit-only required PR/promotion policy, existing
+  admission/coverage, effect/containment/item/group/plugin/storage limits,
+  native/release/source/failure custody and narrow exceptions. Credit the
+  real rig, installation-context lanes, scoped five-phase credential-free
+  Linux case and partner Tier-P setup without calling every outcome enrolled.
+- [ ] **T4217-LV:** Record the exact four-outcome source/scenario/job map and
+  selected enrollment, then meaningful real bounded positive AND intentional
+  failure/reporting/cleanup controls through existing authorized lanes.
+  Preserve truthful unsupported/unavailable and original tiers; no broad
+  required integration, new runner or every-platform/adopter program.
+- [ ] **T4233-P1:** Retain only the exact original supported web-client
+  dependency SET and public-suite deprecation outcome across supported
+  platforms. Identify original warning/class, supported combination and
+  actual causal/owner mapping OR an attributable requirement-preserving
+  disposition; otherwise keep the precise UNKNOWN.
+- [ ] **T4233-P2:** Credit modern combined requirements and real
+  ASGITransport/TestClient fixtures. Runtime FastAPI>=0.141.1 and
+  HTTPX>=0.28.1,<1 plus dev HTTPX>=0.27 do not yield an old effective
+  HTTPX floor. Declarations/fixtures are not warning-free suite receipts.
+- [ ] **T4233-P3:** Preserve meaningful unsuppressed diagnostics and supported
+  platform limits. A bumped version/title, empty generic warning search,
+  unrelated historical artifact or blanket filter is neither original
+  outcome nor attributable disposition. Excluded bot-provider #152 stays
+  metadata-only; no linked BODY reconstruction or reproduced-failure claim.
+- [ ] **T4233-LV:** Resolve exact warning/dependency-set attribution and
+  original supported-suite/platform result OR rightful attributable
+  disposition through appropriate existing evidence/tier, retaining
+  modernization credit and uncertainty. No all-future ecosystem-warning,
+  fresh hardware, paid/native/every-host or package-install program.
+
 ## Validation Plan
 
 - [ ] G5921: Resolve EVERY direct #5921 P1-P6, V1-V5 and C1-C3 clause in the Phase4 finite clean-room verdict family at its ORIGINAL source/API consumer tier: actual Python AND Python-less version/schema/evidence-complete reduction and real caller shape, explicit malformed/incomplete/unjudged NON-PASS, correct valid control/classified-jam results/exits, literal-mode separation and source-safe diagnostics. Preserve all incumbent Plan/Validation, OPEN #1303, same owners and independent #5922/#8511/#4312/#688/#1475 gates. Administrative intake is not a reducer fix or executed evidence; no live box/model/all-host/native programme or unrelated whole-portfolio prerequisite is added, and this does not waive the ROOT's own whole completion gate.
@@ -1082,6 +1136,17 @@ is not a finding that every test is uncontained or a live escape occurred._
   family is not whole all-authority proof. No source transfer, live escape,
   native-every-host or new blanket ACK is inferred.
 
+- [ ] **T4217-G:** Resolve EVERY T4217 Plan/local Validation condition:
+  all FOUR real scenario/job enrollment/reporting outcomes in authorized
+  bounded periodic/disposable lanes, not rig/manual-run proxies. Preserve
+  unit-only required CI, failure/cleanup/resource owners and unavailable
+  states; documentary delivery is not CI coverage or parent completion.
+- [ ] **T4233-G:** Resolve EVERY T4233 Plan/local Validation condition:
+  exact original warning/dependency-set attribution and supported-suite/
+  platform outcome OR attributable requirement-preserving disposition.
+  Preserve modern client/fixture credit, diagnostics, platform and excluded
+  BODY limits; intake is not warning-free execution or source/resource release.
+
 ## Proposal
 
 Approve the vision, framework, and phased campaign as the repository's
@@ -1090,6 +1155,16 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-10-30 - Proposed finite enrollment and warning-attribution intake
+
+Whole eligible #4217/#4233 originals/refinements and complete fixed-pin ROOT
+research support these unchecked proposals. Actual rig/scoped-run and
+combined client/fixture modernization remain credited; all-four automated
+enrollment and exact original warning acceptance/disposition remain open.
+No scenario, workflow, dependency, test or native operation occurred.
+Normal review, actual delivery and whole-current readback are still required;
+this amendment establishes neither source disposition nor new custody.
 
 <!-- backlog-reconciliation:7556:qualified-sixteen:4128:Journal -->
 

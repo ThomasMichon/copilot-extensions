@@ -31,6 +31,15 @@ auth, safety decisions, lifecycle ownership and explicit error semantics.
 
 ## Coordination
 
+The proposed #5518 finite baseline intake retains the existing spawn-reduction
+driver and actual plugin/caller/guard/native/source/resource custodians,
+including independent mux, provenance, lifecycle, daemon and test-portfolio
+owners. No new implementation delegate, all-subprocess lifetime migration,
+blanket ACK or expiry is appointed. Normal review, complete direct
+Plan/local AND actual global Validation/Coordination/Journal delivery and
+permitted whole-current readback precede any separate source judgment;
+headlessness, durable lifetime and custody remain distinct.
+
 - **Topology:** independent, serial reviewable slices; one writer per slice.
 - **Host (owns PRs):** Spawn-reduction driver for this effort's new slices.
 - **Delegates:** no new implementation delegates initially. Existing owners
@@ -200,6 +209,33 @@ The tracked-file protection remains a filesystem safeguard, not a content gate.
 - [ ] Review, merge and verify the bounded ordering change through the normal
   release flow; keep the parent campaign Active for its remaining work.
 
+### Proposed finite #5518 baseline adjudication
+
+_(Agent-recommended tracking refinement; no guard or launch is run here.)_
+
+- [ ] **S5518-P1:** Triage the ORIGINAL 70-site introduction cohort
+  incrementally, not every future subprocess. For each windowless-parent
+  risk, apply the actual shared suppression helper AND remove its baseline
+  entry OR retain a genuinely interactive-only path with a specific reviewed
+  reason. Generic baseline or shifted-line provenance is not review.
+- [ ] **S5518-P2:** Preserve rule 3's actual AST spawn/context determination
+  versus rule 4's JSON/YAML declaration-only reporting. Python permits a
+  specific reviewed inline allowance; JSON requires its file-based specific
+  exception because it has no comment syntax. An argv declaration alone
+  never proves suppression or that the real caller is interactive.
+- [ ] **S5518-P3:** Credit the enforced rules and repaired/moved individual
+  sites at their finite scopes. Original 70 and later reported 69 entries/
+  68 generic reasons are dated inventories, not a fresh guard result or
+  proof every site creates a visible window. Preserve the already-specific
+  interactive-SSH exception and separate resident-launch migration credit.
+- [ ] **S5518-LV:** The implementation owner runs the existing guard AFTER
+  EACH batch and records exact original-cohort decisions, actual
+  windowless-parent suppression OR specifically reviewed interactive
+  exception, with baseline removal where required. Finish only when the
+  baseline is empty OR contains exclusively genuinely reviewed specific
+  exceptions. No new durable-lifetime/lease/custody or all-future-spawn
+  program is imposed; native observations remain at their original tiers.
+
 ## Validation Plan
 
 - [x] First hook slice proves zero client/CLI child processes on daemon success,
@@ -245,6 +281,13 @@ The tracked-file protection remains a filesystem safeguard, not a content gate.
   Incomplete discovery cannot authorize cleanup, and tracked stale outputs
   are preserved with an explicit publication failure.
 
+- [ ] **S5518-G:** Resolve ALL S5518 Plan/local Validation and every original
+  cohort entry: suppression AND removal OR a genuine specifically reviewed
+  exception, rule 3/rule 4 distinction and guard after EACH batch. Preserve
+  original empty-OR-only-reviewed-specific baseline close condition,
+  incumbent credit and actual owners. A documentary merge is not guard/
+  native success, lifetime proof or source/resource release.
+
 ## Proposal
 
 Reduce boundaries rather than optimize wrappers. The shell-only hook host
@@ -270,6 +313,16 @@ merely for code reuse. Do not add cross-file transaction machinery for this
 single-final-batch contract.
 
 ## Journal
+
+### 2026-10-30 - Proposed finite headless-baseline intake
+
+Whole eligible #5518 original/refinement and complete fixed-pin ROOT research
+support unchecked original-cohort adjudication. Actual risk/suppression OR
+specific reviewed interactive exception, Python/declaration distinctions
+and per-batch guard remain; current rules and individual progress keep
+credit. No checker, subprocess or native window observation occurred.
+Normal review, actual complete delivery, current readback and separate
+source judgment remain outstanding; no implementation or custody is claimed.
 
 ### 2026-10-14 - In-process startup copy implementation
 
