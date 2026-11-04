@@ -135,12 +135,12 @@ def _select_inputs(
             environment.update({
                 PIN_ENV: source.identity,
                 "COPILOT_PLUGIN_STAGED_FROM": str(step.payload.resolve()),
-                "COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT": str((project or Path.cwd()).resolve()),
             })
         elif step.name == "agent-index":
             project = _index_repository(step.payload, project, repository_contexts, environment)
         if step.name == "agent-index" and project is not None and not environment.get("AGENT_INDEX_REPO"):
             environment["AGENT_INDEX_REPO"] = str(project.resolve())
+        environment["COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"] = str((project or Path.cwd()).resolve())
         return dataclasses.replace(
             step, source=source, environment=environment, runtime_root=root,
             source_target=source_target,

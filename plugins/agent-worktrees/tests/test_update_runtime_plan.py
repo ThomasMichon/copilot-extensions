@@ -374,7 +374,10 @@ def test_plan_execution_uses_collected_command_and_environment(portfolio, monkey
                         lambda argv, **kw: captured.append((argv, kw)) or SimpleNamespace(status="OK"))
     assert update_runtime._execute_runtime_step(step) == "OK"
     assert captured[0][0] == list(step.argv)
-    assert captured[0][1]["env"] == {"PLAN_TARGET": peer.name}
+    assert captured[0][1]["env"] == {
+        "PLAN_TARGET": peer.name,
+        "COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT": str(Path.cwd().resolve()),
+    }
     assert captured[0][1]["cwd"] == peer
     assert captured[0][1]["target_version"] == "2"
 
@@ -401,8 +404,89 @@ def test_index_activation_retains_logical_repo_without_changing_artifact(
     )
     assert not step.blocked
     assert step.artifact == payload and step.project_root == project
+    assert step.environment["COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"] == str(project)
     expected = str(explicit) if explicit_repo else str(project) if name == "agent-index" else None
     assert step.environment.get("AGENT_INDEX_REPO") == expected
+
+
+@pytest.mark.parametrize("prepared", [False, True])
+def test_installer_project_overrides_inherited_staging_context(portfolio, monkeypatch, prepared):
+    from agent_worktrees import update_runtime_plan, update_runtime_target
+
+    _engine, payload, _calls = portfolio
+    project = payload.parent / "consumer"
+    project.mkdir()
+    monkeypatch.setattr(
+        reconcile, "runtime_installer_environment",
+        lambda *args: ({"COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT": str(payload)}, payload),
+    )
+    monkeypatch.setattr(update_runtime_target, "plan_target", lambda *args: None)
+    source = SimpleNamespace(
+        payload=payload, identity="prepared-source", version="2", validate=lambda *args: None,
+    ) if prepared else None
+    step = update_runtime_plan._select_inputs(
+        update_runtime_plan.RuntimeUpdateStep("agent-vault", "runtime_reconcile", payload),
+        source, project,
+    )
+    assert not step.blocked
+    assert step.environment["COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"] == str(project)
+
+
+@pytest.mark.parametrize("kind", ["registered", "module"])
+def test_native_installer_reads_vault_activation_for_invoking_project(tmp_path, monkeypatch, kind):
+    from agent_worktrees import update_runtime_plan
+
+    project, payload, home = (tmp_path / name for name in ("consumer", "payload", "home"))
+    for path in (project, payload / "scripts", home):
+        path.mkdir(parents=True)
+    (project / ".agent-vault.json").write_text('{"enabled":true}', encoding="utf-8")
+    (payload / ".agent-vault.json").write_text('{"enabled":false}', encoding="utf-8")
+    (payload / "plugin.json").write_text(
+        '{"name":"agent-vault","version":"2","runtimeScope":"universal"}', encoding="utf-8",
+    )
+    reader = Path(__file__).resolve().parents[2] / "agent-vault" / "scripts" / "runtime-activation.py"
+    witness = tmp_path / "activation.json"
+    environment = dict(
+        os.environ, HOME=str(home), USERPROFILE=str(home),
+        AGENT_VAULT_HOME=str(home / ".agent-vault"),
+        AGENT_VAULT_CONFIG=str(home / "absent-config.json"),
+        AGENT_RT_ROOT=str(home / ".agent-vault"),
+        AGENT_CONFIGURATION_CONTEXT="", COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT=str(payload),
+        ACTIVATION_TEST_PYTHON=sys.executable, ACTIVATION_TEST_READER=str(reader),
+        ACTIVATION_TEST_WITNESS=str(witness),
+    )
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    (payload / "scripts" / "install.ps1").write_text(
+        "$project = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {\n"
+        "    $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT\n"
+        "} else { (Get-Location).ProviderPath }\n"
+        "$result = & $env:ACTIVATION_TEST_PYTHON -I -B -X utf8 "
+        "$env:ACTIVATION_TEST_READER --cwd $project\n"
+        "$code = $LASTEXITCODE\n"
+        '[IO.File]::WriteAllText($env:ACTIVATION_TEST_WITNESS, ($result -join "`n"))\n'
+        "exit $code\n", encoding="utf-8",
+    )
+    (payload / "scripts" / "install.sh").write_text(
+        '"$ACTIVATION_TEST_PYTHON" -I -B -X utf8 "$ACTIVATION_TEST_READER" '
+        '--cwd "${COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT:-$PWD}" > "$ACTIVATION_TEST_WITNESS"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda name: payload)
+    monkeypatch.setattr(reconcile, "runtime_installer_environment",
+                        lambda *args: (environment, home / ".agent-vault"))
+    monkeypatch.setattr(reconcile, "runtime_deployed_version", lambda *args, **kwargs: "2")
+    monkeypatch.setattr(update_runtime, "_machine_gate_blocks", lambda *args: False)
+    platform = "windows" if os.name == "nt" else "linux"
+    step = (
+        update_runtime_plan.plan_registered("agent-vault", platform, force=True, gate_context=project)
+        if kind == "registered" else
+        update_runtime_plan.plan_module("agent-vault", payload, platform, force=True, gate_context=project)
+    )
+    assert not step.blocked, step.status
+    assert step.artifact == payload
+    assert update_runtime._execute_runtime_step(step) == "OK"
+    assert json.loads(witness.read_text(encoding="utf-8"))["state"] == "configured"
+    assert not (home / ".agent-vault").exists()
 
 
 def test_source_index_without_repository_does_not_export_neutral_cwd(portfolio, monkeypatch):
@@ -510,7 +594,10 @@ def test_collected_environment_is_an_immutable_snapshot(portfolio, monkeypatch):
                         lambda *a: (environment, peer))
     step = update_runtime_plan.plan_registered(peer.name, "linux", force=True)
     environment["SELECTED_OWNER"] = "changed"
-    assert step.environment == {"SELECTED_OWNER": peer.name}
+    assert step.environment == {
+        "SELECTED_OWNER": peer.name,
+        "COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT": str(Path.cwd().resolve()),
+    }
     with pytest.raises(TypeError):
         step.environment["SELECTED_OWNER"] = "changed"
 

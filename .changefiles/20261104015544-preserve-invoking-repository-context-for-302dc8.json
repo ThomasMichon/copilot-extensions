@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve invoking repository context for native and prepared runtime installers.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
