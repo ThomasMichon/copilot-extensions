@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from agent_logger.sync import worktree_state_namespace as namespace
+from agent_logger import source_roots
 from agent_logger.source_roots import iter_archive_sources
 from agent_logger.sync.meta import write_sync_meta
 from agent_logger.sync.targets import filesystem
@@ -425,6 +426,21 @@ def test_renamed_collection_remains_excluded_from_session_and_fleet_discovery(pa
     (target._root() / namespace.DIRECTORY).rename(target._root() / "retained-exports")
     assert target.fleet_sync_status().machines == {}
     assert list(iter_archive_sources(target._root())) == []
+
+
+@pytest.mark.parametrize("name", ["host.containers", "host.codespaces",
+                                ".codespaces", ".codespaces-live"])
+def test_renamed_collection_is_excluded_before_provider_group_expansion(
+    packet: Packet, monkeypatch: pytest.MonkeyPatch, name: str,
+) -> None:
+    _, target, _, _ = packet
+    collect(packet)
+    typed = (target._root() / namespace.DIRECTORY).rename(target._root() / name)
+    for number in range(12):
+        (typed / f"retained-{number}").mkdir()
+    (target._root() / "worker" / "session-state").mkdir(parents=True)
+    monkeypatch.setattr(source_roots, "MAX_SOURCE_ENTRIES", 2)
+    assert [item.key for item in iter_archive_sources(target._root())] == ["worker"]
 
 
 @pytest.mark.parametrize("kind", ["empty", "directory", "symlink", "future"])

@@ -356,6 +356,11 @@ def iter_archive_sources(
             mode = entry.lstat().st_mode
             if stat.S_ISREG(mode):
                 continue
+            if (
+                grouped and stat.S_ISDIR(mode) and not is_link_or_reparse(entry, mode)
+                and is_namespace_directory(entry.parent, entry.name)
+            ):
+                continue
             layout: LayoutKind = (
                 "container"
                 if entry.name.endswith(".containers")
