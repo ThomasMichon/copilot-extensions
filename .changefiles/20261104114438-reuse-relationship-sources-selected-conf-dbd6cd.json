@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse relationship sources, selected configuration and topology within targeted related resolution.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

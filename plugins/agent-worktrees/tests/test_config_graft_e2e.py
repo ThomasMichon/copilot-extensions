@@ -636,6 +636,97 @@ def _write_related_source(root, summary, *, direct=False):
     return path
 
 
+@pytest.mark.parametrize("mode", ["explicit", "primary", "control-plane"])
+def test_targeted_resolve_acquires_sources_and_topology_once(
+    ordinary_related_sources, monkeypatch, capfd, mode,
+):
+    from collections import Counter
+
+    from agent_worktrees import related_cli
+
+    roots, knowledge, _, _, configs = ordinary_related_sources
+    base = roots["base"]
+    control = roots["foreign"]
+    selected = control if mode == "control-plane" else base
+    _write_related_source(selected, "target")
+    (selected / "machines.yaml").write_text(
+        "machines:\n  execution-a:\n    execution_platform: windows\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cfg, "_ACTIVE_PROJECT", "base")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+    monkeypatch.setattr(related_cli, "_related_anchor", lambda rest: str(base))
+    monkeypatch.setattr(related, "find_control_plane_anchor", lambda: str(control))
+    calls = Counter()
+    supplied_configs = []
+    sources = related_cli._related_config_source_anchors
+    topology = related_cli._related_current_topology
+    machines = cfg.load_machines_yaml
+
+    def source_anchors(anchor, **kwargs):
+        calls[("sources", anchor)] += 1
+        return sources(anchor, **kwargs)
+
+    def current_topology(anchors, anchor):
+        calls["topology"] += 1
+        return topology(anchors, anchor)
+
+    def load_machines(anchor, **kwargs):
+        supplied_configs.append(kwargs.get("config"))
+        return machines(anchor, **kwargs)
+
+    monkeypatch.setattr(related_cli, "_related_config_source_anchors", source_anchors)
+    monkeypatch.setattr(related_cli, "_related_current_topology", current_topology)
+    monkeypatch.setattr(cfg, "load_machines_yaml", load_machines)
+    argv = ["resolve", *([] if mode == "primary" else ["target"]), "--json"]
+    assert related_cli.cmd_related_dispatch(argv) == 0
+    payload = json.loads(capfd.readouterr().out)
+    assert payload["name"] == "target"
+    assert payload["via_control_plane"] is (mode == "control-plane")
+    assert payload["current_machine"] == "execution-a"
+    assert calls["topology"] == 1
+    assert calls[("sources", str(base))] == 1
+    assert calls[("sources", str(control))] == (1 if mode == "control-plane" else 0)
+    assert supplied_configs and all(item is configs["base"] for item in supplied_configs)
+    assert not (knowledge["base"] / "machines.yaml").exists()
+
+
+def test_targeted_resolve_separate_calls_observe_changed_topology_and_related_source(
+    ordinary_related_sources, monkeypatch, capfd,
+):
+    from dataclasses import replace
+
+    from agent_worktrees import related_cli
+
+    roots, _, _, _, configs = ordinary_related_sources
+    base = roots["base"]
+    related_path = _write_related_source(base, "initial")
+    machines_path = base / "machines.yaml"
+    machines_path.write_text(
+        "machines:\n  execution-a:\n    execution_platform: windows\n", encoding="utf-8",
+    )
+    monkeypatch.setattr(cfg, "_ACTIVE_PROJECT", "base")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+    argv = ["resolve", "target", "--repo", str(base), "--json"]
+    assert related_cli.cmd_related_dispatch(argv) == 0
+    initial = json.loads(capfd.readouterr().out)
+    assert initial["current_machine"] == "execution-a"
+    assert initial["locus_kind"] == "local"
+
+    configs["base"] = replace(configs["base"], machine="execution-b")
+    machines_path.write_text(
+        "machines:\n  execution-b:\n    execution_platform: windows\n", encoding="utf-8",
+    )
+    related_path.write_text(
+        "primary: target\nrelated:\n  target:\n    locus: {preferred: codespace}\n",
+        encoding="utf-8",
+    )
+    assert related_cli.cmd_related_dispatch(argv) == 0
+    refreshed = json.loads(capfd.readouterr().out)
+    assert refreshed["current_machine"] == "execution-b"
+    assert refreshed["locus_kind"] == "codespace"
+
+
 @pytest.mark.parametrize("level", range(4))
 def test_related_cli_stateful_binding_four_tiers_and_document_owner(
     ordinary_related_sources, level, capfd,
