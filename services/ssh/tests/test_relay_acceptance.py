@@ -9,15 +9,21 @@ import subprocess
 import sys
 import tempfile
 import time
+from typing import BinaryIO, TYPE_CHECKING, cast
+from collections.abc import Iterator
 
 import pytest
 
-from agent_ssh_service.config import ServiceConfig
-from agent_ssh_service.relay import NativeRelay
+from agent_ssh_service.config import Document, ServiceConfig
+from agent_ssh_service.relay import AccountLookup, NativeRelay, PosixOperations
 from agent_ssh_service.store import DirectoryStore
 
-from conftest import document
-from test_relay_native import wait_ready
+if TYPE_CHECKING:
+    from services.ssh.tests.conftest import document
+    from services.ssh.tests.test_relay_native import wait_ready
+else:
+    from conftest import document
+    from test_relay_native import wait_ready
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "linux"
@@ -26,19 +32,19 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def free_port():
+def free_port() -> int:
     import socket
 
     with socket.socket() as endpoint:
         endpoint.bind(("127.0.0.1", 0))
-        return endpoint.getsockname()[1]
+        return cast(int, endpoint.getsockname()[1])
 
 
-def generate(root, name):
+def generate(root: Path, name: str) -> str:
     from agent_procutil.owned_process import run_caller_owned
 
     result = run_caller_owned(
-        [shutil.which("ssh-keygen"), "-q", "-t", "ed25519", "-N", "", "-f", str(root / name)],
+        [cast(str, shutil.which("ssh-keygen")), "-q", "-t", "ed25519", "-N", "", "-f", str(root / name)],
         timeout=10, max_stdout_bytes=4096, max_stderr_bytes=4096,
     )
     assert result.returncode == 0
@@ -46,13 +52,13 @@ def generate(root, name):
 
 
 @contextmanager
-def client(root, selected, name, *forwards):
+def client(root: Path, selected: Document, name: str, *forwards: str) -> Iterator[tuple[subprocess.Popen[bytes], BinaryIO]]:
     from agent_procutil import no_window_kwargs
     from agent_procutil.native_child import NativeChildCustody
 
     with (root / (name + ".log")).open("w+b") as output:
         process = subprocess.Popen([
-            shutil.which("ssh"), "-F", "/dev/null", "-N", "-T", "-v",
+            cast(str, shutil.which("ssh")), "-F", "/dev/null", "-N", "-T", "-v",
             "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes",
             "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=5",
             "-o", "ExitOnForwardFailure=yes", "-o", "ControlMaster=no",
@@ -69,12 +75,14 @@ def client(root, selected, name, *forwards):
             process.returncode = custody.retire()
 
 
-async def authenticated(process, output, *, refused=False):
+async def authenticated(process: subprocess.Popen[bytes], output: BinaryIO, *, refused: bool = False) -> None:
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         output.seek(0)
         text = output.read(65536).decode("utf-8", errors="replace")
-        exited = os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+        exited = cast(PosixOperations, os).waitid(
+            cast(PosixOperations, os).P_PID, process.pid,
+            cast(PosixOperations, os).WEXITED | cast(PosixOperations, os).WNOHANG | cast(PosixOperations, os).WNOWAIT)
         if refused:
             if exited is not None:
                 assert "remote port forwarding failed" in text, text
@@ -87,7 +95,7 @@ async def authenticated(process, output, *, refused=False):
     pytest.fail("Native SSH did not reach its finite authentication outcome: " + text)
 
 
-async def payload(port, expected):
+async def payload(port: int, expected: bytes) -> None:
     reader, writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), 5)
     try:
         writer.write(expected)
@@ -98,13 +106,13 @@ async def payload(port, expected):
         await writer.wait_closed()
 
 
-async def test_real_distinct_keys_reverse_forward_peer_route_and_denied_bind():
+async def test_real_distinct_keys_reverse_forward_peer_route_and_denied_bind() -> None:
     import pwd
 
-    assert os.geteuid() != 0, "Native acceptance must run as its actual non-root login account"
+    assert cast(PosixOperations, os).geteuid() != 0, "Native acceptance must run as its actual non-root login account"
     assert all(shutil.which(name) for name in ("ssh", "sshd", "ssh-keygen"))
     assert Path("/run/sshd").is_dir()
-    account = pwd.getpwuid(os.geteuid())
+    account = cast(AccountLookup, pwd).getpwuid(cast(PosixOperations, os).geteuid())
     # StrictModes checks the complete authorization path. This explicitly selected
     # disposable account owns the finite test directory; no existing SSH file is read.
     with tempfile.TemporaryDirectory(prefix=".ce-ssh-native-", dir=account.pw_dir) as temporary:
@@ -112,14 +120,14 @@ async def test_real_distinct_keys_reverse_forward_peer_route_and_denied_bind():
         state = root / "state"
         state.mkdir(mode=0o700)
         value = document(state)
-        ports = []
+        ports: list[int] = []
         while len(set(ports)) != 6:
             ports = [free_port() for _ in range(6)]
         for index, row in enumerate(value["bindings"]):
             row["reverse_port"] = ports[index]
         selected = {
-            "sshd": str(Path(shutil.which("sshd")).resolve()),
-            "ssh_keygen": str(Path(shutil.which("ssh-keygen")).resolve()),
+            "sshd": str(Path(cast(str, shutil.which("sshd"))).resolve()),
+            "ssh_keygen": str(Path(cast(str, shutil.which("ssh-keygen"))).resolve()),
             "host_key_file": str(root / "relay-host"),
             "host_public_key": generate(root, "relay-host"),
             "listen_host": "127.0.0.1", "port": ports[2], "user": account.pw_name,
@@ -141,7 +149,7 @@ async def test_real_distinct_keys_reverse_forward_peer_route_and_denied_bind():
         stop, ready = asyncio.Event(), asyncio.Event()
         owner = asyncio.create_task(relay.run(stop, ready))
 
-        async def echo(reader, writer):
+        async def echo(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
             try:
                 data = await reader.read(256)
                 writer.write(data)
@@ -168,4 +176,4 @@ async def test_real_distinct_keys_reverse_forward_peer_route_and_denied_bind():
             await asyncio.wait_for(owner, 10)
             server.close()
             await server.wait_closed()
-        assert relay.process.returncode is not None
+        assert cast(subprocess.Popen[bytes], relay.process).returncode is not None

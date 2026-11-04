@@ -1,22 +1,28 @@
 from copy import deepcopy
+from typing import TYPE_CHECKING
 
 import pytest
 
 from agent_ssh_service import approval
-from agent_ssh_service.config import ServiceConfig, SSHServiceError
+from agent_ssh_service.config import Document, ServiceConfig, SSHServiceError, canonical
 from agent_ssh_service.gateway import SSHService
 from agent_ssh_service.store import DirectoryStore
 from fleet_manager.gateway_service_channel import BODY_BYTES, TransportError
 from fleet_manager.gateway_service_handler import ServiceResponse
-from fleet_manager.planning import canonical
-from fleet_manager.ssh_approval import EnrollmentResult, PeerEnrollmentClient
+from fleet_manager.ssh_approval import EnrollmentResult
 
-from conftest import key
-from test_approval import decision, selected, submit
-from test_approval_client import Caller
+if TYPE_CHECKING:
+    from services.ssh.tests.conftest import key
+    from services.ssh.tests.test_approval import decision, selected, submit
+    from services.ssh.tests.test_approval_client import Caller, PeerEnrollmentClient
+else:
+    from conftest import key
+    from test_approval import decision, selected, submit
+    from test_approval_client import Caller
+    from fleet_manager.ssh_approval import PeerEnrollmentClient
 
 
-def full_fleet(config):
+def full_fleet(config: ServiceConfig) -> tuple[ServiceConfig, list[Document]]:
     value = deepcopy(config.to_dict())
     value["controller"] = "c" * 64
     value["policy"]["controllers"] = [value["controller"]]
@@ -45,7 +51,7 @@ def full_fleet(config):
     return ServiceConfig.from_dict(value), requests
 
 
-def test_near_limit_directory_growth_cannot_strand_a_committed_outcome(config):
+def test_near_limit_directory_growth_cannot_strand_a_committed_outcome(config: ServiceConfig) -> None:
     config, requests = full_fleet(config)
     store = DirectoryStore(config)
     bindings = config.to_dict()["bindings"]
@@ -76,7 +82,7 @@ def test_near_limit_directory_growth_cannot_strand_a_committed_outcome(config):
     assert not changed and repeated == activated
 
 
-def test_receipt_capacity_refusal_rolls_back_activation_and_decision(config, monkeypatch):
+def test_receipt_capacity_refusal_rolls_back_activation_and_decision(config: ServiceConfig, monkeypatch: pytest.MonkeyPatch) -> None:
     store = DirectoryStore(selected(config))
     pending = submit(store)
     before = store.snapshot()
@@ -91,7 +97,7 @@ def test_receipt_capacity_refusal_rolls_back_activation_and_decision(config, mon
     assert store.approval.status("principal-worker-a", pending["request_id"]) == pending
 
 
-async def test_maximum_fleet_pending_pages_fit_and_keep_every_candidate_reachable(config):
+async def test_maximum_fleet_pending_pages_fit_and_keep_every_candidate_reachable(config: ServiceConfig) -> None:
     config, requests = full_fleet(config)
     store = DirectoryStore(config)
     bindings = config.to_dict()["bindings"]
@@ -99,6 +105,8 @@ async def test_maximum_fleet_pending_pages_fit_and_keep_every_candidate_reachabl
         store.enroll(binding["principal"], request)
     service = SSHService(store)
     recovery = PeerEnrollmentClient(Caller(service, "r" * 64))
+    seen: list[str]
+    after: str | None
     seen, after, pages = [], None, 0
     try:
         while True:
@@ -122,7 +130,7 @@ async def test_maximum_fleet_pending_pages_fit_and_keep_every_candidate_reachabl
         await service.close()
 
 
-async def test_terminal_pending_page_cursor_is_counted_at_actual_transport_limit(config):
+async def test_terminal_pending_page_cursor_is_counted_at_actual_transport_limit(config: ServiceConfig) -> None:
     config, requests = full_fleet(config)
     value = config.to_dict()
     for index, binding in enumerate(value["bindings"]):
@@ -171,7 +179,7 @@ async def test_terminal_pending_page_cursor_is_counted_at_actual_transport_limit
         await service.close()
 
 
-async def test_oversized_padded_recovery_reason_refuses_before_transport(config):
+async def test_oversized_padded_recovery_reason_refuses_before_transport(config: ServiceConfig) -> None:
     service = SSHService(DirectoryStore(full_fleet(config)[0]))
     caller = Caller(service, "r" * 64)
     try:

@@ -6,6 +6,10 @@ import asyncio
 import logging
 import os
 import signal
+import subprocess
+from types import FrameType
+from collections.abc import Coroutine, Callable
+from typing import Any, Protocol, TYPE_CHECKING, cast
 
 from fleet_manager.credential_references import load_service_credentials
 from fleet_manager.gateway_service_connector import ServiceConnector
@@ -14,13 +18,28 @@ from single_instance_lease import SingleInstance
 
 from .config import ServiceConfig, absolute, check
 from .gateway import SSHService, _drain
-from .store import DirectoryStore
+from .store import DirectoryStore as DirectoryStore
+
+if TYPE_CHECKING:
+    from .relay import NativeRelay, PosixOperations
+
+SignalHandler = Callable[[int, FrameType | None], Any] | int | None
+
+
+class RegisteredConnector(Protocol):
+    def run(self, stop: asyncio.Event) -> Coroutine[Any, Any, None]: ...
+
+
+class RegisteredRelay(Protocol):
+    def run(self, stop: asyncio.Event, ready: asyncio.Event) -> Coroutine[Any, Any, None]: ...
+
 
 _LEASE = "agent-ssh-service.lock"
 
 
 class UnsettledRelay(RuntimeError):
-    def __init__(self, relay, lease, previous):
+    def __init__(self, relay: NativeRelay, lease: SingleInstance,
+                 previous: dict[signal.Signals, SignalHandler]) -> None:
         self.relay, self.lease = relay, lease
         self.previous = previous
         super().__init__("native-relay-cleanup-unconfirmed")
@@ -31,7 +50,7 @@ class UnsettledRelay(RuntimeError):
         while True:
             if self.relay.custody is not None:
                 try:
-                    self.relay.process.returncode = self.relay.custody.retire()
+                    cast(subprocess.Popen[bytes], self.relay.process).returncode = self.relay.custody.retire()
                 except NativeChildCleanupError:
                     pass
                 else:
@@ -48,8 +67,9 @@ class UnsettledRelay(RuntimeError):
                 continue
 
 
-async def registered_lifetime(connector, relay, stop) -> None:
-    tasks = []
+async def registered_lifetime(connector: RegisteredConnector,
+                              relay: RegisteredRelay | None, stop: asyncio.Event) -> None:
+    tasks: list[asyncio.Task[None]] = []
     try:
         if relay is not None:
             ready = asyncio.Event()
@@ -104,7 +124,7 @@ async def run(config: ServiceConfig, *, stop: asyncio.Event | None = None) -> No
     if lease_path.exists():
         info = lease_path.stat()
         check(lease_path.is_file() and info.st_nlink == 1 and (
-            os.name == "nt" or (info.st_uid == os.getuid() and info.st_mode & 0o022 == 0)
+            os.name == "nt" or (info.st_uid == cast("PosixOperations", os).getuid() and info.st_mode & 0o022 == 0)
         ), "invalid-service-lease")
     check((root / "directory.sqlite3").exists()
           or {entry.name for entry in root.iterdir()} <= {_LEASE},
@@ -124,10 +144,10 @@ async def run(config: ServiceConfig, *, stop: asyncio.Event | None = None) -> No
     lease.acquire()
     service = None
     relay = None
-    previous = {}
+    previous: dict[signal.Signals, SignalHandler] = {}
     loop = asyncio.get_running_loop()
 
-    def withdraw(_signal=None, _frame=None):
+    def withdraw(_signal: int | None = None, _frame: FrameType | None = None) -> None:
         loop.call_soon_threadsafe(stop.set)
 
     try:
@@ -147,6 +167,7 @@ async def run(config: ServiceConfig, *, stop: asyncio.Event | None = None) -> No
         )
         await registered_lifetime(connector, relay, stop)
     finally:
+        result: list[Any]
         result, interrupted = [], False
         if service is not None:
             result, interrupted = await _drain(asyncio.create_task(service.close()))

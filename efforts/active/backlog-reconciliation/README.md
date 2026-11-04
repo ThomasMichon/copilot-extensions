@@ -123,6 +123,14 @@ Finalize, filesystem-registry isolation, native transport and headless
 provider-miss acceptance remain distinct. Vault stays Draft with design and
 implementation-owner admission pending; no source or resource transfer follows.
 
+The [next nineteen qualified contracts](receiving-qualified-nineteen.md)
+retain three finite direct documentary families and sixteen independent
+canonical/scope outcomes. All nineteen complete metadata records match the
+admitted 60-text study. Same-canonical state acceptance, cohesive module
+splitting and conditional process-owned transport proof stay distinct.
+The dead-letter effort remains Draft, and every original claim, applicability
+gap, alternative and source/resource condition remains.
+
 ## Request
 
 Operator request, with identifying organizational references redacted:
@@ -432,6 +440,11 @@ outcomes from agent-recommended research and prioritization mechanics.
   eleven complete canonical/home retentions, including explicit WHOLE OPEN,
   Draft, native OR accepted-transfer and pending design-choice conditions.
   It introduces no implementation or source/resource disposition.
+  The nineteen-contract unit preserves three direct documentary families
+  and sixteen whole canonical/scope outcomes, including all seven #4976
+  clauses and explicit original claim/conditional closure/KEEP_OPEN duties.
+  It changes no product, issue state or custody; complete delivery and
+  source-specific acceptance remain separate.
 
 ## Proposal
 

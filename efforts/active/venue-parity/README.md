@@ -372,6 +372,35 @@ receiving readback precede any separate source-specific disposition.
   docs-only record are not new execution or implemented fix;7157 plugin-preparation ACP/CLI proof is
   real but not this seed-file consumer. No every-venue/new whole-parent native matrix is added.
 
+### Conditional finite process-owned failed-start acceptance from #4031
+
+_(Agent-recommended WS-D tracking; no new native result or source disposition.)_
+
+These rows apply only where the original consumer genuinely uses this effort's
+shared process/provider boundary. An unidentified or nonvenue original provider
+remains an explicit applicability gap, not silently reduced to a container case.
+
+- [ ] **P4031-1:** For a failed PROCESS-OWNED remote ACP startup, establish the
+  exact attempt's remote Copilot child EXIT AND SSH stdio/channel RELEASE AND
+  prompt SAFE RETRY. Historical roughly 80-second self-timeout is impact
+  evidence, not a new fixed acceptance clock.
+- [ ] **P4031-2:** Credit #4314 Windows graceful stdin-close ordering, reported
+  three-second graceful wait/five-second fallback and existing POSIX own-group
+  safety. The linked commit and merge are ONE correction; mocked local ordering
+  does not prove remote descendant death/channel release.
+- [ ] **P4031-3:** Keep survivable Session Host HOST-MODE detach separate from
+  PROCESS ownership. Frontend disconnect/redeploy is not universal remote-kill
+  authority; retain live/foreign/UNKNOWN cases, exact attempt/target custody and
+  failed-start ambiguity.
+- [ ] **P4031-4:** Qualify original applicable failure/fallback paths at their
+  actual native provider/SSH tier, observing remote child AND pipe release AND
+  retry together. Helper/source tests or unrelated venue/daemon cutover are
+  partial; no every-host or whole-#954 prerequisite is invented.
+- [ ] **P4031-5:** Credit older WS-D/timeout-reaper and remote Host/reattach
+  proofs at their stated scopes. #5781 relay/identity-qualified descendant work
+  explicitly lacks blanket live CodeSpace failed-start proof; neither it nor
+  daemon replacement grants arbitrary orphan reaping or resource release.
+
 ## Validation Plan
 
 - [ ] Complete every directly retained #2476 Plan/Validation clause above at
@@ -625,6 +654,28 @@ receiving readback precede any separate source-specific disposition.
   finite evidence tier, preserving alternatives, completed credit and existing custodians.
   Administrative tracking is not technical completion or claim release.
 
+- [ ] **V4031-1:** At the applicable original process-owned consumer, correlate
+  failure/attempt/target/native identity with positive remote child death,
+  observed channel EOF/release and one safe immediate retry. A local return,
+  output silence or elapsed 80 seconds is not all THREE effects.
+- [ ] **V4031-2:** Preserve selected-platform graceful/disconnect/fallback
+  behavior and bounds while observing remote/native consequences. Separate
+  mocked ordering from actual failure/retry proof; do not reopen delivered
+  #4314 or add a process-name sweep.
+- [ ] **V4031-3:** Cover genuinely failed process-owned startup beside surviving
+  Host detach and negative live/foreign/uncertain cases. Missing handles,
+  disconnect, age or an unknown orphan cannot authorize kill, a second native
+  start or replay; existing custody/proof controls any transition.
+- [ ] **V4031-4:** Record the exact source/provider/native consumer and correlated
+  positive effects plus failure/fallback/cleanup uncertainty. If the original
+  provider lies outside this effort's venue boundary, retain that unmatched gap
+  rather than claim blanket parity from a container fixture.
+- [ ] **V4031-5:** Preserve the finite consumer witness without relabeling
+  historical one-second container failure, relay cleanup or daemon cutover as
+  complete present native qualification. Existing #954 keep-OPEN,
+  migration-intake and P3 reservations remain; record source, release, installed
+  and native results separately.
+
 ## Notes / Gotchas
 
 - Coordinate WS1 with whatever stream is building launch-parity fixes so the
@@ -654,7 +705,28 @@ a generic Taking/ACK rule, and document intake cannot remove it.
 
 
 
+### Continuing finite #4031 custody
+
+Existing Bridge child/channel, provider, process/Host lifecycle and native
+custodians retain exact target/attempt/resource authority. #954 remains the whole
+programme token with migration-intake and actual P3 reservations. No generic
+acknowledgement, resource release, owner appointment or whole-#954 completion
+prerequisite is introduced for this finite case. Unknown original provider
+applicability stays unmatched rather than assigned to a different venue.
+
 ## Journal
+
+### 2026-10-29 - Finite process-owned failed-start contract proposed
+
+- Added conditional #4031 child EXIT AND channel RELEASE AND safe RETRY
+  Plan/global Validation and continuing coordination. Credit #4314 once and
+  older WS-D/#5781 results at their actual tiers; do not expand them into the
+  complete present native consumer witness.
+- Host detach remains survivable, original applicability stays explicit, and
+  the historical symptom is neither a fresh observation nor cleanup authority.
+  Preserve all incumbent rows, status, first gates and Journal. This tracking
+  amendment claims no native action, technical completion, accepted transfer
+  or resource release; ordinary review and actual delivery remain outstanding.
 
 - **2026-10-22 — Retained trusted-container initialization acceptance.**
   Materialized #2476's complete bootstrap-order, helper-discovery, partial-state,

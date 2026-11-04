@@ -64,6 +64,16 @@ not a live claim token or worker-activation authority.
   boundary; `python tools/rank-module-size.py` is the live source of truth
   for what's next, not a frozen snapshot in this file.
 
+### Continuing finite #5016 responsibility
+
+The existing componentization host, OPEN #2805 and actual Manager/self_install,
+installer, compatibility and source/resource custodians retain the finite split.
+No new driver or authority is appointed. Preserve Active, checked Phase 0/1 and
+other delivered splits, all #2730/#3382/#2614 alternatives, the #3124
+four-poller/deadline/future/drain family and #3446/#3458/#3353/automation duties.
+The additional rows are agent-recommended tracking, not implementation or a
+whole-program/native acceptance gate.
+
 ## Context
 
 Triggered by a contributor review: a consumer's `guards + lint` CI check
@@ -765,6 +775,44 @@ this proposal is not delivery. If any inherited clause or owner/gate cannot be
 preserved, RETAIN #3458. No source edit, checker/test, generator, native profile
 deployment or resource effect occurs here.
 
+### Finite Phase 2 self_install follow-up from #5016
+
+_(Agent-recommended direct tracking; existing Phase 2 and custody continue.)_
+
+- [ ] **P5016-1:** Coherently split self_install into smaller
+  SINGLE-RESPONSIBILITY modules through existing Phase 2/runbook seams.
+  Preserve source/version, immutable-slot, publication/update and installation
+  orchestration ownership. A move, smaller file, guard pass or blind midpoint
+  does not establish the requested responsibility split.
+- [ ] **P5016-2:** Tighten the relevant shrink-only baseline coupled to that
+  finite split. The original 1,015-to-1,123 reviewed emergency widening is not
+  standing growth permission. Reported 1,080 lines/45,646 UTF8 bytes, 1,111
+  exception versus the shared 1,000 cap and `len(text.splitlines())` are
+  historical measurements, not a fresh audit or substitute success threshold.
+- [ ] **P5016-3:** Preserve imports/public/compatibility surfaces AND focused
+  behavior through extraction and baseline reduction. Structural work changes
+  neither installer/construction/publication/update/cutover authority nor
+  deployment; native/installed/source/resource owners remain.
+- [ ] **P5016-4:** Credit prior shrinkage, moved responsibilities,
+  construction/cutover corrections and extracted adapters; the separate #5024
+  immediate baseline-drift blocker is fixed. Keep this finite split/tighter
+  baseline outcome distinct from a new repository-wide portfolio, whole #2805
+  or Manager completion, or reopening delivered modules.
+
+#### Matching finite qualification
+
+- [ ] **V5016-1:** Account for cohesive responsibility/caller/import/public
+  surface mapping and focused behavior equivalence, not line count or naming.
+- [ ] **V5016-2:** Use existing applicable size accounting, meaningful normal
+  cap/baseline disposition and manual tightening; no blanket refresh, new
+  exception or unrelated strict-base/equality policy is introduced.
+- [ ] **V5016-3:** Qualify actual affected self_install/Manager consumer behavior
+  through its existing bounded portfolio and original tier/current policy.
+  This tracking intake executes no import, test, installer, update or native work.
+- [ ] **V5016-4:** Record exact finite source/behavior/size evidence and remaining
+  obligations separately from broader modules, automation, cross-language,
+  native and installation work; preserve every incumbent checked phase and hold.
+
 ## Validation Plan
 
 - [ ] Resolve EVERY direct3458 Plan/Validation row including ALL3353 inheritance and the
@@ -805,6 +853,13 @@ deployment or resource effect occurs here.
       `@pytest.mark.contract` selection (`pytest -m 'contract("...")'`)
       returns the expected tests for at least one split family.
 
+- [ ] Resolve EVERY direct P5016-1 through P5016-4 and V5016-1 through V5016-4
+  at the original finite scope/tier with alternatives, credit and the same
+  custodians preserved. Record precise unresolved or rightfully tracked
+  residuals without claiming source completion, accepted delivery or effort Done.
+  Preserve incumbent global Validation/first gates; no whole-parent, every-host
+  or generic acknowledgement requirement is added.
+
 ## Proposal
 
 Phase 0's guideline/skill/tooling/marker shape (this document) is the
@@ -813,6 +868,17 @@ onward has no open design question yet — each is a mechanical application of
 the Phase 0 runbook, picked up as capacity allows.
 
 ## Journal
+
+### 2026-10-29 - Finite self_install responsibility split proposed
+
+- Added direct #5016 Phase 2 Plan/qualification/global Validation and continuing
+  coordination. Cohesive responsibility extraction, coupled shrink-only
+  tightening and behavior/public-surface preservation remain one finite outcome;
+  prior extraction/repair credit is not discarded or relabeled absent.
+- Status, original Request, participants, checked foundations, first unresolved
+  gates and complete prior Journal remain. This is documentary tracking only:
+  no source measurement, extraction, test, native/installed result or transfer.
+  Ordinary review, actual delivery and separate source judgment remain.
 
 ### 2026-10-23 - Direct retained acceptance from #3458
 

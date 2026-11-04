@@ -6,10 +6,22 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 import re
+from collections.abc import Callable
+from typing import Any, TypeAlias, cast
 
+from fleet_manager import planning
 from fleet_manager.gateway_ssh_policy import ENVIRONMENTS, GatewaySSHPolicy
-from fleet_manager.gateway_ssh_provider import public_key
-from fleet_manager.planning import canonical, decode, identifier, integer, record
+from fleet_manager import gateway_ssh_provider
+
+# These shared validators own the dynamic JSON boundary; they are not yet annotated.
+Document: TypeAlias = dict[str, Any]
+canonical: Callable[..., bytes] = planning.canonical
+decode: Callable[[bytes], Any] = planning.decode
+identifier: Callable[[object, str], None] = planning.identifier
+integer: Callable[..., None] = planning.integer
+record: Callable[..., None] = planning.record
+public_key: Callable[[object], str] = gateway_ssh_provider.public_key
+policy_from_dict: Callable[[Document], Any] = GatewaySSHPolicy.from_dict
 
 MAX_MACHINES = 32
 
@@ -25,7 +37,7 @@ def check(condition: bool, code: str) -> None:
 
 def absolute(value: object) -> Path:
     check(isinstance(value, str) and bool(value), "invalid-path-reference")
-    path = Path(value)
+    path = Path(cast(str, value))
     check(path.is_absolute(), "absolute-path-required")
     for parent in (path, *path.parents):
         if os.path.lexists(parent):
@@ -41,7 +53,7 @@ class ServiceConfig:
     encoded: bytes
 
     @classmethod
-    def from_dict(cls, value: dict) -> ServiceConfig:
+    def from_dict(cls, value: Document) -> ServiceConfig:
         value = decode(canonical(value))
         record(value, "agent-ssh.service", {
             "revision", "data_dir", "fleet", "gateway", "slot", "controller",
@@ -60,7 +72,7 @@ class ServiceConfig:
         from fleet_manager.gateway_service_channel import origin
 
         origin(value["gateway_origin"])
-        policy = GatewaySSHPolicy.from_dict(value["policy"])
+        policy = policy_from_dict(value["policy"])
         check(value["controller"] in policy.to_dict()["controllers"], "unknown-controller")
         if "relay" in value:
             relay = value["relay"]
@@ -81,6 +93,10 @@ class ServiceConfig:
                   "invalid-native-relay-user")
         rows = value["bindings"]
         check(isinstance(rows, list) and 1 <= len(rows) <= MAX_MACHINES, "invalid-bindings")
+        targets: set[tuple[str, str]]
+        principals: set[str]
+        aliases: set[str]
+        ports: set[int]
         targets, principals, aliases, ports = set(), set(), set(), set()
         for row in rows:
             check(isinstance(row, dict) and set(row) == {
@@ -135,28 +151,28 @@ class ServiceConfig:
         with path.open("rb") as stream:
             return cls.from_dict(decode(stream.read(1024 * 1024 + 1)))
 
-    def to_dict(self) -> dict:
-        return decode(self.encoded)
+    def to_dict(self) -> Document:
+        return cast(Document, decode(self.encoded))
 
-    def binding(self, principal: str) -> dict:
+    def binding(self, principal: str) -> Document:
         matches = [row for row in self.to_dict()["bindings"] if row["principal"] == principal]
         check(len(matches) == 1, "machine-principal-not-admitted")
-        return matches[0]
+        return cast(Document, matches[0])
 
     @property
     def enrollment_mode(self) -> str:
-        return self.to_dict().get("enrollment_policy", {}).get("mode", "configured-bindings")
+        return cast(str, self.to_dict().get("enrollment_policy", {}).get("mode", "configured-bindings"))
 
     @property
     def recovery_principals(self) -> list[str]:
-        return self.to_dict().get("enrollment_policy", {}).get("recovery_principals", [])
+        return cast(list[str], self.to_dict().get("enrollment_policy", {}).get("recovery_principals", []))
 
     def authorize_caller(self, principal: str) -> None:
         if principal not in self.recovery_principals:
             self.binding(principal)
 
     @property
-    def authority(self) -> dict:
+    def authority(self) -> Document:
         value = self.to_dict()
         fields = (
             "revision", "fleet", "gateway", "slot", "controller", "policy", "bindings",

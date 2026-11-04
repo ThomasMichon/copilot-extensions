@@ -1,17 +1,20 @@
 from copy import deepcopy
 import sqlite3
+from typing import Any, TYPE_CHECKING
 
 import pytest
 
-from agent_ssh_service.config import ServiceConfig, SSHServiceError
+from agent_ssh_service.config import Document, ServiceConfig, SSHServiceError, canonical
 from agent_ssh_service.store import DirectoryStore
-from fleet_manager.planning import canonical
 from fleet_manager.ssh_approval import EnrollmentResult
 
-from conftest import enrollment, key
+if TYPE_CHECKING:
+    from services.ssh.tests.conftest import enrollment, key
+else:
+    from conftest import enrollment, key
 
 
-def selected(config, *, recovery=("recovery-owner",)):
+def selected(config: ServiceConfig, *, recovery: tuple[str, ...] = ("recovery-owner",)) -> ServiceConfig:
     value = config.to_dict()
     value["enrollment_policy"] = {
         "mode": "peer-approval", "recovery_principals": list(recovery),
@@ -19,7 +22,7 @@ def selected(config, *, recovery=("recovery-owner",)):
     return ServiceConfig.from_dict(value)
 
 
-def submit(store, index=0, **extra):
+def submit(store: DirectoryStore, index: int = 0, **extra: Any) -> Document:
     result, changed = store.enroll(
         "principal-worker-a" if index == 0 else "principal-worker-b",
         {**enrollment(index), "enrollment_policy": "peer-approval", **extra},
@@ -29,14 +32,14 @@ def submit(store, index=0, **extra):
     return result
 
 
-def decision(pending, **extra):
+def decision(pending: Document, **extra: Any) -> Document:
     return {
         "requester": pending["candidate"]["requester"],
         "request_id": pending["request_id"], "fingerprint": pending["fingerprint"], **extra,
     }
 
 
-def bootstrap(store):
+def bootstrap(store: DirectoryStore) -> Document:
     pending = submit(store)
     result, changed = store.approval.decide(
         "recovery-owner", decision(pending, confirm=True, reason="first-peer"),
@@ -52,8 +55,8 @@ def bootstrap(store):
     ({"relay_public_key": key(1)}, "relay-key-must-be-distinct"),
 ])
 def test_invalid_candidate_is_rejected_before_original_request_is_journaled(
-    config, mode, invalid, expected,
-):
+    config: ServiceConfig, mode: str, invalid: Document, expected: str,
+) -> None:
     store = DirectoryStore(selected(config) if mode == "peer-approval" else config)
     request = {**enrollment(), "enrollment_policy": mode}
     before = store.snapshot()
@@ -76,7 +79,7 @@ def test_invalid_candidate_is_rejected_before_original_request_is_journaled(
 
 
 @pytest.mark.parametrize("mode", ["configured-bindings", "peer-approval"])
-def test_client_only_enrollment_does_not_require_an_inbound_host_pin(config, mode):
+def test_client_only_enrollment_does_not_require_an_inbound_host_pin(config: ServiceConfig, mode: str) -> None:
     value = config.to_dict()
     value["policy"]["machines"][0].update(role="client-only", inbound=False)
     value["bindings"][0]["reverse_port"] = None
@@ -94,7 +97,7 @@ def test_client_only_enrollment_does_not_require_an_inbound_host_pin(config, mod
     assert changed and store.snapshot()["directory"]["machines"][0]["host_key"] is None
 
 
-def test_pending_is_durable_but_not_directory_or_relay_admission(config):
+def test_pending_is_durable_but_not_directory_or_relay_admission(config: ServiceConfig) -> None:
     config = selected(config)
     store = DirectoryStore(config)
     before = store.snapshot()
@@ -109,7 +112,7 @@ def test_pending_is_durable_but_not_directory_or_relay_admission(config):
     assert len(restarted.approval.pending("principal-worker-a")["requests"]) == 1
 
 
-def test_explicit_recovery_then_authenticated_peer_approval_and_lost_reply(config):
+def test_explicit_recovery_then_authenticated_peer_approval_and_lost_reply(config: ServiceConfig) -> None:
     config = selected(config)
     store = DirectoryStore(config)
     first = bootstrap(store)
@@ -128,7 +131,7 @@ def test_explicit_recovery_then_authenticated_peer_approval_and_lost_reply(confi
 
 
 @pytest.mark.parametrize("actor", ["principal-worker-b", "unknown", "recovery-owner"])
-def test_pending_or_foreign_actor_cannot_approve(config, actor):
+def test_pending_or_foreign_actor_cannot_approve(config: ServiceConfig, actor: str) -> None:
     store = DirectoryStore(selected(config))
     bootstrap(store)
     pending = submit(store, 1)
@@ -139,7 +142,7 @@ def test_pending_or_foreign_actor_cannot_approve(config, actor):
     assert store.approval.status("principal-worker-b", pending["request_id"]) == pending
 
 
-def test_enrolled_peer_cannot_self_approve(config):
+def test_enrolled_peer_cannot_self_approve(config: ServiceConfig) -> None:
     store = DirectoryStore(selected(config))
     original = bootstrap(store)
     with pytest.raises(SSHServiceError, match="self-approval-refused"):
@@ -152,7 +155,7 @@ def test_enrolled_peer_cannot_self_approve(config):
     {"confirm": True, "reason": "not\none-operation"},
     {"confirm": True, "reason": " " * 513 + "first-peer"},
 ])
-def test_recovery_requires_explicit_confirmation_and_reason(config, extra):
+def test_recovery_requires_explicit_confirmation_and_reason(config: ServiceConfig, extra: Document) -> None:
     store = DirectoryStore(selected(config))
     pending = submit(store)
     with pytest.raises(SSHServiceError, match="explicit-recovery"):
@@ -160,7 +163,7 @@ def test_recovery_requires_explicit_confirmation_and_reason(config, extra):
     assert store.snapshot()["directory"]["machines"] == []
 
 
-def test_recovery_is_never_an_ordinary_machine_capability(config):
+def test_recovery_is_never_an_ordinary_machine_capability(config: ServiceConfig) -> None:
     store = DirectoryStore(selected(config))
     pending = submit(store)
     with pytest.raises(SSHServiceError, match="recovery-principal-not-admitted"):
@@ -171,7 +174,7 @@ def test_recovery_is_never_an_ordinary_machine_capability(config):
     assert store.snapshot()["directory"]["machines"] == []
 
 
-def test_missing_recovery_owner_does_not_bootstrap_implicitly(config):
+def test_missing_recovery_owner_does_not_bootstrap_implicitly(config: ServiceConfig) -> None:
     store = DirectoryStore(selected(config, recovery=()))
     pending = submit(store)
     with pytest.raises(SSHServiceError):
@@ -184,7 +187,7 @@ def test_missing_recovery_owner_does_not_bootstrap_implicitly(config):
     assert store.snapshot()["directory"]["revision"] == 1
 
 
-def test_exact_fingerprint_and_original_request_content_cannot_change(config):
+def test_exact_fingerprint_and_original_request_content_cannot_change(config: ServiceConfig) -> None:
     store = DirectoryStore(selected(config))
     bootstrap(store)
     pending = submit(store, 1)
@@ -198,7 +201,7 @@ def test_exact_fingerprint_and_original_request_content_cannot_change(config):
     assert store.approval.status("principal-worker-b", pending["request_id"]) == pending
 
 
-def test_competing_pending_identity_cannot_remain_approvable_after_activation(config):
+def test_competing_pending_identity_cannot_remain_approvable_after_activation(config: ServiceConfig) -> None:
     store = DirectoryStore(selected(config))
     original = submit(store)
     competing = submit(store, request_id="different-candidate", public_key=key(25))
@@ -212,7 +215,7 @@ def test_competing_pending_identity_cannot_remain_approvable_after_activation(co
 @pytest.mark.parametrize("field,value", [
     ("generation", 2), ("alias", "renamed-worker"), ("user", "other-owner"),
 ])
-def test_changed_binding_cannot_approve_a_stale_pending_identity(config, field, value):
+def test_changed_binding_cannot_approve_a_stale_pending_identity(config: ServiceConfig, field: str, value: Any) -> None:
     config = selected(config)
     store = DirectoryStore(config)
     bootstrap(store)
@@ -227,7 +230,7 @@ def test_changed_binding_cannot_approve_a_stale_pending_identity(config, field, 
     assert current.snapshot() == before
 
 
-def test_approver_generation_must_still_be_admitted(config):
+def test_approver_generation_must_still_be_admitted(config: ServiceConfig) -> None:
     config = selected(config)
     store = DirectoryStore(config)
     bootstrap(store)
@@ -241,7 +244,7 @@ def test_approver_generation_must_still_be_admitted(config):
     assert current.approval.status("principal-worker-b", pending["request_id"])["status"] == "pending"
 
 
-def test_completed_decision_survives_a_later_generation_without_claiming_active(config):
+def test_completed_decision_survives_a_later_generation_without_claiming_active(config: ServiceConfig) -> None:
     config = selected(config)
     store = DirectoryStore(config)
     active = bootstrap(store)
@@ -256,13 +259,13 @@ def test_completed_decision_survives_a_later_generation_without_claiming_active(
     EnrollmentResult.parse(canonical(history))
 
 
-def test_decision_and_activation_roll_back_together_if_caller_is_withdrawn(config):
+def test_decision_and_activation_roll_back_together_if_caller_is_withdrawn(config: ServiceConfig) -> None:
     store = DirectoryStore(selected(config))
     bootstrap(store)
     pending = submit(store, 1)
     before, calls = store.snapshot(), 0
 
-    def checkpoint():
+    def checkpoint() -> None:
         nonlocal calls
         calls += 1
         if calls == 2:
@@ -276,7 +279,7 @@ def test_decision_and_activation_roll_back_together_if_caller_is_withdrawn(confi
         assert db.execute("SELECT COUNT(*) FROM enrollments").fetchone()[0] == 1
 
 
-def test_enabling_optional_policy_preserves_an_existing_admitted_identity(config):
+def test_enabling_optional_policy_preserves_an_existing_admitted_identity(config: ServiceConfig) -> None:
     store = DirectoryStore(config)
     before, _ = store.enroll("principal-worker-a", enrollment())
     new = selected(config).to_dict()
@@ -293,7 +296,7 @@ def test_enabling_optional_policy_preserves_an_existing_admitted_identity(config
         submit(current, request_id="different-key", public_key=key(23))
 
 
-def test_pending_listing_is_bounded_to_latest_candidate_per_declared_principal(config):
+def test_pending_listing_is_bounded_to_latest_candidate_per_declared_principal(config: ServiceConfig) -> None:
     store = DirectoryStore(selected(config))
     for index in range(35):
         submit(store, request_id=f"pending-{index}")
@@ -306,7 +309,7 @@ def test_pending_listing_is_bounded_to_latest_candidate_per_declared_principal(c
     {"mode": "peer-approval", "recovery_principals": ["principal-worker-a"]},
     {"mode": "peer-approval", "recovery_principals": ["recovery", "recovery"]},
 ])
-def test_invalid_or_overlapping_recovery_policy_is_refused(config, policy):
+def test_invalid_or_overlapping_recovery_policy_is_refused(config: ServiceConfig, policy: Document) -> None:
     value = deepcopy(config.to_dict())
     value["enrollment_policy"] = policy
     with pytest.raises((SSHServiceError, ValueError)):

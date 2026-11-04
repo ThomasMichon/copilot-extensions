@@ -31,6 +31,15 @@ dead" endgame — not a second, dead-ended terminal with no CLI path out.
 - **Host (owns PRs):** copilot-extensions worktree sessions.
 - **Handoff:** standard — Journal records phase completion.
 
+### Continuing finite #4744 reconciliation
+
+The same Dispatch state/GC/reservation/migration/documentation custodians retain
+the original acceptance and all source/resource duties. The reconciliation rows
+below are agent-recommended tracking, not a new claimant or implementation.
+Keep Draft, the original Request, participants, every incumbent checkbox and
+historical Journal unchanged. Reported #4844 delivery is credit; old unchecked
+rows do not establish missing code or authorize a queue, migration or test run.
+
 ## Context
 
 **How a task reaches `DEAD_LETTER` today** (the only path —
@@ -158,6 +167,60 @@ CLI transition out:
       `status-rename-migration-2026-09-29.md` (same convention that doc
       already uses to point forward).
 
+### Finite same-canonical acceptance reconciliation for #4744
+
+_(Agent-recommended documentary reconciliation; no completion or transfer.)_
+
+- [ ] **P4744-1:** Retain held claimed/started, repeatedly owner-confirmed-gone
+  exhaustion at `attempts >= DEFAULT_MAX_ATTEMPTS (5)` targeting ABANDONED.
+  Keep the still-QUEUED, never-claimed spawn-three-plus diagnostic and its
+  rearm path separate; do not broaden liveness, expiry or reclamation policy.
+- [ ] **P4744-2:** Credit reported #4844 terminal field/fence/audit delivery:
+  cleared owner/session/lease, completion time and exhausted-abandon meaning.
+  The returned `dead_lettered` count key may remain OR be consistently renamed
+  with every caller and document. Read-compatible names are not new production.
+- [ ] **P4744-3:** Retain generic ordinary RESERVING/SPAWNED/COLD settlement
+  after ABANDONED and credit removal of the two bespoke branches. BOTH ordinary
+  SPAWNED AND COLD paths need their original witness without calling a removed
+  sweep to manufacture it.
+- [ ] **P4744-4:** Retain the named, self-applying idempotent migration of
+  `tasks.status` AND `task_events.from_status` AND `task_events.to_status`,
+  including terminal ownership/time shape, fixture/no-op rerun and documented
+  restored-backup repair. The unrelated spawn diagnostic remains unchanged.
+- [ ] **P4744-5:** Reconcile original Phase 3 compatibility and Phase 4 State
+  model/migration cross-links with actual delivered semantics. Credit deliberate
+  DEAD_LETTER read compatibility and historical documentation; the old
+  keep-OR-delete design choice does not require deleting working compatibility.
+- [ ] **P4744-6:** Retain original full-suite, simulated exhaustion, BOTH
+  settlement paths, migration/idempotent-backup and unaffected other-state/spawn
+  evidence. Distinguish original acceptance from current required-CI/portfolio
+  policy; do not restore exhaustive required-PR testing, invent #4844 validation
+  prose or add a native-host gate.
+- [ ] **P4744-7:** Reconcile the same canonical Plan, actual global Validation
+  and Journal against attributed #4844 delivery. Preserve Draft, all incumbent
+  unchecked states and the historical not-started entry; record each credited,
+  missing or explicitly tracked residual with its existing owner. Neither this
+  proposal nor source/report absence establishes whole completion.
+
+#### Matching finite qualification
+
+- [ ] **V4744-1:** Account for simulated owner-gone-past-cap ABANDONED and the
+  unaffected queued spawn diagnostic/rearm and ordinary other-state controls.
+- [ ] **V4744-2:** Record terminal fields, fences, audit and consistent output
+  naming with historical compatibility and other abandon/reset states intact.
+- [ ] **V4744-3:** Preserve BOTH ordinary settlement-path witnesses and
+  unaffected reservation/state-machine controls; source removal is not the test.
+- [ ] **V4744-4:** Account for exact three-field conversion, idempotency and
+  restored-backup fixture/manual-repair acceptance, without running a migration.
+- [ ] **V4744-5:** Account for read compatibility versus newly produced states
+  and both original documentation surfaces; a rename or empty PR validation
+  body supplies neither documentation nor test acceptance.
+- [ ] **V4744-6:** Resolve OR directly track each original residual with its
+  named existing owner and precise acceptance. Unrelated CI green is not the
+  original full-suite witness; this intake changes no current test policy.
+- [ ] **V4744-7:** Maintain per-original-clause credited/missing/tracked results
+  and a truthful append-only journal; no old claim, plan or study is effort Done.
+
 ## Validation Plan
 
 - [ ] Full `agent-dispatch` plugin suite green
@@ -178,11 +241,29 @@ CLI transition out:
       diagnostic + `reservations rearm` are untouched and still pass their
       own existing tests — explicitly out of this effort's scope.
 
+- [ ] Resolve EVERY direct P4744-1 through P4744-7 and V4744-1 through V4744-7
+  at the original finite tier, preserving all alternatives, credit, existing
+  custodians and original global Validation/first gates. Record precise
+  unresolved or rightfully tracked residuals without fabricating a pass,
+  receiving acceptance or completion. No whole-parent, every-host or generic
+  acknowledgement condition is added.
+
 ## Proposal
 
 _Pending review._
 
 ## Journal
+
+### 2026-10-29 - Finite same-canonical reconciliation proposed
+
+- Added direct #4744 Plan/qualification/global Validation and continuing
+  coordination, retaining the original state/settlement/migration/documentation
+  union and attributed #4844 delivery. This reconciles evidence rather than
+  reopening delivered implementation.
+- Draft, Request, participants, incumbent check states, first unresolved gates
+  and the complete historical Journal remain unchanged. No queue, migration,
+  product test, native result, source disposition or custody change is claimed;
+  ordinary review, actual delivery and separate source judgment remain.
 
 ### 2026-09-30 — Kickoff
 - Investigated 5 stuck `dead_letter` tasks found during a dotfiles-side
