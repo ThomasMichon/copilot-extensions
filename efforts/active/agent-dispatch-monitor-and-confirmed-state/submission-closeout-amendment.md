@@ -42,10 +42,12 @@ Worktrees already owns native-aware mechanical finalization and separate
 read-only finalized-checkout observation. These preserve normal source, PR,
 claim, effort, pairing, follow-up, foreign-session and native-custody gates.
 Current Dispatch integration uses them for an allocator-created worker's
-decline, where permanent closeout before relinquishment is appropriate. A
-submitted worker is different: its task is still provisional and must retain
-the worktree for a possible rejection. The decline operation cannot be reused
-as if readiness and permanent finalization were the same effect.
+decline, currently finalizing before relinquishment. The new outbound task
+obligation requires that ordering to change as well: check readiness while
+retaining the claim, confirm unassignment and unbound requeue, then settle the
+claim before permanent finalization. A submitted worker retains its claim
+instead, because its task is still provisional and needs the worktree for a
+possible rejection. Neither path can treat readiness as permanent finalization.
 
 The current exact-submission rejection owner already preserves revision-bound
 conversation history and feedback. Its actual routing/resume behavior must
@@ -163,6 +165,23 @@ Normal permanent finalization then rechecks all current gates; prior submission 
 not a blanket later cleanup authorization. Remaining unrelated obligations
 still block, and cleanup cannot remove a live or otherwise protected checkout.
 
+For a worker decline, use readiness while the exact own-task obligation remains
+active, then atomically commit the exclusion/unassignment and unbound requeue.
+Only confirmation of that disposition permits claim settlement and subsequent
+normal finalization. A failed or unknown disposition retains the claim and
+cleanup protection. Never break the circular dependency by force-releasing the
+claim or waiving unrelated obligations in effectful finalization.
+
+`ABANDONED` and dead-letter status alone are not new automatic settlement
+outcomes. Surface the retained obligation and its owner as an actionable
+disposition blocker. An authorized recovery that explicitly unassigns and
+returns the task to unbound `QUEUED` can satisfy the existing second outcome;
+otherwise preserve the claim until the responsible owner resolves its work
+through an explicit existing disposition/transfer workflow. Do not silently
+discard unfinished content, reset a terminal task, or invent abandonment-driven
+cleanup permission. Completion of this integration requires testing and
+documenting that retained-owner path, not leaving an invisible leaked claim.
+
 ### Applicability and staged adoption
 
 An original managed allocation is positive evidence that closeout is required.
@@ -203,7 +222,11 @@ tasks or silently activate an unqualified mixed cohort.
    final claim settlement and permanent finalization, with physical cleanup
    separately admitted. Also prove that exact unassignment plus unbound queued
    work settles only that assignment's claim, while submitted, held, timed-out
-   and still-bound queued tasks retain it. Source/unit and native evidence
+   and still-bound queued tasks retain it. Exercise decline readiness before
+   unassignment, lost disposition replies, and later finalization without a
+   circular claim dependency. Abandoned/dead-letter tasks retain visible
+   accountable disposition until an authorized settlement outcome or explicit
+   owner transfer, never implicit cleanup. Source/unit and native evidence
    remain distinct.
 
 Each source slice needs its own current-head review, required CI and actual

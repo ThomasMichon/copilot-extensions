@@ -247,8 +247,9 @@ supervisor own bringing the assignment to **started**, including workspace
 allocation, session startup and an explicit worker acceptance decision.
 An existing agent/pool assignment waits for capacity in that pool instead of
 silently switching pools. A worker can decline with an explanation and
-structured routing exclusions, but finalizes its own workspace before putting
-the assignment down. Startup exhaustion and worker decline are distinct
+structured routing exclusions, after checking its workspace's readiness.
+Confirmed unassignment and unbound requeue settle its task obligation before
+permanent workspace finalization. Startup exhaustion and worker decline are distinct
 outcomes; neither silently loses the task or its prior effects.
 **submitted** is a deliberate review gap: it is the worker's *claim* that the
 goal is met, not a request for another instruction. Workers uniformly submit;
@@ -905,10 +906,12 @@ assignment or permission to launch twice.
 A worker's "not me" carries an explanation and machine-readable exclusions
 scoped to the unsuitable worktree, pool or machine. Every allocation boundary
 honors those exclusions, so the next selection does not repeat the rejected
-placement. The declining worker finalizes its own workspace before
-relinquishing the assignment; failed closeout retains an explicit accountable
-blocker. Finalization readiness does not authorize removal while its runner is
-still alive, or bypass unrelated worktree obligations.
+placement. The declining worker establishes its own workspace's closeout readiness before
+relinquishing the assignment. Its task obligation protects the workspace until
+unassignment and unbound requeue are confirmed; permanent finalization follows
+that settlement. Failed readiness or uncertain relinquishment retains an
+explicit accountable blocker. Readiness does not authorize removal while its
+runner is still alive, or bypass unrelated worktree obligations.
 
 ### retry-eligibility-prevents-placement-churn
 
@@ -951,6 +954,11 @@ its outcome explicitly** once it judges the goal reached. The one
 exception is a **continuation baton**: a handoff task is spent the moment it is
 picked up, because the continuing *work* is tracked by its own effort or issue,
 not by the handoff record.
+
+An abandoned or dead-letter task does not by itself authorize discarding
+unfinished workspace responsibility. Its retained obligation and rightful owner
+remain visible until an authorized disposition resolves or explicitly transfers
+that responsibility; no silent terminal-status cleanup releases it.
 
 ### verify-the-completion-claim
 A worker's submission is a **claim to review**, not authority to confirm

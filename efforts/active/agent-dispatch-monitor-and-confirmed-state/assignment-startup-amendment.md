@@ -77,9 +77,10 @@ Exhaustion returns the task to `QUEUED`; startup failure
 is a supervisor outcome, distinct from a worker's "not me".
 
 A decline must carry objective machine-readable worktree, pool or machine
-exclusions and an explanatory note. The declining worker must finalize its
-own workspace before relinquishing the assignment so it can later be cleaned
-up. Consider explicit Retry-After eligibility for unresponsive startup after
+exclusions and an explanatory note. Under the November 3 claim-lifetime
+clarification, the declining worker passes readiness before relinquishment;
+confirmed unassignment and unbound requeue settle its task claim before
+permanent finalization and later cleanup. Consider Retry-After eligibility for unresponsive startup after
 nudges and repeated same-pool rejection. Revise intent and architecture before
 behavioral implementation; the mismatch is a repair hypothesis, not proof of
 an operational root cause.
@@ -257,12 +258,14 @@ claims of an installed or complete automatic lane.
    freeing its slot or permitting replacement execution. An unknown late
    outcome is not permission to replay or an indefinite `CLAIMED` hold.
 4. On worker decline, durably record its exclusion scopes and explanation
-   while retaining the assignment/reservation. Finalize only its own correct
-   workspace through Worktrees, then atomically apply the routing disposition
-   and release the assignment to `QUEUED`. A narrowly task-aware closeout path
+   while retaining the assignment/reservation. Check only its own correct
+   workspace's mechanical readiness through Worktrees, retaining its exact
+   task obligation. Then atomically apply routing and confirmed unassignment
+   to unbound `QUEUED`; settle that assignment's task claim before permanent
+   finalization. A narrowly task-aware closeout path
    must avoid deadlocking on its own inbound task/session, without bypassing
    foreign/shared-workspace, source, PR, claim or follow-up gates. Failed
-   finalization keeps a visible closeout blocker and its owner. Physical
+   readiness or unknown relinquishment keeps a visible blocker and its owner. Physical
    reclamation still waits for the runner to stop and normal cleanup admission.
 5. Advertise stable pool identity consistently and enforce declined
    worktree/pool/machine exclusions during selection, reservation and claiming.
@@ -387,7 +390,9 @@ the complete validation matrix remains open.
   distinguish delivery from a decision. Exhaustion returns `QUEUED`; delayed
   launch success cannot bypass startup fencing or free capacity prematurely.
 - [ ] Worktree/pool/machine declines constrain every admission boundary.
-  Finalize succeeds before release; failed closeout retains custody; no
+  Readiness precedes confirmed unassignment/unbound requeue, claim settlement
+  and permanent finalization in that order. Failed or unknown disposition
+  retains cleanup protection without a circular claim dependency; no
   running, foreign/shared or otherwise protected workspace is reclaimed.
 - [ ] Coordinator/supervisor interruption between each durable transition
   preserves history and either resumes the same operation or refuses replay.

@@ -171,7 +171,7 @@ before an otherwise authorized source-backed test.
 | Allocation integrity | Concurrent placement, full pool, retained assignment affinity and no duplicate replacement capacity |
 | Startup/decision | Three completed failures/refusals or deadline exhaustion; five-minute same-native prods; thirty-minute decision clock survives restart |
 | Unknown/race | Lost admission/send reply, stopped/changed native and provider rollback never cause blind replay, forbidden resume or wrong-queue acceptance |
-| Decline | Objective filters and note; worker-owned workspace closeout before relinquishment |
+| Decline | Objective filters and note; readiness before confirmed unassignment/unbound requeue, task-claim settlement and permanent finalization; unknown relinquishment preserves cleanup protection |
 | Suspended recovery | Affirmative current-native `STARTED` or fenced `QUEUED` exhaustion; preserved task-wide cooldown and late-result fencing |
 | Submission | Readiness before `SUBMITTED`; worktree-owned task claim blocks cleanup through review/rejection; same-worker retry; permanent finalization only after `COMPLETED`, or exact claim settlement after unassignment to unbound queued work |
 | Workload continuity | Independent candidate result and changed-candidate continuation in the same task/native, without duplicate output |
