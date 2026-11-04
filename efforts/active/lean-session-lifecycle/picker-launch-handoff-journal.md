@@ -629,3 +629,10 @@
   refusal before final qualification. Nine focused controls pass, including
   actual acquisition plus reader execution with unchanged failed/3 output and
   the controlled peer diagnostic; the ordinary runner settles successfully.
+- Before dispatching that instrumented reproduction, the independent updater
+  context owner supplied a narrower CWD reproduction on #10397. That owner
+  retains updater context propagation/tests/docs; this slice retains Vault
+  diagnostics and the Manager qualification lane, with no overlapping updater
+  edits. Remove the temporary trace, deliberate refusal and its control
+  without running another instrumented VM. Final acceptance must use ordinary
+  fixture delivery after the independently reviewed updater prerequisite.

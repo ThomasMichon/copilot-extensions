@@ -169,25 +169,6 @@ elif kind == 'copilot':
         if target.exists():
             shutil.rmtree(target)
         shutil.copytree(origin, target)
-        if name == 'agent-vault':
-            reader = target / 'scripts' / 'runtime-activation.py'
-            original = reader.read_text(encoding='utf-8')
-            marker = '\nif __name__ == "__main__":'
-            assert original.count(marker) == 1
-            trace = '''
-def _fixture_activation_trace(frame, event, arguments):
-    if event == "exception" and frame.f_code.co_name == "read_owner_context":
-        result = frame.f_locals.get("result")
-        if result is not None:
-            print(json.dumps({
-                "fixture_activation_peer_returncode": result.returncode,
-                "fixture_activation_peer_stderr": result.stderr[:4096].decode(
-                    "utf-8", errors="replace"),
-            }), file=sys.stderr, flush=True)
-    return _fixture_activation_trace
-sys.settrace(_fixture_activation_trace)
-'''
-            reader.write_text(original.replace(marker, trace + marker), encoding='utf-8')
         config = Path.home() / '.copilot' / 'config.json'
         value = json.loads(config.read_text())
         version = json.loads((origin / 'plugin.json').read_text())['version']

@@ -755,7 +755,6 @@ def prepare(directory: Path, mode: str) -> None:
         if Path(configuration["context"]["base_root"]).resolve() != (case / "project").resolve():
             raise RuntimeError("Baseline configuration owner selected another repository")
         _run(_command(case, "worktree-manager", "update", "--project", "example"), case, timeout=840)
-        raise RuntimeError("Instrumented activation diagnosis is not whole-suite acceptance")
         _run([shutil.which("pwsh"), "-NoProfile", "-File", payload.with_name("agent-index") / "scripts" / "install.ps1",
               "engine"], case, timeout=600)
         _run(_command(case, "worktree-manager", "mux-daemon", "ensure"), case, timeout=30)
