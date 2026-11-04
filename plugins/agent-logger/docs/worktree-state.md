@@ -17,8 +17,54 @@ The orchestration caller must first qualify the worktree owner's repository,
 full worktree/incarnation and selected store, obtain the complete domain-owned
 export, and negotiate the selected owner's complete-export verifier. The library
 takes that exact typed identity and verifier; it never imports another plugin's
-runtime or guesses a state home. Provider discovery/export orchestration remains
-an independent unfinished integration.
+runtime or guesses a state home. Passive provider discovery is available
+separately; export orchestration and existing-tick integration remain unfinished.
+
+## Passive provider discovery
+
+`sync.worktree_state_providers.read_project_inventory` accepts the aggregate
+input owner's typed repository admission, retaining its exact authoritative
+checkout rather than reconstructing it from diagnostic provenance. It reuses
+Logger's existing native Worktrees command selection: the validated same-cell
+peer launcher in a namespaced installation, or the completion-gated legacy
+owner prefix without ambient PATH selection. Explicit refusal never falls
+back to another owner.
+
+The Worktrees process selects its own registered project from that checkout's
+actual working directory, not Logger's ambient project or a repository-basename
+alias. Its existing passive capabilities operation must advertise
+`worktree-data-project-inventory-v1` before Logger sends `--inventory`. An older
+or refused provider is unsupported, never permission to bootstrap a runtime,
+scan another registry or fabricate an empty successful result.
+
+The complete inventory must match the admitted repository's actual Git origin
+and selected installation. The existing aggregate policy identity is checked
+separately; it cannot reconstruct a lossless owner identity because it folds
+path case and omits ports. A fresh bounded Git read plus the existing local
+repository-trust normalizer preserves non-GitHub path case and non-default
+ports, folds GitHub path case and removes only protocol-default ports.
+`ProjectInventory.owner_repository_identity` retains that exact owner identity
+separately from the unchanged aggregate-policy identity. A case-distinct path
+or different non-default port is foreign, not a compatible alias.
+Logger retains every registered agenda placement,
+including retired worktrees with missing canonical records, while rejecting
+partial, duplicate, foreign or over-budget results. Limits remain 128 worktrees,
+32 stores per worktree and a 1 MiB response. Locations and registration fences
+are observations, not proof of initialized domain contents or a collection grant.
+The read does not open a domain database or allocate missing state.
+
+`select_efforts_exporter` uses the canonical plugin-activation resolver for
+that exact checkout plus its effective global settings. Explicit project
+disablement, indeterminate settings and multiple matching marketplace identities
+cannot become global fallback or first-provider selection. The selected ordinary
+Efforts script must advertise both complete export and optional complete
+contributor provenance through its actual `info` operation. Package versions or
+another reader's support do not qualify it.
+
+These are explicit passive library calls only. No CLI, scheduler, sync tick,
+export, collection, migration or installed rollout is enabled. A later
+orchestrator must freshly qualify current admission, registration and selected
+provider support at its effect boundary; these observations are not a lease.
 
 ## Admission before effects
 
@@ -130,8 +176,9 @@ Before supplying it, the orchestration caller must negotiate
 `info.optional_capabilities`. The callback returns that provider's complete
 `efforts.agenda-export-contributors`, version 1 projection for the selected export,
 not a live database or a session lookup. Missing support preserves the original
-API; it cannot satisfy a requirement for complete attribution. Provider discovery
-and automatic collection remain unimplemented.
+API; it cannot satisfy a requirement for complete attribution. The passive
+selector above requires richer support without changing those original calls.
+Automatic collection remains unimplemented.
 
 Logger checks the projection's exact raw-manifest digest, source identity,
 complete operation count, tuple uniqueness, first-acceptance order and bounds.
@@ -205,3 +252,8 @@ lossless provenance, unknown/noncanonical identities, both metadata budgets,
 policy refusal, immutable v1/v2 separation and fresh corruption detection.
 The real separate-process export test also negotiates the selected provider's
 optional capability and round-trips both legacy and provenance-aware calls.
+The opt-in `tests/test_worktree_state_providers.py` packet exercises actual
+native `-m agent_worktrees` project selection and retained multi-store discovery,
+same-cell prefix reuse, current and prior capability responses, exact-checkout
+Efforts activation and its actual `info` parser. It preserves fixture state
+bytes and keeps process-heavy qualification out of required unit-only CI.

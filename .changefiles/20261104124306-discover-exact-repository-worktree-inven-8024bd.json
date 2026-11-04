@@ -1,0 +1,9 @@
+{
+  "comment": "Discover exact-repository worktree inventory and negotiate the effective Efforts export provider without enabling collection",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}
