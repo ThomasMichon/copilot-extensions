@@ -22,7 +22,9 @@ Bridge membership consumption and the first isolated three-owner demonstration.
 #10435 adds the supported selected-session semantic consumer and its independent
 history/live and lifecycle fences. #10447 adds Logger's
 [explicit typed collection/readback library](../../../plugins/agent-logger/docs/worktree-state.md),
-not owner discovery or scheduled orchestration. Logger integration, complete source coverage, qualified
+not owner discovery or scheduled orchestration. #10488 adds passive project-wide
+retained inventory at the Worktrees owner, not contributor discovery or a logger
+consumer. Logger integration, complete source coverage, qualified
 current answerability/PRE, installed and native acceptance remain open.
 Providers advertise actual running support before independently installed
 callers use new syntax. Existing roster, agenda-v1/v2 and raw Bridge event
@@ -64,6 +66,7 @@ measurement support is not inferred from either receipt.
 | agent-worktrees | `worktree-observations-feed-v1` | `worktree-observations`: one-shot selected snapshot; `--follow` and an opaque after cursor select held updates |
 | agent-worktrees | `worktree-observations-history-v1` | `worktree-observation-history`: bounded page before an opaque source cursor |
 | agent-worktrees | `worktree-data-v1` | Passive `worktree-data-read` and separate explicit new-home `worktree-data-allocate`; placement is not store-content validation or live authority |
+| agent-worktrees | `worktree-data-project-inventory-v1` | Optional passive `worktree-data-read --inventory`, including retained descriptors without canonical records; no allocation, collection or domain-content validation |
 | Bridge | `bridge-owner-membership-v1` | `observe-owner`: authenticated owner-scoped snapshot and optional follow/position |
 | Bridge | `bridge-session-observations-v1` | `observe-session`: bounded semantic projection over an admitted known session stream |
 | Bridge | `bridge-session-observation-history-v1` | `session-observation-history`: bounded supported retained history, not a raw-SSE query masquerading as a page |

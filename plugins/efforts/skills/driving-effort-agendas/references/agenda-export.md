@@ -21,6 +21,11 @@ python <efforts-payload>/skills/driving-effort-agendas/scripts/agenda_export_cli
   --destination <export-directory> --worktree <full-worktree-id> \
   --store-id <expected-store-id> --expected-revision <revision> \
   --contract-version 1
+
+python <efforts-payload>/skills/driving-effort-agendas/scripts/agenda_export_cli.py contributors \
+  --destination <export-directory> --worktree <full-worktree-id> \
+  --store-id <expected-store-id> --expected-revision <revision> \
+  --contract-version 1
 ```
 
 `info` advertises `agenda-complete-export-v1` without reading a store.
@@ -29,6 +34,50 @@ Source support does not establish an older installed payload's capabilities.
 Both effectful export and read-only verification return bounded JSON under
 `efforts.agenda-export-cli`, version 1. Errors do not return a successful
 manifest.
+
+## Optional contributor provenance
+
+The original `info.capabilities` list remains exactly
+`["agenda-complete-export-v1"]`. A separate additive
+`optional_capabilities: ["agenda-export-contributors-v1"]` advertises
+`contributors` support from the exact selected payload. Consumers must negotiate
+that optional capability before sending the new command. Absent metadata on an
+older or rolled-back provider means provenance support is unknown; original
+`export`/`verify` remain usable. No consumer is enabled by this provider change,
+and no existing command, response field or strict stored manifest changes.
+The version-1 contracts are retained; no retirement is scheduled.
+
+`contributors` is a passive read of an existing complete export, not a live
+database locator. It first verifies the entire export with the same checks as
+`verify`, then derives provenance inside that same pinned read-only transaction.
+Its `efforts.agenda-export-cli`, version 1 response has `ok: true` and a
+`contributors` object, not a `manifest` field. The projection uses schema
+`efforts.agenda-export-contributors`, version 1:
+
+- `completeness: "complete"` and `manifest_sha256` bind the exact raw published
+  manifest bytes, including formatting, rather than a reserialized document.
+- `source` binds `worktree`, `store_id` and the exact accepted `revision`.
+- `contributors` contains every distinct accepted `(actor, session,
+  qualification)` tuple in first-acceptance order, with inclusive
+  `first_revision`/`last_revision` and the number of accepted `operations`.
+  Gaps between first and last do not assert continuous participation.
+
+Null actor/session metadata stays null. Arbitrary owner-valid UTF-8 metadata
+(up to 1 KiB per nonnull field) is preserved without truncation, conversion to
+filename identifiers, assignment to the latest session, or omission of unknown
+contributors. `caller-asserted` is historical input, not authenticated identity
+or current execution authority; both fields null retains `unknown`.
+The original complete export still owns the per-operation evidence.
+
+The projection refuses above 4,096 distinct tuples or 1 MiB of ASCII-escaped
+JSON, and shares the original verification's 120-second cooperative deadline.
+These are whole-result failure budgets, not pagination or retention policies.
+Failures return no successful projection. Export member integrity is checked
+again after projection, before success; neither source nor export is modified.
+Contributor discovery adds one ordered pass over accepted requests and no
+additional connection, history page, subprocess, scheduler or archive write.
+This does not relax an archivist's session-reference schema, privacy gate,
+repository selection or collection consent.
 
 ## Snapshot and completeness
 

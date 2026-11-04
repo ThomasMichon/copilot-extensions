@@ -521,18 +521,12 @@ def export_store(
         raise ExportError(f"agenda export failed; partial destination retained: {exc}") from exc
 
 
-def verify_export(
+@contextmanager
+def _verified_export(
     destination: Path, *, worktree: str, store_id: str,
     expected_revision: int | None = None,
-) -> dict[str, Any]:
-    """Verify all exported bytes, owner schema, identities and complete ledger.
-
-    Verification is passive and does not initialize, migrate, publish or replay.
-    POSIX publication retains the prepared manifest beside the published name;
-    Windows write-through publication moves it. Transport may preserve or omit
-    the prepared name, but never substitute different content for it.
-    A matching manifest cannot authenticate its author or authorize restoration.
-    """
+) -> Iterator[tuple[dict[str, Any], bytes, sqlite3.Connection, _Budget]]:
+    """Keep the fully verified read-only snapshot pinned through owner projection."""
     _selection(worktree, store_id, expected_revision)
     destination = _directory(destination)
     budget = _Budget()
@@ -579,11 +573,21 @@ def verify_export(
         with store.transaction(destination, readonly=True, store_version=2) as db:
             _size(db)
             actual = _inspect(db, destination, worktree, store_id, expected_revision, budget)
-        if manifest != {"schema": SCHEMA, "version": VERSION, "completeness": "complete",
-                        **actual, "members": {store.DATABASE: actual_member}}:
-            raise ExportError("manifest and complete owner snapshot disagree")
+            if manifest != {"schema": SCHEMA, "version": VERSION, "completeness": "complete",
+                            **actual, "members": {store.DATABASE: actual_member}}:
+                raise ExportError("manifest and complete owner snapshot disagree")
+            yield manifest, raw, db, budget
+            budget.check()
         if _member(destination / store.DATABASE, budget) != actual_member:
             raise ExportError("export changed during verification")
-        return manifest
     except (sqlite3.Error, OSError, ValueError, TypeError, KeyError, UnicodeError) as exc:
         raise ExportError(f"agenda export verification failed: {exc}") from exc
+
+
+def verify_export(
+    destination: Path, *, worktree: str, store_id: str, expected_revision: int | None = None,
+) -> dict[str, Any]:
+    """Passively verify the complete export; integrity is not authorship or authority."""
+    with _verified_export(destination, worktree=worktree, store_id=store_id,
+                          expected_revision=expected_revision) as (manifest, _, _, _):
+        return manifest

@@ -63,6 +63,12 @@ fencing. The [source readback](journal/2026/11.04-sidecar-collection-library.md)
 records 876 coupled controls, separate depth/Windows-API controls and continuing
 owner-discovery/orchestration, archival, rescue and native gates.
 
+#10488 merged as `afb014880eccdb19762c122f50b213845acd7de5`, delivering passive
+project-wide retained-descriptor inventory through the existing Worktrees owner.
+The [source readback](journal/2026/11.04-sidecar-retained-inventory.md) records
+166 coupled controls and the unchanged admitted unit packet. Contributor
+provenance and existing-tick integration remain open; D4 is not complete.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than
