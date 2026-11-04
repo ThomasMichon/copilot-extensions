@@ -2187,6 +2187,21 @@ These Windows source controls do not qualify live service registration,
 CodeSpace connectivity, POSIX execution or installed rollout, and do not enter
 the required unit-only CI packet.
 
+The on-demand Worktrees `tests/test_update_codespaces_recovery.py` packet joins
+the normal collected update orchestration, real currentness probe, bounded
+installer process/receipt owner and guarded Codespaces producer. Run
+`python tools/run-plugin-tests.py agent-worktrees --test-file
+tests/test_update_codespaces_recovery.py --allow-explicit-tiers` on Windows.
+A matching manifest with an incomplete selected slot must produce a usable
+repair and generated command; repeat must skip the now-current runtime without
+dependency writes. Failed incoming preparation must preserve the prior slot,
+configuration and selectors. Machine participation, acquisition, the unrelated
+engine and final host integration are synthetic boundaries. The test reuses
+the Codespaces private-profile/fake-UV fixture and real disposable venvs, not a
+mock successful installer. It does not qualify repository-shell fresh bootstrap,
+real feeds, services, other portfolio members or installed rollout, and does
+not add native cases or increase budgets in required unit-only CI.
+
 `tests/test_installer_generation_shell.py` executes the real POSIX selection
 and activation functions under Bash nounset, checking absent/present source
 receipts, argument boundaries and GC with no keep arguments. It uses Git Bash

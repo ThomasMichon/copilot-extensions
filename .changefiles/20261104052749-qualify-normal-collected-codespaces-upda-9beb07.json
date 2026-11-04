@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify normal collected Codespaces update recovery, truthful current reuse and failed incoming preservation through native consumer composition.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
