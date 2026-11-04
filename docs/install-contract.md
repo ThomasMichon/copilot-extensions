@@ -70,6 +70,14 @@ records remaining gaps. Every installer/update effort and bug-fix review must
 cite this contract and state which completion/preservation controls it exercises;
 passing legacy refusal tests alone does not establish conformance.
 
+The canonical ordinary construction session preserves predecessor names through
+the same kernel-backed retention protocol even when an old entry is not an
+installed directory.
+That reference pin prevents cleanup; it does not qualify the entry as a runtime.
+Ordinary runtime/candidate retention remains strict by default, including
+completed-content admission. Fresh construction never rewrites the invalid
+predecessor merely to obtain a lease.
+
 The [installation footprint reference](installation-footprint.md#installer-equivalent-repair)
 maps artifacts and failed/refused installer subtasks to their existing owners.
 Within authorized repair, canonical configuration/launcher/registration and

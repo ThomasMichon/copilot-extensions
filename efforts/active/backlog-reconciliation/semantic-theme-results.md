@@ -84,6 +84,13 @@ This is the first shared-presentation routing cohort, not seventeen duplicates.
 Backend/source/native and #2453 Confirm custody remain separate. Existing
 Manager and Tasks plans retain their own acceptance and first gates.
 
+The [complete seventeen-contract study](picker-provider-cohort.md) synthesizes
+all 79 original/discussion texts into four routed families with typed
+dependencies and explicit residuals. It finds no demonstrated whole-contract
+duplicate or newly verified completion. Relevant existing-home fit is
+distinguished from complete current receiving acceptance; assigned-source,
+claimed integration and native/installed conditions remain.
+
 ### Session-data cohort
 
 #4976, #5665, #5677, #5678, #8682 and #8735.

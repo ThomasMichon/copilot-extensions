@@ -245,6 +245,18 @@ edges and 50 stable cores. A later complete census counts 1,023 whole open,
 correction; new inflow and #10364's external departure remain separate.
 Graph membership and navigation lists are not receiving acceptance.
 
+The [whole-contract Picker/provider study](picker-provider-cohort.md) now
+retains all seventeen originals and sixty-two comments. It separates four
+effort-sized families and their existing-home fit, complete residuals and
+typed dependencies without treating graph density as duplication or priority.
+Assigned-source disposition, claimed integration, bidirectional versus read-only
+transport, all-pivot authority and native/installed acceptance remain distinct.
+The relevant receiving sections were inspected at a fixed source pin; complete
+current receiving-ROOT acceptance and separate source judgments are not claimed.
+The 2026-11-04 12:59:20 UTC / 04:59:20 PST complete census is 1,032 whole
+open, 303 above the fixed 729 checkpoint. No new closure, implementation
+appointment, rollout or held-lane recovery follows.
+
 - [x] Holistically sweep the initial eligible backlog and build an issue/effort
   relationship graph; use alignment and theme to identify consolidation groups.
   The [initial graph snapshot](graph-overview.md) accounts for all 695 assigned

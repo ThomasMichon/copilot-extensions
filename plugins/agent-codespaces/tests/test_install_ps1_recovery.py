@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import shutil
@@ -10,6 +11,7 @@ import sys
 import time
 import tomllib
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -17,6 +19,7 @@ from .installer_test_support import (
     assert_installer_isolated,
     guard_installer_payload,
     isolate_installer_environment,
+    snapshot_tree_manifest,
 )
 
 PLUGIN = Path(__file__).resolve().parents[1]
@@ -111,7 +114,8 @@ if args[:2] == ["pip", "install"]:
     package.mkdir(parents=True, exist_ok=True)
     (package / "__init__.py").write_text("", encoding="utf-8")
     (package / "__main__.py").write_text(
-        "import sys\\nraise SystemExit(0)\\n",
+        "import sys\\nif '--help' in sys.argv: print(sys.prefix)\\n"
+        "raise SystemExit(" + ("31" if mode == "fail-health" else "0") + ")\\n",
         encoding="utf-8",
     )
     raise SystemExit(0)
@@ -266,34 +270,143 @@ def test_uv_only_construction_bootstrap_is_fail_closed(tmp_path: Path, mode: str
         assert (_slot(home) / ".install-complete.json").is_file()
 
 
-def test_uv_only_host_refuses_selected_malformed_slot(tmp_path: Path) -> None:
+def _repair_case(tmp_path: Path, *, qualified: bool = False, footprint: str = "incomplete"):
     home = tmp_path / "home"
     home.mkdir()
     fake_bin = _write_fake_uv(tmp_path)
-    slot = _slot(home)
-    (slot / "Scripts").mkdir(parents=True)
-    (slot / "Scripts" / "python.exe").write_text("malformed", encoding="ascii")
-    (slot / "partial.txt").write_text("discard", encoding="ascii")
-    root = slot.parents[1]
-    (root / "current-version").write_text(VERSION, encoding="ascii")
-    before = {
-        path: path.read_bytes()
-        for path in (slot / "Scripts" / "python.exe", slot / "partial.txt", root / "current-version")
-    }
-
-    result = _run(
-        INSTALL,
-        "install",
-        home=home,
-        fake_bin=fake_bin,
-        mode="success",
-        uv_only=True,
+    identity = None
+    version = VERSION
+    if qualified:
+        payload = tmp_path / "source"
+        _copy_plugin_tree(payload)
+        helper = payload / "scripts" / "versioned_runtime_source.py"
+        spec = importlib.util.spec_from_file_location("codespaces_source_fixture", helper)
+        source = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = source
+        spec.loader.exec_module(source)
+        digest = source.assembly_hash(payload)
+        identity = source.SourceIdentity(
+            "agent-codespaces", VERSION, "a" * 40, "b" * 40, digest,
+            source.runtime_version(VERSION, "a" * 40, digest),
+        )
+        (payload / "runtime-source.json").write_text(json.dumps(identity.document()))
+        version = identity.runtime_version
+    slot = home / ".agent-codespaces" / "versions" / version
+    if footprint == "file":
+        slot.parent.mkdir(parents=True)
+        slot.write_text("preserve non-directory generation", encoding="ascii")
+    elif footprint == "stale-helpers":
+        seeded = _run(
+            INSTALL, "install", home=home, fake_bin=fake_bin, mode="success", uv_only=True,
+        )
+        assert seeded.returncode == 0, seeded.stdout
+        helper = slot / ".runtime-bootstrap" / "versioned_runtime.py"
+        helper.write_bytes(helper.read_bytes() + b"\n# Older retained helper build.\n")
+    else:
+        (slot / "Scripts").mkdir(parents=True)
+        (slot / "Scripts" / "python.exe").write_text("broken interpreter", encoding="ascii")
+        (slot / "partial.txt").write_text("preserve incomplete generation", encoding="ascii")
+    runtime = slot.parents[1]
+    for name in ("current-version", "last-known-good"):
+        if footprint == "invalid-selectors":
+            (runtime / name).write_bytes(b"\xff\xfe")
+        else:
+            (runtime / name).write_text(version, encoding="ascii")
+    config = runtime / "config.yaml"
+    config.write_text("default_idle_timeout: 42\n", encoding="ascii")
+    before = snapshot_tree_manifest(slot)
+    return SimpleNamespace(
+        home=home, fake_bin=fake_bin, version=version, identity=identity,
+        slot=slot, runtime=runtime, config=config, before=before,
     )
 
-    assert result.returncode != 0, result.stdout
-    assert "runtime slot has a construction or retention owner" in result.stdout
-    assert all(path.read_bytes() == content for path, content in before.items())
-    assert not (slot / ".install-complete.json").exists()
+
+def _assert_repair(case, result):
+    runtime, slot, config = case.runtime, case.slot, case.config
+    assert result.returncode == 0, result.stdout
+    selected = (runtime / "current-version").read_text().strip()
+    assert selected.startswith(case.version + (".repair." if case.identity else "+repair.")), result.stdout
+    repaired = runtime / "versions" / selected
+    assert json.loads((repaired / ".install-complete.json").read_text())["version"] == selected
+    assert (runtime / "last-known-good").read_text().strip() == selected
+    manifest = json.loads((runtime / "deploy-manifest.json").read_text(encoding="utf-8-sig"))
+    assert manifest["runtime_version"] == selected
+    assert manifest["source"]["version"] == VERSION
+    assert Path(manifest["venv"]) == repaired
+    if case.identity:
+        assert manifest["runtime_source"] == case.identity.document()
+    assert snapshot_tree_manifest(slot) == case.before
+    assert config.read_text() == "default_idle_timeout: 42\n"
+    cli = subprocess.run(
+        [str(repaired / "Scripts" / "python.exe"), "-I", "-B", "-m", "agent_codespaces", "--help"],
+        text=True, capture_output=True, timeout=30, check=False,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert cli.returncode == 0, cli.stdout + cli.stderr
+    assert Path(cli.stdout.strip()) == repaired
+    command = subprocess.run(
+        [PWSH, "-NoProfile", "-File", str(case.home / ".local" / "bin" / "agent-codespaces.ps1"), "--help"],
+        cwd=case.home, env=_environment(
+            case.home, case.fake_bin, case.fake_bin.parent / "fake_uv.py", "success", uv_only=True,
+        ),
+        text=True, capture_output=True, timeout=30, check=False,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert command.returncode == 0, command.stdout + command.stderr
+    assert Path(command.stdout.strip()) == repaired
+    assert_installer_isolated(case.fake_bin)
+    return selected
+
+
+def _construction_calls(case):
+    calls = (case.fake_bin.parent / "uv.jsonl").read_text().splitlines()
+    return [line for line in calls if json.loads(line)[0] in ("venv", "pip")]
+
+
+@pytest.mark.parametrize(("action", "footprint"), [
+    ("install", "incomplete"), ("update", "incomplete"), ("update", "file"),
+    ("update", "invalid-selectors"), ("update", "stale-helpers"),
+])
+def test_normal_entry_repairs_selected_generation_and_reuses_it(
+    tmp_path: Path, action: str, footprint: str,
+) -> None:
+    case = _repair_case(tmp_path, footprint=footprint)
+    result = _run(
+        INSTALL, action, home=case.home, fake_bin=case.fake_bin, mode="success", uv_only=True,
+    )
+    selected = _assert_repair(case, result)
+    writes = _construction_calls(case)
+    repeated = _run(
+        INSTALL, action, home=case.home, fake_bin=case.fake_bin, mode="success", uv_only=True,
+    )
+    assert _assert_repair(case, repeated) == selected
+    assert _construction_calls(case) == writes
+
+
+@pytest.fixture(scope="module")
+def source_repair_installation(tmp_path_factory):
+    case = _repair_case(tmp_path_factory.mktemp("codespaces-source-repair"), qualified=True)
+    result = _run(
+        INSTALL, "update", home=case.home, fake_bin=case.fake_bin, mode="success", uv_only=True,
+    )
+    assert result.returncode == 0, result.stdout
+    return case, result
+
+
+def test_source_entry_repairs_without_relabeling_source_receipt(source_repair_installation):
+    case, result = source_repair_installation
+    _assert_repair(case, result)
+
+
+def test_source_entry_reuses_healthy_repair(source_repair_installation):
+    case, _ = source_repair_installation
+    selected = (case.runtime / "current-version").read_text().strip()
+    writes = _construction_calls(case)
+    repeated = _run(
+        INSTALL, "update", home=case.home, fake_bin=case.fake_bin, mode="success", uv_only=True,
+    )
+    assert _assert_repair(case, repeated) == selected
+    assert _construction_calls(case) == writes
 
 
 def _seed_healthy_slot(home: Path) -> Path:
@@ -334,7 +447,8 @@ def _seed_healthy_slot(home: Path) -> Path:
     return slot
 
 
-def test_install_refuses_selected_slot_with_incomplete_metadata(tmp_path: Path) -> None:
+@pytest.mark.parametrize("mode", ["fail-pip", "fail-health"])
+def test_failed_repair_preserves_selected_incomplete_generation(tmp_path: Path, mode: str) -> None:
     home = tmp_path / "home"
     home.mkdir()
     fake_bin = _write_fake_uv(tmp_path)
@@ -353,16 +467,17 @@ def test_install_refuses_selected_slot_with_incomplete_metadata(tmp_path: Path) 
         )
     }
 
-    result = _run(INSTALL, "install", home=home, fake_bin=fake_bin, mode="success")
+    result = _run(INSTALL, "update", home=home, fake_bin=fake_bin, mode=mode)
 
     assert result.returncode != 0, result.stdout
-    assert "runtime slot has a construction or retention owner" in result.stdout
     assert all(path.read_bytes() == content for path, content in before.items())
     assert not (slot / "pyvenv.cfg").exists()
     assert not (slot / ".install-complete.json").exists()
+    assert list((runtime / "versions").iterdir()) == [slot]
+    assert not (runtime / "deploy-manifest.json").exists()
 
 
-def test_install_refuses_slot_with_malformed_completion_state(tmp_path: Path) -> None:
+def test_install_repairs_slot_with_malformed_completion_state(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
     fake_bin = _write_fake_uv(tmp_path)
@@ -376,8 +491,8 @@ def test_install_refuses_slot_with_malformed_completion_state(tmp_path: Path) ->
 
     result = _run(INSTALL, "install", home=home, fake_bin=fake_bin, mode="success")
 
-    assert result.returncode != 0, result.stdout
-    assert "health-repair-required" in result.stdout
+    assert result.returncode == 0, result.stdout
+    assert (slot.parents[1] / "current-version").read_text().strip().startswith(VERSION + "+repair.")
     assert all(path.read_bytes() == content for path, content in before.items())
 
 

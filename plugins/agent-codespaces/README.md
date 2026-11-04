@@ -244,7 +244,7 @@ across the provider boundary.
 
 ## Runtime health and activation
 
-Both installers verify `python -I -m agent_codespaces --help` before publishing
+Both installers verify `python -I -B -m agent_codespaces --help` before publishing
 completion or activating a numbered or claimed development slot. Isolated
 module execution checks the actual CLI entrypoint and its imports; a successful
 package import alone can accept a partial namespace package. Checkout files,
@@ -255,12 +255,25 @@ the installer first asks `uv` for Python 3.11, then uses its normal managed-Pyth
 run path if necessary. It requires a successful concrete interpreter result
 before construction; failure does not authorize reuse of an incomplete slot.
 
-If an existing numbered slot has completion evidence but fails that launch
-check, ordinary installation refuses before rebuilding its venv or packages,
-including under `--force`/`-Force`. Its completion evidence and selectors are
-left intact. Use a distinct repair generation or a new released version;
-this health refusal does not itself implement generation repair or complete
-the broader admission/coalescing rollout.
+Normal install, update and first-use provisioning reuse a matching completed
+generation only after that launch check. An occupied but incomplete, malformed,
+content-conflicting or unhealthy target instead constructs a distinct
+`<version>+repair.<generation>` slot (or `.repair.<generation>` after a
+source-qualified identity), including under `--force`/`-Force`. The original
+slot and user configuration are not rebuilt or removed. Failed construction or
+incoming health leaves the existing selection intact; a healthy candidate is
+completed before activation and recorded in the deployment manifest. Repeating
+the same request reuses its healthy selected repair without dependency writes.
+
+PowerShell reuse also verifies the retained bootstrap helpers required by its
+completion step; stale helpers select a fresh generation rather than modifying
+the old slot. Undecodable legacy selector contents do not block construction
+or publication of a healthy incoming selection. Filesystem safety and storage
+failures retain their existing handling.
+
+Source receipt validation remains bound to the original source generation,
+independently of the repair suffix. This native CLI recovery does not establish
+central-service cutover, shared admission/coalescing or installed-host rollout.
 
 ### First-use deployment admission
 
