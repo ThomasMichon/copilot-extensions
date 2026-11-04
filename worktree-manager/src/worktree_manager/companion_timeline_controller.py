@@ -77,6 +77,11 @@ class TimelineController:
         return sum(not task.done() for task in self._readers.values())
 
     @property
+    def selected_tokens(self) -> tuple[SourceToken, ...]:
+        """Current bindings only, distinct from retained historical source scopes."""
+        return tuple(self._selected.values())
+
+    @property
     def page_count(self) -> int:
         return sum(not task.done() for task in self._pages.values())
 

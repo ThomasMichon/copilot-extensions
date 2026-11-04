@@ -2,7 +2,8 @@
 
 The opt-in Manager `tests/test_companion_visual.py` packet compares actual
 Textual timeline renders against synthetic live-following and history-browsing
-SVG baselines. It preserves current captures as JUnit properties for inspection
+SVG baselines, plus a selected-session view with visibly paused membership and
+unknown pre-compaction qualification. It preserves current captures as JUnit properties for inspection
 without silently updating the expected screens. See
 `worktree-manager/tests/visual_baselines/README.md` for the bounded invocation,
 baseline-review procedure and rendered-fixture versus native-client limits.

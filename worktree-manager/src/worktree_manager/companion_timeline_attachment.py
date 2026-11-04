@@ -192,7 +192,7 @@ class TimelineAttachment:
                     else WorktreeTimelineSource(project, worktree, head, cwd=self.cwd)
                 )
                 if self._status is not None:
-                    self._status("loading selected owner observations")
+                    self._status(getattr(source, "preparing_message", "loading selected owner observations"))
                 else:
                     self.panel.query_one(".timeline-state", Static).update(Text("Loading selected owner observations."))
                 initial = await source.prepare(revision, stop=stop)
@@ -248,10 +248,10 @@ class TimelineAttachment:
                     if not result.applied:
                         raise TimelineSourceError(result.reason)
                     if self._status is not None and isinstance(value, TimelineSnapshot):
-                        self._status(
+                        self._status(getattr(source, "status_message",
                             "partial owner-linked membership; liveness, head and answerability unknown; "
                             "linkage is not custody"
-                        )
+                        ))
 
                 def page(value: HistoryPage) -> None:
                     if current():
