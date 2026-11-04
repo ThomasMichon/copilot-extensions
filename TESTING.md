@@ -24,6 +24,15 @@ plus two descriptor-membership scans per worktree, without traversing domain
 contents. These isolated source controls do not qualify installed collection,
 native Windows inventory, remote latency or durable archive acknowledgment.
 
+The manual `windows-coverage-rotation.yml` selector `related_resolution=true`
+runs Worktrees' configuration-graft and execution-context consumers through the
+canonical hardened Linux container. Supply `ref` for the published candidate;
+execution records its immutable checkout, selector, container profile and actual
+outcome. Focused selectors are mutually exclusive. This packet checks targeted
+source/topology work counts, configuration forwarding, precedence, failure and
+separate-invocation freshness. It neither expands required unit-only CI nor
+qualifies installed runtime, native Windows, ACP or whole-hook throughput.
+
 The manual `windows-coverage-rotation.yml` selector `post_tool_fallback=true`
 runs only Worktrees' post-tool shell, status/bind reminder, late-guidance and
 guard-publication consumer packet through the canonical hardened Linux container. Supply `ref`
@@ -52,12 +61,18 @@ an installed rollout.
 Logger's opt-in `--test-file tests/test_worktree_state.py
 --test-file tests/test_worktree_state_coexistence.py
 --test-file tests/test_worktree_state_preservation.py
+--test-file tests/test_worktree_state_contributors.py
 --allow-explicit-tiers` packet checks typed local collection admission,
 creation-time privacy, fleet coexistence, corruption/partial-publication refusal
 and complete efforts export/readback
 through real isolated Python processes. It does not enable scheduled collection
 or qualify native Windows, an installed archive destination, remote durability
 or reclamation. See [the collection boundary](plugins/agent-logger/docs/worktree-state.md).
+The contributor cases preserve the complete optional owner projection separately
+from canonical session references, refuse a v1 receipt as richer acknowledgment,
+and verify actual retained metadata afresh. The separate-process owner test
+negotiates the selected payload's optional capability before using new syntax;
+original export/readback calls remain covered without it.
 The preservation cases exercise actually eligible old sessions and a verified
 ordinary archive containing no worktree collection; neither justifies erasing
 marked nested evidence.
@@ -3616,6 +3631,24 @@ fixture-introduced grant before exact removal/retry. Runtime directories use
 the same canonical held-handle current-principal proof as runtime files plus
 the existing strict private-grant allowlist; roots and metadata retain their
 TokenUser-owner requirement.
+
+The same optional native portfolio separately runs six real installed
+`test_actual_installed_console_managed_lifecycle` cases: exact install/retry,
+same-release forward replacement with missing or malformed predecessor proofs,
+selected higher-release update, exact uninstall/retry and same-byte foreign
+command preservation. Each remains a separate 120-second caller with the
+unchanged 90-second item and 45-second child limits. Its distinct `--managed`
+oracle requires exactly those six non-skipped cases; it does not replace or
+weaken the original six-consumer oracle. The owner console runs outside the
+checkout, and incoming direct/default diagnostics use the actual constructed
+wheel. The fixture retains user configuration and checks the monotonic floor.
+These are private first-touch installation roots, not fresh operating systems.
+`test_client_installation.py` separately covers durable original target
+observations, actual producer-copy recovery, interrupted real default health
+and refusal to recreate a missing incoming observation after publication.
+Its heavy recovery cases should be selected separately under the same caller
+bound. None of these packets qualifies release acquisition, automatic
+maintenance, complete host setup, whole-lineage retirement or live adoption.
 
 The agent-free `fleet-manager-client-admission` clean-room scenario includes
 those four actual generation consumers alongside admission/revocation/reopen

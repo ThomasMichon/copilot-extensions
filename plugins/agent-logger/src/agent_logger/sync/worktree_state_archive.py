@@ -18,6 +18,9 @@ from agent_logger.sync.worktree_state import (
     WorktreeStateReceipt, WorktreeStateRevision, admit_collection, canonical_bytes,
     contributing_sessions, decode_object,
 )
+from agent_logger.sync.worktree_state_contributors import (
+    MAX_CONTRIBUTOR_BYTES, ContributorReader, contributor_bytes,
+)
 
 _METADATA_BYTES = 32768
 _COPY_BYTES = 1 << 20
@@ -103,20 +106,38 @@ def _copy_member(
 
 def _receipt(
     identity: WorktreeStateRevision, root: Path, manifest: dict[str, Any], raw: bytes,
+    provenance: bytes | None = None,
 ) -> WorktreeStateReceipt:
     member = manifest["members"]["agenda.sqlite3"]
     return WorktreeStateReceipt(
         identity, str(root), hashlib.sha256(raw).hexdigest(),
         member["sha256"], member["bytes"],
+        hashlib.sha256(provenance).hexdigest() if provenance is not None else None,
     )
 
 
 def _intent(receipt: WorktreeStateReceipt) -> bytes:
-    return canonical_bytes({
-        "schema": "agent-logger.worktree-state-collection", "version": 1,
+    value = {
+        "schema": "agent-logger.worktree-state-collection",
+        "version": 1 if receipt.contributors_sha256 is None else 2,
         "identity": receipt.identity.as_dict(), "destination": receipt.destination,
         "manifest_sha256": receipt.manifest_sha256,
-    })
+    }
+    if receipt.contributors_sha256 is not None:
+        value["contributors_sha256"] = receipt.contributors_sha256
+    return canonical_bytes(value)
+
+
+def _provenance(
+    directory: PublicationDirectory, identity: WorktreeStateRevision,
+    manifest: bytes, read: ContributorReader | None,
+) -> bytes | None:
+    if read is None:
+        return None
+    raw = contributor_bytes(directory.path, identity, manifest, read)
+    if _read(directory, "manifest.json", MAX_MANIFEST_BYTES) != manifest:
+        raise WorktreeStateError("manifest changed during contributor verification")
+    return raw
 
 
 def _references(directory: Path, receipt: WorktreeStateReceipt, sessions: tuple[str, ...]) -> None:
@@ -137,13 +158,19 @@ def _references(directory: Path, receipt: WorktreeStateReceipt, sessions: tuple[
 
 def _readback(
     directory: Path, identity: WorktreeStateRevision, root: Path, verify: ExportVerifier,
+    contributors: ContributorReader | None = None,
 ) -> WorktreeStateReceipt:
     if not has_namespace(root):
         raise WorktreeStateError("typed collection namespace is missing or unowned")
     with publication_directory(directory, create=False) as revision:
         with publication_directory(directory / "export", create=False) as exported:
             manifest, raw = _verified_manifest(exported, identity, verify)
-        receipt = _receipt(identity, root, manifest, raw)
+            provenance = _provenance(exported, identity, raw, contributors)
+        if provenance is not None and _read(
+            revision, "contributors.json", MAX_CONTRIBUTOR_BYTES,
+        ) != provenance:
+            raise WorktreeStateError("retained contributor provenance differs from owner readback")
+        receipt = _receipt(identity, root, manifest, raw, provenance)
         if (
             _read(revision, "collection.json", _METADATA_BYTES) != _intent(receipt)
             or _read(revision, "receipt.json", _METADATA_BYTES) != canonical_bytes(receipt.as_dict())
@@ -155,15 +182,17 @@ def _readback(
 def readback_worktree_state(
     cfg: Config, target: Target, plan: ResolvedPlan, identity: WorktreeStateRevision,
     verify: ExportVerifier,
+    *, contributors: ContributorReader | None = None,
 ) -> WorktreeStateReceipt:
     """Verify actual retained bytes afresh; a persisted receipt alone is not proof."""
     root = admit_collection(cfg, target, plan, identity)
-    return _readback(root / identity.relative_directory, identity, root, verify)
+    return _readback(root / identity.relative_directory, identity, root, verify, contributors)
 
 
 def collect_worktree_state(
     cfg: Config, target: Target, plan: ResolvedPlan, source: Path,
     identity: WorktreeStateRevision, sessions: tuple[str, ...], verify: ExportVerifier,
+    *, contributors: ContributorReader | None = None,
 ) -> WorktreeStateReceipt:
     """Collect one explicitly selected export under the existing target/policy.
 
@@ -171,7 +200,8 @@ def collect_worktree_state(
     locates live state, starts a provider, redacts the ledger, schedules work,
     replaces a prior revision or deletes partial/retained evidence.
     """
-    sessions = contributing_sessions(sessions)
+    if sessions != () or contributors is None:
+        sessions = contributing_sessions(sessions)
     root = admit_collection(cfg, target, plan, identity)
     destination = root / identity.relative_directory
     source = source.expanduser().absolute()
@@ -179,7 +209,8 @@ def collect_worktree_state(
         raise WorktreeStateError("export source and collection destination must be disjoint")
     with publication_directory(source, create=False) as exported:
         manifest, raw = _verified_manifest(exported, identity, verify)
-        receipt = _receipt(identity, root, manifest, raw)
+        provenance = _provenance(exported, identity, raw, contributors)
+        receipt = _receipt(identity, root, manifest, raw, provenance)
         intent = _intent(receipt)
         try:
             claim_namespace(root)
@@ -199,7 +230,7 @@ def collect_worktree_state(
                 if _read(revision, "collection.json", _METADATA_BYTES) != intent:
                     raise WorktreeStateError("existing worktree revision conflicts; nothing overwritten")
                 try:
-                    existing = _readback(destination, identity, root, verify)
+                    existing = _readback(destination, identity, root, verify, contributors)
                 except (OSError, ValueError) as error:
                     raise WorktreeStateError(
                         "prior collection is incomplete or changed; retained for owner reconciliation"
@@ -215,6 +246,12 @@ def collect_worktree_state(
                     actual, actual_raw = _verified_manifest(copied, identity, verify)
                     if actual != manifest or actual_raw != raw:
                         raise WorktreeStateError("collected export differs from its verified source")
+                    if _provenance(copied, identity, actual_raw, contributors) != provenance:
+                        raise WorktreeStateError("collected contributor provenance differs from source")
+                if provenance is not None:
+                    _write(revision, "contributors.json", provenance)
                 _write(revision, "receipt.json", canonical_bytes(receipt.as_dict()))
             _references(destination / "references", receipt, sessions)
-    return readback_worktree_state(cfg, target, plan, identity, verify)
+    return readback_worktree_state(
+        cfg, target, plan, identity, verify, contributors=contributors,
+    )

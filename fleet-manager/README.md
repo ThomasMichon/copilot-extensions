@@ -2,15 +2,16 @@
 
 Standalone fleet system home and thin CLI. **Current scope: offline configuration/
 capacity planning, explicit release-snapshot inspection, installed-client
-resource diagnostics, explicitly authenticated artifact staging and an explicit
-admitted-client construction/health and owned runtime-selector transitions, a local current-observation
+resource diagnostics, explicitly authenticated artifact staging, explicit
+managed client-generation installation/forward update/exact removal and owned
+runtime-selector transitions, a local current-observation
 storage API, and an opt-in authenticated NEW
 Gateway/SDK/subscribed-controller boundary.**
 The explicitly configured [foreground SSH consumer](docs/ssh-machine.md)
 composes the existing registered directory and agent-ssh writers under its
 normal lifetime owner; thin installation remains inert.
 The [resident boundary](docs/gateway-runtime.md) is a first bounded slice:
-no production Gateway/index offload or managed install/update/uninstall,
+no production Gateway/index offload or managed controller/node lifecycle,
 telemetry sink or fleet resource mutation is claimed.
 Broader fleet delivery remains the [canonical effort](../efforts/active/linux-role-fleet/README.md).
 The explicit local-owner SDK binding below is not activated by those default
@@ -171,6 +172,15 @@ predecessor cleanup. Its explicit `client-generation` operations use one durable
 lineage and exact request/reservation bindings; default-command publication,
 withdrawal and native runtime removal remain separate requests. Version-1
 `client-state` commands do not implicitly adopt or initialize that lineage.
+The explicit `client-generation install` composition connects these owners for
+first install and forward update, requiring the supplied release decision and
+`--replace-commands` for its addressed private command family. It retains the
+original target observation across retries and only reports success after real
+direct and default-command health. `uninstall` composes exact withdrawal and
+runtime removal, preserving the lineage, admitted floor and user configuration.
+Read-only `inspect` remains distinct from current runtime health. These commands
+do not supply release acquisition, whole-install retirement, a host bootstrap,
+automatic maintenance, controller/node setup or a live rollout.
 The separate [owned runtime activation](docs/client-runtime-activation.md)
 transition freshly revalidates that candidate before publishing physically
 attributed local selectors. It supports bounded, proven forward retries, not
@@ -305,6 +315,19 @@ retained bytes. Later filesystem replacement cannot change a lazy component
 import during the staging lifetime.
 
 Ordinary explicit package-manager installation/removal remains supported.
+An explicitly prepared wheel application also installs the ordinary thin
+client through the shared application installer: staging prepares its environment,
+and regular installation publishes the CLI without setup or service-start
+callbacks. It does not invoke an unsupported `__source-start` command or activate
+a Gateway/SSH host. Selected hosting roles still require their separate normal
+lifecycle; client installation is not enrollment or route readiness.
+Older prepared applications retain their original declaration; regenerate them
+from the fixed source and select a new generation rather than rewriting a
+completed slot.
+The opt-in native `pr_artifacts` packet in
+`installation-context-acceptance.yml` exercises fresh application staging,
+regular/repeated installation and the actual installed `doctor` on Linux and
+Windows. This is separate from required unit CI and live Gateway qualification.
 Native first-touch tests install the built wheel into a fresh package-manager
 target without dependencies/network access, run its installed console entry point
 and diagnostics, and remove that distribution while preserving separate user

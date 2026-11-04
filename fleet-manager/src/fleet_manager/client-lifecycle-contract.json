@@ -1,0 +1,12 @@
+{
+  "schema": "fleet-manager.client-lifecycle-contract",
+  "version": 1,
+  "capabilities": {
+    "explicit-generation-installation-v1": {
+      "install": "fleet-manager.client-generation-installation",
+      "uninstall": "fleet-manager.client-generation-uninstallation",
+      "report_version": 1,
+      "requires_explicit_command_replacement": true
+    }
+  }
+}

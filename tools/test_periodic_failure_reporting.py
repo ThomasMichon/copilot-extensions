@@ -20,12 +20,13 @@ def workflow():
     return source_workflow(ROOT, "windows-coverage-rotation.yml")
 
 
-def condition(expression, event, ref, select, windows, linux, launch=False, post_tool=False):
+def condition(expression, event, ref, select, windows, linux, launch=False, post_tool=False, related=False):
     context = {
         "always": True, "event": event, "ref": ref,
         "select": select, "windows": windows, "linux": linux,
         "launch": launch,
         "post_tool": post_tool,
+        "related": related,
     }
     for old, new in (
         ("always()", "always"),
@@ -33,6 +34,7 @@ def condition(expression, event, ref, select, windows, linux, launch=False, post
         ("inputs.ref", "ref"),
         ("!inputs.launch_maintenance", "not launch"),
         ("!inputs.post_tool_fallback", "not post_tool"),
+        ("!inputs.related_resolution", "not related"),
         ("needs.select.result", "select"),
         ("needs.test.result", "windows"),
         ("needs.linux-full.result", "linux"),
@@ -151,6 +153,24 @@ def test_targeted_post_tool_scope_never_files_the_shared_portfolio_issue(ref):
     )
     assert "no native host, Windows or throughput qualification" in evidence["run"]
     assert "Post-tool fallback discovery #6086" in evidence["run"]
+
+
+@pytest.mark.parametrize("ref", ["", "dev", "feature"])
+def test_targeted_related_scope_never_files_the_shared_portfolio_issue(ref):
+    source = workflow()
+    assert not condition(
+        source["jobs"]["report"]["if"], "workflow_dispatch", ref,
+        "success", "skipped", "failure", related=True,
+    )
+    triggers = source.get("on", source.get(True))
+    option = triggers["workflow_dispatch"]["inputs"]["related_resolution"]
+    assert option["type"] == "boolean" and option["default"] is False
+    linux = source["jobs"]["linux-full"]
+    assert """inputs.related_resolution && '["agent-worktrees"]'""" in linux["strategy"]["matrix"]["plugin"]
+    assert "test_config_graft_e2e or test_related_execution_context" in linux["env"]["TEST_SELECTOR"]
+    evidence = next(step for step in linux["steps"] if step.get("name") == "Record exact execution scope and outcome")
+    assert "Linux targeted related-resolution consumers only" in evidence["run"]
+    assert "Targeted related resolution #7961" in evidence["run"]
 
 
 @pytest.mark.skipif(os.name == "nt", reason="The production report is a Linux Bash consumer")

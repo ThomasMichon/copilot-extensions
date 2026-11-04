@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-04 - Seven measurement/preservation contracts, seventeen bounded comparisons and retained per-call type source evidence](<journal/2026/11.04 measurement-preservation-contracts.md>)
+
 - [2026-11-04 - Five venue/runtime contracts, fourteen bounded completed-work comparisons and inherited holds](<journal/2026/11.04 venue-runtime-contracts.md>)
 
 - [2026-11-04 - Seven continuity/lifecycle contracts, eighteen message comparisons and bounded newer receipt-source credit](<journal/2026/11.04 continuity-lifecycle-contracts.md>)

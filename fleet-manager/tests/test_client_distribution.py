@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import time
 import zipfile
 from pathlib import Path
 
@@ -295,6 +296,131 @@ def test_linked_helper_ancestor_is_rejected_before_loading_code(tmp_path):
             os.rmdir(library)
         else:
             library.unlink()
+
+
+@pytest.mark.client_distribution_full
+def test_regular_wheel_application_installs_an_inert_client(tmp_path, wheel, monkeypatch):
+    artifact, _ = wheel
+    uv = shutil.which("uv")
+    assert uv, "native application installation requires the runner's uv"
+    monkeypatch.syspath_prepend(str(PROJECT.parent / "tools"))
+    from local_install_profile import source_inputs as install_source
+    from installer_wheel_inputs import WheelLimits, inspect_archive
+    from installer_wheel_snapshot import retain_wheel_inputs
+    from runtime_application_project import emit, install_callbacks
+
+    engine = install_source.engine
+    with artifact.open("rb") as archive:
+        facts = inspect_archive(
+            archive, deadline=time.monotonic() + 60,
+            limits=WheelLimits(
+                max_archive_bytes=8 << 20, max_expanded_bytes=32 << 20,
+                max_member_bytes=8 << 20, max_metadata_bytes=1 << 20,
+                max_members=10_000, max_tags=100, max_metadata_member_bytes=1 << 20,
+            ),
+        )
+    version = facts.version
+    source, _ = project_at(tmp_path / "source")
+    for package in engine._package_roots(PROJECT):
+        if package != PROJECT:
+            shutil.copytree(
+                package, source.parent / package.relative_to(PROJECT.parent), dirs_exist_ok=True,
+                ignore=shutil.ignore_patterns("__pycache__", "build", "dist", "*.egg-info"),
+            )
+    source_hash = engine.runtime_source.assembly_hash(source)
+    identity = engine.runtime_source.SourceIdentity(
+        "fleet-manager", version, "a" * 40, "b" * 40, source_hash,
+        engine.runtime_source.runtime_version(version, "a" * 40, source_hash),
+    )
+    (source / "runtime-source.json").write_text(json.dumps(identity.document()), encoding="utf-8")
+    digest = "sha256:" + hashlib.sha256(artifact.read_bytes()).hexdigest()
+    profile = {
+        "component": "fleet-manager",
+        "release": {"identity": "source:" + identity.source_commit,
+                    "sha256": "sha256:" + identity.assembly_hash},
+        "wheels": [{
+            "name": "fleet-manager", "version": version, "filename": artifact.name,
+            "sha256": digest, "requires_python": facts.requires_python,
+            "requires_dist": list(facts.requires_dist),
+            "provides_extras": list(facts.provides_extras),
+            "selected_extras": [],
+        }],
+    }
+    selected = install_source.ProjectSource(source, identity, {
+        "projects": {"fleet-manager": {"artifact": {"wheels": [
+            {"name": "fleet-manager", "filename": artifact.name, "sha256": digest},
+        ]}}},
+    }, "fleet-manager")
+    with retain_wheel_inputs(
+        {artifact.name: artifact}, {artifact.name: digest}, max_wheels=1,
+        max_archive_bytes=8 << 20, max_total_bytes=8 << 20, max_snapshot_bytes=8 << 20,
+        deadline=time.monotonic() + 60,
+    ) as retained:
+        inputs = engine.WheelInstallInputs(
+            retained, json.dumps(profile, sort_keys=True, separators=(",", ":")),
+            (("fleet-manager", version, artifact.name, digest),),
+        )
+        construction = install_source.application_inputs(selected, inputs)
+    root = tmp_path / "runtime"
+    slot = root / "versions" / construction["runtime_version"]
+    setup, start = install_callbacks("fleet-manager")
+    emit(
+        slot, distribution="fleet-manager", version=version, requires_python=">=3.10",
+        commands={"fleet-manager": "fleet_manager.__main__:main"},
+        wheels={"fleet-manager": artifact}, setup=setup, start=start,
+        construction=construction, runtime_source=identity.document(),
+    )
+    source.rename(source.with_name("unavailable-source"))
+    home = tmp_path / "home"
+    home.mkdir()
+    config = home / "connection.json"
+    content = b'{"endpoint":"https://controller.invalid","credential_provider":"external"}\n'
+    config.write_bytes(content)
+    clean = {
+        name: value for name, value in os.environ.items()
+        if not name.startswith("UV_") and name not in {"VIRTUAL_ENV", "PYTHONPATH", "PYTHONHOME"}
+    }
+    clean.update(
+        HOME=str(home), USERPROFILE=str(home), UV_OFFLINE="1", UV_PYTHON=sys.executable,
+        UV_PYTHON_DOWNLOADS="never", UV_CACHE_DIR=str(tmp_path / "uv-cache"),
+    )
+    if os.name == "nt":
+        clean.update(HOMEDRIVE=home.drive, HOMEPATH=str(home)[len(home.drive):])
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    (caller / "fleet_manager.py").write_text("raise RuntimeError('caller hijack')", encoding="utf-8")
+    result = run([uv, "lock", "--project", str(slot), "--offline", "--python", sys.executable],
+                 cwd=caller, env=clean)
+    assert result.returncode == 0, result.stderr
+
+    def invoke(path, *arguments):
+        if os.name == "nt":
+            host = shutil.which("powershell.exe") or shutil.which("pwsh")
+            assert host, "native application installation requires PowerShell"
+            command = [host, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(path)]
+        else:
+            command = [str(path)]
+        return run([*command, *arguments], cwd=caller, env=clean, timeout=60)
+
+    extension = ".ps1" if os.name == "nt" else ".sh"
+    result = invoke(slot / ("install" + extension), "--stage")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout)["state"] == "staged"
+    assert not (root / "current-version").exists()
+    assert not (slot / "install-success.json").exists()
+    for _ in range(2):
+        result = invoke(slot / ("install" + extension))
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert json.loads(result.stdout.splitlines()[-1])["state"] == "installed"
+        assert (root / "current-version").read_text().strip() == slot.name
+        assert (slot / "install-success.json").is_file()
+        result = invoke(home / ".local" / "bin" / ("fleet-manager" + extension), "doctor")
+        assert result.returncode == 0, result.stdout + result.stderr
+        report = json.loads(result.stdout)
+        assert report["role"] == "client" and report["status"] == "installed"
+        assert report["controller_readiness_verified"] is False
+        assert report["mutations_performed"] is False
+        assert config.read_bytes() == content
 
 
 def test_real_client_install_doctor_and_package_manager_removal_preserve_config(tmp_path, wheel):

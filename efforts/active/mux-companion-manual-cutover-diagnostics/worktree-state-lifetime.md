@@ -7,7 +7,8 @@ Standing intent: [worktree data](../../../visions/plugins/agent-worktrees/worktr
 **Status: design reviewed in #10199; D1 placement/discovery source merged in
 #10224; D2 managed initialization/export source merged in #10238; D3 Manager
 consumer source merged in #10251; D4's explicit collection/readback library
-merged in #10447; passive project retained-inventory source merged in #10488.**
+merged in #10447; passive project retained-inventory source merged in #10488;
+Efforts export-contributor provenance merged in #10495.**
 Native durability and complete D4-D5 remain open.
 No source merge performs a live data move,
 export, collection, cleanup or rollout. The
@@ -48,9 +49,10 @@ new managed initialization with complete consistent context-qualified export
 and local readback. #10251 connects Manager to that discovery and the owning rich reader,
 using the existing single permanent Agenda subscription. #10447 supplies
 Logger's explicit local collection/readback library. #10488 supplies passive
-project-wide retained inventory at the Worktrees owner. Contributor discovery,
-automatic consumer discovery, existing-tick orchestration and legacy rescue
-remain unfinished integrations.
+project-wide retained inventory at the Worktrees owner. #10495 supplies
+Efforts-owned complete contributor provenance from the same verified export cut.
+Logger provenance consumption, automatic consumer discovery, existing-tick
+orchestration and legacy rescue remain unfinished integrations.
 
 Existing cleanup can remove a checkout while retaining a lifecycle tombstone.
 That tombstone does not preserve arbitrary checkout-local agenda bytes.
@@ -180,14 +182,20 @@ not consequences of a reviewed design.
   the existing Session Sync/accounting owners; no parallel scheduler or service.
   #10447 supplies the policy-qualified local library and namespace/preservation
   fencing. #10488 supplies negotiated owner project inventory, including
-  descriptors without canonical records. Contributor discovery and existing-tick
-  orchestration remain open; see the [inventory readback](journal/2026/11.04-sidecar-retained-inventory.md).
+  descriptors without canonical records. #10495 supplies complete owner-derived
+  contributor provenance; Logger consumption and existing-tick orchestration
+  remain open. See the [contributor readback](journal/2026/11.04-sidecar-export-contributors.md).
 - [ ] D5. Qualify legacy rescue and the separation of checkout removal from data
   reclamation. Actual relocation, collection, deletion and rollout need their
   own concrete authorization and evidence.
 
 ## Validation Plan
 
+- [x] Qualify provider-only export-contributor provenance from the same verified
+  read-only snapshot, retaining nullable/noncanonical caller identities, exact
+  raw manifest/revision binding and whole-result count/byte/time refusal.
+  #10495 preserves the original export/verify contracts and existing Logger
+  client's process behavior; it does not qualify consumer attribution or collection.
 - [x] Qualify provider-only project inventory across retained descriptors,
   missing canonical records, actual repository/cell identity, finite bounds and
   no-write/error behavior. #10488 supplies isolated source/process evidence,
@@ -229,7 +237,8 @@ not consequences of a reviewed design.
   collection. Existing logger aggregate authorization, privacy, idempotency
   and destination ownership remain effective.
   #10447 qualifies two explicitly supplied references to one local collection;
-  owner-derived contributing-session discovery remains open.
+  #10495 supplies the separately negotiated owner provenance projection.
+  Actual consumer discovery and complete attribution/reference integration remain open.
 - [ ] Checkout retirement retains managed data and its discoverable descriptor;
   legacy or unverified rescue prevents data-destroying removal. Archive outage
   alone neither erases data nor fabricates an unfinished source objective.

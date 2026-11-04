@@ -82,6 +82,7 @@ def test_cli_explicit_initialization_inspection_and_legacy_state_remain_separate
 @pytest.mark.parametrize("arguments", [
     ["construct"], ["construct", "--generation", FIRST], ["construct", "--request", "forward-1"],
     ["register-commands"], ["unregister-commands"], ["remove-runtime"],
+    ["install"], ["uninstall"],
     ["admit"], ["recover-retained"], ["deactivate-runtime"], ["retire-installation"],
     ["inspect", "--after", "invalid"], ["inspect", "--generation", "invalid"],
     ["inspect", "--after", FIRST, "--generation", FIRST],
@@ -438,3 +439,132 @@ def test_actual_installed_console_generation_transitions(
         final = invoke("inspect")
         assert FIRST in final["retired"] and final["admitted"] == inspected["admitted"]
         assert Path(first["generation_root"]).is_dir() and not Path(first["direct_command"]).exists()
+
+
+@pytest.mark.timeout(90)
+@pytest.mark.parametrize("transition", [
+    "retry", "forward-missing", "forward-malformed", "higher", "uninstall", "foreign",
+])
+def test_actual_installed_console_managed_lifecycle(tmp_path_factory, primitive, signed_wheel, transition):
+    from fleet_manager import client_generation_frontdoor as frontdoor
+    from test_client_frontdoor import states
+
+    area = tmp_path_factory.mktemp("m")
+    root, directory, stage = (area / name for name in ("l", "c", "s"))
+    for path in (root, directory, stage):
+        private_directory(path)
+    fixture = copy.deepcopy(signed_wheel)
+    now = int(time.time())
+    fixture["proof"]["payload"].update(issued_at=now - 10, expires_at=now + 600)
+    fixture["policy"].update(valid_from=now - 20, valid_until=now + 900)
+    fixture["policy"]["keys"][0].update(valid_from=now - 20, valid_until=now + 900)
+
+    def sign():
+        signed = independently_sign([fixture["proof"]["payload"]], area)
+        fixture["proof"] = {**fixture["proof"], **signed["proofs"][0]}
+        fixture["policy"]["keys"][0]["public_key"] = signed["public_key"]
+
+    sign()
+    paths = inputs_at(area, fixture)
+    console = Path(sys.executable).with_name("fleet-manager.exe" if os.name == "nt" else "fleet-manager")
+    assert console.is_file()
+    declared = subprocess.run(
+        [sys.executable, "-I", "-B", "-c",
+         "from importlib.resources import files; "
+         "print(files('fleet_manager').joinpath('client-lifecycle-contract.json').read_text())"],
+        cwd=area, capture_output=True, text=True, timeout=45, **FLAGS,
+    )
+    assert declared.returncode == 0, declared.stderr
+    contract = json.loads(declared.stdout)
+    assert contract["schema"] == "fleet-manager.client-lifecycle-contract" and contract["version"] == 1
+    assert contract["capabilities"]["explicit-generation-installation-v1"]["requires_explicit_command_replacement"]
+    base = ["--root", str(root), "--identity", str(paths["identity"])]
+
+    def invoke(operation, *arguments, success=True):
+        started = time.monotonic()
+        result = subprocess.run(
+            [str(console), "client-generation", operation, *base, *arguments],
+            cwd=area, capture_output=True, text=True, timeout=45, **FLAGS,
+        )
+        print("MANAGED_CLI_TIMING " + json.dumps({
+            "operation": operation, "seconds": time.monotonic() - started,
+            "returncode": result.returncode,
+        }), flush=True)
+        assert result.returncode == (0 if success else 1), result.stderr
+        if success:
+            return json.loads(result.stdout)
+        assert not result.stdout and "fleet-manager" in result.stderr and "Traceback" not in result.stderr
+
+    def install(generation=FIRST, request="managed-1", *, replace=True, success=True):
+        sources = [
+            item for name in ("selection", "release", "proof", "policy", "sources", "target")
+            for item in ("--" + name, str(paths[name]))
+        ]
+        return invoke(
+            "install", *sources, "--staging-parent", str(stage),
+            "--command-directory", str(directory), "--generation", generation, "--request", request,
+            *(["--replace-commands"] if replace else []), success=success,
+        )
+
+    install(replace=False, success=False)
+    assert list(root.iterdir()) == [] and list(directory.iterdir()) == []
+    first = install()
+    assert first["installed"] and first["started"] and first["selected"] and first["registered"]
+    assert first["intent"] == "explicit" and not first["installation_retired"]
+    direct_health(first, area)
+    before = database_bytes(root)
+    assert invoke("inspect")["selected_generation"] == FIRST
+    assert database_bytes(root) == before
+    commands = states([Path(path) for path in first["commands"]])
+    configuration = root / "configuration"
+    configuration.write_bytes(b"preserved user configuration")
+    if transition == "foreign":
+        command = Path(first["commands"][0])
+        replacement = directory / "foreign"
+        replacement.write_bytes(command.read_bytes())
+        replacement.chmod(command.stat().st_mode)
+        os.replace(replacement, command)
+        actual = states([Path(path) for path in first["commands"]])
+        install(success=False)
+        assert states([Path(path) for path in first["commands"]]) == actual
+        assert database_bytes(root) == before
+    elif transition == "retry":
+        retry = install()
+        assert retry["construction_reused"] and retry["reused"] and not retry["mutations_performed"]
+        assert retry["publication"] == first["publication"] and retry["reservation"] == first["reservation"]
+        assert states([Path(path) for path in first["commands"]]) == commands
+        assert database_bytes(root) == before
+    elif transition == "uninstall":
+        reservation = area / "reservation.json"
+        reservation.write_bytes(canonical(first["reservation"]))
+        for _ in range(2):
+            removed = invoke(
+                "uninstall", "--reservation", str(reservation),
+                "--publication", first["publication"], "--command-directory", str(directory),
+            )
+            assert removed["commands_absent"] and removed["runtime_removed"] and removed["generation_retired"]
+            assert not removed["installation_retired"]
+        assert not Path(first["direct_command"]).exists()
+        assert all(not Path(path).exists() for path in first["commands"])
+        final = invoke("inspect")
+        assert final["selected_generation"] is None and final["admitted"] == state(root)[0]
+    else:
+        receipt = root / frontdoor.HISTORY / first["publication"] / "copy-forward.jsonl"
+        if transition == "forward-missing":
+            receipt.unlink()
+        elif transition == "forward-malformed":
+            receipt.write_bytes(b"unfinished predecessor proof")
+        else:
+            fixture["proof"]["payload"]["sequence"] += 1
+            sign()
+            inputs_at(area, fixture)
+        preserved = receipt.read_bytes() if receipt.exists() else None
+        second = install(SECOND, "managed-2")
+        assert second["selected"] and second["registered"]
+        assert invoke("inspect")["selected_generation"] == SECOND
+        assert (receipt.read_bytes() if receipt.exists() else None) == preserved
+        direct_health(first, area)
+        direct_health(second, area)
+        expected = fixture["proof"]["payload"]["sequence"]
+        assert state(root)[0]["sequence"] == expected
+    assert configuration.read_bytes() == b"preserved user configuration"

@@ -72,6 +72,74 @@ def source_code():
     return code
 
 
+@pytest.mark.parametrize("explicit", [False, True])
+def test_targeted_cli_reuses_selected_sources_and_topology(api, monkeypatch, explicit):
+    from collections import Counter
+
+    calls = Counter()
+    selected_config = SimpleNamespace(machine="local")
+    machines = {"local": SimpleNamespace(key="local", execution_platform="windows")}
+    source_reads = []
+    entry = SimpleNamespace(owner="", summary="", locus=SimpleNamespace(preferred="local"))
+    cfg = api.stub(
+        "config", active_project=lambda: "fixture",
+        load_config=lambda **kwargs: selected_config,
+        detect_platform=lambda: "windows",
+    )
+
+    def load_machines(anchor, *, config=None):
+        source_reads.append((anchor, config))
+        if anchor == "missing":
+            raise FileNotFoundError
+        return machines
+
+    cfg.load_machines_yaml = load_machines
+    captured = []
+    api.stub("output", _json_output=captured.append)
+    api.stub("state_root")
+    api.stub("status_updater_cli")
+    api.stub("related_availability", MachineMatch=object)
+    api.stub("doctor", _read_projects=lambda: {})
+    api.stub("repos", find_repo=lambda name: None, resolve_account=lambda reg: None)
+    related = api.stub(
+        "related", get_primary_grafted=lambda anchors: "target",
+        get_related_grafted=lambda anchors, name: entry,
+        effective_ownership=lambda entry: "", effective_audience=lambda entry: "",
+        effective_ai_attribution=lambda entry: {},
+    )
+
+    def build_resolution(entry, **kwargs):
+        assert kwargs["machine_match"]("local", kwargs["current_machine"])
+        return SimpleNamespace(
+            name="target", locus_kind="local", target_machine="",
+            available_here=True, editing_model="", delegate_via="none",
+            steps=[], notes=[], explore=[],
+        )
+
+    related.build_resolution = build_resolution
+    cli = api.load("related_cli")
+    monkeypatch.setattr(cli, "_related_anchor", lambda rest: "base")
+    monkeypatch.setattr(cli, "_related_machine_entry", lambda entries, name: entries.get(name))
+
+    def anchors(base):
+        calls["sources"] += 1
+        return ["missing", "base"]
+
+    topology = cli._related_current_topology
+
+    def current_topology(anchors, base):
+        calls["topology"] += 1
+        return topology(anchors, base)
+
+    monkeypatch.setattr(cli, "_related_config_source_anchors", anchors)
+    monkeypatch.setattr(cli, "_related_current_topology", current_topology)
+    argv = ["resolve", *(["target"] if explicit else []), "--json"]
+    assert cli.cmd_related_dispatch(argv) == 0
+    assert calls == {"sources": 1, "topology": 1}
+    assert source_reads == [("base", selected_config)]
+    assert captured[0]["current_machine"] == "local"
+
+
 def test_entry_uncertainty_survives_complete_activation_without_discarding_positive(api, monkeypatch):
     root = Path("synthetic-plugin")
     plugin = ActivePlugin("sample@example", "sample", "example", root, ("global",))
