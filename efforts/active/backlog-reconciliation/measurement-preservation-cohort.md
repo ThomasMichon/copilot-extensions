@@ -230,8 +230,8 @@ not newly measured savings. Mirror/index metadata is not telemetry content or
 a competing transport. Next research distinguishes actual active/quiet discovery
 from merely linearized offset lookup.
 
-The first review caught an accidental zero-read strengthening. A separate
-whole read of the 8,128-character [S4 transcript contract](../producer-work-reuse/transcripts.md)
+A whole read of the 8,128-character
+[S4 transcript contract](../producer-work-reuse/transcripts.md)
 at `becc1eae724aeb717e4aba941704a71f0c6b406a` confirms bounded continuity
 checks remain permitted. The ordinary no-discovery-due unchanged pass sends
 zero transcript payload bytes and starts no push; nonzero control-envelope
