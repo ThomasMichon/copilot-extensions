@@ -61,6 +61,25 @@ def test_completed_creation_replays_original_generated_identity(allocation):
 
 
 @pytest.mark.guard
+def test_distinct_creation_key_preserves_finalized_predecessor_and_replays_replacement(allocation):
+    config, facts, allocate, calls, records = allocation
+    first = requests.create(config, "logical:1", facts, allocate)
+    path = records / f"{first['worktree']['id']}.yaml"
+    record = tracking.load_record(path)
+    record.status = "finalized"
+    tracking.save_record(record, path)
+    with pytest.raises(requests.CreationRequestFailure) as caught:
+        requests.create(config, "logical:1", facts, allocate)
+    assert caught.value.status == "terminal" and len(calls) == 1
+    replacement = requests.create(config, "logical:2", facts, allocate)
+    replay = requests.create(config, "logical:2", facts, allocate)
+    assert replacement["worktree"] == replay["worktree"] != first["worktree"]
+    assert replay["creation"]["replayed"] is True and len(calls) == 2
+    assert tracking.load_record(path).status == "finalized"
+    assert Path(first["worktree"]["path"]).is_dir()
+
+
+@pytest.mark.guard
 def test_concurrent_creation_reports_pending_without_another_effect(allocation):
     config, facts, allocate, calls, _ = allocation
     entered, finish = Event(), Event()

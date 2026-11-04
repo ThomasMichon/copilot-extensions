@@ -71,7 +71,7 @@ def register(
     """Reuse the reservation registrar's strict control and drain owners."""
     dependencies = [Depends(control_auth)]
     from .coordinator_pool_decline import register as register_pool_decline
-    register_pool_decline(app, queue, bus)
+    register_pool_decline(app, queue, bus, control_auth)
 
     @app.get(f"{POOL_STARTUP_PATH}/contract", dependencies=dependencies)
     def contract() -> dict:
