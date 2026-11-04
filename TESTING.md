@@ -3063,6 +3063,12 @@ reconciliation child remains blocked. That child is a synthetic downstream
 worker, not an installer or serving runtime. The packet does not establish
 full cold-start latency, installed adoption or Windows/Linux interchangeability.
 
+The native launcher status packet submits the current canonical `update --auto`
+request twice within one launch and requires exactly one child invocation.
+Missing, error, legacy-lock, in-progress and completed legacy staging observations
+remain byte-for-byte unchanged; they are not update-admission or completion
+authority. Windows shells and native Bash exercise their own launcher bodies.
+
 ## Construction-source inventory
 
 With Python 3.11 or newer, `python tools/construction_inventory.py` reads the

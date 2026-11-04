@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify canonical automatic launch requests without adopting legacy staging status.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
