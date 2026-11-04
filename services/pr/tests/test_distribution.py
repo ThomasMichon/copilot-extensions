@@ -5,18 +5,20 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
 import zipfile
 from email.parser import Parser
 from pathlib import Path
+from typing import cast
 
 from fleet_manager.komodo_roles import KomodoRoleProvider
 from fleet_manager.role_bindings import parse_bindings
 
 
-def test_independent_wheel_has_no_source_checkout_or_marketplace_requirement(tmp_path):
+def test_independent_wheel_has_no_source_checkout_or_marketplace_requirement(tmp_path: Path) -> None:
     source = Path(__file__).resolve().parents[1]
     project, output = tmp_path / "project", tmp_path / "artifacts"
     project.mkdir()
@@ -28,12 +30,21 @@ def test_independent_wheel_has_no_source_checkout_or_marketplace_requirement(tmp
         source / "src", project / "src",
         ignore=shutil.ignore_patterns("*.egg-info", "__pycache__"),
     )
+    copied_directories = [
+        project / "src", *(path for path in (project / "src").rglob("*") if path.is_dir()),
+    ]
+    # Rehearse a read-only snapshot on the owned copy, never on the source.
+    for directory in copied_directories:
+        directory.chmod(directory.stat().st_mode & ~stat.S_IWUSR)
+    # The backend must create egg-info beside the copied package.
+    for directory in copied_directories:
+        directory.chmod(directory.stat().st_mode | stat.S_IWUSR)
     built = subprocess.run(
         [sys.executable, "-I", "-c",
          "from setuptools.build_meta import build_wheel,build_sdist; "
          f"build_wheel({str(output)!r});build_sdist({str(output)!r})"],
         cwd=project, capture_output=True, text=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=cast(int, getattr(subprocess, "CREATE_NO_WINDOW")) if os.name == "nt" else 0,
     )
     assert built.returncode == 0, built.stdout + built.stderr
     with zipfile.ZipFile(next(output.glob("*.whl"))) as wheel:
@@ -43,6 +54,7 @@ def test_independent_wheel_has_no_source_checkout_or_marketplace_requirement(tmp
         )).decode())
         assert metadata["Name"] == "agent-pull-requests-service"
         requirements = metadata.get_all("Requires-Dist")
+        assert requirements is not None
         assert any(item.startswith("agent-pull-requests[fleet]") for item in requirements)
         assert not any("@" in item or "file:" in item for item in requirements)
         assert "agent_pull_requests_service/hosting.py" in names
@@ -58,12 +70,12 @@ def test_independent_wheel_has_no_source_checkout_or_marketplace_requirement(tmp
     child = subprocess.run(
         [sys.executable, "-I", "-m", "agent_pull_requests_service", "--help"],
         cwd=tmp_path, capture_output=True, text=True, timeout=10,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=cast(int, getattr(subprocess, "CREATE_NO_WINDOW")) if os.name == "nt" else 0,
     )
     assert child.returncode == 0 and "{provision,serve,ready}" in child.stdout
 
 
-def test_role_example_uses_existing_reference_only_container_service_contract():
+def test_role_example_uses_existing_reference_only_container_service_contract() -> None:
     source = Path(__file__).resolve().parents[1]
     providers, bindings = parse_bindings(json.loads(
         (source / "container" / "role-bindings.example.json").read_text("utf-8"),
@@ -75,7 +87,7 @@ def test_role_example_uses_existing_reference_only_container_service_contract():
     assert resource.target == "host-a"
 
 
-def test_container_recipe_is_explicit_offline_nonroot_and_does_not_copy_host_state():
+def test_container_recipe_is_explicit_offline_nonroot_and_does_not_copy_host_state() -> None:
     recipe = (Path(__file__).resolve().parents[1] / "container" / "Dockerfile").read_text("utf-8")
     assert recipe.startswith("ARG PYTHON_BASE\nFROM ${PYTHON_BASE}")
     assert "@sha256:" in recipe

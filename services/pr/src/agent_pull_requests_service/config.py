@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import AbstractSet, Any
 
 from agent_pull_requests.watch_gateway import WatchScopeBinding
 from agent_pull_requests.watch_observer import NativeObservationBinding
@@ -24,7 +25,9 @@ def _path(value: object) -> Path:
     return path
 
 
-def _fields(value: object, required: set[str], optional: set[str] = frozenset()) -> dict:
+def _fields(
+    value: object, required: AbstractSet[str], optional: AbstractSet[str] = frozenset(),
+) -> dict[str, Any]:
     if not isinstance(value, dict) or not required <= value.keys() or (
         value.keys() - required - optional
     ):
@@ -32,7 +35,7 @@ def _fields(value: object, required: set[str], optional: set[str] = frozenset())
     return value
 
 
-def _collection(value: object) -> list:
+def _collection(value: object) -> list[Any]:
     if not isinstance(value, list) or not 1 <= len(value) <= 128:
         raise ValueError("host bindings require 1..128 entries")
     return value

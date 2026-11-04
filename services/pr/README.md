@@ -18,6 +18,19 @@ tests select the same checkout's PR and Fleet sources explicitly:
 python tools/run-standalone-tests.py services/pr --prepare --timeout 180
 ```
 
+All nine Python source/test files are admitted to strict MyPy on the Linux and
+Windows analysis targets at the declared Python 3.10 minimum:
+`python tools/typecheck.py service-pr --prepare`, then
+`python tools/typecheck.py service-pr --strict`. JSON documents, runtime
+serialization and dynamically imported Gateway fixtures retain their actual
+validation and dependency boundaries. The project-specific checker hash lock
+adds the existing cryptography SDK and its bundled types; no shared checker lock
+or runtime dependency is changed. Static admission does not qualify an installed
+process, image or deployment.
+
+Distribution fixtures retain immutable snapshot inputs and make only their
+owned disposable build directories writable for backend-generated metadata.
+
 ## Explicit host inputs
 
 The trusted launch owner supplies an absolute JSON configuration reference:

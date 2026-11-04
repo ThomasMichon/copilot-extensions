@@ -8,6 +8,8 @@ import os
 import sys
 import time
 from dataclasses import replace
+from pathlib import Path
+from typing import Any, Awaitable, Callable, cast
 
 import pytest
 from cryptography.hazmat.primitives import serialization
@@ -18,10 +20,11 @@ from agent_pull_requests_service.__main__ import main
 from agent_pull_requests_service.config import load_config
 from fleet_manager.gateway_service_handler import RequestDisconnected
 
+Configuration = tuple[Path, dict[str, Any]]
 
 @pytest.fixture
-def configuration(tmp_path):
-    value = {
+def configuration(tmp_path: Path) -> Configuration:
+    value: dict[str, Any] = {
         "schema": "agent-pull-requests.service", "version": 1,
         "root": str(tmp_path / "state"), "namespace": "installation-a",
         "fleet": "fleet-a", "gateway": "gateway-a", "slot": "pr-watch",
@@ -46,7 +49,9 @@ def configuration(tmp_path):
     return path, value
 
 
-def test_load_is_passive_and_provision_is_separate_and_never_replaces(configuration):
+def test_load_is_passive_and_provision_is_separate_and_never_replaces(
+    configuration: Configuration,
+) -> None:
     path, _ = configuration
     config = load_config(path)
     assert not config.root.exists()
@@ -73,7 +78,9 @@ def test_load_is_passive_and_provision_is_separate_and_never_replaces(configurat
     lambda value: value["observations"].append(value["observations"][0]),
     lambda value: value["observations"][0].update(account="other-account"),
 ])
-def test_config_refuses_ambiguous_or_ambient_configuration(configuration, change):
+def test_config_refuses_ambiguous_or_ambient_configuration(
+    configuration: Configuration, change: Callable[[dict[str, Any]], object],
+) -> None:
     path, value = configuration
     change(value)
     path.write_text(json.dumps(value))
@@ -81,7 +88,7 @@ def test_config_refuses_ambiguous_or_ambient_configuration(configuration, change
         load_config(path)
 
 
-def test_config_refuses_duplicate_json_and_oversize(configuration):
+def test_config_refuses_duplicate_json_and_oversize(configuration: Configuration) -> None:
     path, _ = configuration
     path.write_text('{"schema":"first","schema":"second"}')
     with pytest.raises(ValueError, match="duplicate"):
@@ -91,7 +98,7 @@ def test_config_refuses_duplicate_json_and_oversize(configuration):
         load_config(path)
 
 
-def test_provision_refuses_native_state_root(configuration):
+def test_provision_refuses_native_state_root(configuration: Configuration) -> None:
     path, _ = configuration
     config = load_config(path)
     config.root.mkdir()
@@ -102,7 +109,9 @@ def test_provision_refuses_native_state_root(configuration):
     assert native.read_text() == '{"native":"preserve"}'
 
 
-def test_cli_reports_operation_and_failure_class_without_echoing_references(tmp_path, capsys):
+def test_cli_reports_operation_and_failure_class_without_echoing_references(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     path = tmp_path / "private-reference.json"
     assert main(["provision", "--config", str(path)]) == 1
     diagnostic = capsys.readouterr().err
@@ -110,22 +119,22 @@ def test_cli_reports_operation_and_failure_class_without_echoing_references(tmp_
     assert str(path) not in diagnostic and path.name not in diagnostic
 
 
-def test_launch_scope_does_not_read_a_token_or_role_permit(monkeypatch):
+def test_launch_scope_does_not_read_a_token_or_role_permit(monkeypatch: pytest.MonkeyPatch) -> None:
     scope = hosting.LaunchScope(60)
     assert time.time() < scope.deadline() <= time.time() + 60
     scope.stopping.set()
     with pytest.raises(RequestDisconnected):
         scope.deadline()
     scope = hosting.LaunchScope(60)
-    monkeypatch.setattr(hosting.os, "getpid", lambda: scope.pid + 1)
+    monkeypatch.setattr(os, "getpid", lambda: scope.pid + 1)
     with pytest.raises(RequestDisconnected):
         scope.check()
 
 
-def test_passive_readiness_refuses_stale_future_malformed_and_oversize(tmp_path):
+def test_passive_readiness_refuses_stale_future_malformed_and_oversize(tmp_path: Path) -> None:
     path = tmp_path / "status.json"
     assert not hosting.ready(path, now=100)
-    value = {
+    value: dict[str, Any] = {
         "schema": "agent-pull-requests.service-status", "version": 1,
         "ready": True, "observed_at": 100, "expires_at": 103,
     }
@@ -141,7 +150,7 @@ def test_passive_readiness_refuses_stale_future_malformed_and_oversize(tmp_path)
     assert main(["ready", "--status", str(path)]) == 1
 
 
-def test_passive_reader_does_not_stop_writer_on_windows_replace_sharing(tmp_path):
+def test_passive_reader_does_not_stop_writer_on_windows_replace_sharing(tmp_path: Path) -> None:
     path = tmp_path / "status.json"
     value = {
         "schema": "agent-pull-requests.service-status", "version": 1,
@@ -158,7 +167,9 @@ def test_passive_reader_does_not_stop_writer_on_windows_replace_sharing(tmp_path
     assert list(tmp_path.glob("*.tmp")) == []
 
 
-def test_host_owns_service_and_drains_on_passive_status_failure(configuration, monkeypatch):
+def test_host_owns_service_and_drains_on_passive_status_failure(
+    configuration: Configuration, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     path, _ = configuration
     config = load_config(path)
     config.root.mkdir()
@@ -168,16 +179,16 @@ def test_host_owns_service_and_drains_on_passive_status_failure(configuration, m
         serialization.NoEncryption(),
     ))
     config.access_token_file.write_text("synthetic-access")
-    events = []
+    events: list[str] = []
 
     class Service:
-        def __init__(self, *_args, **kwargs):
-            self.credentials = kwargs["access_token_callback"]
-            self.authority = kwargs["authority"]
-            self.checkpoint = kwargs["checkpoint"]
+        def __init__(self, *_args: object, **kwargs: Any) -> None:
+            self.credentials = cast(Callable[[], Awaitable[str]], kwargs["access_token_callback"])
+            self.authority = cast(Callable[[], int], kwargs["authority"])
+            self.checkpoint = cast(Callable[[], None], kwargs["checkpoint"])
             self.held = False
 
-        async def run(self, stop, *, drain_timeout):
+        async def run(self, stop: asyncio.Event, *, drain_timeout: float) -> None:
             assert drain_timeout == 60
             assert await self.credentials() == "synthetic-access"
             self.checkpoint()
@@ -190,12 +201,12 @@ def test_host_owns_service_and_drains_on_passive_status_failure(configuration, m
             events.append("drained")
             self.held = False
 
-        def status(self):
+        def status(self) -> dict[str, bool]:
             return {"writer_held": self.held, "ready": self.held}
 
     monkeypatch.setattr(hosting, "WatchService", Service)
 
-    def publish(*_args):
+    def publish(*_args: object) -> bool:
         assert events == ["started"]
         raise OSError("synthetic readiness storage failure")
 
@@ -205,7 +216,9 @@ def test_host_owns_service_and_drains_on_passive_status_failure(configuration, m
     assert events == ["started", "drained"]
 
 
-def test_preset_stop_does_not_load_credentials_or_touch_state(configuration, monkeypatch):
+def test_preset_stop_does_not_load_credentials_or_touch_state(
+    configuration: Configuration, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     path, _ = configuration
     config = load_config(path)
     monkeypatch.setattr(
@@ -218,20 +231,22 @@ def test_preset_stop_does_not_load_credentials_or_touch_state(configuration, mon
     assert not config.root.exists()
 
 
-def test_host_does_not_touch_readiness_when_writer_acquisition_fails(configuration, monkeypatch):
+def test_host_does_not_touch_readiness_when_writer_acquisition_fails(
+    configuration: Configuration, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     path, _ = configuration
     config = load_config(path)
     credentials = type("Credentials", (), {"proof_key": object(), "access_token": lambda: None})()
     monkeypatch.setattr(hosting, "load_service_credentials", lambda **_kwargs: credentials)
 
     class Service:
-        def __init__(self, *_args, **_kwargs):
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
             pass
 
-        async def run(self, *_args, **_kwargs):
+        async def run(self, *_args: object, **_kwargs: object) -> None:
             raise RuntimeError("writer held by another owner")
 
-        def status(self):
+        def status(self) -> dict[str, bool]:
             return {"writer_held": False, "ready": False}
 
     monkeypatch.setattr(hosting, "WatchService", Service)

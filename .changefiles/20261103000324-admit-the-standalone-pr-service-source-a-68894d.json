@@ -1,0 +1,9 @@
+{
+  "comment": "Add strict Python type contracts for the standalone PR service and its tests",
+  "changes": [
+    {
+      "plugin": "services/pr",
+      "type": "patch"
+    }
+  ]
+}

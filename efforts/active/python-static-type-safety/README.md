@@ -8,7 +8,7 @@
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
 - **Coverage:** [Portfolio tracker and merged lockdown records](coverage.md)
-- **Current slice:** Independent PR service (#10204), Index service (#10206), SSH service (#10211) and retained effort-helper (#10215) preparation. Credential Relay (#10222), Harness Knowledge (#10185), Context Handoff (#10179), Dispatch service (#10184), Devcontainer (#10183), AI Attribution (#10171), Venue Copilot (#10166), Plugin Resolve (#10141), Plugin Activation (#10108), Machine Transport (#10107), Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
+- **Current slice:** Independent PR service (#10204), SSH service (#10211) and retained effort-helper (#10215) qualification. Index service (#10206), Credential Relay (#10222), Harness Knowledge (#10185), Context Handoff (#10179), Dispatch service (#10184), Devcontainer (#10183), AI Attribution (#10171), Venue Copilot (#10166), Plugin Resolve (#10141), Plugin Activation (#10108), Machine Transport (#10107), Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -32,7 +32,7 @@ definition of success.
 
 - **Topology:** Independent per-slice PRs, never a concurrently edited shared staging branch. The lead may integrate non-overlapping test cohorts into one bounded reviewed slice after their isolated validation.
 - **Host (owns PRs):** `lead` owns its PRs and verifies completion of delegated PRs.
-- **Delegates:** PR, Index and SSH service slice owners prepare independently in dedicated worktrees. Heavy unit/native qualification is staggered for actual test capacity, not a shared PR merge queue. Each owner receives an explicit bounded qualification and publication assignment; the lead retains integration, shared coverage/global documentation, the effort and full completion judgment. Completed children are finalized only after their merged evidence returns to this tracker.
+- **Delegates:** PR and SSH service slice owners qualify independently in dedicated worktrees; the Index admission has merged. Heavy unit/native qualification is staggered for actual test capacity, not a shared PR merge queue. Each owner receives an explicit bounded qualification and publication assignment; the lead retains integration, shared coverage/global documentation, the effort and full completion judgment. Completed children are finalized only after their merged evidence returns to this tracker.
 - **Handoff:** A merged slice returns to the canonical README, updates its Plan/Validation/Journal, then selects the next unresolved item. A continuation retains #9807, this README, the current slice, live PRs and exactly one next action.
 - Existing contributor PRs are reviewed/coordinated, not superseded. Shared-library changes precede dependent activations; unrelated leaf activations may proceed independently.
 
@@ -167,6 +167,7 @@ rewrite.
 ### Phase 4 - Runtime and service ratchet
 
 - [x] Strictly admit the complete unchanged Dispatch service Python source/test project (#10184 / merged #10189).
+- [x] Strictly admit all 27 Index service source/test/helper files on its existing Python 3.10 minimum, preserving independent core-plugin ownership (#10206 / merged #10327).
 - [ ] Activate each runtime plugin and standalone service independently, using basic mode only where needed and recording its remaining strict delta.
 - [ ] Tighten each activated runtime/service to strict through component-sized PRs; cover source, optional extras and platform-specific implementations.
 - [ ] Converge the larger Worktrees, Worktree Manager and Fleet Manager surfaces through subsystem-sized PRs, preserving lazy-loading and native behavior.
@@ -201,6 +202,7 @@ rewrite.
 - [ ] Composition and generated-copy controls reject omitted/reordered/changed fragments or stale source correspondence; no empty result can certify coverage.
 - [ ] Each typing change preserves behavior through the smallest existing focused tests plus directly relevant integration/native checks. Skips are explicitly justified in that PR.
 - [x] Credential Relay preserves its production behavior, assertions and deadlines across both strict targets, Python 3.10 native/copy tests and fresh exact-input source CI (#10310).
+- [x] Index service preserves its original function/assertion contracts across both strict targets, Python 3.10 native/copy tests, composed-source qualification and fresh exact-input source CI; the eight original skips receive no additional credit (#10327).
 - [x] Fresh checker preparation and a credential-free local subprocess check exercise the real developer command without executing product code or collecting tests.
 - [x] Required source gate actually rejects a type regression on activated code.
 - [x] Required exact-candidate release gate rejects a type regression on activated code.
@@ -2520,3 +2522,37 @@ composition prerequisites, and review/validation rules.
   The merged tracker remains **36/68 projects and 315/7,780 physical files**,
   with 32 pending and zero basic; this prepared service is not yet a merged
   admission. #9807, this Plan and this Validation Plan remain Active.
+
+### 2026-11-03 - Index service merged; both portfolio metrics reconciled
+
+- #10327 merged as `dcb8603d01a6b008b1f2d83a3ee0bd9824bbdead` after
+  Copilot approval on exact head
+  `d2d44708f0d4a6a8453b23153699508db8448a3d`, green required CI run
+  `41753974777` and zero review threads. #10206 is closed; #9807 remains open.
+  The actual merged tree matches the fresh provider qualification tree
+  `8d1a1ecc04095fba31a34ec351216b404782d0f2`.
+- Fresh exact-input source CI passes all **3,958 units in 90.907 seconds**,
+  with all 553 inputs, 234 positive coverage targets and zero effects.
+  This is new provider evidence, not the pre-publication 275.343-second
+  composed packet relabeled for a new head. The unchanged owned service/core
+  blobs retain their independently verified native and composed-source
+  qualification. Newly refreshed upstream runtime-archive members match their
+  canonical regular sources and pass targeted actual Python 3.10 probes.
+- All 27 service files remain strict on both targets. Linux Python 3.10.22
+  passes 555 native service/core cases with eight original skips; the
+  Windows 3.10/3.12 parity and copy controls retain their recorded scope.
+  All 411 original service function/decorator contracts, 516 assertions and
+  124 affected core functions remain preserved. The separate Index plugin
+  is not admitted by this service change. Exact failed/successful test
+  resources are absent; there is no installed-runtime rollout.
+- The complete Plan and Validation Plan were reread, and all 68 tracker rows
+  reconciled to the authoritative inventory: **37 / 68 strict projects
+  (54.4%)** and **342 / 7,806 physical Python files (4.4%)**. Thirty-one
+  projects remain pending and none are basic. The new admission contributes
+  27 locked files. The 26 additional files inventoried in pending Dispatch,
+  Index, Worktrees and Worktree Manager scopes receive no strict credit.
+- All three earlier merged-admission journal sections and the complete prior
+  coverage document are preserved in the reviewed change. PR service, SSH
+  service and effort-helper qualification continue independently; this effort,
+  its Plan and its Validation Plan remain Active until every remaining project
+  and cross-cutting gate is resolved.
