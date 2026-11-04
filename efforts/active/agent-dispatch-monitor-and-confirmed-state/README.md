@@ -258,6 +258,16 @@ reservations without absorbing or expiring them. This is LONG-TERM intent,
 not immediate implementation authority. #3681 is provenance, not a required
 live claim token. No new blanket ACK or executor appointment is created.
 
+<!-- backlog-reconciliation:7556:qualified-thirteen:3002:Coordination -->
+
+The proposed exact #3002 null-owner-session family retains the existing
+steering/delivery and binding-lifecycle custodian. The planning owner handles
+documentation only; separately approved backend and UI owners retain their
+boundaries. Preserve #2879's exact-worker/resource/complete-transfer and
+#2887's policy reservations. #5701/#5668 delivered interfaces remain credit,
+not reopened claims; no task takeover, new ACK, implementation appointment or
+restoration of historical terminal enums follows.
+
 ## Plan
 
 ### Continuing slice - Pool-owned assignment/startup and retry eligibility
@@ -973,6 +983,44 @@ receiving readback precede any separate source-specific disposition.
   supported producer/query/UI surfaces. Intent documents or a narrow suspend fixture do not prove
   the complete integration or deployed behavior.
 
+<!-- backlog-reconciliation:7556:qualified-thirteen:3002:Plan -->
+
+### Proposed exact owned STARTED/null-owner-session delivery contract
+
+_Agent-recommended finite Phase 7 clarification of the complete current
+source contract. Existing durable/idempotent acceptance, explicit
+`no_owner_session` receipts, custody fences and shared drafts are credit,
+not proof that the rightful worker received or applied the requirement._
+
+- [ ] **D3002-P1:** Preserve ALL THREE original alternatives for an owned
+  STARTED task lacking `owner_session_id`: correct routable binding BEFORE
+  steerable/ready advertisement OR supported alternate exact-owner/headless
+  route OR explicitly undeliverable/not-ready outcome with actionable
+  recovery. Never infer the worker from a newer head, default coordinator
+  or unrelated session.
+- [ ] **D3002-P2:** Distinguish durable data acceptance, route readiness,
+  enqueue, transport delivery, worker consumption and actual application.
+  Preserve accepted input through restart/idempotent retry and asynchronous
+  startup; do not discard durable input merely to reproduce an older output
+  shape.
+- [ ] **D3002-P3:** Temporarily unroutable accepted input has queryable,
+  actionable pending/blocked state and correct-owner binding recovery
+  without loss or false success. Permanent unsupported routing is explicitly
+  undeliverable/not-ready, not success-shaped readiness.
+- [ ] **D3002-P4:** Preserve exact task/source authority, owner/session/
+  generation and request identity across late binding, retry, concurrent
+  owner change and stale delivery. Admission/rebind belongs to the owning
+  lifecycle, not the submitting session.
+- [ ] **D3002-P5:** Distinguish STARTED/null from SUSPENDED cold-headless
+  `resume_requested`, intentional detached wait and no owner. Cover
+  supported local/fleet/interactive variants without treating one branch's
+  fixture as the entire routing matrix.
+- [ ] **D3002-P6:** Preserve delivery/consumption/application acknowledgement
+  gates and visible failures. Exercise null binding, unavailable/unsupported
+  route, owner-change race, restart/retry and eventual exact-worker
+  consumption/application through existing receipt/outbox machinery.
+  Stored steer or accepted Bridge prompt is not a completed requirement.
+
 ## Validation Plan
 
 - [ ] Complete the [assignment/startup validation matrix](assignment-startup-amendment.md#validation-plan);
@@ -1205,6 +1253,22 @@ receiving readback precede any separate source-specific disposition.
   finite evidence tier, preserving alternatives, completed credit and existing custodians.
   Administrative tracking is not technical completion or claim release.
 
+<!-- backlog-reconciliation:7556:qualified-thirteen:3002:Validation-Plan -->
+
+- [ ] **D3002-V1:** Resolve every D3002-P1 through P6 at the original finite
+  route/readiness and consumer tier. Retain ALL THREE OR alternatives and
+  independently observe acceptance, readiness, enqueue, delivery,
+  consumption and application across restart/idempotent retry; asynchronous
+  startup is allowed and accepted input is preserved.
+- [ ] **D3002-V2:** Cover temporary pending/correct-owner recovery, permanent
+  unsupported/not-ready, null/unavailable failures, late binding and
+  owner/session/generation/request races. Distinguish STARTED/null from
+  SUSPENDED cold resume, detached waiting and unowned work across supported
+  local/fleet/interactive variants. Existing custody/receipt/outbox owners,
+  #2879's independent transfer duties and current SUBMITTED/COMPLETED
+  direction remain; no speculative session selection, competing dedup or
+  automatic task takeover.
+
 ## Proposal
 
 Historical Phase 2 API shapes, as recorded then (current state vocabulary and
@@ -1229,6 +1293,20 @@ extension policy are in the 2026-10-08 amendment):
 Phase 3/4's shapes are still pending their own design pass.
 
 ## Journal
+
+<!-- backlog-reconciliation:7556:qualified-thirteen:3002:Journal -->
+
+### 2026-10-29 - Proposed exact null-binding delivery retention
+
+Added direct finite Phase 7 Plan and actual global Validation after complete
+current original/refinement and fixed receiving-document qualification.
+Preserved all three original route/readiness alternatives, six acceptance/
+delivery/consumption/application clauses and the existing delivery custodian.
+#5701, truthful receipts and later custody/shared-draft progress remain
+bounded credit, not actual routing/application completion. No task, steering,
+wake, owner probe, implementation, source closure or resource transfer
+occurred. Review, actual delivery and complete current readback remain
+outstanding.
 
 The [November 2 direct-definition receipt](journal/2026/11.02-direct-pool-definitions.md)
 records lossless direct registration/source integration and its retained gates.
