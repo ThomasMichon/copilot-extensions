@@ -485,7 +485,10 @@ def construction_session(runtime: RuntimeOperations, root: Path, version: str, *
             if os.path.lexists(last_good):
                 if runtime._is_link(last_good) or not last_good.is_file():
                     raise RuntimeError("last-known-good selector must be an ordinary file")
-                references.add(last_good.read_text(encoding="utf-8").strip())
+                try:
+                    references.add(last_good.read_text(encoding="utf-8").strip())
+                except UnicodeError:
+                    pass
         for previous in references:
             if previous:
                 retained.enter_context(runtime.retention_lease(root, previous, require_installed=False))

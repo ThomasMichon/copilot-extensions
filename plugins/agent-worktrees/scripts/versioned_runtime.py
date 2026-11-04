@@ -259,7 +259,7 @@ def current_version(root: Path, link_name: str = CURRENT_LINK) -> str | None:
 def _read_current_marker(root: Path) -> str | None:
     try:
         txt = (root / CURRENT_VERSION_FILE).read_text(encoding="utf-8").strip()
-    except OSError:
+    except (OSError, UnicodeError):
         return None
     return txt or None
 
@@ -268,7 +268,7 @@ def read_last_known_good(root: Path) -> str | None:
     """The last version ``activate()`` published, or ``None`` if never stamped."""
     try:
         txt = (root / LAST_KNOWN_GOOD_FILE).read_text(encoding="utf-8").strip()
-    except OSError:
+    except (OSError, UnicodeError):
         return None
     return txt or None
 

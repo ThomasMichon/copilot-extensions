@@ -101,6 +101,31 @@ def test_source_repair_reuse_requires_exact_deployment_receipt(
     assert candidate.startswith(base + ".repair.")
 
 
+@pytest.mark.parametrize("compatible", [False, True])
+def test_required_retained_helpers_participate_in_reuse(
+    tmp_path, monkeypatch, generation, compatible,
+):
+    (tmp_path / "1.2.3").mkdir()
+    runtime = _runtime(tmp_path, admission="reuse")
+    observed = []
+
+    def helpers(slot, *, complete):
+        observed.append((slot, complete))
+        if not compatible:
+            raise RuntimeError("Completed runtime retention helpers differ from their source")
+
+    runtime.retain_runtime_helpers = helpers
+    monkeypatch.setattr(generation, "_runtime", lambda: runtime)
+    monkeypatch.setattr(generation.subprocess, "run", lambda *_a, **_kw: SimpleNamespace(returncode=0))
+
+    selected = generation.select_generation(
+        tmp_path, "1.2.3", "payload", require_retained_helpers=True,
+    )
+
+    assert (selected == "1.2.3") is compatible
+    assert observed == [(tmp_path / "1.2.3", True)]
+
+
 @pytest.mark.parametrize("failure", ["exit", "timeout", "spawn"])
 def test_failed_old_health_never_selects_incumbent(tmp_path, monkeypatch, generation, failure):
     (tmp_path / "1.2.3").mkdir()

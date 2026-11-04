@@ -295,13 +295,23 @@ def _repair_case(tmp_path: Path, *, qualified: bool = False, footprint: str = "i
     if footprint == "file":
         slot.parent.mkdir(parents=True)
         slot.write_text("preserve non-directory generation", encoding="ascii")
+    elif footprint == "stale-helpers":
+        seeded = _run(
+            INSTALL, "install", home=home, fake_bin=fake_bin, mode="success", uv_only=True,
+        )
+        assert seeded.returncode == 0, seeded.stdout
+        helper = slot / ".runtime-bootstrap" / "versioned_runtime.py"
+        helper.write_bytes(helper.read_bytes() + b"\n# Older retained helper build.\n")
     else:
         (slot / "Scripts").mkdir(parents=True)
         (slot / "Scripts" / "python.exe").write_text("broken interpreter", encoding="ascii")
         (slot / "partial.txt").write_text("preserve incomplete generation", encoding="ascii")
     runtime = slot.parents[1]
     for name in ("current-version", "last-known-good"):
-        (runtime / name).write_text(version, encoding="ascii")
+        if footprint == "invalid-selectors":
+            (runtime / name).write_bytes(b"\xff\xfe")
+        else:
+            (runtime / name).write_text(version, encoding="ascii")
     config = runtime / "config.yaml"
     config.write_text("default_idle_timeout: 42\n", encoding="ascii")
     before = snapshot_tree_manifest(slot)
@@ -355,6 +365,7 @@ def _construction_calls(case):
 
 @pytest.mark.parametrize(("action", "footprint"), [
     ("install", "incomplete"), ("update", "incomplete"), ("update", "file"),
+    ("update", "invalid-selectors"), ("update", "stale-helpers"),
 ])
 def test_normal_entry_repairs_selected_generation_and_reuses_it(
     tmp_path: Path, action: str, footprint: str,

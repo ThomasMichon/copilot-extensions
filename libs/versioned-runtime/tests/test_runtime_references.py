@@ -173,3 +173,20 @@ def test_predecessor_pin_cannot_admit_an_invalid_completed_candidate(tmp_path):
         ):
             pytest.fail("predecessor preservation qualified a candidate")
     assert slot.read_bytes() == b"preserve invalid predecessor"
+
+
+@pytest.mark.parametrize("selector", ["current-version", "last-known-good"])
+def test_undecodable_old_selector_does_not_veto_ready_publication(tmp_path, selector):
+    root = case(tmp_path)
+    slot = runtime.slot(root, "2.0")
+    (slot / "payload").write_text("incoming")
+    runtime.mark_complete(root, "2.0", payload_hash="same")
+    (root / selector).write_bytes(b"\xff\xfe")
+    old_payload = root / "versions" / "old" / "preserve"
+    old_payload.write_bytes(b"old state")
+
+    runtime.activate(root, "2.0", link_free=True)
+
+    assert runtime.current_version(root) == "2.0"
+    assert runtime.read_last_known_good(root) == "2.0"
+    assert old_payload.read_bytes() == b"old state"

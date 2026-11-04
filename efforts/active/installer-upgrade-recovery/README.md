@@ -403,3 +403,32 @@ is repeated against that extraction before publication. Those final reruns pass
 85 Bridge controls with eight platform skips, and the three normal-entry/failure
 controls in 162.14 seconds. No baseline, test budget or candidate-admission requirement was
 relaxed to obtain those results.
+
+### 2026-11-04 - Undecodable selectors and stale retained helpers
+
+The next current-head review found two additional ordinary-update failures.
+Both reproduced through the real PowerShell entry: invalid UTF-8 current and
+last-known-good selectors blocked constructor/publication reads, and stale
+retained helpers passed the CLI launch check but failed completion verification.
+Canonical selector readers now handle undecodable old content without relaxing
+link, type, permission or other I/O checks. PowerShell's reuse probe additionally
+requires the exact retained helper bundle its completion step consumes.
+The existing canonical helper verifier is read-only; old slots are not restamped.
+POSIX completion does not require that bundle and retains its existing probe.
+
+Both native regressions now pass normal update and immediate repeat, preserving
+old-slot and configuration bytes. Two pure helper controls and two canonical
+publication controls also pass. The final focused evidence totals 141 unique
+passes and twelve platform skips, including repeated source-qualified, receipt,
+helper and shell packets. Existing child/item/group bounds remain unchanged.
+Canonical copies and maintained producer digests are synchronized; only three
+admitted source fingerprints change in the required unit manifest, not its
+4,019 nodes, coverage targets or 300-second budget.
+
+The same Windows source-only limitations remain: no native macOS/Bash 3.2,
+fresh external VM, real package feed, service registration or live installation
+is claimed. Required CI and a fresh current-head verdict remain merge gates.
+The earlier planner fix is released through #10430; it is not installed by
+this source work. The separate artifact-publication gap remains with #10432's
+existing owner. Neither containing release nor this PR authorizes rollout or
+completes #10377.

@@ -265,6 +265,12 @@ incoming health leaves the existing selection intact; a healthy candidate is
 completed before activation and recorded in the deployment manifest. Repeating
 the same request reuses its healthy selected repair without dependency writes.
 
+PowerShell reuse also verifies the retained bootstrap helpers required by its
+completion step; stale helpers select a fresh generation rather than modifying
+the old slot. Undecodable legacy selector contents do not block construction
+or publication of a healthy incoming selection. Filesystem safety and storage
+failures retain their existing handling.
+
 Source receipt validation remains bound to the original source generation,
 independently of the repair suffix. This native CLI recovery does not establish
 central-service cutover, shared admission/coalescing or installed-host rollout.

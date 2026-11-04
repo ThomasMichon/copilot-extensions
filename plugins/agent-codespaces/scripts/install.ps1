@@ -947,7 +947,7 @@ function Select-InstallRuntimeGeneration {
     $nativeError = ''
     $selectionArguments = @(
         '-I', '-B', (Join-Path $ScriptDir 'runtime-generation.py'), '--root', $InstallDir,
-        '--version', $SourceVersion, '--payload-hash', (Get-PayloadHash)
+        '--version', $SourceVersion, '--payload-hash', (Get-PayloadHash), '--require-retained-helpers'
     )
     if ($script:SourceRuntimeIdentity) {
         $selectionArguments += @('--source-identity', $script:SourceRuntimeIdentity)

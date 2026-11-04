@@ -25,6 +25,7 @@ def _runtime():
 
 def select_generation(
     root: Path, version: str, payload_hash: str, source_identity: dict | None = None,
+    *, require_retained_helpers: bool = False,
 ) -> str:
     runtime = _runtime()
     suffix = ".repair." if "+" in version else "+repair."
@@ -41,6 +42,11 @@ def select_generation(
                 return False
         if runtime.check_admission(root, candidate, payload_hash=payload_hash) != runtime.ADMIT_REUSE:
             return False
+        if require_retained_helpers:
+            try:
+                runtime.retain_runtime_helpers(runtime.version_dir(root, candidate), complete=True)
+            except (OSError, ValueError, RuntimeError):
+                return False
         python = runtime.slot_python(root, candidate)
         if python is None:
             return False
@@ -78,8 +84,12 @@ def main() -> None:
     parser.add_argument("--version", required=True)
     parser.add_argument("--payload-hash", required=True)
     parser.add_argument("--source-identity", type=json.loads)
+    parser.add_argument("--require-retained-helpers", action="store_true")
     args = parser.parse_args()
-    print(select_generation(args.root, args.version, args.payload_hash, args.source_identity))
+    print(select_generation(
+        args.root, args.version, args.payload_hash, args.source_identity,
+        require_retained_helpers=args.require_retained_helpers,
+    ))
 
 
 if __name__ == "__main__":
