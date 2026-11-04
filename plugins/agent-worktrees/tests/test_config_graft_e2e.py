@@ -590,6 +590,7 @@ def ordinary_related_sources(tmp_path, monkeypatch):
     from agent_worktrees import repos
 
     monkeypatch.setattr(repos, "_current_platform", lambda: "windows")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
     roots = {name: tmp_path / name / "shared" for name in ("base", "foreign")}
     knowledge = {name: tmp_path / f"knowledge-{name}" for name in roots}
     local = {name: tmp_path / "cell-a" / name for name in roots}
