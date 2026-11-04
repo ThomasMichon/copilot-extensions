@@ -201,7 +201,9 @@ def test_legacy_stamp_does_not_acquire_bootstrap_python(
     tmp_path: Path, plugin: str,
 ) -> None:
     payload, _ = native._payload(tmp_path, plugin, source=False)
+    engine = native.ROOT / "libs" / "installer-engine" / "installer-engine.ps1"
     script = native._setup(tmp_path, payload, plugin, "ps1") + f"""
+. {native._quote(engine, 'ps1')}
 $ServiceName = 'fixture'
 $LocalBin = Join-Path $InstallDir 'bin'
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)

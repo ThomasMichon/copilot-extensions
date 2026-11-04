@@ -125,6 +125,7 @@ from .assignment_workspace import RelationshipWriter
 from .queue_steering import QueueSteeringMixin
 from .queue_suspend import QueueSuspendMixin
 from .queue_submission_rejection import QueueSubmissionRejectionMixin
+from .queue_submission_preparation import QueueSubmissionPreparationMixin
 from .queue_verification_requests import QueueVerificationRequestsMixin
 from .registrations import (  # noqa: F401 -- re-exported for existing call sites/tests
     RegistrationError,
@@ -163,6 +164,7 @@ class _ClosingConnection(sqlite3.Connection):
 
 
 class TaskQueue(
+    QueueSubmissionPreparationMixin,
     QueueTaskRelationshipsMixin,
     PoolDeclineMixin,
     TaskRecoveryMixin,
@@ -299,6 +301,8 @@ class TaskQueue(
             self._migrate_pool_catalog(conn)
             from .queue_relationship_schema import migrate_relationships
             migrate_relationships(conn)
+            from .queue_submission_preparation import migrate_submission_preparation
+            migrate_submission_preparation(conn)
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS coordinator_fencing ("
                 " singleton INTEGER PRIMARY KEY CHECK (singleton = 1),"
