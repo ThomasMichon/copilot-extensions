@@ -25,6 +25,9 @@ if ($args.Count -eq 1 -and $args[0] -ceq '--describe-source-inputs') {
     exit 0
 }
 
+$BootstrapSourceAnchor = $env:WORKTREE_MANAGER_SOURCE_ANCHOR
+if (-not $BootstrapSourceAnchor) { $BootstrapSourceAnchor = (Get-Location).Path }
+
 if ($env:BOOTSTRAP_KILLSWITCH_STATE_FILE -and
     -not $env:BOOTSTRAP_KILLSWITCH_STATE_FILE.StartsWith('~')) {
     $holdPath = $env:BOOTSTRAP_KILLSWITCH_STATE_FILE
@@ -470,7 +473,9 @@ if ($InstallSource) {
 }
 
 Push-Location (Join-Path $PayloadParent 'worktree-manager')
+$PreviousSourceAnchor = $env:WORKTREE_MANAGER_SOURCE_ANCHOR
 try {
+    $env:WORKTREE_MANAGER_SOURCE_ANCHOR = $BootstrapSourceAnchor
     $Python = if ($SystemPythonRequested) { $SystemPython } else { Find-BootstrapPython $Uv }
     $env:PATH = Add-BootstrapPythonPath $env:PATH ([IO.Path]::GetDirectoryName($Python))
     if ($commandArgs.Count) {
@@ -480,6 +485,7 @@ try {
     }
     $commandExit = $LASTEXITCODE
 } finally {
+    $env:WORKTREE_MANAGER_SOURCE_ANCHOR = $PreviousSourceAnchor
     Pop-Location
 }
 if ($commandExit -ne 0) {

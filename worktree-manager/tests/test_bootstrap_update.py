@@ -279,6 +279,17 @@ def test_invalid_bootstrap_context_refuses_before_retention(tmp_path, monkeypatc
         execute(args, object(), source_digest="a" * 64)
 
 
+def test_invalid_source_anchor_refuses_before_retention(monkeypatch):
+    from worktree_manager.source_config import SOURCE_ANCHOR_ENV
+    import bootstrap_inputs
+
+    execute = runpy.run_path(str(SCRIPT))["execute"]
+    monkeypatch.setenv(SOURCE_ANCHOR_ENV, "relative")
+    monkeypatch.setattr(bootstrap_inputs, "retain", lambda *a, **k: pytest.fail("invalid inputs retained"))
+    with pytest.raises(ValueError, match="source anchor must be absolute"):
+        execute(SimpleNamespace(command=["update"]), object(), source_digest="a" * 64)
+
+
 def test_bootstrap_source_identity_is_captured_before_retention(tmp_path, monkeypatch):
     execute = runpy.run_path(str(SCRIPT))["execute"]
     import bootstrap_inputs
@@ -306,6 +317,64 @@ def test_bootstrap_source_identity_is_captured_before_retention(tmp_path, monkey
         payload=tmp_path, install_source=None, repair_update=False,
     )
     assert execute(args, driver, source_digest="a" * 64) == 23
+
+
+@pytest.mark.parametrize("changed", [False, True])
+@pytest.mark.parametrize("shell_handoff", [False, True])
+def test_relative_source_keeps_its_admission_anchor_without_the_caller_directory(
+    tmp_path, monkeypatch, changed, shell_handoff,
+):
+    from worktree_manager import source_config
+    import bootstrap_inputs
+
+    execute = runpy.run_path(str(SCRIPT))["execute"]
+    adapter = self_install._runtime_installer()
+    caller, retained = tmp_path / "caller", tmp_path / "retained-controller"
+    caller.mkdir()
+    retained.mkdir()
+    root = tmp_path / "manager"
+    source_config.set_source(repo="../repository", root=root)
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
+    monkeypatch.delenv(source_config.SOURCE_ANCHOR_ENV, raising=False)
+    monkeypatch.chdir(caller)
+    if shell_handoff:
+        monkeypatch.setenv(source_config.SOURCE_ANCHOR_ENV, str(caller))
+        monkeypatch.chdir(retained)
+    monkeypatch.setattr(core, "default_root", lambda: tmp_path / "driver")
+    monkeypatch.setattr(bootstrap_inputs, "retain", lambda *a, **k: (retained, True))
+    drain = core.drain
+    acquired = []
+
+    def participant(transaction):
+        request = transaction.request
+        assert Path(request.spec.cwd) == caller and Path(request.runner.cwd) == retained
+        monkeypatch.chdir(retained)
+        caller.rmdir()
+        if changed:
+            source_config.set_source(repo="../other-repository", root=root)
+        with update_driver_cli._request_environment(
+            request.spec.context, cwd=request.spec.cwd,
+        ):
+            adapter._validate_update_request(SimpleNamespace(admitted_source=request.spec.source))
+            acquired.append(source_config.absolute_local_source(self_install.manager_repo(root)))
+        assert adapter.os.environ.get(source_config.SOURCE_ANCHOR_ENV) == (
+            str(caller) if shell_handoff else None
+        )
+        return 23
+
+    monkeypatch.setattr(core, "drain", lambda: drain(executor=participant))
+    args = SimpleNamespace(
+        payload=tmp_path, root=root, install_source=None,
+        command=["update", "--supervised-debug"], repair_update=False,
+    )
+    if changed:
+        with pytest.raises(RuntimeError, match="Manager source changed"):
+            execute(args, core, source_digest="a" * 64)
+        assert acquired == []
+    else:
+        assert execute(args, core, source_digest="a" * 64) == 23
+        assert acquired == [str(tmp_path / "repository")]
+    assert not caller.exists()
 
 
 @pytest.mark.parametrize("automatic", [False, True])

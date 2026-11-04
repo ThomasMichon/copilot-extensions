@@ -1775,7 +1775,11 @@ write an Autorun entry, require an open Picker or create another scheduler.
 Unattended credential prompts are disabled; authentication failures remain
 observable. A direct Manager request retains its configured source identity
 and refuses a changed source selection at execution rather than silently
-substituting it. Credential-bearing source URLs are refused before journaling;
+substituting it. Relative filesystem sources retain their submitting directory
+as a resolution anchor for validation and acquisition. Bootstrap workers still
+run from the retained controller, so the submitting directory need not remain
+present unless it is also an explicitly required invocation context.
+Credential-bearing source URLs are refused before journaling;
 use the existing source credential helper.
 
 The driver keeps requests, logs and results beneath

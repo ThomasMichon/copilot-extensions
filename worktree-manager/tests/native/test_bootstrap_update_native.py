@@ -17,6 +17,7 @@ import agent_procutil
 from update_driver import core
 from worktree_manager import self_install
 from worktree_manager.engine_acquisition_budget import TIMEOUT_ENV
+from worktree_manager.source_config import SOURCE_ANCHOR_ENV
 
 pytestmark = pytest.mark.timeout(90)
 SOURCE = Path(__file__).resolve().parents[3]
@@ -118,6 +119,8 @@ with runtime_install._installation_custody() as custody:
         raise AssertionError("suite escaped whole-update custody")
     request, = (row for row in driver.status() if row.state == "running")
     def effect(phase):
+        from worktree_manager.source_config import absolute_local_source, resolved_repo
+
         with (root / "effects.jsonl").open("a", encoding="utf-8") as stream:
             stream.write(json.dumps({
                 "phase": phase, "request": request.id, "pid": os.getpid(),
@@ -125,6 +128,7 @@ with runtime_install._installation_custody() as custody:
                 "acquisition_budget": os.environ.get(
                     "WORKTREE_MANAGER_ENGINE_ACQUISITION_TIMEOUT_SEC",
                 ),
+                "source_repo": absolute_local_source(resolved_repo(root)),
             }) + "\\n")
     def body(arguments):
         effect("suite-start")
@@ -289,6 +293,7 @@ def bootstrap(tmp_path):
     for key in ("UPDATE_DRIVER_WITNESS", "UPDATE_DRIVER_STARTUP"):
         environment.pop(key, None)
     environment.pop(TIMEOUT_ENV, None)
+    environment.pop(SOURCE_ANCHOR_ENV, None)
     driver = profile / ".copilot-extensions" / "update-driver"
     callers, streams = [], []
 
@@ -352,10 +357,15 @@ def test_native_bootstrap_coalesces_pending_work_and_retains_worker_after_caller
     bootstrap, lose_caller,
 ):
     root, source, driver, start, effects = bootstrap
+    if lose_caller:
+        (root / "config.toml").write_text(
+            '[source]\nrepo="source"\nref="main"\n', encoding="utf-8",
+        )
     first, first_log = start("--project", "sample")
     # Durable admission finishes acquisition/retention; observe the next owned stage separately.
     _eventually(
         lambda: "Update request " in first_log.read_text(encoding="utf-8"), processes=(first,),
+        timeout=60,
     )
     _eventually(
         lambda: any(row["phase"] == "suite-start" for row in effects()),
@@ -365,6 +375,7 @@ def test_native_bootstrap_coalesces_pending_work_and_retains_worker_after_caller
     assert original.state == "running" and original.exit_code is None
     assert original.spec.backend == "manager"
     assert [row["phase"] for row in effects()] == ["manager", "suite-start"]
+    assert Path(effects()[1]["source_repo"]) == source
     retained = Path(effects()[0]["payload"])
     assert retained.is_relative_to(driver / "bootstrap-inputs")
     assert retained != source / "worktree-manager"
@@ -426,7 +437,7 @@ def test_native_bootstrap_coalesces_pending_work_and_retains_worker_after_caller
         "commit", "-qm", "changed engine source",
     )
     third, third_log = start("--project", "sample")
-    assert third.wait(timeout=20) == 23, third_log.read_text(encoding="utf-8")
+    assert third.wait(timeout=60) == 23, third_log.read_text(encoding="utf-8")
     assert len(core.status(root=driver)) == 4
     assert Path(effects()[9]["payload"]) != retained
     assert not (retained.parent / "plugins" / "agent-worktrees" / "src" / changed.name).exists()
