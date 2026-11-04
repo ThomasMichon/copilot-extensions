@@ -25,9 +25,11 @@ def resolve_invocation_project(args_list, explicit, resolve_project, contains_cw
     from . import config as cfg
 
     own_closeout = args_list[:1] == ["finalize"] and any(
-        option.split("=", 1)[0] in {
-            "--dispatch-task-id", "--dispatch-reservation-key", "--dispatch-native-id",
-        } for option in args_list[1:]
+        len(option) > 2 and option.startswith("--") and any(
+            name.startswith(option) for name in (
+                "--dispatch-task-id", "--dispatch-reservation-key", "--dispatch-native-id",
+            )
+        ) for option in (arg.partition("=")[0] for arg in args_list[1:])
     )
     if own_closeout and explicit:
         raise ValueError("Own-worker closeout cannot override its actual cwd project")

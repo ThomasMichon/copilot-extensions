@@ -408,15 +408,21 @@ def test_canonical_closeout_rejects_all_normal_finalize_overrides(monkeypatch, c
     assert "without finalize overrides" in json.loads(capfd.readouterr().out)["error"]
 
 
-def test_canonical_closeout_cannot_chdir_to_an_explicit_project(monkeypatch, tmp_path) -> None:
+@pytest.mark.parametrize("options", [
+    ["--dispatch-task-id=task"],
+    ["--dispatch-t", "task", "--dispatch-r", "reservation", "--dispatch-n", NATIVE],
+    ["--dispatch-t=task", "--dispatch-r=reservation", f"--dispatch-n={NATIVE}"],
+])
+def test_canonical_closeout_cannot_chdir_to_an_explicit_project(monkeypatch, tmp_path, options) -> None:
     from agent_worktrees.invocation_project import resolve_invocation_project
 
     monkeypatch.chdir(tmp_path)
     with pytest.raises(ValueError, match="actual cwd project"):
         resolve_invocation_project(
-            ["finalize", "--dispatch-task-id=task"], "foreign",
+            ["finalize", *options], "foreign",
             lambda *a: pytest.fail("Override resolved"), lambda *a: False, lambda *a: False,
         )
+    assert Path.cwd() == tmp_path
 
 
 def test_fresh_selected_cli_describes_observation_without_relying_on_worker_cwd(cwd_project, worker):

@@ -34,17 +34,19 @@ A lost preparation response never starts finalization or automatically repeats
 the decision POST.
 
 Successful worker output reports `workspace_closeout: finalized`, not task
-release or native retirement. Initial prompts and decision
-nudges describe this explicit decline path, including routing preservation.
-Version-1 same-native retry invocations remain byte-for-byte compatible with
+release or native retirement. Independently admitted decision nudges describe
+this explicit decline path, including routing preservation.
+Initial prompts and version-1 same-native retry invocations remain byte-for-byte compatible with
 retained invocations and independently updated peers. Decline guidance stays
-outside that immutable retry template; retained ordinary charters and routing
+outside those immutable templates; retained ordinary charters and routing
 remain intact.
 Initial invocation recovery also uses its original stored prompt rather than
 the current generated seed. It still validates the original allocation/native
 binding and requested agent/charter before reading the original receipt;
 changed source guidance neither creates a replacement invocation nor rewrites
 the retained assignment.
+Stable initial templates also preserve keyed CLI acquisition requests and
+ordinary recovery through pre-change readers during rollback.
 
 The existing allocator supervisor consumes a pending decline before startup
 retry/nudge/exhaustion logic. Only its owning supervisor, outside observe-only

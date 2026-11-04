@@ -99,6 +99,34 @@ def launch(ordinary: SimpleNamespace) -> dict:
     )
 
 
+def released_pool_seed(task_id: str, *, generation: int, route: str = "",
+                       repo: str | None = None, all_repos: bool = False) -> str:
+    from agent_dispatch.embody_prompts import AUTOPILOT_CHARTER_NAME, _charter_read_step
+
+    ad = "agent-dispatch" + route
+    lane = " --all-repos" if all_repos else (f" --repo {repo}" if repo else "")
+    return (
+        f"You are a dispatched autopilot worker. Task {task_id} is already allocator-CLAIMED "
+        f"at generation {generation}; it is not queued for a new worker claim. "
+        f"Use `{ad}` for every command so routing stays with the original coordinator. "
+        "Use this worktree's own machine/worktree identity, not a synthetic worker id. "
+        f"{_charter_read_step(ad, task_charter=AUTOPILOT_CHARTER_NAME, concise=False)}"
+        f"Read `{ad} show {task_id}` and evaluate the charter's contract-net checks, "
+        f"including `{ad} list{lane}` for the duplicate sweep. Do not acquire another "
+        "claim or evaluation lease. Only if the task is still at the assigned generation, "
+        "CLAIMED and unowned, and you independently ACCEPT its contract, use "
+        f"`{ad} start {task_id} --pool-generation {generation}` with the actual retained "
+        "native session identity supplied below. Startup or prompt delivery is not acceptance. "
+        "If you cannot accept, retain the assignment and report the blocker; do not use "
+        "legacy yield/abandon as a substitute for pool-aware decline and workspace closeout. "
+        f"After acceptance, take steering with `{ad} steer take {task_id} --all`, record "
+        f"status beats with `{ad} progress {task_id} --phase <phase> --summary "
+        f'"<one line>", and only submit with `{ad} complete {task_id} --result-ref <ref>` '
+        "once the charter's actual goal and completion gates are met. Preserve all holds, "
+        "workspace/PR obligations and effect custody."
+    )
+
+
 def test_real_ordinary_create_store_send_and_affirmative_worker_start(ordinary: SimpleNamespace) -> None:
     o = ordinary
     with pytest.raises(DispatchError):
@@ -347,24 +375,24 @@ def test_exact_initial_receipt_replay_survives_worker_acceptance(ordinary: Simpl
 def test_initial_receipt_recovery_preserves_released_prompt_across_versions(
     ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, direction: str,
 ) -> None:
-    from agent_dispatch import embody_prompts
+    from agent_dispatch import embody_prompts, ordinary_invocation
 
     o = ordinary
     current = embody_prompts.pool_worker_prompt
+    prepare = ordinary_invocation.prepare
 
-    def legacy(*args: Any, **kwargs: Any) -> str:
-        before, separator, after = current(*args, **kwargs).partition("If you cannot accept, use ")
-        assert separator
-        _, separator, tail = after.partition("After acceptance,")
-        assert separator
-        return (
-            before
-            + "If you cannot accept, retain the assignment and report the blocker; do not use "
-            "legacy yield/abandon as a substitute for pool-aware decline and workspace closeout. "
-            + "After acceptance," + tail
-        )
+    def released_reader(task: dict, reservation: dict, info: dict, prompt: str, **kwargs: Any) -> dict:
+        # The pre-change reader regenerated and compared the full initial invocation.
+        original = info.get("startup_invocation")
+        generated = prepare(task, reservation, {k: v for k, v in info.items() if k != "startup_invocation"},
+                            prompt, **kwargs)
+        if original is not None and not ordinary_invocation.same_facts(original, generated):
+            raise TaskError("ordinary startup invocation facts or exact prompt changed")
+        return generated
 
-    monkeypatch.setattr(embody_prompts, "pool_worker_prompt", legacy if direction == "upgrade" else current)
+    monkeypatch.setattr(embody_prompts, "pool_worker_prompt",
+                        released_pool_seed if direction == "upgrade" else current)
+    monkeypatch.setattr(ordinary_invocation, "prepare", released_reader if direction == "upgrade" else prepare)
     seed = startup_seed(o.task, o.client, route=" --shared")
     result = launch(o)
     original = json.loads(o.calls[-1][1]["input"])
@@ -372,8 +400,10 @@ def test_initial_receipt_recovery_preserves_released_prompt_across_versions(
                             owner_session_id="native-a", expected_generation=1)
     before = o.q.get_reservation(o.placed["reservation"]["key"]), o.q.get(o.task["id"])
     o.calls.clear()
-    monkeypatch.setattr(embody_prompts, "pool_worker_prompt", current if direction == "upgrade" else legacy)
-    assert startup_seed(o.task, o.client, route=" --shared") != seed
+    monkeypatch.setattr(embody_prompts, "pool_worker_prompt",
+                        current if direction == "upgrade" else released_pool_seed)
+    monkeypatch.setattr(ordinary_invocation, "prepare", prepare if direction == "upgrade" else released_reader)
+    assert startup_seed(o.task, o.client, route=" --shared") == seed
     assert launch(o) == result
     assert len(o.calls) == 1 and "--receipt-only" in o.calls[0][0]
     assert json.loads(o.calls[0][1]["input"]) == original
