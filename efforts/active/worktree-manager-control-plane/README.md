@@ -2344,6 +2344,40 @@ not an implementation assignment or accepted source disposition.)_
   synthetic/native/installed tiers distinct; relocation or source-file
   application is not wheel-operation proof. No all-host/native-wheel program.
 
+### Proposed finite action-progress Inbox consumer from #5343
+
+_(Agent-recommended additive tracking proposal; completed Inbox/non-blocking
+I/O and static-guard credit is not reopened.)_
+
+- [ ] **P5343-1:** Migrate the ACTUAL `_run_task_action_progress` producer
+  in `engine_pivot_actions`, whose worker/reader writes `pct`, `msg`,
+  `done`, `error` and final message into the UI-polled progress dict.
+  Another background producer or helper presence is not this migration.
+- [ ] **P5343-2:** Publish through the existing addressed Inbox and consume
+  its NONDESTRUCTIVE current value in `_action_stream_panel`, using
+  `post`/`peek` or the canonical equivalent. Preserve smooth in-place
+  per-tick latest-value display; destructive `drain`/`drain_apply`
+  changed-since-drain semantics cannot substitute.
+- [ ] **P5343-3:** Bind progress/completion/error/final message to the
+  correct run, existing cancellation boundary and late-old-run fence.
+  A late reader cannot update a newer run or gain process/resource
+  termination authority.
+- [ ] **P5343-4:** Credit #5315's Inbox/background primitives, addressed
+  coalescing and raw `call_from_thread` guard, which explicitly deferred
+  this shared-state producer. A clean raw-call guard does not prove that
+  direct worker mutation migrated. Keep one Inbox/fabric/run/UI authority,
+  not a second progress store or generic all-producer rewrite.
+- [ ] **V5343-1:** Qualify the actual worker/reader -> addressed publication
+  -> render consumer with progress, completion, real error and final
+  message. Repeated current reads stay nondestructive and responsive.
+- [ ] **V5343-2:** Cover cancellation and late frames from an old run while
+  a new run is current, preserving correct identity and existing owning
+  cancellation semantics throughout the actual consumer path.
+- [ ] **V5343-3:** Preserve existing primitive/I-O/guard credit and original
+  evidence tiers through the least expensive faithful bounded owning lane
+  when separately authorized. No new universal UI/native/every-host or
+  whole-Manager prerequisite is added.
+
 ## Validation Plan
 
 - [ ] G1: Resolve EVERY directly retained #4096 original
@@ -2503,7 +2537,24 @@ tiers without imposing every-host or native-on-every-leaf requirements.
   personal/session/tmux boundaries and original evidence tiers; documentary
   intake is not wheel/native proof or settings/resource disposition.
 
+- [ ] **G5343:** Resolve EVERY P5343/local Validation/continuing Coordination
+  clause for the actual action-progress producer AND render consumer:
+  all four fields/final message, correct run/cancel/late-result fencing
+  and nondestructive current-value responsiveness through the existing
+  single fabric. Keep completed credit, same custodians and original tiers;
+  documentary intake is not implementation, UI/native proof, parent
+  completion or resource release.
+
 ## Coordination
+
+The proposed #5343 finite producer/consumer family enters existing Phase8
+migration-intake/domain-Plan review and the dated Journal/open bounded-source
+process. Actual action-progress/Inbox/render/run/cancellation and source/
+native/resource custodians retain their scopes and serial writer boundaries.
+No new assignee, duplicate UI authority, blanket ACK or age expiry is created.
+Normal review and actual complete direct Plan/local AND global Validation/
+Coordination/Journal delivery plus permitted whole-current source/receiver/
+holder readback precede a separate source judgment; this is not execution.
 
 The proposed #4205/#4305 families continue through existing Phase 8
 migration-intake/domain review and dated Journal process. Router/configuration/
@@ -2628,6 +2679,14 @@ No product, native, credential, host, process, service or resource operation
 is authorized by tracker consolidation.
 
 ## Journal
+
+### 2026-10-30 - Proposed specific action-progress consumer
+
+Retained #5343's exact worker/reader-to-Inbox-to-render family as unchecked
+Plan, local AND actual global Validation and continuing coordination.
+Completed primitives/non-blocking I/O/raw-call guard remain credited.
+No streamed action, thread/UI/native qualification, source repair,
+reviewed receiving acceptance, assignment or custody release is claimed.
 
 ### 2026-10-30 - Proposed project-selection and wheel-support intake
 

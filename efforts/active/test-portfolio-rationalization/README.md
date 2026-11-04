@@ -55,6 +55,27 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
+The proposed finite #5245 family continues through Phase7 migration-intake
+and Phase4's owning fixture/runner/hygiene wave. Preserve the existing
+primary, installer/test/process/GUI/native, audit/cohort/periodic-failure,
+release and resource custodians, OPEN #1303 and #6237/#6747/#7256/#7075
+reservations. Its completed ten-adopter sweep and cache repair stay credited.
+Normal review, actual complete direct Plan/local AND global Validation/
+Coordination/Journal delivery and permitted whole-current source/receiver/
+custody readback precede any separate administrative judgment. No new
+implementer, blanket ACK, expiry, execution or source/resource transfer follows.
+
+The finite #5115 Windows-hosted container route and #5140 five-case causal
+ledger below continue through the existing Phase7 migration-intake/domain
+review and Phase5 workflow/Phase4 Manager waves, respectively. Preserve
+OPEN #1303, all incumbent families/checkstates and the actual wrapper,
+concrete-environment, fixture, runner, shared-identity, platform, audit,
+cohort, periodic-failure, release and resource custodians. This is
+agent-recommended documentary tracking, not an implementation appointment,
+backend/test/process operation, generic ACK or claim/resource release.
+Normal review, actual complete delivery and whole-current receiving/source/
+custody readback precede any separate administrative source judgment.
+
 The proposed #4835 finite contained-Windows stale-lock family continues through
 the existing Phase 7 migration-intake/domain review and Phase 4 Worktrees wave.
 Preserve the primary maintainer, fixture/runner/containment/shared-liveness/
@@ -1081,6 +1102,128 @@ current refinement through the existing Phase 4 Worktrees/Phase 7 boundary.
   no test, process operation, broader lifecycle campaign or unrelated
   whole-portfolio prerequisite is authorized by this tracking amendment.
 
+### Finite Windows-hosted container pathway from #5115
+
+**Agent-recommended tracking amendment.** The original permits ONE
+supported route; the existing Done Linux devcontainer outcome stays Done.
+
+- [ ] **P5115-1:** Document AND test the local/interactive Windows-hosted
+  Docker Desktop WSL2 Linux-container pathway: invoke the wrapper within
+  WSL against that backend OR support native-Windows invocation with its
+  necessary path handling. One chosen alternative suffices; do not require
+  both or substitute hosted Windows process-containment CI.
+- [ ] **P5115-2:** Preserve the actual wrapper's volume/read-only-rootfs,
+  dropped capabilities, absent Docker socket, disconnected test network,
+  credential/resource bounds and owned cleanup. Attribute the real host,
+  backend and invocation path; generic Linux on the same hardware or a
+  Dockerfile is not the requested Windows-hosted backend witness.
+- [ ] **P5115-3:** Credit #5040/#5093/#5095/#5100 Linux isolation and
+  #5117/#5335 documentation at their delivered scopes. Linux-only guidance
+  without an enforced platform gate, direct host paths or absent explicit
+  adaptation does not independently prove a native invocation fails.
+  Keep supported, unsupported, unvalidated and refused outcomes truthful.
+
+#### Local Validation for #5115
+
+- [ ] **V5115-1:** Qualify documentation AND a bounded actual invocation for
+  the ONE chosen WSL-backend OR native-Windows route, retaining the exact
+  Windows-hosted Docker Desktop WSL2 boundary and relevant path behavior.
+  Existing Linux proof and hosted Windows Job controls are distinct tiers.
+- [ ] **V5115-2:** Preserve isolation, concrete-environment admission,
+  original resource/credential/cleanup limits and existing owners; record
+  unavailable combinations without a passing inference. No new runner,
+  both-alternatives, every-host or whole-portfolio prerequisite is added.
+
+### Finite five-case Manager causal ledger from #5140
+
+**Agent-recommended tracking amendment.** Preserve ALL FIVE original cases
+and their Linux/WSL2 context; do not assert that all still fail today.
+
+- [ ] **P5140-1:** Retain the FOUR exact
+  `tests/test_harness_state.py` outcomes:
+  `test_mis_registered_repos_flags_non_git_checkout` (not-git),
+  `test_mis_registered_repos_flags_missing_path` (missing),
+  `test_mis_registered_repos_rejects_empty_dot_git_directory` (not-git),
+  and `test_mis_registered_repos_surfaces_inconclusive_probe_separately`
+  (UNKNOWN, not clean). Credit the reported #6164 exact-WSL fixture
+  correction without reopening those repairs or borrowing another
+  platform's path; retain intentional `include_wsl=False` controls.
+- [ ] **P5140-2:** Resolve the FIFTH exact
+  `tests/test_mux_daemon_cutover_helper.py::test_terminate_mux_daemon_pid_accepts_a_matched_real_process`
+  historical recognized-process/False result through its authoritative
+  causal repair or owning validation record. Preserve the actual owned
+  matched process, real helper True AND process exit. If correspondence
+  is unavailable, keep a named tracked causal uncertainty OPEN; recording
+  uncertainty is not a passing repair or completion.
+- [ ] **P5140-3:** Credit capability checks, recognition waiting and later
+  identity/process-discovery improvements only at their evidenced scope.
+  Generic mismatch, root recognition, an unrelated pass or #5167's
+  claims/topbar repair cannot stand in for the fifth causal outcome.
+  Preserve original assertions and the incidental #5136 scope distinction.
+- [ ] **P5140-4:** Keep original Linux/WSL2 Ubuntu 24.04 versus hosted-CI
+  uncertainty explicit. Historical approximately 0.1-0.4-second observations
+  are not new bounds, current reproduction or a new native/all-platform
+  matrix. Preserve actual fixture/source/platform ownership and budgets;
+  this intake grants no production termination or process probe.
+
+#### Local Validation for #5140
+
+- [ ] **V5140-1:** Maintain an exact FIVE-row original-to-current ledger:
+  four finite WSL fixture credits with not-git/missing/UNKNOWN controls,
+  and the fifth real matched-process/helper/exit causal disposition or
+  explicitly retained named uncertainty. No assertion deletion, generic
+  mismatch proxy or requirement to redo already credited work.
+- [ ] **V5140-2:** Attribute exact source/fixture/platform and causal versus
+  merely related evidence through the existing bounded owning lane.
+  Preserve current containment, source/native distinctions and independent
+  holds; a finite family does not wait on unrelated portfolio completion.
+
+### Proposed finite containment credit and diagnostic tail from #5245
+
+_(Agent-recommended additive tracking proposal; the original hygiene sweep
+is delivered, not work reopened by these unchecked accounting rows.)_
+
+- [ ] **P5245-1:** Preserve real Git fixtures rooted in their own throwaway
+  repository, explicit real shell/PowerShell subprocess bounds and contained
+  HOME/profile/XDG/temp/plugin/Python environments for provisioning,
+  snapshot and retry. Source-only mocks cannot replace these boundaries.
+- [ ] **P5245-2:** Account for ALL TEN original adopters: Logger first,
+  Bridge, Vault, SSH, CodeSpaces, Index, Dispatch, Containers, MCP and
+  Machines. Credit #5248's detailed Logger/Bridge/CodeSpaces repairs versus
+  bounded spot checks of the other seven; do not claim every subprocess
+  was rewritten or duplicate that completed finite sweep.
+- [ ] **P5245-3:** Retain both historical optional-native observations:
+  Worktrees sub-suite1/16 reached unchanged300s after progress/no reported
+  assertion failure; supported `--test-file`/25-file300s grouping passed
+  original group11 with793 passed/2 skipped, then group12 timed out near60%.
+  Group13 GUI-parent exit1 is separate. These are not a current production
+  diagnosis, passing group, deadlock proof or accepted flake.
+- [ ] **P5245-4:** Credit #6788's proven stale-wheel repair and actual
+  TWO-CYCLE windowless probe. It does not explain the retained group12
+  timeout or prove the complete native full suite. Focused four-case
+  project-scoping/#6763 and disjoint green groups remain distinct evidence.
+- [ ] **P5245-5:** Continue the explicitly retained bounded group/
+  partition/startup tail through its actual owners: #6747/#7256 PowerShell
+  fixture/startup and #7075 real-CLI provisioning cost. Preserve assertions,
+  process/GUI boundaries and reservations; #6800 source-safety containment
+  and unrelated workflow work are not harness closure receipts.
+- [ ] **P5245-6:** Obtain an accepted bounded source/fixture fix OR explicit
+  tracked disposition of the residual, without inventing a global failure.
+  Preserve actual installer/subprocess/native/GUI coverage, inventory,
+  assertions and current resource/deadline limits. No dropped boundaries,
+  skip, timeout growth, CI waiver or new every-native-host programme.
+- [ ] **V5245-1:** Keep an exact TEN-adopter delivered-versus-spot-check
+  ledger and cache/two-cycle credit, naming the actual remaining diagnostic
+  tail and custodian rather than reopening the original repairs.
+- [ ] **V5245-2:** Qualify the causal/partition/startup fix OR attributable
+  tracked disposition through the existing separately authorized bounded
+  owning lane with meaningful real controls and original assertions.
+  Progress without assertion failure proves neither pass nor deadlock.
+- [ ] **V5245-3:** Keep optional native full-profile, required Windows
+  launch, current required-unit/periodic and containing Linux release
+  evidence separate. Current policy need not preserve every historical
+  budget byte-for-byte; no relaxed retry or waiver is authorized.
+
 ## Validation Plan
 
 - [ ] G5921: Resolve EVERY direct #5921 P1-P6, V1-V5 and C1-C3 clause in the Phase4 finite clean-room verdict family at its ORIGINAL source/API consumer tier: actual Python AND Python-less version/schema/evidence-complete reduction and real caller shape, explicit malformed/incomplete/unjudged NON-PASS, correct valid control/classified-jam results/exits, literal-mode separation and source-safe diagnostics. Preserve all incumbent Plan/Validation, OPEN #1303, same owners and independent #5922/#8511/#4312/#688/#1475 gates. Administrative intake is not a reducer fix or executed evidence; no live box/model/all-host/native programme or unrelated whole-portfolio prerequisite is added, and this does not waive the ROOT's own whole completion gate.
@@ -1212,6 +1355,26 @@ current refinement through the existing Phase 4 Worktrees/Phase 7 boundary.
   and the same custodians. Intake is not repair, production/native proof,
   parent completion or source/resource release.
 
+- [ ] **G5115:** Resolve EVERY direct #5115 Plan/local Validation and
+  Coordination clause for ONE documented AND tested Windows-hosted Docker
+  Desktop WSL2 route, within WSL OR supported native-Windows invocation.
+  Retain Done Linux credit and actual isolation/path/resource/cleanup
+  behavior; no documentary intake, generic Linux result or hosted Windows
+  process test is backend qualification.
+- [ ] **G5140:** Resolve EVERY direct #5140 Plan/local Validation and
+  Coordination clause across ALL FIVE named originals, preserving FOUR
+  causal fixture credits and the FIFTH actual matched-process/helper/exit
+  evidence requirement. Named unresolved uncertainty remains tracked, not
+  passed. Preserve original Linux/WSL tier, same custodians and all
+  incumbent parent obligations; no production kill or universal native gate.
+
+- [ ] **G5245:** Resolve EVERY P5245/local Validation/continuing Coordination
+  clause at its original finite scope: completed TEN-adopter sweep and cache
+  repair credited, retained bounded diagnostic tail fixed OR explicitly
+  tracked, real controls/assertions/current tiers and limits preserved by
+  the same holders. Tracking intake is not a native full pass, accepted
+  flake, implementation, parent completion or custody/resource release.
+
 ## Proposal
 
 Approve the vision, framework, and phased campaign as the repository's
@@ -1220,6 +1383,27 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-10-30 - Proposed retained hygiene diagnostic tail
+
+Added unchecked direct #5245 Plan/local and actual global Validation with
+continuing same-owner coordination. The original ten-adopter containment
+sweep and cache/two-cycle repair retain their finite credit; only the
+explicitly retained bounded group/partition/startup tail remains. This is
+documentary research, not source/native qualification, reviewed receiving
+delivery, assignment, issue closure or an execution grant.
+
+### 2026-10-30 - Windows-hosted route and five-case causal tracking
+
+- Added direct #5115/#5140 Plan/local Validation, actual global Validation
+  and continuing coordination after whole current-contract admission.
+  Preserve ONE documented-and-tested Windows-hosted route, Done Linux
+  credit, ALL FIVE exact Manager cases and FOUR finite fixture credits.
+- The fifth matched-process historical cause remains unresolved, not
+  replaced by a mismatch proxy or an invented current failure. No test,
+  backend/provisioning/process action or native qualification occurred.
+  Normal review, actual delivery, full current readback and separate
+  judgments remain; every incumbent row/checkstate and custodian survives.
 
 ### 2026-10-30 - Proposed finite contained-Windows stale-lock family
 

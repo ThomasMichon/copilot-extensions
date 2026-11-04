@@ -28,6 +28,16 @@ usage charts and use the digests for later cross-machine retrieval.
 
 ## Coordination
 
+The finite #5727 three-finding ledger below continues through this SAME
+Active preservation Plan and actual global Validation under the existing
+canonical driver's held source/destination/compatibility lane. Preserve
+source publication, identity-admission, health, reader, platform and resource
+custody; no accounting/compaction/adoption completion prerequisite is added
+to that finite residual. Ordinary review, actual complete delivery and full
+current receiving/source/custody readback precede a separate source judgment.
+This amendment grants no sync, corpus, publication, retirement or rollout
+authority and appoints no replacement implementer.
+
 - **Topology:** Serial independently reviewable phase PRs; shared contracts stay
   coordinator-owned, and implementation delegates receive disjoint scopes.
 - **Host (owns PRs):** Primary contributor.
@@ -195,6 +205,49 @@ validation gates are in [process-log reclamation](process-log-reclamation.md).
 - [ ] Verify released runtime adoption and complete every validation obligation
   before marking Done and archiving this effort.
 
+#### Finite three-finding ancestor and health contract from #5727
+
+**Agent-recommended tracking amendment.** Credit delivered findings and
+retain only the actual unfinished boundary; documentation is not remediation.
+
+- [ ] **P5727-1:** Preserve finding1's source-read AND destination-write
+  ancestor-boundary contract beyond the directly configured component.
+  Resolve remaining health-metadata/session-state/identity-admission and
+  reader boundaries with existing canonical pinning and actual owners.
+  Preserve legitimate intentionally relocated/symlinked ancestors; source
+  alias support or blanket lexical destination rejection is not whole
+  compatibility acceptance. Reconcile that precise policy with its owner.
+- [ ] **P5727-2:** Retain delivered finding2 independent session-state/
+  process-log health and finding3 persisted partial-attempt streaks:
+  success in one leg cannot erase the other's failure, while its own
+  clean/no-copy retry can recover a leg. Preserve actual attempt/freshness,
+  oldest-check, aggregate/schema and sustained-partial classification;
+  do not revive the obsolete flat permanently degraded status claim.
+- [ ] **P5727-3:** Credit #6067 health/streaks, #6156 source pinning and
+  #7001 payload create/copy/replace/cleanup with prior-good preservation.
+  Keep source spelling/rotation, deterministic swap refusal, native handle
+  release and explicit I/O errors. These partials and #6996/#7007 journals
+  are not evidence that omitted paths or relocation compatibility are done.
+- [ ] **P5727-4:** Retain the correction that #6067 merged before its
+  then-pending final-head CI completed; the earlier watcher/other-head
+  success was not contemporaneous proof. Preserve the 88-test bounded
+  Linux receipt AND the canonical journal's later final-head completion
+  credit at their distinct tiers, not an assertion no later validation
+  ever occurred. Preserve the held driver's serial continuation.
+
+##### Local Validation for #5727
+
+- [ ] **V5727-1:** Map ALL THREE findings to delivered or unresolved
+  outcomes. Qualify the remaining actual metadata/session/identity/read
+  ancestors and legitimate-relocation compatibility through their owning
+  bounded lane, with meaningful swap/error/prior-good controls. A payload-
+  only proof or stricter rejection cannot silently narrow the original.
+- [ ] **V5727-2:** Preserve independent health retry/recovery and persistent
+  streak/aggregate/freshness controls, actual source/payload credit and
+  historical versus later CI attribution. Keep original finite platform
+  tiers, bounds and source/resource holds; no new publication, corpus,
+  every-host or unrelated whole-parent gate.
+
 ## Validation Plan
 
 - [ ] Session-local usage evidence and transcript estimates meet the bounded
@@ -232,11 +285,31 @@ validation gates are in [process-log reclamation](process-log-reclamation.md).
 - [ ] Reviewed PRs merge; released code is adopted and behavior verified, not
   merely committed or primed for deployment.
 
+- [ ] **G5727:** Resolve EVERY direct #5727 Plan/local Validation and
+  Coordination clause: ALL THREE finding dispositions with delivered
+  health/streak/source/payload credit, actual remaining ancestor paths AND
+  legitimate-relocation compatibility, held canonical-driver custody and
+  truthful historical/later evidence. Intake is not source repair or native/
+  released adoption; independent accounting, compaction and consumer gates
+  remain without becoming new prerequisites for this finite residual.
+
 ## Proposal
 
 Reviewed and merged in #5671. Implementation is authorized against this plan.
 
 ## Journal
+
+### 2026-10-30 - Complete three-finding ancestor contract retained
+
+- Added direct #5727 Plan/local Validation, actual global Validation and
+  continuing coordination. Health/retry/streak and source/payload
+  containment deliveries remain credit; omitted metadata/session/identity/
+  reader paths and legitimate relocation remain the finite held lane.
+- Preserved the premature merge-time CI correction and later canonical
+  final-head credit without claiming fresh execution or runtime acceptance.
+  Review, actual complete delivery, full current readback and separate
+  judgment remain. No sync, corpus rewrite, publication, retirement,
+  implementation appointment or claim/resource release occurred.
 
 ### 2026-10-17 - Historical-estimation review corrections
 - Reproduced all four Medium findings from #7137 with eight failing synthetic

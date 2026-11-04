@@ -14,6 +14,9 @@ environment; editable-source escape is not accepted. The retained probe derives
 required first-party module names from each measured source, checks the actual
 isolated interpreter's module origins and rejects escaping RECORD paths.
 An in-runtime metadata directory alone is not evidence of owned helper code.
+Wheel `RECORD` entries are inspected before filtering nonexistent files:
+`Distribution.files` can omit them on newer interpreters, hiding an escaping
+entry from the retained negative control.
 Real disposable-venv controls cover an in-runtime `.dist-info` plus `.pth`
 that imports external code, and an escaping RECORD entry that must not be
 silently omitted. The stronger checks were also applied to the retained
@@ -31,6 +34,16 @@ environment settings are preserved; only project-venv and Python import
 overrides are removed.
 Evidence checks and retirement guards raise explicit errors even under
 optimized Python; `-O` must not turn a rejected run into a passing report.
+
+All five retained helper/test files belong to the strict `effort-helpers`
+checker project, using the same Python 3.11 minimum on Linux and Windows.
+Prepare its declared checker environment explicitly with
+`python tools/typecheck.py effort-helpers --prepare`, then run
+`python tools/typecheck.py effort-helpers` for both analysis targets.
+Typed measurement/report contracts preserve the existing JSON, native-handle,
+subprocess and transport boundaries; annotations do not replace runtime
+evidence checks or establish production artifact acceptance. The unfiltered
+record read above preserves the existing refusal contract across interpreters.
 
 1. Run `experiments/helper_closure_probe.py --repo <checkout> --uv <uv-path>
    --root <new-source-directory>`.

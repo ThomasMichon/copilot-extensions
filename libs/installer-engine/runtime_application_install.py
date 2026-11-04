@@ -50,7 +50,7 @@ def _read(path: Path, *, limit: int = 65536) -> bytes | None:
     return content
 
 
-def _write(path: Path, content: bytes) -> None:
+def _write(path: Path, content: bytes, *, executable: bool = False) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, filename = tempfile.mkstemp(prefix="." + path.name + ".", dir=path.parent)
     temporary = Path(filename)
@@ -59,11 +59,48 @@ def _write(path: Path, content: bytes) -> None:
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
-        if path.suffix == ".sh" or not path.suffix:
+        if executable or path.suffix == ".sh" or not path.suffix:
             temporary.chmod(0o700)
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _materialize_interpreter(slot: Path) -> None:
+    if os.name == "nt":
+        return
+    environment = slot / ".venv"
+    directory = environment / "bin"
+    if environment.is_symlink() or directory.is_symlink():
+        raise RuntimeError("application interpreter directory must not be indirect")
+    aliases = ("python", f"python{sys.version_info.major}",
+               f"python{sys.version_info.major}.{sys.version_info.minor}")
+    links = [directory / name for name in aliases if (directory / name).is_symlink()]
+    if not links:
+        return
+    import fcntl
+
+    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise RuntimeError("application interpreter preparation is already in progress") from error
+        links = [directory / name for name in aliases if (directory / name).is_symlink()]
+        if not links:
+            return
+        if (slot / ".install-complete.json").exists():
+            raise RuntimeError("completed application contains a linked interpreter")
+        source = Path(sys.executable).resolve(strict=True)
+        if any(not path.resolve(strict=True).samefile(source) for path in links):
+            raise RuntimeError("application interpreter link differs from its running interpreter")
+        content = _read(source, limit=128 << 20)
+        if content is None:
+            raise RuntimeError("application running interpreter is unavailable")
+        for path in links:
+            _write(path, content, executable=True)
+    finally:
+        os.close(descriptor)
 
 
 def _application(slot: Path) -> dict:
@@ -312,6 +349,7 @@ def install(
                 f"(prefix={Path(sys.prefix).resolve()}, expected={(slot / '.venv').resolve()}, "
                 f"config={(slot / '.venv' / 'pyvenv.cfg').is_file()})"
             )
+    _materialize_interpreter(slot)
     if stage:
         return {"state": "staged", "slot": str(slot)}
     if slot.parent.name != "versions" or not re.fullmatch(r"[0-9][A-Za-z0-9._+-]*", slot.name):

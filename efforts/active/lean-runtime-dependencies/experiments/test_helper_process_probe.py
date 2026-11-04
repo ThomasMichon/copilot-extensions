@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 import unittest
+from typing import Any, Literal
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -10,11 +11,11 @@ import helper_process_probe as probe
 
 
 class HelperProbeTests(unittest.TestCase):
-    def test_optimized_python_still_executes_measured_operations(self):
+    def test_optimized_python_still_executes_measured_operations(self) -> None:
         code = (
             "import helper_process_probe as p\n"
-            "calls = []\n"
-            "def operation(consumer):\n"
+            "calls: list[str] = []\n"
+            "def operation(consumer: str) -> dict[str, str]:\n"
             "    calls.append(consumer)\n"
             "    return {'fixture': consumer}\n"
             "p.measure(operation, 2)\n"
@@ -29,17 +30,21 @@ class HelperProbeTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_real_process_contract(self):
+    def test_real_process_contract(self) -> None:
         result = probe.probe(2)
-        for mode in (
+        modes: tuple[Literal[
             "warm_direct_read", "fresh_process_per_read",
             "two_resident_helpers", "one_shared_helper",
-        ):
+        ], ...] = (
+            "warm_direct_read", "fresh_process_per_read",
+            "two_resident_helpers", "one_shared_helper",
+        )
+        for mode in modes:
             self.assertEqual(result[mode]["requests"], 4)
             self.assertGreaterEqual(result[mode]["median_ms"], 0)
         self.assertTrue(result["closed_helper_refused_and_direct_path_preserved"])
 
-    def test_consumer_mismatch_is_an_error(self):
+    def test_consumer_mismatch_is_an_error(self) -> None:
         with TemporaryDirectory(dir=Path(__file__).parent) as directory:
             root = Path(directory)
             (root / "alpha").mkdir()
@@ -51,11 +56,11 @@ class HelperProbeTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 probe.read(root, "../beta")
 
-    def test_failed_readiness_reaps_helper(self):
-        spawned = []
+    def test_failed_readiness_reaps_helper(self) -> None:
+        spawned: list[subprocess.Popen[str]] = []
         real_popen = subprocess.Popen
 
-        def record(*args, **kwargs):
+        def record(*args: Any, **kwargs: Any) -> subprocess.Popen[str]:
             process = real_popen(*args, **kwargs)
             spawned.append(process)
             return process
