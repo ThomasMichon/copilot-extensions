@@ -1,8 +1,20 @@
-"""Optional session provisioning preview through the canonical planner."""
+"""Session provisioning preview and selected-runtime child commands."""
 
 from __future__ import annotations
 
 from pathlib import Path
+
+
+def reconciliation_argv(
+    python: str, runtime_root: Path, cwd: str, status: Path,
+) -> list[str]:
+    """Arguments for the existing background reconciliation operation."""
+    from agent_procutil.python_cache import cache_arguments
+
+    return [
+        python, *cache_arguments(runtime_root), "-m", "agent_worktrees", "reconcile-plugins",
+        "--repo", cwd, "--status", str(status), "--apply",
+    ]
 
 
 def preview_services(cwd: str) -> str | None:
