@@ -332,15 +332,24 @@ class WorktreeStatusCache:
         return self._cleanup_owner.observation_scope(project) if self._cleanup_owner is not None else nullcontext(False)
 
     @contextmanager
-    def _refresh_generation(self, key: tuple[str, str]):
+    def _refresh_generation(
+        self, key: tuple[str, str], *, expected: tuple[dict, float] | None = None,
+    ):
         token = object()
         with self._lock:
-            self._refreshing[key] = token
+            entry = self._entries.get(key)
+            if expected is not None and (
+                entry is None or entry[0] is not expected[0] or entry[1] != expected[1]
+                or key in self._refreshing
+            ):
+                token = None
+            else:
+                self._refreshing[key] = token
         try:
             yield token
         finally:
             with self._lock:
-                if self._refreshing.get(key) is token:
+                if token is not None and self._refreshing.get(key) is token:
                     self._refreshing.pop(key)
 
     # -- reads / refresh -----------------------------------------------------
@@ -498,6 +507,7 @@ class WorktreeStatusCache:
                     and self._cleanup_owner.observation_blocked(key[0])
                 )
             }
+            sampled_bundles = {key: self._entries[key][0] for key in sampled}
             expired = [
                 key
                 for key, (_, _computed_at, demanded_at) in self._entries.items()
@@ -551,7 +561,12 @@ class WorktreeStatusCache:
         for (project, worktree_id), sampled_computed_at in sampled.items():
             if self._cleanup_owner is not None and self._cleanup_owner.observation_blocked(project):
                 continue
-            with self._refresh_generation((project, worktree_id)) as generation:
+            with self._refresh_generation(
+                (project, worktree_id),
+                expected=(sampled_bundles[(project, worktree_id)], sampled_computed_at),
+            ) as generation:
+                if generation is None:
+                    continue
                 try:
                     bundle = refresh(project, worktree_id)
                 except Exception as error:

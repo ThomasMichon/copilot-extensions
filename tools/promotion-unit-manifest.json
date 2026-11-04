@@ -4052,7 +4052,7 @@
         "libs/agent-procutil/src/agent_procutil/_windows_parent_job.py": "d59e628dae3016c67df4d0e691407cc9ca3e1f77df576a36b10ca17d7d658277",
         "libs/agent-procutil/src/agent_procutil/daemon.py": "accf01fc7c6c19eb54f0d7f2432649b1ba6d2d00e2a9ac9657b0bcd836ce2606",
         "libs/agent-procutil/src/agent_procutil/linux_daemon_scope.py": "2ba92519d462d56b22ca80fb8d156c5e0339b5d597aebcbd2b2bfc2a4539e61d",
-        "libs/agent-procutil/tests/test_linux_daemon_scope.py": "1d5380b5de318adcce748c22b5367728eea5ba9fdb086efef5b9fe323fc46e92",
+        "libs/agent-procutil/tests/test_linux_daemon_scope.py": "c81cba4a08ada7fbf7409f22a8547a19e7294a5a14aa970240a029ca1d60f177",
         "tools/promotion_unit_tests/test_linux_daemon_scope.py": "b8fc59ece6341f3876fc091560ed915bd3897376c82c03c93cc7e58449729431",
         "libs/agent-procutil/src/agent_procutil/daemon_broker.py": "4a8034bfa07af5f56a382f93a45f5082e4d5b0f387f58084420d5019bde8f289",
         "libs/agent-procutil/src/agent_procutil/daemon_instances.py": "59fa2d8f1bf612d020e68b4a9674cfbe3ec8b34b46cb5230aa54f743d9907322",

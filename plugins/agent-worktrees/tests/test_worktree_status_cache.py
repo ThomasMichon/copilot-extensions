@@ -147,6 +147,76 @@ def test_older_refresh_cannot_publish_over_a_newer_generation(
         restored.close()
 
 
+@pytest.mark.parametrize("same_timestamp", [False, True])
+def test_stale_multikey_sweep_cannot_displace_a_new_forced_generation(tmp_path, same_timestamp):
+    clock = [10.0]
+    cache = WorktreeStatusCache(tmp_path / "cache.sqlite3", now=lambda: clock[0])
+    for key in ("a", "b"):
+        cache.get_or_refresh("proj", key, force=False, compute=lambda: {"value": "seed"})
+    clock[0] = 200.0
+    sweep_entered, force_entered = threading.Event(), threading.Event()
+    sweep_release, force_release = threading.Event(), threading.Event()
+    visited, errors = [], []
+
+    def refresh(project, key):
+        visited.append(key)
+        if key == "a":
+            sweep_entered.set()
+            assert sweep_release.wait(10)
+        return {"value": "sweep"}
+
+    def run_sweep():
+        try:
+            cache.sweep_due(refresh=refresh)
+        except Exception as error:
+            errors.append(error)
+
+    def compute_forced():
+        force_entered.set()
+        assert force_release.wait(10)
+        return {"value": "newest"}
+
+    def run_forced():
+        try:
+            cache.get_or_refresh("proj", "b", force=True, compute=compute_forced)
+        except Exception as error:
+            errors.append(error)
+
+    sweep, forced = threading.Thread(target=run_sweep), threading.Thread(target=run_forced)
+    sweep.start()
+    try:
+        assert sweep_entered.wait(5)
+        clock[0] = 10.0 if same_timestamp else 200.0
+        cache.get_or_refresh("proj", "b", force=True, compute=lambda: {"value": "intermediate"})
+        clock[0] = 201.0
+        forced.start()
+        assert force_entered.wait(5)
+        sweep_release.set()
+        sweep.join(10)
+        assert not sweep.is_alive()
+        assert visited == ["a"]
+        force_release.set()
+        forced.join(10)
+        assert not forced.is_alive() and not errors
+        assert cache.get_or_refresh(
+            "proj", "b", force=False, compute=lambda: pytest.fail("Newest force was displaced"),
+        ) == {"value": "newest"}
+    finally:
+        sweep_release.set()
+        force_release.set()
+        sweep.join(10)
+        if forced.ident is not None:
+            forced.join(10)
+        cache.close()
+    restored = WorktreeStatusCache(tmp_path / "cache.sqlite3", now=lambda: clock[0])
+    try:
+        assert restored.get_or_refresh(
+            "proj", "b", force=False, compute=lambda: pytest.fail("Newest force was not persisted"),
+        ) == {"value": "newest"}
+    finally:
+        restored.close()
+
+
 def test_a_cached_bundle_disagreeing_with_its_own_key_forces_a_recompute(tmp_path):
     """Copilot review finding: a fresh-cache hit previously returned
     whatever was stored under the requested key without checking that the
