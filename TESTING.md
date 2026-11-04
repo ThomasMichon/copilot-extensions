@@ -73,6 +73,16 @@ from canonical session references, refuse a v1 receipt as richer acknowledgment,
 and verify actual retained metadata afresh. The separate-process owner test
 negotiates the selected payload's optional capability before using new syntax;
 original export/readback calls remain covered without it.
+Logger's separate opt-in `--test-file tests/test_worktree_state_providers.py
+--test-file tests/test_scaffold.py --allow-explicit-tiers` packet checks passive
+provider discovery and unchanged organization-config behavior. A disposable
+native `-m agent_worktrees` process selects the admitted checkout despite a
+foreign ambient project, including every retained store after canonical-record
+retirement. State bytes remain unchanged. Actual selected Efforts `info` calls,
+effective project/global activation and prior/malformed provider controls
+qualify negotiation without enabling exports, collection or a scheduler.
+The same-cell adapter reuses the already-qualified canonical peer launcher;
+its shared native two-cell matrix remains owned by the peer-launch portfolio.
 The preservation cases exercise actually eligible old sessions and a verified
 ordinary archive containing no worktree collection; neither justifies erasing
 marked nested evidence.
