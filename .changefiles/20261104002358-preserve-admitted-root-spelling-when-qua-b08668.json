@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve admitted root spelling when qualifying native SSH service startup",
+  "changes": [
+    {
+      "plugin": "services/ssh",
+      "type": "patch"
+    }
+  ]
+}

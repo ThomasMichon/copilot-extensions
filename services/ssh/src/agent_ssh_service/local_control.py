@@ -1,0 +1,370 @@
+"""Service-local native control using the existing ZDD authenticated channels."""
+from __future__ import annotations
+
+import asyncio
+from dataclasses import asdict
+import hashlib
+import logging
+import os
+from pathlib import Path
+import secrets
+import threading
+import time
+from collections.abc import Callable
+from typing import Any, TYPE_CHECKING, cast
+
+from fleet_manager.private_state import create_private_file, private_directory, read_private_file
+from zdd.conditional import RuntimeAttestation, RuntimePreparation
+from zdd.diagnostics import process_start_time
+from zdd.private_protocol import Channel, Deadline, PeerIdentity, read_frame as read_frame, write_frame
+
+from .config import Document, ServiceConfig, absolute, canonical, check, decode
+
+if TYPE_CHECKING:
+    from fleet_manager.gateway_service_connector import ServiceConnector
+    from single_instance_lease import SingleInstance
+    from zdd.private_unix import UnixListener
+    from zdd.private_windows import WindowsListener
+    from .gateway import SSHService
+    from .relay import NativeRelay, PosixOperations
+    from .store import DirectoryStore
+
+MAX_CONTROL = 16384
+CONTROL_CADENCE = 0.05
+
+
+def current_peer() -> PeerIdentity:
+    if os.name == "nt":
+        from zdd.private_windows_native import native
+
+        principal = native().current_sid()
+    else:
+        principal = str(cast("PosixOperations", os).geteuid())
+    return PeerIdentity(os.getpid(), cast(str, process_start_time(os.getpid())), principal)
+
+
+def config_identity(binding: Any, config: ServiceConfig) -> str:
+    return hashlib.sha256(canonical({
+        "root": str(binding.root), "slot": binding.slot.name,
+        "source": binding.identity.document(), "config": config.to_dict(),
+    })).hexdigest()
+
+
+def writer_identity(peer: Document, identity: str) -> str:
+    return hashlib.sha256(canonical({"peer": peer, "identity": identity})).hexdigest()
+
+
+def cell_directory(config: ServiceConfig) -> Path:
+    return Path(config.to_dict()["data_dir"]) / ".local-service"
+
+
+def publish_new(path: Path, value: Document) -> None:
+    """Publish a complete new owner/request without replacing an existing entry."""
+    data = canonical(value)
+    check(len(data) <= MAX_CONTROL, "local-control-limit")
+    temporary = path.with_name("." + secrets.token_hex(16) + ".tmp")
+    try:
+        with os.fdopen(create_private_file(temporary), "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.link(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def records(config: ServiceConfig) -> list[Document]:
+    cell = cell_directory(config)
+    if not cell.exists():
+        return []
+    private_directory(cell)
+    paths = sorted(cell.glob("owner-*.json"))
+    check(len(paths) <= 32, "local-owner-inventory-limit")
+    result = []
+    for path in paths:
+        value = decode(read_private_file(path, MAX_CONTROL))
+        check(isinstance(value, dict) and set(value) == {
+            "peer", "root", "slot", "source", "config_identity",
+        }, "invalid-local-owner-record")
+        PeerIdentity(**value["peer"])
+        result.append(value)
+    return result
+
+
+def attestation(record: Document, result: Document, operation: str) -> Document:
+    expected = PeerIdentity(**record["peer"])
+    evidence = "prepared" if operation == "prepare" else "ready"
+    check(isinstance(result, dict) and set(result) == {
+        "pid", "process_start_time", "version", "config_identity", evidence,
+    }, "invalid-local-attestation")
+    check(result["pid"] == expected.pid
+          and result["process_start_time"] == expected.start_time
+          and result["version"] == record["slot"]
+          and result["config_identity"] == record["config_identity"]
+          and type(result[evidence]) is bool, "local-attestation-mismatch")
+    return result
+
+
+def remove_request(path: Path, deadline: Deadline) -> None:
+    while True:
+        try:
+            path.unlink(missing_ok=True)
+            return
+        except PermissionError as error:
+            if getattr(error, "winerror", None) not in (32, 33):
+                raise
+            time.sleep(min(CONTROL_CADENCE, deadline.remaining()))
+
+
+def request(config: ServiceConfig, record: Document, operation: str, *,
+            wait_exit: bool = False, timeout: float | None = None) -> Document:
+    """Discovery is not health: authenticate and retain the actual service peer."""
+    check(operation in ("prepare", "activate", "health", "stop"), "invalid-local-control-operation")
+    cell = cell_directory(config)
+    private_directory(cell)
+    peer, expected = current_peer(), PeerIdentity(**record["peer"])
+    nonce = secrets.token_hex(16)
+    listener: WindowsListener | UnixListener
+    if os.name == "nt":
+        from zdd.private_windows import WindowsListener
+
+        address = "\\\\.\\pipe\\agent-ssh-service-" + nonce
+        listener = WindowsListener(address)
+    else:
+        from zdd.private_unix import UnixListener
+
+        address = str(cell / (nonce + ".sock"))
+        listener = UnixListener(Path(address))
+    path = cell / ("request-" + nonce + ".json")
+    channel: Channel | None = None
+    held = None
+    limit = 15 if operation == "activate" else 10 if wait_exit else 3
+    deadline = Deadline(limit if timeout is None else min(limit, max(0, timeout)))
+    try:
+        publish_new(path, {
+            "peer": asdict(peer), "address": address, "operation": operation,
+            "target": record["peer"], "config_identity": record["config_identity"],
+        })
+        channel = listener.accept(deadline, expected=expected)
+        held = channel.retain_peer(deadline)
+        write_frame(channel, {"operation": operation}, deadline)
+        result = attestation(record, read_frame(channel, deadline), operation)
+        channel.close()
+        channel = None
+        if wait_exit:
+            held.wait_exit(deadline)
+        return result
+    finally:
+        if held is not None:
+            held.close()
+        if channel is not None:
+            channel.close()
+        listener.close()
+        remove_request(path, deadline)
+
+
+class LocalControl:
+    """One listener-registration worker inside the existing foreground process."""
+
+    def __init__(self, binding: Any, config: ServiceConfig, *,
+                 selected: Callable[[Any], None] | None = None) -> None:
+        from .source_start import ensure_selected
+        from .writer import FencedWriter
+
+        self.binding, self.config = binding, config
+        self.peer = current_peer()
+        self.identity = config_identity(binding, config)
+        self.closed = threading.Event()
+        self.thread: threading.Thread | None = None
+        self.record: Path | None = None
+        self.handled: set[str] = set()
+        owner = writer_identity(asdict(self.peer), self.identity)
+        self.writer = FencedWriter(
+            config, owner, selected=lambda: (selected or ensure_selected)(binding),
+        )
+        self.service: SSHService | None = None
+        self.connector: ServiceConnector | None = None
+        self.relay: NativeRelay | None = None
+        self.read_selection: Callable[[], str | None] | None = None
+
+    async def prepare(self, *, stop: asyncio.Event, lease: SingleInstance) -> None:
+        check("relay" not in self.config.to_dict(), "native-relay-transfer-unsupported")
+        self.stop, self.lease = stop, lease
+        self.loop = asyncio.get_running_loop()
+        self.activation = asyncio.Event()
+        self.initialized = asyncio.Event()
+        self.cell = cell_directory(self.config)
+        private_directory(self.cell)
+        self.record = self.cell / ("owner-" + str(self.peer.pid) + "-" + self.peer.start_time + ".json")
+        self.record_data = {
+            "peer": asdict(self.peer), "root": str(self.binding.root),
+            "slot": self.binding.slot.name, "source": self.binding.identity.document(),
+            "config_identity": self.identity,
+        }
+        publish_new(self.record, self.record_data)
+        self.thread = threading.Thread(target=self._serve, name="ssh-local-control", daemon=False)
+        self.thread.start()
+
+    async def wait_activation(self) -> bool:
+        tasks = [asyncio.create_task(event.wait()) for event in (self.activation, self.stop)]
+        try:
+            await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            return self.activation.is_set() and not self.stop.is_set()
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    def attach(self, *, store: DirectoryStore, service: SSHService,
+               connector: ServiceConnector, relay: NativeRelay | None,
+               stop: asyncio.Event, lease: SingleInstance) -> None:
+        self.store, self.service, self.connector, self.relay = store, service, connector, relay
+        self.initialized.set()
+
+    async def _attest(self) -> Document:
+        ready = (
+            self.service is not None and self.writer.current()
+            and not self.stop.is_set() and not self.service.closed
+            and cast("ServiceConnector", self.connector).connected.is_set()
+            and (self.relay is None or (
+                self.relay.process is not None and self.relay.process.returncode is None
+            ))
+        )
+        if ready:
+            from .config import SSHServiceError
+
+            try:
+                await asyncio.to_thread(self.store.snapshot)
+            except SSHServiceError:
+                ready = False
+        return asdict(RuntimeAttestation(
+            self.peer.pid, self.peer.start_time, self.binding.slot.name, self.identity, ready,
+        ))
+
+    async def _operate(self, operation: str) -> Document:
+        if operation == "prepare":
+            return asdict(RuntimePreparation(
+                self.peer.pid, self.peer.start_time, self.binding.slot.name,
+                self.identity, not self.stop.is_set() and (
+                    not self.initialized.is_set() or self.writer.current()
+                ),
+            ))
+        if operation == "activate":
+            self.activation.set()
+            await self.initialized.wait()
+            await cast("ServiceConnector", self.connector).connected.wait()
+        return await self._attest()
+
+    def _supersession_unchanged(self, owner: str, selection: str) -> bool:
+        return (
+            not self.closed.is_set() and not self.stop.is_set()
+            and owner != self.writer.owner
+            and self.writer.observed_owner() == owner
+            and cast(Callable[[], str | None], self.read_selection)() == selection
+        )
+
+    def _stop_if_superseded(self, owner: str, selection: str) -> None:
+        try:
+            if self._supersession_unchanged(owner, selection):
+                self.stop.set()
+        except (OSError, ValueError, RuntimeError):
+            return
+
+    def _observe_supersession(self) -> None:
+        """Only this outgoing owner retires, and only from current ready evidence."""
+        try:
+            if not self.initialized.is_set() or self.closed.is_set() or self.stop.is_set():
+                return
+            owner = self.writer.observed_owner()
+            if owner is None or owner == self.writer.owner:
+                return
+            if self.read_selection is None:
+                from .source_start import selection_reader
+
+                self.read_selection = selection_reader(self.binding)
+            selection = self.read_selection()
+            if not selection:
+                return
+            for record in records(self.config):
+                if record["slot"] != selection:
+                    continue
+                peer = PeerIdentity(**record["peer"])
+                if peer == self.peer or peer.principal != self.peer.principal:
+                    continue
+                if not absolute(record["root"]).samefile(self.binding.root):
+                    continue
+                if writer_identity(record["peer"], record["config_identity"]) != owner:
+                    continue
+                result = attestation(
+                    record, request(self.config, record, "health"), "health",
+                )
+                if result["ready"] and self._supersession_unchanged(owner, selection):
+                    self.loop.call_soon_threadsafe(
+                        lambda: self._stop_if_superseded(owner, selection),
+                    )
+                return
+        except (OSError, ValueError, RuntimeError, TypeError, KeyError):
+            # Missing/changed native readiness is not retirement authority.
+            return
+
+    def _serve(self) -> None:
+        while not self.closed.wait(CONTROL_CADENCE):
+            self._observe_supersession()
+            paths = sorted(self.cell.glob("request-*.json"))
+            self.handled.intersection_update(path.name for path in paths)
+            if len(paths) > 32:
+                continue
+            for path in paths:
+                if path.name in self.handled:
+                    continue
+                self.handled.add(path.name)
+                channel: Channel | None = None
+                try:
+                    value = decode(read_private_file(path, MAX_CONTROL))
+                    check(set(value) == {"peer", "address", "operation", "target", "config_identity"},
+                          "invalid-local-registration")
+                    if value["target"] != asdict(self.peer):
+                        continue
+                    check(value["config_identity"] == self.identity, "local-config-mismatch")
+                    check(value["operation"] in ("prepare", "activate", "health", "stop"),
+                          "invalid-local-operation")
+                    expected = PeerIdentity(**value["peer"])
+                    check(expected.principal == self.peer.principal, "local-principal-mismatch")
+                    deadline = Deadline(14 if value["operation"] == "activate" else 2)
+                    if os.name == "nt":
+                        from zdd.private_windows import connect as windows_connect
+                        channel = windows_connect(value["address"], expected, deadline)
+                    else:
+                        from zdd.private_unix import connect as unix_connect
+                        channel = unix_connect(Path(value["address"]), expected, deadline)
+                    frame = read_frame(channel, deadline)
+                    check(frame == {"operation": value["operation"]}, "local-operation-mismatch")
+                    pending = asyncio.run_coroutine_threadsafe(
+                        self._operate(value["operation"]), self.loop,
+                    )
+                    try:
+                        result = pending.result(timeout=deadline.remaining())
+                    finally:
+                        if not pending.done():
+                            pending.cancel()
+                    write_frame(channel, result, deadline)
+                    if value["operation"] == "stop":
+                        self.loop.call_soon_threadsafe(self.stop.set)
+                except Exception as error:
+                    logging.getLogger(__name__).warning(
+                        "local-control-request-refused type=%s", type(error).__name__,
+                    )
+                    continue
+                finally:
+                    if channel is not None:
+                        channel.close()
+
+    def close(self) -> None:
+        self.closed.set()
+        if self.thread is not None:
+            self.thread.join(5)
+            check(not self.thread.is_alive(), "local-control-cleanup-unconfirmed")
+        if self.record is not None:
+            if decode(read_private_file(self.record, MAX_CONTROL)) != self.record_data:
+                raise RuntimeError("local-owner-record-changed")
+            self.record.unlink()

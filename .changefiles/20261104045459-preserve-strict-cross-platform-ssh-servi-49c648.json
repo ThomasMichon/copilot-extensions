@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve strict cross-platform SSH service typing for Source-qualified lifecycle and fenced handoff.",
+  "changes": [
+    {
+      "plugin": "services/ssh",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "comment": "Add service-local fenced writer transfer and authenticated installed application lifecycle",
+  "changes": [
+    {
+      "plugin": "services/ssh",
+      "type": "minor"
+    }
+  ]
+}

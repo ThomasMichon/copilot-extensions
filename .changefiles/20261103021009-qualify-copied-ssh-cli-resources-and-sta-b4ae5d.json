@@ -1,0 +1,13 @@
+{
+  "comment": "Qualify copied SSH CLI resources and standalone service dependency construction",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/ssh",
+      "type": "patch"
+    }
+  ]
+}

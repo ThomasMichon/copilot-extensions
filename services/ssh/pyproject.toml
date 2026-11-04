@@ -5,6 +5,11 @@ build-backend = "setuptools.build_meta"
 [tool.uv]
 exclude-newer = "7 days"
 
+[tool.uv.sources]
+agent-single-instance-lease = { path = "../../libs/single-instance-lease", editable = true }
+agent-procutil = { path = "../../libs/agent-procutil", editable = true }
+agent-zdd = { path = "../../libs/zdd", editable = true }
+
 [project]
 name = "agent-ssh-service"
 version = "0.1.0-dev1"
@@ -16,6 +21,7 @@ dependencies = [
     "fleet-manager[service-gateway]>=0.1.0.dev1",
     "agent-single-instance-lease",
     "agent-procutil",
+    "agent-zdd",
 ]
 
 [project.optional-dependencies]

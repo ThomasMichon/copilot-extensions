@@ -368,6 +368,7 @@ def _child(
     environment: dict[str, str] | None = None, cwd: Path | None = None,
     candidate: Path | None = None,
     on_progress: Callable[[], None] | None = None,
+    allow_breakaway: bool = False,
 ) -> subprocess.CompletedProcess:
     env = dict(os.environ if environment is None else environment)
     if environment is None:
@@ -399,6 +400,7 @@ def _child(
                 procutil=procutil, construction_fd=descriptor,
                 on_output=relay if on_progress is not None or not output_fds else None,
                 output_fds=output_fds,
+                allow_breakaway=allow_breakaway,
                 **({
                     "runtime_root": candidate.parent.parent, "runtime_version": candidate.name,
                     "runtime_path": Path(runtime.__file__),

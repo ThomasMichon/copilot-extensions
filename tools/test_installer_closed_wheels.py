@@ -593,6 +593,13 @@ def test_prepared_closed_child_uses_actual_remaining_deadline(tmp_path, engine, 
     frozen = engine.freeze_inputs(plugin, tmp_path / "prepared")
     procutil = engine._procutil(frozen)
     monkeypatch.setattr(engine, "_procutil", lambda _inputs: procutil)
+    run_owned = engine.run_owned
+
+    def contained_child(argv, **options):
+        assert options.get("allow_breakaway", False) is False
+        return run_owned(argv, **options)
+
+    monkeypatch.setattr(engine, "run_owned", contained_child)
     marker = tmp_path / "owned-child"
     root = tmp_path / "runtime"
     with snapshot(tmp_path) as retained:

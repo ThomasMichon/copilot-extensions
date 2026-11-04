@@ -67,6 +67,76 @@ A first-start interruption may leave only the validated canonical lease file.
 That otherwise empty directory can retry through the same exclusive OS lease;
 a live holder or unrelated retained contents are never displaced or adopted.
 
+## Installed-application local lifecycle
+
+This service-local adapter follows
+[authoritative runtime replacement](../../visions/installer/README.md#authoritative-runtime-replacement)
+and the [application cutover contract](../../docs/patterns/fast-application-install-and-cutover.md).
+
+The internal `__source-start` receiver requires the selected nested application,
+its co-delivered canonical `qualify_installed_application` provider, the original
+`ssh-service` Source association and explicit `AGENT_SSH_SERVICE_HOME`.
+An older provider without that callable refuses as
+`installed-Source-provider-unsupported`; it is not retried through the legacy
+payload reader or an installer constructor. Association does not grant data,
+principal, privacy, configuration or serving authority.
+The receiver derives the slot from that explicit root and verifies native
+same-file identity against the interpreter slot before qualification. A Windows
+extended executable spelling must not change the pinned wheel-origin URI spelling.
+
+Supply the private policy with `--config <absolute-path>` or explicitly set
+`AGENT_SSH_SERVICE_CONFIG` for the generated startup callback. Policy and
+dedicated data remain outside the application root. Existing roots are validated,
+never ACL-repaired or silently adopted. Ordinary `--config` foreground execution
+retains its legacy lifetime writer guard.
+
+Managed startup prepares a service-local authenticated native control worker.
+ZDD `RuntimePreparation` is not serving readiness. Activation initializes the
+actual directory service, and health requires its current writer fence, a real
+store transaction and the existing connector's attached event. Discovery records
+are not ready files. Exact root, physical generation, original Source and
+configuration match plus native attestation are required for reuse.
+New owners launch the Source-qualified slot interpreter, not an inherited native
+executable alias. The co-delivered canonical native-path helper supplies its
+Windows extended spelling for native DLL imports; the existing retention
+bootstrap still verifies the same physical slot.
+
+Managed owners retain the same canonical OS writer guard **for every complete
+SQLite transaction**, rather than for the whole process. An additive
+`service_writer` row fences the captured owner. Activation, configuration
+admission and fence replacement commit atomically: held earlier work completes
+first; subsequent old-owner work refuses before committing. Invalid authority,
+revision rollback or moved selection rolls back activation without adopting a
+new owner. A lost activation reply remains uncertain; retries attest the same
+owner instead of rewinding a newer fence or selector.
+
+Incoming activation does not require the previous process to stop, drain or
+acknowledge. The existing Gateway replaces attached generations; a service-local
+pre/post-admission fence prevents a ticket returned after ownership loss from
+being used. Earlier tickets retain the Gateway's existing monotonic-generation
+rejection. Old process retirement is independent. `__local-stop --config ...`
+requires an exact cohort and waits for that authenticated native peer's exit.
+A connector refused as stale that cannot assert current writer ownership stops
+route admission but retains native control until retirement is authorized.
+The existing local-control worker independently observes the current database
+fence and canonical selected slot, authenticates that exact owner's existing
+ready health, and rechecks both before scheduling and applying its own stop.
+Unavailable/unready evidence or a changed fence/selection cannot authorize stop.
+The existing foreground then drains and exits; incoming installation never
+waits for this observation, drain or exit. No retirement timer or new reaper is
+introduced. Explicit stop remains supported, and unrelated or inconsistent
+failures still propagate. There is no PID-only or foreign-owner fallback.
+
+**Compatibility limits:** an old lifetime-lease owner is preserved and transfer
+refuses; this is not seamless migration from an unaware legacy binary. Current
+legacy foreground refuses a database already managed by a writer fence.
+Configuration and enrollment generation floors, public data and original request
+correlations remain unchanged. Managed native-relay transfer is explicitly
+unsupported: database fencing cannot transfer its real listener, fixed artifacts
+or child custody. The existing legacy relay path remains supported separately.
+Neither passive preparation nor Windows/synthetic-connector tests qualify an
+external Gateway, Linux/OpenSSH relay or live fleet deployment.
+
 ## Optional explicit peer approval
 
 Select this additional nonsecret configuration only on a capable service:
@@ -218,6 +288,11 @@ artifact flow, then the existing lifecycle/container manager invokes:
 python -I -m agent_ssh_service --config <absolute-service-policy.json>
 ```
 
+The wheel also declares `agent-ssh-service` as a console entry point. Source
+development resolves `agent-procutil` and `agent-single-instance-lease` from
+their canonical repository libraries; deployment consumes their non-editable
+wheels. Neither dependency is a separate service launched by this entry point.
+
 The foreground entry point retains one daemon-instance admission through the
 registered service and any unsettled native-relay retirement. Production has
 no expiry; explicitly test-owned instances use their caller's lease. The native
@@ -239,6 +314,12 @@ Do not run two hosts against one retained volume.
 This entry point is not a bespoke install/cutover command. Standalone lifecycle,
 immutable image construction, selected role placement, actual native SSH,
 rollout and rollback remain distinct from a running control-plane channel.
+
+`tests/test_source_free_runtime.py` exercises installed consumers with checkout
+reads and startup `.pth` loading disabled. A repository-local test sandbox may
+expose only its explicitly selected fixture data; Python source and bytecode
+reads there remain refused. This is installed control-plane fixture evidence,
+not generated-application installation or native SSH rollout qualification.
 
 ## Optional native relay
 
@@ -316,7 +397,7 @@ placement and preserving migration/rollback need their own evidence.
 
 ## Python type checking
 
-The `service-ssh` project in `tools/typecheck-projects.json` checks all 26
+The `service-ssh` project in `tools/typecheck-projects.json` checks all 35
 canonical Python source and test files, including native and installed-consumer
 fixtures, strictly for Linux and Windows with Python 3.10 analysis. The runtime
 minimum remains Python 3.10; static platform analysis is not native execution.
@@ -341,3 +422,8 @@ are described in the repository's `TESTING.md`.
 Artifact fixtures make only their own copied build directory owner-writable
 when the input tree is read-only. Source-free process interception retains a
 stable process type independently of the patched constructor.
+The installed Source provider's co-delivered binding remains a dynamic boundary:
+the receiver does not import its implementation from a source checkout.
+Local lifecycle, native channels, writer fencing and readiness observation use
+the existing service and SDK types; test-only native and lifecycle doubles use
+explicit casts without changing their assertions or runtime custody.

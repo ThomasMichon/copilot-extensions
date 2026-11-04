@@ -125,6 +125,7 @@
     "fm:gateway_host_start.py": ["fm:gateway_host_runtime.py::run"],
     "fm:gateway_service_server.py": ["fm:gateway_service_server.py::serve", "fm:gateway_service_server.py::build_app.lifetime", "fm:gateway_service_server.py::start"],
     "ss:relay.py": ["ss:__main__.py::_foreground"],
+    "ss:local_service.py": ["ss:__main__.py::_foreground"],
     "n:self_update_dtssh.py": ["r:plugins/agent-ssh/transports/dtssh/scripts/dtssh-host-launcher.ps1"],
     "r:plugins/agent-index/scripts/cell-runtime.py": ["i:server.py::serve"],
     "r:plugins/agent-bridge/spikes/session-host/frontend.py": ["r:plugins/agent-bridge/spikes/session-host/session_host.py::SessionHost.run"],
@@ -185,6 +186,7 @@
   "sites": {
     "resident": {
       "fm:gateway_host_start.py::ensure::spawn_daemon": 1,
+      "ss:local_service.py::start::spawn_daemon": 1,
       "r:services/ssh/container/Dockerfile::<script>::ENTRYPOINT": 1,
       "r:services/ssh/container/Dockerfile::<script>::CMD": 1,
       "t:clean-room/gateway-role-tunnels/fixture_service.py::_supervise::spawn_daemon": 1,

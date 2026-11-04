@@ -2,25 +2,31 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from collections.abc import Callable, Iterator
 import os
 import sqlite3
+from typing import TYPE_CHECKING
 
 from fleet_manager.gateway_ssh_provider import directory_snapshot
 from fleet_manager.private_state import create_private_file
 
 from .config import Document, ServiceConfig, absolute, canonical, check, decode, identifier, integer, policy_from_dict, public_key
 
+if TYPE_CHECKING:
+    from .writer import FencedWriter
+
 MAX_REQUESTS = 4096
 MAX_RESPONSE = 32 * 1024
 
 
 class DirectoryStore:
-    """The host must hold its canonical single-writer lease for this lifetime."""
+    """Legacy hosts hold the lease; managed owners fence every guarded transaction."""
 
-    def __init__(self, config: ServiceConfig) -> None:
+    def __init__(self, config: ServiceConfig, *, writer: FencedWriter | None = None,
+                 activate: bool = False) -> None:
         self.config = config
+        self.writer = writer
         self.root = absolute(config.to_dict()["data_dir"])
         check(self.root.is_dir(), "service-data-directory-unavailable")
         self.path = self.root / "directory.sqlite3"
@@ -34,7 +40,7 @@ class DirectoryStore:
         else:
             os.close(descriptor)
             created = True
-        with self._transaction() as db:
+        with self._transaction(activate=activate) as db:
             if created:
                 for statement in (
                     """CREATE TABLE metadata (id INTEGER PRIMARY KEY CHECK(id=1),
@@ -75,12 +81,30 @@ class DirectoryStore:
         self.approval = PeerApproval(self)
 
     @contextmanager
-    def _transaction(self) -> Iterator[sqlite3.Connection]:
+    def _transaction(self, *, activate: bool = False) -> Iterator[sqlite3.Connection]:
+        with self.writer.guard() if self.writer is not None else nullcontext():
+            with self._guarded_transaction(activate=activate) as db:
+                yield db
+
+    @contextmanager
+    def _guarded_transaction(self, *, activate: bool) -> Iterator[sqlite3.Connection]:
+        from .writer import managed_owner
+
         db = sqlite3.connect(self.path, timeout=5, isolation_level=None)
         try:
             db.execute("PRAGMA synchronous=FULL")
             db.execute("BEGIN IMMEDIATE")
+            if self.writer is None:
+                check(managed_owner(db) is None, "managed-writer-requires-transfer-owner")
+            elif activate:
+                self.writer.claim(db)
+            else:
+                self.writer.check(db)
             yield db
+            if self.writer is not None:
+                self.writer.check(db)
+                if activate:
+                    self.writer.selected()
             db.commit()
         except BaseException:
             db.rollback()

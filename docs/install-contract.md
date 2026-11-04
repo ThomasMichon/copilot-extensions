@@ -1974,6 +1974,12 @@ this boundary before its driver-owned Windows broker adoption and before
 selection or launch callbacks; removal retains the adopted action until its
 owned registration is confirmed gone.
 
+Python application construction retains those helpers from the copied,
+Source-verified application's `runtime` directory, not from a plugin-only
+`scripts` layout. Standalone applications need no plugin scripts directory.
+Non-application construction continues to retain the frozen plugin helpers;
+missing application resources do not fall back to another payload.
+
 Read-only helper execution must not mutate the admitted payload. The runtime
 primitive loads its canonical sidecar source directly without creating or
 consuming bytecode caches; both native Index role probes similarly suppress

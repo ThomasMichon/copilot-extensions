@@ -16,12 +16,15 @@ from fleet_manager.gateway_service_connector import ServiceConnector
 from fleet_manager.private_state import create_private_file, private_directory, windows_private
 from single_instance_lease import SingleInstance
 
-from .config import ServiceConfig, absolute, check
+from .config import SSHServiceError, ServiceConfig, absolute, check
 from .gateway import SSHService, _drain
 from .store import DirectoryStore as DirectoryStore
 
 if TYPE_CHECKING:
+    from aiohttp import ClientSession
+    from .local_control import LocalControl
     from .relay import NativeRelay, PosixOperations
+    from .writer import FencedWriter
 
 SignalHandler = Callable[[int, FrameType | None], Any] | int | None
 
@@ -35,6 +38,28 @@ class RegisteredRelay(Protocol):
 
 
 _LEASE = "agent-ssh-service.lock"
+
+
+class FencedConnector(ServiceConnector):
+    """Do not publish an admission ticket returned after this owner was fenced."""
+
+    def __init__(self, *, writer: FencedWriter, **options: Any) -> None:
+        self.writer = writer
+        super().__init__(**options)
+
+    async def _admit(self, session: ClientSession) -> str:
+        check(self.writer.current(), "stale-service-writer")
+        ticket = await super()._admit(session)
+        check(self.writer.current(), "stale-service-writer")
+        return ticket
+
+    async def run(self, stop: asyncio.Event) -> None:
+        try:
+            await super().run(stop)
+        except SSHServiceError as error:
+            if str(error) != "stale-service-writer" or self.writer.current():
+                raise
+            await stop.wait()
 
 
 class UnsettledRelay(RuntimeError):
@@ -104,7 +129,8 @@ async def registered_lifetime(connector: RegisteredConnector,
             raise asyncio.CancelledError
 
 
-async def run(config: ServiceConfig, *, stop: asyncio.Event | None = None) -> None:
+async def run(config: ServiceConfig, *, stop: asyncio.Event | None = None,
+              lifecycle: LocalControl | None = None) -> None:
     stop = stop if stop is not None else asyncio.Event()
     if stop.is_set():
         return
@@ -127,7 +153,8 @@ async def run(config: ServiceConfig, *, stop: asyncio.Event | None = None) -> No
             os.name == "nt" or (info.st_uid == cast("PosixOperations", os).getuid() and info.st_mode & 0o022 == 0)
         ), "invalid-service-lease")
     check((root / "directory.sqlite3").exists()
-          or {entry.name for entry in root.iterdir()} <= {_LEASE},
+          or {entry.name for entry in root.iterdir()} <= (
+              {_LEASE, ".local-service"} if lifecycle is not None else {_LEASE}),
           "unowned-service-data-directory")
     credentials = load_service_credentials(
         proof_key_file=absolute(selected["proof_key_file"]),
@@ -141,7 +168,8 @@ async def run(config: ServiceConfig, *, stop: asyncio.Event | None = None) -> No
             windows_private(lease.lock_path)
         else:
             os.close(descriptor)
-    lease.acquire()
+    if lifecycle is None:
+        lease.acquire()
     service = None
     relay = None
     previous: dict[signal.Signals, SignalHandler] = {}
@@ -153,18 +181,45 @@ async def run(config: ServiceConfig, *, stop: asyncio.Event | None = None) -> No
     try:
         for selected_signal in (signal.SIGINT, signal.SIGTERM):
             previous[selected_signal] = signal.signal(selected_signal, withdraw)
-        store = DirectoryStore(config)
+        if lifecycle is None:
+            store = DirectoryStore(config)
+        else:
+            await lifecycle.prepare(stop=stop, lease=lease)
+            if not await lifecycle.wait_activation():
+                return
+            store = await asyncio.to_thread(lifecycle.writer.activate)
+            original_access = credentials.access_token
+
+            async def current_access() -> str:
+                check(lifecycle.writer.current(), "stale-service-writer")
+                access = await original_access()
+                check(lifecycle.writer.current(), "stale-service-writer")
+                return access
+
+            credentials_access = current_access
         if "relay" in selected:
             from .relay import NativeRelay
 
             relay = NativeRelay(store)
         service = SSHService(store, reconcile_relay=relay.reconcile if relay else None)
-        connector = ServiceConnector(
+        connector_type = ServiceConnector if lifecycle is None else FencedConnector
+        connector_options: dict[str, Any] = (
+            {} if lifecycle is None else {"writer": lifecycle.writer}
+        )
+        connector = connector_type(
+            **connector_options,
             slot=selected["slot"], gateway_origin=selected["gateway_origin"],
-            access_token_callback=credentials.access_token, proof_key=credentials.proof_key,
+            access_token_callback=(
+                credentials.access_token if lifecycle is None else credentials_access
+            ), proof_key=credentials.proof_key,
             gateway_ca=selected["gateway_ca"], handler=service.binding,
             methods=frozenset({"GET", "POST"}),
         )
+        if lifecycle is not None:
+            lifecycle.attach(
+                store=store, service=service, connector=connector,
+                relay=relay, stop=stop, lease=lease,
+            )
         await registered_lifetime(connector, relay, stop)
     finally:
         result: list[Any]
