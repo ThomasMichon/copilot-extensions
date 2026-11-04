@@ -93,11 +93,12 @@ class QueueStorageMixin:
         to_status: str,
         worker: str | None = None,
         note: str | None = None,
+        unassigned_worker: str | None = None,
     ) -> None:
         conn.execute(
-            "INSERT INTO task_events (task_id, ts, from_status, to_status, worker, note) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (task_id, ts, from_status, to_status, worker, note),
+            "INSERT INTO task_events (task_id, ts, from_status, to_status, worker, note, unassigned_worker) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (task_id, ts, from_status, to_status, worker, note, unassigned_worker),
         )
 
     @staticmethod

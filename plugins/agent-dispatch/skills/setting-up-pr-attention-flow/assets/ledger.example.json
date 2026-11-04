@@ -5,7 +5,9 @@
   "charter_reference": null,
   "original_grant_reference": null,
   "lane_choice": {
-    "active_limit": 2,
+    "desired_active": 2,
+    "hard_limit": null,
+    "expansion": "work-conserving within existing authority and capacity",
     "mode": "continuous",
     "stop_reference": null,
     "cadence_reference": null
@@ -39,6 +41,9 @@
         "original_readback_receipt": null,
         "native_review_id": null,
         "current_fence_reference": null,
+        "preflight_reference": null,
+        "revision_binding_reference": null,
+        "server_fence_support": "unknown",
         "unresolved_findings": [],
         "author_replies": [],
         "unknown_evidence": [
@@ -50,9 +55,11 @@
       "hold_evidence": null,
       "watch": {
         "owner_reference": null,
+        "mode": null,
         "subscription_id": null,
         "returned_cursor": null,
-        "observed_state": null
+        "observed_state": null,
+        "last_successful_observation_at": null
       },
       "communication": {
         "retained_handle": null,

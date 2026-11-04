@@ -122,6 +122,7 @@ def close(
             conn, task_id, ts=ts, from_status=Status.CLAIMED, to_status=Status.QUEUED,
             worker=binding["worker_id"],
             note="worker decline closeout observed; routing applied; native retirement pending",
+            unassigned_worker=binding["worker_id"],
         )
         conn.commit()
         return PoolDeclineCloseout(receipt, True)

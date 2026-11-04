@@ -123,6 +123,11 @@ def _cmd_claim_status(args: argparse.Namespace) -> int:
                     or policy.get("automatic_eligible") is not False
                 ):
                     raise DispatchError(502, "coordinator does not confirm native restart policy")
+            elif "task_obligation" in task:
+                from .task_obligations import valid_snapshot
+
+                if not valid_snapshot(task["task_obligation"], task_id=args.task_id):
+                    raise DispatchError(502, "coordinator returned invalid task obligation evidence")
     except DispatchError as exc:
         if exc.status_code == 404:
             return _core()._emit({"exists": False, "detail": "no such task"})
@@ -147,7 +152,11 @@ def _cmd_claim_status(args: argparse.Namespace) -> int:
         detail = "waiting: " + " ".join(str(part) for part in waiter["command"])
     else:
         detail = task.get("owner") or ""
-    return _core()._emit({"exists": True, "state": task.get("status"), "detail": detail})
+    result = {"exists": True, "state": task.get("status"), "detail": detail}
+    if "task_obligation" in task:
+        result["task_obligation"] = task["task_obligation"]
+        result["state"] = task["task_obligation"]["state"]
+    return _core()._emit(result)
 
 
 def _cmd_show(args: argparse.Namespace) -> int:

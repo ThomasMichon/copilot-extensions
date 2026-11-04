@@ -932,6 +932,7 @@ class QueueLifecycleMixin(QueueProgressMixin):
                 to_status=to,
                 worker=worker_id,
                 note=note,
+                unassigned_worker=task.owner if to == Status.QUEUED else None,
             )
             result = self._fetch(conn, task_id)
             if wake_requested:

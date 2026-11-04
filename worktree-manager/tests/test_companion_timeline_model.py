@@ -12,6 +12,76 @@ from worktree_manager.companion_timeline_model import ResultCode, TimelineWindow
 from _companion_timeline_fixtures import event, position, snapshot, token
 
 
+def test_read_failure_cannot_downgrade_known_head_invalidation():
+    source = token()
+    model = TimelineWindow()
+    model.bind(source)
+    initial = snapshot(source, (event(source, 0),))
+    model.apply_snapshot(initial)
+    model.apply_snapshot(replace(initial, events=(), availability=Availability.HEAD_CHANGED))
+    model.source_error(source, "fresh preparation is unavailable")
+    assert model.sources[source.identity.source_key].availability is Availability.HEAD_CHANGED
+    assert not model.events
+
+
+def test_unavailable_source_recovers_exact_multi_page_replay_atomically():
+    source = token()
+    model = TimelineWindow()
+    model.bind(source)
+    rows = tuple(event(source, number) for number in range(3))
+    model.apply_snapshot(snapshot(source, rows[:1]))
+    model.follow_live = False
+    model.source_error(source, "transient owner read failed")
+    replay = (
+        LiveDelta(source, position(source, "live-0"), position(source, "live-1"), rows[1:2]),
+        LiveDelta(source, position(source, "live-1"), position(source, "live-2"), rows[2:]),
+    )
+    result = model.recover_snapshot(snapshot(source, rows[2:], cursor="live-2"), replay)
+    assert result.applied and model.events == rows
+    state = model.sources[source.identity.source_key]
+    assert state.availability is Availability.OBSERVED and state.position == position(source, "live-2")
+    assert model.unread == frozenset(row.ref for row in rows[1:])
+
+
+@pytest.mark.parametrize("failure", ["gap", "head-changed", "wrong-snapshot", "immutable-conflict"])
+def test_failed_recovery_does_not_publish_a_partial_replay_or_reactivate_facts(failure):
+    source = token()
+    model = TimelineWindow()
+    model.bind(source)
+    first = event(source, 0)
+    model.apply_snapshot(snapshot(source, (first,)))
+    model.source_error(source, "transient failure")
+    one = LiveDelta(source, position(source, "live-0"), position(source, "live-1"), (event(source, 1),))
+    two = LiveDelta(source, position(source, "live-1"), position(source, "live-2"), (event(source, 2),))
+    current = snapshot(source, two.events, cursor="live-2")
+    if failure == "gap":
+        two = replace(two, base=position(source, "missing"))
+    elif failure == "head-changed":
+        model.apply_snapshot(replace(current, availability=Availability.HEAD_CHANGED, events=()))
+    elif failure == "wrong-snapshot":
+        current = replace(current, position=position(source, "another-head"))
+    else:
+        two = replace(two, events=(replace(first, summary="rewritten old immutable event"),))
+    previous, state, proofs = model.events, model.sources[source.identity.source_key], dict(model._proofs)
+    assert not model.recover_snapshot(current, (one, two)).applied
+    assert model.events == previous and model.sources[source.identity.source_key] == state
+    assert model._proofs == proofs
+
+
+def test_recovery_keeps_integrity_exhaustion_visible_without_discarding_old_evidence():
+    source = token()
+    model = TimelineWindow(max_proofs=2)
+    model.bind(source)
+    first = event(source, 0)
+    model.apply_snapshot(snapshot(source, (first,)))
+    model.source_error(source, "transient failure")
+    one = LiveDelta(source, position(source, "live-0"), position(source, "live-1"), (event(source, 1),))
+    two = LiveDelta(source, position(source, "live-1"), position(source, "live-2"), (event(source, 2),))
+    assert model.recover_snapshot(snapshot(source, two.events, cursor="live-2"), (one, two)).code is ResultCode.LIMIT
+    assert model.events == (first,) and set(model._proofs) == {first.ref}
+    assert source.identity.source_key in model.reconciliation_required
+
+
 def test_atomic_snapshot_delta_deduplication_and_cursor_fences():
     source = token()
     model = TimelineWindow()

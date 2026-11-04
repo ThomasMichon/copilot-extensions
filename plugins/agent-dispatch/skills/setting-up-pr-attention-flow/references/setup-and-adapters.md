@@ -19,6 +19,12 @@ When the operator requests a charter-refresh cadence, name one existing owner
 and reuse its authorized cadence. Do not add another timer or refresh loop.
 Observation cadence, charter refresh and nudge cooldown are separate choices.
 
+Prefer an existing webhook/subscription owner where available. Otherwise select
+one existing polling owner with an explicit scope, authorized cadence, complete
+enumeration, observed-state comparison and bounded error backoff. Record that
+fallback and its latency/freshness limits. Do not add a competing collector or
+install a service solely to satisfy this skill.
+
 For adopted Worktrees, its catalog command exposes:
 
 ```text
@@ -148,8 +154,8 @@ private source references in the adopter's authorized private contract, not
 in public review artifacts. Apply each owner's documented precedence within
 its own scope, **not one universal precedence chain** across harness, knowledge,
 target and provider. A local customization cannot widen the original grant,
-replace server candidate/write fences, silently swap the acting identity or
-remove author/reviewer independence. Route conflicts to the responsible owner;
+disable existing required provider safeguards, silently swap the acting identity
+or remove author/reviewer independence. Route conflicts to the responsible owner;
 block the affected action while continuing unrelated safe discovery. Missing
 optional owners may use an existing qualifying host adapter; missing required
 authority or binding is not permission to guess a replacement.
@@ -165,9 +171,9 @@ not a new adapter API, marker schema or set of required method names.
 | Candidate and source | PR/source-workspace owner | Current head/base/range, exact retained source, completeness; unavailable source blocks source conclusions |
 | Reviews, threads, checks | PR/provider owner | Full addressable native IDs, replies, dismissal, policy evaluations; unsupported fields stay unknown |
 | Task and lane binding | Task/host owner | Actual stable task/claim/reviewer handles, dedup and suspend/resume; absent task is null, not a fake ID |
-| Review preparation/write | Existing protected review owner | Exact current candidate/signature/round fence, identity/self-review checks and preserved original receipts; missing fence blocks publication |
+| Review preparation/write | Existing review owner | Actual revision binding, supported preconditions, fresh relevant-state checks, identity/self-review checks and original receipts; record residual races when server fencing is unavailable |
 | Effect inspection | Same write owner/provider | Original operation and native IDs, confirmed versus unknown; inability to reconcile stops replay |
-| Update observation | Existing watch owner | Real cursor/subscription, replay/ack/lifetime contract; unavailable watch is a named setup blocker or policy-permitted manual observation |
+| Update observation | Existing observation owner | Real subscription/cursor where supported, otherwise authorized bounded shared polling with observation clocks, dedup and backoff; unsupported fields stay null |
 | Peer follow-up | Existing transport/host owner | Admitted domain, routable retained handle, idempotency/receipt support; unknown delivery stays unknown |
 | Consent and landing | Author/repository merge owner | Effective profile, actual actor authority and current gates; refusal is not bypass permission |
 
@@ -175,10 +181,12 @@ not a new adapter API, marker schema or set of required method names.
 capability descriptors and `workspace load/sync/submit/inspect` frontdoor
 require an actual authenticated host binding. An ordinary **unbound** command
 reports owner-unavailable; source interfaces do not imply installed tools,
-live source preparation or adopted submission fences. Use only capabilities
-the executing owner actually advertises. Worktrees compatibility/provider
-adapters remain useful where supported; do not write another forge client
-to erase gaps.
+live source preparation or adopted submission safeguards. Use only capabilities
+the executing owner actually advertises. An authorized compatibility/provider
+adapter may combine preflight reads, exact revision binding where available and
+official post-write readback without promising atomicity. A missing optional
+server fence alone is not a blocker; an actual required precondition, identity,
+authority or hold still is. Do not write another forge client to erase gaps.
 
 Minor adaptations belong in repository-owned policy or existing adapters:
 population exclusions, rubric, native verdict semantics, capabilities and
