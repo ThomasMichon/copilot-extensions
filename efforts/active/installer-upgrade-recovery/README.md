@@ -337,3 +337,21 @@ CodeSpace connectivity, protected sessions or central retirement. README,
 testing recipes and the existing immutable-generation pattern describe that
 adoption boundary. Source review, required CI, merge and containing release
 remain pending; #10377 and the parent effort remain active.
+
+### 2026-11-04 - Review catches Bash 3.2 nounset compatibility
+
+#10426 received a current-head Comment review identifying a real macOS
+portability failure: the two new optional arrays could be empty under
+`set -u`, which Bash 3.2 treats as an unbound expansion. Both arrays now retain
+their mandatory command arguments, so they are never empty. Optional receipt
+and keep arguments still preserve their individual boundaries.
+
+Three focused controls execute the actual selection and activation functions
+under nounset, with absent/present receipts and no GC keep arguments. They pass
+on Git Bash 5.3.15 in 1.68 seconds (49.20 including isolated preparation and
+cleanup). The same on-demand packet accepts an explicit Bash 3.2 interpreter;
+native macOS/Bash 3.2 execution is unavailable in this source lane and is not
+claimed. These add three controls to the prior 27 unique passes. Windows
+runtime behavior, shared construction helpers and the existing four platform
+skips are unchanged. Review-fix lint/whitespace pass; current-head review and
+required CI must pass again before merge.

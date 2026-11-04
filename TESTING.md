@@ -2187,6 +2187,14 @@ These Windows source controls do not qualify live service registration,
 CodeSpace connectivity, POSIX execution or installed rollout, and do not enter
 the required unit-only CI packet.
 
+`tests/test_installer_generation_shell.py` executes the real POSIX selection
+and activation functions under Bash nounset, checking absent/present source
+receipts, argument boundaries and GC with no keep arguments. It uses Git Bash
+on Windows or the available POSIX Bash; `CODESPACES_TEST_BASH` pins an explicit
+interpreter for stock macOS Bash 3.2 qualification. These are bounded shell
+controls, not package construction or native macOS runtime qualification when
+executed with another Bash version.
+
 ## Optional SSH installation recipes
 
 The manual `installation-context-full.yml` portfolio `ssh-recipes` runs only

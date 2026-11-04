@@ -297,10 +297,10 @@ _versioned_activate() {
         return 1
     fi
     _ok "Runtime version $SRC_VERSION active (marker-only; versions/$SRC_VERSION)"
-    local gc_args=()
+    local gc_args=(gc --protect-pids)
     [[ -z "$prev" ]] || gc_args+=(--keep "$prev")
     [[ "$SRC_VERSION" == "$SOURCE_VERSION" ]] || gc_args+=(--keep "$SOURCE_VERSION")
-    "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids "${gc_args[@]}" 2>&1 | sed 's/^/  gc: /' || true
+    "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" "${gc_args[@]}" 2>&1 | sed 's/^/  gc: /' || true
     return 0
 }
 # === end install-contract:v3 versioned-venv ===
@@ -614,10 +614,10 @@ _select_install_runtime_generation() {
     _assert_source_runtime || return 1
     local py
     py="$(_bootstrap_python)" || return 1
-    local source_arguments=()
-    [[ -z "${SOURCE_RUNTIME_IDENTITY:-}" ]] || source_arguments+=(--source-identity "$SOURCE_RUNTIME_IDENTITY")
-    SRC_VERSION="$("$py" -I -B "$SCRIPT_DIR/runtime-generation.py" --root "$INSTALL_DIR" \
-        --version "$SOURCE_VERSION" --payload-hash "$(_payload_hash)" "${source_arguments[@]}")" || return 1
+    local generation_args=(-I -B "$SCRIPT_DIR/runtime-generation.py" --root "$INSTALL_DIR"
+        --version "$SOURCE_VERSION" --payload-hash "$(_payload_hash)")
+    [[ -z "${SOURCE_RUNTIME_IDENTITY:-}" ]] || generation_args+=(--source-identity "$SOURCE_RUNTIME_IDENTITY")
+    SRC_VERSION="$("$py" "${generation_args[@]}")" || return 1
     VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
     VENV_PYTHON="$VENV_DIR/bin/python"
     LINK_PYTHON="$VENV_PYTHON"
