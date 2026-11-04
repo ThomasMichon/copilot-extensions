@@ -222,6 +222,17 @@ Examples nominated for independent verification include #6937/#6941,
 #10061/#10070 and #10079/#10100. A matching merged PR is not automatically
 whole-issue completion, release, installed acceptance or owner release.
 
+**Further independently verified results:** the
+[finite caller/probe judgments](<journal/2026/11.04 finite-caller-and-probe-completions.md>)
+support completed-source closures for #10079/#10100 and #10092/#10119 after
+whole originals/refinements, actual merged/current code, focused regressions,
+review resolutions and complete CI checks. The final #10079 verdict remains
+accurately COMMENTED with its actual carried-over finding fixed; #10092 has
+genuine exact-head approval. No new tests, live authentication, native latency,
+installed behavior or custody release is claimed. #10060/#10065 remains
+unqualified and OPEN. The finite #10092 fix does not complete #7948's distinct
+producer-scheduling relation to the same PR.
+
 **Verified result:** #10203 is closed as completed after checking its complete
 original and reservation-release comment, actual #10210 merged diff, current
 comparison caller, positive and three refusal regression definitions, current-head

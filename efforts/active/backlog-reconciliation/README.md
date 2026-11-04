@@ -342,6 +342,29 @@ New #10474 is metadata-only, with no departure or closure credit. Continue
 bounded graph-backed research without changing any incumbent parent check
 state, source/resource responsibility or no-implementation boundary.
 
+The exact six-file Bridge study merged in #10475 as
+`388fb76360def673eae35e05e949c52c119e64e5` after genuine exact-head approval,
+zero findings and successful required CI. All actual merged/current blobs
+equal the reviewed head. Its independent publication child alone finalized;
+the eleven source contracts and all existing custodians remain unchanged.
+
+The [independent finite-source judgments](<journal/2026/11.04 finite-caller-and-probe-completions.md>)
+verify #10079's captured caller-directory correction against merged #10100
+and current source, and #10092's redundant routed-probe correction against
+merged #10119. Both complete original/refined contracts, actual current code,
+focused regression definitions, review resolutions and complete CI were checked
+before separate guarded completion closures. #10079's final COMMENTED verdict
+is not called an approval: its carried-over test-double finding is independently
+fixed and all three threads resolved. #10092 has a genuine final-head approval.
+No new test, authentication, native update, installed behavior or custody release
+is claimed. #10060 remains OPEN: merged source/CI do not settle the final
+review's native visibility assessment or supply a missing maintainer approval.
+Two equal complete eleven-page scans at 17:52:06 UTC / 09:52:06 PST count
+1,019 whole open, 290 above 729: 745 eligible, 274 excluded, 681 original-cohort
+and 338 inflow. The two verified departures are inflow completions, with no
+other arrival or external departure in those observations. Continue bounded
+weighted-graph and completed-work research; all parent check states survive.
+
 - [x] Holistically sweep the initial eligible backlog and build an issue/effort
   relationship graph; use alignment and theme to identify consolidation groups.
   The [initial graph snapshot](graph-overview.md) accounts for all 695 assigned
@@ -599,6 +622,13 @@ state, source/resource responsibility or no-implementation boundary.
   normal publication flow.
 
 ## Validation Plan
+
+The [two finite completion judgments](<journal/2026/11.04 finite-caller-and-probe-completions.md>)
+separate original source acceptance from full installation, native latency and
+custody. Current code/regression readback and actual review/CI support #10079
+and #10092 only. #10060 remains unqualified; #7948's distinct scheduling
+contract stays OPEN despite the finite #10092/#10119 completion. No original
+parent Plan/Validation item is resolved by these two source dispositions.
 
 The [Bridge-observation study](bridge-observation-cohort.md) preserves eleven
 whole contracts across five families. Three complete merged descriptions
