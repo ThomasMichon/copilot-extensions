@@ -146,6 +146,37 @@ def test_delta_position_cannot_skip_hashed_or_undelivered_native_events(semantic
         semantic.codec().decode(body)
 
 
+@pytest.mark.parametrize("kind,empty", [
+    ("history", False), ("history", True), ("latest-history", False),
+    ("snapshot", False), ("snapshot", True),
+])
+def test_snapshot_and_history_cannot_omit_retained_tail_or_report_false_exhaustion(
+    semantic, kind: str, empty: bool,
+) -> None:
+    for index in range(5):
+        semantic.log.append("turn_complete", {"title": str(index)})
+    current = semantic.frame()
+    before = semantic.wire.position(current["source"], 4) if kind == "history" else None
+    history = kind != "snapshot"
+    body = semantic.frame(history=history, position=before)
+    if empty:
+        body["entries"] = []
+    else:
+        body["entries"] = body["entries"][:2]
+        body["position"] = body["entries"][-1]["id"]
+    body.update(next_before=None, has_more=False)
+    with pytest.raises(TimelineContractError, match="omitted events before its retained boundary"):
+        semantic.codec().decode(body, history=history)
+
+
+def test_empty_history_at_the_actual_retained_floor_is_valid_partial_evidence(semantic) -> None:
+    semantic.log.append("turn_complete", {})
+    current = semantic.frame()
+    floor = semantic.wire.position(current["source"], current["retained"]["floor"])
+    body = semantic.codec().decode(semantic.frame(history=True, position=floor), history=True)
+    assert not body["entries"] and body["next_before"] is None and body["coverage"] == "partial"
+
+
 def test_empty_log_acquires_only_real_first_continuity_then_rebuild_refuses(semantic) -> None:
     codec = semantic.codec()
     empty = codec.decode(semantic.frame())

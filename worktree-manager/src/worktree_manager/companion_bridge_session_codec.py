@@ -171,10 +171,17 @@ class SessionCodec:
             raise TimelineContractError("Bridge session non-delta acquired a live base")
         if not history and frame["before"] is not None:
             raise TimelineContractError("Bridge session observation acquired a history boundary")
-        if history and frame["before"] is not None and any(
-            item["native_event_id"] >= offset(frame["before"], source) for item in frame["entries"]
-        ):
-            raise TimelineContractError("Bridge history crossed the requested boundary")
+        if kind != "delta":
+            end = retained["head"]
+            if history and frame["before"] is not None:
+                boundary = offset(frame["before"], source)
+                if not retained["floor"] <= boundary <= retained["head"] + 1:
+                    raise TimelineContractError("Bridge history boundary is outside the retained range")
+                end = boundary - 1
+            if (prior is not None and prior != end) or (
+                prior is None and retained["floor"] > 0 and end >= retained["floor"]
+            ):
+                raise TimelineContractError("Bridge page omitted events before its retained boundary")
         next_before = frame["next_before"]
         expected_before = (
             frame["entries"][0]["id"] if frame["entries"]
