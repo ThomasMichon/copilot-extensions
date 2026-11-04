@@ -31,6 +31,7 @@ except ImportError:  # pragma: no cover - pyyaml is a hard dependency
 from .repo_trust import has_symlink_ancestor, path_traverses_symlink, repo_config_is_trusted
 from .config_process_logs import ProcessLogArchiveConfig
 from .config_sync_protection import SYNC_PROTECTION_DEFAULTS, SyncProtectionConfig
+from .config_sync_policy import SyncPolicyConfig
 from .config_origin import MachineConfigOrigin, machine_config_origin
 
 #: Neutral, personality- and multi-machine system-free defaults.
@@ -74,6 +75,7 @@ DEFAULTS: dict[str, Any] = {
         # config remains sufficient on its own, as today) so enabling it is
         # an explicit, opt-in behavior change, not a silent one.
         "require_repo_opt_in": False,
+        "worktree_state": {"enabled": False},
         **SYNC_PROTECTION_DEFAULTS,
         # Retention for destination pruning. None/<=0 -> retain everything.
         "retention_days": None,
@@ -644,7 +646,7 @@ def _load_repo_config(path: Path) -> dict[str, Any]:
     return result
 
 
-class Config(ProcessLogArchiveConfig, SyncProtectionConfig):
+class Config(ProcessLogArchiveConfig, SyncProtectionConfig, SyncPolicyConfig):
     """Resolved agent-logger configuration."""
 
     def __init__(
@@ -693,28 +695,6 @@ class Config(ProcessLogArchiveConfig, SyncProtectionConfig):
         if configured:
             return Path(configured).expanduser()
         return Path.home() / ".copilot"
-
-    @property
-    def sync_retention_days(self) -> int | None:
-        """Retention in days, or ``None`` to retain everything.
-
-        Accepts the sentinel strings ``infinite``/``forever``/``never`` (and
-        blank) as "retain all".
-        """
-        raw = self._data.get("sync", {}).get("retention_days")
-        if raw is None:
-            return None
-        if isinstance(raw, str):
-            if raw.strip().lower() in {"infinite", "forever", "never", "none", ""}:
-                return None
-            try:
-                return int(raw)
-            except ValueError:
-                return None
-        try:
-            return int(raw)
-        except (TypeError, ValueError):
-            return None
 
     @property
     def sync_lock_timeout(self) -> int:

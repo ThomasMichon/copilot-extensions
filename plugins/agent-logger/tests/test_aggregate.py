@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
+from typing import Any
+
+import pytest
+from agent_procutil.owned_budget import OwnedExecutionBudget
 
 from agent_logger import __main__ as cli_module
+from agent_logger import aggregate as aggregate_module
+from agent_logger import aggregate_io
 from agent_logger.aggregate import (
     Admission,
     AggregateInputs,
@@ -29,6 +36,55 @@ from agent_logger.aggregate import (
 )
 
 MACHINE = MachineIdentity(name="worker-1", platform="windows", role="developer")
+
+
+def test_budgeted_aggregate_git_uses_one_owned_deadline_and_stream_caps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    budget = OwnedExecutionBudget.from_timeout(30, cleanup_reserve=5)
+    calls = []
+
+    def owned(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        calls.append(kwargs)
+        if argv[-1] == "origin":
+            output = b"https://github.com/example/project.git\n"
+        else:
+            output = f"{tmp_path}\n.git\n.git\nsame-head\nsame-head\n".encode()
+        return subprocess.CompletedProcess(argv, 0, output, b"")
+
+    monkeypatch.setattr(aggregate_io, "run_caller_owned", owned)
+    monkeypatch.setenv("GIT_WORK_TREE", str(tmp_path / "foreign"))
+    assert aggregate_module.repository_identity_from_checkout(
+        tmp_path, budget=budget,
+    ) == "github.com/example/project"
+    assert len(calls) == 2
+    assert all(
+        call["budget"] is budget and call["binary"] is True
+        and call["max_stdout_bytes"] == 1 << 20 and call["max_stderr_bytes"] == 4096
+        and "GIT_WORK_TREE" not in call["env"]
+        for call in calls
+    )
+
+
+@pytest.mark.parametrize("kind", ["bytes", "admissions"])
+def test_budgeted_aggregate_refuses_unbounded_config_before_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str,
+) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        " " * ((1 << 20) + 1) if kind == "bytes"
+        else json.dumps({"aggregate": {"admissions": [{}] * 129}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        aggregate_io, "run_caller_owned",
+        lambda *a, **k: pytest.fail("unbounded config reached Git"),
+    )
+    with pytest.raises(ValueError, match="budget"):
+        FileSystemAggregateInputProvider(
+            machine=MACHINE, home=tmp_path,
+            budget=OwnedExecutionBudget.from_timeout(30, cleanup_reserve=5),
+        ).load()
 
 
 def _declaration(

@@ -1,0 +1,9 @@
+{
+  "comment": "Opt the existing sync tick into bounded policy-first worktree-state collection with fair retained-store rotation.",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}
