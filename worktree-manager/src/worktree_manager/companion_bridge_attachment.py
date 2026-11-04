@@ -91,7 +91,14 @@ class BridgeTimelineAttachment(TimelineAttachment):
         await self.set_selection(self.selection, reconcile=True, reset_membership=False)
 
     def head_changed(self) -> bool:
-        """Ignore paused historical streams when testing the active reader's head fence."""
+        """Stop pending admission on head loss; ignore paused historical stream markers."""
+        if (
+            self.selection is not None and self._head_current is not None
+            and not self._head_current(self.selection)
+        ):
+            if not self._stop.is_set():
+                self.stop_now()
+            return True
         if self.controller is None:
             return False
         return any(
