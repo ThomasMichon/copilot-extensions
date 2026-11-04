@@ -119,6 +119,11 @@ genesis. The separate guidance hook is unchanged.
 
 ## Verbs
 
+The source-only [inert attention foundation](docs/attention.md) supplies scoped
+candidate/cursor projections and bounded fair ordering for later service
+adoption. It performs no IO, policy authorization, persistence or effects;
+it adds no CLI/HTTP operation.
+
 Source embeddings additionally expose the finite
 [workspace service/client API](docs/workspace-integration.md) through the
 existing PR owner. These library interfaces do not install a writer, acquire
