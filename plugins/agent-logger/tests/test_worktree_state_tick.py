@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,8 @@ from agent_logger.sync.worktree_state_providers import ProjectInventory
 from .test_worktree_state import Packet
 from .test_worktree_state import packet as packet
 from .test_worktree_state_pipeline import selection
+
+pytestmark = pytest.mark.skipif(os.name != "posix", reason="POSIX collection adapter")
 
 
 def _inputs(packet: Packet, count: int = 1) -> AggregateInputs:

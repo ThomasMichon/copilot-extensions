@@ -114,6 +114,11 @@ Machine-local `sync.worktree_state: {enabled: true}` enables the typed leg in
 and nonboolean values refuse before sync effects. Ordinary users do not load
 aggregate policy, inventory owners or export stores. Dry runs never invoke the
 typed leg or create its staging, cursor or destination.
+For multi-tenant sync, set the switch in the existing machine-local
+`<home>/tenants/<tenant>.yaml` supplement. Committed `tenant.sync` and
+`tenant.machines.<machine>.sync` blocks cannot set it; their setting is ignored
+with an advisory before the local supplement is applied. The ordinary tenant
+layering remains unchanged for other sync fields.
 
 The leg runs under the existing sync lock, before ordinary session accounting
 and transfer. It loads the actual filesystem aggregate inputs once, compiles
