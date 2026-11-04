@@ -55,6 +55,13 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
+The proposed finite #1012 conditional-field synchronization family below uses the
+existing Phase 4 Worktrees/Manager wave and Phase 7 intake, not a new timing
+campaign. Preserve the actual form/test, production-Picker, portfolio and
+source/resource custodians, OPEN #1303 and all incumbent families. Proposed
+tracking does not appoint an implementer, authorize collection or execution,
+or make an isolated passing retry a completed repair.
+
 The finite #4395 ordinary developer-entry diagnostic OR supported-local-setup
 contract continues through Phase5 workflow and Phase7 migration-intake/domain
 review below, its actual global Validation and Journal. Preserve the existing
@@ -898,6 +905,32 @@ current refinements through the existing Phase5/Phase7 boundaries.
   native trial or host operation and adds no unrelated whole-portfolio/
   every-host prerequisite.
 
+### Proposed finite #1012 conditional-field synchronization
+
+_(Agent-recommended tracking proposal; normal review, actual delivery and complete
+current readback remain outstanding.)_
+
+- [ ] **P1012-1:** Preserve the actual Other-field visibility and collected-value
+  assertions in the production Picker form test. Synchronize on the actual
+  visible state/event instead of assuming one generic `pilot.pause()` settles
+  it. Relocation, a larger fixed sleep or a weakened expectation is not repair.
+- [ ] **P1012-2:** Through the existing wave/intake owners, retain the historical
+  full-run failure separately from the isolated passing rerun. Use the cheapest
+  faithful bounded validation tier; no unrelated whole-portfolio or native-UI
+  qualification is added to this finite synchronization correction.
+
+#### Local Validation for #1012
+
+- [ ] **V1012-1:** Exercise actual conditional visibility/event synchronization
+  while retaining the field and collected-value assertions. Include deterministic
+  bounded slow-visible and never-visible controls, with a truthful failed
+  expectation when the field never appears. These controls are proposed
+  validation refinements, not results already obtained.
+- [ ] **V1012-2:** Do not substitute relocation, a green isolated retry, skip,
+  xfail, deadline inflation or fixed-sleep growth for the exact contract.
+  Preserve current containment, admission and owning cleanup; this document
+  authorizes no import, collection, test, native interaction or host action.
+
 ## Validation Plan
 
 - [ ] G5921: Resolve EVERY direct #5921 P1-P6, V1-V5 and C1-C3 clause in the Phase4 finite clean-room verdict family at its ORIGINAL source/API consumer tier: actual Python AND Python-less version/schema/evidence-complete reduction and real caller shape, explicit malformed/incomplete/unjudged NON-PASS, correct valid control/classified-jam results/exits, literal-mode separation and source-safe diagnostics. Preserve all incumbent Plan/Validation, OPEN #1303, same owners and independent #5922/#8511/#4312/#688/#1475 gates. Administrative intake is not a reducer fix or executed evidence; no live box/model/all-host/native programme or unrelated whole-portfolio prerequisite is added, and this does not waive the ROOT's own whole completion gate.
@@ -988,6 +1021,14 @@ current refinements through the existing Phase5/Phase7 boundaries.
   documentation is not an implemented fix or executed result. No new
   generic ACK or unrelated native/whole-parent gate is added or waived.
 
+- [ ] **G1012:** Resolve every direct #1012 Plan/local Validation clause through
+  the existing finite Worktrees/Manager wave and intake, retaining actual
+  visibility/event and collected-value assertions, slow-visible/never-visible
+  controls, truthful failure and the original evidence tier. Preserve every
+  incumbent family, owner and gate. Tracking is not a synchronization fix or
+  executed proof; unrelated portfolio work is not an added finite-case
+  prerequisite and this ROOT's own completion gate remains unchanged.
+
 ## Proposal
 
 Approve the vision, framework, and phased campaign as the repository's
@@ -996,6 +1037,16 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-10-28 - Proposed finite conditional-field synchronization family
+
+- Added direct #1012 Plan/local Validation, actual global Validation and
+  continuing coordination under the existing wave/intake owners. Historical
+  full-run failure, isolated passing retry and test relocation remain distinct.
+- Preserved actual field/value assertions and proposed bounded slow/never-visible
+  controls without executing tests or appointing a source owner. Normal review,
+  actual delivery and full current readback remain outstanding; no source
+  disposition or implementation completion is claimed.
 
 ### 2026-10-28 - Finite ordinary developer-entry intake
 
