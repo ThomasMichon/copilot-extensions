@@ -34,7 +34,7 @@ implement runtime configuration.
 
 | Responsibility | Actual owner/handle | Supported operation and absence path |
 |----------------|---------------------|--------------------------------------|
-| Coordinator census/lanes/follow-ups and post-publication audit | `<owner>` | `<audit/normal merge capability or blocker, not verdict relay>` |
+| Coordinator census/lanes/follow-ups and outcome monitoring | `<owner>` | `<monitoring/normal merge capability or blocker, not verdict relay>` |
 | Independent reviewer: static analysis, bot-thread reconciliation, direct verdict/readback | `<naturally bound handle>` | `<task/owner-bound publication and verified receipt capability or blocker>` |
 | Author PR/worktree/fixes/consent | `<original owner>` | `<capability or blocker>` |
 | Candidate/round review write and receipt inspection | `<tool owner>` | `<supported preconditions/revision binding, preflight/readback, residual races and original receipts>` |
@@ -49,6 +49,8 @@ writes. Qualifying rounds proceed directly in the reviewer without mandatory
 per-round coordinator approval/release. Return a verified posted receipt or real
 blocker asynchronously; preserve required safeguards and no reviewer merge/fix/consent
 or custody authority. A missing-read-field snapshot is an adapter exception.
+Coordinator checks address concrete risk or integration needs, not a mandatory
+duplicate per-write forge audit.
 
 ## State and policy
 
