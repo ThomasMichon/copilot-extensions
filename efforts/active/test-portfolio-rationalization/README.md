@@ -177,6 +177,13 @@ admission or budgets.
 
 ## Context
 
+The [weighted native fixture/runner cohort](../backlog-reconciliation/semantic-theme-results.md#native-fixturerunner-cohort)
+indexes related #7243/#7643/#8521/#9436/#9460/#9467/#9614/#9699/#10225
+cases through existing fixture, runner and platform owners. The shared
+neighborhood's #9375/#10239 supported-uninstall cases retain separate caller
+custody. This is snapshot navigation, not accepted whole-source intake,
+changed budgets, test execution, cleanup or source/resource transfer.
+
 The source tree contains well over **8,000 source-level test functions across
 more than 500 Python files**, before parameter expansion during collection.
 The largest suites (`agent-worktrees`, `agent-bridge`, and `agent-dispatch`)

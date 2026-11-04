@@ -96,6 +96,13 @@ item in this umbrella.
 
 ## Context
 
+The [weighted Picker/provider cohort](../backlog-reconciliation/semantic-theme-results.md#pickerprovider-cohort)
+indexes related #542/#1193/#1239/#2801/#3657/#4117/#4118/#4175/#4182/
+#4183/#4225/#4274/#5555/#5898/#6832/#7939/#8490 work under the existing
+Manager/Tasks presentation boundaries. This snapshot is navigation, not
+seventeen duplicates or accepted whole-source intake. Existing Plan,
+Validation, phase owners and independent backend/native holds remain.
+
 **Cross-link (2026-09-28):** the companion `mux-daemon`'s own zero-downtime
 update story (graceful cutover on `worktree-manager update`, generation
 self-retire, so a stale daemon can never stack up after a rapid-fire

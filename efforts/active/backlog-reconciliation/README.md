@@ -209,6 +209,17 @@ research and a plan for fixes; it does not authorize implementing those fixes.
 The [roadmap method](stabilization-roadmap.md) distinguishes operator-requested
 outcomes from agent-recommended research and prioritization mechanics.
 
+Operator direction change, 2026-11-03, summary:
+
+Prioritize aggressive thematic consolidation of the remaining 1,000-plus
+issues using a large weighted semantic graph, density-based theme discovery,
+effort-sized issue groups and comparisons with completed PR/commit descriptions.
+The [verbatim capture](inception-transcript.md) retains the request; the
+[agent-recommended method](semantic-density-consolidation.md) names the
+measured outputs and continuing gates. Serial small documentary batches are
+no longer the principal research engine. This changes neither the fixed
+checkpoint nor author eligibility, holds, requirements or source/resource custody.
+
 ## Plan
 
 ### Phase 1 - Baseline and reviewed charter
@@ -219,6 +230,20 @@ outcomes from agent-recommended research and prioritization mechanics.
 - [x] Preserve the initial cohort and oldest-first cursor in structured session state.
 
 ### Phase 2 - Continuing reconciliation
+
+The current research priority is the
+[weighted semantic consolidation method](semantic-density-consolidation.md):
+complete eligible-node coverage, ranked dense themes, effort-sized receiving
+groups and independently verified issue-to-completed-work candidates. Reuse
+the initial graph and prior studies without treating them as current semantic
+coverage. Preserve the remaining documentary collection without automatically
+publishing its next leaf unit.
+The [first measured results and effort cohorts](semantic-theme-results.md)
+retain the 1,021-node source snapshot, 719 analyzed issues, 6,600 weighted
+edges and 50 stable cores. A later complete census counts 1,023 whole open,
+294 above 729. #10203 is independently verified and closed as a finite source
+correction; new inflow and #10364's external departure remain separate.
+Graph membership and navigation lists are not receiving acceptance.
 
 - [x] Holistically sweep the initial eligible backlog and build an issue/effort
   relationship graph; use alignment and theme to identify consolidation groups.
@@ -477,6 +502,19 @@ outcomes from agent-recommended research and prioritization mechanics.
   normal publication flow.
 
 ## Validation Plan
+
+The [semantic consolidation method](semantic-density-consolidation.md)
+requires whole-queue coverage accounting, measured weighted communities,
+threshold/resolution sensitivity, actual effort-sized membership and
+independently verified completed-work candidates. Semantic similarity,
+density, an effort issue list or a documentation merge alone supplies no
+closure credit. All original Plan/Validation check states and holds remain.
+The [results and data](semantic-theme-results.md) distinguish source-snapshot
+coverage from later current-presence projection, raw-cosine hub bias from
+calibrated retrieval, stable cores from connected paths, and all 560
+completed-work targets from independently verified whole completion.
+#10203's code/requirement/review/CI and post-close audit are separate
+from its model score. No native run, rollout or source/resource transfer follows.
 
 - [ ] Full enumeration excludes pull requests and records observation time,
   original cohort, live open count, oldest unreviewed issue and inflow.
