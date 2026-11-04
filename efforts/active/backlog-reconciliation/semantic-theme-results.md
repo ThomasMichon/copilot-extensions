@@ -73,11 +73,25 @@ acceptance are **not** claimed from a graph, title, list or link.
 | group-009: session/task observation consumers | 8 historical; 7 admitted | Existing Bridge/Dispatch/interface and actual source/resource owners; whole effort receivers unqualified | [Seven-contract study](session-task-observation-cohort.md); #6462 withheld before new rendering, twenty bounded comparisons and one withheld relation. The finite report-design documentation proposal needs reviewed delivery and a separate judgment. |
 | group-010: measurement, preservation and exact completion | 8 historical; 7 admitted | Existing Logger, Index, metadata-repair and producer-discovery owners; whole current receivers unqualified | [Seven-contract study](measurement-preservation-cohort.md); inherited-held member excluded, seventeen bounded comparisons and four withheld relations. Two whole functions confirm only #6026's retained per-call type pattern; repair, native, installed and handoff residuals remain. |
 | group-011: common venue/runtime adapters | 7 historical; 5 admitted | Existing venue, assigned protocol and restricted runtime/custody owners; whole current receivers unqualified | [Five-contract study](venue-runtime-cohort.md); two inherited-held members excluded, fourteen bounded completed-work comparisons and one withheld description. Specific wrapper mapping conditions and all incumbent claims remain. |
-| group-013: interpreter and construction inputs | 7 | [Vendored Installer](../vendored-installer-engine/README.md), [Feed Construction](../feed-construction-release-gate/README.md) | Separate interpreter selection, native argument handling and source materialization. Preserve every original platform/feed/source and existing #7028 boundary. |
+| group-013: interpreter and construction inputs | 7 historical; 6 admitted | Existing installer, constructor, updater and helper owners; whole Vendored Installer bundle read, feed bundle withheld | [Six-contract study](interpreter-construction-cohort.md); seventeen bounded comparisons and two withheld descriptions. Only the finite three-path first-use contract has a direct installer intake proposed; all sources remain OPEN. |
 | group-014: native CI timeout evidence | 7 | [Test Portfolio](../test-portfolio-rationalization/README.md), existing release/fixture owners | Match actual failed boundaries and unchanged budgets before repair or duplicate judgments; neither an isolated retry nor broad CI success proves the finite cause. |
 | group-015: session intelligence and accounting | 6 historical; 5 admitted | Existing Session Intelligence and Large-Corpus Sync owners; five whole receiving documents read without a source/resource transfer | [Five-contract study](session-intelligence-cohort.md); eighteen whole texts, fifteen bounded comparisons and eleven complete source functions. CLOSED historical issue stays metadata-only, not an invented reference STOP. Two same-owner phase-tracking proposals have unchecked direct retention, pending reviewed delivery and separate judgments. |
 | group-018: attention and history readers | 5 | [Operator Attention](../operator-attention-contract/README.md), actual Bridge reader owners | Keep wait/deadline, history paging and event coverage separate; an attention home does not automatically receive the complete history contract. |
 | group-021: head succession | 4 | [Head Succession](../worktree-head-succession-hardening/README.md) | The home remains Draft; #84's OPEN canonical and #912's actual claim conditions survive. No automatic transfer or session operation. |
+
+### Interpreter/construction core
+
+#5955, #6888, #7313, #9489, #10060 and #10186.
+
+The [six-contract study](interpreter-construction-cohort.md) reads eleven
+whole original/refinement texts, nine whole messages and four actual MERGED
+descriptions: seventeen bounded relations, two protected descriptions withheld.
+One inherited-held historical member remains unrendered. All four complete
+Vendored Installer documents support only a finite #5955 direct proposal;
+the feed receiver stays wholly withheld. Preserve constructor/updater/helper
+ownership, actual-child proof, urgent UV source credit, finite diagnostic
+acceptance and public post-update inheritance as distinct unfinished work.
+No actual receiving delivery or source disposition is claimed by this study.
 
 ### Session-intelligence core
 

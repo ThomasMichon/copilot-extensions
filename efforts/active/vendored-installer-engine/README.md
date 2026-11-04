@@ -68,6 +68,14 @@ as independent per-plugin PRs; see Coordination._
 
 ## Coordination
 
+The proposed finite #5955 intake retains the SAME legacy bootstrap/installer
+and adopter custodians for Containers, SSH and Machines. Direct tracking of
+their first-use acquisition order does not start an adopter, resume the paused
+Index/next-adopter lane, transfer implementation or native custody, or change
+Worktrees' permanent engine exception/Budget's audit-only scope. Normal reviewed
+actual delivery, complete current readback and a separate fresh source judgment
+precede administrative consolidation; no product or installed result follows.
+
 The proposed #5356 qualification-only family stays with this existing
 Phase2 adopter/qualification process and the actual Windows installer-
 liveness, worker/guardian, source/adopter/native and whole-installer
@@ -672,7 +680,34 @@ this is not a new product-source audit or a request to port that guard.)_
   liveness/immutable/whole-installer owners; no all-host/native programme
   or unrelated parent prerequisite.
 
+### Finite POSIX first-use acquisition order retained from #5955
+
+_Agent-recommended additive tracking proposal; every incumbent Plan, check
+state, pause, participant, exception and Journal entry remains binding._
+
+- [ ] **P5955:** Preserve ALL THREE legacy first-use paths, Containers
+  `init.sh`, SSH `install.sh` and Machines `init.sh`: reach usable private
+  Python through the OWNING approved acquisition flow BEFORE an interpreter-
+  dependent bootstrap step. Preserve supported preinstalled Python, machine
+  installation gating, governed feeds/seven-day seasoning and clear acquisition
+  failure; do not bypass elevation/feed policy or confuse a later context/cell
+  helper's legitimate interpreter requirement with these earlier paths.
+- [ ] **V5955:** Qualify the actual finite first-use ordering in each named
+  legacy path with no preinstalled Python, supported preinstalled Python and
+  acquisition refusal/failure controls. Preserve approved acquisition/gating/
+  feeds and truthful diagnostics in contained fixtures and the original
+  appropriate native tier. Existing helper/constructor and shared-engine
+  progress is credit, not three-path completion; no every-host programme,
+  new framework, actual runtime execution or rollout is authorized by intake.
+
 ## Validation Plan
+
+- [ ] **G5955:** Resolve the complete P5955/local V5955 and continuing
+  Coordination contract at its finite original tier, under the same custodians.
+  Keep all three paths, ordering, supported preinstalled Python, private owning
+  acquisition, machine gating, governed feeds/seasoning and honest refusal/
+  failure. Administrative tracking retention is not implementation, native/
+  installed acceptance, paused-adopter resumption or whole-parent completion.
 
 - [ ] Qualify manual replacement through unsupported old recovery/monitor and
   stale fences without copying those refusals into the canonical engine;
@@ -794,6 +829,16 @@ immutable-versioned-runtime slot contract. No scheduled task, no sibling
 installs, no service-specific config needed for this class of plugin.
 
 ## Journal
+
+### 2026-11-04 - Finite first-use interpreter-order intake proposed
+
+Added direct unchecked #5955 Plan/local AND global Validation and same-owner
+Coordination after a complete four-document receiving read. Its three legacy
+POSIX paths and every acquisition/gating/feed/failure condition remain explicit.
+All 63 earlier check states, pauses, exceptions, participants and historical
+Journal are preserved. Normal review, actual delivery/current readback and a
+separate source judgment remain outstanding. No adopter, runtime, native test,
+installation, environment, source/resource or custodial effect occurred.
 
 ### 2026-10-30 - Proposed qualification-only Windows liveness case
 
