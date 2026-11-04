@@ -138,6 +138,23 @@ def test_guarded_resolver_exit_reports_a_recorded_feed_failure(monkeypatch):
         guard._run_uv(["unused"], {}, server, time.monotonic() + 30)
 
 
+def test_guarded_isolated_timeout_reports_only_the_deadline(monkeypatch, tmp_path):
+    def timeout(*_args, **_kwargs):
+        raise guard.ChildTimeoutExpired(
+            ["private-command"], 1, output=b"private-output", stderr=b"private-error",
+        )
+
+    monkeypatch.setattr(guard, "run_owned", timeout)
+    with pytest.raises(guard.GuardedSelectionError) as caught:
+        guard._run_isolated(
+            {"control_bytes": 0}, tmp_path, {"worker.py": b"pass"},
+            _limits(), time.monotonic() + 30, SimpleNamespace(),
+        )
+
+    assert str(caught.value) == "guarded native resolver deadline exceeded"
+    assert "private" not in str(caught.value)
+
+
 def test_guarded_project_uses_the_configured_feed_metadata_policy(monkeypatch):
     observed = []
 

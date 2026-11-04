@@ -882,8 +882,9 @@ def _run_isolated(request, root, sources, limits, deadline, procutil):
         return response
     except GuardedSelectionError:
         raise
-    except (ChildLaunchError, ChildTimeoutExpired, subprocess.CalledProcessError, OSError,
-            ValueError, KeyError, TypeError) as error:
+    except ChildTimeoutExpired:
+        raise GuardedSelectionError("guarded native resolver deadline exceeded") from None
+    except (ChildLaunchError, subprocess.CalledProcessError, OSError, ValueError, KeyError, TypeError) as error:
         raise GuardedSelectionError("guarded worker failed: " + type(error).__name__) from None
 
 
