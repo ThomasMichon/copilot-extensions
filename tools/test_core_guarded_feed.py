@@ -103,6 +103,21 @@ def test_guarded_feed_selects_the_latest_native_candidate(tmp_path, monkeypatch,
     assert paths.count("/files/" + dependency_name) == 1
 
 
+def test_guarded_feed_reports_a_sanitized_admission_refusal(tmp_path, monkeypatch, tls_source):  # noqa: F811
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("native uv is required")
+    producer, wheels, manifest, state, _wheel, digest = tls_source
+    project(state, [listed(hashes={"sha256": digest}, withdrawn="private-detail")])
+    _configure_native_tls(tmp_path, monkeypatch, state)
+
+    with pytest.raises(ValueError, match="guarded index contains invalid admission evidence") as caught:
+        _resolve(tmp_path, producer, wheels, manifest, uv=uv)
+
+    assert "private-detail" not in str(caught.value)
+    assert not (tmp_path / "guarded-delivery.zip").exists()
+
+
 def test_guarded_feed_filters_incompatible_records_without_changing_uv_selection(
     tmp_path, monkeypatch, tls_source,  # noqa: F811
 ):
