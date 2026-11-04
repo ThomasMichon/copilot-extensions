@@ -93,6 +93,33 @@ They distinguish environment staging, candidate readiness, activation and
 release; they do not claim that every app already implements the target flow.
 Existing plugin-native installation remains supported during the migration.
 
+## Manager first-party artifact and retained hosts
+
+Manager's wheel-first target embeds its selected in-process first-party library
+core, resources and notices in one Manager wheel. Third-party runtime dependencies
+remain ordinary exactly locked distributions with normal package metadata and
+the existing approved-source, compatibility and origin checks. Independent tools
+and service hosts retain their actual external boundary; imported process-helper
+and client libraries remain first-party core.
+
+Preserve authoritative static source/wheel metadata and the complete third-party
+closure after embedding first-party code. Separate build-time first-party inputs
+remain permissible, but neither a ZIP of separate wheels nor installing those
+libraries beside Manager proves this target. The existing native artifact/profile
+association and final installed-content checks remain authoritative; do not
+introduce alternate metadata, dependency receipts or a second build pipeline.
+See the [application pattern](patterns/fast-application-install-and-cutover.md#manager-first-party-core-and-retained-hosts).
+
+Artifact membership and process lifetime are independent. Default survival uses
+the existing original-generation bootstrap and native retention lease, not a
+per-library service, permanent environment or copied venv. Preserve interpreter,
+completion and process identity through execution and eventual retirement, without
+turning outgoing retirement into an incoming readiness gate. An already-created
+virtual environment is not a relocatable artifact.
+
+These are target requirements, not claims that current Manager artifacts or all
+host entry points already implement them.
+
 Runtime installation and communication compatibility are separate contracts.
 For a new or changed CLI/service boundary, apply
 [service-contract-evolution](patterns/service-contract-evolution.md): publish

@@ -96,6 +96,44 @@ retain their separate qualification boundaries. External references:
 [uv project environments](https://docs.astral.sh/uv/concepts/projects/layout/#the-project-environment)
 and [Python virtual environments](https://docs.python.org/3/library/venv.html).
 
+### Manager first-party core and retained hosts
+
+Manager's wheel embeds the selected first-party library core under its normal
+import names, preserving class identity, required package resources and notices.
+This includes the imported `agent_procutil`, `zdd`, `update_driver` and
+`ssh_manager` code. A shared library's name is not evidence of an independent
+service. Actual external tools and service hosts retain their existing owners.
+
+Third-party packages remain ordinary locked distributions. Preserve their
+`Requires-Dist`, extras, marker-dependent closure, native compatibility,
+distribution metadata and feed/origin admission. Development-only tools are not
+runtime dependencies. There is no third-party vendoring, metadata alias layer or
+query-site rewrite implied by the first-party artifact boundary.
+
+Reuse the canonical inventory, selected-source closure, standalone build/resource
+hooks, native lock/profile and wheel inspectors. The existing
+[lock-input generator](../../bundle/README.md) projects third-party requirements;
+its output is inert, not a resolved or approved lock. The
+[consolidated core artifact](../install-contract.md#consolidated-first-party-core-artifact)
+is a manifest/ZIP of separate first-party wheels, not a monolithic Manager wheel.
+Neither mechanism alone establishes Manager's new embedded-core contract.
+
+The Manager producer must account for the selected first-party dependency edges
+and their transitive third-party requirements in authoritative static declarations.
+Its final wheel has one owning distribution and a complete native `RECORD`.
+Do not merely remove first-party `Requires-Dist`, copy independent installation
+receipts or invent installed library distributions. Keep build-input association
+distinct from the installed Manager-plus-third-party distribution set; use the
+existing identity, metadata and installed-origin/content owners.
+
+For update/controller survival, prefer the existing exact-generation
+`runtime_command` and slot-local native retention bootstrap. Preserve physical
+interpreter/completion identity, retention before imports, process custody,
+admission, drain and eventual retirement. Do not copy or relocate a ready venv
+or introduce per-library services, permanent venvs or a satellite framework.
+Source/provider-resource parity and import-only checks do not prove the final
+artifact, actual serving or cutover survival.
+
 Worktrees' source-aware hook CLI retains its existing `session-lifecycle --stdin
 --source-bound` and `deregister-session --stdin --source-bound` operations.
 The provider ships `scripts/hook-runtime-contract.json` inside its installed
