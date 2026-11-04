@@ -888,7 +888,7 @@ def test_materialized_producer_verifier_roundtrip(
 
         def encode_wheel(
             source_dir: Path, out_dir: Path, *, toolchain: builder.ToolchainLock,
-            reserved_names: set[str],
+            reserved_names: set[str], normalize_timestamps: bool,
         ) -> Path:
             # Only the external build backend is replaced: closure discovery,
             # pre-build source hashing, identity generation and verification are real.
@@ -899,6 +899,7 @@ def test_materialized_producer_verifier_roundtrip(
             version = project["version"].replace("-", ".")
             wheel = out_dir / f"{name}-{version}-py3-none-any.whl"
             assert toolchain.generator == "setuptools (80.9.0)"
+            assert normalize_timestamps
             assert wheel.name not in reserved_names
             reserved_names.add(wheel.name)
             out_dir.mkdir(parents=True, exist_ok=True)

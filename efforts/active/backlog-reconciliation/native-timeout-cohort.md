@@ -222,3 +222,36 @@ The complete 13:45 PST census is 1,014 whole open, 285 above 729:
 separately verified outcomes are #5955's original-cohort tracking fold
 and #7820's inflow finite source completion. Verified campaign closures
 total 765; the parent campaign remains Active.
+
+## Actual delivery, current readback and independent dispositions
+
+#10516 merged as `56d91385093be167a5b4e4286dd587c4c13a02e7` after genuine
+current-head approval `5776590573`, zero findings and successful required CI.
+All eight actual document blobs match the reviewed head. Its publication
+child finalized, retained; both watches completed and were fully consumed.
+The current portfolio ROOT was directly read in full, 2,124 lines/138,956
+characters; four unchanged whole-read annexes/history were explicitly reused.
+Fresh complete source/#1303 metadata and the eleven-member roster matched.
+
+Each source received a separate literal judgment:
+
+| Source | Judgment after actual delivery |
+| --- | --- |
+| #6662 | Remains OPEN: its eligible refinement explicitly keeps this live unresolved completion symptom. Completed diagnostics and a new receiving row do not revoke that source-live condition. |
+| #6663 | NOT_PLANNED tracking supersession: conditional IF-RECURRENCE diagnosis, twelve actual allocators, generations/profiles, positions/capacity and the production two-second bound remain directly tracked. No fresh native programme is required. |
+| #6690 | NOT_PLANNED tracking supersession: the whole version-change Bash/stream/coalescing/replay/cleanup contract now has direct acceptance rows. Original reporting-driver evidence custody and protected whole-message/source holds remain unchanged; no linked retry follows. |
+| #6900 | NOT_PLANNED tracking supersession: measured error-view/invocation distinctions, minimal regression OR owning-fixture correction, original pane/result/receipt limits, other pane ownership and unattributed drift remain explicit. No host-setting change or causal fix is claimed. |
+| #9442 | NOT_PLANNED tracking supersession: both individual 20-second failures remain distinct from aggregate-only budget credit. Scope/invocation/Job/cleanup, monotonic diagnosis and unknown cause stay with the same owner. |
+| #9815 | NOT_PLANNED tracking supersession: four real readers, three seconds, full writer/drain/cancel settlement, failed combined versus isolated evidence and independent required CI remain unchecked. Broader service/source/resource obligations are not absorbed or transferred. |
+
+Fresh complete source/actor/receiver checks preceded each effect, and each
+public comment, close reason, original body/title and empty assignment was
+read back from the provider. #6662 stayed unchanged OPEN without a redundant
+comment. All thirty local and six global receiving rows remain unchecked;
+tracking consolidation is not technical, native or installed acceptance.
+
+Two equal complete eleven-page metadata-only scans at 14:30 PST count
+1,010 whole open, 281 above the fixed 729 target: 735 eligible, 275 excluded,
+674 original-cohort and 336 inflow. The five verified tracking departures
+are three original-cohort and two inflow, with no arrivals or external
+departures. Campaign closure credit totals 770; the parent remains Active.
