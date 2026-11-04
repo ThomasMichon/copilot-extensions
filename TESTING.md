@@ -39,6 +39,17 @@ It checks same-process module execution, `__main__` identity and settled instanc
 cleanup without binding a service port or touching existing sessions. This is
 source-boundary admission evidence, not installed watchdog recovery or rollout.
 
+The explicit `agent-worktrees --test-file
+tests/native/test_resident_prompt_receipt_integration.py --allow-explicit-tiers`
+packet exercises a real Node consumer and private resident receipt server.
+Without `RECEIPT_CLIENT_ROOT`, its test-only client fixture selects the sibling
+`context-handoff` source payload; an explicit fixture override remains supported.
+Its finite Node peer borrows the bounded runner's process scope with an absolute
+execution/cleanup budget, retaining the strict no-helper assertion on resident
+code. Deliberate persisted nonce replacement uses raw fixture YAML and verifies
+the new incarnation before testing refusal. This qualifies the isolated receipt
+boundary, not installed services, whole task-lifecycle acceptance or rollout.
+
 The explicit `agent-worktrees` native packet
 `--test-file tests/test_python_runtime_install.py -k real_installer_returns_before_resident_owned_monitor_drain --allow-explicit-tiers`
 contains the three compatible routed/lock-layout controls plus one legacy-peer
