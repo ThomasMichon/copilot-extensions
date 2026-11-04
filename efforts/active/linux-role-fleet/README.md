@@ -406,11 +406,18 @@ Implementation sequencing below is **agent-recommended**:
   [forward-first generation contract](client-lifecycle-admission.md#forward-first-installation-generations)
   has source primitives merged in #10439: independent construction/start,
   generation/floor fencing, explicit incoming default-command publication and
-  separate exact-generation withdrawal/removal. Native Windows lifecycle
-  qualification and Linux/Windows artifact installation are recorded in the
+  separate exact-generation withdrawal/removal. Native Linux/Windows installed
+  admission, construction, publication, withdrawal and removal consumers are
+  qualified in #10469; that source also corrects Windows private-state creation,
+  rollback-journal ordering and held-handle runtime-directory custody.
+  Their exact-source evidence and earlier artifact installation are recorded in the
   [incoming-selection journal](journal/2026/11.04-client-incoming-selection.md).
-  Full native Linux generation qualification and a complete managed installer
-  remain open; artifact installation alone is not that lifecycle proof.
+  The broader lifecycle matrix and complete managed installer remain open;
+  these consumers are not a fresh-OS or adopter receipt.
+  The current client-only candidate composes explicit generation install/forward
+  update and exact uninstall through those existing owners. Its original incoming
+  command observation is durable across retries; source review and renewed native
+  qualification remain gates, not a closed packaging/controller checkbox.
   Its [authoritative replacement reconciliation](client-lifecycle-admission.md#authoritative-replacement-reconciliation)
   keeps incoming readiness plus complete current launcher/registration selection
   as the completion gate. Retained generation work is not complete installation
@@ -676,6 +683,17 @@ Runtime package/API details belong to the implementation contract after review,
 not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
+
+### 2026-11-04 - Native client generation consumers accepted
+
+#10469 merged at `b01544dc89c9532273ddaf401b192851da532ce1` after its exact
+head passed all six installed consumers on both native Linux and Windows,
+the strict report oracle, a clean Copilot Comment on the owner's PR and current
+required CI. The [qualification journal](journal/2026/11.04-client-incoming-selection.md#native-consumer-source-accepted)
+records the Windows ownership/journal corrections, private-directory refusal,
+evidence limits and accepted review. The Plan and Validation Plan were reread:
+managed lifecycle composition, the broader matrix, fresh-OS and adopter gates
+remain open under their existing owners. No broad checkbox or rollout closes.
 
 ### 2026-11-04 - Incoming client generation source accepted
 

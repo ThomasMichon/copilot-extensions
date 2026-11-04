@@ -128,6 +128,54 @@ jobs:
               sys.executable, "-I",
               "tools/clean-room/scenarios/fleet-manager-client-admission/verify.py", str(report),
           ], timeout=30)
+      - name: Qualify explicit managed client installation and exact removal
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          import shlex
+          import sys
+          import xml.etree.ElementTree as ET
+
+          source = Path.cwd()
+          sys.path.insert(0, str(source / "libs/agent-procutil/src"))
+          from agent_procutil.owned_process import run_caller_owned
+
+          reports = source / ".test-venvs/fleet-client-consumers"
+          ignored = [
+              "--ignore=" + str(path)
+              for path in sorted((source / "fleet-manager/tests").glob("test_*.py"))
+              if path.name != "test_client_generation_cli.py"
+          ]
+          combined = ET.Element("testsuites")
+          for transition in ("retry", "forward-missing", "forward-malformed", "higher", "uninstall", "foreign"):
+              report = reports / ("managed-" + transition + ".xml")
+              if report.exists():
+                  raise RuntimeError("native qualification refuses a retained managed report")
+              expression = "actual_installed_console_managed_lifecycle and " + transition
+              result = run_caller_owned(
+                  [sys.executable, "tools/run-standalone-tests.py", "fleet-manager", "--timeout", "120"],
+                  cwd=source, timeout=180,
+                  env={**os.environ, "PYTEST_ADDOPTS": shlex.join([
+                      *ignored, "-k", expression, "--junitxml", str(report),
+                  ])},
+                  max_stdout_bytes=16 * 1024 * 1024, max_stderr_bytes=16 * 1024 * 1024,
+              )
+              print(result.stdout, end="", flush=True)
+              print(result.stderr, end="", file=sys.stderr, flush=True)
+              result.check_returncode()
+              combined.extend(ET.parse(report).getroot().findall("testsuite"))
+          report = reports / "managed.xml"
+          ET.ElementTree(combined).write(report, encoding="utf-8")
+          result = run_caller_owned(
+              [sys.executable, "-I",
+               "tools/clean-room/scenarios/fleet-manager-client-admission/verify.py", str(report), "--managed"],
+              cwd=source, timeout=30,
+              max_stdout_bytes=16 * 1024 * 1024, max_stderr_bytes=16 * 1024 * 1024,
+          )
+          print(result.stdout, end="", flush=True)
+          print(result.stderr, end="", file=sys.stderr, flush=True)
+          result.check_returncode()
       - uses: actions/upload-artifact@v4
         if: always()
         with:

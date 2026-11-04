@@ -35,7 +35,7 @@ fleet-manager = "fleet_manager.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-fleet_manager = ["ssh-client-contract.json"]
+fleet_manager = ["ssh-client-contract.json", "client-lifecycle-contract.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
