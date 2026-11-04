@@ -432,3 +432,13 @@ The earlier planner fix is released through #10430; it is not installed by
 this source work. The separate artifact-publication gap remains with #10432's
 existing owner. Neither containing release nor this PR authorizes rollout or
 completes #10377.
+
+The following review had no open findings but identified unexecuted native
+completion-failure controls. Both Install/Update cases reproduced a missing
+generation-selection fixture prerequisite before reaching completion refusal.
+The focused extracted-function fixture now records selection followed by
+completion, retaining the real activation function, unchanged selector and
+throwing publication callbacks. All four native broker/publication controls
+pass in 5.08 seconds (53.00 including isolated preparation/cleanup). This fixes
+test integration, not production behavior, and is additional to the 141-control
+evidence above. Current-head CI/review and reconciliation with Dev remain due.
