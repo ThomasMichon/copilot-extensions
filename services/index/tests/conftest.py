@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import os
 
 import pytest
@@ -8,13 +11,13 @@ from agent_index_service.config import parse_config
 
 
 @pytest.fixture
-def distribution_root(tmp_path_factory):
+def distribution_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
     # Nested wheel/sdist paths need room below Windows' legacy path limit.
     return tmp_path_factory.mktemp("d")
 
 
 @pytest.fixture(autouse=True)
-def isolated_environment(monkeypatch, tmp_path):
+def isolated_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     for name in list(os.environ):
         if name.startswith("AGENT_INDEX_") or name == "COPILOT_EXTENSIONS_CONTEXT":
             monkeypatch.delenv(name)
@@ -32,7 +35,7 @@ def isolated_environment(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def config_data(tmp_path):
+def config_data(tmp_path: Path) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "home": str(tmp_path / "service"),
@@ -41,7 +44,7 @@ def config_data(tmp_path):
 
 
 @pytest.fixture
-def config_file(tmp_path, config_data):
+def config_file(tmp_path: Path, config_data: dict[str, Any]) -> Path:
     import yaml
 
     path = tmp_path / "host.yaml"

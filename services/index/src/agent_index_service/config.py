@@ -139,11 +139,11 @@ def _source(value: Any, index: int) -> dict[str, Any]:
         from urllib.parse import urlsplit
 
         remote = _text(raw["remote"], f"{label}.remote")
-        parts = urlsplit(remote)
+        parsed = urlsplit(remote)
         if (
-            parts.scheme != "https" or not parts.hostname
-            or parts.username is not None or parts.password is not None
-            or parts.query or parts.fragment
+            parsed.scheme != "https" or not parsed.hostname
+            or parsed.username is not None or parsed.password is not None
+            or parsed.query or parsed.fragment
         ):
             raise ConfigurationError(f"{label}.remote must be a credential-free HTTPS URL")
         result["remote"] = remote

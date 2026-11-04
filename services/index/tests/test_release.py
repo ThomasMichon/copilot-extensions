@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from typing import Any, IO, cast
+from collections.abc import Callable
+
 import base64
 import copy
 import csv
@@ -17,7 +20,9 @@ import pytest
 from packaging.version import Version
 
 from agent_index_service import release
-from agent_index_service.release import ReleaseError, build_descriptor, verify_descriptor
+from agent_index_service.release import (
+    ReleaseError, build_descriptor as build_descriptor, verify_descriptor as verify_descriptor,
+)
 
 COMMIT = "0123456789abcdef" * 2 + "01234567"
 VERSIONS = {
@@ -39,9 +44,10 @@ EXTRAS = {"agent-index-service": ["native"], "agent-index": ["store", "server"]}
 WHEEL = "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n\n"
 
 
-def _record_bytes(entries, record_name, algorithm="sha256"):
+def _record_bytes(entries: dict[str, bytes], record_name: str, algorithm: str="sha256") -> bytes:
     output = io.StringIO(newline="")
-    writer = csv.writer(output)
+    # An explicit escape avoids Python 3.10 treating NUL as its unset escape character.
+    writer = csv.writer(output, escapechar="\\")
     signatures = {record_name + ".jws", record_name + ".p7s"}
     for name, value in entries.items():
         if name == record_name or name in signatures or name.endswith("/"):
@@ -55,7 +61,7 @@ def _record_bytes(entries, record_name, algorithm="sha256"):
     return output.getvalue().encode()
 
 
-def _write_archive(path, entries, *, regenerate=True):
+def _write_archive(path: Path, entries: dict[str, bytes], *, regenerate: bool=True) -> None:
     if regenerate:
         record_name = next((name for name in entries if name.endswith("/RECORD")), None)
         if record_name is None:
@@ -67,7 +73,7 @@ def _write_archive(path, entries, *, regenerate=True):
             archive.writestr(name, value)
 
 
-def _make_wheel(root, name, version, requirements=None):
+def _make_wheel(root: Path, name: str, version: str, requirements: list[str] | None=None) -> Path:
     normalized = str(Version(version))
     escaped = name.replace("-", "_")
     filename = f"{escaped}-{normalized}-py3-none-any.whl"
@@ -86,21 +92,21 @@ def _make_wheel(root, name, version, requirements=None):
     return path
 
 
-def _find(root, distribution):
+def _find(root: Path, distribution: str) -> Path:
     return next(root.glob(f"{distribution.replace('-', '_')}-*.whl"))
 
 
-def _rewrite(path, transform, *, regenerate=True):
+def _rewrite(path: Path, transform: Callable[[dict[str, bytes]], dict[str, bytes]], *, regenerate: bool=True) -> None:
     with zipfile.ZipFile(path) as archive:
         entries = {entry.filename: archive.read(entry) for entry in archive.infolist()}
     changed = transform(entries)
     _write_archive(path, changed, regenerate=regenerate)
 
 
-def _mutate_metadata(bundle, transform, name="agent-index-service", record="METADATA"):
+def _mutate_metadata(bundle: Path, transform: Callable[[str], str], name: str="agent-index-service", record: str="METADATA") -> None:
     path = _find(bundle, name)
 
-    def mutate(entries):
+    def mutate(entries: dict[str, bytes]) -> dict[str, bytes]:
         key = next(key for key in entries if key.endswith(f"/{record}"))
         entries[key] = transform(entries[key].decode()).encode()
         return entries
@@ -109,7 +115,7 @@ def _mutate_metadata(bundle, transform, name="agent-index-service", record="META
 
 
 @pytest.fixture
-def bundle(tmp_path):
+def bundle(tmp_path: Path) -> Path:
     root = tmp_path / "bundle"
     root.mkdir()
     for name, version in VERSIONS.items():
@@ -118,17 +124,17 @@ def bundle(tmp_path):
 
 
 @pytest.fixture
-def descriptor(bundle):
+def descriptor(bundle: Path) -> dict[str, Any]:
     return build_descriptor(bundle, source_commit=COMMIT)
 
 
-def _save(bundle, descriptor):
+def _save(bundle: Path, descriptor: dict[str, Any]) -> Path:
     path = bundle / "release.json"
     path.write_text(json.dumps(descriptor), encoding="utf-8")
     return path
 
 
-def test_exact_shape_and_round_trip_without_writes(bundle):
+def test_exact_shape_and_round_trip_without_writes(bundle: Path) -> None:
     before = {path.name: path.read_bytes() for path in bundle.iterdir()}
     result = build_descriptor(bundle, source_commit=COMMIT)
     expected = {
@@ -149,7 +155,7 @@ def test_exact_shape_and_round_trip_without_writes(bundle):
     assert {path.name: path.read_bytes() for path in bundle.iterdir()} == before
 
 
-def test_canonical_versions_and_artifact_order(bundle, descriptor):
+def test_canonical_versions_and_artifact_order(bundle: Path, descriptor: dict[str, Any]) -> None:
     descriptor["service_version"] = "0.1.1-dev1"
     descriptor["artifacts"].reverse()
     for artifact in descriptor["artifacts"]:
@@ -159,22 +165,22 @@ def test_canonical_versions_and_artifact_order(bundle, descriptor):
 
 
 @pytest.mark.parametrize("commit", ["a" * 39, "a" * 41, "A" * 40, "g" * 40, "", None, 1])
-def test_commit_is_strict(bundle, descriptor, commit):
+def test_commit_is_strict(bundle: Path, descriptor: dict[str, Any], commit: object) -> None:
     with pytest.raises(ReleaseError):
-        build_descriptor(bundle, source_commit=commit)
+        build_descriptor(bundle, source_commit=cast(str, commit))
     with pytest.raises(ReleaseError):
-        verify_descriptor(_save(bundle, descriptor), expected_source_commit=commit)
+        verify_descriptor(_save(bundle, descriptor), expected_source_commit=cast(str, commit))
     descriptor["source_commit"] = commit
     with pytest.raises(ReleaseError):
         verify_descriptor(_save(bundle, descriptor), expected_source_commit=COMMIT)
 
 
-def test_wrong_trusted_revision(bundle, descriptor):
+def test_wrong_trusted_revision(bundle: Path, descriptor: dict[str, Any]) -> None:
     with pytest.raises(ReleaseError, match="trusted revision"):
         verify_descriptor(_save(bundle, descriptor), expected_source_commit="f" * 40)
 
 
-def test_changed_bytes_fail_hash_even_when_zip_still_reads(bundle, descriptor):
+def test_changed_bytes_fail_hash_even_when_zip_still_reads(bundle: Path, descriptor: dict[str, Any]) -> None:
     with _find(bundle, "agent-index").open("ab") as stream:
         stream.write(b"changed")
     with pytest.raises(ReleaseError, match="digest"):
@@ -182,7 +188,7 @@ def test_changed_bytes_fail_hash_even_when_zip_still_reads(bundle, descriptor):
 
 
 @pytest.mark.parametrize("version", ["not-a-version", "", " 1.0", None, 1])
-def test_bad_descriptor_versions(bundle, descriptor, version):
+def test_bad_descriptor_versions(bundle: Path, descriptor: dict[str, Any], version: str) -> None:
     for key in ("service_version", "core_version"):
         bad = copy.deepcopy(descriptor)
         bad[key] = version
@@ -194,7 +200,7 @@ def test_bad_descriptor_versions(bundle, descriptor, version):
 
 
 @pytest.mark.parametrize("field", ["service_version", "core_version"])
-def test_top_level_version_mismatch(bundle, descriptor, field):
+def test_top_level_version_mismatch(bundle: Path, descriptor: dict[str, Any], field: str) -> None:
     descriptor[field] = "99.0"
     with pytest.raises(ReleaseError, match="versions"):
         verify_descriptor(_save(bundle, descriptor), expected_source_commit=COMMIT)
@@ -205,14 +211,14 @@ def test_top_level_version_mismatch(bundle, descriptor, field):
     ("sha256", "f" * 64), ("sha256", "A" * 64), ("sha256", "a" * 63),
     ("sha256", "g" * 64), ("sha256", None),
 ])
-def test_artifact_identity_and_digest_validation(bundle, descriptor, field, value):
+def test_artifact_identity_and_digest_validation(bundle: Path, descriptor: dict[str, Any], field: str, value: object) -> None:
     descriptor["artifacts"][0][field] = value
     with pytest.raises(ReleaseError):
         verify_descriptor(_save(bundle, descriptor), expected_source_commit=COMMIT)
 
 
 @pytest.mark.parametrize("change", ["missing", "extra", "duplicate"])
-def test_exact_bundle_distributions(bundle, change):
+def test_exact_bundle_distributions(bundle: Path, change: str) -> None:
     if change == "missing":
         _find(bundle, "agent-zdd").unlink()
     elif change == "extra":
@@ -224,7 +230,7 @@ def test_exact_bundle_distributions(bundle, change):
 
 
 @pytest.mark.parametrize("change", ["missing", "extra", "duplicate"])
-def test_exact_descriptor_artifacts(bundle, descriptor, change):
+def test_exact_descriptor_artifacts(bundle: Path, descriptor: dict[str, Any], change: str) -> None:
     if change == "missing":
         descriptor["artifacts"].pop()
     elif change == "extra":
@@ -235,13 +241,13 @@ def test_exact_descriptor_artifacts(bundle, descriptor, change):
         verify_descriptor(_save(bundle, descriptor), expected_source_commit=COMMIT)
 
 
-def test_missing_wheel(bundle, descriptor):
+def test_missing_wheel(bundle: Path, descriptor: dict[str, Any]) -> None:
     _find(bundle, "agent-zdd").unlink()
     with pytest.raises(ReleaseError):
         verify_descriptor(_save(bundle, descriptor), expected_source_commit=COMMIT)
 
 
-def test_wheel_filename_identity(bundle):
+def test_wheel_filename_identity(bundle: Path) -> None:
     path = _find(bundle, "agent-index-service")
     path.rename(bundle / path.name.replace("0.1.1.dev1", "9.0"))
     with pytest.raises(ReleaseError, match="identity"):
@@ -260,7 +266,7 @@ def test_wheel_filename_identity(bundle):
     ("Version: 0.1.1.dev1", "Version: 0.1.1.dev1\nVersion: 0.1.1.dev1"),
     ("Metadata-Version: 2.4", "Metadata-Version: 2.4\nMetadata-Version: 2.4"),
 ])
-def test_bad_wheel_metadata(bundle, old, new):
+def test_bad_wheel_metadata(bundle: Path, old: str, new: str) -> None:
     _mutate_metadata(bundle, lambda text: text.replace(old, new))
     with pytest.raises(ReleaseError):
         build_descriptor(bundle, source_commit=COMMIT)
@@ -275,18 +281,18 @@ def test_bad_wheel_metadata(bundle, old, new):
     lambda text: text + "unexpected body",
     lambda text: text.replace("Tag: py3-none-any", "Tag: py3-none-any\nTag: py3-none-any"),
 ])
-def test_bad_wheel_record(bundle, mutation):
+def test_bad_wheel_record(bundle: Path, mutation: Callable[[str], str]) -> None:
     _mutate_metadata(bundle, mutation, record="WHEEL")
     with pytest.raises(ReleaseError):
         build_descriptor(bundle, source_commit=COMMIT)
 
 
 @pytest.mark.parametrize("record", ["METADATA", "WHEEL"])
-def test_missing_and_multiple_zip_metadata(bundle, record):
+def test_missing_and_multiple_zip_metadata(bundle: Path, record: str) -> None:
     path = _find(bundle, "agent-index-service")
     original = path.read_bytes()
 
-    def remove(entries):
+    def remove(entries: dict[str, bytes]) -> dict[str, bytes]:
         return {key: val for key, val in entries.items() if not key.endswith(f"/{record}")}
 
     _rewrite(path, remove)
@@ -299,7 +305,7 @@ def test_missing_and_multiple_zip_metadata(bundle, record):
         build_descriptor(bundle, source_commit=COMMIT)
 
 
-def test_duplicate_zip_member(bundle):
+def test_duplicate_zip_member(bundle: Path) -> None:
     path = _find(bundle, "agent-index-service")
     with zipfile.ZipFile(path, "a") as archive:
         name = next(name for name in archive.namelist() if name.endswith("/METADATA"))
@@ -310,7 +316,7 @@ def test_duplicate_zip_member(bundle):
         build_descriptor(bundle, source_commit=COMMIT)
 
 
-def test_metadata_limit(bundle):
+def test_metadata_limit(bundle: Path) -> None:
     _mutate_metadata(bundle, lambda text: text + "x" * (1024 * 1024 + 1))
     with pytest.raises(ReleaseError, match="1 MiB"):
         build_descriptor(bundle, source_commit=COMMIT)
@@ -329,7 +335,7 @@ def test_metadata_limit(bundle):
     ["agent-index", "agent-index", REQUIREMENTS["agent-index-service"][1]],
     ["agent-index", "Agent_Index", REQUIREMENTS["agent-index-service"][1]],
 ])
-def test_service_base_native_requirements(bundle, requirements):
+def test_service_base_native_requirements(bundle: Path, requirements: list[str]) -> None:
     _make_wheel(bundle, "agent-index-service", VERSIONS["agent-index-service"], requirements)
     with pytest.raises(ReleaseError):
         build_descriptor(bundle, source_commit=COMMIT)
@@ -342,7 +348,7 @@ def test_service_base_native_requirements(bundle, requirements):
     ['agent-zdd; sys_platform == "linux"', "agent-procutil", "agent-dropin-registry"],
     ["agent-zdd @ file:///not-a-bundled-wheel", "agent-procutil", "agent-dropin-registry"],
 ])
-def test_core_shared_dependency_contract(bundle, requirements):
+def test_core_shared_dependency_contract(bundle: Path, requirements: list[str]) -> None:
     _make_wheel(bundle, "agent-index", VERSIONS["agent-index"], requirements)
     with pytest.raises(ReleaseError):
         build_descriptor(bundle, source_commit=COMMIT)
@@ -353,13 +359,13 @@ def test_core_shared_dependency_contract(bundle, requirements):
     "\\\\server\\share\\escape.whl", "sub\\escape.whl", "sub/escape.whl",
     "file:///escape.whl", "escape.whl:stream", " escape.whl", "escape.whl\n",
 ])
-def test_path_aliases_are_rejected(bundle, descriptor, filename):
+def test_path_aliases_are_rejected(bundle: Path, descriptor: dict[str, Any], filename: str) -> None:
     descriptor["artifacts"][0]["file"] = filename
     with pytest.raises(ReleaseError):
         verify_descriptor(_save(bundle, descriptor), expected_source_commit=COMMIT)
 
 
-def test_real_symlink_wheel(bundle, descriptor, tmp_path):
+def test_real_symlink_wheel(bundle: Path, descriptor: dict[str, Any], tmp_path: Path) -> None:
     path = _find(bundle, "agent-index")
     outside = tmp_path / path.name
     outside.write_bytes(path.read_bytes())
@@ -375,11 +381,11 @@ def test_real_symlink_wheel(bundle, descriptor, tmp_path):
 
 
 @pytest.mark.parametrize("mode,attributes", [(stat.S_IFLNK, 0), (stat.S_IFREG, 0x400)])
-def test_link_guard_rejects_before_open(bundle, descriptor, monkeypatch, mode, attributes):
+def test_link_guard_rejects_before_open(bundle: Path, descriptor: dict[str, Any], monkeypatch: pytest.MonkeyPatch, mode: int, attributes: int) -> None:
     path = _find(bundle, "agent-index")
     real_stat = Path.lstat
 
-    def lstat(candidate):
+    def lstat(candidate: Path) -> object:
         if candidate == path:
             return SimpleNamespace(st_mode=mode, st_file_attributes=attributes)
         return real_stat(candidate)
@@ -394,14 +400,14 @@ def test_link_guard_rejects_before_open(bundle, descriptor, monkeypatch, mode, a
     ("config_schema_version", True), ("config_schema_version", 2),
     ("artifacts", {}), ("artifacts", None),
 ])
-def test_strict_descriptor_schema(bundle, descriptor, field, value):
+def test_strict_descriptor_schema(bundle: Path, descriptor: dict[str, Any], field: str, value: object) -> None:
     descriptor[field] = value
     with pytest.raises(ReleaseError):
         verify_descriptor(_save(bundle, descriptor), expected_source_commit=COMMIT)
 
 
 @pytest.mark.parametrize("location", ["root", "artifact"])
-def test_unknown_and_missing_keys(bundle, descriptor, location):
+def test_unknown_and_missing_keys(bundle: Path, descriptor: dict[str, Any], location: str) -> None:
     target = descriptor if location == "root" else descriptor["artifacts"][0]
     target["unknown"] = "not accepted"
     with pytest.raises(ReleaseError):
@@ -416,7 +422,7 @@ def test_unknown_and_missing_keys(bundle, descriptor, location):
     '{"schema": "agent-index-service.release", "schema": "agent-index-service.release",',
     '{"schema": NaN,', '{"schema": Infinity,', '{"schema": "agent-index-service.release",',
 ])
-def test_malformed_or_duplicate_json(bundle, descriptor, replacement):
+def test_malformed_or_duplicate_json(bundle: Path, descriptor: dict[str, Any], replacement: str) -> None:
     path = _save(bundle, descriptor)
     text = path.read_text()
     path.write_text(text.replace('{"schema": "agent-index-service.release",', replacement, 1))
@@ -426,7 +432,7 @@ def test_malformed_or_duplicate_json(bundle, descriptor, replacement):
         verify_descriptor(path, expected_source_commit=COMMIT)
 
 
-def test_duplicate_nested_json_keys(bundle, descriptor):
+def test_duplicate_nested_json_keys(bundle: Path, descriptor: dict[str, Any]) -> None:
     path = _save(bundle, descriptor)
     text = path.read_text()
     path.write_text(text.replace('"distribution":', '"version": "1.0", "distribution":', 1))
@@ -434,19 +440,19 @@ def test_duplicate_nested_json_keys(bundle, descriptor):
         verify_descriptor(path, expected_source_commit=COMMIT)
 
 
-def test_verify_does_not_adopt_unlisted_siblings(bundle, descriptor):
+def test_verify_does_not_adopt_unlisted_siblings(bundle: Path, descriptor: dict[str, Any]) -> None:
     path = _save(bundle, descriptor)
     _make_wheel(bundle, "unlisted-third-party", "1.0")
     assert verify_descriptor(path, expected_source_commit=COMMIT) == descriptor
 
 
-def test_non_zip_wheel(bundle):
+def test_non_zip_wheel(bundle: Path) -> None:
     _find(bundle, "agent-index").write_bytes(b"not a zip archive")
     with pytest.raises(ReleaseError):
         build_descriptor(bundle, source_commit=COMMIT)
 
 
-def test_descriptor_limit(bundle):
+def test_descriptor_limit(bundle: Path) -> None:
     path = bundle / "release.json"
     path.write_bytes(b" " * (1024 * 1024 + 1))
     with pytest.raises(ReleaseError, match="1 MiB"):
@@ -454,7 +460,7 @@ def test_descriptor_limit(bundle):
 
 
 @pytest.mark.parametrize("kind", ["bundle", "descriptor"])
-def test_real_symlink_roots_and_descriptor(bundle, descriptor, tmp_path, kind):
+def test_real_symlink_roots_and_descriptor(bundle: Path, descriptor: dict[str, Any], tmp_path: Path, kind: str) -> None:
     original = bundle if kind == "bundle" else _save(bundle, descriptor)
     link = tmp_path / "alias"
     try:
@@ -468,10 +474,10 @@ def test_real_symlink_roots_and_descriptor(bundle, descriptor, tmp_path, kind):
             verify_descriptor(link, expected_source_commit=COMMIT)
 
 
-def test_header_encoding_error(bundle):
+def test_header_encoding_error(bundle: Path) -> None:
     path = _find(bundle, "agent-index-service")
 
-    def invalid(entries):
+    def invalid(entries: dict[str, bytes]) -> dict[str, bytes]:
         key = next(key for key in entries if key.endswith("/METADATA"))
         entries[key] = b"\xff"
         return entries
@@ -481,14 +487,14 @@ def test_header_encoding_error(bundle):
         build_descriptor(bundle, source_commit=COMMIT)
 
 
-def test_distribution_alias_normalization(bundle):
+def test_distribution_alias_normalization(bundle: Path) -> None:
     _mutate_metadata(bundle, lambda text: text.replace(
         "Name: agent-index-service", "Name: Agent_Index_Service",
     ))
     assert build_descriptor(bundle, source_commit=COMMIT)["service_version"] == "0.1.1.dev1"
 
 
-def test_metadata_requirements_rechecked_during_verification(bundle, descriptor):
+def test_metadata_requirements_rechecked_during_verification(bundle: Path, descriptor: dict[str, Any]) -> None:
     _make_wheel(bundle, "agent-index-service", VERSIONS["agent-index-service"], [
         "agent-index>=99", REQUIREMENTS["agent-index-service"][1],
     ])
@@ -501,7 +507,7 @@ def test_metadata_requirements_rechecked_during_verification(bundle, descriptor)
 
 
 @pytest.mark.parametrize("text", ["[]", "null", "true"])
-def test_descriptor_requires_json_object(bundle, text):
+def test_descriptor_requires_json_object(bundle: Path, text: str) -> None:
     path = bundle / "release.json"
     path.write_text(text)
     with pytest.raises(ReleaseError):
@@ -514,7 +520,7 @@ def test_descriptor_requires_json_object(bundle, text):
     ("Import-Name", ["example_one", "example_two"]),
     ("Import-Namespace", ["example.one", "example.two"]),
 ])
-def test_standard_repeatable_headers(bundle, header, values):
+def test_standard_repeatable_headers(bundle: Path, header: str, values: list[str]) -> None:
     _mutate_metadata(bundle, lambda text: text.replace(
         "Metadata-Version: 2.4",
         "Metadata-Version: 2.6\n" + "\n".join(f"{header}: {value}" for value in values),
@@ -524,14 +530,14 @@ def test_standard_repeatable_headers(bundle, header, values):
     assert actual == descriptor
 
 
-def test_core_metadata_26(bundle):
+def test_core_metadata_26(bundle: Path) -> None:
     _mutate_metadata(bundle, lambda text: text.replace("Metadata-Version: 2.4",
                                                      "Metadata-Version: 2.6"))
     assert build_descriptor(bundle, source_commit=COMMIT)["service_version"] == "0.1.1.dev1"
 
 
-def _change_record(bundle, change):
-    def mutate(entries):
+def _change_record(bundle: Path, change: Callable[[list[list[str]]], list[list[str]]]) -> None:
+    def mutate(entries: dict[str, bytes]) -> dict[str, bytes]:
         name = next(name for name in entries if name.endswith("/RECORD"))
         rows = list(csv.reader(io.StringIO(entries[name].decode(), newline="")))
         rows = change(rows)
@@ -544,8 +550,8 @@ def _change_record(bundle, change):
 
 
 @pytest.mark.parametrize("kind", ["missing", "second", "wrong-directory", "duplicate-member"])
-def test_record_location_and_uniqueness(bundle, kind):
-    def mutate(entries):
+def test_record_location_and_uniqueness(bundle: Path, kind: str) -> None:
+    def mutate(entries: dict[str, bytes]) -> dict[str, bytes]:
         name = next(name for name in entries if name.endswith("/RECORD"))
         if kind == "missing":
             del entries[name]
@@ -581,14 +587,14 @@ def test_record_location_and_uniqueness(bundle, kind):
     lambda rows: [[rows[0][0], rows[0][1], "1.0"]] + rows[1:],
     lambda rows: [*rows[:-1], [rows[-1][0], "sha256=invalid", ""]],
 ])
-def test_invalid_record_rows_inventory_hash_size(bundle, change):
+def test_invalid_record_rows_inventory_hash_size(bundle: Path, change: Callable[[list[list[str]]], list[list[str]]]) -> None:
     _change_record(bundle, change)
     with pytest.raises(ReleaseError):
         build_descriptor(bundle, source_commit=COMMIT)
 
 
-def test_record_rejects_matching_numeric_self_size(bundle):
-    def set_self_size(rows):
+def test_record_rejects_matching_numeric_self_size(bundle: Path) -> None:
+    def set_self_size(rows: list[list[str]]) -> list[list[str]]:
         # Decimal length changes the encoded RECORD size; iterate to the
         # fixed point so this rejects a matching size, not a size mismatch.
         size = 0
@@ -610,15 +616,15 @@ def test_record_rejects_matching_numeric_self_size(bundle):
     "md5=abc", "sha1=abc", "md5-sha1=abc", "sha224=abc", "shake_256=abc", "unknown=abc",
     "sha256=not+urlsafe", "sha256=haspadding=", "sha256=short", "sha256=", "sha256",
 ])
-def test_unsupported_weak_or_malformed_record_digest(bundle, digest):
+def test_unsupported_weak_or_malformed_record_digest(bundle: Path, digest: str) -> None:
     _change_record(bundle, lambda rows: [[rows[0][0], digest, rows[0][2]]] + rows[1:])
     with pytest.raises(ReleaseError):
         build_descriptor(bundle, source_commit=COMMIT)
 
 
 @pytest.mark.parametrize("algorithm", ["sha256", "sha384", "sha512", "sha3_256", "blake2b"])
-def test_supported_secure_record_hashes(bundle, algorithm):
-    def mutate(entries):
+def test_supported_secure_record_hashes(bundle: Path, algorithm: str) -> None:
+    def mutate(entries: dict[str, bytes]) -> dict[str, bytes]:
         name = next(name for name in entries if name.endswith("/RECORD"))
         entries[name] = _record_bytes(entries, name, algorithm)
         return entries
@@ -627,10 +633,10 @@ def test_supported_secure_record_hashes(bundle, algorithm):
     assert build_descriptor(bundle, source_commit=COMMIT)["service_version"] == "0.1.1.dev1"
 
 
-def test_payload_tamper_fails_even_with_new_outer_digest(bundle, descriptor):
+def test_payload_tamper_fails_even_with_new_outer_digest(bundle: Path, descriptor: dict[str, Any]) -> None:
     path = _find(bundle, "agent-index-service")
 
-    def mutate(entries):
+    def mutate(entries: dict[str, bytes]) -> dict[str, bytes]:
         name = next(name for name in entries if name.endswith("/__init__.py"))
         entries[name] = b"tampered"
         return entries
@@ -644,8 +650,8 @@ def test_payload_tamper_fails_even_with_new_outer_digest(bundle, descriptor):
 
 
 @pytest.mark.parametrize("kind", ["unlisted", "missing"])
-def test_payload_inventory(bundle, kind):
-    def mutate(entries):
+def test_payload_inventory(bundle: Path, kind: str) -> None:
+    def mutate(entries: dict[str, bytes]) -> dict[str, bytes]:
         if kind == "unlisted":
             entries["unlisted.py"] = b"unlisted"
         else:
@@ -661,8 +667,8 @@ def test_payload_inventory(bundle, kind):
     "../escape.py", "/absolute.py", "pkg/../escape.py", "pkg//alias.py",
     "pkg/./alias.py", "C:drive.py", "pkg\\backslash.py", "pkg/null\x00.py",
 ])
-def test_unsafe_archive_paths(bundle, name):
-    def mutate(entries):
+def test_unsafe_archive_paths(bundle: Path, name: str) -> None:
+    def mutate(entries: dict[str, bytes]) -> dict[str, bytes]:
         entries[name] = b"unsafe"
         return entries
 
@@ -671,7 +677,7 @@ def test_unsafe_archive_paths(bundle, name):
         build_descriptor(bundle, source_commit=COMMIT)
 
 
-def test_archive_symlink_member(bundle):
+def test_archive_symlink_member(bundle: Path) -> None:
     path = _find(bundle, "agent-index-service")
     with zipfile.ZipFile(path, "a") as archive:
         entry = zipfile.ZipInfo("link")
@@ -682,8 +688,8 @@ def test_archive_symlink_member(bundle):
         build_descriptor(bundle, source_commit=COMMIT)
 
 
-def test_standard_signature_exceptions_and_directory_entries(bundle):
-    def mutate(entries):
+def test_standard_signature_exceptions_and_directory_entries(bundle: Path) -> None:
+    def mutate(entries: dict[str, bytes]) -> dict[str, bytes]:
         record = next(name for name in entries if name.endswith("/RECORD"))
         entries[record + ".jws"] = b"legacy-signature"
         entries[record + ".p7s"] = b"legacy-signature"
@@ -697,8 +703,8 @@ def test_standard_signature_exceptions_and_directory_entries(bundle):
     assert actual == descriptor
 
 
-def test_signature_must_not_be_listed_in_record(bundle):
-    def mutate(entries):
+def test_signature_must_not_be_listed_in_record(bundle: Path) -> None:
+    def mutate(entries: dict[str, bytes]) -> dict[str, bytes]:
         record = next(name for name in entries if name.endswith("/RECORD"))
         entries[record + ".jws"] = b"signature"
         entries[record] += f"{record}.jws,,\n".encode()
@@ -710,7 +716,7 @@ def test_signature_must_not_be_listed_in_record(bundle):
 
 
 @pytest.mark.parametrize("limit", ["member", "total", "count"])
-def test_archive_resource_limits(bundle, monkeypatch, limit):
+def test_archive_resource_limits(bundle: Path, monkeypatch: pytest.MonkeyPatch, limit: str) -> None:
     if limit == "member":
         monkeypatch.setattr(release, "_MEMBER_LIMIT", 1024)
         _rewrite(_find(bundle, "agent-index-service"),
@@ -723,14 +729,14 @@ def test_archive_resource_limits(bundle, monkeypatch, limit):
         build_descriptor(bundle, source_commit=COMMIT)
 
 
-def test_record_csv_is_bounded(bundle, monkeypatch):
+def test_record_csv_is_bounded(bundle: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(release, "_LIMIT", 128)
     with pytest.raises(ReleaseError, match="RECORD.*1 MiB"):
         build_descriptor(bundle, source_commit=COMMIT)
 
 
-def test_malformed_record_csv(bundle):
-    def mutate(entries):
+def test_malformed_record_csv(bundle: Path) -> None:
+    def mutate(entries: dict[str, bytes]) -> dict[str, bytes]:
         name = next(name for name in entries if name.endswith("/RECORD"))
         entries[name] = b'"unterminated'
         return entries
@@ -740,8 +746,8 @@ def test_malformed_record_csv(bundle):
         build_descriptor(bundle, source_commit=COMMIT)
 
 
-def test_same_size_payload_tamper_is_digest_failure(bundle):
-    def mutate(entries):
+def test_same_size_payload_tamper_is_digest_failure(bundle: Path) -> None:
+    def mutate(entries: dict[str, bytes]) -> dict[str, bytes]:
         name = next(name for name in entries if name.endswith("/__init__.py"))
         entries[name] = b"x" * len(entries[name])
         return entries
@@ -751,8 +757,8 @@ def test_same_size_payload_tamper_is_digest_failure(bundle):
         build_descriptor(bundle, source_commit=COMMIT)
 
 
-def test_signature_elsewhere_requires_normal_hash_and_size(bundle):
-    def mutate(entries):
+def test_signature_elsewhere_requires_normal_hash_and_size(bundle: Path) -> None:
+    def mutate(entries: dict[str, bytes]) -> dict[str, bytes]:
         entries["package/RECORD.jws"] = b"not a signature exemption"
         return entries
 
@@ -761,16 +767,18 @@ def test_signature_elsewhere_requires_normal_hash_and_size(bundle):
         build_descriptor(bundle, source_commit=COMMIT)
 
 
-def test_archive_compressed_size_is_bounded(bundle, monkeypatch):
+def test_archive_compressed_size_is_bounded(bundle: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(release, "_ARCHIVE_LIMIT", 100)
     with pytest.raises(ReleaseError, match="archive limit"):
         build_descriptor(bundle, source_commit=COMMIT)
 
 
-def test_streaming_member_limit_not_only_zip_header(bundle, monkeypatch):
+def test_streaming_member_limit_not_only_zip_header(bundle: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     real_open = zipfile.ZipFile.open
 
-    def expanded(archive, entry, *args, **kwargs):
+    def expanded(
+        archive: zipfile.ZipFile, entry: str | zipfile.ZipInfo, *args: Any, **kwargs: Any,
+    ) -> IO[bytes]:
         if isinstance(entry, zipfile.ZipInfo) and entry.filename.endswith("/__init__.py"):
             return io.BytesIO(b"x" * 1025)
         return real_open(archive, entry, *args, **kwargs)
@@ -781,7 +789,7 @@ def test_streaming_member_limit_not_only_zip_header(bundle, monkeypatch):
         build_descriptor(bundle, source_commit=COMMIT)
 
 
-def test_zip_crc_failure_is_explicit(bundle):
+def test_zip_crc_failure_is_explicit(bundle: Path) -> None:
     path = _find(bundle, "agent-index-service")
     with zipfile.ZipFile(path) as archive:
         entry = next(entry for entry in archive.infolist()

@@ -10,21 +10,22 @@ final paths; preexisting incomplete or conflicting slots are never repaired.
 from __future__ import annotations
 
 import hashlib
-import importlib
+import importlib as importlib
 import json
 import math
-import os
+import os as os
 import re
-import shutil
+import shutil as shutil
 import stat
 import subprocess
-import sys
+import sys as sys
 import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, BinaryIO, TypedDict
+from pathlib import Path as Path
+from typing import Any, IO, TypedDict, Protocol, TYPE_CHECKING, cast
+from collections.abc import Iterator
 from urllib.parse import urlsplit
 
 from packaging.requirements import InvalidRequirement, Requirement
@@ -68,9 +69,30 @@ class NativeBuildConfig:
             raise CandidateError("timeout_seconds must be finite and positive")
 
 
-def _primitive():
+class RuntimeSlots(Protocol):
+    def version_dir(self, root: Path, version: str) -> Path: ...
+    def slot(self, root: Path, version: str, *, clean_incomplete: bool) -> Path: ...
+    def slot_python(self, root: Path, version: str) -> Path | None: ...
+    def read_marker(self, root: Path, version: str) -> dict[str, Any] | None: ...
+    def is_complete(self, root: Path, version: str, *, expect_hash: str) -> bool: ...
+    def mark_complete(self, root: Path, version: str, *, payload_hash: str) -> Path: ...
+
+
+class OwnedJob(Protocol):
+    def terminate_and_wait(self, timeout_seconds: float) -> None: ...
+
+
+class OwnedProcess(Protocol):
+    pid: int
+    returncode: int | None
+    def poll(self) -> int | None: ...
+    def terminate(self) -> None: ...
+    def wait(self, timeout: float) -> int: ...
+
+
+def _primitive() -> RuntimeSlots:
     try:
-        return importlib.import_module("agent_index_service._versioned_runtime")
+        return cast(RuntimeSlots, importlib.import_module("agent_index_service._versioned_runtime"))
     except ImportError as exc:
         raise CandidateError(
             "packaged versioned-runtime unavailable; build/install a wheel"
@@ -78,7 +100,7 @@ def _primitive():
 
 
 @contextmanager
-def _lease(root: Path):
+def _lease(root: Path) -> Iterator[None]:
     from zdd import CutoverLock, CutoverLockedError
 
     try:
@@ -161,8 +183,8 @@ def _json(value: Any) -> bytes:
     return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
-def _unique(pairs):
-    value = {}
+def _unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
     for key, item in pairs:
         if key in value:
             raise CandidateError("duplicate receipt key")
@@ -170,12 +192,12 @@ def _unique(pairs):
     return value
 
 
-def _read_json(path: Path):
+def _read_json(path: Path) -> Any:
     _path(path, file=True)
     return json.loads(_bytes(path), object_pairs_hook=_unique)
 
 
-def _write(path: Path, value: dict) -> None:
+def _write(path: Path, value: dict[str, Any]) -> None:
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -237,13 +259,16 @@ def _lock_requirements(data: bytes) -> dict[str, str]:
 
 
 def _uv_policy(data: bytes) -> None:
-    try:
-        import tomllib
-    except ImportError:
+    if TYPE_CHECKING:
+        import tomli as tomllib
+    else:
         try:
-            import tomli as tomllib
-        except ImportError as exc:
-            raise CandidateError("uv policy validation requires Python 3.11+ or tomli") from exc
+            import tomllib
+        except ImportError:
+            try:
+                import tomli as tomllib
+            except ImportError as exc:
+                raise CandidateError("uv policy validation requires Python 3.11+ or tomli") from exc
     try:
         policy = tomllib.loads(data.decode("utf-8"))
     except UnicodeDecodeError as exc:
@@ -413,9 +438,12 @@ def _start_token(pid: int) -> str | None:
         return None
 
 
-def _terminate_supervisor(process, token: str | None, operation: str) -> None:
+def _terminate_supervisor(
+    process: OwnedProcess, token: str | None, operation: str,
+) -> None:
     if process.poll() is not None:
-        if process.returncode < 0 or process.returncode == 125:
+        code = cast(int, process.returncode)
+        if code < 0 or code == 125:
             raise _CleanupUnconfirmed(f"{operation}: supervisor cleanup not confirmed")
         return
     if token is None or _start_token(process.pid) != token:
@@ -431,7 +459,10 @@ def _terminate_supervisor(process, token: str | None, operation: str) -> None:
         raise _CleanupUnconfirmed(f"{operation}: supervisor cleanup not confirmed")
 
 
-def _teardown(process, job, token: str | None, supervised: bool, operation: str) -> None:
+def _teardown(
+    process: OwnedProcess | None, job: OwnedJob | None,
+    token: str | None, supervised: bool, operation: str,
+) -> None:
     """Only a fully completed teardown authorizes removal of candidate files."""
     try:
         if job is not None:
@@ -457,7 +488,7 @@ def _teardown(process, job, token: str | None, supervised: bool, operation: str)
 
 def _run(
     argv: list[str], *, cwd: Path, env: dict[str, str], deadline: float,
-    input_stream: BinaryIO | None = None,
+    input_stream: IO[bytes] | None = None,
     operation_label: str | None = None,
 ) -> str:
     from agent_procutil import (
@@ -552,7 +583,8 @@ def _long_path(path: Path) -> str:
 
 
 def _remove_owned_tree(
-    target: Path, *, slot: Path, owner: dict, primitive, root: Path, version: str,
+    target: Path, *, slot: Path, owner: dict[str, Any], primitive: RuntimeSlots,
+    root: Path, version: str,
 ) -> None:
     """Delete only this transaction's scratch or incomplete slot, retaining its fence."""
     if target not in {slot, slot / "build-state"}:
@@ -669,7 +701,9 @@ def _copy(source: Path, target: Path, expected: str) -> None:
         raise CandidateError("release source changed while snapshotting") from exc
 
 
-def _receipt(slot: Path, primitive, root: Path, version: str) -> dict | None:
+def _receipt(
+    slot: Path, primitive: RuntimeSlots, root: Path, version: str,
+) -> dict[str, Any] | None:
     value = _read_json(slot / _RECEIPT)
     keys = {
         "schema", "schema_version", "version", "source_commit", "identity",
@@ -701,7 +735,9 @@ def _receipt(slot: Path, primitive, root: Path, version: str) -> dict | None:
     return value
 
 
-def _result(root: Path, version: str, primitive, state: str, receipt: dict) -> dict:
+def _result(
+    root: Path, version: str, primitive: RuntimeSlots, state: str, receipt: dict[str, Any],
+) -> dict[str, Any]:
     return {
         "schema": _SCHEMA, "schema_version": 1, "state": state,
         "version": version, "source_commit": receipt["source_commit"],
@@ -713,7 +749,7 @@ def _result(root: Path, version: str, primitive, state: str, receipt: dict) -> d
 def stage_candidate(
     descriptor_path: Path, *, expected_source_commit: str, install_root: Path,
     host_config_path: Path, build: NativeBuildConfig,
-) -> dict:
+) -> dict[str, Any]:
     """Build a new final-path runtime; never activate or repair an existing slot."""
     try:
         root = _host_root(install_root, host_config_path)
@@ -889,7 +925,7 @@ def stage_candidate(
         raise CandidateError(f"candidate staging failed ({type(exc).__name__})") from exc
 
 
-def inspect_candidates(install_root: Path, *, host_config_path: Path) -> dict:
+def inspect_candidates(install_root: Path, *, host_config_path: Path) -> dict[str, Any]:
     """Read candidate receipts/completeness without selecting a runtime or creating files."""
     try:
         root = _host_root(install_root, host_config_path)

@@ -28,12 +28,13 @@ import zlib
 from dataclasses import dataclass
 from email import policy
 from email.parser import Parser
+from email.message import Message
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, cast
 
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
-from packaging.tags import parse_tag
+from packaging.tags import Tag, parse_tag
 from packaging.utils import InvalidWheelFilename, canonicalize_name, parse_wheel_filename
 from packaging.version import InvalidVersion, Version
 
@@ -116,7 +117,7 @@ def _filename(value: Any) -> str:
 
 def _stat(path: Path, *, directory: bool = False) -> os.stat_result:
     info = path.lstat()
-    reparse = getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+    reparse = getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT")
     if stat.S_ISLNK(info.st_mode) or reparse:
         raise ReleaseError(f"symlinks/reparse points are not allowed: {path.name}")
     if not (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode)):
@@ -137,7 +138,7 @@ def _unchanged(before: os.stat_result, after: os.stat_result) -> None:
         raise ReleaseError("release input changed while being read")
 
 
-def _message(archive: zipfile.ZipFile, entry: zipfile.ZipInfo):
+def _message(archive: zipfile.ZipFile, entry: zipfile.ZipInfo) -> Message:
     if entry.file_size > _LIMIT:
         raise ReleaseError("wheel metadata exceeds the 1 MiB limit")
     with archive.open(entry) as stream:
@@ -199,6 +200,8 @@ def _record(
         data = stream.read(_LIMIT + 1)
     if len(data) > _LIMIT:
         raise ReleaseError("RECORD exceeds the 1 MiB limit")
+    if b"\x00" in data:
+        raise ReleaseError("unsafe RECORD path or field contains NUL")
     rows = {}
     try:
         for row in csv.reader(io.StringIO(data.decode("utf-8"), newline=""), strict=True):
@@ -300,12 +303,12 @@ def _metadata(
     if (
         wheel_message.get("Wheel-Version") != "1.0"
         or wheel_message.get("Root-Is-Purelib") not in {"true", "false"}
-        or wheel_message.get_payload().strip()
+        or cast(str, wheel_message.get_payload()).strip()
     ):
         raise ReleaseError("unsupported or malformed WHEEL metadata")
     declared_tags = wheel_message.get_all("Tag", [])
     try:
-        actual_tags = set()
+        actual_tags: set[Tag] = set()
         for tag in declared_tags:
             parsed = parse_tag(tag)
             if actual_tags & parsed:
@@ -372,7 +375,9 @@ def _wheel(
     return result
 
 
-def inspect_wheel(path: Path, *, distributions: frozenset[str], native: bool = False) -> dict:
+def inspect_wheel(
+    path: Path, *, distributions: frozenset[str], native: bool = False,
+) -> dict[str, Any]:
     """Reuse bounded RECORD/metadata validation for an explicitly permitted wheel set.
 
     Does not resolve dependencies, execute wheel code or attest acquisition trust.
@@ -465,7 +470,9 @@ def _assemble(wheels: list[_Wheel], commit: str, profile: str) -> dict[str, Any]
     }
 
 
-def build_descriptor(bundle: Path, *, source_commit: str, profile: str = "native") -> dict:
+def build_descriptor(
+    bundle: Path, *, source_commit: str, profile: str = "native",
+) -> dict[str, Any]:
     """Read the explicitly selected first-party closure without writing files.
 
     source_commit is supplied provenance, not an attestation of release approval.
@@ -500,7 +507,7 @@ def _reject_constant(value: str) -> None:
 
 def verify_descriptor(
     path: Path, *, expected_source_commit: str, profile: str = "native",
-) -> dict:
+) -> dict[str, Any]:
     """Verify pinned revision, exact schema, wheel bytes/metadata and requirements.
 
     expected_source_commit must come from the trusted release controller. Hashes

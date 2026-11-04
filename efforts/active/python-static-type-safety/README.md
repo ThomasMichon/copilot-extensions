@@ -8,7 +8,7 @@
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
 - **Coverage:** [Portfolio tracker and merged lockdown records](coverage.md)
-- **Current slice:** Selecting the next independent Python scope. AI Attribution (#10171), Venue Copilot (#10166), Plugin Resolve (#10141), Plugin Activation (#10108), Machine Transport (#10107), Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
+- **Current slice:** Independent PR service (#10204), Index service (#10206), SSH service (#10211) and retained effort-helper (#10215) preparation. Credential Relay (#10222), Harness Knowledge (#10185), Context Handoff (#10179), Dispatch service (#10184), Devcontainer (#10183), AI Attribution (#10171), Venue Copilot (#10166), Plugin Resolve (#10141), Plugin Activation (#10108), Machine Transport (#10107), Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -32,7 +32,7 @@ definition of success.
 
 - **Topology:** Independent per-slice PRs, never a concurrently edited shared staging branch. The lead may integrate non-overlapping test cohorts into one bounded reviewed slice after their isolated validation.
 - **Host (owns PRs):** `lead` owns its PRs and verifies completion of delegated PRs.
-- **Delegates:** The completed AI Attribution and Venue Copilot source children are finalized. No implementation delegate is active. The lead retains integration, native Linux, consumer/copy, shared admission/coverage manifests, global documentation, the effort, publication and full completion judgment.
+- **Delegates:** PR, Index and SSH service slice owners prepare independently in dedicated worktrees. Heavy unit/native qualification is staggered for actual test capacity, not a shared PR merge queue. Each owner receives an explicit bounded qualification and publication assignment; the lead retains integration, shared coverage/global documentation, the effort and full completion judgment. Completed children are finalized only after their merged evidence returns to this tracker.
 - **Handoff:** A merged slice returns to the canonical README, updates its Plan/Validation/Journal, then selects the next unresolved item. A continuation retains #9807, this README, the current slice, live PRs and exactly one next action.
 - Existing contributor PRs are reviewed/coordinated, not superseded. Shared-library changes precede dependent activations; unrelated leaf activations may proceed independently.
 
@@ -159,6 +159,7 @@ rewrite.
 - [x] Strictly admit all canonical Plugin Activation source/test modules with its declared YAML checker environment (#10108).
 - [x] Strictly admit all canonical Plugin Resolve source/test/installer-fixture modules (#10141).
 - [x] Strictly admit all canonical Venue Copilot source/test modules (#10166).
+- [x] Strictly admit all 22 canonical Credential Relay source/test files with Python 3.10 native/copy qualification (#10222 / merged #10310); keep consumer projects independently pending.
 - [ ] Admit near-clean leaf libraries through small annotation/narrowing PRs; activate directly in strict mode when possible.
 - [ ] Admit remaining shared libraries in basic mode, then close their stricter deltas in separate PRs until every shared library is strict.
 - [ ] Replace loose generics and unchecked boundary results with honest callable, protocol and validated data contracts; rerun affected consumer checks/tests.
@@ -174,6 +175,8 @@ rewrite.
 
 - [x] Strictly admit AI Attribution's complete five-file Python helper/test portfolio (#10171), preserving shell emission and signature/disclosure behavior.
 - [x] Strictly admit Context Handoff's complete six-file Python helper/test portfolio (#10179 / merged #10192), preserving native continuity and sync controls.
+- [x] Strictly admit all three devcontainer helper/test files on their existing Python 3.11 minimum (#10183 / merged #10193).
+- [x] Strictly admit all nine Harness Knowledge binding/overlay helper and test files, preserving Python 3.10 copied-helper compatibility (#10185 / merged #10201).
 - [ ] Admit repository tools and CI helpers with unambiguous module identities and strict local/CI behavior.
 - [ ] Admit tests in bounded package/fixture-family PRs, typing fixtures, doubles and monkeypatch interfaces without weakening assertions.
 - [ ] Admit installer/bootstrap, hooks, payload-only Python, `.devcontainer`, effort-hosted executable helpers and every remaining inventory path.
@@ -197,6 +200,7 @@ rewrite.
 - [x] Changed-scope checks include working-tree edits and affected activated consumers; changes to checker/config/workflows cannot skip enforcement.
 - [ ] Composition and generated-copy controls reject omitted/reordered/changed fragments or stale source correspondence; no empty result can certify coverage.
 - [ ] Each typing change preserves behavior through the smallest existing focused tests plus directly relevant integration/native checks. Skips are explicitly justified in that PR.
+- [x] Credential Relay preserves its production behavior, assertions and deadlines across both strict targets, Python 3.10 native/copy tests and fresh exact-input source CI (#10310).
 - [x] Fresh checker preparation and a credential-free local subprocess check exercise the real developer command without executing product code or collecting tests.
 - [x] Required source gate actually rejects a type regression on activated code.
 - [x] Required exact-candidate release gate rejects a type regression on activated code.
@@ -2368,3 +2372,151 @@ composition prerequisites, and review/validation rules.
   retains its Python 3.10 copied-payload and native qualification gates.
   #9807, this Plan and this Validation Plan remain active; no runtime rollout
   or whole-campaign completion is claimed.
+
+### 2026-11-03 - Devcontainer helpers merged; both metrics refreshed
+
+- #10193 merged as `40a441ae8553f3a84bd70f4bbb5abe7832fa6ed5` after
+  Copilot approval on exact head
+  `0d622564a9a3e8b0bda8704afa6f0ca93ba40e02`, green required CI and zero
+  review threads. #10183 is closed; #9807 remains open.
+- The complete three-file project preserves its 117 original functions,
+  291 decision nodes, 42 tests, 156 assertion calls, decorators and native
+  scripts. The existing wrapper minimum is Python 3.11: the unsupported
+  Python 3.10 run exposed `hashlib.file_digest` availability rather than a
+  requested compatibility change. Only this project's declared checker version
+  is aligned to 3.11. Both analysis targets and all 42 Linux native contracts
+  pass; Windows retains its unchanged directory-fsync skip.
+- Publication incorporated two already-reviewed upstream source/node additions.
+  The old 3,811-node proof was not reused against those changed inputs:
+  fresh exact-head CI passes all 3,813 nodes in 76.181 seconds, with independent
+  verification of all 520 inputs, 213 coverage targets and zero effects.
+  The 300-second budget remains unchanged. Failed native test resources were
+  retained for diagnosis, then exactly cleaned up; no runtime deployment occurred.
+- Both metrics now record **34 / 68 strict projects (50.0%)** and
+  **282 / 7,670 physical Python files (3.7%)**. Thirty-four projects remain
+  pending and none are basic. All rows remain tied to actual merged policy.
+  Harness Knowledge qualification and the next independent service scope
+  continue; this Plan and Validation Plan remain active.
+
+### 2026-11-03 - Harness Knowledge merged; independent service fleet continues
+
+- #10201 merged as `dc9501dd8350aa08cdba8b9b785a906787bcb8d0` after
+  Copilot approval on exact head
+  `750962b829d0013b7b5bf1913bd555427071c9ec`, green required CI run
+  `41599033543` and zero review threads. #10185 is closed; #9807 remains open.
+- All nine canonical files pass both declared strict analysis targets.
+  Preservation retains 175 functions, 96 tests, 238 assertions and 24
+  decorators. All 151 native Linux tests and every copied standard-library
+  helper's capability/help contracts pass on Python 3.10.22 without touching
+  actual bindings or operator state. Owned Docker resources and the PR watch
+  are released; no installed rollout is claimed.
+- After a backup and managed pull-forward, the previously published journal
+  replay is redundant upstream; the useful Devcontainer journal remains.
+  No useful local work is discarded. The inventory now records **35 / 68
+  strict projects (51.5%)** and **291 / 7,672 physical Python files (3.8%)**.
+  Thirty-three projects remain pending; none are basic. Two new Dispatch-plugin
+  files are classified under their pending owner, not omitted or credited.
+- Independent service slices #10204, #10206 and #10211 own separate worktrees.
+  Their preparation remains pending coverage until reviewed actual merge.
+  SSH-service scope does not overlap the open SSH-plugin PRs; Chat-service
+  overlap with #8726 is preserved for its existing owner. Heavy validation
+  is staggered while independent implementation proceeds.
+- This Plan and Validation Plan remain active. The final all-project,
+  embedded/copy, negative-control and source/candidate parity gates are still
+  unresolved; a merged helper slice is not whole-campaign completion.
+
+### 2026-11-03 - Credential Relay strict admission; both metrics reconciled
+
+- #10310 merged into `dev` as `5ee8e294cbf57795fa54bc32fb45f36bb215ea57`
+  after Copilot approval on exact head
+  `0f8cd9a9b0d5e1749b439555c8fdd319fd1ef3a1`, zero review threads and green
+  required [CI run 41735669002](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41735669002).
+  The 22-file canonical library/test scope is strict on both targets; consumer
+  project scopes remain independently pending. #10222 is closed; #9807 remains
+  open.
+- Production behavior, all 295 original assertions and test deadlines are
+  preserved. Windows Python 3.10.22 passes all 196 native cases. The initial
+  canonical/four-copy Linux qualification passed 980 cases; the three affected
+  cases across those five variants passed again after the test-only compatibility
+  correction. Python 3.10's separate `asyncio.TimeoutError` is accepted alongside
+  `OSError`, preserving the same bounded failed-connection expectation that
+  already passed through the Python 3.11+ built-in exception alias.
+- The pre-publication composed candidate passed 3,857 units in 200.748 seconds
+  with zero effects. Its composed-tree fingerprint is separate from the raw
+  source Git tree; materialized provenance, caller-derived admission and the
+  complete packet were independently verified against the actual source.
+  Changed rebased inputs received a fresh
+  [CI run 41734664779](https://github.com/ThomasMichon/copilot-extensions/actions/runs/41734664779):
+  3,958 units, all 553 bound inputs and 234 coverage targets, zero effects,
+  88.613 seconds under the unchanged 300-second budget. The final required run
+  reused that exact-input proof, not the historical 3,857-unit packet.
+- Unit, developer-consumer and clean-room minimum-runtime checks are exercised.
+  Live external-venue validation was not run because no remote lane was
+  currently admitted. No installed rollout or whole-campaign completion is
+  claimed. Owned failed setup fixtures were diagnosed before exact cleanup;
+  all four unit containers and their volume are independently confirmed absent.
+- After a backup and managed pull-forward, useful prior Devcontainer and Harness
+  Knowledge journals remain intact. Every tracker row is reconciled against the
+  authoritative inventory: **36 / 68 strict projects (52.9%)** and
+  **315 / 7,780 physical Python files (4.0%)**. Thirty-two projects remain
+  pending; none are basic. Credential Relay accounts for 22 newly locked files;
+  two added files under the already strict Bootstrap Killswitch scope are counted
+  separately. Other additions stay with their pending owners.
+- PR, Index, SSH and retained effort-helper qualification continue independently.
+  #9807, this Plan and this Validation Plan remain Active until every remaining
+  project and cross-cutting gate is resolved.
+
+### 2026-11-03 - Complete Index service qualified for reviewed publication
+
+- #10206 prepares strict admission of all 27 physical `service-index` source,
+  test and helper files on both declared analysis targets. Its Python 3.10
+  contract is unchanged. Honest fixture records, callable/process protocols
+  and typed dynamic boundaries replace loose generics without excluding files
+  or weakening the original 411 function/decorator contracts and 516 assertions.
+  Twelve additional non-null/type guards retain the original value assertions.
+- Actual minimum-runtime qualification exposed coupled core compatibility
+  defects, not a reason to raise the service minimum. Task status retains native
+  `enum.StrEnum` on Python 3.11+ and a private string/Enum base on 3.10; all eight
+  explicit values, formatting, lookup, JSON and SQLite wire semantics remain.
+  Five core UTC imports use the identical `timezone.utc` singleton. All 124
+  original functions in the six affected core modules remain unchanged.
+  These repairs do not strictly admit the independently pending Index plugin.
+- The malformed RECORD fixture keeps its original NUL filename and assertions.
+  An explicit CSV escape character avoids Python 3.10's NUL escape sentinel;
+  the release verifier rejects forbidden NUL bytes before version-dependent
+  CSV parsing. The complete 171-case release family passes on Python 3.10
+  and 3.12. The focused status/UTC parity packet passes 20 cases on each.
+- A fresh non-editable Linux Python 3.10.22 runtime is built from six actual
+  composed first-party wheels and a genuine 44-distribution closed profile.
+  Retained wheel custody, metadata/RECORD/ABI/closure inspection and installed
+  health preserve the normal seven-day, non-yanked and SHA-256 admission.
+  All 563 current native cases complete: **555 pass and eight original skips**.
+  This includes all 506 service cases and 57 core enum/polling cases.
+- The original deployment timeout was diagnosed rather than waived. The
+  four-CPU quota exposed sixteen CPUs to Arrow; aligning the private test
+  container's affinity to four reduces import threads from 18 to six and peak
+  test PIDs from 84 to 49. The focused corrected case passes in 26.15 seconds;
+  the complete native collection passes in 100.03 seconds. CPU, memory, PID,
+  network, read-only/non-root and original 30/300-second limits are unchanged.
+  Startup/CLI composition bodies remain runtime-equivalent to the baseline.
+- The eight skips retain their original scope: six Windows-only cases, the
+  separate POSIX abrupt-worker control and the opt-in real-UV staging fixture.
+  Existing closed SDK artifacts are not that fixture's approved descriptor,
+  source-commit, lock and UV-config manifest; its unset fixture receives no
+  first-touch credit. Actual copied/distribution/CLI cases remain separately
+  exercised. No live backend, operator configuration or installed rollout is used.
+- Pre-publication source `60a6e1ed00c3efd54d066a69a893a24a712f23ae`
+  and its actual composed candidate pass **3,958 units in 275.343 seconds**:
+  553 Dev inputs, 1,889 candidate inputs, 718 coverage targets, all 234 required
+  positive origins and zero effects. The composed Git tree is distinct from
+  raw source HEAD. Independently derived manifests and canonical verification
+  bind the real source/candidate roots. Journal integration changes publication
+  identity, so required CI must produce current-head proof before merge;
+  historical packet success is not claimed for a new head.
+- Ruff `F,E9`, scoped size, install-contract, documentation, checker-lock and
+  both required patch changefiles pass. Failed private setup/test instances
+  were diagnosed before exact container/volume cleanup. Native evidence may
+  be reused only for identical qualified production, test and SDK inputs.
+  The merged tracker remains **36/68 projects and 315/7,780 physical files**,
+  with 32 pending and zero basic; this prepared service is not yet a merged
+  admission. #9807, this Plan and this Validation Plan remain Active.

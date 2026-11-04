@@ -1,0 +1,6 @@
+-r typecheck-yaml-requirements.txt
+fastapi==0.115.14
+httpx==0.28.1
+numpy==2.2.6
+tomli==2.5.0
+types-setuptools==80.9.0.20250822

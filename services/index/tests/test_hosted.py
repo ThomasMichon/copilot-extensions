@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Any, TYPE_CHECKING
+from collections.abc import Iterator
+from pathlib import Path
+if TYPE_CHECKING:
+    from zdd.routing import Endpoint
+
 import json
 import os
 import subprocess
@@ -15,20 +21,26 @@ import httpx
 import numpy as np
 import pytest
 import yaml
-from _service_process import owned_python
+if TYPE_CHECKING:
+    from services.index.tests._service_process import owned_python
+else:
+    from _service_process import owned_python
 from agent_procutil import no_window_kwargs
 
 from agent_index_service import __version__
 from agent_index_service.composition import core_environment
-from agent_index_service.config import load_config
+from agent_index_service.config import HostConfig, load_config
+
+EngineCalls = list[tuple[str, dict[str, Any]]]
+WarmEngine = tuple[int, EngineCalls]
 
 
 @pytest.fixture
-def warm_engine():
-    calls = []
+def warm_engine() -> Iterator[WarmEngine]:
+    calls: EngineCalls = []
 
     class Handler(BaseHTTPRequestHandler):
-        def send_json(self, value):
+        def send_json(self, value: object) -> None:
             encoded = json.dumps(value).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -36,11 +48,11 @@ def warm_engine():
             self.end_headers()
             self.wfile.write(encoded)
 
-        def do_GET(self):
+        def do_GET(self) -> None:
             assert self.path in ("/ready", "/health")
             self.send_json({"ready": True, "status": "ready"})
 
-        def do_POST(self):
+        def do_POST(self) -> None:
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))) or b"{}")
             calls.append((self.path, body))
             if self.path == "/embed":
@@ -51,7 +63,7 @@ def warm_engine():
                 assert self.path == "/spinup", "unexpected engine lifecycle/mutation request"
                 self.send_json({"ready": True, "status": "ready"})
 
-        def log_message(self, *args):
+        def log_message(self, *args: Any) -> None:
             pass
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -66,7 +78,7 @@ def warm_engine():
         assert not thread.is_alive()
 
 
-def _seed(config):
+def _seed(config: HostConfig) -> str:
     from agent_index.chunking.base import Chunk
     from agent_index.index_config import IndexConfig
     from agent_index.store.multi_model_store import MultiModelStore
@@ -85,7 +97,7 @@ def _seed(config):
         return chunk.chunk_id
 
 
-def _wait_route(process, directory):
+def _wait_route(process: subprocess.Popen[bytes] | None, directory: Path) -> Endpoint:
     from zdd.routing import read_active_endpoint
 
     deadline = time.monotonic() + 30
@@ -105,8 +117,8 @@ def _wait_route(process, directory):
 
 
 def test_real_native_cli_health_uses_configured_not_ambient_identity(
-    config_file, config_data, tmp_path, warm_engine, monkeypatch,
-):
+    config_file: Path, config_data: dict[str, Any], tmp_path: Path, warm_engine: WarmEngine, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config_data["installation_id"] = "persistent-native-instance"
     config_data["engine"] = {"port": warm_engine[0], "mode": "external"}
     with socket.socket() as probe:
@@ -147,8 +159,8 @@ def test_real_native_cli_health_uses_configured_not_ambient_identity(
 
 
 def test_long_lived_http_reader_sees_external_commits_without_restart(
-    config_file, config_data, tmp_path, warm_engine,
-):
+    config_file: Path, config_data: dict[str, Any], tmp_path: Path, warm_engine: WarmEngine,
+) -> None:
     from agent_index.indexing.task_store import TaskStore, TaskStatus
     repo = tmp_path / "fixture"
     repo.mkdir()
@@ -222,10 +234,12 @@ with core_environment(load_config(Path(sys.argv[1]))):
             deadline = time.monotonic() + 60
             while time.monotonic() < deadline:
                 task = tasks.get_task(accepted["task"]["id"])
+                assert task is not None
                 if task.status in (TaskStatus.COMPLETE, TaskStatus.PARTIAL, TaskStatus.FAILED):
                     break
                 time.sleep(0.1)
             worker_log = config.data / "worker.log"
+            assert task is not None
             assert task.status == TaskStatus.COMPLETE, (
                 task, worker_log.read_text(encoding="utf-8", errors="replace")[-8000:]
                 if worker_log.exists() else "no worker log",
@@ -249,8 +263,8 @@ with core_environment(load_config(Path(sys.argv[1]))):
 
 
 def test_real_host_legacy_client_native_persistence_and_warm_engine(
-    config_file, config_data, tmp_path, warm_engine,
-):
+    config_file: Path, config_data: dict[str, Any], tmp_path: Path, warm_engine: WarmEngine,
+) -> None:
     from agent_index.client import AgentIndexClient
 
     port, calls = warm_engine
@@ -331,7 +345,7 @@ raise SystemExit(main(sys.argv[1:]))
     assert "Task runner startup skipped" not in log_path.read_text(encoding="utf-8")
 
 
-def test_explicit_source_specs_use_paths_not_registry(config_file, monkeypatch):
+def test_explicit_source_specs_use_paths_not_registry(config_file: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_index import config as core_config
     from agent_index.indexing.engine import _connector_kwargs, configured_source_specs
 
@@ -345,7 +359,7 @@ def test_explicit_source_specs_use_paths_not_registry(config_file, monkeypatch):
         assert _connector_kwargs(specs[0]) == {"repo_path": config.sources[0]["_repo_path"]}
 
 
-def test_existing_passive_promotion_and_persistent_queue(config_file):
+def test_existing_passive_promotion_and_persistent_queue(config_file: Path) -> None:
     from agent_index.server import build_app
     from fastapi.testclient import TestClient
 
@@ -359,9 +373,10 @@ def test_existing_passive_promotion_and_persistent_queue(config_file):
             assert client.get("/health").json()["version"] == __version__
             runner = app.state.task_runner
 
-            async def pause_dequeue():
+            async def pause_dequeue() -> None:
                 await runner.drain(timeout=5, poll=0.1)
 
+            assert client.portal is not None
             client.portal.call(pause_dequeue)
             first = client.post("/reindex", json={
                 "source": "git:fixture", "full": False,
