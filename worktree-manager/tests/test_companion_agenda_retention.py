@@ -394,7 +394,7 @@ def test_retired_viewer_history_message_cannot_invalidate_healthy_source(managed
 
 
 @pytest.mark.parametrize("kind", ["latest", "history"])
-def test_agenda_conflict_is_rejected_against_actual_reconciled_window_archive(managed, monkeypatch, kind) -> None:
+def test_agenda_integrity_and_backward_history_survive_reconciled_window(managed, monkeypatch, kind) -> None:
     real_selection = worktree_attachment.TimelineAttachment.set_selection
     configure(managed, monkeypatch)
     monkeypatch.setattr(SubwayTimeline, "action_request_history", lambda self: None)
@@ -441,15 +441,15 @@ def test_agenda_conflict_is_rejected_against_actual_reconciled_window_archive(ma
             )
             window = app._timeline_panel.window
             assert window is not old and app._timeline_attachment.retained_windows == (old,)
-            assert retained.ref in old._proofs and retained.ref not in window._proofs
-            assert all(state.token.identity.provider is Provider.WORKTREES for state in window.sources.values())
+            assert retained.ref in old._proofs and retained.ref in window._proofs
+            assert {state.token.identity.provider for state in window.sources.values()} == {Provider.WORKTREES, Provider.AGENDA}
             reader, token = attachment.reader, attachment.token
             original = reader.commands.read
             changed = []
 
             def corrupt(cancelled, *, history=False, before=None):
                 frame = original(cancelled, history=history, before=before)
-                if history and ((kind == "latest" and before is None) or (kind == "history" and before is not None)):
+                if history and kind == "latest" and before is None:
                     frame = deepcopy(frame)
                     for entry in frame["entries"]:
                         if entry["event_id"] == retained.event_id:
@@ -462,18 +462,23 @@ def test_agenda_conflict_is_rejected_against_actual_reconciled_window_archive(ma
             if kind == "history":
                 for _ in range(10):
                     managed["update"]()
+            previous = window.sources[token.identity.source_key].position
             publish(app, managed["publication"]())
             if kind == "history":
-                await until(pilot, lambda: token.identity.source_key in window.sources)
+                await until(pilot, lambda: window.sources[token.identity.source_key].position != previous)
                 state = window.sources[token.identity.source_key]
-                assert state.before is not None and retained.ref not in window._proofs
+                assert state.before is not None and retained.ref in window._proofs
+                rows = len(window.events)
                 assert window.request_history(state.token, state.before).applied
                 attachment.history(SubwayTimeline.HistoryRequested(state.token, state.before))
-            await until(pilot, lambda: "immutable event conflicts" in str(
-                app.query_one("#timeline-agenda-status", Static).content,
-            ))
-            assert changed == [retained.event_id]
-            assert retained.ref in old._proofs and retained.ref not in window._proofs
+                await until(pilot, lambda: window.sources[token.identity.source_key].requested_before is None)
+                assert len(window.events) > rows
+            else:
+                await until(pilot, lambda: "immutable event conflicts" in str(
+                    app.query_one("#timeline-agenda-status", Static).content,
+                ))
+                assert changed == [retained.event_id]
+            assert retained.ref in old._proofs and retained.ref in window._proofs
             assert all("rewritten retained content" not in (row.data_json or "") for row in window.events)
 
     asyncio.run(check())

@@ -1,12 +1,13 @@
 """Pure admission, bounded-window and lineage display controls."""
 
 from dataclasses import replace
+from datetime import datetime, timezone
 
 import pytest
 
 from worktree_manager.companion_timeline_contract import (
     Availability, Completeness, HistoryPage, LiveDelta, MAX_EXPANDED_GROUPS,
-    MAX_LANES, Qualification, RelationKind, TimelineRelation,
+    MAX_LANES, Provider, Qualification, RelationKind, SourceToken, TimelineRelation,
 )
 from worktree_manager.companion_timeline_model import ResultCode, TimelineWindow
 from _companion_timeline_fixtures import event, position, snapshot, token
@@ -482,3 +483,42 @@ def test_changed_history_scope_invalidates_pending_page(change: str) -> None:
         source, before, None, (event(source, 2),), Completeness.COMPLETE,
     ))
     assert not result.applied and result.code is ResultCode.STALE_TOKEN
+
+
+def test_bridge_reconciliation_preserves_other_sources_and_their_next_publications() -> None:
+    worktree = token(key="worktree")
+    agenda = SourceToken(replace(worktree.identity, provider=Provider.AGENDA, source_key="agenda"), 0)
+    bridge = SourceToken(replace(
+        worktree.identity, provider=Provider.BRIDGE, source_key="bridge",
+        head_session_id=None, owner_ref="fixture-owner",
+    ), 0)
+    model = TimelineWindow(max_proofs=6)
+    for source in (worktree, agenda, bridge):
+        assert model.bind(source).applied
+        assert model.apply_snapshot(snapshot(source, (event(source, 0),))).applied
+    before = position(worktree, "older-0")
+    assert model.request_history(worktree, before).applied
+    saved = {source.identity.source_key: model.sources[source.identity.source_key] for source in (worktree, agenda)}
+    proofs = {ref: digest for ref, digest in model._proofs.items() if ref.source_key != "bridge"}
+    model.set_follow_live(False)
+    assert model.toggle_expansion(event(worktree, 0).ref).applied
+    assert model.apply_delta(LiveDelta(
+        bridge, position(bridge, "live-0"), position(bridge, "overflow"),
+        tuple(event(bridge, number) for number in range(1, 5)),
+    )).code is ResultCode.LIMIT
+    renewed = replace(bridge, request_epoch=1)
+    candidate = model.reconciliation_window(replace(
+        snapshot(renewed, (), cursor="fresh"), as_of=datetime.now(timezone.utc), facts_json='{"members":[]}',
+    ))
+    assert all(candidate.sources[key] == state for key, state in saved.items())
+    assert all(candidate._proofs[ref] == digest for ref, digest in proofs.items())
+    assert candidate.context() == model.context()
+    assert candidate.expanded == model.expanded and not candidate.follow_live
+    for source in (worktree, agenda):
+        assert candidate.apply_delta(LiveDelta(
+            source, position(source, "live-0"), position(source, "live-1"), (event(source, 1),),
+        )).applied
+    assert candidate.prepend_page(HistoryPage(
+        worktree, before, None, (event(worktree, -1),), Completeness.COMPLETE,
+    )).applied
+    assert model.reconciliation_required == frozenset({"bridge"})

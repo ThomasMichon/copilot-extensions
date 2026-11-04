@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import os
 import asyncio
-import json
 import time
 from dataclasses import dataclass, field
 from threading import Event
@@ -57,7 +56,7 @@ from .companion_timeline_attachment import TimelineAttachment, selected_head
 from .companion_agenda_attachment import AgendaTimelineAttachment
 from .companion_bridge_source import BridgeMembershipSource
 from .companion_timeline_contract import Availability, Provider
-from .companion_summary import _claims_view, _fact, _summary_text
+from .companion_summary import _claims_view, _fact, _summary_text, bridge_status
 
 #: Blocker code (from the closure descriptor's ``blockers`` list) -> a short,
 #: plain-language reason. Mirrors the vocabulary in
@@ -363,6 +362,8 @@ class MuxCompanionApp(App):
         self._attention_busy = False
         self._attention_next = 0.0
         self._agenda_cancel = Event()
+        self._agenda_retired = Event()
+        self._agenda_retired.set()
         self._agenda_worker = None
         self._agenda_generation = 0
         self._agenda_cleanup_failures: list[ec.EngineCleanupError] = []
@@ -379,6 +380,7 @@ class MuxCompanionApp(App):
             self._timeline_panel, cwd=self._cwd or os.getcwd(),
             status=self._rich_agenda_status,
             validate_events=self._timeline_attachment.validate_events,
+            head_changed=lambda selection: self._bridge_attachment.invalidate_head(selection),
         )
         self._bridge_attachment = TimelineAttachment(
             self._timeline_panel, cwd=self._cwd or os.getcwd(), provider=Provider.BRIDGE,
@@ -465,6 +467,8 @@ class MuxCompanionApp(App):
         for result in results:
             if isinstance(result, BaseException):
                 raise result
+        if not await asyncio.to_thread(self._agenda_retired.wait, 15):
+            raise RuntimeError("Owned Agenda thread retirement remains unconfirmed")
 
     def action_quit(self) -> None:
         self._cancel_owned_reads()
@@ -567,10 +571,12 @@ class MuxCompanionApp(App):
         project, worktree, head = selection
         cancelled = Event()
         self._agenda_cancel = cancelled
+        self._agenda_retired = Event()
+        self._agenda_retired.set()
         data.agenda_error = "awaiting provider snapshot (worktree-agendas-v1)"
         self._update_agenda()
         self._agenda_worker = self._subscribe_agenda(
-            data, self._agenda_generation, cancelled, project, worktree, head,
+            data, self._agenda_generation, cancelled, self._agenda_retired, project, worktree, head,
         )
 
     def _update_agenda(self) -> None:
@@ -593,17 +599,25 @@ class MuxCompanionApp(App):
 
     @work(thread=True, group="agenda-subscription")
     def _subscribe_agenda(
-        self, data: _CompanionData, generation: int, cancelled: Event,
+        self, data: _CompanionData, generation: int, cancelled: Event, retired: Event,
         project: str, worktree: str, session: str,
     ) -> None:
-        subscribe(
-            project, worktree, session, cancelled=cancelled,
-            cwd=self._cwd or os.getcwd(),
-            publish=lambda frame, error: self.call_from_thread(
-                self._receive_agenda, data, generation, cancelled, frame, error,
-            ),
-            cleanup_failed=self._agenda_cleanup_failures.append,
-        )
+        if cancelled.is_set():
+            return
+        retired.clear()
+        try:
+            if cancelled.is_set():
+                return
+            subscribe(
+                project, worktree, session, cancelled=cancelled,
+                cwd=self._cwd or os.getcwd(),
+                publish=lambda frame, error: self.call_from_thread(
+                    self._receive_agenda, data, generation, cancelled, frame, error,
+                ),
+                cleanup_failed=self._agenda_cleanup_failures.append,
+            )
+        finally:
+            retired.set()
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
         if (
@@ -668,40 +682,38 @@ class MuxCompanionApp(App):
         await self._bridge_attachment.set_selection(None)
         if revision != self._timeline_sync_revision or data is not self._data:
             return
-        await self._timeline_attachment.set_selection(selection, reconcile=reconcile)
+        bridge_first = reconcile and any(
+            state.token.identity.provider is Provider.BRIDGE
+            and key in self._timeline_panel.window.reconciliation_required
+            for key, state in self._timeline_panel.window.sources.items()
+        )
+        first, second = (
+            (self._bridge_attachment, self._timeline_attachment) if bridge_first
+            else (self._timeline_attachment, self._bridge_attachment)
+        )
+        await first.set_selection(selection, reconcile=reconcile)
         if (
             revision != self._timeline_sync_revision or data is not self._data
             or self._bridge_attachment.closed or not self._timeline_panel.is_attached
         ):
             return
-        await self._bridge_attachment.set_selection(selection, reconcile=reconcile)
+        await self._rich_agenda_attachment.set_selection(
+            selection, data.agenda, data.agenda_error, project_root=data.worktree.get("path"),
+        )
         if (
-            revision == self._timeline_sync_revision and data is self._data and not self._loading
-            and not self._timeline_attachment.closed and self._timeline_panel.is_attached
-            and bool(self._timeline_panel.query(SubwayTimeline))
-            and visible == self._timeline_panel.query_one(SubwayTimeline).demand_visible
+            revision != self._timeline_sync_revision or data is not self._data or self._loading
+            or self._timeline_attachment.closed or not self._timeline_panel.is_attached
+            or not self._timeline_panel.query(SubwayTimeline)
+            or visible != self._timeline_panel.query_one(SubwayTimeline).demand_visible
         ):
-            await self._rich_agenda_attachment.set_selection(
-                selection, data.agenda, data.agenda_error, project_root=data.worktree.get("path"),
-            )
+            return
+        await second.set_selection(selection, reconcile=reconcile)
 
     def _bridge_status(self, message: str) -> None:
-        if not self.query("#timeline-bridge-status"):
-            return
-        lines = ["Bridge: " + message]
-        for state in self._timeline_panel.window.sources.values():
-            if (
-                state.token.identity.provider is Provider.BRIDGE
-                and state.availability is Availability.OBSERVED
-                and state.snapshot is not None and state.snapshot.facts_json is not None
-            ):
-                facts = json.loads(state.snapshot.facts_json)
-                lines.extend(
-                    f"{member['bridge_session_id']}: {member['state']} "
-                    f"({member['registry']}, link {member['link_qualification']})"
-                    for member in facts.get("members", [])
-                )
-        self.query_one("#timeline-bridge-status", Static).update(Text("\n".join(lines)))
+        if self.query("#timeline-bridge-status"):
+            self.query_one("#timeline-bridge-status", Static).update(
+                bridge_status(self._timeline_panel.window, message),
+            )
 
     @work(exclusive=True, group="session-observations")
     async def _load_observations(self) -> None:

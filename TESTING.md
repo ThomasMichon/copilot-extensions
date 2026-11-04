@@ -173,6 +173,13 @@ capability refusal, unrelated-owner heartbeat continuity, retention gaps,
 independent cancellation, retained rows and selected-head retirement without
 starting an SDK actor. `test_companion_bridge_codec.py` and
 `test_companion_bridge_discovery.py` cover normalization and payload selection.
+The discovery packet invokes the real passive payload gate with an inherited
+foreign-plugin receipt and checks no provisioning. Replacement controls replay
+64 old members to 64 new members across bounded pages without transient current
+facts. The joined fixture exhausts Bridge evidence, refreshes the baseline, and
+checks the other providers' rows, proofs, purpose, browsing anchor and next
+Worktrees delta. Tokenless head invalidation and a blocked Bridge preparation
+separately check retirement and independent rich Agenda admission.
 These controls do not establish native performance, rollout or known-session
 event/history consumption, and do not expand required unit-only CI.
 

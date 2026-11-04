@@ -1,14 +1,37 @@
-"""Literal Summary/Claims rendering from independently qualified owner facts."""
+"""Literal Summary/Claims/Bridge rendering from independently qualified owner facts."""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 from typing import TYPE_CHECKING
 
 from rich.text import Text
 
+from .companion_timeline_contract import Availability, Provider
+from .companion_timeline_model import TimelineWindow
+
 if TYPE_CHECKING:
     from .mux_companion import _CompanionData
+
+
+def bridge_status(window: TimelineWindow, message: str) -> Text:
+    lines = ["Bridge: " + message]
+    for state in window.sources.values():
+        if (
+            state.token.identity.provider is Provider.BRIDGE
+            and state.availability is Availability.OBSERVED
+            and state.snapshot is not None and state.snapshot.facts_json is not None
+        ):
+            facts = json.loads(state.snapshot.facts_json)
+            if "membership-replay-incomplete" in facts.get("limitations", []):
+                lines.append("Membership replay incomplete; current members unknown.")
+            lines.extend(
+                f"{member['bridge_session_id']}: {member['state']} "
+                f"({member['registry']}, link {member['link_qualification']})"
+                for member in facts.get("members", [])
+            )
+    return Text("\n".join(lines))
 
 
 def _fact(data: _CompanionData, name: str) -> tuple[dict | None, str]:

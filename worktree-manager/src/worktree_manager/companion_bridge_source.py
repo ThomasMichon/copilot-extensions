@@ -53,7 +53,8 @@ def bridge_command(project_root: str) -> list[str]:
         raise TimelineContractError("Bridge command declaration exceeded its bound")
     declaration = json.loads(raw)
     if (
-        declaration.get("schema") != "copilot-extensions.payload-invocation"
+        not isinstance(declaration, dict)
+        or declaration.get("schema") != "copilot-extensions.payload-invocation"
         or declaration.get("command") != "agent-bridge"
         or declaration.get("module") != "agent_bridge"
         or declaration.get("noSelfProvisionEnv") != "AGENT_BRIDGE_NO_SELFPROVISION"
@@ -85,7 +86,12 @@ class MembershipCommands:
             # its read. The overlay also fences older payload first-use paths.
             yield from transport.command_frames(
                 argv, cancelled=cancelled, cwd=self.cwd,
-                environment={"AGENT_BRIDGE_NO_SELFPROVISION": "1"},
+                environment={
+                    "AGENT_BRIDGE_NO_SELFPROVISION": "1",
+                    # The selected payload's gate resolves and validates its own
+                    # installation; a receipt for the parent plugin is not its context.
+                    "COPILOT_EXTENSIONS_CONTEXT": "",
+                },
                 startup_timeout=BRIDGE_STARTUP_TIMEOUT, idle_timeout=BRIDGE_IDLE_TIMEOUT,
             )
         except EngineCleanupError as error:
@@ -155,7 +161,7 @@ class BridgeMembershipSource:
                 if frame["kind"] != "delta" or frame["base_position"] != cursor:
                     raise TimelineContractError("Bridge membership lost its exact delivered boundary")
                 cursor = frame["position"]
-                if not frame["changes"]:
+                if not frame["changes"] and not self.codec.replaying:
                     continue
                 snapshot = self.codec.apply(frame, token)
                 delta = self.codec.delta(frame, token)

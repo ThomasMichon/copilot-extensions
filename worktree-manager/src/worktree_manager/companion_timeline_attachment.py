@@ -11,7 +11,7 @@ from textual.widgets import Static
 
 from .agenda_contract import AgendaUnavailable
 from .companion_timeline_contract import (
-    Availability, HistoryPage, LiveDelta, MAX_WINDOW_BYTES, Provider, SourceToken,
+    Availability, Completeness, HistoryPage, LiveDelta, MAX_WINDOW_BYTES, Provider, SourceToken,
     TimelineContractError, TimelineEvent, TimelineGap, TimelineSnapshot,
 )
 from .companion_timeline_controller import (
@@ -294,6 +294,22 @@ class TimelineAttachment:
 
     def unavailable(self, reason: str) -> None:
         self._error(None, reason)
+
+    def invalidate_head(self, selection: tuple[str, str, str]) -> None:
+        """Fence headless owner observations even before a head-qualified source binds."""
+        self.stop_now()
+        for state in tuple(self.panel.window.sources.values()):
+            identity = state.token.identity
+            if (
+                identity.provider is self.provider
+                and (identity.project, identity.worktree_id) == selection[:2]
+                and state.availability is not Availability.HEAD_CHANGED
+            ):
+                self.panel.apply_snapshot(TimelineSnapshot(
+                    state.token, None, Availability.HEAD_CHANGED, Completeness.PARTIAL,
+                ))
+        if self._status is not None:
+            self._status("head changed; retained membership is not current; Refresh required")
 
     async def close(self) -> None:
         self.begin_close()

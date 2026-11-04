@@ -367,7 +367,17 @@ class TimelineWindow:
             for event in snapshot.events
         ):
             raise TimelineContractError("reconciliation changed immutable event evidence")
-        candidate = TimelineWindow(max_events=self.max_events, max_bytes=self.max_bytes, max_proofs=self.max_proofs)
+        # Only the exhausted provider moves to a fresh baseline. Independent
+        # readers still publish against their exact accepted bindings/cursors.
+        candidate = deepcopy(self)
+        candidate.sources.pop(key)
+        candidate.events = tuple(event for event in self.events if event.source.source_key != key)
+        candidate._by_ref = {event.ref: event for event in candidate.events}
+        candidate._proofs = {ref: digest for ref, digest in self._proofs.items() if ref.source_key != key}
+        candidate._cursors.pop(key, None)
+        candidate._lanes = {actor: lane for actor, lane in self._lanes.items() if actor[0] != key}
+        candidate.reconciliation_required -= {key}
+        candidate.source_gaps.pop(key, None)
         bound = candidate.bind(snapshot.token)
         if not bound.applied:
             raise TimelineContractError("reconciliation source was not admitted: " + bound.reason)

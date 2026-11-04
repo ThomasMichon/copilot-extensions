@@ -142,22 +142,29 @@ qualification or rollout.
 The optional Bridge adapter selects the enabled payload through shared plugin
 activation, uses the selected worktree's qualified Claims owner reference, and
 invokes its passive `observe-owner` operation across a process boundary.
-The owning CLI negotiates the running capability; a child-local no-provision
-fence also covers older payloads. Missing support preserves Summary and the
+The owning CLI negotiates the running capability and resolves its own validated
+installation, without inheriting another plugin's installation receipt. A
+child-local no-provision fence also covers older payloads. Missing support preserves Summary and the
 independent sources. Current membership appears separately from history:
 bootstrap facts do not become fabricated creation or activity events.
 Owner upserts/tombstones retain their exact observed-change and retirement
 qualifications, never claim release. Source head, liveness, freshness and
 answerability stay unknown; the independently selected worktree/head fence
 controls admission and retires the reader when that selection is invalidated.
-Unrelated-owner heartbeat progress retains transport continuity without a
+Paginated replacement stages bounded intermediate membership without publishing
+it as current facts; current members remain unknown until replay completes.
+Already-published rich Agenda work is admitted before optional Bridge startup
+waits. Unrelated-owner heartbeat progress retains transport continuity without a
 productive milestone. This adapter does not attach known-session event/history
 readers or infer pending input, SDK execution or compaction capacity.
 See the [owning membership contract](../plugins/agent-bridge/docs/owner-membership.md).
 Integrity-budget exhaustion does not discard evidence on ordinary reconnect or
 tab reopening. With Timeline visible, explicit Refresh or Reconcile source first
 obtains a fresh owner-qualified snapshot and admits a separate bounded observation
-window before replacing the exhausted one. Failed, unqualified, stale or
+window before replacing the exhausted one. Only the exhausted source receives a
+fresh baseline: other providers retain their exact bindings, accepted cursors,
+facts, rows and immutable proofs. An exhausted Bridge source reconciles before
+independent reader rebootstrap consumes the shared proof budget. Failed, unqualified, stale or
 conflicting snapshots leave the old proof fence and cached rows intact. A retained
 browsing anchor and unread state carry into the new window where available.
 This replaces ephemeral viewer evidence, not owner history or work/resource budgets.

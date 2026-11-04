@@ -151,3 +151,59 @@ def test_foreign_selection_and_replacement_are_not_silently_retargeted() -> None
     frame["position"] = cursor(0, frame["source"])
     with pytest.raises(OwnerReadError, match="source-replaced"):
         codec.decode(raw(frame))
+
+
+def named_member(name: str) -> dict:
+    return {
+        **member("s"), "member_id": "owned:" + name, "bridge_session_id": name,
+        "project": None, "worktree_id": None, "transport": "x",
+    }
+
+
+def replay_page(names: list[str], before: int, *, tombstones: bool, more: bool) -> dict:
+    frame = delta(before + len(names), before=before)
+    frame.update(has_more=more, changes=[{
+        **frame["changes"][0], "member": named_member(name), "id": cursor(before + index + 1),
+        "operation": "tombstone" if tombstones else "upsert",
+    } for index, name in enumerate(names)])
+    return frame
+
+
+def test_paginated_full_replacement_keeps_transient_members_out_of_current_facts() -> None:
+    codec = MembershipCodec("example", "selected", OWNER)
+    initial = snapshot()
+    initial["members"] = [named_member(f"z{i}") for i in range(64)]
+    initial = codec.decode(raw(initial))
+    token = codec.token(initial, 1)
+    codec.apply(initial, token)
+    window = TimelineWindow()
+    window.bind(token)
+    window.apply_snapshot(codec.apply(initial, token))
+    before = 0
+    for tombstones in (False, True):
+        names = [f"{'z' if tombstones else 'a'}{i}" for i in range(64)]
+        for start in range(0, 64, 16):
+            more = not tombstones or start != 48
+            frame = codec.decode(raw(replay_page(names[start:start + 16], before, tombstones=tombstones, more=more)))
+            baseline = codec.apply(frame, token)
+            assert window.apply_delta(codec.delta(frame, token)).applied
+            assert window.apply_snapshot(baseline).applied
+            facts = json.loads(baseline.facts_json)
+            if more:
+                assert not facts["members"] and "membership-replay-incomplete" in facts["limitations"]
+            before += 16
+    assert len(window.events) == 128
+    assert set(codec.members) == {f"owned:a{i}" for i in range(64)}
+    assert len(json.loads(baseline.facts_json)["members"]) == 64
+    assert not codec.replaying
+
+
+def test_completed_replay_still_enforces_current_bound_atomically() -> None:
+    codec = MembershipCodec("example", "selected", OWNER)
+    initial = snapshot()
+    initial["members"] = [named_member(f"z{i}") for i in range(64)]
+    token = codec.token(initial, 1)
+    codec.apply(initial, token)
+    with pytest.raises(TimelineContractError, match="admitted bound"):
+        codec.apply(replay_page(["a"], 0, tombstones=False, more=False), token)
+    assert len(codec.members) == 64 and "owned:a" not in codec.members

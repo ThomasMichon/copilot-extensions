@@ -101,9 +101,11 @@ class AgendaTimelineAttachment:
     def __init__(
         self, panel: CompanionTimelinePanel, *, cwd: str, status: Callable[[str], None],
         validate_events: Callable[[SourceToken, tuple[TimelineEvent, ...]], None],
+        head_changed: Callable[[Selection], None] | None = None,
     ) -> None:
         self.panel, self.cwd, self.status = panel, cwd, status
         self._validate_events = validate_events
+        self._head_changed = head_changed
         self.selection: Selection | None = None
         self._last_selection: Selection | None = None
         self._invalidated_selection: Selection | None = None
@@ -153,6 +155,8 @@ class AgendaTimelineAttachment:
                 self.status("Rich Agenda: head changed; Refresh required")
             if self.selection in (None, terminal):
                 self._stop.set()
+            if self._head_changed is not None:
+                self._head_changed(terminal)
             return
         if self.selection is None or not self._renderable():
             return

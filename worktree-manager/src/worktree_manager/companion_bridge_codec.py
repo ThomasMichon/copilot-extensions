@@ -8,7 +8,7 @@ from hashlib import sha256
 from typing import Any
 
 from .companion_timeline_contract import (
-    ActorKind, Availability, Completeness, EvidenceKind, LiveDelta, Provider, Qualification,
+    ActorKind, Availability, Completeness, EvidenceKind, LiveDelta, MAX_BODY_BYTES, Provider, Qualification,
     RelationKind, SourceIdentity, SourcePosition, SourceToken, TimelineActor,
     TimelineContractError, TimelineEvent, TimelineKind, TimelineRelation, TimelineSnapshot,
     check_wire_body, decode_wire_frame, identifier,
@@ -77,6 +77,7 @@ class MembershipCodec:
         self.owner = selected_owner(owner, project, worktree)
         self.source: dict[str, Any] | None = None
         self.members: dict[str, dict[str, Any]] = {}
+        self.replaying = False
 
     def decode(self, raw: bytes) -> dict[str, Any]:
         frame = decode_wire_frame(raw)
@@ -241,17 +242,25 @@ class MembershipCodec:
                     members.pop(member["member_id"], None)
                 else:
                     members[member["member_id"]] = member
-        if len(members) > 64:
+        # A capture orders upserts and tombstones by native ID, then pages
+        # them. Two valid 64-member states may temporarily coexist in replay.
+        if len(members) > (128 if frame["has_more"] else 64):
             raise TimelineContractError("Bridge membership state exceeded its admitted bound")
+        if len(encoded(list(members.values())).encode()) > 2 * MAX_BODY_BYTES:
+            raise TimelineContractError("Bridge membership replay exceeded its byte bound")
         facts = encoded({
-            "members": [members[key] for key in sorted(members)],
-            "limitations": frame["limitations"], "current_answerability": "unknown",
+            "members": [] if frame["has_more"] else [members[key] for key in sorted(members)],
+            "limitations": [
+                *frame["limitations"], *(["membership-replay-incomplete"] if frame["has_more"] else []),
+            ],
+            "current_answerability": "unknown",
         })
         result = TimelineSnapshot(
             token, self.position(token, frame["position"]), Availability.OBSERVED, Completeness.PARTIAL,
             as_of=stamp(frame["observed_at"]), facts_json=facts,
         )
         self.members = members
+        self.replaying = frame["has_more"]
         return result
 
     def delta(self, frame: dict[str, Any], token: SourceToken) -> LiveDelta:

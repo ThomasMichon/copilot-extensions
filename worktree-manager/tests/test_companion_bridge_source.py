@@ -7,6 +7,7 @@ import importlib
 import json
 import os
 from pathlib import Path
+import select
 import socket
 import sys
 from threading import Event, Thread
@@ -22,8 +23,10 @@ from worktree_manager.agenda_transport import STARTUP_TIMEOUT
 from worktree_manager.companion_bridge_codec import MembershipCodec
 from worktree_manager.companion_timeline_contract import Provider
 from worktree_manager.companion_timeline_widget import SubwayTimeline
+from worktree_manager.companion_worktree_source import WorktreeTimelineSource
 from test_agenda_end_to_end import ROOT, SOURCE_PATHS
 from test_companion_agenda_live import current_data, until
+from test_companion_agenda_rich import managed as managed, current_managed_data
 from test_companion_bridge_codec import OWNER, raw
 from _worktree_timeline_fixtures import (
     JOIN_COMMAND_CLEANUP, JOIN_PREPARATION_SECONDS, JoinPhase, resident_join,
@@ -31,8 +34,24 @@ from _worktree_timeline_fixtures import (
 
 pytestmark = [
     pytest.mark.portfolio_tier("T3"), pytest.mark.effect("filesystem"),
+    pytest.mark.timeout(90),
     pytest.mark.skipif(os.name == "nt", reason="POSIX attributed executable; not native Windows qualification"),
 ]
+
+
+async def membership_ready(app, pilot, peer) -> None:
+    await JoinPhase("membership-reader", bridge.BRIDGE_STARTUP_TIMEOUT + JOIN_COMMAND_CLEANUP).wait(
+        lambda: peer["following"].is_set() and app._bridge_attachment.controller is not None
+        and app._bridge_attachment.controller.reader_count == 1,
+        pilot.pause,
+        lambda: peer["failures"][0] if peer["failures"] else None,
+        lambda: {
+            "status": str(app.query_one("#timeline-bridge-status", Static).content),
+            "requests": peer["requests"], "following": peer["following"].is_set(),
+            "revision": app._timeline_sync_revision,
+            "controller": repr(app._bridge_attachment.controller),
+        },
+    )
 
 
 @pytest.fixture
@@ -70,31 +89,37 @@ def native_bridge(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                     continue
                 peers.append(peer)
                 peer.settimeout(2)
-                with peer, peer.makefile("rb") as incoming:
-                    request = json.loads(incoming.readline(8192))
-                    requests.append(request)
-                    query = parse_qs(urlsplit(request["path"]).query)
-                    assert query["owner_ref"] == [OWNER] and query["contract_version"] == ["1"]
-                    after = query.get("after", [None])[0]
-                    body = outgoing.pop(0) if outgoing else source.frame(OWNER, after)
-                    peer.sendall(wire.sse(body))
-                    if query["follow"] == ["false"]:
-                        continue
-                    following.set()
-                    after = body["position"]
-                    while not stop.is_set():
-                        if not changed.wait(0.05):
-                            continue
-                        changed.clear()
-                        body = outgoing.pop(0) if outgoing else source.frame(OWNER, after)
-                        peer.sendall(wire.sse(body))
-                        if body["kind"] in {"gap", "error", "going-away"}:
-                            break
-                        after = body["position"]
-        except (BrokenPipeError, ConnectionResetError):
-            pass
+                try:
+                    connection(peer)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
         except BaseException as error:
             failures.append(error)
+
+    def connection(peer) -> None:
+        with peer, peer.makefile("rb") as incoming:
+            request = json.loads(incoming.readline(8192))
+            requests.append(request)
+            query = parse_qs(urlsplit(request["path"]).query)
+            assert query["owner_ref"] == [OWNER] and query["contract_version"] == ["1"]
+            after = query.get("after", [None])[0]
+            body = outgoing.pop(0) if outgoing else source.frame(OWNER, after)
+            peer.sendall(wire.sse(body))
+            if query["follow"] == ["false"]:
+                return
+            following.set()
+            after = body["position"]
+            while not stop.is_set():
+                if select.select([peer], [], [], 0)[0] and not peer.recv(1, socket.MSG_PEEK):
+                    return
+                if not changed.wait(0.05):
+                    continue
+                changed.clear()
+                body = outgoing.pop(0) if outgoing else source.frame(OWNER, after)
+                peer.sendall(wire.sse(body))
+                if body["kind"] in {"gap", "error", "going-away"}:
+                    break
+                after = body["position"]
 
     thread = Thread(target=serve, name="private-bridge-transport")
     thread.start()
@@ -325,19 +350,116 @@ def test_membership_is_demand_driven_and_does_not_disable_independent_summary(
             await until(pilot, lambda: not app._loading)
             assert not native_bridge["requests"]
             app.query_one("#views", TabbedContent).active = "timeline-tab"
-            await until(pilot, lambda: native_bridge["following"].is_set())
+            await membership_ready(app, pilot, native_bridge)
             assert "child: starting" in str(app.query_one("#timeline-bridge-status", Static).content)
+            requests = len(native_bridge["requests"])
             native_bridge["db"].update_session_status("child", "idle", 2.0)
             native_bridge["changed"].set()
             timeline = app.query_one(SubwayTimeline)
             await until(pilot, lambda: any(event.source.provider is Provider.BRIDGE for event in timeline.window.events))
             event = next(event for event in timeline.window.events if event.source.provider is Provider.BRIDGE)
             assert event.actor.qualification.value == "reported"
+            await pilot.pause()
+            assert len(native_bridge["requests"]) == requests
             app.query_one("#views", TabbedContent).active = "summary-tab"
             await until(pilot, lambda: app._bridge_attachment.controller is None)
             assert app._data.error is None
             assert native_bridge["db"].get_session("child")["status"] == "idle"
             await pilot.press("escape")
+
+    asyncio.run(check())
+
+
+def test_bridge_only_head_change_retires_reader_without_a_head_qualified_token(
+    native_bridge, tmp_path, monkeypatch,
+) -> None:
+    def data():
+        result = current_data()
+        result.worktree["path"] = str(tmp_path)
+        result.bundle = {"facts": {"claims": {"value": {"owner_ref": OWNER}, "confirmed": True}}}
+        return result
+
+    async def unavailable(*args, **kwargs):
+        raise bridge.OwnerReadError("unavailable", "fixture failed Worktree preparation")
+
+    monkeypatch.setattr(companion, "_load_current_worktree", lambda *args, **kwargs: data())
+    monkeypatch.setattr(companion.MuxCompanionApp, "_start_agenda", lambda self: None)
+    monkeypatch.setattr(companion.MuxCompanionApp, "_poll_attention", lambda *args, **kwargs: None)
+    monkeypatch.setattr(WorktreeTimelineSource, "prepare", unavailable)
+
+    async def check() -> None:
+        app = companion.MuxCompanionApp(cwd=str(tmp_path))
+        async with app.run_test(size=(110, 40)) as pilot:
+            await until(pilot, lambda: not app._loading)
+            app.query_one("#views", TabbedContent).active = "timeline-tab"
+            await membership_ready(app, pilot, native_bridge)
+            window = app._timeline_panel.window
+            assert {state.token.identity.provider for state in window.sources.values()} == {Provider.BRIDGE}
+            assert app._rich_agenda_attachment.token is None
+            app._agenda_cancel = Event()
+            app._receive_agenda(
+                app._data, app._agenda_generation, app._agenda_cancel, {
+                    "project": "example", "worktree_id": "selected", "session_id": "head-a",
+                    "availability": "head-changed", "observation": None,
+                }, None,
+            )
+            await until(pilot, lambda: app._bridge_attachment.controller is None)
+            assert all(state.availability.value == "head-changed" for state in window.sources.values())
+            assert "child:" not in str(app.query_one("#timeline-bridge-status", Static).content)
+            assert not window.events
+            count = len(native_bridge["requests"])
+            app.query_one("#views", TabbedContent).active = "summary-tab"
+            await until(pilot, lambda: app._rich_agenda_attachment.selection is None)
+            app.query_one("#views", TabbedContent).active = "timeline-tab"
+            await until(pilot, lambda: app._rich_agenda_attachment.selection is not None)
+            assert len(native_bridge["requests"]) == count
+            assert native_bridge["db"].get_session("child")["status"] == "starting"
+
+    asyncio.run(check())
+
+
+def test_slow_bridge_preparation_does_not_block_published_rich_agenda(managed, monkeypatch) -> None:
+    entered, release = asyncio.Event(), asyncio.Event()
+    reads = []
+
+    def data():
+        result = current_managed_data(managed)
+        result.bundle = {"facts": {"claims": {"value": {"owner_ref": OWNER}, "confirmed": True}}}
+        return result
+
+    async def unavailable(*args, **kwargs):
+        raise bridge.OwnerReadError("unavailable", "fixture failed Worktree preparation")
+
+    async def slow(self, epoch, *, stop):
+        reads.append(stop)
+        entered.set()
+        await stop.wait()
+        release.set()
+        raise InterruptedError("fixture Bridge preparation cancelled")
+
+    monkeypatch.setattr(companion, "_load_current_worktree", lambda *args, **kwargs: data())
+    monkeypatch.setattr(companion.MuxCompanionApp, "_start_agenda", lambda self: None)
+    monkeypatch.setattr(companion.MuxCompanionApp, "_poll_attention", lambda *args, **kwargs: None)
+    monkeypatch.setattr(WorktreeTimelineSource, "prepare", unavailable)
+    monkeypatch.setattr(bridge.BridgeMembershipSource, "prepare", slow)
+
+    async def check() -> None:
+        app = companion.MuxCompanionApp(cwd=str(managed["cwd"]))
+        async with app.run_test(size=(110, 40)) as pilot:
+            await until(pilot, lambda: not app._loading)
+            app._agenda_cancel = Event()
+            app._receive_agenda(
+                app._data, app._agenda_generation, app._agenda_cancel, managed["publication"](), None,
+            )
+            app.query_one("#views", TabbedContent).active = "timeline-tab"
+            await until(pilot, entered.is_set)
+            await until(pilot, lambda: app._rich_agenda_attachment.token is not None)
+            assert any(not stop.is_set() for stop in reads)
+            assert any(row.source.provider is Provider.AGENDA for row in app._timeline_panel.window.events)
+            app.query_one("#views", TabbedContent).active = "summary-tab"
+            await until(pilot, release.is_set)
+            await until(pilot, lambda: all(stop.is_set() for stop in reads))
+            await until(pilot, lambda: app._rich_agenda_attachment.selection is None)
 
     asyncio.run(check())
 
@@ -415,7 +537,7 @@ def test_actual_three_source_commit_binding_and_child_join_preserves_history(
 
         async def check() -> None:
             app = companion.MuxCompanionApp(cwd=str(checkout))
-            async with app.run_test(size=(110, 50)) as pilot:
+            async with app.run_test(size=(110, 35)) as pilot:
                 await until(pilot, lambda: app._data.agenda is not None)
                 await publish()
                 app.query_one("#views", TabbedContent).active = "timeline-tab"
@@ -426,7 +548,11 @@ def test_actual_three_source_commit_binding_and_child_join_preserves_history(
                     + 4 * (STARTUP_TIMEOUT + JOIN_COMMAND_CLEANUP),
                 )
                 await phase.wait(
-                    lambda: {state.token.identity.provider for state in timeline.window.sources.values()} == set(Provider),
+                    lambda: {state.token.identity.provider for state in timeline.window.sources.values()} == set(Provider)
+                    and app._bridge_attachment.controller is not None
+                    and app._bridge_attachment.controller.reader_count == 1
+                    and app._timeline_attachment.controller is not None
+                    and app._timeline_attachment.controller.reader_count == 1,
                     pilot.pause,
                     lambda: peer["failures"][0] if peer["failures"] else None,
                     lambda: {
@@ -475,6 +601,58 @@ def test_actual_three_source_commit_binding_and_child_join_preserves_history(
                 assert app._agenda_worker is coarse
                 assert len([row for row in peer["trace"].read_text().splitlines() if "agenda-feed" in row]) == 1
                 assert native_bridge["db"].get_session("child")["status"] == "idle"
+                for number in range(5, 25):
+                    peer["publish"](f"Retained joined history {number}", number)
+                await until(pilot, lambda: "Retained joined history 24" in str(
+                    app.query_one(".timeline-context", Static).content,
+                ))
+                timeline.focus()
+                await pilot.press("pageup")
+                await until(pilot, lambda: app._timeline_attachment.controller.page_count == 0 and all(
+                    state.requested_before is None for state in timeline.window.sources.values()
+                ))
+                assert timeline.virtual_size.height > timeline.size.height
+                old_window = timeline.window
+                # Leave room for an independent owner's bounded 32-row
+                # bootstrap, then exhaust this window with Bridge evidence.
+                old_window.max_proofs = len(old_window._proofs) + 32
+                bridge_key = next(
+                    key for key, state in old_window.sources.items()
+                    if state.token.identity.provider is Provider.BRIDGE
+                )
+                for number in range(33):
+                    count = len(old_window._proofs)
+                    native_bridge["db"].update_session_status("child", "running" if number % 2 == 0 else "idle", 4.0 + number)
+                    native_bridge["changed"].set()
+                    await until(pilot, lambda: len(old_window._proofs) > count or bridge_key in old_window.reconciliation_required)
+                assert bridge_key in old_window.reconciliation_required
+                others = tuple(row for row in old_window.events if row.source.provider is not Provider.BRIDGE)
+                old_window.set_follow_live(False)
+                timeline.selected = others[0].ref
+                viewport = app._timeline_panel.capture_viewport()
+                app.action_refresh()
+                await until(pilot, lambda: timeline.window is not old_window, attempts=400)
+                await until(pilot, lambda: app._rich_agenda_attachment.token is not None)
+                assert {state.token.identity.provider for state in timeline.window.sources.values()} == set(Provider)
+                assert all(row in timeline.window.events for row in others)
+                assert all(row.ref in timeline.window._proofs for row in others)
+                assert app._timeline_attachment.retained_windows == (old_window,)
+                assert not timeline.window.follow_live and timeline.selected == others[0].ref
+                assert app._timeline_panel.capture_viewport() == viewport
+                assert "Retained joined history 24" in str(app.query_one(".timeline-context", Static).content), {
+                    "sources": {
+                        key: (state.availability.value, None if state.snapshot is None else state.snapshot.purpose)
+                        for key, state in timeline.window.sources.items()
+                    },
+                    "status": str(app.query_one(".timeline-state", Static).content),
+                    "result": timeline.window.last_result,
+                    "reconciliation": timeline.window.reconciliation_required,
+                }
+                peer["publish"]("Binding after membership reconciliation", 25)
+                await until(pilot, lambda: "Binding after membership reconciliation" in str(
+                    app.query_one(".timeline-context", Static).content,
+                ))
+                assert all(row in timeline.window.events for row in others)
                 app._receive_agenda(
                     app._data, app._agenda_generation, app._agenda_cancel,
                     {**app._data.agenda, "availability": "head-changed", "observation": None}, None,
@@ -483,7 +661,7 @@ def test_actual_three_source_commit_binding_and_child_join_preserves_history(
                 assert not timeline.window.events
                 assert all(state.availability.value == "head-changed" for state in timeline.window.sources.values())
                 assert "retained membership is not current" in str(app.query_one("#timeline-bridge-status", Static).content)
-                assert native_bridge["db"].get_session("child")["status"] == "idle"
+                assert native_bridge["db"].get_session("child")["status"] == "running"
                 await pilot.press("escape")
             assert app._bridge_attachment.controller is None
             assert app._rich_agenda_attachment._task is None

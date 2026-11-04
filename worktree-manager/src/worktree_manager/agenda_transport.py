@@ -298,7 +298,10 @@ def frames(
     if on_contract is not None:
         on_contract(version)
     argv = feed_argv(project, worktree, session, engine_command=base, contract_version=version)
-    yield from command_frames(argv, cancelled=cancelled, cwd=cwd)
+    yield from command_frames(
+        argv, cancelled=cancelled, cwd=cwd,
+        startup_timeout=STARTUP_TIMEOUT, idle_timeout=IDLE_TIMEOUT,
+    )
 
 
 def command_frames(
