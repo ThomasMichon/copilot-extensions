@@ -76,6 +76,7 @@ def registry_call_failed(source: str, error: Exception) -> None:
 
 def full_load_started() -> None:
     observe(current_observations(), "load-config", "config-load", ScanAuthority.COMPLETE)
+    opaque_source("execution-machine")
 
 
 def source_exists(path: Path, stage: str) -> bool:
@@ -216,7 +217,6 @@ def execution_config(config, configured_machine, machine_raw, global_raw):
     from . import config as cfg
 
     source = "execution-machine"
-    opaque_source(source)
     start = registry_call_started()
     try:
         try:
