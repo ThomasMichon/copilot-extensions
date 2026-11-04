@@ -11,16 +11,27 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import sys
 import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 from .change_hints import ChangeHints
 from .task_hints_schema import install_hints_schema
+
+if sys.version_info >= (3, 11):
+    from enum import StrEnum as _TaskStatusBase
+else:
+    from enum import Enum
+
+    class _TaskStatusBase(str, Enum):
+        """String rendering for the explicit queue states on Python 3.10."""
+
+        __str__ = str.__str__
+        __format__ = str.__format__
 
 log = logging.getLogger(__name__)
 
@@ -54,7 +65,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_finished_at
 """
 
 
-class TaskStatus(StrEnum):
+class TaskStatus(_TaskStatusBase):
     QUEUED = "queued"
     QUEUED_HINTS = "queued_hints"
     PROCESSING = "processing"

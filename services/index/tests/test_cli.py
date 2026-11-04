@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from typing import Any
+
 import importlib
 import json
 import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from types import ModuleType
+import argparse
 
 import pytest
 from agent_procutil import no_window_kwargs
@@ -15,7 +19,7 @@ from agent_index_service.__main__ import main
 
 
 @pytest.mark.parametrize("argv", [["--help"], ["--version"], ["serve", "--help"]])
-def test_cli_without_site_packages(argv):
+def test_cli_without_site_packages(argv: list[str]) -> None:
     source = Path(__file__).resolve().parents[1] / "src"
     script = (
         f"import sys; sys.path.insert(0, {str(source)!r}); "
@@ -31,7 +35,7 @@ def test_cli_without_site_packages(argv):
         assert __version__ in result.stdout
 
 
-def test_import_lightness():
+def test_import_lightness() -> None:
     source = Path(__file__).resolve().parents[1] / "src"
     script = f"""
 import sys
@@ -48,17 +52,17 @@ for name in ('agent_index', 'fastapi', 'uvicorn', 'pydantic', 'lancedb',
     assert result.returncode == 0, result.stderr
 
 
-def test_config_does_not_load_core(config_file, monkeypatch, capsys):
+def test_config_does_not_load_core(config_file: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.setattr(composition, "load_core", lambda **kw: pytest.fail("core imported"))
     assert main(["config", "--config", str(config_file)]) == 0
     assert json.loads(capsys.readouterr().out)["valid"] is True
 
 
 @pytest.mark.parametrize("missing_name", ["fastapi", "lancedb"])
-def test_missing_native_is_error(config_file, monkeypatch, capsys, missing_name):
+def test_missing_native_is_error(config_file: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], missing_name: str) -> None:
     real_import = importlib.import_module
 
-    def missing(name):
+    def missing(name: str) -> ModuleType | SimpleNamespace:
         if name == missing_name:
             raise ModuleNotFoundError(f"fixture missing {missing_name}", name=missing_name)
         if name in {"fastapi", "uvicorn", "pydantic", "numpy", "pyarrow", "lancedb"}:
@@ -73,7 +77,7 @@ def test_missing_native_is_error(config_file, monkeypatch, capsys, missing_name)
     assert not output.out
 
 
-def test_old_core_is_rejected(monkeypatch):
+def test_old_core_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         composition, "importlib", SimpleNamespace(import_module=lambda name: SimpleNamespace()),
     )
@@ -82,7 +86,7 @@ def test_old_core_is_rejected(monkeypatch):
 
 
 @pytest.mark.parametrize("verb", ["serve", "start"])
-def test_serve_delegates(config_file, monkeypatch, verb):
+def test_serve_delegates(config_file: Path, monkeypatch: pytest.MonkeyPatch, verb: str) -> None:
     calls = []
     core = SimpleNamespace(serve=lambda cfg, **kw: calls.append((cfg, kw)))
     monkeypatch.setattr(composition, "load_core", lambda **kw: core)
@@ -91,9 +95,13 @@ def test_serve_delegates(config_file, monkeypatch, verb):
     assert calls[0][1] == {"passive": True}
 
 
-def test_deploy_reuses_core_cutover(config_file, monkeypatch):
+def test_deploy_reuses_core_cutover(config_file: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
-    core = SimpleNamespace(cmd_deploy=lambda args: calls.append(args) or 0)
+    def deploy(args: argparse.Namespace) -> int:
+        calls.append(args)
+        return 0
+
+    core = SimpleNamespace(cmd_deploy=deploy)
     monkeypatch.setattr(composition, "load_core", lambda **kw: core)
     monkeypatch.setattr(composition, "require_installed_core", lambda: None)
     assert main(["deploy", "--config", str(config_file),
@@ -104,7 +112,7 @@ def test_deploy_reuses_core_cutover(config_file, monkeypatch):
     assert calls[0].force is False
 
 
-def test_deploy_requires_same_isolated_core(monkeypatch):
+def test_deploy_requires_same_isolated_core(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(subprocess, "run", lambda *a, **kw: SimpleNamespace(
         returncode=1, stdout="",
     ))
@@ -112,8 +120,8 @@ def test_deploy_requires_same_isolated_core(monkeypatch):
         composition.require_installed_core()
 
 
-def test_isolated_core_probe_timeout_is_explicit(monkeypatch):
-    def timeout(*args, **kwargs):
+def test_isolated_core_probe_timeout_is_explicit(monkeypatch: pytest.MonkeyPatch) -> None:
+    def timeout(*args: Any, **kwargs: Any) -> object:
         raise subprocess.TimeoutExpired("isolated-core-probe", 15)
 
     monkeypatch.setattr(subprocess, "run", timeout)
@@ -122,13 +130,13 @@ def test_isolated_core_probe_timeout_is_explicit(monkeypatch):
 
 
 @pytest.mark.parametrize("timeout", ["nan", "inf", "-1", "0"])
-def test_bad_deploy_timeout(config_file, timeout):
+def test_bad_deploy_timeout(config_file: Path, timeout: str) -> None:
     with pytest.raises(SystemExit) as exc:
         main(["deploy", "--config", str(config_file), "--health-timeout", timeout])
     assert exc.value.code == 2
 
 
-def test_status_not_running_is_failure(config_file, capsys):
+def test_status_not_running_is_failure(config_file: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["status", "--config", str(config_file)]) == 1
     payload = json.loads(capsys.readouterr().out)
     assert payload["state"] == "not_running"

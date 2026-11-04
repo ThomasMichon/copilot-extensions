@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 import json
 import re
 import shutil
@@ -16,7 +17,7 @@ from agent_procutil import no_window_kwargs
 from agent_index_service.release import ReleaseError, build_descriptor, verify_descriptor
 
 
-def test_real_wheels_verify_and_reject_frozen_pre_seam_core(distribution_root):
+def test_real_wheels_verify_and_reject_frozen_pre_seam_core(distribution_root: Path) -> None:
     repo = Path(__file__).resolve().parents[3]
     sources = (
         repo / "services" / "index",

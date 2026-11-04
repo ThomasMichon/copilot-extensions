@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from agent_index.sources.delta import AcquisitionPage, SourceDelta
@@ -13,6 +13,8 @@ from agent_index.sources.good_citizen_http import has_next_link
 
 if TYPE_CHECKING:
     from agent_index.sources.github import GitHubConnector
+
+UTC = timezone.utc
 
 
 def _checkpoint(value: str | None) -> datetime:

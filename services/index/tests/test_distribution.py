@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 import shutil
 import subprocess
 import sys
@@ -14,7 +15,7 @@ from packaging.version import Version
 from agent_index_service import __version__
 
 
-def test_normal_wheel_metadata_and_console_program(distribution_root):
+def test_normal_wheel_metadata_and_console_program(distribution_root: Path) -> None:
     source = Path(__file__).resolve().parents[1]
     build = distribution_root / "build-source"
     build.mkdir()
@@ -48,6 +49,7 @@ def test_normal_wheel_metadata_and_console_program(distribution_root):
         assert metadata["Name"] == "agent-index-service"
         assert Version(metadata["Version"]) == Version(__version__)
         requirements = metadata.get_all("Requires-Dist")
+        assert requirements is not None
         assert any(req.startswith("agent-index>=") for req in requirements)
         assert any(req.startswith("agent-index[server,store]>=") for req in requirements)
         core_requirements = [

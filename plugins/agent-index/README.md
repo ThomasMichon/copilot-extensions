@@ -24,6 +24,12 @@ path never stops tasks or becomes an update prerequisite. Other registration
 platforms/families remain explicitly unsupported. See the
 [historical cleanup contract](../../docs/patterns/historical-installation-cleanup.md).
 
+The declared Python 3.10 minimum includes the task queue used by `[store,server]`
+and standalone native hosting. Its eight explicit task-status values retain
+string equality, rendering, formatting, JSON and SQLite representation on every
+supported interpreter. Python 3.11+ uses native `enum.StrEnum`; Python 3.10 uses
+a private string/enum base without adding a dependency or changing stored states.
+
 ## What ships today
 
 - **Runtime service**: FastAPI service on loopback with an OS-assigned port,

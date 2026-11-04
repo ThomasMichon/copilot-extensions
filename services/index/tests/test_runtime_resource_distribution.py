@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 import shutil
 import inspect
 import subprocess
@@ -15,7 +16,7 @@ import pytest
 from agent_procutil import no_window_kwargs
 
 
-def _project(tmp_path):
+def _project(tmp_path: Path) -> tuple[Path, Path]:
     source = Path(__file__).resolve().parents[1]
     project = tmp_path / "release" / "agent-index-service"
     project.mkdir(parents=True)
@@ -39,7 +40,7 @@ def _project(tmp_path):
     return project, primitive
 
 
-def _build(project, output, operation):
+def _build(project: Path, output: Path, operation: str) -> subprocess.CompletedProcess[str]:
     output.mkdir(exist_ok=True)
     result = subprocess.run(
         [sys.executable, "-c",
@@ -49,7 +50,7 @@ def _build(project, output, operation):
     return result
 
 
-def test_sdist_to_wheel_preserves_canonical_primitive_outside_repository(distribution_root):
+def test_sdist_to_wheel_preserves_canonical_primitive_outside_repository(distribution_root: Path) -> None:
     project, primitive = _project(distribution_root)
     expected = primitive.read_bytes()
     artifacts = distribution_root / "artifacts"
@@ -71,7 +72,9 @@ def test_sdist_to_wheel_preserves_canonical_primitive_outside_repository(distrib
             name for name in archive.getnames()
             if name.endswith("/src/agent_index_service/versioned_runtime_publication.py")
         )
-        assert archive.extractfile(publication).read() == (
+        publication_stream = archive.extractfile(publication)
+        assert publication_stream is not None
+        assert publication_stream.read() == (
             primitive.with_name("versioned_runtime_publication.py").read_bytes()
         )
         if "filter" in inspect.signature(archive.extractall).parameters:
@@ -94,23 +97,23 @@ def test_sdist_to_wheel_preserves_canonical_primitive_outside_repository(distrib
     result = _build(standalone, artifacts, "build_wheel")
     assert result.returncode == 0, result.stdout + result.stderr
     with zipfile.ZipFile(next(artifacts.glob("*.whl"))) as wheel:
-        member = "agent_index_service/_versioned_runtime.py"
-        assert wheel.namelist().count(member) == 1
-        assert wheel.read(member) == expected
+        wheel_member = "agent_index_service/_versioned_runtime.py"
+        assert wheel.namelist().count(wheel_member) == 1
+        assert wheel.read(wheel_member) == expected
         record = next(name for name in wheel.namelist() if name.endswith(".dist-info/RECORD"))
-        assert member in wheel.read(record).decode()
+        assert wheel_member in wheel.read(record).decode()
         for name in (
             "versioned_runtime_leases.py", "versioned_runtime_construction.py",
             "versioned_runtime_source.py", "versioned_runtime_publication.py",
         ):
-            member = f"agent_index_service/{name}"
-            assert wheel.read(member) == primitive.with_name(name).read_bytes()
-            assert member in wheel.read(record).decode()
+            wheel_member = f"agent_index_service/{name}"
+            assert wheel.read(wheel_member) == primitive.with_name(name).read_bytes()
+            assert wheel_member in wheel.read(record).decode()
 
 
 @pytest.mark.parametrize("included_copy", [False, True])
 @pytest.mark.parametrize("resource", ["versioned_runtime.py", "versioned_runtime_publication.py"])
-def test_missing_canonical_and_sdist_resource_fails_build(distribution_root, included_copy, resource):
+def test_missing_canonical_and_sdist_resource_fails_build(distribution_root: Path, included_copy: bool, resource: str) -> None:
     project, primitive = _project(distribution_root)
     source = primitive.with_name(resource)
     if included_copy:
@@ -123,7 +126,7 @@ def test_missing_canonical_and_sdist_resource_fails_build(distribution_root, inc
     assert f"{label} is missing" in result.stderr
 
 
-def test_missing_canonical_helper_cannot_fall_back_to_included_copy(distribution_root):
+def test_missing_canonical_helper_cannot_fall_back_to_included_copy(distribution_root: Path) -> None:
     project, primitive = _project(distribution_root)
     helper = primitive.with_name("standalone_build.py")
     shutil.copy2(helper, project / "_standalone_runtime_build.py")
@@ -133,7 +136,7 @@ def test_missing_canonical_helper_cannot_fall_back_to_included_copy(distribution
     assert not list((distribution_root / "artifacts").glob("*.whl"))
 
 
-def test_conflicting_included_resource_fails_instead_of_preferring_stale_copy(distribution_root):
+def test_conflicting_included_resource_fails_instead_of_preferring_stale_copy(distribution_root: Path) -> None:
     project, _ = _project(distribution_root)
     included = project / "src" / "agent_index_service" / "_versioned_runtime.py"
     included.write_text("stale\n", encoding="utf-8")

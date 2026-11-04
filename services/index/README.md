@@ -1,5 +1,24 @@
 # agent-index-service
 
+## Static type checking
+
+The complete standalone source and fixture project (27 physical Python files)
+is admitted to strict MyPy for the declared Python 3.10 target on both Linux
+and Windows:
+
+```console
+python tools/typecheck.py service-index --prepare
+python tools/typecheck.py service-index --strict
+```
+
+Its scoped `tools/typecheck-service-index-requirements.txt` is a flat SHA-256
+lock for the checker and genuine third-party fixture imports. Preparation uses
+the existing seven-day dependency-seasoning policy. Runtime-slot/process
+collaborators have narrow protocols; validated release/configuration documents
+and malformed fixture inputs retain explicit dynamic boundaries. This admission
+does not qualify the independently pending core, native storage/backend,
+fresh Linux installation, deployment or fleet enrollment.
+
 `installation_id` is an optional explicit, persistent host-config identity.
 When selected, it is projected as `AGENT_INDEX_NATIVE_INSTALLATION_ID` into the
 hosted core and `/health`; ambient identity variables are never accepted as

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import json
 import sys
 from pathlib import Path
@@ -11,15 +13,15 @@ from agent_index_service.__main__ import main
 
 
 @pytest.mark.parametrize("command", ["describe", "verify"])
-def test_release_cli_needs_no_host_config_or_core(command, tmp_path, monkeypatch, capsys):
+def test_release_cli_needs_no_host_config_or_core(command: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     calls = []
-    descriptor = {"schema": "fixture", "source_commit": "a" * 40}
+    descriptor: dict[str, Any] = {"schema": "fixture", "source_commit": "a" * 40}
 
-    def build(bundle, *, source_commit, profile):
+    def build(bundle: Path, *, source_commit: str, profile: str) -> dict[str, Any]:
         calls.append((bundle, source_commit, profile))
         return descriptor
 
-    def verify(path, *, expected_source_commit, profile):
+    def verify(path: Path, *, expected_source_commit: str, profile: str) -> dict[str, Any]:
         calls.append((path, expected_source_commit, profile))
         return descriptor
 
@@ -38,8 +40,8 @@ def test_release_cli_needs_no_host_config_or_core(command, tmp_path, monkeypatch
     assert not path.exists()
 
 
-def test_release_verification_error_is_not_success(tmp_path, monkeypatch, capsys):
-    def verify(path: Path, *, expected_source_commit: str, profile: str):
+def test_release_verification_error_is_not_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    def verify(path: Path, *, expected_source_commit: str, profile: str) -> dict[str, Any]:
         raise ValueError("artifact digest mismatch")
 
     monkeypatch.setitem(sys.modules, "agent_index_service.release", SimpleNamespace(
@@ -54,7 +56,7 @@ def test_release_verification_error_is_not_success(tmp_path, monkeypatch, capsys
     assert "artifact digest mismatch" in result.err
 
 
-def test_release_verify_requires_independent_commit_pin(tmp_path):
+def test_release_verify_requires_independent_commit_pin(tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as exc:
         main(["release", "verify", "--descriptor", str(tmp_path / "release.json")])
     assert exc.value.code == 2

@@ -12,19 +12,22 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
-import shutil
+import shutil as shutil
 import stat
 import tarfile
 import tempfile
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path as Path
+from typing import Any, BinaryIO, IO
+from collections.abc import Iterator
 
 from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
-from packaging.tags import compatible_tags, cpython_tags
+from packaging.tags import Tag, compatible_tags, cpython_tags
 from packaging.utils import canonicalize_name, parse_wheel_filename
 from packaging.version import InvalidVersion, Version
 
@@ -32,7 +35,7 @@ from .release import inspect_wheel, verify_descriptor
 from .staging import (
     _PROBE,
     _bytes,
-    _copy,
+    _copy as _copy,
     _environment,
     _json,
     _path,
@@ -55,6 +58,7 @@ class ContainerError(ValueError):
 class ContextCleanupError(ContainerError):
     """Preparation failed and its owned output could not safely be removed."""
 
+    cleanup_reason: str
 
 @dataclass(frozen=True)
 class ContainerTarget:
@@ -89,7 +93,7 @@ class ContainerTarget:
             "implementation_version": str(version),
         }
 
-    def tags(self):
+    def tags(self) -> set[Tag]:
         environment = self.environment()
         architecture = environment["platform_machine"]
         minor = int(self.glibc_version.split(".")[1])
@@ -137,7 +141,10 @@ def _base(value: str) -> str:
     return value
 
 
-def _closure(metadata: dict, extras: dict, environment: dict, target: ContainerTarget) -> None:
+def _closure(
+    metadata: dict[str, Any], extras: dict[str, list[str]],
+    environment: dict[str, str], target: ContainerTarget,
+) -> None:
     supported = target.tags()
     pending = [(name, extra) for name in metadata for extra in ("", *extras.get(name, []))]
     seen = set()
@@ -256,7 +263,9 @@ def _files(root: Path) -> dict[str, str]:
     return result
 
 
-def _cleanup_preparation(output: Path, identity, primary: BaseException) -> None:
+def _cleanup_preparation(
+    output: Path, identity: os.stat_result | None, primary: BaseException,
+) -> None:
     try:
         if identity is None:
             raise ContainerError("output ownership was not captured")
@@ -290,19 +299,21 @@ def _context_name(value: object) -> str:
 
 
 class _SnapshotReader:
-    def __init__(self, stream, expected: str):
+    def __init__(self, stream: BinaryIO, expected: str) -> None:
         self.stream = stream
         self.expected = expected
         self.digest = hashlib.sha256()
 
-    def read(self, count: int) -> bytes:
+    def read(self, count: int = -1) -> bytes:
         data = self.stream.read(count)
         self.digest.update(data)
         return data
 
 
 @contextmanager
-def verified_context_snapshot(context: Path, *, expected_contract_sha256: str):
+def verified_context_snapshot(
+    context: Path, *, expected_contract_sha256: str,
+) -> Iterator[tuple[dict[str, Any], IO[bytes]]]:
     """Capture exact digest-pinned bytes before any builder is invoked.
 
     A private bounded temporary tar, not the mutable original directory, becomes
@@ -375,15 +386,15 @@ def verified_context_snapshot(context: Path, *, expected_contract_sha256: str):
             for name in sorted(expected):
                 path = _path(context / name, file=True)
                 before = path.stat()
-                info = tarfile.TarInfo(name)
-                info.size, info.mode = before.st_size, 0o644
-                info.mtime, info.uid, info.gid = 0, 0, 0
-                info.uname, info.gname = "", ""
-                if info.size != sizes[name]:
+                member = tarfile.TarInfo(name)
+                member.size, member.mode = before.st_size, 0o644
+                member.mtime, member.uid, member.gid = 0, 0, 0
+                member.uname, member.gname = "", ""
+                if member.size != sizes[name]:
                     raise ContainerError("context changed before capture")
                 with path.open("rb") as stream:
                     reader = _SnapshotReader(stream, expected[name])
-                    archive.addfile(info, reader)
+                    archive.addfile(member, reader)
                     if reader.digest.hexdigest() != expected[name]:
                         raise ContainerError("context artifact digest mismatch while capturing")
                 after = path.stat()
@@ -404,7 +415,7 @@ def build_container_context(
     context: Path, *, expected_contract_sha256: str, docker: Path | None = None,
     docker_context: str = "default", docker_config: Path | None = None,
     timeout_seconds: float = 600.0,
-) -> dict:
+) -> dict[str, Any]:
     """Use only a preverified bounded snapshot, never Docker over a mutable path.
 
     No arbitrary Docker flags/URLs/headers. Cached approved base must exist.
@@ -476,7 +487,7 @@ def prepare_container_context(
     third_party_wheels: Path, output: Path, base_image: str, target: ContainerTarget,
     uid: int = 10001, gid: int = 10001,
     profile: str = "native",
-) -> dict:
+) -> dict[str, Any]:
     """Prepare an exclusive immutable build snapshot; replay only identical content.
 
     No Docker, package installation, network, credential/config or host-state

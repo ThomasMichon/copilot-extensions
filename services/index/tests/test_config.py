@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import copy
 import os
 
@@ -10,7 +13,7 @@ from agent_index_service.composition import core_environment
 from agent_index_service.config import ConfigurationError, load_config, parse_config
 
 
-def test_source_layout_opt_in_is_explicit_and_scoped(config_data, tmp_path, monkeypatch):
+def test_source_layout_opt_in_is_explicit_and_scoped(config_data: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert "AGENT_INDEX_STORE_LAYOUT" not in parse_config(
         config_data, tmp_path / "host.yaml",
     ).core_environment()
@@ -24,13 +27,13 @@ def test_source_layout_opt_in_is_explicit_and_scoped(config_data, tmp_path, monk
 
 @pytest.mark.parametrize("store", [{}, {"layout": "legacy"}, {"layout": "unknown"},
                                   {"layout": "source-aware-v1", "adopt_legacy": True}])
-def test_unknown_or_adoptive_layout_not_accepted(config_data, tmp_path, store):
+def test_unknown_or_adoptive_layout_not_accepted(config_data: dict[str, Any], tmp_path: Path, store: object) -> None:
     config_data["store"] = store
     with pytest.raises(ConfigurationError):
         parse_config(config_data, tmp_path / "host.yaml")
 
 
-def test_optional_fleet_policy_is_explicit_and_scoped(config_data, tmp_path, monkeypatch):
+def test_optional_fleet_policy_is_explicit_and_scoped(config_data: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert "AGENT_INDEX_FLEET_POLICY" not in parse_config(
         config_data, tmp_path / "host.yaml",
     ).core_environment()
@@ -47,20 +50,20 @@ def test_optional_fleet_policy_is_explicit_and_scoped(config_data, tmp_path, mon
 @pytest.mark.parametrize("fleet", [
     {"policy": "relative"}, {"policy": None}, {"policy": "x", "token": "not-accepted"},
 ])
-def test_invalid_fleet_policy_reference(config_data, tmp_path, fleet):
+def test_invalid_fleet_policy_reference(config_data: dict[str, Any], tmp_path: Path, fleet: object) -> None:
     config_data["fleet"] = fleet
     config_data["store"] = {"layout": "source-aware-v1"}
     with pytest.raises(ConfigurationError):
         parse_config(config_data, tmp_path / "host.yaml")
 
 
-def test_fleet_policy_cannot_implicitly_select_or_adopt_store(config_data, tmp_path):
+def test_fleet_policy_cannot_implicitly_select_or_adopt_store(config_data: dict[str, Any], tmp_path: Path) -> None:
     config_data["fleet"] = {"policy": str(tmp_path / "policy.json")}
     with pytest.raises(ConfigurationError, match="explicit store.layout"):
         parse_config(config_data, tmp_path / "host.yaml")
 
 
-def test_defaults_and_environment(config_data, tmp_path):
+def test_defaults_and_environment(config_data: dict[str, Any], tmp_path: Path) -> None:
     config = parse_config(config_data, tmp_path / "host.yaml")
     env = config.core_environment()
     assert config.data == config.home / "data"
@@ -73,7 +76,7 @@ def test_defaults_and_environment(config_data, tmp_path):
     assert not config.home.exists()
 
 
-def test_explicit_installation_identity_is_projected_without_ambient_spoof(config_data, tmp_path, monkeypatch):
+def test_explicit_installation_identity_is_projected_without_ambient_spoof(config_data: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENT_INDEX_INSTALLATION_ID", "ambient-spoof")
     unspecified = parse_config(config_data, tmp_path / "host.yaml")
     with core_environment(unspecified):
@@ -87,13 +90,13 @@ def test_explicit_installation_identity_is_projected_without_ambient_spoof(confi
 
 
 @pytest.mark.parametrize("identity", [None, "", " leading", "line\nbreak", "not ascii \u2603", "x" * 257])
-def test_invalid_installation_identity(config_data, tmp_path, identity):
+def test_invalid_installation_identity(config_data: dict[str, Any], tmp_path: Path, identity: object) -> None:
     config_data["installation_id"] = identity
     with pytest.raises(ConfigurationError):
         parse_config(config_data, tmp_path / "host.yaml")
 
 
-def test_account_relay_git_remote_is_explicit_and_preserved(config_data, tmp_path):
+def test_account_relay_git_remote_is_explicit_and_preserved(config_data: dict[str, Any], tmp_path: Path) -> None:
     policy = tmp_path / "worker-policy.json"
     config_data["sources"] = [{
         "name": "git:fixture", "path": str(tmp_path / "repository"),
@@ -113,7 +116,7 @@ def test_account_relay_git_remote_is_explicit_and_preserved(config_data, tmp_pat
     {"relay": "relative", "account": "account-a"},
     {"relay": "relative"},
 ])
-def test_invalid_account_relay_references(config_data, tmp_path, auth):
+def test_invalid_account_relay_references(config_data: dict[str, Any], tmp_path: Path, auth: object) -> None:
     config_data["sources"] = [{"name": "github:example/project", "auth": auth}]
     with pytest.raises(ConfigurationError):
         parse_config(config_data, tmp_path / "host.yaml")
@@ -132,7 +135,7 @@ def test_invalid_account_relay_references(config_data, tmp_path, auth):
     ("unknown", 1), ("limits", {"unknown": 1}),
     ("listener", ["127.0.0.1"]),
 ])
-def test_invalid_config(config_data, tmp_path, key, value):
+def test_invalid_config(config_data: dict[str, Any], tmp_path: Path, key: str, value: object) -> None:
     data = copy.deepcopy(config_data)
     data[key] = value
     with pytest.raises(ConfigurationError):
@@ -151,13 +154,13 @@ def test_invalid_config(config_data, tmp_path, key, value):
     {"name": "git:fixture", "repo": "registry-resolution-is-not-accepted"},
     {"name": " git:fixture"},
 ])
-def test_invalid_sources(config_data, tmp_path, source):
+def test_invalid_sources(config_data: dict[str, Any], tmp_path: Path, source: object) -> None:
     config_data["sources"] = [source]
     with pytest.raises(ConfigurationError):
         parse_config(config_data, tmp_path / "host.yaml")
 
 
-def test_duplicate_sources(config_data, tmp_path):
+def test_duplicate_sources(config_data: dict[str, Any], tmp_path: Path) -> None:
     config_data["sources"].append({
         "name": "git:FIXTURE", "path": str(tmp_path / "other"),
     })
@@ -171,26 +174,26 @@ def test_duplicate_sources(config_data, tmp_path):
     "- a\n- b\n",
     "{invalid",
 ])
-def test_invalid_yaml(tmp_path, text):
+def test_invalid_yaml(tmp_path: Path, text: str) -> None:
     path = tmp_path / "host.yaml"
     path.write_text(text, encoding="utf-8")
     with pytest.raises(ConfigurationError):
         load_config(path)
 
 
-def test_missing_file(tmp_path):
+def test_missing_file(tmp_path: Path) -> None:
     with pytest.raises(ConfigurationError, match="cannot read"):
         load_config(tmp_path / "absent.yaml")
 
 
-def test_invalid_encoding(tmp_path):
+def test_invalid_encoding(tmp_path: Path) -> None:
     path = tmp_path / "host.yaml"
     path.write_bytes(b"\xff\xfe")
     with pytest.raises(ConfigurationError, match="cannot read"):
         load_config(path)
 
 
-def test_environment_overrides_are_scoped(monkeypatch, config_data, tmp_path):
+def test_environment_overrides_are_scoped(monkeypatch: pytest.MonkeyPatch, config_data: dict[str, Any], tmp_path: Path) -> None:
     config = parse_config(config_data, tmp_path / "host.yaml")
     monkeypatch.setenv("AGENT_INDEX_ENGINE_MODE", "subprocess")
     monkeypatch.setenv("AGENT_INDEX_SOURCE_MODE", "ambient")
@@ -208,7 +211,7 @@ def test_environment_overrides_are_scoped(monkeypatch, config_data, tmp_path):
     assert dict(os.environ) == before
 
 
-def test_explicit_legacy_selection_not_implicit(config_data, tmp_path):
+def test_explicit_legacy_selection_not_implicit(config_data: dict[str, Any], tmp_path: Path) -> None:
     # A simulated legacy home, never the operator's actual home.
     config_data["home"] = str(tmp_path / ".agent-index")
     config = parse_config(config_data, tmp_path / "host.yaml")
@@ -216,7 +219,7 @@ def test_explicit_legacy_selection_not_implicit(config_data, tmp_path):
     assert config.data == config.home / "data"
 
 
-def test_github_and_source_metadata(config_data, tmp_path):
+def test_github_and_source_metadata(config_data: dict[str, Any], tmp_path: Path) -> None:
     config_data["sources"] = [{
         "name": "github:owner/repo", "auth": {"account": "selected"},
         "trust_domain": "work",
@@ -226,7 +229,7 @@ def test_github_and_source_metadata(config_data, tmp_path):
     assert config.sources[0]["trust_domain"] == "work"
 
 
-def test_gateway_ingestion_selection_survives_detached_worker_environment(config_data, tmp_path):
+def test_gateway_ingestion_selection_survives_detached_worker_environment(config_data: dict[str, Any], tmp_path: Path) -> None:
     policy = tmp_path / "worker.json"
     checkout = tmp_path / "checkouts" / "repo"
     config_data["sources"] = [
@@ -256,8 +259,8 @@ def test_gateway_ingestion_selection_survives_detached_worker_environment(config
     {"auth": {"account": "selected", "gateway": "relative"}},
     {"auth": {"account": "selected", "gateway": "x", "token": "forbidden"}},
 ])
-def test_invalid_gateway_source_selection(config_data, tmp_path, change):
-    source = {
+def test_invalid_gateway_source_selection(config_data: dict[str, Any], tmp_path: Path, change: dict[str, Any]) -> None:
+    source: dict[str, Any] = {
         "name": "git:repo", "path": str(tmp_path / "checkout"),
         "remote": "https://example.test/repo.git",
         "auth": {"account": "selected", "gateway": str(tmp_path / "worker.json")},

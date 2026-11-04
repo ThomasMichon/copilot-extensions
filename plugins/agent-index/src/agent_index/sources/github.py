@@ -7,7 +7,7 @@ import json
 import os
 import hashlib
 from collections.abc import Callable, Iterable
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -21,6 +21,8 @@ from agent_index.sources.good_citizen_http import (
     GoodCitizenSession,
     has_next_link,
 )
+
+UTC = timezone.utc
 
 log = logging.getLogger(__name__)
 
