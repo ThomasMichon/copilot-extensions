@@ -25,6 +25,7 @@ from .pr_patch_ids import (
 )
 from .pr_bypass_note import self_merge_bypass_note
 from .pr_observation_persistence import persist_observation as _persist_pr_observation
+from .providers.base import PullResult
 from .tracking import PRRecord
 
 HOLD_LABEL = "do-not-merge"
@@ -552,7 +553,7 @@ def create_pr(
                 "access with mismatched credentials."
             ),
         }
-    _reconcile_active_pr(record, config)
+    observed_pulls = _reconcile_active_pr(record, config) or {}
     active = record.active_pr() if record else None
     active_is_live = active is not None and not tracking._pr_is_terminal(active)
 
@@ -737,6 +738,7 @@ def create_pr(
             worktree_path, feature_branch, publish_remote, repo, prcfg, record,
             base, config=config, worktree_id=worktree_id, title=eff_title,
             body=body, open_pr=open_pr, draft=want_draft, attribution=attribution,
+            observed_pulls=observed_pulls,
             pr_head=(f"{fork_owner}:{feature_branch}" if fork_owner else ""), fork_head_repo=fork_head_repo, fork_head_identity=fork_head_identity, source_ref=resume_source,
         )
 
@@ -764,6 +766,7 @@ def create_pr(
             worktree_path, feature_branch, publish_remote, repo, prcfg, record,
             base, config=config, worktree_id=worktree_id, title=eff_title,
             body=body, open_pr=open_pr, draft=want_draft, attribution=attribution,
+            observed_pulls=observed_pulls,
             pr_head=(f"{fork_owner}:{feature_branch}" if fork_owner else ""), fork_head_repo=fork_head_repo, fork_head_identity=fork_head_identity,
         )
 
@@ -1020,6 +1023,7 @@ def create_pr(
         result, config, record, target_pr, title=eff_title, body=body,
         worktree_id=worktree_id, head_sha=head_sha, open_pr=open_pr,
         draft=want_draft, attribution=attribution, prcfg=prcfg, published_identity=getattr(pushed, "head_identity", ""),
+        observed_pulls=observed_pulls,
     )
     observation_error = refresh_head_observation(
         config, record, target_pr, head_sha
@@ -1275,10 +1279,7 @@ def _open_via_provider(
     result["url"] = pull.url
     result["number"] = pull.number
     result["state"] = pull.state or result.get("state")
-    # Reflect what THIS call actually did: a draft was created only when we asked
-    # the provider to open one. (The caller pre-seeds result["draft"] with the
-    # request intent for the dry-run/no-open paths; here we make it authoritative
-    # for the opened PR so "opened as a DRAFT" can never be reported falsely.)
+    # Provider-observed draft state overrides this legacy default below.
     result["draft"] = bool(draft)
     labels = pr_publication_labels.refresh(config, record, target_pr)
     if labels is not None:
@@ -1513,6 +1514,7 @@ def _finish_auto_open(
     attribution: SourceAttribution | None,
     prcfg,
     published_identity: str = "",
+    observed_pulls: dict | None = None,
 ) -> None:
     """Open the PR (when pending) or surface an already-open PR's number/url.
     Both initial and incremental create-pr publication record ownership here.
@@ -1533,6 +1535,14 @@ def _finish_auto_open(
         if error:
             result["rewrite_ownership_error"] = error
             output.warn(error)
+    if target_pr.number is not None:
+        from .pr_metadata import include_publication_metadata
+        result["draft"] = False
+        key = (target_pr.pr_id or (target_pr.provider, target_pr.repo), target_pr.number)
+        include_publication_metadata(
+            result, (observed_pulls or {}).get(key), requested_draft=draft,
+            require_draft_observation=prcfg.provider == "azure-devops",
+        )
     if not want_open:
         # Nothing is opened or changed on the provider (create-pr already read the tracked
         # PR's state, so a merged PR's branch is never reused); say what exists so no caller is told
@@ -1543,7 +1553,6 @@ def _finish_auto_open(
             result["pr_opened"] = True
             result["pr_existing"] = True  # it was already open: this run opened nothing
             result["number"] = target_pr.number
-            result["draft"] = False  # nothing was opened here, so no draft was created
             if target_pr.url:
                 result["url"] = target_pr.url
         return
@@ -1586,10 +1595,6 @@ def _finish_auto_open(
         result["url"] = target_pr.url
     if target_pr.state:
         result["state"] = target_pr.state
-    # This call did not open a PR, so it created no draft -- never let a
-    # re-run's ``--draft`` request masquerade as "opened as a DRAFT". Un-drafting
-    # an already-open PR is pr-ready's job, not create-pr's.
-    result["draft"] = False
     # codename-attribution-by-default (round-38 finding): always invoke
     # refresh_source_attribution when a record exists -- never gate the
     # call itself on a LIVE `want_attribution` snapshot. A PR frozen under
@@ -1617,7 +1622,7 @@ def _reconcile_active_pr(
     config: Config,
     *,
     best_effort: bool = False,
-) -> None:
+) -> dict:
     """Reconcile tracked PRs and their claims against the configured provider.
 
     Includes terminal records with lingering live PR claims. Unavailable or
@@ -1625,9 +1630,13 @@ def _reconcile_active_pr(
     source content. ``best_effort`` skips a contended record lock.
     """
     if record is None:
-        return
+        return {}
+    observations = {}
     for pr in list(record.prs):
-        _reconcile_pr(record, pr, config, best_effort=best_effort)
+        pull = _reconcile_pr(record, pr, config, best_effort=best_effort)
+        if pull is not None:
+            observations[(pr.pr_id or (pr.provider, pr.repo), pr.number)] = pull
+    return observations
 
 
 def _pr_needs_reconcile(record: tracking.WorktreeRecord, pr: PRRecord) -> bool:
@@ -1643,7 +1652,7 @@ def _pr_needs_reconcile(record: tracking.WorktreeRecord, pr: PRRecord) -> bool:
 def _reconcile_pr(
     record: tracking.WorktreeRecord, active: PRRecord | None, config: Config,
     *, best_effort: bool = False,
-) -> None:
+) -> PullResult | None:
     """Persist one authority-matched provider observation and claim transition."""
     if active is None or not _pr_needs_reconcile(record, active):
         return
@@ -1709,6 +1718,7 @@ def _reconcile_pr(
         # Reload and revalidate the observation's authority after admission.
         with pr_authority.guard(timeout=publication_deadline.lock_wait(publication_deadline.configured(prcfg))):
             _persist_pr_observation(record, active, state, resolved, provider_terminal, pull)
+    return pull
 
 
 def _live_pr_state(
@@ -2314,6 +2324,7 @@ def _push_existing_feature(
     draft: bool,
     attribution: SourceAttribution | None,
     pr_head: str = "", fork_head_repo: str = "", fork_head_identity: str = "", source_ref: str = "",
+    observed_pulls: dict | None = None,
 ) -> dict:
     """Resume an exact prepared source or update an existing feature branch.
 
@@ -2404,6 +2415,7 @@ def _push_existing_feature(
         result, config, record, target, title=title, body=body,
         worktree_id=worktree_id, head_sha=head_sha, open_pr=open_pr,
         draft=draft, attribution=attribution, prcfg=prcfg, published_identity=getattr(pushed, "head_identity", ""),
+        observed_pulls=observed_pulls,
     )
     observation_error = refresh_head_observation(config, record, target, head_sha)
     if observation_error:

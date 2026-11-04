@@ -112,6 +112,8 @@ class AzureDevOpsProvider:
         ]
         for label in scope.labels:
             args += ["--labels", label]
+        if scope.draft:
+            args += ["--draft", "true"]
         proc = run_cli(args, env=self._env(token))
         if proc.returncode != 0:
             raise ProviderError(
@@ -121,13 +123,14 @@ class AzureDevOpsProvider:
         data = json.loads(proc.stdout)
         number = data.get("pullRequestId")
         state = self._canonical_state(str(data.get("status", "active")).lower())
-        from ..pr_metadata import MetadataPullResult
+        from ..pr_metadata import MetadataPullResult, draft_confirmation
 
         result = MetadataPullResult(
             url=self._web_url(scope.api_base, project, name, number),
             number=int(number) if number is not None else None,
             state=state,
             merged=state == "merged",
+            draft=data.get("isDraft") if type(data.get("isDraft")) is bool else None,
         )
         if result.number is not None:
             try:
@@ -141,6 +144,9 @@ class AzureDevOpsProvider:
                     "url": result.url, "publication_retained": True,
                     "actions": {"description": {"status": "unknown", "error": str(exc)}},
                 }
+            if scope.draft and result.draft is not True:
+                result.metadata["ok"] = False
+                result.metadata.setdefault("actions", {})["draft"] = draft_confirmation(result.draft)
         return result
 
     def update_pull_metadata(self, repo, number, **kwargs):
@@ -260,6 +266,7 @@ class AzureDevOpsProvider:
             merged=merged,
             head_sha=head_sha,
             base_ref=source_text(data, "targetRefName").removeprefix("refs/heads/"),
+            draft=data.get("isDraft") if type(data.get("isDraft")) is bool else None,
             **azure_source(data),
         )
 
@@ -669,6 +676,7 @@ class AzureDevOpsProvider:
             state=state,
             merged=merged,
             base_ref=source_text(p, "targetRefName").removeprefix("refs/heads/"),
+            draft=p.get("isDraft") if type(p.get("isDraft")) is bool else None,
             **azure_source(p),
         )
 

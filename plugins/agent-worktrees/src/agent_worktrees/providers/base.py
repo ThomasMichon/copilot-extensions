@@ -130,6 +130,8 @@ class PullResult:
     being silently swallowed, so a dropped ``auto-merge`` / ``source:<machine>``
     label is visible rather than mysterious.
     """
+    draft: bool | None = None
+    """Provider-observed native draft state, or None when not reported."""
 @runtime_checkable
 class PRProvider(Protocol):
     """Protocol every PR provider implements."""

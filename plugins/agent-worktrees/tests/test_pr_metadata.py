@@ -117,6 +117,40 @@ def update(**kwargs):
     )
 
 
+@pytest.mark.parametrize("requested,observed", [
+    (True, True), (True, False), (True, None), (False, False),
+])
+def test_create_forwards_and_verifies_native_draft(backend, monkeypatch, requested, observed):
+    transport = backend.cli
+
+    def cli(args, **kwargs):
+        if args[:4] == ["az", "repos", "pr", "create"]:
+            if requested:
+                assert args[args.index("--draft") + 1] == "true"
+            else:
+                assert "--draft" not in args
+            if observed is not None:
+                backend.pr["isDraft"] = observed
+        return transport(args, **kwargs)
+
+    monkeypatch.setattr(azure, "run_cli", cli)
+    pull = azure.AzureDevOpsProvider().create_pull(
+        PRScope(REPO, "topic", "main", "title", body="body", api_base=ORG, draft=requested),
+        token="fixture-pat",
+    )
+    result = {"draft": requested}
+    pr_metadata.include_publication_metadata(result, pull)
+    assert pull.number == 7 and backend.creates == 1
+    assert result["draft"] is (observed is True)
+    if requested and observed is not True:
+        assert not result["author_metadata"]["ok"]
+        action = result["author_metadata"]["actions"]["draft"]
+        assert action["status"] == ("unknown" if observed is None else "failed")
+        assert result.get("draft_unconfirmed", False) is (observed is None)
+    else:
+        assert result["author_metadata"]["ok"]
+
+
 def test_exact_markdown_additive_reviewers_cross_project_links_and_labels(backend):
     original_reviewer = deepcopy(backend.pr["reviewers"][0])
     original_relation = deepcopy(backend.wi["relations"][0])

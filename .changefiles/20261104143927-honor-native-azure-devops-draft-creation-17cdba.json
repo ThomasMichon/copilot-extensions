@@ -1,0 +1,9 @@
+{
+  "comment": "Honor native Azure DevOps draft creation and retain provider-observed draft state in publication results.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
