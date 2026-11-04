@@ -123,6 +123,34 @@ Fail-closed admission predicates are not strict configuration readback:
 `automatic_maintenance_enabled()` also returns `False` on unreadable/invalid
 configuration. That result alone cannot verify a requested disabled setting.
 
+## Verified subtask examples
+
+These are sanitized Windows repair observations, **not universal current-version
+guarantees or a completed whole-installation update**. They addressed capabilities
+already selected by operator configuration under existing repair authority;
+they do not authorize activating an unconfigured service or enabling an
+intentionally disabled capability. Recheck the selected authentic release's
+implementation before applying the same route.
+
+| Observed boundary | Canonical repair and verification | What was not established |
+|-------------------|-----------------------------------|--------------------------|
+| An interrupted same-boot update fence remained with no live installer | The supported `update --recover-for-repair` owner released the fence after its inactivity checks; see [native-confirmed recovery](../libs/update-driver/README.md#native-confirmed-same-boot-failure) | Release did not clean up or settle the interrupted operation. Subsequent ordinary updates and their actual results were still required. |
+| Bridge runtime and commands were installed, but an existing disabled scheduled task referenced a missing launcher | The selected authentic [Bridge installer](../plugins/agent-bridge/scripts/install.ps1) supplied the exact `launcherBody` expression, selected through its PowerShell AST and evaluated with normal template inputs. Original task XML was retained; task/source hashes and the missing-file condition were rechecked before restoring only that launcher and enabling the exact existing task. Service health then proved the current generation, with source/configuration bytes unchanged and no elevation. | The existing-task “leave untouched” branch had not regenerated the missing artifact. Task presence or successful runtime/binstub construction alone had not proved service readiness. |
+| Index project activation selected client while the machine's explicit role was host | The completed/current client slot lacked its required host-role server sibling. Repair reused the authentic [Index installer's](../plugins/agent-index/scripts/install.ps1) `Install-ServerVenv` with the explicit host role, under `Enter-IndexBuildLock`, then `Ensure-ServiceRunning`. Native cutover health passed; installer/configuration/primary completion bytes and index data were unchanged. | An ordinary owner update had returned zero despite a host-runtime-unavailable error and reused the completed client slot without constructing the sibling. Neither its exit code nor primary completion established the configured host footprint. This was not enrollment of an optional, unconfigured host. |
+| Bridge published an endpoint, then exceeded its native installation deadline | A fresh process census after installer exit found neither the installer nor a live Bridge central process; the published PID was dead. Supported installer `start` through its canonical scheduled task restored the current service. | Endpoint/marker publication was not continuing serving proof. The timeout was not a successful update, and the empty census was not itself recovery. |
+| Vault activation failed inside ordinary update although its standalone activation reader worked with normal interpreter defaults | The published [Vault installer](../plugins/agent-vault/scripts/install.ps1) update succeeded from the intended project context without a Python override. Its existing canonical task nevertheless remained disabled after an “already correct”/zero-exit result; exact-task enable/start used XML before-state, compare-before-mutation and after-state receipts. | The contrast did not prove a global Python defect or justify changing PATH/interpreter policy. Installer success had not verified the task's enabled/running state. Final ordinary full-update verification remained a separate obligation. |
+
+The Index case constructed an absent role-specific sibling through its existing
+build owner. It was not a package-logic edit or a generic in-place rebuild of
+completed primary code.
+
+These subtask repairs did not patch runtime package code, erase roots/slots/
+caches, modify global identity or security policy, or manually kill processes.
+Known session/Picker identities were retained. This is preservation evidence
+for those addressed operations, not a claim that every possible session,
+connectivity path or later release has been qualified. A newer release admitted
+during a subsequent update must be verified as that update's selected set.
+
 ## Completion evidence and limits
 
 For the **requested set**, verify authentic source/profile, completed incoming
@@ -141,13 +169,11 @@ set ready, or kill session keepers to tidy the process list. Never use whole-roo
 erase, recursive deletion through junctions, wildcard state deletion or
 process-name termination as repair.
 
-The grounded observations here are narrow: flat/nested environments and
-Windows venv/base pairs are documented variants; source, payload, selected and
-running versions differ; an older command surface need not prevent an exact
-schema-preserving configuration correction with canonical readback. The decision
-routes above are not evidence of successful stale-queue recovery or central
-retirement. New verified cases should name their owning artifact and consumer
-assertion without private host inventories, transcripts or identifying receipts.
+Keep the evidence boundaries narrow: documented environment variants, canonical
+configuration readback and the [verified subtasks](#verified-subtask-examples)
+do not establish whole-set update completion or outgoing central retirement.
+New cases should name their owning artifact and consumer assertion without
+private host inventories, transcripts or identifying receipts.
 
 Return to [installation/recovery](installation.md#maintenance-and-recovery) or
 the [diagnosis skill](../plugins/copilot-extensions-harness/skills/diagnosing-copilot-extensions/SKILL.md)
