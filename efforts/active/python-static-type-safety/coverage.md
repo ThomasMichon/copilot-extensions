@@ -91,7 +91,7 @@ Admission decisions and validation details are retained in the
 | `lib-installer-readiness` | 10 | **Locked** | #10044 |
 | `lib-lazy-cli-dispatch` | 3 | **Locked** | #9951 |
 | `lib-machine-transport` | 19 | **Locked** | #10107; five consumer contracts and native qualification |
-| `lib-payload-invocation` | 31 | Pending | Production and fixture cohorts; emitted templates/copies also need qualification |
+| `lib-payload-invocation` | 31 | Pending | #10371; canonical source/test preparation; executed/emitted helpers and consumer copies need qualification |
 | `lib-peer-launch` | 3 | **Locked** | #9967 |
 | `lib-plugin-activation` | 21 | **Locked** | #10108 / merged #10150; both targets, native fixtures and nine consumer contracts |
 | `lib-plugin-resolve` | 23 | **Locked** | #10141 / merged #10165; both targets, native fixtures and ten consumer contracts |

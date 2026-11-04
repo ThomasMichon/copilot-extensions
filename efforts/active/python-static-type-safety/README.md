@@ -8,7 +8,7 @@
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
 - **Coverage:** [Portfolio tracker and merged lockdown records](coverage.md)
-- **Current slice:** Versioned Runtime and persistent dual-version checker (#10331), and the Copilot Extensions Harness payload helpers/tests (#10362). Retained effort helpers (#10215), SSH service (#10211), PR service (#10204), Index service (#10206), Credential Relay (#10222), Harness Knowledge (#10185), Context Handoff (#10179), Dispatch service (#10184), Devcontainer (#10183), AI Attribution (#10171), Venue Copilot (#10166), Plugin Resolve (#10141), Plugin Activation (#10108), Machine Transport (#10107), Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
+- **Current slice:** Versioned Runtime and persistent dual-version checker (#10331), the Copilot Extensions Harness payload helpers/tests (#10362), and canonical Payload Invocation (#10371). Retained effort helpers (#10215), SSH service (#10211), PR service (#10204), Index service (#10206), Credential Relay (#10222), Harness Knowledge (#10185), Context Handoff (#10179), Dispatch service (#10184), Devcontainer (#10183), AI Attribution (#10171), Venue Copilot (#10166), Plugin Resolve (#10141), Plugin Activation (#10108), Machine Transport (#10107), Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -32,7 +32,7 @@ definition of success.
 
 - **Topology:** Independent per-slice PRs, never a concurrently edited shared staging branch. The lead may integrate non-overlapping test cohorts into one bounded reviewed slice after their isolated validation.
 - **Host (owns PRs):** `lead` owns its PRs and verifies completion of delegated PRs.
-- **Delegates:** Versioned Runtime/checker and the Copilot Extensions Harness payload helpers/tests qualify independently in dedicated worktrees; retained effort-helper, SSH, PR and Index service admissions have merged. Heavy unit/native qualification is staggered for actual test capacity, not a shared PR merge queue. Each owner receives an explicit bounded qualification and publication assignment; the lead retains integration, shared coverage/global documentation, the effort and full completion judgment. Completed children are finalized only after their merged evidence returns to this tracker.
+- **Delegates:** Versioned Runtime/checker, the Copilot Extensions Harness payload helpers/tests and canonical Payload Invocation qualify independently in dedicated worktrees; retained effort-helper, SSH, PR and Index service admissions have merged. Heavy unit/native qualification is staggered for actual test capacity, not a shared PR merge queue. Each owner receives an explicit bounded qualification and publication assignment; the lead retains integration, shared coverage/global documentation, the effort and full completion judgment. Completed children are finalized only after their merged evidence returns to this tracker.
 - **Handoff:** A merged slice returns to the canonical README, updates its Plan/Validation/Journal, then selects the next unresolved item. A continuation retains #9807, this README, the current slice, live PRs and exactly one next action.
 - Existing contributor PRs are reviewed/coordinated, not superseded. Shared-library changes precede dependent activations; unrelated leaf activations may proceed independently.
 
@@ -171,6 +171,7 @@ rewrite.
 - [x] Strictly admit all canonical Venue Copilot source/test modules (#10166).
 - [x] Strictly admit all 22 canonical Credential Relay source/test files with Python 3.10 native/copy qualification (#10222 / merged #10310); keep consumer projects independently pending.
 - [ ] Strictly admit Versioned Runtime's complete source/test/helper scope with unchanged runtime behavior, persistent 3.10/3.11 qualification and canonical generated-copy correspondence (#10331).
+- [ ] Strictly admit canonical Payload Invocation's complete Python source/test scope and executed/emitted helpers, preserving consumer-copy ownership and actual helper minimums (#10371).
 - [ ] Admit near-clean leaf libraries through small annotation/narrowing PRs; activate directly in strict mode when possible.
 - [ ] Admit remaining shared libraries in basic mode, then close their stricter deltas in separate PRs until every shared library is strict.
 - [ ] Replace loose generics and unchecked boundary results with honest callable, protocol and validated data contracts; rerun affected consumer checks/tests.
@@ -2696,3 +2697,19 @@ composition prerequisites, and review/validation rules.
   the shared checker and generated runtime family already owned by #10331.
   Both slices remain uncredited until their own review, applicable native/
   emitted-copy qualification and merge. This effort and #9807 remain Active.
+
+### 2026-11-03 - Canonical Payload Invocation preparation selected
+
+- #10371 selects the independent canonical Payload Invocation library,
+  initially 31 physical Python files, including its executed/emitted Python.
+  Preparation owns the library, its tests and its checker row, not writes
+  across consumer trees or the shared checker already owned by #10331.
+- The Copilot Extensions Harness helper slice has typed three scripts and
+  preserved its original callable/assertion contracts in light tests, but its
+  complete project remains pending while test typing, real import resolution
+  and embedded/minimum qualification continue. An unresolved first-party
+  import is not permission to insert an unchecked substitute.
+- These are preparation scopes, not admissions. Source-data correspondence,
+  actual interpreter/native and generated-copy qualification, review and
+  required CI remain explicit gates. All global Plan/Validation and final
+  completion conditions remain Active.
