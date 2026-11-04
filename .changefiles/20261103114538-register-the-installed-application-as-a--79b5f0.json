@@ -1,0 +1,9 @@
+{
+  "comment": "Register the installed application as a separate plain Bridge provider with configured-registry matching, install-root precedence, explicit I/O refusal and preserved canonical payload ownership",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

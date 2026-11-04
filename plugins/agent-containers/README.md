@@ -19,6 +19,56 @@ container port, key, or SSH daemon is added. The CLI and binstub are owned by
 this plugin and work standalone; without agent-bridge only bridge addressing
 (`container:<name>`) is unavailable.
 
+## Application-project qualification
+
+The internal `__source-setup` and `__source-start` callbacks validate
+configuration strictly and repeatably without
+starting Docker, fleet members, relays or Session Hosts. Containers has no
+installation-owned resident. Configuration admission is not serving readiness:
+the existing `installer-readiness` command separately reports configured and
+provisioned fleet state.
+
+After strict configuration admission, setup publishes the explicit plain
+`providers.d/agent-containers.standalone.json` contribution through the shared
+atomic writer, invoking the installed global binstub. Bridge need not already
+be installed, and plugin activation is not a prerequisite. Bridge's existing
+schema-0 advisory applies; this entry does not borrow payload identity. The command may be
+absent until the installer publishes its global front door; Bridge then admits
+it on a later scan. Startup and session hooks do not publish this app entry.
+
+The separate `agent-containers.json` schema-1 payload contribution retains its
+identity, eligibility checks and filename precedence. Disabled payloads do not
+hide the plain application contribution. The earlier-sorting payload exception
+is limited to the canonical `agent-containers` plugin name with a nonempty
+marketplace; it works across marketplaces, not for foreign plugins claiming
+the same namespace. Setup never converts an existing
+identity-bearing record into a plain one: it creates its separate entry without
+clobbering another writer, reuses an identical binding without rewriting it, and refuses conflicting
+plain namespace claims or identity-bearing claims whose filename would lose
+precedence. Peer entries are never overwritten or removed. Rejected
+configuration creates no provider entry. This registration is not a Docker,
+fleet or serving-readiness check.
+
+Malformed or oversized unrelated entries are isolated per entry. An invalid
+or oversized entry at the application's own destination is refused unchanged.
+Registry enumeration I/O errors refuse publication, including unchanged-entry
+setup, without rewriting entries. Only a genuinely absent directory is empty.
+Registry location precedence is `AGENT_BRIDGE_PROVIDERS_DIR`,
+`AGENT_BRIDGE_CONFIG_DIR/providers.d`, `AGENT_BRIDGE_INSTALL_DIR/providers.d`,
+then the home fallback. A registry ending in the exact canonical name
+`providers.d` must lexically belong to that configured Bridge config root,
+matching the consumer's expanded/absolute platform-normalized path comparison.
+A mismatch refuses setup before directory creation or publication, without
+resolving symlinks. A custom noncanonical directory name remains the intentional
+override escape hatch. The real-consumer regression uses the canonical Bridge
+test environment (`tools/run-plugin-tests.py agent-bridge --prepare-only`);
+it never invokes a provider command.
+
+The contained wheel/sdist/prepared-source resource packet checks each linked
+origin as a separate bounded item, sharing only its fixture-owned installed
+slot and restoring every moved resource. This preserves every refusal control
+without accumulating nine child probes in one item deadline.
+
 ## Legacy runtime removal
 
 Use `scripts/init.ps1 -Action uninstall -InstallDir <root>` or

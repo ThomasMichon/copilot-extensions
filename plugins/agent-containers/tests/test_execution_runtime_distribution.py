@@ -42,9 +42,7 @@ def _run(
     return result
 
 
-@pytest.fixture
-def project(tmp_path: Path) -> Path:
-    project = tmp_path / "release/plugins/agent-containers"
+def _project(project: Path) -> Path:
     project.mkdir(parents=True)
     for name in ("pyproject.toml", "README.md", "setup.py", "MANIFEST.in"):
         shutil.copyfile(PLUGIN / name, project / name)
@@ -55,6 +53,11 @@ def project(tmp_path: Path) -> Path:
     for name in (*RESOURCES, "standalone_build.py"):
         shutil.copyfile(PLUGIN / "scripts" / name, project / "scripts" / name)
     return project
+
+
+@pytest.fixture
+def project(tmp_path: Path) -> Path:
+    return _project(tmp_path / "release/plugins/agent-containers")
 
 
 def _build(project: Path, output: Path, operation: str = "build_wheel") -> Path:
@@ -87,15 +90,17 @@ def _extract(sdist: Path, destination: Path) -> Path:
     return project
 
 
-@pytest.mark.parametrize("layout", ["wheel", "sdist", "prepared"])
-def test_fresh_installed_process_owns_exact_resources_and_retention(
-    project: Path, tmp_path: Path, layout: str, monkeypatch: pytest.MonkeyPatch,
-) -> None:
+@pytest.fixture(scope="module", params=["wheel", "sdist", "prepared"])
+def installed_runtime(request, tmp_path_factory):
+    tmp_path = tmp_path_factory.mktemp("installed-" + request.param)
+    project = _project(tmp_path / "release/plugins/agent-containers")
+    layout = request.param
     if layout == "prepared":
-        monkeypatch.syspath_prepend(str(ROOT / "tools"))
-        from prepare_runtime_source import _materialize
-        project = tmp_path / "prepared"
-        _materialize(ROOT, "agent-containers", project)
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.syspath_prepend(str(ROOT / "tools"))
+            from prepare_runtime_source import _materialize
+            project = tmp_path / "prepared"
+            _materialize(ROOT, "agent-containers", project)
     expected = {
         "agent_containers/" + destination: (project / "scripts" / source).read_bytes()
         for source, destination in RESOURCES.items()
@@ -124,6 +129,14 @@ def test_fresh_installed_process_owns_exact_resources_and_retention(
         uv, "pip", "install", "--no-index", "--no-deps", "--python", str(python), str(wheel),
     ], cwd=tmp_path)
     project.rename(project.with_name("unavailable-source"))
+    site = Path(_run([
+        str(python), "-I", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))",
+    ], cwd=tmp_path).stdout.strip())
+    return root, python, site / "agent_containers", tmp_path
+
+
+def test_fresh_installed_process_owns_exact_resources_and_retention(installed_runtime) -> None:
+    root, python, _package, tmp_path = installed_runtime
     probe = """
 import json,os,sys
 from pathlib import Path
@@ -185,24 +198,26 @@ print(json.dumps({"slot_owned":True,"retainedCreation":False}))
 """
     result = _run([str(python), "-I", "-B", "-c", probe, str(root)], cwd=tmp_path)
     assert result.stdout.strip() == '{"slot_owned": true, "retainedCreation": false}'
-    site = Path(_run([
-        str(python), "-I", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))",
-    ], cwd=tmp_path).stdout.strip())
-    package = site / "agent_containers"
-    outside = tmp_path / "mutable-code"
+
+
+@pytest.mark.parametrize("name", [
+    "package", "__init__.py", "execution_runtime.py", *RESOURCES.values(),
+])
+def test_installed_process_refuses_each_linked_origin(installed_runtime, name: str) -> None:
+    root, python, package, tmp_path = installed_runtime
+    outside = tmp_path / ("mutable-" + name)
     outside.mkdir()
-    for name in ("package", "__init__.py", "execution_runtime.py", *RESOURCES.values()):
-        source = package if name == "package" else package / name
-        target = outside / name
-        source.rename(target)
+    source = package if name == "package" else package / name
+    target = outside / name
+    source.rename(target)
+    try:
         try:
-            try:
-                source.symlink_to(target, target_is_directory=name == "package")
-            except OSError as error:
-                if os.name == "nt" and getattr(error, "winerror", None) == 1314:
-                    pytest.skip("linked-origin controls require native symlink privilege")
-                raise
-            refusal = """
+            source.symlink_to(target, target_is_directory=name == "package")
+        except OSError as error:
+            if os.name == "nt" and getattr(error, "winerror", None) == 1314:
+                pytest.skip("linked-origin controls require native symlink privilege")
+            raise
+        refusal = """
 from pathlib import Path
 import sys
 from agent_containers.execution_runtime import retain_current_execution
@@ -216,11 +231,11 @@ except RuntimeError as error:
 else:
     raise AssertionError("linked origin was not refused")
 """
-            _run([str(python), "-I", "-B", "-c", refusal, str(root)], cwd=tmp_path)
-        finally:
-            if source.is_symlink():
-                source.unlink()
-            target.rename(source)
+        _run([str(python), "-I", "-B", "-c", refusal, str(root)], cwd=tmp_path)
+    finally:
+        if source.is_symlink():
+            source.unlink()
+        target.rename(source)
 
 
 @pytest.mark.parametrize("missing", [

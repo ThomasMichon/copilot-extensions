@@ -33,6 +33,7 @@ from agent_procutil import no_window_flags as _creation_flags
 
 from . import claim_provider_cli, hosting_policy, plugin_config, rescue_capture_cli
 from . import copilot_process_auth as process_auth
+from .application_provider import add_install_parsers
 from .config import (
     RESTRICTED_PROFILE,
     SECURITY_PROFILE_LABEL,
@@ -232,10 +233,7 @@ def main(argv: list[str] | None = None) -> int:
     host_cleanup.add_argument("--remote-env", required=True)
 
     sub.add_parser("version", help="Show version")
-    sub.add_parser(
-        "installer-readiness",
-        help="Emit the plugin-owned installer/readiness contract state as JSON",
-    )
+    add_install_parsers(sub, config_loader=load_config)
 
     sub.add_parser(
         "config-migrate",

@@ -1,0 +1,9 @@
+{
+  "comment": "Isolate oversized peer provider documents while refusing invalid application destinations",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

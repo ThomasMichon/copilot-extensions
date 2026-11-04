@@ -1,0 +1,9 @@
+{
+  "comment": "Admit idempotent configuration-only application setup and startup, and bound linked-origin resource probes",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}
