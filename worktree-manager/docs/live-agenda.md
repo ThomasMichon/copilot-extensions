@@ -245,6 +245,11 @@ pass merely because the higher revision arrived through a backward read.
 An already in-flight historical page still uses its start-time floor without
 lowering that shared fence. Display status reports the displayed latest page,
 not a newer store head seen only through historical metadata.
+Latest and catch-up commands capture their own retained floor before each
+child starts too, so an overlapping backward read cannot retroactively make a
+valid captured result look like a restored store. Explicit head-scope changes
+supersede the old viewer before either provider prepares, including when
+Worktree observations become available after an Agenda-only head.
 An Agenda head-change notice invalidates every bound selected-head source even
 before the first Agenda token exists. An explicit refresh selecting a different
 canonical head supersedes the retired viewer scope without depending on optional
@@ -254,6 +259,9 @@ hide/reopen, and immediately clears matching retained rows. Hiding or changing
 selection stops both provider scopes before waiting on either retirement.
 Selection synchronization rechecks its revision and actual visibility after
 Worktree preparation, so an older show request cannot restore hidden demand.
+Refresh marks loading, invalidates that synchronization and stops both scopes
+before its first retirement await; old show-time work cannot restart reads
+during reload.
 Repeated visible demand for the same selection does not restart a healthy rich
 reader.
 Retired history results and errors cannot downgrade a recovered source. A

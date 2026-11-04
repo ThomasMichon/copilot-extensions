@@ -41,9 +41,9 @@ class AgendaReader:
         self.revision = 0
         self._revision_lock = Lock()
 
-    def _retain_revision(self, revision: int, minimum: int, *, historical: bool = False) -> None:
+    def _retain_revision(self, revision: int, minimum: int, *, in_flight: bool = False) -> None:
         with self._revision_lock:
-            floor = minimum if historical else max(minimum, self.revision)
+            floor = minimum if in_flight else max(minimum, self.revision)
             if revision < floor:
                 raise OwnerReadError("source-replaced", "agenda store is behind accepted publication or retained evidence")
             self.revision = max(self.revision, revision)
@@ -56,13 +56,14 @@ class AgendaReader:
             info = self.commands.read(cancelled)
             self.codec.info(_raw(info))
             self._retain_revision(info["revision"], publication["revision"])
+        minimum_revision = max(self.revision, publication["revision"])
         page = self.codec.decode(_raw(self.commands.read(cancelled, history=True)))
         if page["type"] != "history-page" or page["before_cursor"] is not None:
             raise TimelineContractError("latest agenda read did not return a latest history page")
         revision = self.codec.revision(page["cursor"])
         if revision == publication["revision"] and page["committed_at"] != publication["committed_at"]:
             raise TimelineContractError("agenda reader and publication disagree at the same revision")
-        self._retain_revision(revision, publication["revision"])
+        self._retain_revision(revision, minimum_revision, in_flight=True)
         pages = [page]
         if previous is not None:
             previous_revision = self.codec.revision(previous)
@@ -73,10 +74,11 @@ class AgendaReader:
                 before = oldest["next_before"]
                 if before is None:
                     raise OwnerReadError("cursor-unavailable", "agenda catch-up lost its prior accepted boundary")
+                minimum_revision = max(self.revision, revision)
                 earlier = self.codec.decode(_raw(self.commands.read(cancelled, history=True, before=before)))
                 if earlier["type"] != "history-page" or earlier["before_cursor"] != before:
                     raise TimelineContractError("agenda catch-up changed its requested history boundary")
-                self._retain_revision(self.codec.revision(earlier["cursor"]), revision)
+                self._retain_revision(self.codec.revision(earlier["cursor"]), minimum_revision, in_flight=True)
                 pages.append(earlier)
             oldest = pages[-1]
             if not oldest["entries"] or self.codec.revision(oldest["entries"][0]["cursor"]) > previous_revision + 1:
@@ -91,7 +93,7 @@ class AgendaReader:
         minimum_revision = self.revision
         self.commands.discover(cancelled)
         frame = self.codec.decode(_raw(self.commands.read(cancelled, history=True, before=cursor)))
-        self._retain_revision(self.codec.revision(frame["cursor"]), minimum_revision, historical=True)
+        self._retain_revision(self.codec.revision(frame["cursor"]), minimum_revision, in_flight=True)
         return frame
 
 
@@ -263,19 +265,23 @@ class AgendaTimelineAttachment:
             if not isinstance(project_root, str) or not Path(project_root).is_absolute():
                 self._failure("selected worktree root is unavailable")
                 return
-            if self._last_selection is not None and selection != self._last_selection:
-                self._invalidated_selection = None
-                if self._renderable() and not any(
-                    (state.token.identity.project, state.token.identity.worktree_id,
-                     state.token.identity.head_session_id) == selection
-                    for state in self.panel.window.sources.values()
-                ):
-                    self.panel.replace_window(TimelineWindow())
-            self._last_selection = selection
+            self.prepare_selection(selection)
             self.project_root = project_root
             self._stop = asyncio.Event()
             self.publication(frame, error)
             self._task = asyncio.create_task(self._observe(), name="sidecar-agenda-rich")
+
+    def prepare_selection(self, selection: Selection) -> None:
+        """Supersede an explicit old-head scope before either provider prepares."""
+        if self._last_selection is not None and selection != self._last_selection:
+            self._invalidated_selection = None
+            if self._renderable() and not any(
+                (state.token.identity.project, state.token.identity.worktree_id,
+                 state.token.identity.head_session_id) == selection
+                for state in self.panel.window.sources.values()
+            ):
+                self.panel.replace_window(TimelineWindow())
+        self._last_selection = selection
 
     async def _observe(self) -> None:
         while not self._stop.is_set():

@@ -83,9 +83,9 @@ def test_tokenless_head_invalidation_survives_hide_and_failed_worktree_reopen(ma
     asyncio.run(check())
 
 
-def owner_snapshot(epoch: int) -> TimelineSnapshot:
+def owner_snapshot(epoch: int, head: str = "head-a") -> TimelineSnapshot:
     token = SourceToken(SourceIdentity(
-        Provider.WORKTREES, "fixture-worktree", "example", "selected", "head-a",
+        Provider.WORKTREES, "fixture-worktree", "example", "selected", head,
         "fixture-generation", owner_ref="fixture-owner",
     ), epoch)
     return TimelineSnapshot(
@@ -94,6 +94,105 @@ def owner_snapshot(epoch: int) -> TimelineSnapshot:
         events=(event(token, 0), event(token, 1)) if epoch else (event(token, 0),),
         as_of=datetime.now(timezone.utc), facts_json='{"coverage":"fixture"}',
     )
+
+
+def test_agenda_only_head_transition_prepares_new_worktree_in_the_same_refresh(managed, monkeypatch) -> None:
+    real_selection = worktree_attachment.TimelineAttachment.set_selection
+    configure(managed, monkeypatch)
+    from test_companion_agenda_rich import current_managed_data
+    selected = {"head": "head-a"}
+
+    def data(*args, **kwargs):
+        value = current_managed_data(managed)
+        value.sessions = [{"id": selected["head"], "is_head": True}]
+        return value
+
+    class Source:
+        async def prepare(self, epoch, *, stop):
+            self.initial = owner_snapshot(epoch, "head-b")
+            return self.initial
+
+        async def observe(self, token, *, stop):
+            yield self.initial
+            await stop.wait()
+
+    monkeypatch.setattr(companion, "_load_current_worktree", data)
+    monkeypatch.setattr(worktree_attachment, "WorktreeTimelineSource", lambda *args, **kwargs: Source())
+
+    async def check() -> None:
+        app = companion.MuxCompanionApp(cwd=str(managed["cwd"]))
+        async with app.run_test(size=(110, 40)) as pilot:
+            await until(pilot, lambda: not app._loading)
+            app._agenda_cancel = Event()
+            publish(app, managed["publication"]())
+            app.query_one("#views", TabbedContent).active = "timeline-tab"
+            await until(pilot, lambda: app._rich_agenda_attachment.token is not None)
+            selected["head"] = "head-b"
+            newer = managed["update"](session="head-b")
+            monkeypatch.setattr(worktree_attachment.TimelineAttachment, "set_selection", real_selection)
+            app.action_refresh()
+            await until(pilot, lambda: not app._loading and app._data.sessions[0]["id"] == "head-b")
+            await until(pilot, lambda: app._rich_agenda_attachment.selection == ("example", "selected", "head-b"))
+            app._agenda_cancel = Event()
+            publish(app, newer)
+            await until(pilot, lambda: app._rich_agenda_attachment.token is not None)
+            states = app._timeline_panel.window.sources.values()
+            assert {state.token.identity.provider for state in states} == {Provider.WORKTREES, Provider.AGENDA}
+            assert all(state.token.identity.head_session_id == "head-b" for state in states)
+
+    asyncio.run(check())
+
+
+def test_refresh_invalidates_a_blocked_show_before_retirement_awaits(managed, monkeypatch) -> None:
+    real_selection = worktree_attachment.TimelineAttachment.set_selection
+    configure(managed, monkeypatch)
+    entered, release = asyncio.Event(), asyncio.Event()
+    loading, finish_load = Event(), Event()
+
+    class Source:
+        async def prepare(self, epoch, *, stop):
+            entered.set()
+            await release.wait()
+            self.initial = owner_snapshot(epoch)
+            return self.initial
+
+        async def observe(self, token, *, stop):
+            yield self.initial
+            await stop.wait()
+
+    async def check() -> None:
+        app = companion.MuxCompanionApp(cwd=str(managed["cwd"]))
+        async with app.run_test(size=(110, 40)) as pilot:
+            try:
+                await until(pilot, lambda: not app._loading)
+                app._agenda_cancel = Event()
+                publish(app, managed["publication"]())
+                original_load = companion._load_current_worktree
+
+                def held_load(*args, **kwargs):
+                    loading.set()
+                    assert finish_load.wait(10)
+                    return original_load(*args, **kwargs)
+
+                monkeypatch.setattr(companion, "_load_current_worktree", held_load)
+                monkeypatch.setattr(worktree_attachment, "WorktreeTimelineSource", lambda *args, **kwargs: Source())
+                monkeypatch.setattr(worktree_attachment.TimelineAttachment, "set_selection", real_selection)
+                app.query_one("#views", TabbedContent).active = "timeline-tab"
+                await until(pilot, entered.is_set)
+                app.action_refresh()
+                await until(pilot, lambda: app._loading)
+                assert app._rich_agenda_attachment._stop.is_set()
+                release.set()
+                await until(pilot, loading.is_set)
+                assert app._rich_agenda_attachment.selection is None
+                assert app._rich_agenda_attachment.token is None
+            finally:
+                release.set()
+                finish_load.set()
+                await until(pilot, lambda: not app._loading)
+                await pilot.pause()
+
+    asyncio.run(check())
 
 
 @pytest.mark.parametrize("reopen", [False, True])

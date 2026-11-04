@@ -546,6 +546,10 @@ class MuxCompanionApp(App):
             )
             self._refresh_view(reload=False)
             return
+        self._loading = True
+        self._timeline_sync_revision += 1
+        self._rich_agenda_attachment.stop_now()
+        self._timeline_attachment.stop_now()
         await self._rich_agenda_attachment.set_selection(None)
         await self._timeline_attachment.set_selection(None)
         self._read_cancel.set()
@@ -565,7 +569,6 @@ class MuxCompanionApp(App):
         self._data.attention = None
         self._data.attention_error = "loading"
         self._update_attention()
-        self._loading = True
         self.query_one("#refresh-btn", Button).disabled = True
         self.query_one("#cutover-btn", Button).disabled = True
         cancelled = Event()
@@ -603,29 +606,18 @@ class MuxCompanionApp(App):
             )
             self._update_agenda()
             return
-        heads = [
-            row.get("id") for row in data.sessions
-            if row.get("is_head") is True and isinstance(row.get("id"), str) and row["id"]
-        ]
-        worktree = data.worktree.get("id")
-        project = data.worktree.get("repo")
-        if not isinstance(project, str) or not project:
-            observer_project, observer_worktree, _ = self._observer_identity
-            project = observer_project if observer_worktree == worktree else None
-        if (
-            data.error or data.sessions_error or len(heads) != 1
-            or not isinstance(worktree, str) or not worktree
-            or not isinstance(project, str) or not project
-        ):
+        selection = selected_head(data.worktree, data.sessions, self._observer_identity)
+        if data.error or data.sessions_error or selection is None:
             data.agenda_error = "selected project/worktree or exactly one head is unavailable"
             self._update_agenda()
             return
+        project, worktree, head = selection
         cancelled = Event()
         self._agenda_cancel = cancelled
         data.agenda_error = "awaiting provider snapshot (worktree-agendas-v1)"
         self._update_agenda()
         self._agenda_worker = self._subscribe_agenda(
-            data, self._agenda_generation, cancelled, project, worktree, heads[0],
+            data, self._agenda_generation, cancelled, project, worktree, head,
         )
 
     def _update_agenda(self) -> None:
@@ -693,7 +685,6 @@ class MuxCompanionApp(App):
             return
         self._timeline_sync_revision += 1
         revision = self._timeline_sync_revision
-        self._timeline_attachment.stop_now()
         data = self._data
         selection = None
         visible = self._timeline_panel.query_one(SubwayTimeline).demand_visible
@@ -706,6 +697,8 @@ class MuxCompanionApp(App):
                 )
         if selection is None or selection != self._rich_agenda_attachment.selection:
             self._rich_agenda_attachment.stop_now()
+        if selection is not None:
+            self._rich_agenda_attachment.prepare_selection(selection)
         await self._timeline_attachment.set_selection(selection, reconcile=reconcile)
         if (
             revision == self._timeline_sync_revision and data is self._data and not self._loading

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 import json
 import os
@@ -362,6 +363,40 @@ def test_every_owner_page_retains_its_revision_fence(managed, monkeypatch, advan
     monkeypatch.setattr(reader.commands, "read", rewound)
     with pytest.raises(OwnerReadError, match="source-replaced"):
         reader.latest(publication, Event(), None)
+    assert reader.revision == publication["revision"] + 1
+
+
+def test_history_advance_preserves_an_already_inflight_latest_page(managed, monkeypatch) -> None:
+    reader = AgendaReader(
+        ("example", "selected", "head-a"), "b" * 32,
+        cwd=str(managed["cwd"]), project_root=str(managed["cwd"]),
+    )
+    for _ in range(35):
+        managed["update"]()
+    publication = managed["publication"]()["observation"]
+    initial = reader.latest(publication, Event(), None)[0]
+    original = reader.commands.read
+    captured, release = Event(), Event()
+
+    def delayed(cancelled, *, history=False, before=None):
+        frame = original(cancelled, history=history, before=before)
+        if history and before is None:
+            captured.set()
+            assert release.wait(10)
+        return frame
+
+    monkeypatch.setattr(reader.commands, "read", delayed)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pending = pool.submit(reader.latest, publication, Event(), None)
+        try:
+            assert captured.wait(10)
+            managed["update"]()
+            reader.history(Event(), initial["next_before"])
+            assert reader.revision == publication["revision"] + 1
+        finally:
+            release.set()
+        pages = pending.result(timeout=10)
+    assert reader.codec.revision(pages[-1]["cursor"]) == publication["revision"]
     assert reader.revision == publication["revision"] + 1
 
 
