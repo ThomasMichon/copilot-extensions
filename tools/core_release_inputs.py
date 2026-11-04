@@ -41,7 +41,8 @@ from installer_wheel_snapshot import (
     _unchanged,
     retain_wheel_inputs,
 )
-from promotion_python_artifacts import _bundle_filename, _bundle_manifest, _write_bundle_members
+from promotion_bundle_members import _bundle_manifest, _write_bundle_members
+from promotion_python_artifacts import _bundle_filename
 from runtime_profile_bundle import _BoundedOutput
 from runtime_profile_delivery import _held
 from runtime_profile_release import _unique_object

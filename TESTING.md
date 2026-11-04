@@ -3520,7 +3520,11 @@ input index or approve the changed subject.
 `tools/test_core_release_inputs.py` exercises the existing source-release
 discovery and core attestation hand-off into the producer, including missing,
 untrusted, oversized, changed and unsafe inputs. Its release service and
-attestations are controlled fixtures; they do not approve a profile.
+attestations are controlled fixtures; they do not approve a profile. Its
+reconstruction cases compare the original core ZIP with retained delivery
+wheels, exercise held-subject attestation, and reject mismatched or over-budget
+inputs. The actor-free packet separately checks canonical member ordering and
+early refusal of unselected reconstruction inputs.
 `tools/test_core_release_delivery.py` connects those retained inputs to the
 real native producer using a committed Git fixture. It checks source identity,
 foreign Git selectors, bounded failures, material and release-input custody,
