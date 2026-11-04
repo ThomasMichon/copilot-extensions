@@ -4270,7 +4270,8 @@ The guarded native index also omits wheels incompatible with the selected
 interpreter's actual tags. It first binds the retained UV interpreter and
 native target to that same interpreter, and validates incompatible records'
 filename, project, any present digest, metadata and duplicate-name evidence. Existing
-candidate, request and metadata budgets remain in force.
+per-project candidate and metadata budgets bound raw index entries; the global
+request-derived candidate cap applies after native compatibility filtering.
 Configured HTTPS feed redirects use that same owner's metadata and artifact
 delivery policy, including public-index refusal and cross-origin credential
 isolation. Explicit nonempty download-origin restrictions still constrain
