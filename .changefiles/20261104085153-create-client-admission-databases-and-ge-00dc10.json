@@ -1,5 +1,5 @@
 {
-  "comment": "Create client admission databases, per-transaction rollback journals and generation metadata with explicit native owner-private security.",
+  "comment": "Create client state and rollback journals with explicit native owner-private security; use canonical held-handle native principal proof and strict private grants for runtime directory cleanup.",
   "changes": [
     {
       "plugin": "fleet-manager",

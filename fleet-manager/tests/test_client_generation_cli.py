@@ -4,6 +4,7 @@ import copy
 import json
 import os
 from pathlib import Path
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -414,6 +415,22 @@ def test_actual_installed_console_generation_transitions(
     assert invoke("inspect")["selected_generation"] is None
     direct_health(first, tmp_path)
     if transition == "remove-runtime":
+        if os.name == "nt":
+            icacls = shutil.which("icacls")
+            assert icacls
+            runtime = Path(first["direct_command"]).parent.parent
+            for arguments in (
+                ["/grant", "*S-1-1-0:(R)"],
+                ["/remove:g", "*S-1-1-0"],
+            ):
+                changed = subprocess.run(
+                    [icacls, str(runtime), *arguments], capture_output=True,
+                    text=True, timeout=10, **FLAGS,
+                )
+                assert changed.returncode == 0, changed.stderr
+                if arguments[0] == "/grant":
+                    invoke("remove-runtime", *exact, success=False)
+                    assert Path(first["direct_command"]).is_file()
         for _ in range(2):
             removed = invoke("remove-runtime", *exact)
             assert removed["generation_retired"] and removed["runtime_removed"]

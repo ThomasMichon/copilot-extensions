@@ -3555,6 +3555,12 @@ Positive roots and staging directories use the existing native private-state
 creator rather than treating POSIX mode bits as Windows ownership evidence.
 The installed consumers exercise explicit owner-private database and generation
 metadata creation without weakening the existing ACL or hot-journal checks.
+The Windows removal consumer also introduces an explicit public-read directory
+grant, requires refusal with the runtime retained, then removes only that
+fixture-introduced grant before exact removal/retry. Runtime directories use
+the same canonical held-handle current-principal proof as runtime files plus
+the existing strict private-grant allowlist; roots and metadata retain their
+TokenUser-owner requirement.
 
 The agent-free `fleet-manager-client-admission` clean-room scenario includes
 those four actual generation consumers alongside admission/revocation/reopen
