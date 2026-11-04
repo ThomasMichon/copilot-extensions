@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from agent_procutil.owned_budget import OwnedExecutionBudget
+from agent_procutil.owned_process import OwnedCleanupError
 
 from agent_logger import configuration_layers
 from agent_logger.aggregate import Admission
@@ -81,7 +83,7 @@ def inventory(tmp_path: Path) -> dict[str, Any]:
 
 def transport(monkeypatch: pytest.MonkeyPatch, reply: dict[str, Any]) -> list[list[str]]:
     calls = []
-    native_run = subprocess.run
+    native_run = providers.run_caller_owned
     prefix, environment = [sys.executable, "-m", "agent_worktrees"], {"selected": "owner"}
     monkeypatch.setattr(
         configuration_layers,
@@ -91,7 +93,7 @@ def transport(monkeypatch: pytest.MonkeyPatch, reply: dict[str, Any]) -> list[li
     monkeypatch.setattr(
         providers,
         "_checkout_repository_identity",
-        lambda selected: "network:" + REPOSITORY,
+        lambda selected, **kwargs: "network:" + REPOSITORY,
     )
 
     def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
@@ -114,8 +116,66 @@ def transport(monkeypatch: pytest.MonkeyPatch, reply: dict[str, Any]) -> list[li
         )
         return subprocess.CompletedProcess(argv, 0, json.dumps(value).encode(), b"")
 
-    monkeypatch.setattr(providers.subprocess, "run", run)
+    monkeypatch.setattr(providers, "run_caller_owned", run)
     return calls
+
+
+@pytest.mark.parametrize("cleanup", [False, True])
+def test_origin_probe_uses_the_same_execution_budget_and_preserves_git_isolation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    cleanup: bool,
+) -> None:
+    original = providers._checkout_repository_identity
+    transport(monkeypatch, inventory(tmp_path))
+    owner_run = providers.run_caller_owned
+    monkeypatch.setattr(providers, "_checkout_repository_identity", original)
+    budget = OwnedExecutionBudget.from_timeout(30, cleanup_reserve=5)
+    uncertain = OwnedCleanupError(None)
+    probes = []
+    for key in providers.repo_trust._AMBIENT_GIT_ENV_VARS:
+        monkeypatch.setenv(key, "foreign-git-routing")
+
+    def run(argv: list[str], **options: Any) -> subprocess.CompletedProcess[bytes]:
+        if argv[0] != "git":
+            assert options["budget"] is budget
+            return owner_run(argv, **options)
+        probes.append(argv)
+        assert options["budget"] is budget
+        assert options["max_stdout_bytes"] == 65536 and options["max_stderr_bytes"] == 4096
+        assert all(key not in options["env"] for key in providers.repo_trust._AMBIENT_GIT_ENV_VARS)
+        if cleanup:
+            raise uncertain
+        return subprocess.CompletedProcess(
+            argv, 0, ("https://" + REPOSITORY + ".git\n").encode(), b""
+        )
+
+    monkeypatch.setattr(providers, "run_caller_owned", run)
+    if cleanup:
+        with pytest.raises(OwnedCleanupError) as caught:
+            providers.read_project_inventory(
+                admission(tmp_path), tmp_path / "logger", budget=budget
+            )
+        assert caught.value is uncertain
+    else:
+        result = providers.read_project_inventory(
+            admission(tmp_path),
+            tmp_path / "logger",
+            budget=budget,
+        )
+        assert result.owner_repository_identity == "network:" + REPOSITORY
+    assert probes == [["git", "-C", str(tmp_path / "checkout"), "remote", "get-url", "origin"]]
+
+
+def test_complete_inventory_cannot_succeed_after_its_execution_cutoff(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport(monkeypatch, inventory(tmp_path))
+    budget = OwnedExecutionBudget.from_timeout(30, cleanup_reserve=5)
+    monkeypatch.setattr(providers.time, "monotonic", lambda: budget.execution_deadline + 1)
+    with pytest.raises(WorktreeStateError, match="shared time budget"):
+        providers.read_project_inventory(admission(tmp_path), tmp_path / "logger", budget=budget)
 
 
 @pytest.mark.parametrize(
@@ -257,7 +317,7 @@ def test_inventory_capability_is_negotiated_before_new_syntax(
             b"unsupported",
         )
 
-    monkeypatch.setattr(providers.subprocess, "run", run)
+    monkeypatch.setattr(providers, "run_caller_owned", run)
     with pytest.raises(WorktreeStateError):
         providers.read_project_inventory(admission(tmp_path), tmp_path / "logger")
     assert len(calls) == 1
@@ -314,7 +374,7 @@ def test_same_cell_inventory_reuses_existing_native_peer_launch(
     monkeypatch.setattr(
         providers,
         "_checkout_repository_identity",
-        lambda selected: "network:" + REPOSITORY,
+        lambda selected, **kwargs: "network:" + REPOSITORY,
     )
     monkeypatch.setattr(
         configuration_layers,
@@ -347,7 +407,7 @@ def test_same_cell_inventory_reuses_existing_native_peer_launch(
         )
         return subprocess.CompletedProcess(argv, 0, json.dumps(value).encode(), b"")
 
-    monkeypatch.setattr(providers.subprocess, "run", run)
+    monkeypatch.setattr(providers, "run_caller_owned", run)
     assert len(providers.read_project_inventory(admission(tmp_path), home).placements) == 1
     assert len(calls) == 2
 
@@ -577,8 +637,8 @@ def test_efforts_selection_never_uses_another_scope_or_first_provider(
     if kind != "malformed-settings":
         _json(settings, value)
     monkeypatch.setattr(
-        providers.subprocess,
-        "run",
+        providers,
+        "run_caller_owned",
         lambda *args, **kwargs: pytest.fail("unselected provider executed"),
     )
     with pytest.raises(WorktreeStateError):

@@ -86,6 +86,17 @@ ports, reject foreign case/port variants, and retain GitHub/default-port equival
 without changing the older aggregate-policy identity.
 The same-cell adapter reuses the already-qualified canonical peer launcher;
 its shared native two-cell matrix remains owned by the peer-launch portfolio.
+Logger's opt-in `--test-file tests/test_worktree_state_exporter.py
+--test-file tests/test_worktree_state_pipeline.py --allow-explicit-tiers` packet
+composes the actual selected Worktrees and Efforts owners for a synthetic retired
+managed placement. It checks admission before discovery/staging, unchanged
+source bytes, the actual exported revision, complete unknown/noncanonical
+provenance, changed scope/placement refusal and exact temporary-member cleanup.
+Failed or uncertain exports retain their evidence. A native Linux pidfd witness
+requires an export timeout to settle its console descendant. Process commands
+and collection copying share the caller's absolute execution budget.
+This explicit library packet does not enable a sync tick, change ordinary
+accounting or qualify native Windows, installed collection or remote archival.
 The preservation cases exercise actually eligible old sessions and a verified
 ordinary archive containing no worktree collection; neither justifies erasing
 marked nested evidence.

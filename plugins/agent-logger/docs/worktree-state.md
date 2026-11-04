@@ -17,8 +17,8 @@ The orchestration caller must first qualify the worktree owner's repository,
 full worktree/incarnation and selected store, obtain the complete domain-owned
 export, and negotiate the selected owner's complete-export verifier. The library
 takes that exact typed identity and verifier; it never imports another plugin's
-runtime or guesses a state home. Passive provider discovery is available
-separately; export orchestration and existing-tick integration remain unfinished.
+runtime or guesses a state home. Explicit managed-placement composition is also
+available as a library; existing-tick integration remains unfinished.
 
 ## Passive provider discovery
 
@@ -40,8 +40,10 @@ scan another registry or fabricate an empty successful result.
 The complete inventory must match the admitted repository's actual Git origin
 and selected installation. The existing aggregate policy identity is checked
 separately; it cannot reconstruct a lossless owner identity because it folds
-path case and omits ports. A fresh bounded Git read plus the existing local
-repository-trust normalizer preserves non-GitHub path case and non-default
+path case and omits ports. A fresh caller-owned Git read shares the same execution
+budget and cleanup custody, strips ambient Git repository-routing variables and
+bounds its stdout/stderr. The existing local repository-trust normalizer preserves
+non-GitHub path case and non-default
 ports, folds GitHub path case and removes only protocol-default ports.
 `ProjectInventory.owner_repository_identity` retains that exact owner identity
 separately from the unchanged aggregate-policy identity. A case-distinct path
@@ -52,6 +54,8 @@ partial, duplicate, foreign or over-budget results. Limits remain 128 worktrees,
 32 stores per worktree and a 1 MiB response. Locations and registration fences
 are observations, not proof of initialized domain contents or a collection grant.
 The read does not open a domain database or allocate missing state.
+Inventory completion also checks the execution cutoff after response validation;
+completed commands cannot turn expired caller time into a successful observation.
 
 `select_efforts_exporter` uses the canonical plugin-activation resolver for
 that exact checkout plus its effective global settings. Explicit project
@@ -61,10 +65,47 @@ Efforts script must advertise both complete export and optional complete
 contributor provenance through its actual `info` operation. Package versions or
 another reader's support do not qualify it.
 
-These are explicit passive library calls only. No CLI, scheduler, sync tick,
-export, collection, migration or installed rollout is enabled. A later
-orchestrator must freshly qualify current admission, registration and selected
-provider support at its effect boundary; these observations are not a lease.
+These discovery calls remain passive. Their process commands use the shared
+finite caller-owned boundary with bounded stdout/stderr and descendant
+settlement. An optional caller-supplied absolute budget is shared rather than
+renewed by each command. No CLI, scheduler, sync tick, migration or installed
+rollout is enabled. Inventory retains its typed project-root/installation scope
+for fresh effect-side requalification; observations are not a lease.
+
+## Explicit managed export composition
+
+`sync.worktree_state_pipeline.collect_managed_worktree_state` composes one typed
+admission, inventory and placement with export and local collection. Repository
+policy is checked **before** provider discovery or staging creation through
+`admit_repository_collection`; no invented accepted revision is needed to invoke
+that gate. The original revision-bound admission API delegates to this same gate.
+
+The pipeline re-reads the exact Worktrees inventory before export and after the
+consistent cut, checking owner repository, project-root/installation scope and
+the complete selected placement. A removed or changed store cannot be replaced
+by an inferred path. The selected Efforts client re-resolves activation and
+negotiates the actual provider before every command. A changed provider selection
+refuses; an updated provider at the same selection must still advertise support.
+
+Export captures the owner's actual accepted revision without an expected-revision
+placeholder. Verification and complete contributor reads pin that returned
+revision against the same exported snapshot. Commands share one caller-owned
+absolute process budget, bounded response streams and exact cleanup custody;
+unconfirmed native cleanup propagates without becoming an ordinary empty result.
+The collection copy also respects that budget's execution cutoff.
+
+Only after admission does the pipeline create an opaque private export directory
+under Logger's local home, disjoint from source and collection. Successful local
+readback permits removal of those exact temporary export members and the empty
+staging directory. This includes the owner's optional, byte-identical prepared
+manifest. Unexpected members, changed manifests, failed publication or uncertain
+process cleanup retain staging and report its path; no recursive sweep, source
+retirement or persistent-collection deletion occurs.
+
+This is an explicit source-library operation, not automatic collection or a new
+command/service. Ordinary sync defaults, accounting and scheduled ticks are
+unchanged. Real-data collection and installed/native qualification remain
+separate effect and validation gates.
 
 ## Admission before effects
 
@@ -178,7 +219,8 @@ Before supplying it, the orchestration caller must negotiate
 not a live database or a session lookup. Missing support preserves the original
 API; it cannot satisfy a requirement for complete attribution. The passive
 selector above requires richer support without changing those original calls.
-Automatic collection remains unimplemented.
+The explicit composition supplies that negotiated reader; automatic collection
+remains unimplemented.
 
 Logger checks the projection's exact raw-manifest digest, source identity,
 complete operation count, tuple uniqueness, first-acceptance order and bounds.
@@ -257,3 +299,10 @@ native `-m agent_worktrees` project selection and retained multi-store discovery
 same-cell prefix reuse, current and prior capability responses, exact-checkout
 Efforts activation and its actual `info` parser. It preserves fixture state
 bytes and keeps process-heavy qualification out of required unit-only CI.
+The opt-in `tests/test_worktree_state_exporter.py` and
+`tests/test_worktree_state_pipeline.py` packet exercises actual selected-owner
+export/readback from a retired managed placement, unchanged source bytes, exact
+temporary cleanup, retained failure evidence, changed-owner refusal and
+revision-pinned lossless provenance. A Linux pidfd witness checks that an export
+timeout settles its console descendant. These are isolated synthetic fixtures,
+not native Windows visibility, installed collection or remote durability proof.

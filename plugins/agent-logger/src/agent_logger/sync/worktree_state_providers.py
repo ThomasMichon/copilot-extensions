@@ -6,11 +6,13 @@ import os
 import re
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agent_procutil import no_window_kwargs
+from agent_procutil.owned_budget import OwnedExecutionBudget
+from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
 from plugin_activation import resolve_active_plugins
 
 from agent_logger import configuration_layers, repo_trust
@@ -36,6 +38,17 @@ class ManagedPlacement:
 
 
 @dataclass(frozen=True)
+class OwnerScope:
+    """Installation and project-root identity retained for effect-side rechecks."""
+
+    project: str
+    repository_id: str
+    marketplace_id: str | None
+    project_root_device: int
+    project_root_inode: int
+
+
+@dataclass(frozen=True)
 class ProjectInventory:
     """One complete passive owner observation for an admitted repository."""
 
@@ -43,6 +56,7 @@ class ProjectInventory:
     project: str
     owner_repository_identity: str
     placements: tuple[ManagedPlacement, ...]
+    scope: OwnerScope | None
 
 
 @dataclass(frozen=True)
@@ -58,18 +72,21 @@ def _read(
     arguments: list[str],
     root: Path,
     environment: dict[str, str] | None,
+    budget: OwnedExecutionBudget | None,
 ) -> dict[str, Any]:
     try:
-        result = subprocess.run(
+        result = run_caller_owned(
             [*prefix, *arguments],
             cwd=root,
             env=environment,
-            capture_output=True,
-            stdin=subprocess.DEVNULL,
+            binary=True,
+            max_stdout_bytes=MAX_INVENTORY_BYTES,
+            max_stderr_bytes=4096,
             timeout=30,
-            check=False,
-            **no_window_kwargs(),
+            budget=budget,
         )
+    except OwnedCleanupError:
+        raise
     except (OSError, subprocess.SubprocessError) as error:
         raise WorktreeStateError("selected worktree-data owner read failed") from error
     if result.returncode:
@@ -239,8 +256,31 @@ def _placements(
     return tuple(result)
 
 
-def _checkout_repository_identity(admission: Admission) -> str:
-    remote = repo_trust._run_git(admission.authoritative_checkout, "remote", "get-url", "origin")
+def _checkout_repository_identity(
+    admission: Admission,
+    *,
+    budget: OwnedExecutionBudget | None = None,
+) -> str:
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in repo_trust._AMBIENT_GIT_ENV_VARS
+    }
+    try:
+        result = run_caller_owned(
+            ["git", "-C", str(admission.authoritative_checkout), "remote", "get-url", "origin"],
+            env=environment,
+            timeout=5,
+            max_stdout_bytes=65536,
+            max_stderr_bytes=4096,
+            binary=True,
+            budget=budget,
+        )
+        remote = result.stdout.decode("utf-8").strip() if result.returncode == 0 else None
+    except OwnedCleanupError:
+        raise
+    except (OSError, UnicodeError, subprocess.SubprocessError) as error:
+        raise WorktreeStateError("actual checkout origin probe failed") from error
     if not remote or canonical_repository_identity(remote) != admission.repository:
         raise WorktreeStateError("actual checkout differs from the admitted repository")
     identity = repo_trust._normalize_git_remote(remote)
@@ -249,7 +289,12 @@ def _checkout_repository_identity(admission: Admission) -> str:
     return identity
 
 
-def read_project_inventory(admission: Admission, home: Path) -> ProjectInventory:
+def read_project_inventory(
+    admission: Admission,
+    home: Path,
+    *,
+    budget: OwnedExecutionBudget | None = None,
+) -> ProjectInventory:
     """Negotiate and read the actual admitted checkout's complete retained inventory.
 
     The aggregate input owner supplies the admitted checkout. No project alias is
@@ -271,6 +316,7 @@ def read_project_inventory(admission: Admission, home: Path) -> ProjectInventory
         ["worktree-data-read", "--capabilities", "--json"],
         root,
         environment,
+        budget,
     )
     baseline = capabilities.get("capabilities")
     optional = capabilities.get("optional_capabilities")
@@ -282,7 +328,13 @@ def read_project_inventory(admission: Admission, home: Path) -> ProjectInventory
         or any(not isinstance(item, str) for item in [*baseline, *optional])
     ):
         raise WorktreeStateError("selected owner lacks worktree-data-project-inventory-v1")
-    reply = _read(prefix, ["worktree-data-read", "--inventory", "--json"], root, environment)
+    reply = _read(
+        prefix,
+        ["worktree-data-read", "--inventory", "--json"],
+        root,
+        environment,
+        budget,
+    )
     project = _segment(reply.get("project"))
     if reply.get("capability") != INVENTORY_CAPABILITY:
         raise WorktreeStateError("selected owner did not return the negotiated inventory")
@@ -296,7 +348,7 @@ def read_project_inventory(admission: Admission, home: Path) -> ProjectInventory
             "live_authority",
         },
     )
-    expected_repository = _checkout_repository_identity(admission)
+    expected_repository = _checkout_repository_identity(admission, budget=budget)
     if (
         data["project"] != project
         or data["live_authority"] is not False
@@ -305,12 +357,24 @@ def read_project_inventory(admission: Admission, home: Path) -> ProjectInventory
         raise WorktreeStateError("selected owner inventory differs from the admitted repository")
     marketplace = own["marketplaceId"] if own is not None else None
     scope = None if data["scope"] is None else _scope(data["scope"], project, marketplace)
-    return ProjectInventory(
+    inventory = ProjectInventory(
         admission.repository,
         project,
         expected_repository,
         _placements(data["worktrees"], scope),
+        OwnerScope(
+            project,
+            scope["repository_id"],
+            scope["marketplace_id"],
+            scope["project_root_device"],
+            scope["project_root_inode"],
+        )
+        if scope is not None
+        else None,
     )
+    if budget is not None and time.monotonic() >= budget.execution_deadline:
+        raise WorktreeStateError("complete owner inventory exhausted its shared time budget")
+    return inventory
 
 
 _SCRIPT_ENTRY = (
@@ -319,7 +383,11 @@ _SCRIPT_ENTRY = (
 )
 
 
-def select_efforts_exporter(root: Path) -> EffortsExporter:
+def select_efforts_exporter(
+    root: Path,
+    *,
+    budget: OwnedExecutionBudget | None = None,
+) -> EffortsExporter:
     """Select only this checkout's effective Efforts activation, then negotiate info.
 
     No other repository's activation, package version or rich-reader availability
@@ -351,15 +419,15 @@ def select_efforts_exporter(root: Path) -> EffortsExporter:
         ):
             raise WorktreeStateError("selected efforts export path is missing or indirect")
         environment = configuration_layers._peer_launch.legacy_peer_environment(dict(os.environ))
-        result = subprocess.run(
+        result = run_caller_owned(
             [sys.executable, "-I", "-B", "-c", _SCRIPT_ENTRY, str(script), "info"],
             cwd=root,
             env=environment,
-            capture_output=True,
-            stdin=subprocess.DEVNULL,
+            binary=True,
+            max_stdout_bytes=65536,
+            max_stderr_bytes=4096,
             timeout=30,
-            check=False,
-            **no_window_kwargs(),
+            budget=budget,
         )
         if result.returncode or len(result.stdout) > 65536:
             raise WorktreeStateError("selected efforts export info refused or exceeded its bound")
@@ -378,7 +446,7 @@ def select_efforts_exporter(root: Path) -> EffortsExporter:
         ):
             raise WorktreeStateError("selected efforts provider lacks complete export provenance")
         return EffortsExporter(plugin.source, script)
-    except WorktreeStateError:
+    except (WorktreeStateError, OwnedCleanupError):
         raise
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         raise WorktreeStateError("selected efforts export provider is unavailable") from error

@@ -1,0 +1,9 @@
+{
+  "comment": "Compose policy-first managed agenda export, lossless readback and finite provider execution",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}
