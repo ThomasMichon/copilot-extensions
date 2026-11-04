@@ -152,6 +152,19 @@ Its private native cache uses the existing short-lived neutral acquisition
 directory, avoiding deeply nested native Git cache paths on Windows. Native
 catalog metadata is read before that cache is removed and retained in the
 completed operation receipt; legacy persisted caches remain readable.
+On Windows the private installation home is
+`copilot-venue-plugins/marketplaces/<full-source-definition-sha256>`; POSIX
+retains the marketplace/installation subdirectories. The full digest still
+distinguishes qualified plugin identity and the complete source declaration.
+Normal preparation selects this shorter home without moving or deleting an
+older nested footprint or changing the authored marketplace source. A valid
+completed short home is reused on repeat. Windows preparation rejects a payload
+working directory of 259 or more UTF-16 code units before installation or
+registration, including on reuse: `CreateProcessW` cannot use it as
+`lpCurrentDirectory` even when file access supports long paths. Use a shorter
+checkout **and Git metadata** path, then retry normal preparation. This does not
+change OS long-path policy, introduce a shared cache, or resume installation-cell
+migration.
 The original structured marketplace declaration is written into
 that private operation home's settings **before** acquisition. Native installation
 therefore receives its complete source, including revision and location fields;

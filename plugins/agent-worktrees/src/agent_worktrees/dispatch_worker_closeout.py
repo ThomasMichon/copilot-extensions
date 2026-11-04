@@ -62,6 +62,23 @@ class OwnWorker:
 
     def require(self, record: tracking.WorktreeRecord | None, config: cfg.Config) -> None:
         """Recheck identity and preservation gates at each finalization boundary."""
+        self._require_custody(record, config)
+        self.require_caller()
+
+    def require_caller(self) -> None:
+        """Require the actual invoking native process, not an observer's label."""
+        if (
+            not Path.cwd().resolve().is_relative_to(self.path)
+            or os.environ.get("COPILOT_AGENT_SESSION_ID") != self.native_id
+            or _native_source(self.native_id) != self.source
+        ):
+            raise ValueError("Own-worker closeout requires its actual native caller and workspace")
+
+    def _require_custody(
+        self, record: tracking.WorktreeRecord | None, config: cfg.Config,
+        *, readiness_claim: str | None = None,
+    ) -> None:
+        """Share preservation reads; normal finalization never excepts a task."""
         if record is None:
             raise ValueError("Own-worker closeout requires an existing managed record")
         require_record_mutation(record, config)
@@ -70,7 +87,6 @@ class OwnWorker:
         if (
             record.repo != config.repo_name or record.worktree_id != self.worktree_id
             or Path(record.worktree_path).resolve(strict=True) != self.path
-            or not Path.cwd().resolve().is_relative_to(self.path)
             or record.creation_nonce != self.creation_nonce or not self.creation_nonce
             or not record.checkout_managed
             or record.status not in {"active", "finalizing", "finalized"}
@@ -83,8 +99,6 @@ class OwnWorker:
             or record.head_session not in {None, self.native_id}
             or record.head_revision != self.head_revision
             or entry is None or entry.state != "active"
-            or os.environ.get("COPILOT_AGENT_SESSION_ID") != self.native_id
-            or _native_source(self.native_id) != self.source
         ):
             raise ValueError("Own-worker closeout workspace, allocation or native head changed")
         activations = [
@@ -109,8 +123,12 @@ class OwnWorker:
         own_ref = tracking.format_claim_ref(
             record.execution_machine, record.repo, record.worktree_id, session=self.native_id,
         )
+        retained = None
+        if readiness_claim is not None:
+            from .dispatch_worker_readiness import require_task_claim
+            retained = require_task_claim(record, self.task_id, readiness_claim)
         if any(
-            claim.is_unsettled and claim.kind != "pr"
+            claim.is_unsettled and claim is not retained and claim.kind != "pr"
             and not (claim.kind == "session" and claim.ref == own_ref)
             for claim in record.resources
         ):
