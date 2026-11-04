@@ -71,7 +71,7 @@ commands are added, renamed, or filled in.
 | 3 | Given a session id, what is its active bridge state (live? driving agent? observed/steered?) | For an **interactive-CLI (represented) session**: `agent-bridge live-sessions resolve --handle <session-id>` returns status, liveness, `turn_state`, and `latest_progress` (`live-sessions` registers only represented CLI sessions, not general bridge-hosted ACP sessions). For **any** bridge-hosted session (represented or not), `agent-bridge session-usage <session-id>` reports `status` (a liveness proxy: e.g. running/idle/completed) plus turn/context usage — but not `driven_by`/observed-or-steered detail, which is a `live-sessions`-only (represented-session) concept. |
 | 4 | Given a worktree, what is its active bridge state | For an interactive-CLI (represented) session on that worktree: `agent-bridge live-sessions resolve --handle <worktree-id>` (or `live-sessions list --worktree-id <id>`) — same represented-session-only scope as row 3. |
 | 5 | Given a task id, resolve its assigned worktree, session, and bridge state | **Composable for the live case, a genuine gap for the durable case.** `agent-dispatch show <task_id>`/`list` already **overlay** live-session status for a CLI-embodied task: it joins the task's owner worktree against agent-bridge's live-session registry and adds an `embodiment` block (`driven_by`, `status`, `turn_state`/`liveness`, heartbeat) — cross-machine too (resolves over the SSH mesh when the owner is a remote machine). See `agent-dispatch`'s own skill, § Inspect. That overlay is **absent by design** the moment the task's worktree is no longer live (best-effort/read-only) — resolving the session for *that* case is the same durable gap as the `—` row below (issue #3555), not a separate one. Tracked as [issue #3556](https://github.com/ThomasMichon/copilot-extensions/issues/3556) to decide whether a single command spanning both the live-overlay and durable-fallback cases is worth adding once #3555 lands. |
-| 6 | Given a session id, enumerate its conversation history and compute stats (turn count, token usage, `context_pct`, duration) | Intentional two-call composition (rule 4): `agent-bridge session-usage <session-id>` for stats; separately, `agent-bridge read <session-id> --no-follow` (or `GET /api/v1/sessions/{id}/transcript`) for the rendered conversation. The [session-report decision](#session-report-composition) records the cost rationale and scope requested by [issue #3557](https://github.com/ThomasMichon/copilot-extensions/issues/3557). |
+| 6 | Given a session id, enumerate its conversation history and compute stats (turn count, token usage, `context_pct`, duration) | Intentional two-call composition (rule 4): `agent-bridge session-usage <session-id>` for stats; for an **ACP event-backed session**, separately use `agent-bridge read <session-id> --range A:B` (inclusive event IDs) or `--tail N` for cursor-neutral rendered history. Represented interactive-CLI reads return bounded result snapshots, not rendered conversation history. The [session-report decision](#session-report-composition) records the rationale and this limitation for [issue #3557](https://github.com/ThomasMichon/copilot-extensions/issues/3557). |
 | 7 | Given a worktree, identify its handoff chain | `agent-worktrees worktree-lineage --worktree <id> --json` (or `handoff-trace <worktree-id>`) |
 | 8 | Given a session id, identify its predecessor/successor/head in the handoff chain | Composable, not a gap: `agent-worktrees session-lineage --session-id <id> --json` already returns this session-scoped -- `relations[].projection.lineage.predecessor`/`.successor` and `relations[].projection.is_head` -- directly, no need to parse the broader worktree-lineage graph. |
 | 9 | Given a session id, find the task(s) it worked (reverse of row 5) | `agent-dispatch find-by-session <session-id>` -- lists every task on this host's coordinator that session ever attached to, with `worktree_id`/`machine` and attach/detach timestamps (local-only; no cross-machine peer-browse for this direction yet). |
@@ -97,11 +97,20 @@ adds history reads, formatting and output that a caller asking only for usage
 does not need. This is a cost and work-cardinality decision, not a claim about
 measured latency or an assertion that history rendering is always cheap.
 
-When both are needed, request usage for the selected session, then explicitly
-request its rendered conversation using the existing read/transcript surface
-and its supported bounds. Either call remains independently useful. Missing
-or unavailable usage stays unknown, not zero; a rendered conversation is not
-replaced by a snapshot, result summary or attention projection.
+When both are needed for an ACP event-backed session, request usage for the
+selected session, then explicitly request rendered conversation with
+`read <session-id> --range A:B` or `read <session-id> --tail N`. These
+random-access reads do not advance the delivery cursor; enumerate further
+explicit ranges when more history is needed. `read --no-follow` instead
+delivers pending events after that cursor and acknowledges rendered delivery,
+so "caught up" does not mean the session has no history.
+
+This history recipe does not apply to represented interactive-CLI sessions:
+their `read` surface returns a bounded result snapshot (`--tail` bounds its
+items), and ACP event ranges are rejected. That snapshot is not rendered
+conversation history; retain this limitation rather than treating a result
+summary or attention projection as a substitute. Either supported call remains
+independently useful. Missing or unavailable usage stays unknown, not zero.
 
 The two observations are not an atomic snapshot. Preserve their session
 identity, observation provenance and individual errors rather than implying
