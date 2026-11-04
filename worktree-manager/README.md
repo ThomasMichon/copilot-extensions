@@ -510,6 +510,13 @@ controller's declared driver dependencies before either platform branch.
 
 Each update acquisition has its own staging directory. Before submission, the
 bootstrap freezes Manager and SDK inputs through the canonical source freezer.
+Successful callers remove only their acquisition checkout, including detached
+callers after acceptance; the worker continues from its retained inputs.
+Detached callers first launch the worker through a finite retained controller,
+so leased startup dependencies also come from retained source. This helper
+inherits the caller's containment; the existing daemon owner governs worker
+lifetime and startup acknowledgment.
+Failed callers preserve their acquisition checkout for diagnosis.
 Equivalent pending callers share a request when its immutable source and
 configured marketplace selection agree; distinct arguments or changed source
 remain separate. An active suite may still discover later marketplace inputs,

@@ -497,7 +497,7 @@ if ($commandExit -eq 0 -and ($env:PATH -split ';') -notcontains $LocalBin) {
 exit $commandExit
 } finally {
     if ($RecoveryStaging) { Remove-Item -LiteralPath $RecoveryStaging -Recurse -Force }
-    if ($UpdateStaging -and $commandExit -eq 0 -and '--detach' -cnotin $commandArgs -and
+    if ($UpdateStaging -and $commandExit -eq 0 -and
         (Test-Path -LiteralPath $UpdateStaging)) {
         Remove-Item -LiteralPath $UpdateStaging -Recurse -Force
     }

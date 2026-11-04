@@ -167,11 +167,7 @@ elif [ -z "$install_source" ] && [ "${1-}" = update ]; then
     mkdir -p "$ROOT/bootstrap-acquisition"
     update_staging="$(mktemp -d "$ROOT/bootstrap-acquisition/update.XXXXXXXX")"
     STAGING="$update_staging/source"
-    update_detach=0
-    for argument in "$@"; do
-        [ "$argument" != --detach ] || update_detach=1
-    done
-    trap 'status=$?; if [ "$status" -eq 0 ] && [ "$update_detach" -eq 0 ]; then rm -rf -- "$update_staging"; fi' EXIT
+    trap 'status=$?; if [ "$status" -eq 0 ]; then rm -rf -- "$update_staging"; fi' EXIT
 fi
 
 _bootstrap_progress 'Worktree Manager bootstrap'

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import subprocess
 import sys
 
 
@@ -14,6 +15,24 @@ def _request_control(options, forwarded) -> bool:
         options.request_status is not None, options.recovery_status, options.recover_after_restart,
         options.recover_for_repair, "--auth-report" in forwarded,
     ))
+
+
+def _start_detached_worker(payload: Path, environment: dict[str, str]) -> None:
+    from agent_procutil import no_window_kwargs
+
+    # Keep the caller's containment, not another cleanup scope around the durable launch.
+    result = subprocess.run(
+        [
+            sys.executable, "-I", "-S", "-B", "-X", "utf8",
+            str(payload / "scripts" / "bootstrap_update.py"), "--start-worker",
+        ],
+        cwd=payload, env=environment, timeout=15, capture_output=True,
+        text=True, encoding="utf-8", errors="replace", **no_window_kwargs(),
+    )
+    if result.stderr:
+        print(result.stderr, file=sys.stderr, end="")
+    if result.returncode:
+        raise RuntimeError("Retained bootstrap worker launch failed")
 
 
 def execute(args, driver, *, source_digest: str) -> int:
@@ -95,16 +114,21 @@ def execute(args, driver, *, source_digest: str) -> int:
     if options.supervised_debug:
         driver.drain()
     else:
-        worker = driver.ensure_worker(
-            (
-                sys.executable, "-I", "-S", "-B", "-X", "utf8",
-                str(payload / "scripts" / "bootstrap_update.py"),
-            ),
-            cwd=payload, env={
-                **os.environ, "GIT_TERMINAL_PROMPT": "0",
-                "GH_PROMPT_DISABLED": "1", "GCM_INTERACTIVE": "never",
-            },
-        )
+        environment = {
+            **os.environ, "GIT_TERMINAL_PROMPT": "0",
+            "GH_PROMPT_DISABLED": "1", "GCM_INTERACTIVE": "never",
+        }
+        if options.detach:
+            # The leased worker's bootstrap must also outlive the acquisition checkout.
+            _start_detached_worker(payload, environment)
+        else:
+            worker = driver.ensure_worker(
+                (
+                    sys.executable, "-I", "-S", "-B", "-X", "utf8",
+                    str(payload / "scripts" / "bootstrap_update.py"),
+                ),
+                cwd=payload, env=environment,
+            )
     if options.detach:
         _report(request, as_json=options.json)
         return 0
@@ -118,4 +142,14 @@ if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import runtime_install
 
-    raise SystemExit(runtime_install._execution_driver(Path(__file__).resolve().parents[1]).drain())
+    payload = Path(__file__).resolve().parents[1]
+    driver = runtime_install._execution_driver(payload)
+    if sys.argv[1:] == ["--start-worker"]:
+        driver.ensure_worker(
+            (sys.executable, "-I", "-S", "-B", "-X", "utf8", str(Path(__file__).resolve())),
+            cwd=payload, env=os.environ,
+        )
+        raise SystemExit(0)
+    if sys.argv[1:]:
+        raise ValueError("Unsupported bootstrap worker arguments")
+    raise SystemExit(driver.drain())

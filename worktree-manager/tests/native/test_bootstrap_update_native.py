@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 import json
 import os
 from pathlib import Path
+import runpy
 import shutil
 import subprocess
 import sys
@@ -441,6 +443,39 @@ def test_native_bootstrap_coalesces_pending_work_and_retains_worker_after_caller
     assert len(core.status(root=driver)) == 4
     assert Path(effects()[9]["payload"]) != retained
     assert not (retained.parent / "plugins" / "agent-worktrees" / "src" / changed.name).exists()
+
+
+def test_native_detached_bootstrap_removes_only_its_acquisition_and_retains_worker(bootstrap):
+    root, _source, driver, start, effects = bootstrap
+    preserved = root / "bootstrap-acquisition" / "failed-earlier"
+    preserved.mkdir(parents=True)
+    sentinel = preserved / "diagnostic.txt"
+    sentinel.write_bytes(b"retained failed acquisition")
+    with ExitStack() as stack:
+        if os.name == "nt":
+            observer = runpy.run_path(str(
+                SOURCE / "libs/agent-procutil/tests/test_spawn_daemon_windows_integration.py"
+            ))
+            windows = stack.enter_context(observer["_WindowObserver"](*observer["_configure_win32"]()))
+        for cycle in range(2):
+            (root / "release-suite").unlink(missing_ok=True)
+            detached, log = start("--project", "detached", "--detach", "--json")
+            assert detached.wait(timeout=20) == 0, log.read_text(encoding="utf-8")
+            assert list(preserved.parent.iterdir()) == [preserved]
+            assert sentinel.read_bytes() == b"retained failed acquisition"
+            _eventually(lambda: len(effects()) == 3 * cycle + 2)
+            request = core.status(root=driver)[cycle]
+            assert request.state == "running" and request.exit_code is None
+            retained = Path(effects()[3 * cycle]["payload"])
+            assert retained.is_relative_to(driver / "bootstrap-inputs") and retained.is_dir()
+            (root / "release-suite").touch()
+            _eventually(lambda: core.status(request.id, root=driver).state == "completed")
+            assert core.status(request.id, root=driver).exit_code == 23
+        assert [row["phase"] for row in effects()] == [
+            "manager", "suite-start", "suite-end",
+        ] * 2
+    if os.name == "nt":
+        assert windows.surfaced == {} and windows.focus_changes == {}
 
 
 def test_native_current_controller_runs_a_prepared_source_without_new_bootstrap_code(bootstrap):

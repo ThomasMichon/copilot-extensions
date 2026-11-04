@@ -105,13 +105,22 @@ def test_bootstrap_update_does_not_report_unfinished_work_as_success(tmp_path, m
 def test_default_update_observes_a_retained_worker_instead_of_running_installers(
     tmp_path, monkeypatch, detach,
 ):
-    execute = runpy.run_path(str(SCRIPT))["execute"]
+    import bootstrap_update
+
+    execute = bootstrap_update.execute
     monkeypatch.setattr(update_driver_cli, "_source_key", lambda: "configured-source")
     monkeypatch.setattr(update_driver_cli, "request_context", lambda: {})
     request = SimpleNamespace(
         id="fixture", log_path=tmp_path / "log", state="pending", exit_code=None, error=None,
     )
     seen = []
+
+    def detached_worker(payload, environment):
+        assert payload == tmp_path
+        assert environment["GIT_TERMINAL_PROMPT"] == "0"
+        seen.append("detached-worker")
+
+    monkeypatch.setattr(bootstrap_update, "_start_detached_worker", detached_worker)
 
     def worker(command, **kwargs):
         assert Path(command[-1]) == tmp_path / "scripts" / "bootstrap_update.py"
@@ -136,7 +145,32 @@ def test_default_update_observes_a_retained_worker_instead_of_running_installers
         repair_update=True, install_source=None,
     )
     assert execute(args, driver, source_digest="a" * 64) == (0 if detach else 23)
-    assert seen == (["worker"] if detach else ["worker", "wait"])
+    assert seen == (["detached-worker"] if detach else ["worker", "wait"])
+
+
+@pytest.mark.parametrize("exit_code", [0, 3])
+def test_detached_worker_launch_uses_retained_controller_and_preserves_failure(
+    tmp_path, monkeypatch, capsys, exit_code,
+):
+    import bootstrap_update
+
+    calls = []
+
+    def run(command, **options):
+        calls.append((command, options))
+        return SimpleNamespace(returncode=exit_code, stderr="worker launch diagnostic\n")
+
+    monkeypatch.setattr(bootstrap_update.subprocess, "run", run)
+    if exit_code:
+        with pytest.raises(RuntimeError, match="worker launch failed"):
+            bootstrap_update._start_detached_worker(tmp_path, {"fixture": "value"})
+    else:
+        bootstrap_update._start_detached_worker(tmp_path, {"fixture": "value"})
+    command, options = calls[0]
+    assert command[-2:] == [str(tmp_path / "scripts" / "bootstrap_update.py"), "--start-worker"]
+    assert options["cwd"] == tmp_path and options["env"] == {"fixture": "value"}
+    assert capsys.readouterr().err == "worker launch diagnostic\n"
+    assert len(calls) == 1
 
 
 def test_prepared_old_source_is_data_not_the_bootstrap_controller(tmp_path, monkeypatch):

@@ -25,6 +25,10 @@ waiting Python caller. A prepared legacy payload without bootstrap scripts
 separately exercises current-controller compatibility and a saved acquisition
 budget. The caller-loss case uses a relative configured source through real
 acquisition, participant validation and the suite's source locator.
+An independent case verifies that detached acceptance removes only that caller's acquisition
+checkout while the retained worker continues to its recorded final result.
+The detached control runs twice and observes native Windows windows and focus
+changes without weakening the enclosing test lifecycle.
 Authentication inspection retains valid caller-stdout JSON without
 installation, and request controls preserve an interrupted fence until explicit
 recovery outside the install transaction. A POSIX-only non-update entry resolves source dependencies without creating a
