@@ -12,6 +12,7 @@ from agent_logger.aggregate import ResolvedPlan
 from agent_logger.config import Config
 from agent_logger.sync.publication_directory import PublicationDirectory, publication_directory
 from agent_logger.sync.targets.base import Target
+from agent_logger.sync.worktree_state_namespace import claim_namespace, has_namespace
 from agent_logger.sync.worktree_state import (
     MAX_MANIFEST_BYTES, MAX_MEMBER_BYTES, ExportVerifier, WorktreeStateError,
     WorktreeStateReceipt, WorktreeStateRevision, admit_collection, canonical_bytes,
@@ -34,8 +35,7 @@ def _read(directory: PublicationDirectory, name: str, limit: int) -> bytes:
 def _write(directory: PublicationDirectory, name: str, raw: bytes) -> None:
     if directory.fd is None:
         raise WorktreeStateError("typed collection requires directory-relative durable publication")
-    with directory.create(name) as stream:
-        os.fchmod(stream.fileno(), 0o600)
+    with directory.create(name, mode=0o600) as stream:
         stream.write(raw)
         stream.flush()
         os.fsync(stream.fileno())
@@ -83,8 +83,7 @@ def _copy_member(
         before = os.fstat(incoming.fileno())
         if before.st_nlink != 1 or before.st_size != member["bytes"]:
             raise WorktreeStateError("export database is aliased or changed before collection")
-        with destination.create("agenda.sqlite3") as outgoing:
-            os.fchmod(outgoing.fileno(), 0o600)
+        with destination.create("agenda.sqlite3", mode=0o600) as outgoing:
             while chunk := incoming.read(_COPY_BYTES):
                 count += len(chunk)
                 if count > member["bytes"] or time.monotonic() >= deadline:
@@ -139,6 +138,8 @@ def _references(directory: Path, receipt: WorktreeStateReceipt, sessions: tuple[
 def _readback(
     directory: Path, identity: WorktreeStateRevision, root: Path, verify: ExportVerifier,
 ) -> WorktreeStateReceipt:
+    if not has_namespace(root):
+        raise WorktreeStateError("typed collection namespace is missing or unowned")
     with publication_directory(directory, create=False) as revision:
         with publication_directory(directory / "export", create=False) as exported:
             manifest, raw = _verified_manifest(exported, identity, verify)
@@ -180,6 +181,10 @@ def collect_worktree_state(
         manifest, raw = _verified_manifest(exported, identity, verify)
         receipt = _receipt(identity, root, manifest, raw)
         intent = _intent(receipt)
+        try:
+            claim_namespace(root)
+        except ValueError as error:
+            raise WorktreeStateError(str(error)) from error
         with publication_directory(destination) as revision:
             names = revision.names()
             if not names:

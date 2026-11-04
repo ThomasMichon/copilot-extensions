@@ -82,6 +82,8 @@ from agent_logger.sync.targets.hub_sessions import (
     _hub_session_cwd,
     _parse_iso,
 )
+from agent_logger.sync.worktree_state_namespace import DIRECTORY as WORKTREE_STATE_DIRECTORY
+from agent_logger.sync.worktree_state_namespace import has_namespace as has_worktree_state_namespace
 
 #: Excluded from sync: legacy lock names, ``.lock``/``.tmp`` suffixes, and ``.hold`` (Copilot's restrictive-ACL ``inuse.<pid>.hold`` marker).
 _EXCLUDE_NAMES, _EXCLUDE_SUFFIXES = frozenset({".lock", "lock"}), (".lock", ".tmp", ".hold")
@@ -1628,6 +1630,11 @@ class FilesystemTarget(Target):
             return PushResult(ok=False, detail=f"detritus discovery failed: {exc}")
         try:
             root = self._root()
+            if (
+                Path(machine).parts and Path(machine).parts[0] == WORKTREE_STATE_DIRECTORY
+                and has_worktree_state_namespace(root)
+            ):
+                return PushResult(ok=False, detail="machine path overlaps the typed-state namespace")
             dest = _ensure_relative_directory(root, Path(machine), durable=source_identity is not None)
         except OSError as exc:
             return PushResult(
@@ -2059,6 +2066,11 @@ class FilesystemTarget(Target):
                     continue
                 for name, mode in children:
                     path = directory / name
+                    if (
+                        not relative.parts and name == WORKTREE_STATE_DIRECTORY
+                        and has_worktree_state_namespace(root)
+                    ):
+                        continue
                     if stat.S_ISDIR(mode) and not is_link_or_reparse(path, mode):
                         pending.append((path, relative / name))
             return FleetSyncStatus(supported=True, machines=machines)

@@ -18,6 +18,7 @@ from agent_logger.config import Config
 from agent_logger.aggregate_machine import resolve_machine_identity
 from agent_logger.sync.targets import build_target
 from agent_logger.sync.targets.base import Target
+from agent_logger.sync.worktree_state_namespace import DIRECTORY
 
 MAX_MANIFEST_BYTES = 16384
 MAX_MEMBER_BYTES = 1 << 30
@@ -86,7 +87,7 @@ class WorktreeStateRevision:
         identity = self.as_dict()
         identity.pop("revision")
         key = hashlib.sha256(canonical_bytes(identity)).hexdigest()
-        return Path("worktree-state") / key / str(self.revision)
+        return Path(DIRECTORY) / key / str(self.revision)
 
 
 class ExportVerifier(Protocol):

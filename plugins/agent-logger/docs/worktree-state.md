@@ -53,7 +53,16 @@ at the same key conflicts instead of replacing previously retained evidence.
 This also exposes a changed delivery-state cut at an unchanged accepted
 revision rather than silently discarding either snapshot.
 
+The top-level `worktree-state/` namespace has its own schema-v1 format marker.
+It is claimed only when empty or already owned; an existing ordinary machine
+with that name is neither adopted nor hidden. Fleet health excludes only a
+positively identified collection namespace, so retained revisions do not consume
+the machine-directory scan budget. Ordinary session pushes cannot enter that
+owned namespace.
+
 Only the verified `agenda.sqlite3` and original `manifest.json` are collected.
+Every new database, metadata and reference file requests mode `0600` in the
+initial POSIX creation syscall, not a later permission change.
 The owner's optional prepared manifest is not needed in a transported export.
 Copying checks the exact declared byte count and SHA-256, with bounded chunks
 and a complete-copy deadline. The selected owner then verifies the destination's
@@ -78,10 +87,12 @@ leases or live execution authority.
 
 ## Qualification
 
-The opt-in `agent-logger` `tests/test_worktree_state.py` packet covers real
+The opt-in `agent-logger` `tests/test_worktree_state.py` and
+`tests/test_worktree_state_coexistence.py` packet covers real
 efforts export/readback in separate Python processes, complete-byte retention,
 multiple contributing sessions, exact retry, privacy/claim refusal, corruption,
-partial publication and redirected paths. It uses synthetic private fixtures,
+partial publication, creation-time permissions, namespace/fleet coexistence
+and redirected paths. It uses synthetic private fixtures,
 not an operator's actual agenda or archive destination. Required unit-only CI
 admission and operational/native acceptance are separate gates; see
 [testing](../../../TESTING.md).

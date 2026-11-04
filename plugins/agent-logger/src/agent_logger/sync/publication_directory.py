@@ -27,13 +27,15 @@ class PublicationDirectory(ArchiveDirectory):
             )
         return super().stat(name)
 
-    def create(self, name: str) -> BinaryIO:
+    def create(self, name: str, *, mode: int = 0o666) -> BinaryIO:
         name = self._name(name)
         if self.fd is None:
+            if mode != 0o666:
+                raise OSError("private publication requires a native permissions adapter")
             return open(windows_extended_path(self.path / name), "xb")
         fd = os.open(
             name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-            0o666, dir_fd=self.fd,
+            mode, dir_fd=self.fd,
         )
         try:
             return os.fdopen(fd, "wb")

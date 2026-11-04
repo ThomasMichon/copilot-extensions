@@ -257,7 +257,7 @@ def test_source_and_destination_aliases_do_not_publish_through_links(packet: Pac
 
 def test_missing_readback_does_not_create_destination(packet: Packet) -> None:
     cfg, target, plan, _ = packet
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(WorktreeStateError, match="missing or unowned"):
         readback_worktree_state(cfg, target, plan, IDENTITY, fake_owner)
     assert not target._root().exists()
 
