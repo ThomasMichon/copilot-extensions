@@ -272,9 +272,9 @@ _Operator-required outcome; agent-recommended slices and validation._
   [inert attention projection](../../../plugins/agent-pull-requests/docs/attention.md);
   merged in #10390. It does not close normalized acquisition, durable cursors
   or serving adoption.
-  The next bounded source leaf is the
+  The
   [existing-owner conversation metadata journal](../../../plugins/agent-pull-requests/docs/conversation-journal.md)
-  and opt-in event reader; full body acquisition, coordinated terminal
+  and opt-in event reader merged in #10401; full body acquisition, coordinated terminal
   retention, notifications and normal host adoption remain separate.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
@@ -906,6 +906,39 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-04 - Qualify normalized workspace-to-journal acquisition
+
+- The opt-in ADO workspace owner now projects confirmed load/sync acquisition
+  into the existing journal transaction, without another fetcher, watcher,
+  database or caller-supplied ingest route. Disabled embeddings are unchanged.
+- The focused isolated acquisition/journal/workspace packet passed 79 cases.
+  It covers body-free projection, unchanged polls, same-head dialogue, target
+  movement, fractional interval overlap, partial relationship/statistic
+  preservation, restart, terminal/reopen, cache conflicts and journal failure
+  after confirmed cache publication. Cleanup was verified.
+- Capture intervals widen outward to integer seconds; an overlap remains
+  explicitly stale, not fabricated ordering. ADO current votes do not prove a
+  candidate-bound verdict; iterations do not prove review-round or commit totals.
+- This is source qualification, not an installed host, autonomous acquisition,
+  three-driver proof or live shadow. Whole P1/P2 and the parent acceptance remain
+  open. Next: compose journal evidence with read-only attention comparison while
+  keeping missing eligibility/handled state explicit.
+
+### 2026-11-04 - Merge the journal/event source leaf
+
+- #10401 merged as `978fc45be52e1da899dace26544280a9397cae23`
+  after current-head Copilot approval and green required CI. The final fix
+  refuses null/scalar persisted journal state rather than treating corruption
+  as first provisioning and resetting cursor lineage.
+- The initial affected packet passed 136 container cases; the final focused
+  journal/CLI/HTTP/replay-store packet passed 87 after cumulative-statistics
+  and persistent-state corrections. Actual TLS/channel reads use synthetic
+  identities and an explicitly supplied test host, with zero forge writes.
+- Re-read the parent Plan/Validation. Whole P1/P2 and installed/provider/shadow
+  acceptance remain open. Next: connect existing normalized acquisition to
+  the journal while preserving source intervals, CAS, partial/unknown evidence
+  and explicit adoption. No live service or review authority changed.
 
 ### 2026-11-04 - Qualify the opt-in conversation cursor source
 

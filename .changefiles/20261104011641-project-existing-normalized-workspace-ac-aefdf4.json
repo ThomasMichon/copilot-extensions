@@ -1,0 +1,9 @@
+{
+  "comment": "Project existing normalized workspace acquisition into the opt-in conversation journal.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}
