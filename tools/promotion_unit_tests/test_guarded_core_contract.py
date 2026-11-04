@@ -145,6 +145,7 @@ def test_guarded_isolated_timeout_reports_only_the_deadline(monkeypatch, tmp_pat
         )
 
     monkeypatch.setattr(guard, "run_owned", timeout)
+    monkeypatch.setattr(guard.snapshots, "_open", lambda path: path.open("rb"))
     with pytest.raises(guard.GuardedSelectionError) as caught:
         guard._run_isolated(
             {"control_bytes": 0}, tmp_path, {"worker.py": b"pass"},

@@ -4117,7 +4117,7 @@
         "tools/core_runtime_profile.py": "df7864fc7f57f856612b5cfadd8140c4ccd4be8c3d2b2515ef1c40f84d84fd86",
         "tools/python_project_inventory.py": "6981a4cf50106c205847e5f946c23c09c5a0959cc5e2caf30920264c91c0b538",
         "tools/promotion_unit_tests/test_core_artifacts.py": "65af880e0df559bfc0e69d5f67357ded77576cd94511b65f2e8b5e5f42201181",
-        "tools/promotion_unit_tests/test_guarded_core_contract.py": "b80ffda3cbce9e8e74ff76b8fda280d62a4d5bc9cfc5065f6f54b94fa224c83f",
+        "tools/promotion_unit_tests/test_guarded_core_contract.py": "bb3e70d33ec0101e5f89ddebaac43688d59ae061d3825ed55e80396729fe0526",
         "tools/promotion_unit_tests/test_core_profile_candidate.py": "fea38adc192a4bec13756d80e4d49082e8e61f04eca7a5ddddef8a8b35960817",
         "tools/promotion_unit_tests/test_core_public_feed.py": "106ada4659e7aece6eaaed68f76e41522fc61ba9e323726818c74aff55ca3185",
         "tools/promotion_unit_tests/test_bundle_snapshot.py": "4122e4030eb49d3748acc70ae4360c597f273a224a2d257c8e7fd2825b3c48da",
