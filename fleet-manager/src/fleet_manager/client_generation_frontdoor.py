@@ -174,7 +174,7 @@ def _writer(root, identity, reservation, location, authenticate, manifest, stage
         with admission._connection(
             path, database_root=database_root, readonly=False,
         ) as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            admission._begin_write(connection, path)
 
             def checkpoint():
                 unchanged()
@@ -414,7 +414,7 @@ def publish_client_generation(root, identity, reservation, staged, *, command_di
                                        (canonical(value).decode("utf-8"),))
                     intent_durable = True
                     admission._commit(connection)
-                    connection.execute("BEGIN IMMEDIATE")
+                    admission._begin_write(connection, root)
                     validate()
 
                 copy = publication.CopyPublication(
@@ -525,7 +525,7 @@ def _withdrawal_writer(path, identity, reservation, unchanged, directory_unchang
         admission._owned(path) as (_path, database_root, owned_unchanged),
         admission._connection(path, database_root=database_root, readonly=False) as connection,
     ):
-        connection.execute("BEGIN IMMEDIATE")
+        admission._begin_write(connection, path)
         location = generations._location(path)
         admitted, _origin, reservations, _fences = generations._read(connection, identity, location)
         if reservations.get(reservation["generation"]) != reservation:

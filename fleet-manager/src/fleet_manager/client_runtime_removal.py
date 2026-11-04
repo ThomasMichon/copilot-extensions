@@ -264,7 +264,11 @@ def _windows_node(path, publication, expected=None, *, remove=False, depth=0):
         raise PlanError("client runtime removal tree exceeds its depth bound")
     with cleanup._windows_entry(path, delete=remove) as (kernel, handle, descriptor, info):
         if stat.S_ISDIR(info.st_mode):
-            client_admission._windows_private(path)
+            if not publication.lease_component().windows_owned_file(descriptor):
+                raise PlanError("client runtime removal requires a physically owned directory")
+            client_admission._windows_private(
+                path, privileged_owner=True, descriptor=descriptor,
+            )
             actual = {"kind": "directory", "identity": list(cleanup._windows_identity(kernel, handle)),
                       "mode": info.st_mode}
             if expected is not None:
@@ -386,7 +390,7 @@ def _legacy_custody(root, identity):
         client_admission._owned(root) as (path, database_root, unchanged),
         client_admission._connection(path, database_root=database_root, readonly=False) as connection,
     ):
-        connection.execute("BEGIN IMMEDIATE")
+        client_admission._begin_write(connection, path)
         client_admission._read_state(connection, identity)
         yield path, unchanged
 

@@ -123,6 +123,9 @@ def _reap(process: subprocess.Popen, root: Path, directory: Path, request_id: st
 
 
 def queue(root: Path, directory: Path):
+    from agent_procutil.python_cache import cache_arguments
+
+    from . import config as cfg
     from . import status_monitor_runtime
     from .local_cache_refresh import RefreshResult
 
@@ -151,7 +154,8 @@ def queue(root: Path, directory: Path):
         process = None
         try:
             process = subprocess.Popen(
-                [sys.executable, "-m", "agent_worktrees.local_cache_worker",
+                [sys.executable, *cache_arguments(cfg.install_dir()),
+                 "-m", "agent_worktrees.local_cache_worker",
                  str(root), str(directory), request_id],
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 cwd=status_monitor_runtime._daemon_cwd(),

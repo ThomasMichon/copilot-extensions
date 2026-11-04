@@ -1,4 +1,4 @@
-"""Helpers that read sessions already published to a hub destination.
+"""Inspection and compaction of sessions already published to a hub destination.
 
 Hub compaction judges each published session by its ``workspace.yaml``
 timestamps and working directory, never by filesystem mtimes, which are
@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from agent_logger import sessions
+from agent_logger.sync.worktree_state_preservation import require_disposable_tree
 
 
 def _parse_iso(ts: str) -> datetime | None:
@@ -63,3 +64,33 @@ def _hub_session_cwd(session_dir: Path) -> str:
         return ""
     raw = (ws.get("cwd") or ws.get("git_root") or "").strip()
     return os.path.normcase(os.path.normpath(raw)) if raw else ""
+
+
+def compact_hub_sessions(
+    state: Path, archived: Path, min_age_days: int, codec: str,
+    *, tracked_paths: set[str] | None, dry_run: bool,
+) -> int:
+    now = datetime.now(timezone.utc)
+    compacted = 0
+    for directory in state.iterdir():
+        if not directory.is_dir() or not (directory / sessions.EVENTS_MEMBER).exists():
+            continue
+        if sessions.is_archived(directory.name, archived, codec):
+            continue
+        if tracked_paths is not None:
+            cwd = _hub_session_cwd(directory)
+            if cwd and cwd in tracked_paths:
+                continue
+        age = _hub_session_age_days(directory, now)
+        if age is None or age < min_age_days:
+            continue
+        if dry_run:
+            require_disposable_tree(directory)
+            compacted += 1
+            continue
+        ref = sessions.archive_session(directory, archived, codec=codec)
+        if sessions.verify_archive(ref):
+            compacted += 1
+        else:
+            sessions.remove_archive(ref)
+    return compacted

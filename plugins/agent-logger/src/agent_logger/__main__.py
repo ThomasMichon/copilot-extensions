@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import platform
 import subprocess
 import sys
 
@@ -20,11 +19,11 @@ from agent_logger.aggregate import (
     ExecutionMode,
     FileSystemAggregateInputProvider,
     Finding,
-    MachineIdentity,
     ResolvedPlan,
     compile_from_provider,
 )
 from agent_logger.config import RepositoryConfigError, home_dir, load_config
+from agent_logger.aggregate_machine import default_machine_identity, resolve_machine_identity
 from agent_logger.segmenter.platform import detect_machine
 
 
@@ -47,20 +46,10 @@ def _cmd_corpus_inventory(args: argparse.Namespace) -> int:
 
 def _load_aggregate_plan() -> ResolvedPlan:
     home = home_dir()
-    machine = MachineIdentity(
-        name=detect_machine(),
-        platform=_platform_name(),
-    )
+    machine = default_machine_identity()
     try:
         legacy = load_config(home=home, include_repo=False)
-        raw_machine = legacy.get("machine", {})
-        if not isinstance(raw_machine, dict):
-            raise ValueError("machine configuration must be a mapping")
-        machine = MachineIdentity(
-            name=_machine_text(legacy.machine_name, "name") or machine.name,
-            platform=machine.platform,
-            role=_machine_text(legacy.machine_role, "role"),
-        )
+        machine = resolve_machine_identity(legacy, fallback=machine)
         return compile_from_provider(
             FileSystemAggregateInputProvider(machine=machine, home=home)
         )
@@ -77,23 +66,6 @@ def _load_aggregate_plan() -> ResolvedPlan:
             authorized=False,
             passive=True,
         )
-
-
-def _platform_name() -> str:
-    name = platform.system().lower()
-    if name == "darwin":
-        return "macos"
-    if name == "windows":
-        return "windows"
-    return "linux"
-
-
-def _machine_text(value: object, field_name: str) -> str | None:
-    if value is None:
-        return None
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"machine.{field_name} must be null or a non-empty string")
-    return value.strip()
 
 
 def _print_aggregate_plan(plan: ResolvedPlan, *, canonical: bool) -> None:

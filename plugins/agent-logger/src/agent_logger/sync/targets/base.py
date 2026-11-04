@@ -524,6 +524,10 @@ class Target(ABC):
         """Resolve pass-local ZIP readback; an ordinary successful push is no proof."""
         return ProcessLogReadback(self.name)
 
+    def worktree_state_root(self) -> Path | None:
+        """Optional typed-export destination; unsupported never means an ok no-op."""
+        return None
+
     def prune(self, machine: str, retention_days: int | None) -> int:
         """Remove session data older than *retention_days*.
 

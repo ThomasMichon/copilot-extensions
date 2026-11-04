@@ -25,6 +25,31 @@ suppression, while the requested command retains its own interpreter flags.
 This source-boundary control does not expand required unit-only CI or qualify
 an installed rollout.
 
+Logger's opt-in `--test-file tests/test_worktree_state.py
+--test-file tests/test_worktree_state_coexistence.py
+--test-file tests/test_worktree_state_preservation.py
+--allow-explicit-tiers` packet checks typed local collection admission,
+creation-time privacy, fleet coexistence, corruption/partial-publication refusal
+and complete efforts export/readback
+through real isolated Python processes. It does not enable scheduled collection
+or qualify native Windows, an installed archive destination, remote durability
+or reclamation. See [the collection boundary](plugins/agent-logger/docs/worktree-state.md).
+The preservation cases exercise actually eligible old sessions and a verified
+ordinary archive containing no worktree collection; neither justifies erasing
+marked nested evidence.
+Raw and redacted copy refusals compare directory membership as well as file
+bytes, and the real efforts owner verifies the retained export afterward.
+Renamed markers remain protected, and deterministic interleavings qualify both
+claim-first and ordinary-publication-first namespace locking.
+Disposal beginning below a retained marker preserves bytes, directories and
+permissions; a marked `logs/` destination refuses ordinary process-log writes.
+Collections renamed to qualified or legacy provider-group names are excluded
+before expansion, preserving the source-discovery budget for ordinary peers.
+Invalid group markers report per-entry failures while preserving healthy inventory
+peers; actual group-enumeration budget failures still abort traversal.
+Actual directory-open counts at three path depths require one pinned ancestry
+walk per admission, and a newly written marker must be observed on the next call.
+
 The opt-in Manager `tests/test_companion_visual.py` packet compares actual
 Textual timeline renders against synthetic live-following and history-browsing
 SVG baselines, plus a selected-session view with visibly paused membership and
@@ -3542,8 +3567,31 @@ Missing state is never initialized by construction; selected-runtime removal
 refuses before retirement. These cases retain the 90-second item, 120-second
 caller and 45-second child bounds; they do not prove full installer integration,
 whole-installation retirement or live rollout.
-Each native case uses a short factory-owned root to avoid pip's separate Win32
-command-token limit; this is not arbitrary long-executable-path qualification.
+Each native case uses short factory-owned and lineage root names to stay below
+the native Win32 console-launcher path limit. The hosted Windows fixture's
+longer temporary prefix otherwise made its console path 263 characters while
+its interpreter remained within the limit. This is not arbitrary
+long-executable-path qualification.
+
+The manually selected `fleet-client-generations` portfolio in
+`installation-context-full.yml` runs these consumers on native Linux and Windows
+at the exact dispatch SHA. Admission and each of the four generation transitions
+use separate canonical standalone-runner invocations with the existing
+120-second caller, 90-second item and 45-second child bounds. The existing
+strict six-consumer oracle checks the combined reports, refusing missing,
+duplicate, skipped, errored or failed cases. Reports are retained per platform.
+This optional portfolio does not expand required unit CI or qualify a complete
+installer, fresh-OS scenario, controller or live adopter.
+Positive roots and staging directories use the existing native private-state
+creator rather than treating POSIX mode bits as Windows ownership evidence.
+The installed consumers exercise explicit owner-private database and generation
+metadata creation without weakening the existing ACL or hot-journal checks.
+The Windows removal consumer also introduces an explicit public-read directory
+grant, requires refusal with the runtime retained, then removes only that
+fixture-introduced grant before exact removal/retry. Runtime directories use
+the same canonical held-handle current-principal proof as runtime files plus
+the existing strict private-grant allowlist; roots and metadata retain their
+TokenUser-owner requirement.
 
 The agent-free `fleet-manager-client-admission` clean-room scenario includes
 those four actual generation consumers alongside admission/revocation/reopen

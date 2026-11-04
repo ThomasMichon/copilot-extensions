@@ -358,12 +358,39 @@ is not called an approval: its carried-over test-double finding is independently
 fixed and all three threads resolved. #10092 has a genuine final-head approval.
 No new test, authentication, native update, installed behavior or custody release
 is claimed. #10060 remains OPEN: merged source/CI do not settle the final
-review's native visibility assessment or supply a missing maintainer approval.
+review's native visibility assessment; current whole-source and actor-specific
+review acceptance were not fully qualified. Absence of a separate approval is
+not itself a new gate for a role-authorized author.
 Two equal complete eleven-page scans at 17:52:06 UTC / 09:52:06 PST count
 1,019 whole open, 290 above 729: 745 eligible, 274 excluded, 681 original-cohort
 and 338 inflow. The two verified departures are inflow completions, with no
 other arrival or external departure in those observations. Continue bounded
 weighted-graph and completed-work research; all parent check states survive.
+
+The exact five-file finite-judgment packet merged in #10478 as
+`6163510e8de01263522235983d84605d1af63053` after genuine exact-head approval,
+zero findings and successful required CI. All actual merged/current blobs
+equal the reviewed head. An initial managed completion correctly refused the
+missing required PR gate; no effect occurred, and completion was retried only
+after the watcher observed CI success. Only the independent publication child
+finalized, with checkout and branch retained. Both finite source issues stay
+CLOSED and #10060 stays OPEN, without native or custody implications.
+Two equal complete eleven-page scans at 18:12:53 UTC / 10:12:53 PST count
+1,018 whole open, 289 above 729: 744 eligible, 274 excluded, 681 original-cohort
+and 337 inflow. External #10474 departure is metadata-only and uncredited,
+with no arrivals or own closures in that observation.
+
+The [mux lifecycle core study](mux-lifecycle-cohort.md) now integrates eight
+admitted originals and all refinements: 29 texts, 60,815 characters. Ninth
+#8669 remains withheld before new rendering because of protected lineage.
+Twelve complete commit messages provide 21 bounded comparisons, with three
+other edges withheld before rendering; no PR-description/source completion is
+inferred. One whole Mux Companion vision supports scope/default reconciliation,
+not complete receiver fit. Native recovery reservations, unique diagnostics,
+manual-versus-automatic restore, human/installed residuals and selected child
+cwd remain separate. All eight sources remain OPEN, with no new ROOT intake,
+implementation appointment, execution or custody transfer. Continue through
+normal publication and a changed bounded graph/completed-work question.
 
 - [x] Holistically sweep the initial eligible backlog and build an issue/effort
   relationship graph; use alignment and theme to identify consolidation groups.
@@ -622,6 +649,15 @@ weighted-graph and completed-work research; all parent check states survive.
   normal publication flow.
 
 ## Validation Plan
+
+The [mux lifecycle study](mux-lifecycle-cohort.md) distinguishes eight complete
+original contracts from excluded #8669 and its protected lineage. All 24
+retrieval scores survive: 21 whole-message comparisons and three pre-render
+withholds supply no independently verified whole completion. One complete
+standing vision does not qualify an effort receiver or settle native/human/
+installed acceptance. Implementation reservations are retained as such, not
+misread as research grants or erased because an assignee is absent. No parent
+Plan/Validation state or source/resource custodian changes.
 
 The [two finite completion judgments](<journal/2026/11.04 finite-caller-and-probe-completions.md>)
 separate original source acceptance from full installation, native latency and

@@ -4,6 +4,7 @@ import copy
 import json
 import os
 from pathlib import Path
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -14,6 +15,7 @@ import pytest
 from fleet_manager import client_admission as admission, client_generations as generations
 from fleet_manager.__main__ import main
 from fleet_manager.planning import PlanError, canonical, digest
+from fleet_manager.private_state import private_directory
 from test_artifact_staging import primitive as primitive  # noqa: F401
 from test_client_admission import database_bytes, identity, independently_sign, retained, selection
 from test_client_construction import signed_wheel as signed_wheel, target  # noqa: F401
@@ -313,11 +315,12 @@ def test_actual_installed_console_generation_transitions(
     signed = independently_sign([fixture["proof"]["payload"]], tmp_path)
     fixture["proof"] = {**fixture["proof"], **signed["proofs"][0]}
     fixture["policy"]["keys"][0]["public_key"] = signed["public_key"]
-    root = lineage_at(tmp_path)
+    root = tmp_path / "l"
+    private_directory(root)
     directory = tmp_path / "commands"
-    directory.mkdir(mode=0o700)
+    private_directory(directory)
     stage = tmp_path / "stage"
-    stage.mkdir(mode=0o700)
+    private_directory(stage)
     paths = inputs_at(tmp_path, fixture)
     console = Path(sys.executable).with_name("fleet-manager.exe" if os.name == "nt" else "fleet-manager")
     assert console.is_file(), "actual installed owner console required"
@@ -340,6 +343,24 @@ def test_actual_installed_console_generation_transitions(
             "operation": operation, "seconds": time.monotonic() - started,
             "returncode": result.returncode,
         }), flush=True)
+        if success and result.returncode != 0 and operation == "construct":
+            from fleet_manager import client_construction as owner
+
+            namespace = root / ("generation-" + FIRST) / owner.NAMESPACE
+            version = f"client-{fixture['proof']['payload']['sequence']}-{digest(fixture['manifest'])}"
+            slot = namespace / "versions" / version
+            if (slot / ("Scripts" if os.name == "nt" else "bin")).is_dir():
+                try:
+                    with primitive.construction_lease(namespace, version) as descriptor:
+                        owner._run(
+                            [slot / ("Scripts/fleet-manager.exe" if os.name == "nt"
+                                     else "bin/fleet-manager"), "--version"],
+                            slot, "failed-candidate diagnostic", descriptor=descriptor,
+                        )
+                except Exception as error:
+                    cause = error.__context__ or error
+                    print("GENERATION_CLI_NESTED_FAILURE", repr(cause),
+                          (getattr(cause, "stderr", None) or "")[:4096], flush=True)
         assert result.returncode == (0 if success else 1), result.stderr
         if success:
             return json.loads(result.stdout)
@@ -394,6 +415,22 @@ def test_actual_installed_console_generation_transitions(
     assert invoke("inspect")["selected_generation"] is None
     direct_health(first, tmp_path)
     if transition == "remove-runtime":
+        if os.name == "nt":
+            icacls = shutil.which("icacls")
+            assert icacls
+            runtime = Path(first["direct_command"]).parent.parent
+            for arguments in (
+                ["/grant", "*S-1-1-0:(R)"],
+                ["/remove:g", "*S-1-1-0"],
+            ):
+                changed = subprocess.run(
+                    [icacls, str(runtime), *arguments], capture_output=True,
+                    text=True, timeout=10, **FLAGS,
+                )
+                assert changed.returncode == 0, changed.stderr
+                if arguments[0] == "/grant":
+                    invoke("remove-runtime", *exact, success=False)
+                    assert Path(first["direct_command"]).is_file()
         for _ in range(2):
             removed = invoke("remove-runtime", *exact)
             assert removed["generation_retired"] and removed["runtime_removed"]

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import stat
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import BinaryIO
@@ -27,13 +27,15 @@ class PublicationDirectory(ArchiveDirectory):
             )
         return super().stat(name)
 
-    def create(self, name: str) -> BinaryIO:
+    def create(self, name: str, *, mode: int = 0o666) -> BinaryIO:
         name = self._name(name)
         if self.fd is None:
+            if mode != 0o666:
+                raise OSError("private publication requires a native permissions adapter")
             return open(windows_extended_path(self.path / name), "xb")
         fd = os.open(
             name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-            0o666, dir_fd=self.fd,
+            mode, dir_fd=self.fd,
         )
         try:
             return os.fdopen(fd, "wb")
@@ -79,6 +81,7 @@ class PublicationDirectory(ArchiveDirectory):
 @contextmanager
 def publication_directory(
     path: Path, *, create: bool = True,
+    inspect: Callable[[PublicationDirectory], None] | None = None,
 ) -> Iterator[PublicationDirectory]:
     """Create and pin a lexical directory chain without following redirects.
 
@@ -87,6 +90,7 @@ def publication_directory(
     No unchecked pathname mkdir precedes this boundary. Readback uses
     ``create=False``: missing children fail without mkdir or durability writes,
     and successful exit requires the pinned ancestry to retain its lexical names.
+    An optional inspector examines each admitted child through that same pin.
     """
     absolute = path.expanduser().absolute()
     if ".." in absolute.parts:
@@ -105,11 +109,14 @@ def publication_directory(
                     except FileExistsError:
                         pass
                 stack.enter_context(_windows_directory(current))
+                if inspect is not None:
+                    inspect(PublicationDirectory(current, None))
         else:
             flags = _posix_flags("O_DIRECTORY", "O_NOFOLLOW")
             fd = os.open(current, flags)
             stack.callback(os.close, fd)
             for component in absolute.parts[1:]:
+                current /= component
                 if create:
                     try:
                         os.mkdir(component, dir_fd=fd)
@@ -121,6 +128,8 @@ def publication_directory(
                 stack.callback(os.close, fd)
                 if not create:
                     readback_edges.append((parent_fd, component, fd))
+                if inspect is not None:
+                    inspect(PublicationDirectory(current, fd))
         yield PublicationDirectory(absolute, fd)
         for parent_fd, component, child_fd in readback_edges:
             named = os.stat(component, dir_fd=parent_fd, follow_symlinks=False)
