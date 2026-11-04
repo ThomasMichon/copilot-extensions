@@ -36,6 +36,13 @@ explicit new managed agenda initialization and complete consistent export/
 readback. The [D2 source readback](journal/2026/11.03-sidecar-managed-agenda-export.md)
 retains Manager/Bridge consumers, logger/rescue, native and original parent gates.
 
+#10251 merged as `8b01db9aff9064434c839d2275eada0d27f876da`, delivering D3's
+managed rich Agenda consumer through the existing single permanent subscription.
+The [source readback](journal/2026/11.03-sidecar-rich-agenda-consumer.md) records
+294 coupled controls, required unit qualification and the actual approved merge.
+Bridge consumption/three-source composition, logger/rescue, native and original
+parent gates remain open.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than
@@ -307,7 +314,7 @@ publication and installed support retain their separate qualification.
   [linked worktree-state design](worktree-state-lifetime.md). Existing source
   approvals do not authorize actual data relocation, collection or deletion.
   #10224 delivers D1's allocator/discovery source and #10238 D2's explicit
-  initialization/export. D3-D5 and native durability
+  initialization/export, and #10251 D3's Manager consumer. D4-D5 and native durability
   remain open rather than completing this combined acceptance.
 - [x] Attach the selected worktree provider to the actual Manager Timeline
   through the owning process boundary, with independent page/live cursors and
@@ -315,8 +322,9 @@ publication and installed support retain their separate qualification.
   join, explicit integrity reconciliation and typed retirement custody.
 - [ ] Integrate Manager adapters with independent cursors, atomic view updates,
   stale/head/source replacement and cancellation.
-  The selected worktree adapter is delivered; rich agenda and Bridge consumers
-  and their joined coverage remain open.
+  The selected worktree and rich Agenda adapters are delivered, including their
+  real isolated process/Textual joins in #10131/#10251. Bridge consumption and
+  complete three-source coverage remain open.
 
 ### S3 - Bridge relationships and problem evidence
 

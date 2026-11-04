@@ -219,8 +219,10 @@ def feed_argv(
 
 
 @contextmanager
-def _owned_process(argv: list[str], cwd: str):
+def _owned_process(argv: list[str], cwd: str, *, environment: dict[str, str] | None = None):
     env = _engine_environment()
+    if environment is not None:
+        env.update(environment)
     # Reuse Manager's unreaped POSIX group-owner protocol; only its stdout
     # destination differs. This reserves the group identity through cleanup.
     if os.name != "nt" and not contained_test_mode():
@@ -296,10 +298,17 @@ def frames(
     if on_contract is not None:
         on_contract(version)
     argv = feed_argv(project, worktree, session, engine_command=base, contract_version=version)
-    yield from command_frames(argv, cancelled=cancelled, cwd=cwd)
+    yield from command_frames(
+        argv, cancelled=cancelled, cwd=cwd,
+        startup_timeout=STARTUP_TIMEOUT, idle_timeout=IDLE_TIMEOUT,
+    )
 
 
-def command_frames(argv: list[str], *, cancelled: Event, cwd: str):
+def command_frames(
+    argv: list[str], *, cancelled: Event, cwd: str,
+    environment: dict[str, str] | None = None,
+    startup_timeout: float = STARTUP_TIMEOUT, idle_timeout: float = IDLE_TIMEOUT,
+):
     """Bounded JSONL for an already admitted owned command; no discovery or bootstrap."""
     if cancelled.is_set():
         return
@@ -432,7 +441,11 @@ def command_frames(argv: list[str], *, cancelled: Event, cwd: str):
 
     readers = []
     try:
-        with _owned_process(argv, cwd) as (stdout, stderr, completion):
+        process = (
+            _owned_process(argv, cwd) if environment is None
+            else _owned_process(argv, cwd, environment=environment)
+        )
+        with process as (stdout, stderr, completion):
             readers = [
                 Thread(target=read_lines, args=(stdout,), name="agenda-feed-stdout", daemon=True),
                 Thread(target=read_errors, args=(stderr,), name="agenda-feed-stderr", daemon=True),
@@ -440,7 +453,7 @@ def command_frames(argv: list[str], *, cancelled: Event, cwd: str):
             ]
             for reader in readers:
                 reader.start()
-            deadline = time.monotonic() + STARTUP_TIMEOUT
+            deadline = time.monotonic() + startup_timeout
             reader_deadline = None
             try:
                 while not cancelled.is_set():
@@ -483,7 +496,7 @@ def command_frames(argv: list[str], *, cancelled: Event, cwd: str):
                     if not isinstance(frame, dict):
                         raise ValueError("agenda feed emitted a non-object frame")
                     yield frame
-                    deadline = time.monotonic() + IDLE_TIMEOUT
+                    deadline = time.monotonic() + idle_timeout
             finally:
                 stopped.set()
     except OSError as exc:

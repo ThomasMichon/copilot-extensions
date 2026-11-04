@@ -161,17 +161,24 @@ class TimelineWindow:
             if old is not None and old != self._digest(event):
                 return self._result(False, ResultCode.CONTENT_CONFLICT, "An immutable event changed content.")
             additions += old is None
-        if len(self._proofs) + additions > self.max_proofs:
+        keys = self._provider_keys(key)
+        if sum(ref.source_key in keys for ref in self._proofs) + additions > min(
+            self.max_proofs, MAX_EVENT_PROOFS // len(Provider),
+        ):
             return self._integrity_gap(key, "Integrity proof budget exhausted; evidence was not evicted.")
         return None
 
-    def _integrity_size(self) -> int:
+    def _provider_keys(self, key: str) -> set[str]:
+        provider = self.sources[key].token.identity.provider
+        return {key for key, state in self.sources.items() if state.token.identity.provider is provider}
+
+    def _integrity_size(self, keys: set[str] | None = None) -> int:
         return sum(
             64 + sum(len(value.encode("utf-8")) for value in (ref.source_key, ref.generation, ref.event_id))
-            for ref in self._proofs
+            for ref in self._proofs if keys is None or ref.source_key in keys
         ) + sum(
             64 + sum(len(value.encode("utf-8")) for value in (position.source_key, position.generation, position.cursor))
-            for values in self._cursors.values() for position in values
+            for key, values in self._cursors.items() for position in values if keys is None or key in keys
         )
 
     def _merge_ordered(
@@ -230,13 +237,16 @@ class TimelineWindow:
                 event.ref.source_key, event.ref.generation, event.ref.event_id,
             )) for event in events if event.ref not in self._proofs
         )
+        # Fixed owner partitions keep the total bound while preventing an
+        # exhausted optional owner from consuming another owner's admission.
+        keys = self._provider_keys(key)
         if state.position is not None and state.position not in self._cursors.get(state.token.identity.source_key, set()):
-            if sum(len(values) for values in self._cursors.values()) >= MAX_EVENT_PROOFS:
+            if sum(len(values) for source, values in self._cursors.items() if source in keys) >= MAX_EVENT_PROOFS // len(Provider):
                 return self._integrity_gap(key, "Live cursor integrity budget exhausted.")
             integrity_added += 64 + sum(len(value.encode("utf-8")) for value in (
                 state.position.source_key, state.position.generation, state.position.cursor,
             ))
-        if self._integrity_size() + integrity_added > MAX_WINDOW_BYTES:
+        if self._integrity_size(keys) + integrity_added > MAX_WINDOW_BYTES // len(Provider):
             return self._integrity_gap(key, "Integrity evidence byte budget exhausted.")
         fresh = {event.ref for event in events if event.ref not in self._proofs}
         # Source tuples preserve provider order. Across sources, timestamps are
@@ -367,7 +377,17 @@ class TimelineWindow:
             for event in snapshot.events
         ):
             raise TimelineContractError("reconciliation changed immutable event evidence")
-        candidate = TimelineWindow(max_events=self.max_events, max_bytes=self.max_bytes, max_proofs=self.max_proofs)
+        # Only the exhausted provider moves to a fresh baseline. Independent
+        # readers still publish against their exact accepted bindings/cursors.
+        candidate = deepcopy(self)
+        candidate.sources.pop(key)
+        candidate.events = tuple(event for event in self.events if event.source.source_key != key)
+        candidate._by_ref = {event.ref: event for event in candidate.events}
+        candidate._proofs = {ref: digest for ref, digest in self._proofs.items() if ref.source_key != key}
+        candidate._cursors.pop(key, None)
+        candidate._lanes = {actor: lane for actor, lane in self._lanes.items() if actor[0] != key}
+        candidate.reconciliation_required -= {key}
+        candidate.source_gaps.pop(key, None)
         bound = candidate.bind(snapshot.token)
         if not bound.applied:
             raise TimelineContractError("reconciliation source was not admitted: " + bound.reason)

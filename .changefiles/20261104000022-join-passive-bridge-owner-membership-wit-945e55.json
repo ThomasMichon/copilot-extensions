@@ -1,0 +1,9 @@
+{
+  "comment": "Join passive Bridge owner membership with selected worktree and rich Agenda timelines",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
