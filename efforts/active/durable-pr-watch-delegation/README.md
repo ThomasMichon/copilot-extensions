@@ -627,12 +627,17 @@ The [bounded amendment](author-publication.md) captures the public-safe request,
 credited baseline, unchanged owners and agent-recommended implementation.
 It extends the following checkout-free lane, not the fleet deployment scope.
 
-- [ ] Complete [A0: contract and target policy](author-publication.md#a0---contract-and-target-policy).
-- [ ] Complete [A1: policy-qualified foreign creation](author-publication.md#a1---policy-qualified-foreign-creation), retaining caller claims and delegated publication checks.
-- [ ] Complete [A2: verified author metadata](author-publication.md#a2---verified-author-metadata), including exact descriptions, reviewers and bidirectional work-item links.
-- [ ] Complete [A3: delegated source publication](author-publication.md#a3---delegated-source-publication) through the existing source-control owner.
+- [x] Complete [A0: contract and target policy](author-publication.md#a0---contract-and-target-policy) at the source-contract layer (#10402).
+- [x] Complete [A1: policy-qualified foreign creation](author-publication.md#a1---policy-qualified-foreign-creation), retaining caller claims and delegated publication checks (#10402, reachable-workspace adapter).
+- [x] Complete [A2: verified author metadata](author-publication.md#a2---verified-author-metadata), including exact descriptions, reviewers and bidirectional work-item links (#10402 source acceptance).
+- [x] Complete [A3: delegated source publication](author-publication.md#a3---delegated-source-publication) through the existing source-control owner (#10402 source acceptance).
 - [ ] Complete [A4: one documented front door](author-publication.md#a4---one-documented-front-door) across generic guidance and consumer adapters.
 - [ ] Complete [A5: qualification and adoption](author-publication.md#a5---qualification-and-adoption), with source, release and authorized installed acceptance distinguished.
+
+The operator selected source-PR completion with remaining adoption tracked
+separately. #10412, assigned to ThomasMichon, retains the remaining A4-A5
+consumer/live/installed and remote-only transport acceptance. Generic guidance
+and source tests do not close those rows or the broader parent effort.
 
 ### Direct checkout-free operation and inherited ADO matrix from #2700/#2881
 
@@ -832,6 +837,8 @@ or silently expanding a bounded source claim.
   partial-effect recovery, source-publication policy, observation continuity,
   actual consumer routing and separate native/live/installed evidence tiers.
   Preserve every existing acceptance row and current owner.
+  Source controls merged in #10402; remaining live/installed and consumer
+  qualification is retained by #10412, not claimed complete.
 
 - [ ] Resolve the caller-driven backend, exact-set and reviewer-selection
   [validation contract](caller-driven-subscriptions.md#validation-agent-recommended)
@@ -996,6 +1003,17 @@ callback an implicit credential store.
 - Preserve every prior Plan/Validation row and existing operational hold.
   Reviewed intent precedes finite source realization; no live reviewer,
   backend enrollment, credential, service or deployment changed.
+
+### 2026-11-04 - Merge finite ADO author source and retain adoption
+
+- #10402 merged after current-head Copilot approval, resolved findings and
+  required green CI. A0-A3 source acceptance and generic frontend guidance are
+  recorded in the [bounded amendment](author-publication.md#implementation-journal).
+- The explicit source-only completion disposition transfers the remaining
+  A4-A5 live/installed, consumer migration and remote-only evidence duties to
+  assigned #10412. Azure CLI/Entra remains supported without a PAT prerequisite.
+- No runtime rollout or consumer-helper retirement occurred. #6007 stays
+  Active; #7051 conformance and #7188 service ownership are unchanged.
 
 ### 2026-11-03 - Propose bounded author-publication convergence
 
