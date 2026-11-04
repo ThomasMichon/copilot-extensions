@@ -5,6 +5,7 @@ index lists dated checkpoints newest-first.
 
 - [2026-11-03 - Qualified fifteen documentary publication slice](<journal/2026/11.03 qualified-fifteen-publication.md>)
 - [2026-10-30 - Sixteen further contracts and twelve finite proposals](<journal/2026/10.30 recovered-contract-qualification.md>)
+- [2026-10-30 - Fifteen further contracts, two proposals and thirteen retentions](<journal/2026/10.30 fifteen-more-contract-qualification.md>)
 - [2026-10-29 - Nineteen qualified contracts and three direct proposals](<journal/2026/10.29 nineteen-contract-qualification.md>)
 - [2026-10-29 - Sixteen qualified contracts and five direct proposals](<journal/2026/10.29 sixteen-contract-qualification.md>)
 - [2026-10-29 - Thirteen qualified contracts and five direct proposals](<journal/2026/10.29 thirteen-contract-qualification.md>)
