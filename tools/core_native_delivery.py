@@ -410,7 +410,8 @@ def _build_from_snapshot(
                     )
                     witness, guarded_directory, snapshot_budget = compile_owners.enter_context(compile_guarded(
                         transaction, projections[1], initial_feed, floor=floor, cutoffs=cutoffs,
-                        exclusions=first_exclusions, limits=acquisition_limits, wheel_limits=limits,
+                        exclusions=first_exclusions, target_tags=target["tags"],
+                        limits=acquisition_limits, wheel_limits=limits,
                         deadline=deadline, procutil=_producer_procutil(),
                     ))
                     selected_lock = _read_lock(lock_file, deadline)

@@ -19,6 +19,7 @@ from typing import Any
 from agent_procutil import no_window_kwargs
 
 from . import __version__
+from .cli_output import render_status as _render_status
 
 _STATUS_QUERY = (
     "query($owner: String!, $name: String!, $number: Int!) { "
@@ -248,24 +249,6 @@ def _github_status(repo: str, number: int) -> dict[str, Any]:
     }
 
 
-def _render_status(status: dict[str, Any]) -> str:
-    review = status["reviewDecision"] or "(none)"
-    mergeable = status["mergeable"] or "(unknown)"
-    draft = "yes" if status["isDraft"] else "no"
-    return "\n".join(
-        [
-            f"repo:            {status['repo']}",
-            f"number:          #{status['number']}",
-            f"state:           {status['state']}",
-            f"mergeable:       {mergeable}",
-            f"review decision: {review}",
-            f"draft:           {draft}",
-            f"title:           {status['title']}",
-            f"url:             {status['url']}",
-        ]
-    )
-
-
 def _cmd_status(args: argparse.Namespace) -> int:
     if args.worktrees_command is not None:
         return _cmd_native(args)
@@ -380,6 +363,10 @@ def _github_create(
 def _cmd_create(args: argparse.Namespace) -> int:
     if args.worktrees_command is not None:
         return _cmd_native(args)
+    if any(getattr(args, field, None) for field in ("source_workspace", "expected_head", "body_file")):
+        message = "Delegated creation requires an explicit --worktrees-command; no GitHub fallback was attempted."
+        print(json.dumps({"error": message, "repo": args.repo})) if args.json else print(message, file=sys.stderr)
+        return 2
     worktree_id = _resolve_claimant_worktree_id()
     if not worktree_id:
         if args.json:
@@ -828,8 +815,12 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument("--head", required=True, help="head branch (must already be pushed)")
     create.add_argument("--base", default=None, help="base branch (defaults to the repo default)")
     create.add_argument("--title", required=True, help="pull request title")
-    create.add_argument("--body", default="", help="pull request body (default: empty)")
+    create_body = create.add_mutually_exclusive_group()
+    create_body.add_argument("--body", default="", help="pull request body (default: empty)")
+    create_body.add_argument("--body-file", help="UTF-8 body file read by the native owner")
     create.add_argument("--draft", action="store_true", help="open as a draft pull request")
+    create.add_argument("--source-workspace", help="Exact reachable delegated Git root (native only)")
+    create.add_argument("--expected-head", help="Full reviewed source commit (native only)")
     create.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     create.set_defaults(handler=_cmd_create)
 
@@ -870,6 +861,9 @@ def build_parser() -> argparse.ArgumentParser:
             "--worktrees-command", type=validate_selector,
             help="absolute attributable Worktrees command for native configured PR operations",
         )
+
+    from .native_author import add_parsers as add_author_parsers
+    add_author_parsers(subparsers, repo_type=_validate_repo_slug, handler=_cmd_native)
 
     watch = subparsers.add_parser(
         "watch", help="non-blocking subscription against the shared watch daemon"

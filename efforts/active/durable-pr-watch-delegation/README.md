@@ -38,6 +38,7 @@ native/fleet switch alone does not deliver this service intake model.
 | PR-service plan steward | First-class plugin/service and fleet-consumer scope amendment, review and integration | Separate managed planning worktree; #7188 |
 | Author-publication plan steward | Bounded author-publication proposal and vision amendment only | Public coordination issue #6007; existing runtime owners retained |
 | PR-perspectives steward | Author/Reviewer domain amendment, bounded inert attention source and isolated qualification; no live activation | #6007 and the Author/Reviewer perspectives plan |
+| Author-publication implementation driver | Finite A0-A5 authorship contribution, integration, validation and PR stewardship | Bounded implementation claim #10383; existing broader owners retained |
 
 ## Coordination
 
@@ -100,8 +101,10 @@ and reviewer task owners remain unchanged; this is not a new generic producer
 framework, fleet controller or permission to activate a live backend.
 
 The [author-publication amendment](author-publication.md) refines the existing
-checkout-free/client-convergence lane. Its steward owns planning only; Worktrees
-publication/claim, #7051 conformance and #7188 service custody remain unchanged.
+checkout-free/client-convergence lane. Its original steward owns the planning
+amendment; the subsequently assigned implementation driver works under #10383.
+Worktrees publication/claim, #7051 conformance and #7188 service custody remain
+unchanged.
 
 The [Author/Reviewer amendment](author-reviewer-perspectives.md) extends this
 same canonical effort with role-aware attention, a bounded live conversation
@@ -272,9 +275,9 @@ _Operator-required outcome; agent-recommended slices and validation._
   [inert attention projection](../../../plugins/agent-pull-requests/docs/attention.md);
   merged in #10390. It does not close normalized acquisition, durable cursors
   or serving adoption.
-  The next bounded source leaf is the
+  The
   [existing-owner conversation metadata journal](../../../plugins/agent-pull-requests/docs/conversation-journal.md)
-  and opt-in event reader; full body acquisition, coordinated terminal
+  and opt-in event reader merged in #10401; full body acquisition, coordinated terminal
   retention, notifications and normal host adoption remain separate.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
@@ -624,12 +627,17 @@ The [bounded amendment](author-publication.md) captures the public-safe request,
 credited baseline, unchanged owners and agent-recommended implementation.
 It extends the following checkout-free lane, not the fleet deployment scope.
 
-- [ ] Complete [A0: contract and target policy](author-publication.md#a0---contract-and-target-policy).
-- [ ] Complete [A1: policy-qualified foreign creation](author-publication.md#a1---policy-qualified-foreign-creation), retaining caller claims and delegated publication checks.
-- [ ] Complete [A2: verified author metadata](author-publication.md#a2---verified-author-metadata), including exact descriptions, reviewers and bidirectional work-item links.
-- [ ] Complete [A3: delegated source publication](author-publication.md#a3---delegated-source-publication) through the existing source-control owner.
+- [x] Complete [A0: contract and target policy](author-publication.md#a0---contract-and-target-policy) at the source-contract layer (#10402).
+- [x] Complete [A1: policy-qualified foreign creation](author-publication.md#a1---policy-qualified-foreign-creation), retaining caller claims and delegated publication checks (#10402, reachable-workspace adapter).
+- [x] Complete [A2: verified author metadata](author-publication.md#a2---verified-author-metadata), including exact descriptions, reviewers and bidirectional work-item links (#10402 source acceptance).
+- [x] Complete [A3: delegated source publication](author-publication.md#a3---delegated-source-publication) through the existing source-control owner (#10402 source acceptance).
 - [ ] Complete [A4: one documented front door](author-publication.md#a4---one-documented-front-door) across generic guidance and consumer adapters.
 - [ ] Complete [A5: qualification and adoption](author-publication.md#a5---qualification-and-adoption), with source, release and authorized installed acceptance distinguished.
+
+The operator selected source-PR completion with remaining adoption tracked
+separately. #10412, assigned to ThomasMichon, retains the remaining A4-A5
+consumer/live/installed and remote-only transport acceptance. Generic guidance
+and source tests do not close those rows or the broader parent effort.
 
 ### Direct checkout-free operation and inherited ADO matrix from #2700/#2881
 
@@ -829,6 +837,8 @@ or silently expanding a bounded source claim.
   partial-effect recovery, source-publication policy, observation continuity,
   actual consumer routing and separate native/live/installed evidence tiers.
   Preserve every existing acceptance row and current owner.
+  Source controls merged in #10402; remaining live/installed and consumer
+  qualification is retained by #10412, not claimed complete.
 
 - [ ] Resolve the caller-driven backend, exact-set and reviewer-selection
   [validation contract](caller-driven-subscriptions.md#validation-agent-recommended)
@@ -907,6 +917,39 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-11-04 - Qualify normalized workspace-to-journal acquisition
+
+- The opt-in ADO workspace owner now projects confirmed load/sync acquisition
+  into the existing journal transaction, without another fetcher, watcher,
+  database or caller-supplied ingest route. Disabled embeddings are unchanged.
+- The focused isolated acquisition/journal/workspace packet passed 79 cases.
+  It covers body-free projection, unchanged polls, same-head dialogue, target
+  movement, fractional interval overlap, partial relationship/statistic
+  preservation, restart, terminal/reopen, cache conflicts and journal failure
+  after confirmed cache publication. Cleanup was verified.
+- Capture intervals widen outward to integer seconds; an overlap remains
+  explicitly stale, not fabricated ordering. ADO current votes do not prove a
+  candidate-bound verdict; iterations do not prove review-round or commit totals.
+- This is source qualification, not an installed host, autonomous acquisition,
+  three-driver proof or live shadow. Whole P1/P2 and the parent acceptance remain
+  open. Next: compose journal evidence with read-only attention comparison while
+  keeping missing eligibility/handled state explicit.
+
+### 2026-11-04 - Merge the journal/event source leaf
+
+- #10401 merged as `978fc45be52e1da899dace26544280a9397cae23`
+  after current-head Copilot approval and green required CI. The final fix
+  refuses null/scalar persisted journal state rather than treating corruption
+  as first provisioning and resetting cursor lineage.
+- The initial affected packet passed 136 container cases; the final focused
+  journal/CLI/HTTP/replay-store packet passed 87 after cumulative-statistics
+  and persistent-state corrections. Actual TLS/channel reads use synthetic
+  identities and an explicitly supplied test host, with zero forge writes.
+- Re-read the parent Plan/Validation. Whole P1/P2 and installed/provider/shadow
+  acceptance remain open. Next: connect existing normalized acquisition to
+  the journal while preserving source intervals, CAS, partial/unknown evidence
+  and explicit adoption. No live service or review authority changed.
+
 ### 2026-11-04 - Qualify the opt-in conversation cursor source
 
 - The bounded metadata journal and optional workspace event reader passed
@@ -960,6 +1003,17 @@ callback an implicit credential store.
 - Preserve every prior Plan/Validation row and existing operational hold.
   Reviewed intent precedes finite source realization; no live reviewer,
   backend enrollment, credential, service or deployment changed.
+
+### 2026-11-04 - Merge finite ADO author source and retain adoption
+
+- #10402 merged after current-head Copilot approval, resolved findings and
+  required green CI. A0-A3 source acceptance and generic frontend guidance are
+  recorded in the [bounded amendment](author-publication.md#implementation-journal).
+- The explicit source-only completion disposition transfers the remaining
+  A4-A5 live/installed, consumer migration and remote-only evidence duties to
+  assigned #10412. Azure CLI/Entra remains supported without a PAT prerequisite.
+- No runtime rollout or consumer-helper retirement occurred. #6007 stays
+  Active; #7051 conformance and #7188 service ownership are unchanged.
 
 ### 2026-11-03 - Propose bounded author-publication convergence
 

@@ -123,6 +123,7 @@ def test_source_recovery_retains_unrecoverable_receipt_gates(selected, kind, fau
 @pytest.mark.parametrize("kind", ["engine", "module", "registered"])
 @pytest.mark.parametrize("change", [
     "none", "commit", "tree", "selector", "version", "slot", "venv", "completion", "service",
+    "interpreter",
 ])
 def test_only_complete_selected_source_receipt_skips(selected, kind, change):
     owner, artifact, runtime, source = selected
@@ -130,6 +131,10 @@ def test_only_complete_selected_source_receipt_skips(selected, kind, change):
     manifest = json.loads(source.identity)
     slot = runtime / "versions" / source.version
     slot.mkdir(parents=True)
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python.parent.mkdir()
+    if change != "interpreter":
+        python.touch()
     (slot / ".install-complete.json").write_text(json.dumps({
         "version": source.version, "completed_at": "2026-01-01T00:00:00Z", "pid": os.getpid(),
     }))
@@ -171,6 +176,9 @@ def test_selected_repair_generation_preserves_exact_source_currentness(selected,
     version = source.version + ".repair." + "d" * 32
     slot = runtime / "versions" / version
     slot.mkdir(parents=True)
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python.parent.mkdir()
+    python.touch()
     (slot / ".install-complete.json").write_text(json.dumps(
         {} if fault == "completion" else {
             "version": version, "completed_at": "2026-01-01T00:00:00Z", "pid": os.getpid(),

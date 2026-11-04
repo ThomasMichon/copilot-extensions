@@ -39,7 +39,7 @@ def isolated_engine_step(step):
     })
 
 
-def target_plan(name, target):
+def target_plan(name, target, *, check_footprint=True):
     payload = reconcile.core_installed_payload_dir(name)
     if payload is not None:
         _target_scope(payload)
@@ -48,16 +48,20 @@ def target_plan(name, target):
         payload = reconcile.core_installed_payload_dir(name)
         if payload is None:
             raise ValueError("Engine payload is missing; use the explicit setup/repair flow")
-        step = update_runtime_plan.plan_engine(payload, platform, force=False)
+        step = update_runtime_plan.plan_engine(
+            payload, platform, force=False, check_footprint=check_footprint,
+        )
         return isolated_engine_step(step)
     engine = reconcile.core_installed_payload_dir(reconcile.SELF_PLUGIN)
     if engine is not None and name in update_options._module_dirs(engine) and _target_scope(payload) != "none":
         step = update_runtime_plan.plan_module(
             name, payload, platform, force=False, gate_context=target.context,
+            check_footprint=check_footprint,
         )
         return dataclasses.replace(step, fallback_argv=())
     return update_runtime_plan.plan_registered(
         name, platform, force=False, gate_context=target.context,
+        check_footprint=check_footprint,
     )
 
 
@@ -110,7 +114,9 @@ def inventory():
                 selected_target = _target(name, targets)
                 if selected_target is None or (not selected_target.required and scope != "none"):
                     raise ValueError("Not enabled; enable through configuration before updating its runtime")
-                plan = target_plan(name, selected_target)
+                # Inventory reports support, not runtime readiness. Updates
+                # revalidate the selected footprint before and after acquisition.
+                plan = target_plan(name, selected_target, check_footprint=False)
                 if plan.blocked or (plan.eligible is False and scope != "none"):
                     raise ValueError(plan.status)
                 row["updatable"] = True

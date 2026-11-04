@@ -68,6 +68,23 @@ back to `gh`/`az repos`/`git` directly for the same operation.** That skips
 the provider/token/policy resolution this command exists to get right, and
 defeats the point of having one coherent PR surface at all.
 
+### Azure DevOps author publication and metadata
+
+Use the native `agent-pull-requests` frontend's
+[author workflow](../../../../agent-pull-requests/docs/author-operations.md)
+for capability-qualified creation, admitted delegated source publication and
+metadata-only repair. Worktrees remains the underlying owner:
+`pr-create --from-branch` accepts paired `--source-workspace` /
+`--expected-head` inputs for current built-in publication checks; `pr-update`
+repairs an existing PR without pushing; `pr-push` publishes an admitted,
+pinned source without forcing the managed caller's branch scheme.
+
+Query `pr-author-capabilities --repo <target> --json` on the actual selected
+runtime before relying on new operations. The target's own binding governs
+checks, credentials and completion. A worker policy export, an arbitrary JSON
+receipt or an old package version cannot replace qualified source custody.
+Missing installed support blocks dependent migration, not ordinary supported
+observation and not permission to fall back to raw provider commands.
 
 
 ### Check the target repo's PR flow FIRST -- it is not the same everywhere

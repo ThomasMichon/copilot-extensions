@@ -1501,9 +1501,18 @@ manifest, and service restart (see "What NOT to Do" and "Deploying: one command
 — `<repo> update`" in `CONTRIBUTING.md`).
 
 > **Runtime reconcile is version-keyed; `--force` overrides it.** `update` runs a
-> plugin's runtime installer only when its deployed runtime version differs from
-> the freshly-refreshed payload version (an equal version is assumed current and
-> skipped for speed). `--force` re-runs every enabled plugin's runtime installer
+> plugin's runtime installer when its deployed runtime version differs from
+> the freshly-refreshed payload version, or a matching manifest lacks its
+> selected completed runtime and interpreter. Equal versions retain the quick
+> skip only after the owning payload's read-only generation/completion helpers
+> confirm that footprint. A fallback slot cannot stand in for a broken current
+> selector; selector-free real legacy venv directories remain supported, but
+> symlinks and Windows junctions cannot certify that fallback. An unavailable or
+> unsuccessful footprint probe reaches the normal installer rather than
+> certifying currentness or requiring a separate recovery command. This is
+> footprint validation, not a package-import or service-health guarantee.
+> Bridge always reaches its serving-reconciliation installer, even when its
+> build is current. `--force` re-runs every enabled plugin's runtime installer
 > regardless — the escape hatch for a same-version content drift (a dev checkout,
 > or a marketplace artifact whose version stamp lagged the code). This covers
 > **every** enabled runtime plugin, not just agent-worktrees and the
@@ -1513,6 +1522,11 @@ manifest, and service restart (see "What NOT to Do" and "Deploying: one command
 > (`check-changefile-presence.py`) makes the same-version-drift case rare in
 > the first place, so `--force` stays a last resort.
 
+Containers' marketplace `base` and `provider-exec` generations use their owning
+profile selector rather than the generic unprofiled package-version rule.
+Changed desired profile still reaches its installer; prepared-source profile
+qualification remains separate.
+
 The explicit updater collects the engine, selected modules and other required
 registered runtime commands once after payload acquisition. Before launching
 any runtime installer, its `runtime_preflight` checks the whole selected set's
@@ -1521,6 +1535,9 @@ and interpreter availability, and effective deadline. Execution uses those
 collected arguments, environment snapshots and roots rather than repeating
 discovery after the engine has already changed. Required preflight failures
 name their targets and stop all runtime installation and local integration.
+Read-only installation inventory reports version/support facts without these
+footprint probes; its `updatable` field is not runtime-readiness evidence.
+Actual targeted updates validate the footprint before and after acquisition.
 Intentional exclusions and already-current runtimes do not require unused
 installers; existing module update/install fallback and cell-specific invocation
 contracts remain intact.
@@ -4078,6 +4095,16 @@ artifact/manifest pair, target, component, roots and capability. Returned
 evidence identifies the attested subject digest and producer; it is not feed
 admission or an installed-generation receipt.
 
+Exact target equality remains the default. An explicit
+`allow_compatible_target` selection revalidates the signed profile's complete
+closure against an independently supplied target: platform/architecture,
+implementation, Python minor and device remain in the same family, every
+wheel must support the requested tags and Python version, and marker-dependent
+dependencies and extras must still yield the same complete closure. The
+returned profile and approval identity remain the original signed record.
+This pure selection does not prove that the target belongs to the actual
+interpreter, inspect wheel bytes, or enable an installer.
+
 `tools/artifact_release_discovery.py` owns the existing read-only source
 artifact-channel lookup separately from publication tooling. Promotion reuse,
 tag lookup and readiness retain compatibility adapters over this owner, and
@@ -4206,6 +4233,16 @@ the selected source and actual wheel metadata. This adapter does not select or
 authenticate the source checkout, approve a runtime profile, provision
 third-party materials, publish a delivery, or enable an updater.
 
+For a delivery that already holds the first-party wheels,
+`retain_reconstructed_core` uses the promotion owner's canonical bundle writer
+to reconstruct the selected core ZIP from those held wheels and the exact
+manifest bytes. It checks the selected entry's identity and digest within the
+caller's byte, count and deadline limits, then holds the temporary ZIP until
+the context exits. The caller must still authenticate the source index,
+perform any required attestation check on that ZIP, admit the source and
+profile independently, and stage consequential output until custody checks
+finish. Reconstruction itself grants no authority and performs no download.
+
 `tools/core_release_delivery.py` combines that adapter with the native
 producer in one local candidate operation:
 
@@ -4266,6 +4303,12 @@ immutable bytes and direct dependency URLs are refused before UV sees it.
 Withdrawn files and wheel records with syntactically invalid tag components
 are not advertised as candidates. Unsafe filenames, mismatched projects and
 over-budget tag expansions still refuse the index.
+The guarded native index also omits wheels incompatible with the selected
+interpreter's actual tags. It first binds the retained UV interpreter and
+native target to that same interpreter, and validates incompatible records'
+filename, project, any present digest, metadata and duplicate-name evidence. Existing
+per-project candidate and metadata budgets bound raw index entries; the global
+request-derived candidate cap applies after native compatibility filtering.
 Configured HTTPS feed redirects use that same owner's metadata and artifact
 delivery policy, including public-index refusal and cross-origin credential
 isolation. Explicit nonempty download-origin restrictions still constrain

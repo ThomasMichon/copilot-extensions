@@ -5,8 +5,11 @@ import contextlib
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
+import time
+import venv
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -59,6 +62,28 @@ def test_inventory_is_read_only_and_does_not_confuse_versions(installed, monkeyp
     assert rows["guide"]["updatable"]
     assert not rows["agent-worktrees"]["installed"]
     assert before == {p: p.read_bytes() for p in before}
+
+
+def test_inventory_does_not_spawn_current_footprint_probes(installed, monkeypatch, tmp_path):
+    engine = tmp_path / "agent-worktrees"
+    (engine / "scripts").mkdir(parents=True)
+    (engine / "plugin.json").write_text('{"name":"agent-worktrees","version":"2","runtimeScope":"universal"}')
+    (engine / "modules.json").write_text('{"modules":[{"name":"agent-other"}]}')
+    for extension in ("sh", "ps1"):
+        (engine / "scripts" / f"install.{extension}").write_text("AGENT_WORKTREES_TARGETED_UPDATE")
+    installed["agent-worktrees"] = engine
+    monkeypatch.setattr(update_runtime_plan, "plan_registered", PLAN_REGISTERED)
+    monkeypatch.setattr(reconcile, "runtime_deployed_version", lambda *a, **k: "2")
+    monkeypatch.setattr(reconcile, "hook_shims_drifted", lambda *a: False)
+    monkeypatch.setattr(reconcile, "runtime_installer_environment", lambda *a: ({}, tmp_path / "runtime"))
+    monkeypatch.setattr(update_runtime, "_machine_gate_blocks", lambda *a: False)
+    monkeypatch.setattr(update_runtime, "_invocation_update_context", lambda: tmp_path)
+    monkeypatch.setattr(update_runtime_plan, "_runtime_footprint_current",
+                        lambda *a: pytest.fail("inventory probed runtime readiness"))
+    rows = {row["id"]: row for row in owner.inventory()["entries"]}
+    assert all(rows[name]["updatable"] for name in (
+        "agent-worktrees", "agent-example", "agent-other",
+    ))
 
 
 @pytest.mark.parametrize("name", ["guide", "agent-example"])
@@ -400,6 +425,104 @@ def test_malformed_manifest_cannot_hide_valid_peer_inventory(installed, monkeypa
     assert rows["guide"]["installed"] and rows["guide"]["payload"] == "unknown"
     assert not rows["guide"]["updatable"] and rows["guide"]["limitation"]
     assert owner.update_target("guide") == 1
+
+
+@pytest.mark.real_installer_processes
+@pytest.mark.parametrize("fault", [
+    "missing-interpreter", "incomplete", "wrong-selection", "failed-repair",
+])
+def test_current_manifest_recovers_selected_runtime_through_target_update(
+    installed, monkeypatch, tmp_path, fault, record_testsuite_property,
+):
+    name = "agent-example"
+    payload = installed[name]
+    scripts = payload / "scripts"
+    scripts.mkdir()
+    library = Path(__file__).resolve().parents[3] / "libs" / "versioned-runtime"
+    for helper in library.glob("*.py"):
+        shutil.copyfile(helper, scripts / helper.name)
+    root = tmp_path / "selected-runtime"
+    slot = root / "versions" / "2"
+    slot.mkdir(parents=True)
+    venv.EnvBuilder(with_pip=False).create(slot)
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    if fault in {"missing-interpreter", "failed-repair"}:
+        python.unlink()
+    (root / "current-version").write_text("1" if fault == "wrong-selection" else "2")
+    (root / "deploy-manifest.json").write_text('{"source":{"version":"2"}}')
+    if fault != "incomplete":
+        (slot / ".install-complete.json").write_text(json.dumps({
+            "version": "2", "completed_at": "2026-01-01", "pid": 0,
+        }))
+    state = root / "config.json"
+    state.write_text('{"preserved":true}')
+    installer = scripts / "fixture-install.py"
+    installer.write_text(
+        ("raise SystemExit(7)\n" if fault == "failed-repair" else "")
+        + "import json, pathlib, venv\n"
+        f"root = pathlib.Path({str(root)!r})\n"
+        "slot = root / 'versions' / '2'\n"
+        "venv.EnvBuilder(with_pip=False).create(slot)\n"
+        "(slot / '.install-complete.json').write_text(json.dumps({\n"
+        "    'version': '2', 'completed_at': '2026-01-01', 'pid': 0}))\n"
+        "(root / 'current-version').write_text('2')\n"
+        "(root / 'installer-ran').write_text('repaired')\n",
+    )
+    if os.name == "nt":
+        script = scripts / "install.ps1"
+        script.write_text(
+            "& '" + sys.executable.replace("'", "''") + "' -I -B '"
+            + str(installer).replace("'", "''") + "'\nexit $LASTEXITCODE\n",
+        )
+    else:
+        script = scripts / "install.sh"
+        script.write_text(
+            "set -e\n" + shlex.quote(sys.executable) + " -I -B "
+            + shlex.quote(str(installer)) + "\n",
+        )
+    monkeypatch.setattr(update_runtime_plan, "plan_registered", PLAN_REGISTERED)
+    monkeypatch.setattr(reconcile, "runtime_deployed_version", DEPLOYED_VERSION)
+    monkeypatch.setattr(reconcile, "runtime_installer_environment", lambda *a: (dict(os.environ), root))
+    monkeypatch.setattr(update_runtime, "_machine_gate_blocks", lambda *a: False)
+    monkeypatch.setattr(owner.config, "detect_platform", lambda: "windows" if os.name == "nt" else "linux")
+    monkeypatch.setattr(update_runtime, "_installer_timeout", lambda *a: 30)
+    monkeypatch.setattr(update_runtime, "_update_one_plugin_payload", lambda *a, **k: "OK")
+    probe = update_runtime_plan._runtime_footprint_current
+    timings = []
+
+    def measured(step):
+        started = time.monotonic()
+        try:
+            return probe(step)
+        finally:
+            timings.append(time.monotonic() - started)
+
+    monkeypatch.setattr(update_runtime_plan, "_runtime_footprint_current", measured)
+    result = owner.update_target(name)
+    if fault == "failed-repair":
+        assert result == 1
+        assert not python.exists() and not (root / "installer-ran").exists()
+        assert state.read_text() == '{"preserved":true}'
+        assert len(timings) == 2
+        record_testsuite_property(f"footprint_probe_seconds_{fault}", json.dumps(timings))
+        return
+    assert result == 0
+    assert (root / "installer-ran").is_file()
+    result = subprocess.run(
+        [str(python), "-I", "-B", "-c", "import sys; print(sys.prefix)"],
+        capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert Path(result.stdout.strip()) == slot
+    assert (root / "current-version").read_text() == "2"
+    assert state.read_text() == '{"preserved":true}'
+    (root / "installer-ran").unlink()
+    before = {p: p.read_bytes() for p in slot.rglob("*") if p.is_file()}
+    assert owner.update_target(name) == 0
+    assert not (root / "installer-ran").exists()
+    assert before == {p: p.read_bytes() for p in slot.rglob("*") if p.is_file()}
+    assert len(timings) == 4
+    record_testsuite_property(f"footprint_probe_seconds_{fault}", json.dumps(timings))
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX actual-installer fixture; native Windows remains separate")

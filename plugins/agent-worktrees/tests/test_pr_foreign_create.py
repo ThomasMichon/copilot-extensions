@@ -18,6 +18,7 @@ class _FakePull:
         self.number = number
         self.state = state
         self.label_error = label_error
+        self.base_ref = "dev"
 
 
 class _FakeProvider:
@@ -84,6 +85,74 @@ def _foreign_resolution(
     return pr_config.ForeignRepoResolution(
         repo_cfg, "owner/other-repo", same_as_active=same_as_active,
     )
+
+
+@pytest.mark.parametrize("qualified", [True, False])
+def test_qualified_foreign_creation_retains_claim_and_postcreate_uncertainty(
+    monkeypatch, _tracking_setup, qualified,
+):
+    from dataclasses import replace
+    from agent_worktrees import pr_foreign_checks
+    from agent_worktrees.pr_publication_config import PublicationChecksConfig
+
+    _, wid = _tracking_setup
+    resolution = _foreign_resolution(provider="azure-devops")
+    resolution = replace(
+        resolution, repo_config=replace(
+            resolution.repo_config, pr=replace(
+                resolution.repo_config.pr, publication_checks=PublicationChecksConfig(),
+            ),
+        ),
+    )
+    monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug", lambda *_: resolution)
+    pull = _FakePull(url="https://forge.invalid/7", number=7)
+    pull.metadata = {"ok": False, "actions": {"description": {"status": "unknown"}}}
+    backend = _FakeProvider(result=pull)
+    monkeypatch.setattr(providers, "get_provider", lambda *_: backend)
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: None)
+
+    def qualify(*args, **kwargs):
+        if not qualified:
+            raise ValueError("reviewed source changed")
+        return {"ok": True, "head": "a" * 40}
+
+    monkeypatch.setattr(pr_foreign_checks, "qualify", qualify)
+    monkeypatch.setattr(
+        pr_foreign_checks, "after_create",
+        lambda *args, **kwargs: {"ok": False, "outcome": "unknown-after-create"},
+    )
+    result = pr_foreign_create.create_foreign_pr_from_branch(
+        wid, _config(), target_repo="owner/other-repo", from_branch="topic", title="fix",
+        source_workspace="source", expected_head="a" * 40,
+    )
+    if qualified:
+        assert result["number"] == 7 and result["claimed"] and result["pr_opened"]
+        assert result["publication_checks"]["outcome"] == "unknown-after-create"
+        assert result["author_metadata"] == pull.metadata
+        assert len(backend.calls) == 1
+    else:
+        assert "reviewed source changed" in result["error"]
+        assert not backend.calls
+
+
+@pytest.mark.parametrize("base", ["dev", "release", ""])
+def test_ado_retry_requires_the_authoritative_configured_base(monkeypatch, _tracking_setup, base):
+    _, wid = _tracking_setup
+    monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug",
+                        lambda *_: _foreign_resolution(provider="azure-devops"))
+    pull = _FakePull(url="https://forge.invalid/7", number=7)
+    pull.base_ref = base
+    backend = _FakeProvider(existing=pull)
+    monkeypatch.setattr(providers, "get_provider", lambda *_: backend)
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: None)
+    result = pr_foreign_create.create_foreign_pr_from_branch(
+        wid, _config(), target_repo="owner/other-repo", from_branch="topic", title="fix",
+    )
+    if base == "dev":
+        assert result["reused"] and result["claimed"]
+    else:
+        assert "target base" in result["error"] and result["number"] == 7
+    assert not backend.calls
 
 
 class TestCreateForeignPrFromBranch:
