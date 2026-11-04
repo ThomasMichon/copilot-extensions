@@ -2,15 +2,18 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import subprocess
 import time
+import zipfile
 from contextlib import contextmanager
 from types import SimpleNamespace
 
 import core_release_delivery as delivery
 import core_release_inputs as intake
+import promotion_bundle_members as bundle_members
 import pytest
 from artifact_attestation import PromotionArtifactError
 
@@ -18,6 +21,65 @@ COMMIT = "a" * 40
 DEV = "b" * 40
 TREE = "c" * 40
 CONTENT = "d" * 40
+
+
+def test_promotion_bundle_members_keep_manifest_first_and_wheels_sorted():
+    manifest = {
+        "composition": "core",
+        "wheels": [
+            {"filename": "zeta-1-py3-none-any.whl", "role": "plugin"},
+            {"filename": "alpha-1-py3-none-any.whl", "role": "vendored-lib"},
+        ],
+    }
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_STORED) as archive:
+        def write_wheel(wheel, info):
+            with archive.open(info, "w") as target:
+                target.write(wheel["filename"].encode())
+
+        bundle_members._write_bundle_members(archive, manifest, write_wheel)
+    with zipfile.ZipFile(output) as archive:
+        assert archive.namelist() == [
+            "manifest.json", "alpha-1-py3-none-any.whl", "zeta-1-py3-none-any.whl",
+        ]
+        assert archive.read("manifest.json") == bundle_members._bundle_manifest(manifest)
+        assert archive.read("alpha-1-py3-none-any.whl") == b"alpha-1-py3-none-any.whl"
+
+
+@pytest.mark.parametrize("failure", ["entry-id", "entry-digest", "manifest", "snapshot", "deadline"])
+def test_reconstructed_core_refuses_unselected_inputs_before_use(monkeypatch, failure):
+    manifest = {
+        "composition": "core", "version": "1.0", "artifact_id": "sha256:" + "d" * 64,
+        "wheels": [{
+            "filename": "sample-1-py3-none-any.whl", "role": "plugin", "sha256": "sha256:" + "e" * 64,
+        }],
+    }
+    monkeypatch.setattr(intake, "_core_manifest", lambda _data: manifest)
+    raw = bundle_members._bundle_manifest(manifest)
+    entry = {
+        "composition": "core", "version": manifest["version"], "artifact_id": manifest["artifact_id"],
+        "filename": intake._bundle_filename(manifest), "sha256": "f" * 64,
+    }
+    deadline = time.monotonic() + 60
+    if failure == "entry-id":
+        entry["artifact_id"] = "sha256:" + "0" * 64
+    elif failure == "entry-digest":
+        entry["sha256"] = "not-a-digest"
+    elif failure == "manifest":
+        raw += b" "
+    elif failure == "deadline":
+        deadline = time.monotonic() - 1
+    expected = {
+        "entry-id": "differs from its selected source entry",
+        "entry-digest": "differs from its selected source entry",
+        "manifest": "requires the exact canonical manifest bytes",
+        "snapshot": "requires a retained wheel snapshot",
+        "deadline": "deadline exhausted or invalid",
+    }[failure]
+    with pytest.raises(ValueError, match=expected), intake.retain_reconstructed_core(
+        manifest_data=raw, entry=entry, wheels=None, deadline=deadline, max_bytes=4096, max_wheels=2,
+    ):
+        pytest.fail("unselected core was exposed")
 
 
 @pytest.mark.parametrize("duplicate", [False, True], ids=["valid", "duplicate-state"])

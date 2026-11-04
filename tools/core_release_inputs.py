@@ -3,13 +3,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import re
 import stat
 import subprocess
 import time
 import zipfile
 import zlib
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from artifact_attestation import (
@@ -32,11 +34,16 @@ from installer_wheel_inputs import (
     preflight_archive,
 )
 from installer_wheel_snapshot import (
+    WheelSnapshot,
+    _digest,
     _open,
     _selected_hashes,
     _unchanged,
     retain_wheel_inputs,
 )
+from promotion_bundle_members import _bundle_manifest, _write_bundle_members
+from promotion_python_artifacts import _bundle_filename
+from runtime_profile_bundle import _BoundedOutput
 from runtime_profile_delivery import _held
 from runtime_profile_release import _unique_object
 
@@ -50,6 +57,85 @@ class CoreReleaseInputs:
     manifest_path: Path
     manifest_data: bytes
     wheel_dir: Path
+
+
+@contextmanager
+def retain_reconstructed_core(
+    *, manifest_data: bytes, entry: dict, wheels: WheelSnapshot,
+    deadline: float, max_bytes: int, max_wheels: int,
+):
+    """Hold the selected core ZIP reconstructed from already-retained wheels.
+
+    The caller must independently authenticate the source index and entry,
+    authenticate the reconstructed subject if required, and admit the profile
+    and source. Stage any consequential output until this context exits.
+    """
+    _check_deadline(deadline)
+    if type(max_bytes) is not int or max_bytes <= 0 or type(max_wheels) is not int or max_wheels <= 0:
+        raise WheelError("core reconstruction limits must be explicit positive integers")
+    if not isinstance(manifest_data, bytes) or not 0 < len(manifest_data) <= min(max_bytes, 1 << 20):
+        raise WheelError("core reconstruction manifest exceeds its byte limit")
+    manifest = _core_manifest(manifest_data)
+    filename = _bundle_filename(manifest)
+    if (
+        not isinstance(entry, dict)
+        or any(manifest.get(key) != entry.get(key) for key in ("composition", "version", "artifact_id"))
+        or "plugin" in entry or "component" in entry
+        or entry.get("filename") != filename or len(filename) > 255
+        or not isinstance(entry.get("sha256"), str)
+        or re.fullmatch(r"[0-9a-f]{64}", entry["sha256"]) is None
+    ):
+        raise WheelError("core reconstruction differs from its selected source entry")
+    if _bundle_manifest(manifest) != manifest_data:
+        raise WheelError("core reconstruction requires the exact canonical manifest bytes")
+    rows = manifest["wheels"]
+    expected = {row["filename"]: row["sha256"] for row in rows}
+    if len(expected) != len(rows):
+        raise WheelError("duplicate core reconstruction wheel")
+    expected = _selected_hashes(expected, max_wheels, deadline)
+    if not isinstance(wheels, WheelSnapshot):
+        raise WheelError("core reconstruction requires a retained wheel snapshot")
+    retained = replace(wheels, _deadline=min(wheels._deadline, deadline)).subset(tuple(expected))
+    if dict(retained.digests) != expected:
+        raise WheelError("retained wheels differ from the selected core manifest")
+    total = len(manifest_data)
+    for stream in retained.archives.values():
+        _check_deadline(deadline)
+        total += os.fstat(stream.fileno()).st_size
+        if total > max_bytes:
+            raise WheelError("core reconstruction input byte budget exceeded")
+
+    with _temporary_inputs(None) as temporary:
+        root = Path(native_retained_path(_private_retained_root(Path(temporary)).resolve()))
+        path = root / filename
+        with path.open("xb") as output, zipfile.ZipFile(
+            _BoundedOutput(output, max_bytes, deadline), "w", compression=zipfile.ZIP_STORED,
+        ) as bundle:
+            def write_wheel(wheel, info):
+                stream = retained.archives[wheel["filename"]]
+                stream.seek(0)
+                with bundle.open(info, "w") as target:
+                    while True:
+                        _check_deadline(deadline)
+                        chunk = stream.read(1 << 20)
+                        if not chunk:
+                            break
+                        target.write(chunk)
+
+            _write_bundle_members(bundle, manifest, write_wheel)
+        retained.verify()
+        before = _ordinary(path)
+        with _open(path) as stream:
+            opened = _unchanged(path, before, stream)
+            digest, size = _digest(stream, max_bytes, deadline)
+            _unchanged(path, before, stream, opened=opened)
+        if digest != "sha256:" + entry["sha256"]:
+            raise WheelError("reconstructed core differs from its selected source digest")
+        with _held(
+            {"core": path}, {"core": {"sha256": digest, "size": size}}, deadline,
+        ):
+            yield path
+        retained.verify()
 
 
 def _unpack_core(stream, entry, root, *, deadline, max_bytes, max_wheels):
