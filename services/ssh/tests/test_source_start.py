@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from fleet_manager.private_state import create_private_file
+from fleet_manager.private_state import create_private_file, private_directory
 from agent_ssh_service.config import Document, ServiceConfig
 
 
@@ -74,6 +74,7 @@ def test_missing_installed_provider_is_precise_unsupported(
 ) -> None:
     source = importlib.import_module("agent_ssh_service.source_start")
     root = tmp_path / "runtime"
+    private_directory(root)
     prefix = root / "versions" / "1.0" / ".venv"
     prefix.mkdir(parents=True)
     monkeypatch.setattr(source.sys, "prefix", str(prefix))
@@ -191,6 +192,7 @@ def test_selected_source_preserves_explicit_root_spelling_for_native_prefix(
 ) -> None:
     source = importlib.import_module("agent_ssh_service.source_start")
     root = tmp_path / "runtime"
+    private_directory(root)
     prefix = root / "versions" / "1.0" / ".venv"
     prefix.mkdir(parents=True)
     native_prefix = Path("\\\\?\\" + str(prefix))

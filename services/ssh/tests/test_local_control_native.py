@@ -6,8 +6,10 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import json
 import secrets
+import shutil
 import stat
 import tempfile
+import threading
 import os
 from pathlib import Path
 import sqlite3
@@ -26,6 +28,7 @@ from agent_ssh_service.local_control import records, request
 from agent_ssh_service.store import DirectoryStore
 from agent_ssh_service.config import Document, ServiceConfig
 from single_instance_lease import SingleInstance
+from fleet_manager.private_state import create_private_file
 if TYPE_CHECKING:
     from services.ssh.tests.conftest import enrollment
     from zdd.private_protocol import Channel, Deadline
@@ -56,6 +59,7 @@ def test_private_process_attests_actual_foreground_and_exits_on_owned_stop(
     policy = tmp_path / "policy.json"
     policy.write_text(json.dumps(config.to_dict()), encoding="utf-8")
     seed_lease = SingleInstance(config.to_dict()["data_dir"], service="agent-ssh-service")
+    os.close(create_private_file(seed_lease.lock_path))
     seed_lease.acquire()
     try:
         DirectoryStore(config).enroll("principal-worker-a", enrollment())
@@ -241,8 +245,9 @@ binding = SimpleNamespace(root=slot.parent.parent, slot=slot,
 async def no_access():
     raise AssertionError('no credential may be acquired')
 hosting.load_service_credentials = lambda **_: SimpleNamespace(access_token=no_access, proof_key=None)
-source_start.ensure_selected = lambda _: None
-source_start.selection_reader = lambda _: lambda: None
+if mode != 'selection-aware':
+    source_start.ensure_selected = lambda _: None
+    source_start.selection_reader = lambda _: lambda: None
 original_prepare = local_control.LocalControl.prepare
 async def prepare(self, **kwargs):
     await original_prepare(self, **kwargs)
@@ -329,6 +334,116 @@ def wait_record(config: ServiceConfig, process: Any) -> Document:
             return found[0]
         time.sleep(.02)
     pytest.fail("native owner registration missing")
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Actual Linux native handoff and original pidfds")
+def test_linux_native_successor_self_retires_old_writer(
+    config: ServiceConfig, tmp_path: Path, native_environment: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_manager.private_state import private_directory
+    from agent_ssh_service.writer import FencedWriter
+    from zdd.private_protocol import Deadline
+
+    root = tmp_path / "runtime"
+    private_directory(root)
+    slots = [root / "versions" / name for name in ("linux-first", "linux-successor")]
+    repo = Path(__file__).resolve().parents[3]
+    for slot in slots:
+        (slot / "runtime").mkdir(parents=True)
+        # Synthetic binding, but real canonical selection reader; no completion/Source claim.
+        shutil.copyfile(repo / "libs/installer-engine/runtime_application_install.py", slot / "install.py")
+        for directory in ("installer-engine", "versioned-runtime"):
+            for source in (repo / "libs" / directory).glob("*.py"):
+                shutil.copyfile(source, slot / "runtime" / source.name)
+    policy = tmp_path / "selection-aware-policy.json"
+    with os.fdopen(create_private_file(policy), "w") as stream:
+        json.dump(config.to_dict(), stream)
+    seed = SingleInstance(config.to_dict()["data_dir"], service="agent-ssh-service")
+    os.close(create_private_file(seed.lock_path))
+    seed.acquire()
+    try:
+        DirectoryStore(config).enroll("principal-worker-a", enrollment())
+    finally:
+        seed.release()
+
+    def select(slot: Path) -> None:
+        temporary = root / "next-selection"
+        with os.fdopen(create_private_file(temporary), "w") as stream:
+            stream.write(slot.name)
+        os.replace(temporary, root / "current-version")
+
+    def launch(slot: Path) -> Any:
+        return spawn_daemon(
+            [sys.executable, "-I", "-B", "-c", _RECOVERY_CHILD,
+             str(policy), str(slot), "selection-aware"],
+            cwd=Path(config.to_dict()["data_dir"]), log_path=tmp_path / (slot.name + ".log"),
+            env=native_environment,
+            instance=DaemonInstanceSpec(
+                "agent-ssh-service", Path(config.to_dict()["data_dir"]), Path(entry.__file__)),
+        )
+
+    references: list[Any] = []
+    parent_thread = threading.current_thread()
+    original_read = local_control.read_frame
+    def capture(channel: Channel, deadline: Deadline) -> Document:
+        if threading.current_thread() is parent_thread:
+            references.append(cast(Any, channel).retain_peer(deadline))
+        return original_read(channel, deadline)
+    monkeypatch.setattr(local_control, "read_frame", capture)
+    processes = []
+    try:
+        select(slots[0])
+        first = launch(slots[0])
+        processes.append(first)
+        outgoing = wait_record(config, first)
+        assert request(config, outgoing, "prepare")["prepared"]
+        assert request(config, outgoing, "activate")["ready"]
+        old = references[-1]
+        assert asdict(old.peer) == outgoing["peer"]
+        assert old.peer.principal == local_control.current_peer().principal
+        assert old.peer.principal.isdecimal() and not old.exited(Deadline(1))
+        with sqlite3.connect(Path(config.to_dict()["data_dir"]) / "directory.sqlite3") as db:
+            before = db.execute("SELECT * FROM metadata").fetchall()
+            enrollments = db.execute("SELECT * FROM enrollments").fetchall()
+            assert len(enrollments) == 1
+            old_owner = db.execute("SELECT owner FROM service_writer").fetchone()[0]
+        select(slots[1])
+        successor = launch(slots[1])
+        processes.append(successor)
+        incoming = wait_record(config, successor)
+        assert request(config, incoming, "prepare")["prepared"]
+        with ThreadPoolExecutor(max_workers=1) as workers:
+            with FencedWriter(config, "fixture-guard-holder").guard():
+                activation = workers.submit(request, config, incoming, "activate")
+                time.sleep(.1)
+                assert not activation.done() and not old.exited(Deadline(1))
+            assert activation.result(timeout=10)["ready"]
+        for _ in range(2):
+            assert request(config, incoming, "health")["ready"]
+        fresh = references[-1]
+        assert asdict(fresh.peer) == incoming["peer"]
+        assert old.exited(Deadline(10)) and first.wait(timeout=5) == 0
+        assert not fresh.exited(Deadline(1)) and records(config) == [incoming]
+        with sqlite3.connect(Path(config.to_dict()["data_dir"]) / "directory.sqlite3") as db:
+            assert db.execute("SELECT * FROM metadata").fetchall() == before
+            assert db.execute("SELECT * FROM enrollments").fetchall() == enrollments
+            owner = db.execute("SELECT owner FROM service_writer").fetchone()[0]
+            assert owner != old_owner
+            assert owner == local_control.writer_identity(incoming["peer"], incoming["config_identity"])
+        print(json.dumps({"Linux_native_old": outgoing["peer"], "successor": incoming["peer"],
+                          "old_self_retired_without_stop": True, "successor_registration": True,
+                          "actual_guard_and_SQLite_fence": True, "transport": "Unix peer credentials/pidfd",
+                          "fixture_boundary": "synthetic Source binding and connected connector; real canonical selection, auth, fence and retirement"}))
+    finally:
+        for record in records(config):
+            request(config, record, "stop", wait_exit=True)
+        for process in processes:
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=5)
+        for reference in references:
+            reference.close()
 
 
 def test_abrupt_native_exit_reconciles_33_records_before_restart(

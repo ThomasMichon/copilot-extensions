@@ -140,6 +140,7 @@ def test_legacy_lifetime_lease_is_not_displaced(
     from single_instance_lease import SingleInstance
 
     lease = SingleInstance(config.to_dict()["data_dir"], service="agent-ssh-service")
+    os.close(create_private_file(lease.lock_path))
     lease.acquire()
     try:
         with pytest.raises(RuntimeError, match="writer-guard-unavailable"):
