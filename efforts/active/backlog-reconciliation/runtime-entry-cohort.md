@@ -127,11 +127,15 @@ update.
 ## Deployed helper and status truth
 
 - **#5479 - all six deployment/readiness helpers.** Preserve the reported
-  successful deployment with missing scripts, its distinction from
-  `launch-command.ps1`/`.sh`, output verification, doctor visibility,
-  missing-wrapper and early-exit classification. The cause remains
-  unreproduced. Transactional publication alone is neither complete helper
-  bundle delivery nor diagnostic acceptance.
+  missing-script deployment and the complete bundle: `default-setup.ps1`,
+  `default-setup.sh`, `launch-command.ps1`, `launch-command.sh`,
+  `reconcile-machine-settings.ps1` and `reconcile-machine-settings.sh`.
+  The original reports that an absent launch wrapper makes PowerShell emit its
+  usage banner to ACP stdout and exit 64. Preserve output verification, doctor
+  visibility, missing-wrapper and early-exit classification. Why the copy was
+  skipped remains unreproduced and unproven; the reported mechanism is not a
+  newly reproduced omission cause. Transactional publication alone is neither
+  complete helper bundle delivery nor diagnostic acceptance.
 - **#5611 - retain the maintainer's explicit OR.** Either deploy required
   local-manifest assets consistently or let status accept the actually usable
   supported relocated Manager launcher; fail only if neither is available.
@@ -166,9 +170,14 @@ update.
 - **#9281 - usable first-use bootstrap diagnosis.** Preserve Ubuntu 24.04
   Codespace first use with Copilot/node/python3/uv present but tmux,
   marketplace and runtime absent. The stale apt 404, missing-marketplace
-  install failure and missing-binstub `install.sh install` failure require
-  visible failing stderr and handling or exact next commands. They are reported
-  cases, not newly executed general causes. The Draft diagnostics route is
+  install failure and doctor's persistent missing-binstub skip require visible
+  failing stderr and handling or exact next commands. The author reports
+  successful manual recovery through refreshed apt lists, marketplace
+  registration and explicit `bash <plugin>/scripts/install.sh install`;
+  a bare `install.sh` prints status. Doctor still skipped runtime installation
+  after plugin installation, but reported READY after those manual steps.
+  The explicit install command is recovery, not a reported failure. These are
+  reported results, not newly executed proof. The Draft diagnostics route is
   partial and does not establish a whole receiving home.
 
 ## Completed-work comparisons
