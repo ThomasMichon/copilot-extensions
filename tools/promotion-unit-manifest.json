@@ -4024,7 +4024,7 @@
         "tools/runtime_profile_bundle.py": "436bf9b190c87f2c5a09f9355081cf488ce1f7c4e12a77174a9b00c4be088c42",
         "tools/runtime_profile_delivery.py": "260065872c36e6ddd4e68d6604b45b7c77cabc5e01e3a6d432edccb9d834cd7c",
         "worktree-manager/scripts/install_source.py": "b64c0d521901346c2fb92f2ede98266de297b2e90851b0ef82346fc7a49ad4b0",
-        "worktree-manager/scripts/installer_engine.py": "8c38de4ba0ecc20db11ad3b264c8e50976844d1b0394d138e0913292188ceac4",
+        "worktree-manager/scripts/installer_engine.py": "75d37ce6c82ee4e8eff01e2a9d0a194fef860304a263f05d87bf606458a58ccf",
         "worktree-manager/scripts/installer_engine_health.py": "37b5ed64b847858fb3cb130dee5d0002db929b83641e3fa8fccc8f16b0473115",
         "worktree-manager/scripts/installer_engine_process.py": "88e40cd277d18daba227d95f3f81d576442f7c2cc4260d7f1e2c91f04ebf6c2c",
         "worktree-manager/scripts/installer_source_build.py": "877ec6a495bc63472770cdffc0ee1776c4ec5e4b02877ef0d4f6d0abb3121ce7",
