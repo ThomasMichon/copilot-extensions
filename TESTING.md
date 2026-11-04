@@ -1,5 +1,18 @@
 # Testing copilot-extensions
 
+Generated application staging materializes the known POSIX Python interpreter
+aliases as regular files before inventory preparation or stage completion.
+Only links to the running interpreter may be converted; foreign targets,
+indirect environment directories and linked interpreters in completed slots
+are refused. Regular files and hardlinks remain unchanged. Windows keeps its
+ordinary interpreter-file path without requiring symbolic-link privileges.
+Materialization uses a nonblocking, per-environment native directory lock;
+concurrent preparation refuses without changing links, and a later retry
+observes the finished files rather than restamping their inventory identities.
+`tools/test_runtime_application_binstubs.py` covers these boundaries and checks
+the actual UV stage entry; its native POSIX controls are separate from Windows
+execution and the required unit-only CI packet.
+
 The optional `agent-worktrees --test-file tests/test_update_write_activity_native.py
 --allow-explicit-tiers` packet uses private synthetic Windows writers under the
 real strict Job and finite stream owner. It distinguishes useful silent writes,

@@ -350,6 +350,72 @@ def test_manager_regular_install_routes_to_its_owner_before_generic_publication(
     assert not (slot.parent.parent / "current-version").exists()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX interpreter links")
+@pytest.mark.parametrize("refusal", [None, "foreign-alias", "completed", "indirect-directory", "busy"])
+def test_staging_materializes_only_the_running_interpreter_links(tmp_path, monkeypatch, refusal):
+    interpreter = sys.executable
+    slot = tmp_path / "slot"
+    directory = slot / ".venv" / "bin"
+    directory.mkdir(parents=True)
+    source = tmp_path / "python-base"
+    source.write_bytes(b"selected interpreter bytes")
+    source.chmod(0o700)
+    aliases = [directory / name for name in (
+        "python", f"python{sys.version_info.major}",
+        f"python{sys.version_info.major}.{sys.version_info.minor}",
+    )]
+    for index, alias in enumerate(aliases):
+        alias.symlink_to(aliases[0] if index == 2 else source)
+    package = directory / "hardlinked-package"
+    os.link(source, package)
+    before = package.stat()
+    monkeypatch.setattr(runtime_application_install.sys, "executable", str(aliases[0]))
+    if refusal is None:
+        aliases[1].unlink()
+        os.link(source, aliases[1])
+    if refusal == "foreign-alias":
+        foreign = tmp_path / "foreign"
+        foreign.write_bytes(b"not the selected interpreter")
+        aliases[-1].unlink()
+        aliases[-1].symlink_to(foreign)
+    elif refusal == "completed":
+        (slot / ".install-complete.json").write_text("completed")
+    elif refusal == "indirect-directory":
+        moved = directory.with_name("elsewhere")
+        directory.rename(moved)
+        directory.symlink_to(moved, target_is_directory=True)
+    if refusal == "busy":
+        with subprocess.Popen([
+            interpreter, "-c",
+            "import fcntl,os,sys;"
+            "fd=os.open(sys.argv[1],os.O_RDONLY|os.O_DIRECTORY);"
+            "fcntl.flock(fd,fcntl.LOCK_EX);"
+            "print('held',flush=True);sys.stdin.readline();os.close(fd)",
+            str(directory),
+        ], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0) as owner:
+            assert owner.stdout.readline().strip() == "held"
+            with pytest.raises(RuntimeError, match="already in progress"):
+                runtime_application_install._materialize_interpreter(slot)
+            assert all(alias.is_symlink() for alias in aliases)
+            owner.communicate("\n", timeout=10)
+            assert owner.returncode == 0
+        runtime_application_install._materialize_interpreter(slot)
+        assert all(not alias.is_symlink() for alias in aliases)
+    elif refusal:
+        with pytest.raises(RuntimeError, match="interpreter"):
+            runtime_application_install._materialize_interpreter(slot)
+        assert all(alias.is_symlink() for alias in aliases)
+    else:
+        runtime_application_install._materialize_interpreter(slot)
+        assert aliases[1].samefile(source)
+        assert all(not alias.is_symlink() and alias.read_bytes() == source.read_bytes()
+                   and os.access(alias, os.X_OK) for alias in aliases)
+        runtime_application_install._materialize_interpreter(slot)
+    assert package.samefile(source)
+    assert (package.stat().st_dev, package.stat().st_ino) == (before.st_dev, before.st_ino)
+
+
 @pytest.mark.parametrize("wheel_present", [False, True])
 def test_application_source_fallback_only_on_real_wheel_absence(tmp_path, wheel_present):
     source = tmp_path / "source"
@@ -580,6 +646,8 @@ def test_install_stage_uses_uv_without_touching_root_selection(application, exte
     record = json.loads(result.stdout)
     assert record == {"state": "staged", "slot": str(slot.resolve())}
     assert (slot / ".venv" / "pyvenv.cfg").is_file()
+    interpreter = slot / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    assert interpreter.is_file() and not interpreter.is_symlink()
     assert not (root / "current-version").exists()
     assert not (root / ".venv").exists()
     assert not (caller / "wrong-env").exists()
