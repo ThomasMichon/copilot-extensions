@@ -158,13 +158,13 @@ def _check_database_header(path, expected, *, initializing):
 
 
 def _begin_write(connection, root):
-    connection.execute("BEGIN IMMEDIATE")
     if os.name == "nt":
-        # Each DELETE-mode transaction needs a new, explicitly owned journal.
+        # Even BEGIN can create an empty database's journal with the default owner.
         journal = root / (DATABASE + "-journal")
         if not os.path.lexists(journal):
             os.close(create_private_file(journal))
         _ordinary_file(journal, sqlite_state=True)
+    connection.execute("BEGIN IMMEDIATE")
 
 
 @contextmanager

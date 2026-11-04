@@ -4126,7 +4126,7 @@
         "fleet-manager/src/fleet_manager/artifacts.py": "3d8233f1994c6620b55a664e4c0b6b944beb54263c415be38a22f5af00c5b10d",
         "fleet-manager/src/fleet_manager/bearer_identity.py": "5dd2488ccf8f328e33c01e9512e61ce7807a0af2a128d9f91c49d2c180af1999",
         "fleet-manager/src/fleet_manager/client_activation.py": "e1daf63fcb6760227d8c4763b400a47a48d193e776658d35a4e022ff2cd69e5c",
-        "fleet-manager/src/fleet_manager/client_admission.py": "c7a10f015c170d1981901a5c6b28581ed10ab51b4e9ae443043ecf38e328bdf0",
+        "fleet-manager/src/fleet_manager/client_admission.py": "171cf103030001c758d0a3863b9d93a144d4743bfe17cd1b3d7782a7bf119c50",
         "fleet-manager/src/fleet_manager/client_construction.py": "b39075cfc887cb00755170f5e912877125271faa1bf416ac88e20ab092068ec7",
         "fleet-manager/src/fleet_manager/client_deactivation.py": "2ea9e7eb84f6178d3726aeec89e1237c60329024ba2281161b365a1d25965f24",
         "fleet-manager/src/fleet_manager/client_diagnostics.py": "b60a6d9fba34316075cceb69d3688d39eebb0c86059bff986467ac98b9ed1c2c",
