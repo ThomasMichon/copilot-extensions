@@ -3547,7 +3547,9 @@ source hashing and settlement after a worker failure; the core producer still
 revalidates source changes before exposing a delivery.
 `tools/test_core_guarded_feed.py` exercises the opt-in guarded-feed CLI and real
 UV against local TLS fixtures: transitive selection, seasoning, withdrawn files,
-invalid historical tag parity with native UV and retained unsafe/tag-budget refusal,
+invalid historical tag and native-compatible candidate parity with UV,
+single-project histories above the offered-candidate cap, bounded multi-project
+indexes and retained unsafe/tag-budget refusal,
 configured-feed redirects, credential isolation, explicit redirect refusal,
 late index and source rechecks, retained inputs,
 one-download selected wheels, tampered retained bytes, shared budgets and Windows

@@ -103,6 +103,74 @@ def test_guarded_feed_selects_the_latest_native_candidate(tmp_path, monkeypatch,
     assert paths.count("/files/" + dependency_name) == 1
 
 
+def test_guarded_feed_filters_incompatible_records_without_changing_uv_selection(
+    tmp_path, monkeypatch, tls_source,  # noqa: F811
+):
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("native uv is required")
+    producer, wheels, manifest, state, wheel, digest = tls_source
+    newer = _wheel_bytes("fixture", "2.0", members={"fixture-2.0.dist-info/METADATA": (
+        b"Metadata-Version: 2.4\nName: fixture\nVersion: 2.0\nRequires-Python: >=3.9\n"
+        b"Requires-Dist: dep>=1\n"
+    )})
+    newer_name = "fixture-2.0-py3-none-any.whl"
+    dependency = _wheel_bytes("dep", "1.0", members={"dep-1.0.dist-info/METADATA": (
+        b"Metadata-Version: 2.4\nName: dep\nVersion: 1.0\nRequires-Python: >=3.9\n"
+    )})
+    dependency_name = "dep-1.0-py3-none-any.whl"
+    def incompatible(name, count):
+        return [
+            listed(filename=f"{name}-{version}.0-cp1-cp1-any.whl",
+                   url=f"/files/{name}-{version}.0-cp1-cp1-any.whl", hashes={"sha256": "c" * 64})
+            for version in range(3, count + 3)
+        ]
+
+    project(state, [
+        listed(hashes={"sha256": digest}, size=len(wheel)),
+        listed(filename=newer_name, url="/files/" + newer_name,
+               hashes={"sha256": hashlib.sha256(newer).hexdigest()}, size=len(newer)),
+        *incompatible("fixture", 18),
+    ])
+    dep_index = json.dumps({
+        "meta": {"api-version": "1.1"}, "name": "dep",
+        "files": [listed(filename=dependency_name, url="/files/" + dependency_name,
+                         hashes={"sha256": hashlib.sha256(dependency).hexdigest()}, size=len(dependency)),
+                  *incompatible("dep", 17)],
+    }).encode()
+    state["routes"]["/simple/dep/"] = (200, {"Content-Type": "application/vnd.pypi.simple.v1+json"}, dep_index)
+    state["routes"]["/files/" + FILENAME] = (200, {}, wheel)
+    state["routes"]["/files/" + newer_name] = (200, {}, newer)
+    state["routes"]["/files/" + dependency_name] = (200, {}, dependency)
+    _configure_native_tls(tmp_path, monkeypatch, state)
+    requirements = tmp_path / "native.in"
+    requirements.write_text("fixture>=1\n", encoding="utf-8")
+    lock = tmp_path / "pylock.toml"
+    native = subprocess.run(
+        [uv, "pip", "compile", str(requirements), "--python", sys.executable, "--only-binary", ":all:",
+         "--no-python-downloads", "--no-cache", "--format", "pylock.toml", "--output-file", str(lock)],
+        cwd=tmp_path, env=dict(os.environ), capture_output=True, text=True, timeout=90,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert native.returncode == 0, native.stderr
+    assert 'version = "2.0"' in lock.read_text()
+    assert not any("-cp1-cp1-any.whl" in path for path, _headers in state["requests"])
+    state["requests"].clear()
+    original_limits = producer.AcquisitionLimits
+    monkeypatch.setattr(
+        producer, "AcquisitionLimits",
+        lambda **kwargs: replace(original_limits(**kwargs), max_requests=16, max_workers=1),
+    )
+
+    _result, destination = _resolve(tmp_path, producer, wheels, manifest, uv=uv)
+
+    with zipfile.ZipFile(destination) as delivery:
+        profile = json.loads(delivery.read("profile.json"))
+    assert {row["name"]: row["version"] for row in profile["wheels"]}["fixture"] == "2.0"
+    assert {row["name"]: row["version"] for row in profile["wheels"]}["dep"] == "1.0"
+    assert not any("-cp1-cp1-any.whl" in path for path, _headers in state["requests"])
+
+
 @pytest.mark.parametrize("bad_tag", ["py36+-none-any", "py3-none-any+", "py3..py2-none-any"])
 def test_guarded_feed_ignores_legacy_invalid_tag_like_native_uv(
     tmp_path, monkeypatch, tls_source, bad_tag,  # noqa: F811
