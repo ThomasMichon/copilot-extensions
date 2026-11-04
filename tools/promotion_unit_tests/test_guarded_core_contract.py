@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import platform
+import sys
 import threading
 import time
 from copy import deepcopy
@@ -11,8 +13,10 @@ from datetime import datetime
 from types import SimpleNamespace
 
 import core_native_feed_resolution as guard
+import core_native_feed_target as target_guard
 import pytest
 from installer_wheel_acquisition import AcquisitionLimits
+from packaging.tags import Tag
 
 URL = "http://127.0.0.1:12345/capability/files/key/fixture-1.0-py3-none-any.whl"
 INDEX = "http://127.0.0.1:12345/capability/simple/"
@@ -250,9 +254,95 @@ def _guarded_index(entries):
     index.deadline = time.monotonic() + 30
     index.project_locks, index.projects, index.files, index.offered = {}, {}, {}, {}
     index.filenames, index.candidate_count = set(), 0
+    index.compatible_tags = frozenset({Tag("py3", "none", "any")})
     index.secret, index.base = "capability", "http://127.0.0.1:12345/capability"
     index._project = lambda _name: (entries, "https://example.invalid/simple/", "https://example.invalid", "b" * 64)
     return index
+
+
+def test_guarded_index_counts_only_native_candidates_across_projects():
+    projects = {
+        name: [
+            {"filename": f"{name}-{version}.0-cp1-cp1-any.whl", "url": "/old.whl",
+             "hashes": {"sha256": DIGEST}}
+            for version in range(2, 11)
+        ] + [{"filename": f"{name}-1.0-py3-none-any.whl", "url": "/good.whl",
+              "hashes": {"sha256": DIGEST}}]
+        for name in ("fixture", "dependency")
+    }
+    index = _guarded_index([])
+    index._project = lambda name: (projects[name], "https://example.invalid/simple/",
+                                   "https://example.invalid", "b" * 64)
+
+    pages = [json.loads(index.page(name)) for name in projects]
+
+    assert [[item["filename"] for item in page["files"]] for page in pages] == [
+        ["fixture-1.0-py3-none-any.whl"], ["dependency-1.0-py3-none-any.whl"],
+    ]
+    assert index.candidate_count == len(index.offered) == 2
+
+
+def test_guarded_index_keeps_a_matching_compressed_tag():
+    entries = [{"filename": "fixture-1.0-py2.py3-none-any.whl", "url": "/wheel.whl",
+                "hashes": {"sha256": DIGEST}}]
+
+    page = json.loads(_guarded_index(entries).page("fixture"))
+
+    assert [item["filename"] for item in page["files"]] == ["fixture-1.0-py2.py3-none-any.whl"]
+
+
+@pytest.mark.parametrize("kind", ["bad-hash", "wrong-project", "duplicate"])
+def test_guarded_index_validates_incompatible_records_before_filtering(kind):
+    filename = ("other" if kind == "wrong-project" else "fixture") + "-1.0-cp1-cp1-any.whl"
+    entry = {"filename": filename, "url": "/old.whl",
+             "hashes": {"sha256": "bad" if kind == "bad-hash" else DIGEST}}
+    entries = [entry, dict(entry)] if kind == "duplicate" else [entry]
+
+    with pytest.raises(ValueError):
+        _guarded_index(entries).page("fixture")
+
+
+def test_guarded_index_still_bounds_native_candidates():
+    entries = [
+        {"filename": f"fixture-{version}.0-py3-none-any.whl", "url": "/wheel.whl",
+         "hashes": {"sha256": DIGEST}}
+        for version in range(1, 18)
+    ]
+
+    with pytest.raises(ValueError, match="candidate count"):
+        _guarded_index(entries).page("fixture")
+
+
+@pytest.mark.parametrize("fault", ["tags", "python", "version", "reported-python", "platform", "universal"])
+def test_guarded_target_filter_refuses_a_non_native_resolver(monkeypatch, fault):
+    tags = [Tag("py3", "none", "any"), Tag("cp311", "cp311", "win_amd64")]
+    monkeypatch.setattr(target_guard, "sys_tags", lambda: iter(tags))
+    expected = [str(tag) for tag in tags]
+    python, version = sys.executable, platform.python_version()
+    reported, target_platform, universal = python, "None", "false"
+    if fault == "tags":
+        expected = expected[:1]
+    elif fault == "python":
+        python += ".other"
+    elif fault == "version":
+        version = "0.0.0"
+    elif fault == "reported-python":
+        reported += ".other"
+    elif fault == "platform":
+        target_platform = 'Some("other")'
+    else:
+        universal = "true"
+    transaction = SimpleNamespace(argv=(
+        "uv", "pip", "compile", "--python", python, "--python-version", version,
+    ))
+    projection = (
+        "PipCompileSettings { settings: PipSettings { "
+        f"python: Some({json.dumps(reported)}), python_platform: {target_platform}, "
+        f"universal: {universal}, }}, }}"
+    )
+
+    with pytest.raises(ValueError, match="native"):
+        target_guard.require_native_target(transaction, projection, expected)
 
 
 def test_guarded_index_omits_withdrawn_candidates_without_actors():

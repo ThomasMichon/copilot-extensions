@@ -120,3 +120,32 @@ class ConversationStore:
             checkpoint=checkpoint,
             persist=False,
         )
+
+    def observe_workspace(
+        self,
+        generation: dict,
+        *,
+        expires_at: int,
+        checkpoint: Callable[[], None] | None = None,
+    ) -> dict:
+        """Project trusted acquisition under the same journal transaction, not HTTP ingest."""
+        from .workspace_conversation import conversation_key, project_generation
+
+        def observe(journal: ConversationJournal) -> dict:
+            key = conversation_key(generation["scope"], self.owner.namespace)
+            record = journal._find(key)
+            previous = Observation.restore(record["current"]) if record is not None else None
+            value = project_generation(generation, self.owner.namespace, previous)
+            if value is None:
+                return {"status": "unavailable", "reason": "candidate_state_or_interval_missing"}
+            if previous is not None and previous.terminal and not value.complete:
+                return {"status": "unavailable", "reason": "terminal_requires_complete_observation"}
+            expected = Cursor(record["epoch"], record["sequence"]) if record else None
+            return journal.observe(
+                value, expected=expected,
+                reopen=bool(previous and previous.terminal and value.complete and value.state == "open"),
+            )
+
+        return self._transaction(
+            observe, expires_at=expires_at, checkpoint=checkpoint, persist=True,
+        )

@@ -4,6 +4,7 @@ This is the explicit update path, not the pull-free session-launch planner or
 a prepare/activate adapter. Installer ownership and execution stay unchanged.
 Bridge's installer also reconciles serving state when completed content is
 current; the outer updater must not bypass that phase.
+Other current-version skips require a selected completed runtime and interpreter.
 """
 
 from __future__ import annotations
@@ -134,12 +135,12 @@ def _select_inputs(
             environment.update({
                 PIN_ENV: source.identity,
                 "COPILOT_PLUGIN_STAGED_FROM": str(step.payload.resolve()),
-                "COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT": str((project or Path.cwd()).resolve()),
             })
         elif step.name == "agent-index":
             project = _index_repository(step.payload, project, repository_contexts, environment)
         if step.name == "agent-index" and project is not None and not environment.get("AGENT_INDEX_REPO"):
             environment["AGENT_INDEX_REPO"] = str(project.resolve())
+        environment["COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"] = str((project or Path.cwd()).resolve())
         return dataclasses.replace(
             step, source=source, environment=environment, runtime_root=root,
             source_target=source_target,
@@ -163,10 +164,64 @@ def _deployed_version(step: RuntimeUpdateStep) -> str | None:
     return reconcile.runtime_deployed_version(step.name, root=step.runtime_root)
 
 
+def _runtime_footprint_current(step: RuntimeUpdateStep) -> bool:
+    """A manifest alone cannot certify an absent or incomplete selected runtime."""
+    from agent_procutil import no_window_kwargs
+
+    if step.runtime_root is None:
+        return False
+    probe = """
+import json, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import versioned_runtime as runtime
+from versioned_runtime_readiness import deployment_runtime_version
+payload, root = Path(sys.argv[2]), Path(sys.argv[3])
+package, plugin, prepared = sys.argv[4:]
+deployment = json.loads((root / "deploy-manifest.json").read_text(encoding="utf-8-sig"))
+if prepared == "1":
+    expected = deployment.get("runtime_version")
+elif plugin == "agent-containers":
+    import runtime_profile
+    target = runtime_profile._select_target(root, payload, None, None, None)
+    if (target.package_version != package
+            or deployment.get("runtime_profile") != target.profile
+            or deployment.get("runtime_version") != target.runtime_version
+            or deployment.get("runtime_source") !=
+               runtime_profile.source.manifest_fields(target.identity).get("runtime_source")):
+        sys.exit(1)
+    expected = target.runtime_version
+else:
+    expected = deployment_runtime_version(payload, package, plugin, deployment)
+marker = root / "current-version"
+if marker.exists() or marker.is_symlink():
+    ready = (marker.read_text(encoding="utf-8-sig").strip() == expected
+             and runtime.is_complete(root, expected)
+             and runtime.slot_python(root, expected) is not None)
+else:
+    ready = (prepared == "0" and expected == package
+             and any(not runtime._is_link(root / name) and (root / name / sub).is_file()
+                     for name in (".venv", "venv") for sub in runtime.SLOT_PYTHON_SUBPATHS))
+sys.exit(0 if ready else 1)
+"""
+    try:
+        result = subprocess.run(
+            [sys.executable, "-I", "-B", "-c", probe, str(step.payload / "scripts"),
+             str(step.artifact), str(step.runtime_root), step.target_version or "",
+             step.name, "1" if step.source is not None else "0"],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True,
+            env=dict(step.environment), timeout=15, check=False, **no_window_kwargs(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
 def plan_registered(
     name: str, platform_name: str, *, force: bool, gate_context: Path | None = None,
     source: PreparedRuntimeSource | None = None,
     repository_contexts: tuple[Path, ...] = (),
+    check_footprint: bool = True,
 ) -> RuntimeUpdateStep:
     from . import update_runtime as runtime
 
@@ -198,7 +253,9 @@ def plan_registered(
         dver = _deployed_version(step)
     except (OSError, ValueError) as error:
         return dataclasses.replace(step, status=f"source deployment receipt invalid: {error}")
-    if name != "agent-bridge" and not force and pver and dver and reconcile._versions_equal(dver, pver):
+    if (name != "agent-bridge" and not force and pver and dver
+            and reconcile._versions_equal(dver, pver)
+            and (not check_footprint or _runtime_footprint_current(step))):
         return dataclasses.replace(step, status="SKIPPED (current)")
     context = environment.get("COPILOT_EXTENSIONS_CONTEXT")
     if context is not None:
@@ -254,6 +311,7 @@ def plan_module(
     gate_context: Path | None = None,
     source: PreparedRuntimeSource | None = None,
     repository_contexts: tuple[Path, ...] = (),
+    check_footprint: bool = True,
 ) -> RuntimeUpdateStep:
     from . import update_runtime as runtime
 
@@ -286,7 +344,8 @@ def plan_module(
         dver = _deployed_version(step)
     except (OSError, ValueError) as error:
         return dataclasses.replace(step, status=f"source deployment receipt invalid: {error}")
-    if name != "agent-bridge" and not force and pver and dver and pver == dver:
+    if (name != "agent-bridge" and not force and pver and dver
+            and pver == dver and (not check_footprint or _runtime_footprint_current(step))):
         return dataclasses.replace(step, status="SKIPPED (current)")
     # Modules historically use install/update even in a selected cell. Never
     # replace that contract with the registered-runtime init/cell-provision path.
@@ -404,6 +463,7 @@ def plan_portfolio(
 def plan_engine(
     plugin_dir: Path, platform_name: str, *, force: bool,
     source: PreparedRuntimeSource | None = None, project_root: Path | None = None,
+    check_footprint: bool = True,
 ) -> RuntimeUpdateStep:
     from . import update_cli
 
@@ -420,7 +480,8 @@ def plan_engine(
         dver = _deployed_version(step)
     except (OSError, ValueError) as error:
         return dataclasses.replace(step, status=f"source deployment receipt invalid: {error}")
-    if not force and pver and pver == dver:
+    if (not force and pver and pver == dver
+            and (not check_footprint or _runtime_footprint_current(step))):
         if "COPILOT_EXTENSIONS_CONTEXT" in environment or not reconcile.hook_shims_drifted(plugin_dir):
             return dataclasses.replace(step, status="SKIPPED (current)")
     prefix = _shell_prefix(plugin_dir, platform_name)

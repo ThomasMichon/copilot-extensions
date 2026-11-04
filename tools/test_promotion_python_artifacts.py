@@ -758,7 +758,7 @@ def resolve_toolchain_lock(*args, **kwargs):
     )
     for name in (
         "artifact_source_build.py", "standalone_python_artifacts.py", "standalone_consumers.py",
-        "core_python_artifacts.py",
+        "core_python_artifacts.py", "promotion_bundle_members.py",
         "python_project_inventory.py",
         "plugin_runtime_resources.py", "native_daemon_artifacts.py", "runtime_wheel_inspection.py",
         "artifact_attestation.py",
@@ -769,6 +769,7 @@ def resolve_toolchain_lock(*args, **kwargs):
     for name in (
         "promotion_python_artifacts.py", "build_python_artifacts.py", "build_toolchain_lock.py",
         "promotion_candidate.py", "runtime_wheel_inspection.py", "core_python_artifacts.py",
+        "promotion_bundle_members.py",
         "python_project_inventory.py",
         "artifact_attestation.py",
     ):
@@ -786,6 +787,7 @@ def resolve_toolchain_lock(*args, **kwargs):
 
 
 def test_real_export_subprocess_uses_bumped_candidate_without_polluting_it(repo, tmp_path, monkeypatch):
+    monkeypatch.delenv("PYTHONPATH", raising=False)
     _git(["checkout", "-q", "dev"], repo)
     _fake_builder(repo, monkeypatch)
     other = repo / "plugins" / "other-plugin"

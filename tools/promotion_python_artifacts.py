@@ -20,6 +20,7 @@ from artifact_source_build import (
     PromotionArtifactError, validate_static_build,
     validate_runtime_metadata as validate_runtime_metadata,
 )
+from promotion_bundle_members import _write_bundle_members
 from standalone_python_artifacts import COMPONENTS, artifact_label, project_key
 from artifact_attestation import INDEX_LIMIT as INDEX_LIMIT, INDEX_NAME, INDEX_SCHEMA as SCHEMA
 
@@ -92,8 +93,7 @@ def candidate_projects(root: Path) -> dict[str, str]:
     return projects
 
 
-def bundle_wheels(manifest: dict, wheel_dir: Path, out_dir: Path) -> dict:
-    """Bundle only the builder's declared first-party wheels and manifest."""
+def _bundle_filename(manifest: dict) -> str:
     plugin, version = _artifact_label(manifest), manifest["version"]
     artifact_id = manifest["artifact_id"]
     if (
@@ -104,46 +104,31 @@ def bundle_wheels(manifest: dict, wheel_dir: Path, out_dir: Path) -> dict:
         or not _DIGEST.fullmatch(artifact_id[7:])
     ):
         raise PromotionArtifactError("invalid artifact bundle identity")
-    filename = f"{plugin}-{version}-{artifact_id[7:]}.zip"
+    return f"{plugin}-{version}-{artifact_id[7:]}.zip"
+
+
+def bundle_wheels(manifest: dict, wheel_dir: Path, out_dir: Path) -> dict:
+    """Bundle only the builder's declared first-party wheels and manifest."""
+    filename = _bundle_filename(manifest)
     destination = out_dir / filename
-    names = {"manifest.json"}
 
-    def member(name: str) -> zipfile.ZipInfo:
-        info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
-        info.create_system = 3
-        info.external_attr = (stat.S_IFREG | 0o644) << 16
-        return info
-
-    wheels = sorted(manifest["wheels"], key=lambda wheel: wheel["filename"])
-    canonical_manifest = {**manifest, "wheels": wheels}
     # Wheels are already compressed; storing them avoids zlib-version drift too.
     with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_STORED) as bundle:
-        bundle.writestr(member("manifest.json"), json.dumps(canonical_manifest, sort_keys=True) + "\n")
-        for wheel in wheels:
+        def write_wheel(wheel, info):
             name = wheel["filename"]
-            if (
-                wheel["role"] not in (
-                    ("plugin", "standalone", "vendored-lib") if "composition" in manifest else
-                    ("standalone", "vendored-lib") if "component" in manifest
-                    else ("plugin", "vendored-lib")
-                )
-                or not isinstance(name, str) or Path(name).name != name
-                or "/" in name or "\\" in name or not name.endswith(".whl")
-                or name in names
-            ):
-                raise PromotionArtifactError("invalid or duplicate first-party wheel entry")
-            names.add(name)
             path = wheel_dir / name
             try:
                 if path.is_symlink() or f"sha256:{_digest(path)}" != wheel["sha256"]:
                     raise PromotionArtifactError(f"{name}: wheel digest changed before bundling")
-                with path.open("rb") as source, bundle.open(member(name), "w") as target:
+                with path.open("rb") as source, bundle.open(info, "w") as target:
                     shutil.copyfileobj(source, target, length=1 << 20)
             except OSError as exc:
                 raise PromotionArtifactError(f"{name}: cannot read wheel for bundling: {exc}") from exc
+
+        _write_bundle_members(bundle, manifest, write_wheel)
     return {
         **{key: manifest[key] for key in ("plugin", "component", "composition") if key in manifest},
-        "version": version, "artifact_id": artifact_id,
+        "version": manifest["version"], "artifact_id": manifest["artifact_id"],
         "filename": filename, "sha256": _digest(destination),
     }
 

@@ -29,9 +29,11 @@ import installer_native_feed as native_feed
 import installer_wheel_acquisition as acquisition
 import installer_wheel_inputs as inspection
 import installer_wheel_snapshot as snapshots
+from core_native_feed_target import require_native_target
 from installer_engine_process import ChildLaunchError, ChildTimeoutExpired, run_owned
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.tags import sys_tags
 from packaging.utils import canonicalize_name, parse_wheel_filename
 from runtime_wheel_inspection import inspect_wheel_facts
 
@@ -99,7 +101,8 @@ def _read_source(path: Path, deadline: float) -> bytes:
 def _worker_sources(deadline: float) -> dict[str, bytes]:
     sources = acquisition._worker_sources()
     extra = (
-        Path(__file__), ROOT / "tools" / "runtime_wheel_inspection.py",
+        Path(__file__), ROOT / "tools" / "core_native_feed_target.py",
+        ROOT / "tools" / "runtime_wheel_inspection.py",
         ROOT / "tools" / "artifact_source_build.py",
         ROOT / "libs" / "installer-engine" / "installer_native_feed.py",
         ROOT / "libs" / "installer-engine" / "installer_dependency_policy.py",
@@ -227,7 +230,7 @@ def _project_url(feed, name: str) -> str:
     ))
 
 
-def _fetch_project(feed, name, limits, deadline, context, budget, *, candidate_limit=None):
+def _fetch_project(feed, name, limits, deadline, context, budget):
     client = acquisition._Client(limits, deadline, context, {}, budget)
     location = _project_url(feed, name)
     origin = acquisition._url(location)[1]
@@ -242,7 +245,7 @@ def _fetch_project(feed, name, limits, deadline, context, budget, *, candidate_l
         media = response.headers.get_content_type()
         entries = acquisition._entries(
             content, media, name,
-            min(limits.max_candidates_per_project, candidate_limit or limits.max_candidates_per_project),
+            limits.max_candidates_per_project,
         )
     finally:
         response.close()
@@ -258,12 +261,13 @@ class _GuardedIndex(ThreadingHTTPServer):
     allow_reuse_address = False
 
     def __init__(self, feed, origins, floor, cutoffs, exclusions, limits, wheel_limits,
-                 deadline, context, control_bytes):
+                 deadline, context, control_bytes, compatible_tags):
         self.request_queue_size = limits.max_workers * 2
         super().__init__(("127.0.0.1", 0), _Handler)
         self.feed, self.origins = feed, origins
         self.floor, self.cutoffs = floor, cutoffs
         self.exclusions = set(exclusions)
+        self.compatible_tags = frozenset(compatible_tags)
         self.limits, self.wheel_limits, self.deadline = limits, wheel_limits, deadline
         self.context = context
         self.budget = acquisition._Budget(limits, deadline, control_bytes)
@@ -325,7 +329,6 @@ class _GuardedIndex(ThreadingHTTPServer):
     def _project(self, name):
         return _fetch_project(
             self.feed, name, self.limits, self.deadline, self.context, self.budget,
-            candidate_limit=self.limits.max_requests * self.limits.max_workers,
         )
 
     def page(self, name):
@@ -346,7 +349,7 @@ class _GuardedIndex(ThreadingHTTPServer):
                 self.projects[name] = {"identity": None, "page": None}
                 return None
             entries, base, origin, identity = project
-            files = []
+            files, seen = [], set()
             for entry in entries:
                 inspection._check_deadline(self.deadline)
                 filename = entry.get("filename")
@@ -372,7 +375,7 @@ class _GuardedIndex(ThreadingHTTPServer):
                 inspection.bounded_tag(
                     "-".join(tokens[-3:]), limit=self.wheel_limits.max_tags, deadline=self.deadline,
                 )
-                wheel_name, _version, _build, _tags = parse_wheel_filename(filename)
+                wheel_name, _version, _build, tags = parse_wheel_filename(filename)
                 if canonicalize_name(wheel_name) != name:
                     raise GuardedSelectionError("guarded index contains another project")
                 location, hashes = entry.get("url"), entry.get("hashes", {})
@@ -403,11 +406,16 @@ class _GuardedIndex(ThreadingHTTPServer):
                     or not uploaded.isascii() or any(ord(char) < 32 for char in uploaded)
                 ):
                     raise GuardedSelectionError("guarded index contains an invalid upload time")
+                folded = filename.casefold()
+                if folded in seen:
+                    raise GuardedSelectionError("guarded index contains duplicate wheel names")
+                seen.add(folded)
+                if tags.isdisjoint(self.compatible_tags):
+                    continue
                 key = hashlib.sha256((name + "\0" + filename).encode("ascii")).hexdigest()
                 path = f"/{self.secret}/files/{key}/{filename}"
                 url = self.base + f"/files/{key}/{filename}"
                 with self.lock:
-                    folded = filename.casefold()
                     if folded in self.filenames:
                         raise GuardedSelectionError("guarded index contains duplicate wheel names")
                     self.filenames.add(folded)
@@ -601,11 +609,14 @@ def _worker(request, control: Path) -> dict:
     limits.verify()
     wheel_limits = inspection.WheelLimits(**request["wheel_limits"])
     deadline = request["deadline"]
+    compatible_tags = tuple(sys_tags())
+    if request.get("target_tags") != [str(tag) for tag in compatible_tags]:
+        raise GuardedSelectionError("guarded worker target differs from the native interpreter")
     server = _GuardedIndex(
         feed, set(request["origins"]), datetime.fromisoformat(request["floor"]),
         {name: datetime.fromisoformat(value) for name, value in request["cutoffs"].items()},
         request["exclusions"], limits, wheel_limits, deadline,
-        acquisition._tls_context(request["tls"]), request["control_bytes"],
+        acquisition._tls_context(request["tls"]), request["control_bytes"], compatible_tags,
     )
     config = Path(request["config"])
     template = request["template"]
@@ -875,13 +886,17 @@ def _run_isolated(request, root, sources, limits, deadline, procutil):
 @contextmanager
 def compile_guarded(
     transaction, projection: str, feed, *, floor: datetime, cutoffs: dict,
-    exclusions: tuple[str, ...], limits, wheel_limits, deadline: float, procutil,
+    exclusions: tuple[str, ...], target_tags: list[str], limits, wheel_limits, deadline: float, procutil,
 ):
     """Run native UV against inspected, origin-guarded candidates and retain their bytes."""
     inspection._check_deadline(deadline)
     limits.verify()
     if not isinstance(floor, datetime) or floor.tzinfo is None or not isinstance(exclusions, tuple):
         raise GuardedSelectionError("guarded selection requires captured native feed inputs")
+    try:
+        require_native_target(transaction, projection, target_tags)
+    except ValueError as error:
+        raise GuardedSelectionError(str(error)) from None
     source = _feed_request(feed)
     sources = _worker_sources(deadline)
     with dependencies._temporary_inputs(None) as temporary:
@@ -893,6 +908,7 @@ def compile_guarded(
             "version": 1, "operation": "resolve", **source,
             "floor": floor.isoformat(), "cutoffs": {name: value.isoformat() for name, value in cutoffs.items()},
             "exclusions": list(exclusions), "limits": asdict(limits), "wheel_limits": asdict(wheel_limits),
+            "target_tags": target_tags,
             "deadline": deadline, "control_bytes": 0,
             "argv": argv, "cwd": str(transaction.cwd), "environment": environment,
             "config": environment["UV_CONFIG_FILE"], "template": template, "projection": projection,

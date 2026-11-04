@@ -89,6 +89,76 @@ def test_new_cli_against_prior_owner_refuses_optional_events_without_sending_the
     asyncio.run(scenario())
 
 
+def test_actual_load_and_sync_feed_opt_in_journal_but_cache_conflict_does_not(
+    environment, integration,
+):
+    store, _, initial, _, backend, _ = environment
+    gateway, client, native, evidence, _, _ = integration
+    ConversationStore(store).adopt(
+        lifecycle_checkpoint=lambda: None, expires_at=int(time.time()) + 600,
+    )
+    native.operations.conversations = True
+
+    async def scenario():
+        await client.capabilities()
+        request = {"number": 42, "expected_current": initial["id"], "budget_seconds": 120}
+        first = (await client.exchange("load", request))["result"]
+        assert first["conversation"]["cursor"] == {"epoch": 1, "sequence": 1}
+        current = first["descriptor"]["id"]
+        for section in evidence["sections"].values():
+            section["observed_from"] = "2026-10-30T00:01:00Z"
+            section["observed_to"] = "2026-10-30T00:01:01Z"
+        backend.threads.append({"id": 1, "comments": [{"id": 1, "content": "New dialogue"}]})
+        conflict = (await client.exchange("load", {**request, "expected_current": "f" * 64}))["result"]
+        assert conflict["conversation"]["status"] == "not_observed"
+        result = (await client.exchange("sync", {
+            **request, "expected_current": current, "previous_id": current,
+        }))["result"]
+        assert result["conversation"]["cursor"] == {"epoch": 1, "sequence": 2}
+        page = (await client.exchange("events", {
+            "number": 42, "after": None, "limit": 16,
+        }))["result"]
+        assert page["high_water"] == result["conversation"]["cursor"]
+        assert page["current"]["candidate"] == {"head": "a" * 40, "base": "c" * 40}
+        assert not backend.calls and backend.vote is None
+        await gateway.drain(timeout=2)
+
+    asyncio.run(scenario())
+
+
+def test_journal_failure_does_not_undo_cache_publication_and_retry_reconciles(
+    environment, integration, monkeypatch,
+):
+    store, selected, initial, _, backend, _ = environment
+    gateway, _, native, evidence, _, _ = integration
+    ConversationStore(store).adopt(
+        lifecycle_checkpoint=lambda: None, expires_at=int(time.time()) + 600,
+    )
+    native.operations.conversations = True
+    for section in evidence["sections"].values():
+        section["observed_from"] = "2026-10-30T00:01:00Z"
+        section["observed_to"] = "2026-10-30T00:01:01Z"
+    original = ConversationStore.observe_workspace
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("synthetic journal failure after cache publication")
+
+    monkeypatch.setattr(ConversationStore, "observe_workspace", fail)
+    with pytest.raises(RuntimeError, match="after cache publication"):
+        native.exchange("load", {
+            "number": 42, "expected_current": initial["id"], "budget_seconds": 120,
+        })
+    current = native.operations.cache.lookup(selected["scope"])["current_id"]
+    assert current != initial["id"]
+    monkeypatch.setattr(ConversationStore, "observe_workspace", original)
+    result = native.exchange("load", {
+        "number": 42, "expected_current": current, "budget_seconds": 120,
+    })["result"]
+    assert result["conversation"]["cursor"] == {"epoch": 1, "sequence": 1}
+    assert not backend.calls
+    asyncio.run(gateway.drain(timeout=2))
+
+
 def test_unknown_optional_contract_leaves_prior_workspace_operations_available(integration):
     gateway, client, native, _, caller, _ = integration
     expires = int(time.time()) + 600

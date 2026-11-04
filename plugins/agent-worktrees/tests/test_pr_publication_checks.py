@@ -57,6 +57,46 @@ def test_receipt_is_local_exact_and_whitespace_sensitive(branch):
     assert not checks.before_publish(branch, BASE, POLICY)["ok"]
 
 
+@pytest.mark.parametrize("failure", ["none", "wrong-source", "stale-base", "moved", "changed-policy"])
+def test_foreign_candidate_checks_bind_authoritative_refs_and_current_policy(branch, failure):
+    from agent_worktrees import pr_foreign_checks
+
+    git(branch, "remote", "add", "origin", "https://dev.azure.com/example/project/_git/repo")
+    head, base = git(branch, "rev-parse", "HEAD"), git(branch, "rev-parse", BASE)
+    record(branch)
+    policy = replace(POLICY, guidance="changed") if failure == "changed-policy" else POLICY
+    repo = cfg.RepoConfig(
+        anchor=str(branch), worktree_root=str(branch.parent / "worktrees"),
+        remote="origin", default_branch="main",
+        pr=cfg.PRConfig(
+            enabled=True, provider="azure-devops", api_base="https://dev.azure.com/example",
+            publication_checks=policy,
+        ),
+    )
+
+    class Provider:
+        source_reads = 0
+
+        def observe_branch(self, repository, selected, **kwargs):
+            sha = base
+            if selected == "change":
+                self.source_reads += 1
+                sha = "f" * 40 if failure == "wrong-source" or (
+                    failure == "moved" and self.source_reads > 1
+                ) else head
+            elif failure == "stale-base":
+                sha = "e" * 40
+            return {"repository": repository, "branch": selected, "head_sha": sha}
+
+    if failure == "none":
+        result = pr_foreign_checks.qualify(str(branch), "project/repo", "change", head, repo, Provider())
+        assert result["ok"] and result["checks"]["checks"][0]["reviewed_head"] == head
+        assert result["base_head"] == base and result["atomic"] is False
+    else:
+        with pytest.raises(checks.CheckError):
+            pr_foreign_checks.qualify(str(branch), "project/repo", "change", head, repo, Provider())
+
+
 def test_unrelated_base_merge_preserves_exact_review(branch):
     record(branch)
     git(branch, "checkout", "-q", "main")

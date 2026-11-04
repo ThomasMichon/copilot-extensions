@@ -1,4 +1,4 @@
-"""A current Bridge build must still reach its serving-reconciliation owner."""
+"""Current skips require selected footprints; Bridge still reconciles serving."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 import shutil
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -27,17 +28,32 @@ def current_payload(tmp_path, monkeypatch):
     root = tmp_path / "runtime"
     root.mkdir()
     (root / "deploy-manifest.json").write_text('{"source":{"version":"1.2.3"}}')
+    (root / "current-version").write_text("1.2.3")
+    slot = root / "versions" / "1.2.3"
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True)
+    python.touch()
+    (slot / ".install-complete.json").write_text(json.dumps({
+        "version": "1.2.3", "completed_at": "2026-01-01", "pid": 0,
+    }))
+    library = Path(__file__).resolve().parents[3] / "libs/versioned-runtime"
+    for helper in library.glob("*.py"):
+        shutil.copyfile(helper, payload / "scripts" / helper.name)
     monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda name: payload)
     monkeypatch.setattr(reconcile, "runtime_installer_environment", lambda *a: (dict(os.environ), root))
     monkeypatch.setattr(update_runtime, "_machine_gate_blocks", lambda *a: False)
     monkeypatch.setattr(update_runtime, "_installer_timeout", lambda *a: 30)
+    monkeypatch.setattr(reconcile, "hook_shims_drifted", lambda *a: False)
     return payload, root
 
 
 def _plan(kind, payload, name="agent-bridge"):
+    platform = "windows" if os.name == "nt" else "linux"
+    if kind == "engine":
+        return update_runtime_plan.plan_engine(payload, platform, force=False)
     if kind == "module":
-        return update_runtime_plan.plan_module(name, payload, "windows" if os.name == "nt" else "linux", force=False)
-    return update_runtime_plan.plan_registered(name, "windows" if os.name == "nt" else "linux", force=False)
+        return update_runtime_plan.plan_module(name, payload, platform, force=False)
+    return update_runtime_plan.plan_registered(name, platform, force=False)
 
 
 @pytest.mark.parametrize("kind", ["module", "registered"])
@@ -52,10 +68,67 @@ def test_current_bridge_build_does_not_skip_serving_owner(current_payload, kind)
     assert (root / "deploy-manifest.json").read_bytes() == before
 
 
-@pytest.mark.parametrize("kind", ["module", "registered"])
+@pytest.mark.parametrize("kind", ["engine", "module", "registered"])
 def test_non_bridge_current_build_retains_quick_skip(current_payload, kind):
     payload, _root = current_payload
     assert _plan(kind, payload, "agent-example").status == "SKIPPED (current)"
+
+
+@pytest.mark.parametrize("kind", ["engine", "module", "registered"])
+@pytest.mark.parametrize("fault", ["interpreter", "completion", "selector", "helper"])
+def test_current_manifest_without_selected_footprint_reaches_installer(current_payload, kind, fault):
+    payload, root = current_payload
+    slot = root / "versions" / "1.2.3"
+    if fault == "interpreter":
+        (slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")).unlink()
+    elif fault == "completion":
+        (slot / ".install-complete.json").write_text("{}")
+    elif fault == "selector":
+        (root / "current-version").write_text("older")
+        (root / "last-known-good").write_text("1.2.3")
+    else:
+        (payload / "scripts/versioned_runtime.py").unlink()
+    before = {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    step = _plan(kind, payload, "agent-example")
+    assert step.status == "" and "update" in step.argv
+    assert before == {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
+
+
+@pytest.mark.parametrize("kind", ["engine", "module", "registered"])
+def test_current_legacy_runtime_without_selector_retains_reuse(current_payload, kind):
+    payload, root = current_payload
+    (root / "current-version").unlink()
+    python = root / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True)
+    python.touch()
+    assert _plan(kind, payload, "agent-example").status == "SKIPPED (current)"
+    python.unlink()
+    assert _plan(kind, payload, "agent-example").status == ""
+
+
+@pytest.mark.parametrize("kind", ["engine", "module", "registered"])
+@pytest.mark.parametrize("link_name", [".venv", "venv"])
+def test_stale_legacy_link_cannot_certify_missing_current_slot(current_payload, kind, link_name):
+    payload, root = current_payload
+    (root / "current-version").unlink()
+    older = root / "versions" / "0.9.0"
+    (root / "versions" / "1.2.3").rename(older)
+    (older / ".install-complete.json").write_text(json.dumps({
+        "version": "0.9.0", "completed_at": "2026-01-01", "pid": 0,
+    }))
+    link = root / link_name
+    if os.name == "nt":
+        result = subprocess.run(
+            [os.environ["COMSPEC"], "/c", "mklink", "/J", str(link), str(older)],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+    else:
+        link.symlink_to(older, target_is_directory=True)
+    step = _plan(kind, payload, "agent-example")
+    assert step.status == "" and "update" in step.argv
+    assert (older / ".install-complete.json").is_file()
+    assert link.is_dir() and not (root / "versions" / "1.2.3").exists()
 
 
 def test_failed_bridge_serving_reconcile_cannot_be_laundered_by_install(current_payload, monkeypatch):

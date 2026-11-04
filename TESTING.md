@@ -3531,7 +3531,11 @@ input index or approve the changed subject.
 `tools/test_core_release_inputs.py` exercises the existing source-release
 discovery and core attestation hand-off into the producer, including missing,
 untrusted, oversized, changed and unsafe inputs. Its release service and
-attestations are controlled fixtures; they do not approve a profile.
+attestations are controlled fixtures; they do not approve a profile. Its
+reconstruction cases compare the original core ZIP with retained delivery
+wheels, exercise held-subject attestation, and reject mismatched or over-budget
+inputs. The actor-free packet separately checks canonical member ordering and
+early refusal of unselected reconstruction inputs.
 `tools/test_core_release_delivery.py` connects those retained inputs to the
 real native producer using a committed Git fixture. It checks source identity,
 foreign Git selectors, bounded failures, material and release-input custody,
@@ -3547,7 +3551,9 @@ source hashing and settlement after a worker failure; the core producer still
 revalidates source changes before exposing a delivery.
 `tools/test_core_guarded_feed.py` exercises the opt-in guarded-feed CLI and real
 UV against local TLS fixtures: transitive selection, seasoning, withdrawn files,
-invalid historical tag parity with native UV and retained unsafe/tag-budget refusal,
+invalid historical tag and native-compatible candidate parity with UV,
+single-project histories above the offered-candidate cap, bounded multi-project
+indexes and retained unsafe/tag-budget refusal,
 configured-feed redirects, credential isolation, explicit redirect refusal,
 late index and source rechecks, retained inputs,
 one-download selected wheels, tampered retained bytes, shared budgets and Windows
