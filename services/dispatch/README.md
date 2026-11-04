@@ -27,6 +27,33 @@ either way; it does not permit arbitrary plugin-to-plugin copying.
 
 ## Install and run
 
+The distribution supplies `agent-dispatch-service` and
+`python -m agent_dispatch_service`. Both delegate arguments and exit status to
+the packaged coordinator CLI; the implementation is a wheel dependency, not a
+Copilot plugin registration or a source-checkout dependency. Its declared
+entrypoint also lets the canonical Source application emitter produce the
+slot-local app/install frontdoors. The existing public bootstrap below remains
+the compatibility fetch/install surface; it is not required to run an already
+installed standalone wheel/application.
+
+The installed Source application's configured user-mode master uses the same
+passive preparation and singleton handoff as the plugin distribution. Its
+readiness requires an authenticated coordinator probe, native process identity,
+SDK-owned preparation artifact and a completed supervisor cycle; process
+presence alone is insufficient. Legacy incomplete declarations and
+native-service-owned transitions remain explicit holds for their existing owners.
+
+The opt-in Windows qualification in
+`plugins/agent-dispatch/tests/test_supervisor_source_native.py` accepts separately
+prepared canonical plugin/standalone snapshots through
+`DISPATCH_C_PLUGIN_SNAPSHOT` and `DISPATCH_C_SERVICE_SNAPSHOT`, plus private
+`DISPATCH_C_NATIVE_ROOT`, `DISPATCH_SOURCE_EVIDENCE_ROOT` and
+`DISPATCH_C_BUILD_ROOT`. It exercises enabled bootstrap, passive overlap,
+singleton handoff, held-work preservation, caller-Job closure and exact native
+cleanup. The standalone case also runs installed frontdoors while the
+qualification's frozen source/staging trees are temporarily unavailable, then
+restores them. Ordinary tests skip this lane without those explicit inputs.
+
 The stable, public install command (never changes across future repo
 reorganizations -- see
 [`docs/patterns/standalone-service-layout.md`](../../docs/patterns/standalone-service-layout.md)'s

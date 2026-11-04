@@ -72,7 +72,7 @@ def native(
     if not pwsh:
         pytest.skip("PowerShell unavailable")
     for name in (
-        "versioned_runtime.py", "versioned_runtime_leases.py",
+        "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
         "versioned_runtime_construction.py", "versioned_runtime_source.py",
         "versioned_runtime_publication.py",
     ):

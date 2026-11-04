@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve physical Dispatch Source identity and selected application interpreter; defer passive discovery and queue mutation until active ownership",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

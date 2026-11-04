@@ -1777,6 +1777,8 @@ def test_resolve_runtime_python_refuses_redirected_slot(tmp_path, redirect):
 
 @pytest.mark.parametrize("nested", [False, True])
 def test_sibling_launch_executes_selected_physical_environment(tmp_path, monkeypatch, nested):
+    if os.name == "nt":
+        tmp_path = Path("\\\\?\\" + str(tmp_path))
     root = tmp_path / ".agent-bridge"
     slot = root / "versions" / "1.0.0"
     prefix = slot / ".venv" if nested else slot
@@ -1784,7 +1786,8 @@ def test_sibling_launch_executes_selected_physical_environment(tmp_path, monkeyp
     python = prefix / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     result = subprocess.run(
         [str(python), "-I", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"],
-        capture_output=True, text=True, timeout=15, **procutil.no_window_kwargs(),
+        executable=str(python), capture_output=True, text=True, timeout=15,
+        **procutil.no_window_kwargs(),
     )
     assert result.returncode == 0, result.stderr
     module = Path(result.stdout.strip()) / "agent_bridge"
@@ -1806,7 +1809,7 @@ def test_sibling_launch_executes_selected_physical_environment(tmp_path, monkeyp
         assert command == [str(python), "-m", "agent_bridge"]
         launched = subprocess.run(
             [*command, "probe", "literal argument"], capture_output=True,
-            text=True, timeout=15, **procutil.no_window_kwargs(),
+            executable=command[0], text=True, timeout=15, **procutil.no_window_kwargs(),
         )
         assert launched.returncode == 0, launched.stderr
         assert json.loads(launched.stdout) == {
@@ -1850,6 +1853,55 @@ def test_resolve_own_runtime_python_falls_back_to_sys_executable_when_unresolved
     root = tmp_path / ".agent-dispatch-empty"
     monkeypatch.setattr("agent_dispatch.runtime_version.install_dir", lambda: root)
     assert procutil.resolve_own_runtime_python() == procutil.sys.executable
+
+
+@pytest.mark.parametrize("selected", [False, True])
+def test_resolve_own_runtime_python_uses_application_selection_not_data_root(
+    tmp_path, monkeypatch, selected,
+):
+    root = tmp_path / "application"
+    old = _make_slot(root, "source-a", nested=True)
+    new = _make_slot(root, "source-b", nested=True)
+    prefix = old.parent.parent
+    monkeypatch.setattr(sys, "prefix", str(prefix))
+    monkeypatch.setattr(procutil, "__file__", str(prefix / "lib" / "agent_dispatch" / "procutil.py"))
+    monkeypatch.setattr("agent_dispatch.runtime_version.install_dir", lambda: tmp_path / "data")
+    if selected:
+        (root / "current-version").write_text("source-b")
+        assert procutil.resolve_own_runtime_python() == str(new)
+    else:
+        (root / "last-known-good").write_text("source-b")
+        with pytest.raises(RuntimeError, match="application interpreter is unavailable"):
+            procutil.resolve_own_runtime_python()
+
+
+def test_resolve_own_runtime_python_executes_selected_application_environment(tmp_path, monkeypatch):
+    if os.name == "nt":
+        tmp_path = Path("\\\\?\\" + str(tmp_path))
+    root = tmp_path / "app"
+    prefix = root / "versions" / "source-b" / ".venv"
+    venv.EnvBuilder(with_pip=False, symlinks=os.name != "nt").create(prefix)
+    python = prefix / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    (root / "current-version").write_text("source-b", encoding="utf-8")
+    data = tmp_path / "data"
+    data.mkdir()
+    sentinel = data / "unfinished.json"
+    sentinel.write_text('{"held": true}', encoding="utf-8")
+    monkeypatch.setattr(sys, "prefix", str(root / "versions" / "source-a" / ".venv"))
+    monkeypatch.setattr(procutil, "__file__", str(Path(sys.prefix) / "lib" / "procutil.py"))
+    monkeypatch.setattr("agent_dispatch.runtime_version.install_dir", lambda: data)
+    for _ in range(2):
+        selected = procutil.resolve_own_runtime_python()
+        assert selected == str(python)
+        result = subprocess.run(
+            [selected, "-I", "-c", "import sys; print(sys.prefix)"],
+            executable=selected, capture_output=True, text=True, timeout=15,
+            **procutil.no_window_kwargs(),
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == str(prefix)
+    assert sentinel.read_text(encoding="utf-8") == '{"held": true}'
+    assert (root / "current-version").read_text(encoding="utf-8") == "source-b"
 
 
 def test_agent_worktrees_environment_scrubs_unsafe_vars(monkeypatch):

@@ -183,6 +183,68 @@ slot. Current-version, last-known-good and complete-slot fallback order is
 unchanged. UTF-8 markers may include a Windows BOM; redirected slots and
 environment directories are refused. This does not change daemon cutover.
 
+Source identity also recognizes nested `.venv` environments and their exact
+profile/repair suffixes. An installed standalone wrapper supplies the package
+version only when its own physical Source slot matches; unrelated wrapper
+metadata cannot override the plugin version. A Dispatch process loaded from a
+physical application environment selects relaunches from that application's
+`current-version`, not from a separately configured data root. Missing selection
+refuses rather than silently choosing last-known-good or another installation.
+These identity/selection controls do not establish application staging,
+installed readiness, coordinator replacement or release acceptance.
+
+Passive coordinators leave rendezvous and running-version records with the
+incumbent until they observe active-route ownership. Before ownership, their
+HTTP surface admits only health and cutover lifecycle controls; queue requests
+return 503. Liveness, orphan, handoff and worktree-status reconciliation also
+recheck ownership before mutation, including between GC subpasses. These
+source controls do not qualify native replacement or installer startup.
+
+Generated application startup now has a strict `__source-start` receiver.
+It requires the selected, complete physical Source slot and uses the existing
+guarded cutover owner, authenticated application health, native process birth
+and effective database/configuration identity. A healthy unchanged owner is
+reused. Supervisor startup goes through the existing singleton/cohort owner
+and requires its selected native runtime status; unknown declaration sources,
+classic-mode migrations and unconfirmed readiness fail rather than report
+installation success. A committed cutover with an unsettled startup result is
+not proof that the incumbent or selectors were restored.
+
+Source validation compares the actual installation identity and normalizes
+equivalent Windows extended-path spellings without relaxing module containment
+or redirected-slot refusal. Supervisor intent is captured before coordinator
+publication: foreign scopes, unknown declarations, classic child profiles and
+invalid poll intervals fail before replacement. A modern cohort does not
+implicitly opt into the legacy environment bridge.
+
+An enabled user-mode Source supervisor prepares independently before it takes
+the original singleton scope. Its existing status format is published at an
+instance-specific path under SDK artifact custody only after selected-slot,
+cohort, governance and authenticated data-access checks. It does not reconcile
+or claim work before singleton admission. The outgoing supervisor retains its
+lock while preparation, units, futures or native executor workers remain
+unsettled; a process PID or SDK `running` record alone is not readiness.
+Currentness also requires a completed cycle from the selected native owner.
+Unconfirmed legacy declaration sources and native-service-owned transitions
+remain explicit holds rather than an invented readiness or service manager.
+
+`tests/test_source_start_native.py` consumes an explicitly prepared canonical
+Source/profile snapshot; it never rebuilds one. Its opt-in generated-frontdoor
+checks use private roots and renewed daemon leases. The repair-generation
+matrix is distinct from a two-Source update: it exercises the same admitted
+wheel/profile closure under canonical repair slots. Preparation time, each
+frontdoor's 300-second deadline, native exit and cleanup outcomes remain
+separate evidence.
+`tests/test_source_caller_job_native.py` separately exercises nested caller-Job
+closure, an admitted bounded control and a restrictive outer-Job negative.
+Its full installed-owner survival checks require a matching admitted artifact;
+the bounded control alone is not application lifetime qualification.
+`tests/test_source_ab_native.py` consumes two distinct admitted Git snapshots
+for forward/reverse selection, native outgoing exit, held work and data
+preservation, construction-failure retry and root-unset global frontdoors.
+Pre-startup construction retry is separate from an unknown startup outcome;
+the latter is observed and retained without automatic rollback or replay.
+
 Supervisor transitions have a [structured lifecycle audit](docs/supervisor-lifecycle.md)
 that separates runtime-slot readiness from service reconciliation and preserves
 observed native disablement without guessing its author.

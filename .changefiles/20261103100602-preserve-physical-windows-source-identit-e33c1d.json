@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve physical Windows Source identity and preflight supervisor intent before coordinator publication",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

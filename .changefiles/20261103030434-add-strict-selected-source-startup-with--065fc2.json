@@ -1,0 +1,9 @@
+{
+  "comment": "Add strict selected Source startup with native application attestation and guarded coordinator ownership",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

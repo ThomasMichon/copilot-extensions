@@ -40,6 +40,7 @@ _lifecycle_started = False
 # transient routing read failure must not strand durable wakes, and must not
 # make a passive/demoted process seize them.
 _wake_route_owned = False
+_pending_discovery: Config | None = None
 # Throttle for the missing-active self-heal probe below: this check runs on
 # every wake-drain poll (as often as every 0.25s while idle), but the probe it
 # triggers does a real socket connect, so it is rate-limited independently of
@@ -97,7 +98,7 @@ def build_app(cfg: Config | None = None, *, replay_consumer_factory=None):
     queue = TaskQueue(
         Path(cfg.db_path).expanduser(), worker_admission=require_worker_admission,
     )
-    return create_app(
+    app = create_app(
         queue, token=cfg.token, control_token=cfg.control_token,
         sweep_interval=cfg.sweep_interval,
         orphan_grace=cfg.orphan_grace, wake_interval=0.25,
@@ -108,6 +109,10 @@ def build_app(cfg: Config | None = None, *, replay_consumer_factory=None):
         cohort_sources=RegistrarSources(),
         pool_publication_enabled=cfg.pool_publication_enabled,
     )
+    from .source_start import config_identity
+
+    app.state.runtime_config_identity = config_identity(cfg)
+    return app
 
 
 def _owns_active_route() -> bool:
@@ -126,7 +131,7 @@ def _owns_active_route() -> bool:
     recurring hook to self-heal that case, throttled well below the poll
     cadence since it does a real socket probe.
     """
-    global _wake_route_owned, _last_missing_active_heal_attempt
+    global _wake_route_owned, _last_missing_active_heal_attempt, _pending_discovery
     try:
         from zdd import routing
 
@@ -138,6 +143,9 @@ def _owns_active_route() -> bool:
             return _wake_route_owned
         raw = table.get("active")
         if not isinstance(raw, dict):
+            if _pending_discovery is not None:
+                _wake_route_owned = False
+                return False
             # Confirmed: this table has no active claim at all. Attempt the
             # self-heal, but if it cannot restore one (dead/missing
             # `previous`, throttled, or a failed probe), this is positive
@@ -172,6 +180,12 @@ def _owns_active_route() -> bool:
         # True: fall through to the plain pid comparison below, which
         # correctly evaluates to False (``None != os.getpid()``).
         _wake_route_owned = raw.get("pid") == os.getpid()
+        if _wake_route_owned and _pending_discovery is not None:
+            from .runtime_version import write_running_version
+
+            if advertise_endpoint(_pending_discovery) is not None:
+                write_running_version()
+                _pending_discovery = None
         return _wake_route_owned
     except Exception:
         log.debug("wake active-route check failed", exc_info=True)
@@ -294,7 +308,7 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
 
     When ``passive`` is set (a graceful-cutover passive instance, spawned by the
     installer's in-process cutover), the coordinator serves the full app on a
-    fresh port but does **not** publish the zdd routing table -- the cutover
+    fresh port but does **not** publish discovery or running-version records -- the cutover
     orchestrator flips the route to it only after it health-gates, so it never
     seizes the active route from the live coordinator (invariant #5).
 
@@ -383,12 +397,14 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
         # the already-bound socket to uvicorn avoids a fixed-port reservation entirely.
         sock = _bind_listen_socket(cfg.host, _server_bind_port())
         bound_port = sock.getsockname()[1]
-        global _wake_route_owned
+        global _wake_route_owned, _pending_discovery
         _wake_route_owned = not passive
+        _pending_discovery = replace(cfg, port=bound_port) if passive else None
         # Advertise the bound endpoint for discovery (see the endpoint-rendezvous lib
         # and docs/patterns/local-endpoint-discovery.md). Additive: discovery-capable
         # clients resolve this dynamic port from the rendezvous file.
-        advertise_endpoint(replace(cfg, port=bound_port))
+        if not passive:
+            advertise_endpoint(replace(cfg, port=bound_port))
         # Publish the zdd routing table (skipped while passive) so clients follow this
         # generation across a graceful cutover (docs/patterns/graceful-daemon-cutover.md).
         _publish_routing(cfg, bound_port, passive=passive)
@@ -397,7 +413,8 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
         # #533). Best-effort; a dead-pid/missing file is treated as absent by readers.
         from .runtime_version import write_running_version
 
-        write_running_version()
+        if not passive:
+            write_running_version()
         app = build_app(cfg)
         fed_runner = _maybe_start_federation(drain_gate=app.state.drain_gate)
         app.state.federation_runner = fed_runner
@@ -483,6 +500,7 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
                 if fed_runner is not None:
                     _settle_federation(fed_runner, interrupted=sys.exc_info()[1])
             finally:
+                _pending_discovery = None
                 _clear_routing()
                 clear_endpoint(run_dir(), owner_pid=os.getpid())
                 if sock is not None:

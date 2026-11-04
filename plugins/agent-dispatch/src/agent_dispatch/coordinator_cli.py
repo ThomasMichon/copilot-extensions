@@ -345,12 +345,22 @@ def _add_cutover_flags(p: argparse.ArgumentParser) -> None:
 def _cmd_cutover(
     args: argparse.Namespace, *, conditional: ConditionalCutover | None = None,
     routing_dir: Path | None = None, install_root: Path | None = None,
+    source_replacement: bool = False,
 ) -> int:
     """Zero-downtime graceful cutover -- shared by ``deploy`` and ``_cutover``."""
     from zdd import breadcrumb
     from zdd.cutover import CutoverOrchestrator
     from .action_controls import action_decision
     from .install_paths import INSTALL_DIR_ENV, install_dir
+    if source_replacement:
+        from .source_start import require_selected_source
+
+        require_selected_source()
+        if (
+            conditional is not None or install_root is not None or routing_dir is not None
+            or getattr(args, "force", False) or getattr(args, "recover", False)
+        ):
+            raise ValueError("Source startup cannot force or redirect replacement")
 
     def refusal(message: str) -> int:
         print(f"[FAIL] {message}", file=sys.stderr)
@@ -568,6 +578,16 @@ def _cmd_cutover(
     try:
         if not admitted():
             return 3
+        if source_replacement:
+            from .source_start import run_coordinator
+
+            result = run_coordinator(
+                cfg, captured_routing_dir, token=token,
+                spawn_passive=spawn_passive, pick_free_port=pick_free_port,
+                timeout=args.health_timeout,
+            )
+            _emit(result)
+            return 0 if result.get("ok") is True else 1
         _pre_recovery_breadcrumb = breadcrumb.read_breadcrumb(captured_routing_dir)
         recovery = breadcrumb.recover_stale_cutover(
             captured_routing_dir, make_client, health_check=liveness_check
