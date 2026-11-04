@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh the canonical owned daemon runtime archive after shared source integration",
+  "changes": [
+    {
+      "plugin": "wsl-setup",
+      "type": "patch"
+    }
+  ]
+}

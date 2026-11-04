@@ -104,6 +104,9 @@ installation identity retirement remain separate transitions under the reviewed
 client lifecycle plan.
 
 The agent-free `fleet-manager-client-admission` clean-room scenario exercises
-the actual freshly installed console in a disposable base image. It requires
-both installed-consumer and missing-resource checks to run without skips; a
-dependency-feed failure is a classified jam, never substituted with a unit pass.
+the actual freshly installed console in a disposable base image. Its oracle
+requires the admission and missing-resource checks plus all four explicit
+generation construction/publication/withdrawal/removal consumers to run without
+skips. Admission itself still creates no runtime; the generation consumers use
+their own explicitly initialized roots. A dependency-feed failure is a
+classified jam, never substituted with a unit pass.

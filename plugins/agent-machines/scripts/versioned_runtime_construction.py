@@ -227,6 +227,10 @@ def require_immutable_environment(
                     if line.startswith(("import ", "import\t")):
                         # These are standard installed-package bootstrap hooks.
                         # Unknown executable hooks cannot prove source independence.
+                        if name == "immutable_runtime.pth" and line == (
+                            "import sys; sys.dont_write_bytecode = True"
+                        ):
+                            continue
                         if name == "_virtualenv.pth" and line == "import _virtualenv":
                             if (site / "_virtualenv.py").is_file():
                                 continue

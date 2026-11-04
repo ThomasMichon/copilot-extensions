@@ -1,6 +1,6 @@
 """Exact owned completed-candidate removal, never installation retirement."""
 
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from dataclasses import asdict
 import os
 import re
@@ -334,7 +334,7 @@ def _binding(namespace, identity, candidate, value):
     construction._completed_intent(namespace, candidate, value)
 
 
-def _intent(namespace, identity, candidate, publication):
+def _intent(namespace, identity, candidate, publication, *, validate_binding=None):
     path = namespace / construction.REMOVING
     if not os.path.lexists(path):
         return None
@@ -350,7 +350,7 @@ def _intent(namespace, identity, candidate, publication):
     artifact_staging._directory(directory)
     _same(construction._read(directory / "intent.json"), value)
     binding = value["input"]
-    _binding(namespace, identity, candidate, binding)
+    (validate_binding or _binding)(namespace, identity, candidate, binding)
     record(value["completion"], "fleet-manager.client-constructed", {"input", "runtime_sha256"})
     if value["completion"]["input"] != binding or (
         not isinstance(value["completion"]["runtime_sha256"], str)
@@ -380,8 +380,28 @@ def _outcome(value, identity, candidate):
     return value
 
 
+@contextmanager
+def _legacy_custody(root, identity):
+    with (
+        client_admission._owned(root) as (path, database_root, unchanged),
+        client_admission._connection(path, database_root=database_root, readonly=False) as connection,
+    ):
+        connection.execute("BEGIN IMMEDIATE")
+        client_admission._read_state(connection, identity)
+        yield path, unchanged
+
+
 def remove_client_runtime(root, identity, *, candidate):
     """Delete exactly one completed client only after owned withdrawal has settled."""
+    identity = client_admission._identity(identity)
+    return _remove_client_runtime(
+        identity, candidate=candidate, custody=lambda: _legacy_custody(root, identity),
+        validate_binding=_binding,
+    )
+
+
+def _remove_client_runtime(identity, *, candidate, custody, validate_binding):
+    """Reuse exact native removal with the owning installation's custody and input binding."""
     identity = client_admission._identity(identity)
     if not isinstance(candidate, str) or re.fullmatch(
         r"client-[1-9][0-9]*-[0-9a-f]{64}", candidate,
@@ -391,12 +411,9 @@ def remove_client_runtime(root, identity, *, candidate):
     reused = False
     try:
         with (
-            client_admission._owned(root) as (path, database_root, unchanged),
-            client_admission._connection(path, database_root=database_root, readonly=False) as connection,
+            custody() as (path, unchanged),
             artifact_staging._primitive() as primitive,
         ):
-            connection.execute("BEGIN IMMEDIATE")
-            client_admission._read_state(connection, identity)
             namespace = path / construction.NAMESPACE
             artifact_staging._directory(namespace)
             construction._namespace(path, identity)
@@ -406,7 +423,9 @@ def remove_client_runtime(root, identity, *, candidate):
                 nonlocal removing, reused
                 _quiesced(namespace)
                 unchanged()
-                value = _intent(namespace, identity, candidate, publication)
+                value = _intent(
+                    namespace, identity, candidate, publication, validate_binding=validate_binding,
+                )
                 if value is None and not os.path.lexists(slot):
                     artifact_staging._directory(namespace / OUTCOMES)
                     outcome = _outcome(
@@ -418,7 +437,7 @@ def remove_client_runtime(root, identity, *, candidate):
                     saved = construction._read(history / "intent.json")
                     _same(construction._read(history / "outcome.json"), outcome)
                     record(saved, "fleet-manager.client-runtime-removal-intent", FIELDS)
-                    _binding(namespace, identity, candidate, saved["input"])
+                    validate_binding(namespace, identity, candidate, saved["input"])
                     if digest(saved) != outcome["intent_sha256"] or (
                         saved["identity"], saved["candidate"], saved["removal"]
                     ) != (identity, candidate, outcome["removal"]):
@@ -427,7 +446,7 @@ def remove_client_runtime(root, identity, *, candidate):
                     return
                 if value is None:
                     binding = construction._read(namespace / "client-inputs" / (candidate + ".json"))
-                    _binding(namespace, identity, candidate, binding)
+                    validate_binding(namespace, identity, candidate, binding)
                     completed = construction._completion(primitive, namespace, candidate, binding)
                     snapshot = _tree(slot, publication)
                     _same(construction._completion(primitive, namespace, candidate, binding), completed)
@@ -448,7 +467,9 @@ def remove_client_runtime(root, identity, *, candidate):
                     _write(history / "intent.json", value)
                     _write(namespace / construction.REMOVING, value)
                 removing = True
-                _same(_intent(namespace, identity, candidate, publication), value)
+                _same(_intent(
+                    namespace, identity, candidate, publication, validate_binding=validate_binding,
+                ), value)
                 _quiesced(namespace)
                 unchanged()
                 expected = _inflate(value["tree"], publication)
@@ -474,7 +495,9 @@ def remove_client_runtime(root, identity, *, candidate):
                 outcomes = _directory(namespace / OUTCOMES)
                 _write(outcomes / (candidate + ".json"), outcome)
                 unchanged()
-                _same(_intent(namespace, identity, candidate, publication), value)
+                _same(_intent(
+                    namespace, identity, candidate, publication, validate_binding=validate_binding,
+                ), value)
                 _quiesced(namespace)
                 (namespace / construction.REMOVING).unlink()
                 client_admission._sync_directory(namespace)

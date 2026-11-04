@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh the shared canonical owned daemon runtime archive without changing service activation",
+  "changes": [
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    }
+  ]
+}

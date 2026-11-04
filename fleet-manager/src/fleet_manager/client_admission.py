@@ -190,16 +190,19 @@ def _connection(root, *, database_root, readonly, initializing=False):
                 connection.close()
 
 
-def _read_state(connection, identity):
+def _read_state(connection, identity, *, expected_tables=None, schema_version=SCHEMA_VERSION):
     if (
         connection.execute("PRAGMA application_id").fetchone()[0] != APPLICATION_ID
-        or connection.execute("PRAGMA user_version").fetchone()[0] != SCHEMA_VERSION
+        or connection.execute("PRAGMA user_version").fetchone()[0] != schema_version
     ):
         raise PlanError("unsupported client admission state version or application")
     tables = dict(connection.execute(
         "SELECT name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'"
     ).fetchall())
-    if tables != _TABLES or connection.execute("PRAGMA quick_check").fetchall() != [("ok",)]:
+    if (
+        tables != (_TABLES if expected_tables is None else expected_tables)
+        or connection.execute("PRAGMA quick_check").fetchall() != [("ok",)]
+    ):
         raise PlanError("client admission schema or integrity mismatch")
     rows = connection.execute("SELECT singleton, identity FROM installation").fetchall()
     expected = canonical(identity).decode("utf-8")
@@ -210,16 +213,24 @@ def _read_state(connection, identity):
         return None
     if len(rows) != 1 or rows[0][0] != 1:
         raise PlanError("invalid client admission high-water state")
-    receipt = decode(rows[0][2].encode("utf-8"))
+    receipt = _receipt(decode(rows[0][2].encode("utf-8")), identity)
+    if (
+        receipt["sequence"] != rows[0][1]
+        or canonical(receipt).decode("utf-8") != rows[0][2]
+    ):
+        raise PlanError("client admission receipt identity mismatch")
+    return receipt
+
+
+def _receipt(receipt, identity):
     record(receipt, "fleet-manager.client-admitted-release",
            {"sequence", "release_digest", "selection_digest", "selection", "admitted_at"})
     selection = _selection(receipt["selection"], identity)
     integer(receipt["admitted_at"], "admission time")
     if (
-        receipt["sequence"] != rows[0][1] or receipt["sequence"] != selection["sequence"]
+        receipt["sequence"] != selection["sequence"]
         or receipt["release_digest"] != selection["release_digest"]
         or receipt["selection_digest"] != ReleaseSelection.from_dict(selection).selection_digest
-        or canonical(receipt).decode("utf-8") != rows[0][2]
     ):
         raise PlanError("client admission receipt identity mismatch")
     return receipt
@@ -288,6 +299,21 @@ def _sync_initialization_lease(root):
 
 def initialize_client_admission(root, identity):
     """Explicitly initialize an empty private root, or inspect its exact owned identity."""
+    return _initialize(root, identity)
+
+
+def _initialize(root, identity, *, tables=None, schema_version=SCHEMA_VERSION,
+                initialize_state=None, validate_state=None):
+    tables = _TABLES if tables is None else tables
+
+    def read_state(connection):
+        receipt = _read_state(
+            connection, identity, expected_tables=tables, schema_version=schema_version,
+        )
+        if validate_state is not None:
+            validate_state(connection, receipt)
+        return receipt
+
     identity = _identity(identity)
     initialization = _initialization_name(identity)
     try:
@@ -296,7 +322,7 @@ def initialize_client_admission(root, identity):
             if (path / DATABASE).exists() and not (path / initialization).exists():
                 with _connection(path, database_root=database_root, readonly=True) as connection:
                     connection.execute("BEGIN")
-                    receipt = _read_state(connection, identity)
+                    receipt = read_state(connection)
                     unchanged()
                     return _report(identity, receipt, changed=False,
                                    status="admitted" if receipt else "initialized")
@@ -310,7 +336,7 @@ def initialize_client_admission(root, identity):
             if database.exists():
                 with _connection(path, database_root=database_root, readonly=True) as connection:
                     connection.execute("BEGIN")
-                    receipt = _read_state(connection, identity)
+                    receipt = read_state(connection)
                     unchanged()
                     cleared = (path / initialization).exists()
                     if cleared:
@@ -331,15 +357,18 @@ def initialize_client_admission(root, identity):
                 path / initialization, database_root=candidate, readonly=False, initializing=True,
             ) as connection:
                 connection.execute("BEGIN IMMEDIATE")
-                for sql in _TABLES.values():
+                for sql in tables.values():
                     connection.execute(sql)
                 connection.execute("PRAGMA application_id = " + str(APPLICATION_ID))
-                connection.execute("PRAGMA user_version = " + str(SCHEMA_VERSION))
+                connection.execute("PRAGMA user_version = " + str(schema_version))
                 connection.execute("INSERT INTO installation VALUES (1, ?)",
                                    (canonical(identity).decode("utf-8"),))
+                if initialize_state is not None:
+                    initialize_state(connection)
+                read_state(connection)
                 unchanged()
                 _commit(connection)
-                _read_state(connection, identity)
+                receipt = read_state(connection)
                 unchanged()
             unchanged()
             if database.exists():
@@ -350,7 +379,8 @@ def initialize_client_admission(root, identity):
             _clear_initialization(path / initialization)
             _sync_directory(database_root)
             unchanged()
-            return _report(identity, None, changed=True, status="initialized")
+            return _report(identity, receipt, changed=True,
+                           status="admitted" if receipt else "initialized")
     except (OSError, sqlite3.Error, subprocess.SubprocessError):
         raise PlanError("client admission initialization could not establish durable state") from None
 
@@ -387,48 +417,60 @@ def recover_client_admission(root, identity):
         raise PlanError("client admission state could not be recovered under ownership") from None
 
 
-def admit_client_release(root, identity, selection, staged, policy, *, clock=lambda: int(time.time())):
-    """Persist a supplied selected release after fresh live-stage authentication, never execute it."""
-    identity = _identity(identity)
-    selection = _selection(selection, identity)
+def _selected_receipt(identity, selection, staged, policy, previous, clock):
     if not isinstance(staged, artifact_staging.StagedArtifacts):
         raise PlanError("client admission requires a live retained artifact stage")
     if (staged.authority, staged.installation, staged.role) != (
         identity["authority"], identity["installation"], "client",
     ):
         raise PlanError("retained stage installation scope mismatch")
+    evidence = staged.reverify(policy, clock=clock)
+    if (
+        evidence["release_digest"] != selection["release_digest"]
+        or evidence["sequence"] != selection["sequence"]
+        or sorted(staged.artifacts) != selection["components"]
+    ):
+        raise PlanError("authenticated release was not selected for this installation")
+    staged.read_artifacts(policy, clock=clock)
+    evidence = staged.reverify(policy, clock=clock)
+    return _admission_receipt(selection, evidence, previous)
+
+
+def _admission_receipt(selection, evidence, previous):
+    decision_digest = ReleaseSelection.from_dict(selection).selection_digest
+    if previous:
+        if selection["sequence"] < previous["sequence"]:
+            raise PlanError("selected release is below durable admitted sequence")
+        if selection["sequence"] == previous["sequence"]:
+            if (
+                selection["release_digest"] != previous["release_digest"]
+                or decision_digest != previous["selection_digest"]
+            ):
+                raise PlanError("same-sequence release or selection content conflicts")
+            return previous
+    return {
+        "schema": "fleet-manager.client-admitted-release", "version": 1,
+        "sequence": selection["sequence"], "release_digest": selection["release_digest"],
+        "selection_digest": decision_digest, "selection": selection,
+        "admitted_at": evidence["verified_at"],
+    }
+
+
+def admit_client_release(root, identity, selection, staged, policy, *, clock=lambda: int(time.time())):
+    """Persist a supplied selected release after fresh live-stage authentication, never execute it."""
+    identity = _identity(identity)
+    selection = _selection(selection, identity)
     try:
         with _owned(root) as (path, database_root, unchanged):
             with _connection(path, database_root=database_root, readonly=False) as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 previous = _read_state(connection, identity)
-                evidence = staged.reverify(policy, clock=clock)
-                if (
-                    evidence["release_digest"] != selection["release_digest"]
-                    or evidence["sequence"] != selection["sequence"]
-                    or sorted(staged.artifacts) != selection["components"]
-                ):
-                    raise PlanError("authenticated release was not selected for this installation")
-                staged.read_artifacts(policy, clock=clock)
-                evidence = staged.reverify(policy, clock=clock)
-                decision_digest = ReleaseSelection.from_dict(selection).selection_digest
-                if previous:
-                    if selection["sequence"] < previous["sequence"]:
-                        raise PlanError("selected release is below durable admitted sequence")
-                    if selection["sequence"] == previous["sequence"]:
-                        if (
-                            selection["release_digest"] != previous["release_digest"]
-                            or decision_digest != previous["selection_digest"]
-                        ):
-                            raise PlanError("same-sequence release or selection content conflicts")
-                        unchanged()
-                        return _report(identity, previous, changed=False, status="admitted")
-                receipt = {
-                    "schema": "fleet-manager.client-admitted-release", "version": 1,
-                    "sequence": selection["sequence"], "release_digest": selection["release_digest"],
-                    "selection_digest": decision_digest, "selection": selection,
-                    "admitted_at": evidence["verified_at"],
-                }
+                receipt = _selected_receipt(
+                    identity, selection, staged, policy, previous, clock,
+                )
+                if receipt == previous:
+                    unchanged()
+                    return _report(identity, previous, changed=False, status="admitted")
                 connection.execute(
                     "INSERT INTO admission VALUES (1, ?, ?) ON CONFLICT(singleton) DO UPDATE "
                     "SET sequence = excluded.sequence, receipt = excluded.receipt",

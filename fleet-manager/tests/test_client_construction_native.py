@@ -27,6 +27,23 @@ from test_client_distribution import FLAGS
 pytestmark = pytest.mark.client_distribution_full
 
 
+@pytest.mark.skipif(os.name != "nt", reason="native Windows launcher TEMP path boundary")
+@pytest.mark.timeout(30)
+def test_native_launcher_uses_private_short_temporary_path_for_long_candidate(tmp_path, primitive):
+    namespace = tmp_path / "runtime"
+    version = "client-" + "a" * max(80, 260 - len(str(namespace)))
+    slot = primitive.slot(namespace, version)
+    assert len(str(slot / "health-home")) > 260
+    with primitive.construction_lease(namespace, version) as descriptor:
+        for _ in range(2):
+            output = construction._run([
+                sys.executable, "-I", "-B", "-c",
+                "import tempfile; "
+                "f=tempfile.TemporaryFile(); f.write(b'probe'); f.close(); print('ready')",
+            ], slot, "native temporary path probe", descriptor=descriptor)
+            assert output.strip() == b"ready"
+
+
 @contextmanager
 def stage(fixture, parent):
     parent.mkdir(mode=0o700, exist_ok=True)
@@ -38,10 +55,7 @@ def stage(fixture, parent):
         yield staged
 
 
-@pytest.mark.timeout(90)
-def test_actual_failed_doctor_preserves_previous_selector_config_and_admitted_floor(
-    tmp_path, primitive, signed_wheel,
-):
+def failed_doctor_fixture(signed_wheel, tmp_path):
     fixture = copy.deepcopy(signed_wheel)
     source = Path(fixture["sources"]["components"]["cli"])
     output = io.BytesIO()
@@ -61,6 +75,14 @@ def test_actual_failed_doctor_preserves_previous_selector_config_and_admitted_fl
     signed = independently_sign([payload], tmp_path)
     fixture["proof"] = {**fixture["proof"], **signed["proofs"][0]}
     fixture["policy"]["keys"][0]["public_key"] = signed["public_key"]
+    return fixture
+
+
+@pytest.mark.timeout(90)
+def test_actual_failed_doctor_preserves_previous_selector_config_and_admitted_floor(
+    tmp_path, primitive, signed_wheel,
+):
+    fixture = failed_doctor_fixture(signed_wheel, tmp_path)
     root = root_at(tmp_path)
     with stage(fixture, tmp_path / "stage") as staged:
         admit(root, fixture, staged, fixture["policy"])
