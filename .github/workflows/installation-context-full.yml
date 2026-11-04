@@ -148,7 +148,7 @@ jobs:
               if path.name != "test_client_generation_cli.py"
           ]
           combined = ET.Element("testsuites")
-          for transition in ("retry", "forward-missing", "forward-malformed", "higher", "uninstall", "foreign"):
+          for transition in ("retry", "forward-missing", "forward-malformed", "higher", "uninstall", "foreign", "legacy"):
               report = reports / ("managed-" + transition + ".xml")
               if report.exists():
                   raise RuntimeError("native qualification refuses a retained managed report")
@@ -1355,7 +1355,7 @@ jobs:
         run: |
           python -c "import os,subprocess,sys; actual=subprocess.check_output(['git','rev-parse','HEAD'],creationflags=subprocess.CREATE_NO_WINDOW,text=True).strip(); assert actual == os.environ['EXPECTED_SOURCE'], (actual,os.environ['EXPECTED_SOURCE']); print('Source:',actual); print('Python:',sys.version)"
           python tools/run-plugin-tests.py worktree-manager --test-file tests/test_pane_args_file.py -k real_psmux --allow-explicit-tiers
-      - name: Qualify native Companion attention and navigation
+      - name: Qualify native Companion navigation and daemon observations
         if: inputs.portfolio == 'mux-companion'
         env:
           UV_PYTHON: "3.12"
@@ -1364,6 +1364,10 @@ jobs:
           --test-file tests/native/test_companion_pane_native.py
           --test-file tests/test_companion_attention.py
           --test-file tests/test_companion_attention_ui.py
+          --test-file tests/test_daemons_status.py
+          --test-file tests/test_daemons_cli.py
+          --test-file tests/test_windows_daemon_observation.py
+          --test-file tests/native/test_daemon_observation_native.py
           --allow-explicit-tiers --test-timeout 120
 
   bridge-binding-linux:

@@ -21,6 +21,10 @@ both Docker's copy rules and its closed allowlist. This source check is not
 limited to names: it builds the procutil wheel from those filtered inputs and
 compares every declared module/resource with the exact source bytes. It is
 not evidence that either target architecture's image was built or run.
+Both repository and pinned contexts also preserve Fleet's client-lifecycle
+and SSH-client contract resources. The filtered-wheel controls compare every
+direct Fleet Python/JSON input, so a newly added module or contract cannot be
+silently omitted by the pinned roster or Docker copy rules.
 
 ## Runtime contract
 

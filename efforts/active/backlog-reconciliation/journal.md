@@ -3,6 +3,10 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-04 - Seven native timeout/lifetime contracts, sixteen comparisons and six direct portfolio tracking families](<journal/2026/11.04 native-timeout-contracts.md>)
+
+- [2026-11-04 - Six interpreter/construction contracts, seventeen bounded comparisons and one finite installer intake proposal](<journal/2026/11.04 interpreter-construction-contracts.md>)
+
 - [2026-11-04 - Five session-intelligence contracts, fifteen comparisons, whole receiving readback and bounded source gains](<journal/2026/11.04 session-intelligence-contracts.md>)
 
 - [2026-11-04 - Seven measurement/preservation contracts, seventeen bounded comparisons and retained per-call type source evidence](<journal/2026/11.04 measurement-preservation-contracts.md>)

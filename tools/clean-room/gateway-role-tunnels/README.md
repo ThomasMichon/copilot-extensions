@@ -3,8 +3,13 @@
 This explicit host-driven Tier-P lane composes ordinary unprivileged containers
 on the existing Docker engine. It follows the
 [clean-room report and jam vocabulary](../ARCHITECTURE.md), not the privileged
-Komodo nested-Docker path. There is no scheduler, CI job, Docker socket mount,
+Komodo nested-Docker path. There is no scheduler, Docker socket mount,
 host port, cloud credential, provider account, Copilot or live adopter change.
+The existing native acceptance workflow's default-off `pr_artifacts`
+selector includes this witness on an ordinary disposable Linux runner.
+It executes the same exact-commit witness and retains only reports, receipts
+and the source manifest, never synthetic credentials or container logs.
+Required unit-only PR CI is unchanged.
 
 ## Prerequisites and invocation
 

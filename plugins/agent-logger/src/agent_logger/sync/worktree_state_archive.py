@@ -8,6 +8,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from agent_procutil.owned_budget import OwnedExecutionBudget
+
 from agent_logger.aggregate import ResolvedPlan
 from agent_logger.config import Config
 from agent_logger.sync.publication_directory import PublicationDirectory, publication_directory
@@ -79,8 +81,13 @@ def _verified_manifest(
 
 def _copy_member(
     source: PublicationDirectory, destination: PublicationDirectory, member: dict[str, Any],
+    budget: OwnedExecutionBudget | None = None,
 ) -> None:
     deadline = time.monotonic() + _DEADLINE_SECONDS
+    if budget is not None:
+        deadline = min(deadline, budget.execution_deadline)
+    if time.monotonic() >= deadline:
+        raise WorktreeStateError("complete collection exhausted its shared time budget")
     digest, count = hashlib.sha256(), 0
     with source.open("agenda.sqlite3", protected=True) as incoming:
         before = os.fstat(incoming.fileno())
@@ -192,7 +199,7 @@ def readback_worktree_state(
 def collect_worktree_state(
     cfg: Config, target: Target, plan: ResolvedPlan, source: Path,
     identity: WorktreeStateRevision, sessions: tuple[str, ...], verify: ExportVerifier,
-    *, contributors: ContributorReader | None = None,
+    *, contributors: ContributorReader | None = None, budget: OwnedExecutionBudget | None = None,
 ) -> WorktreeStateReceipt:
     """Collect one explicitly selected export under the existing target/policy.
 
@@ -241,7 +248,7 @@ def collect_worktree_state(
                 with publication_directory(destination / "export") as copied:
                     if copied.names():
                         raise WorktreeStateError("new collection export directory is not empty")
-                    _copy_member(exported, copied, manifest["members"]["agenda.sqlite3"])
+                    _copy_member(exported, copied, manifest["members"]["agenda.sqlite3"], budget)
                     _write(copied, "manifest.json", raw)
                     actual, actual_raw = _verified_manifest(copied, identity, verify)
                     if actual != manifest or actual_raw != raw:

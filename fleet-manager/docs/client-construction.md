@@ -345,9 +345,15 @@ other runtimes and user configuration. Results distinguish
 commands. Every operation requires explicit `--root` and `--identity` paths.
 The root must already be an existing private directory; `initialize` and the
 explicit `install` composition can create the lineage database.
-Optional `initialize --legacy-root <path>` imports
+Optional `initialize --legacy-root <path>` or `install --legacy-root <path>` imports
 the exact legacy origin and admitted floor without cleaning up or rewriting it.
-Retries must name the same origin. Other primitive commands never initialize,
+An `initialize` retry must repeat the same `--legacy-root`; omitting it after
+an import refuses. For `install`, a supplied origin must match the durable
+import, while omitting the option continues the existing lineage without
+changing its origin. Neither command rereads an already imported predecessor
+or requires it to remain present. Omitting the option never discovers or imports
+a legacy installation.
+Other primitive commands never initialize,
 chooses a release, allocates a generation/request or replays predecessor work.
 
 | Operation | Additional explicit inputs | Outcome |
@@ -357,7 +363,7 @@ chooses a release, allocates a generation/request or replays predecessor work.
 | `register-commands` | `--reservation`, `--command-directory`, authenticated inputs below | Owned default-command publication; returns its exact `publication` ID |
 | `unregister-commands` | `--reservation`, `--publication`, `--command-directory` | Exact-attempt withdrawal; does not remove a runtime |
 | `remove-runtime` | `--reservation` | Exact-generation retirement and native runtime cleanup; never installation retirement |
-| `install` | `--generation`, `--request`, `--selection`, `--command-directory`, `--replace-commands`, authenticated inputs below | Explicit initialization when absent, healthy construction and complete default command-family selection |
+| `install` | `--generation`, `--request`, `--selection`, `--command-directory`, `--replace-commands`, optional `--legacy-root`, authenticated inputs below | Explicit initialization/import when absent, healthy construction and complete default command-family selection |
 | `uninstall` | `--reservation`, `--publication`, `--command-directory` | Exact-attempt withdrawal followed by exact-generation runtime removal; preserves the lineage and user state |
 
 Authenticated inputs are `--release`, `--proof`, `--policy`, `--sources`,

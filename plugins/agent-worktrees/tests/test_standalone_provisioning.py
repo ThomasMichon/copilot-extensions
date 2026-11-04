@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -103,8 +104,11 @@ def test_standalone_provisioning_launches_one_noop_candidate_without_foreground_
     assert standalone.plans == []
     assert len(standalone.children) == 1
     argv, kwargs = standalone.children[0]
-    assert argv == [
-        "synthetic-pythonw", "-m", "agent_worktrees", "reconcile-plugins",
+    assert argv[:2] == ["synthetic-pythonw", "-X"]
+    prefix = Path(argv[2].removeprefix("pycache_prefix=").removeprefix("\\\\?\\"))
+    assert prefix.is_relative_to(standalone.runtime / "cache" / "python")
+    assert argv[3:] == [
+        "-m", "agent_worktrees", "reconcile-plugins",
         "--repo", str(standalone.repo),
         "--status", str(standalone.runtime / "logs" / "provision-status.json"),
         "--apply",
@@ -231,6 +235,8 @@ def test_standalone_optional_planning_cannot_consume_the_command_deadline(
 def test_standalone_returns_while_the_existing_child_owns_optional_work(
     standalone, monkeypatch, tmp_path, capsys,
 ):
+    monkeypatch.delenv("PYTHONDONTWRITEBYTECODE", raising=False)
+    monkeypatch.delenv("PYTHONPYCACHEPREFIX", raising=False)
     worker_root = tmp_path / "worker"
     package = worker_root / "agent_worktrees"
     package.mkdir(parents=True)
@@ -240,6 +246,7 @@ def test_standalone_returns_while_the_existing_child_owns_optional_work(
         "assert sys.argv[1:] == ['reconcile-plugins', '--repo', sys.argv[3], "
         "'--status', sys.argv[5], '--apply']\n"
         "root = pathlib.Path(sys.argv[5]).parent\n"
+        "(root / 'worker-cache').write_text(__cached__, encoding='utf-8')\n"
         "(root / 'worker-started').write_text('planning', encoding='utf-8')\n"
         "deadline = time.monotonic() + 10\n"
         "while not (root / 'release-worker').exists():\n"
@@ -269,6 +276,11 @@ def test_standalone_returns_while_the_existing_child_owns_optional_work(
             assert children[0].poll() is None
             assert time.monotonic() < deadline
             time.sleep(0.01)
+        cached = Path((logs / "worker-cache").read_text(encoding="utf-8"))
+        assert Path(str(cached).removeprefix("\\\\?\\")).is_relative_to(
+            standalone.runtime / "cache" / "python"
+        )
+        assert cached.is_file()
         assert not (logs / "worker-finished").exists()
         assert standalone.events[-2:] == ["completed", "returned"]
         captured = capsys.readouterr()

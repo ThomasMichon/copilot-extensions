@@ -35,7 +35,8 @@ qualifies installed runtime, native Windows, ACP or whole-hook throughput.
 
 The manual `windows-coverage-rotation.yml` selector `post_tool_fallback=true`
 runs only Worktrees' post-tool shell, status/bind reminder, late-guidance and
-guard-publication consumer packet through the canonical hardened Linux container. Supply `ref`
+guard-publication consumers plus ordinary pre/post-hook idle-retention controls
+through the canonical hardened Linux container. Supply `ref`
 to select a published candidate; execution records its immutable checkout,
 selector, container profile and actual result. It cannot be combined with
 `launch_maintenance`. Required unit-only CI and the scheduled full portfolio
@@ -86,6 +87,17 @@ ports, reject foreign case/port variants, and retain GitHub/default-port equival
 without changing the older aggregate-policy identity.
 The same-cell adapter reuses the already-qualified canonical peer launcher;
 its shared native two-cell matrix remains owned by the peer-launch portfolio.
+Logger's opt-in `--test-file tests/test_worktree_state_exporter.py
+--test-file tests/test_worktree_state_pipeline.py --allow-explicit-tiers` packet
+composes the actual selected Worktrees and Efforts owners for a synthetic retired
+managed placement. It checks admission before discovery/staging, unchanged
+source bytes, the actual exported revision, complete unknown/noncanonical
+provenance, changed scope/placement refusal and exact temporary-member cleanup.
+Failed or uncertain exports retain their evidence. A native Linux pidfd witness
+requires an export timeout to settle its console descendant. Process commands
+and collection copying share the caller's absolute execution budget.
+This explicit library packet does not enable a sync tick, change ordinary
+accounting or qualify native Windows, installed collection or remote archival.
 The preservation cases exercise actually eligible old sessions and a verified
 ordinary archive containing no worktree collection; neither justifies erasing
 marked nested evidence.
@@ -215,6 +227,17 @@ sibling_launch_executes_selected_physical_environment"` packet includes fresh
 real venvs and two actual sibling module invocations per layout, retaining data
 and selectors. It does not qualify whole installation, resident lifetime,
 desktop visibility, graceful cutover or rollout.
+
+The Windows daemon-status native packet is
+`python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_daemon_observation_native.py --allow-explicit-tiers`.
+It reads a real caller-contained process's census membership, literal command
+line, token SID, creation time and root through native APIs with subprocess
+probes forbidden. The process carries synthetic daemon arguments; this does not
+start a central daemon or prove installed cutover. Portable reader/refusal
+controls remain in `tests/test_windows_daemon_observation.py` and the existing
+status/CLI suites. The existing manual `mux-companion` portfolio also selects
+these status/CLI and native files on its Windows runner; its job and test
+budgets remain unchanged. No native packet is added to required unit-only CI.
 
 The explicitly selected Windows Picker-handoff packet is
 `python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_terminal_launch_native.py --test-file tests/native/test_terminal_launch_mux_native.py --allow-explicit-tiers`.
@@ -3645,13 +3668,15 @@ the same canonical held-handle current-principal proof as runtime files plus
 the existing strict private-grant allowlist; roots and metadata retain their
 TokenUser-owner requirement.
 
-The same optional native portfolio separately runs six real installed
+The same optional native portfolio separately runs seven real installed
 `test_actual_installed_console_managed_lifecycle` cases: exact install/retry,
 same-release forward replacement with missing or malformed predecessor proofs,
 selected higher-release update, exact uninstall/retry and same-byte foreign
-command preservation. Each remains a separate 120-second caller with the
+command preservation, plus explicit legacy-origin import/install and exact retry
+after predecessor disappearance. The legacy case also refuses a different
+origin without altering the selected commands or lineage. Each remains a separate 120-second caller with the
 unchanged 90-second item and 45-second child limits. Its distinct `--managed`
-oracle requires exactly those six non-skipped cases; it does not replace or
+oracle requires exactly those seven non-skipped cases; it does not replace or
 weaken the original six-consumer oracle. The owner console runs outside the
 checkout, and incoming direct/default diagnostics use the actual constructed
 wheel. The fixture retains user configuration and checks the monotonic floor.
@@ -3659,6 +3684,9 @@ These are private first-touch installation roots, not fresh operating systems.
 `test_client_installation.py` separately covers durable original target
 observations, actual producer-copy recovery, interrupted real default health
 and refusal to recreate a missing incoming observation after publication.
+Its managed legacy-install controls prove imported lower-release and
+same-sequence content-conflict refusals before construction, with the old
+database and imported floor preserved, plus changed-origin refusal.
 Its heavy recovery cases should be selected separately under the same caller
 bound. None of these packets qualifies release acquisition, automatic
 maintenance, complete host setup, whole-lineage retirement or live adoption.

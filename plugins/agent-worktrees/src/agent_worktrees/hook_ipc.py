@@ -14,6 +14,7 @@ from pathlib import Path
 
 Decision = Callable[[str, dict, float], dict]
 _READ_TIMEOUT_S = 1.0
+_RECENT_HOOK_DEMAND_S = 120.0
 _CAPABILITIES = [
     "session-lifecycle-v1", "session-start-source-v1", "session-end-source-v1",
 ]
@@ -86,14 +87,16 @@ class _Handler(socketserver.StreamRequestHandler):
             kind = str(request.get("kind") or "")
             payload = request.get("payload")
             deadline = float(request.get("deadline") or 0)
-            if not isinstance(payload, dict):
+            payload_valid = isinstance(payload, dict)
+            if not payload_valid:
                 payload = {}
             if deadline <= time.time():
                 raise HookUnavailable
             if self.server.admission_closed:
                 raise HookUnavailable(self.server.admission_closed_reason)
             result = self.server.decide(kind, payload, deadline)
-            if not isinstance(result, dict):
+            result_valid = isinstance(result, dict)
+            if not result_valid:
                 result = {}
             if os.environ.get("PYTEST_CURRENT_TEST"):
                 try:
@@ -111,6 +114,10 @@ class _Handler(socketserver.StreamRequestHandler):
                 json.dumps(response, separators=(",", ":")).encode("utf-8")
                 + b"\n"
             )
+            if payload_valid and result_valid and deadline > time.time():
+                owner = self.server.owner
+                if owner is not None:
+                    owner._on_hook_completed(kind)
         except HookUnavailable as exc:
             try:
                 response = {"version": 1, "fallback": True}
@@ -142,6 +149,8 @@ class HookIpcServer:
         )
         self._active_handlers = 0
         self._active_handlers_lock = threading.Lock()
+        self._clock = time.monotonic
+        self._last_completed_hook: float | None = None
 
     def start(self) -> None:
         self.thread.start()
@@ -193,6 +202,19 @@ class HookIpcServer:
     def active_handler_count(self) -> int:
         with self._active_handlers_lock:
             return self._active_handlers
+
+    def _on_hook_completed(self, kind: str) -> None:
+        """Record admitted response completion before handler settlement."""
+        if kind in {"preToolUse", "postToolUse"}:
+            with self._active_handlers_lock:
+                self._last_completed_hook = self._clock()
+
+    def has_recent_hook_demand(self) -> bool:
+        """Idle grace only; active-handler counts still govern draining."""
+        with self._active_handlers_lock:
+            return self._last_completed_hook is not None and (
+                0 <= self._clock() - self._last_completed_hook < _RECENT_HOOK_DEMAND_S
+            )
 
 
 _DEFAULT_CLIENT_TIMEOUT_S = 1.0

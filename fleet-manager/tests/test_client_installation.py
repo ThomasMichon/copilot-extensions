@@ -5,15 +5,19 @@ import copy
 import pytest
 
 from fleet_manager import client_generation_frontdoor as frontdoor
+from fleet_manager import client_admission as admission
 from fleet_manager import client_generations as generations, client_installation as managed
 from fleet_manager.planning import PlanError, canonical
 from fleet_manager.private_state import private_directory
 from test_artifact_staging import primitive as primitive  # noqa: F401
-from test_client_admission import database_bytes, identity, retained, selection
+from test_client_admission import (
+    database_bytes, identity, independently_signed_variants as independently_signed_variants,
+    retained, root_at, selection,
+)
 from test_client_construction import signed_wheel as signed_wheel, target  # noqa: F401
 from test_client_generation_frontdoor import installation as installation, pointer  # noqa: F401
 from test_client_frontdoor import states
-from test_client_generations import FIRST, lineage_at, reserve
+from test_client_generations import FIRST, lineage_at, reserve, state
 from test_release_auth import artifact_fixture
 
 
@@ -25,6 +29,53 @@ def test_installation_requires_explicit_fixed_command_replacement_before_any_eff
             command_directory=tmp_path, current_policy=lambda: {}, current_target=lambda: {},
         )
     assert list(root.iterdir()) == []
+
+
+@pytest.mark.parametrize("incoming,message", [(0, "below durable"), (3, "content conflicts")])
+def test_managed_legacy_install_imports_floor_before_refusing_an_incompatible_request(
+    tmp_path, primitive, independently_signed_variants, incoming, message,
+):
+    root, legacy = lineage_at(tmp_path), root_at(tmp_path)
+    first = independently_signed_variants[1]
+    admission.initialize_client_admission(legacy, identity())
+    with retained(first, tmp_path) as (staged, trusted):
+        admitted = admission.admit_client_release(
+            legacy, identity(), selection(first), staged, trusted, clock=lambda: 150,
+        )["admitted"]
+    before = database_bytes(legacy)
+    fixture = independently_signed_variants[incoming]
+    with retained(fixture, tmp_path) as (staged, trusted):
+        with pytest.raises(PlanError, match=message):
+            managed.install_client_generation(
+                root, identity(), selection(fixture), staged, generation=FIRST,
+                request="legacy-migration", legacy_root=legacy,
+                command_directory=tmp_path / "commands", replace_commands=True,
+                current_policy=lambda: trusted, current_target=lambda: target(fixture),
+                clock=lambda: 150,
+            )
+    floor, origin, reservations = state(root)
+    assert floor == origin["legacy"]["admitted"] == admitted and not reservations
+    assert database_bytes(legacy) == before
+    assert not (root / ("generation-" + FIRST)).exists()
+    assert not (tmp_path / "commands").exists()
+
+
+def test_managed_legacy_install_refuses_a_different_origin_before_constructing(tmp_path, primitive):
+    root = lineage_at(tmp_path)
+    generations._initialize_lineage(root, identity())
+    before = database_bytes(root)
+    fixture = artifact_fixture(tmp_path)
+    with retained(fixture, tmp_path) as (staged, trusted):
+        with pytest.raises(PlanError, match="different legacy origin"):
+            managed.install_client_generation(
+                root, identity(), selection(fixture), staged, generation=FIRST,
+                request="legacy-migration", legacy_root=tmp_path / "unrelated-legacy",
+                command_directory=tmp_path / "commands", replace_commands=True,
+                current_policy=lambda: trusted, current_target=lambda: target(fixture),
+                clock=lambda: 150,
+            )
+    assert database_bytes(root) == before and not state(root)[2]
+    assert not (tmp_path / "commands").exists()
 
 
 @pytest.mark.parametrize("change", ["targets", "directory", "reservation"])
