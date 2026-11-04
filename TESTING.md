@@ -2195,6 +2195,16 @@ interpreter for stock macOS Bash 3.2 qualification. These are bounded shell
 controls, not package construction or native macOS runtime qualification when
 executed with another Bash version.
 
+The shared predecessor-retention prerequisite uses the `runtime-source` target
+with `--test-file tests/test_runtime_references.py`. Strict ordinary retention,
+missing/regular-file predecessor pinning, cleanup exclusion and completed
+candidate rejection remain separate assertions. The existing Bridge
+`test_runtime_retention.py` and `test_failed_construction.py` packets cover
+native competing holders, handoff, process death and failed-candidate custody.
+Codespaces' `normal_entry_repairs and file` selection exercises normal update
+and repeat from an actual regular file at the selected slot name. These
+on-demand packets retain their existing bounds and do not widen required CI.
+
 ## Optional SSH installation recipes
 
 The manual `installation-context-full.yml` portfolio `ssh-recipes` runs only

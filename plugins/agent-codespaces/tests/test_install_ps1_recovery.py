@@ -270,7 +270,7 @@ def test_uv_only_construction_bootstrap_is_fail_closed(tmp_path: Path, mode: str
         assert (_slot(home) / ".install-complete.json").is_file()
 
 
-def _repair_case(tmp_path: Path, *, qualified: bool = False):
+def _repair_case(tmp_path: Path, *, qualified: bool = False, footprint: str = "incomplete"):
     home = tmp_path / "home"
     home.mkdir()
     fake_bin = _write_fake_uv(tmp_path)
@@ -292,9 +292,13 @@ def _repair_case(tmp_path: Path, *, qualified: bool = False):
         (payload / "runtime-source.json").write_text(json.dumps(identity.document()))
         version = identity.runtime_version
     slot = home / ".agent-codespaces" / "versions" / version
-    (slot / "Scripts").mkdir(parents=True)
-    (slot / "Scripts" / "python.exe").write_text("broken interpreter", encoding="ascii")
-    (slot / "partial.txt").write_text("preserve incomplete generation", encoding="ascii")
+    if footprint == "file":
+        slot.parent.mkdir(parents=True)
+        slot.write_text("preserve non-directory generation", encoding="ascii")
+    else:
+        (slot / "Scripts").mkdir(parents=True)
+        (slot / "Scripts" / "python.exe").write_text("broken interpreter", encoding="ascii")
+        (slot / "partial.txt").write_text("preserve incomplete generation", encoding="ascii")
     runtime = slot.parents[1]
     for name in ("current-version", "last-known-good"):
         (runtime / name).write_text(version, encoding="ascii")
@@ -349,9 +353,13 @@ def _construction_calls(case):
     return [line for line in calls if json.loads(line)[0] in ("venv", "pip")]
 
 
-@pytest.mark.parametrize("action", ["install", "update"])
-def test_normal_entry_repairs_selected_generation_and_reuses_it(tmp_path: Path, action: str) -> None:
-    case = _repair_case(tmp_path)
+@pytest.mark.parametrize(("action", "footprint"), [
+    ("install", "incomplete"), ("update", "incomplete"), ("update", "file"),
+])
+def test_normal_entry_repairs_selected_generation_and_reuses_it(
+    tmp_path: Path, action: str, footprint: str,
+) -> None:
+    case = _repair_case(tmp_path, footprint=footprint)
     result = _run(
         INSTALL, action, home=case.home, fake_bin=case.fake_bin, mode="success", uv_only=True,
     )

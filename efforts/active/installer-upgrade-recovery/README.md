@@ -355,3 +355,51 @@ claimed. These add three controls to the prior 27 unique passes. Windows
 runtime behavior, shared construction helpers and the existing four platform
 skips are unchanged. Review-fix lint/whitespace pass; current-head review and
 required CI must pass again before merge.
+
+### 2026-11-04 - Invalid predecessor reference is not runtime admission
+
+The next current-head Comment review exposed a surviving ordinary-entry
+failure when the selected base slot is a regular file. The focused real
+update regression failed at `ordinary runtime slot not installed` before
+fresh construction, despite the adapter selecting a distinct generation.
+The bounded prerequisite is coordinated on #5472 in
+[comment 6629192533](https://github.com/ThomasMichon/copilot-extensions/issues/5472#issuecomment-6629192533).
+It does not transfer shared guardian or Worktrees coordinator ownership.
+
+The existing canonical retention primitive now permits an explicit
+predecessor-reference pin without requiring that old entry to qualify as an
+installed directory. Only construction's predecessor pins select that mode.
+The same kernel ownership excludes cleanup; ordinary runtime/candidate
+retention remains strict by default, and payload-hash admission is independent.
+No invalid old entry is rewritten, no lock protocol is replaced, and
+installer guardian/process transport and candidate admission are unchanged.
+Adopting the maintained footprint plan would instead require migrating
+Codespaces' legacy removal profile and broaden the cleanup contract; that
+alternative was rejected for this fix.
+
+The canonical reference packet passes 19 controls, including three new strict
+default/preservation/admission controls. Normal update from the regular-file
+slot, immediate reuse and the two existing failed incoming controls pass
+three native cases in 129.90 seconds. Existing Bridge retention/construction
+packets pass 85 controls with eight explicit platform skips, including real
+competing holders, cleanup, process death and failed-candidate receipt custody.
+Together with the settled Codespaces cases this is 135 unique passes and
+twelve platform skips, not installed-host qualification.
+
+Canonical copies are synchronized across thirteen plugins, the Manager and
+Update Driver, with release changefiles for every affected consumer. MCP's
+maintained producer digests refresh without changing contract revision 36.
+The required unit manifest refreshes only three changed admitted source
+fingerprints; its 4,019 nodes, coverage targets and 300-second budget remain
+unchanged. That new source snapshot still requires hosted CI and a fresh
+passing review before merge. No rollout or whole-parent completion is claimed.
+
+The shared module-size guard rejected five lines of facade growth. Rather than
+widen its shrink-only ceiling, the touched custody implementation moved into
+the existing construction component behind the same public facade and kernel
+callbacks. The full module-size sweep now passes without a baseline edit;
+the canonical 19-control packet passes again, and native consumer qualification
+is repeated against that extraction before publication. Those final reruns pass
+85 Bridge controls with eight platform skips, and the three normal-entry/failure
+controls in 162.14 seconds. No baseline, test budget or candidate-admission requirement was
+relaxed to obtain those results.

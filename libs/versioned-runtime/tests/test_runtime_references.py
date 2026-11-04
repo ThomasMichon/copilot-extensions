@@ -135,3 +135,41 @@ def test_publication_holds_retention_before_selector_custody(tmp_path, monkeypat
     monkeypatch.setattr(runtime._leases, "_publication_lease", check)
     replace(root, ["new"])
     assert observed == [False]
+
+
+@pytest.mark.parametrize("exists", [False, True])
+def test_predecessor_reference_pin_does_not_require_an_installed_directory(tmp_path, exists):
+    root = tmp_path / "runtime"
+    slot = root / "versions" / "1.2.3"
+    slot.parent.mkdir(parents=True)
+    if exists:
+        slot.write_bytes(b"preserve invalid predecessor")
+    with pytest.raises(FileNotFoundError, match="ordinary runtime slot not installed"):
+        with runtime.retention_lease(root, "1.2.3"):
+            pytest.fail("ordinary retention admitted an invalid runtime")
+
+    with runtime.retention_lease(root, "1.2.3", require_installed=False):
+        with runtime._cleanup_lease(root, "1.2.3") as admitted:
+            assert not admitted
+        if exists:
+            assert slot.read_bytes() == b"preserve invalid predecessor"
+        else:
+            assert not slot.exists()
+
+    with pytest.raises(FileNotFoundError, match="ordinary runtime slot not installed"):
+        with runtime.retention_lease(root, "1.2.3"):
+            pytest.fail("reference preservation changed ordinary runtime admission")
+
+
+def test_predecessor_pin_cannot_admit_an_invalid_completed_candidate(tmp_path):
+    root = tmp_path / "runtime"
+    slot = root / "versions" / "1.2.3"
+    slot.parent.mkdir(parents=True)
+    slot.write_bytes(b"preserve invalid predecessor")
+
+    with pytest.raises(RuntimeError, match="runtime retention admission refused"):
+        with runtime.retention_lease(
+            root, "1.2.3", payload_hash="a" * 64, require_installed=False,
+        ):
+            pytest.fail("predecessor preservation qualified a candidate")
+    assert slot.read_bytes() == b"preserve invalid predecessor"
