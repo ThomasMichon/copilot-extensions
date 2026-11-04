@@ -555,3 +555,102 @@ def test_task_only_start_refuses_provider_without_scoped_discovery(status: int) 
     assert [(req.method, req.url.path) for req in requests] == [
         ("GET", "/tasks/task-a/pool-start/contract"),
     ]
+
+
+@pytest.mark.parametrize("delivery", ["late-finished", "late-settled", "decision-expired"])
+def test_hold_cannot_revive_a_budget_expired_before_the_hold(
+    q: TaskQueue, monkeypatch: pytest.MonkeyPatch, delivery: str,
+) -> None:
+    task_id, _, generation = suspended(q)
+    revision = request(q, task_id)
+    wake = q.claim_due_wake(now=104, lease_seconds=3000)
+    delivered = 104 if delivery == "decision-expired" else 704
+    if delivery == "late-settled":
+        admission = q.admit_execution_wake(wake, provenance=None, now=104)
+        monkeypatch.setattr(q, "_now", lambda now: delivered if now is None else now)
+        q.settle_execution_wake(wake, admission, outcome="sent", detail="late delivery")
+    else:
+        q.finish_wake(wake.id, wake.delivery_token, delivered=True, now=delivered)
+    held_at, cleared_at = (2000, 3000) if delivery == "decision-expired" else (705, 1000)
+    q.set_hold(task_id, reason="hold after expiry", actor="operator", now=held_at)
+    q.clear_hold(task_id, actor="operator", now=cleared_at)
+    assert q.pool_startup(task_id).startup_deadline == 703
+    with pytest.raises(TaskError, match="deadline expired"):
+        affirm(q, task_id, generation, revision, now=cleared_at + 1)
+    assert reconcile_recoveries(q, now=cleared_at + 1) >= 1
+    assert q.get(task_id).status == Status.QUEUED
+
+
+def test_delivery_during_an_active_hold_uses_only_pre_delivery_hold_time(
+    q: TaskQueue,
+) -> None:
+    task_id, _, generation = suspended(q)
+    revision = request(q, task_id)
+    wake = q.claim_due_wake(now=104, lease_seconds=3000)
+    q.set_hold(task_id, reason="pause before deadline", actor="operator", now=105)
+    q.finish_wake(wake.id, wake.delivery_token, delivered=True, now=704)
+    q.clear_hold(task_id, actor="operator", now=1000)
+    budget = q.pool_startup(task_id)
+    assert budget.startup_deadline == 1598
+    assert budget.reachable_at == 704 and budget.decision_deadline == 2800
+    assert affirm(q, task_id, generation, revision, now=1001).status == Status.STARTED
+
+
+def test_expired_suspended_worker_grant_requires_exact_trusted_renewal(
+    q: TaskQueue, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_dispatch.client import DispatchClient, DispatchError
+    from agent_dispatch.task_authority import mint_task_token
+    clock = [2000.0]
+    monkeypatch.setattr("agent_dispatch.task_scope.time.time", lambda: clock[0])
+    task_id, _, generation = suspended(q)
+    original = mint_task_token("control", None, task_id, "host-a/worktree", "native", generation)
+    clock[0] = 3001.0
+    api = TestClient(create_app(
+        q, token="data", control_token="control", enable_mcp=False, verification_interval=0,
+    ))
+    requests = []
+
+    def transport(req: httpx.Request) -> httpx.Response:
+        requests.append(req)
+        response = api.request(req.method, str(req.url), headers=dict(req.headers), content=req.content)
+        return httpx.Response(response.status_code, content=response.content, headers=dict(response.headers))
+
+    with connected(api, []) as trusted:
+        with pytest.raises(DispatchError) as waiting:
+            trusted.task_grant(
+                task_id, "host-a/worktree", "native", expected_generation=generation, expected_epoch=0,
+            )
+        assert waiting.value.status_code == 409
+        revision = request(q, task_id, now=clock[0])
+        with DispatchClient(
+            "http://testserver", task_token=original, transport=httpx.MockTransport(transport),
+        ) as expired:
+            with pytest.raises(DispatchError) as denied:
+                expired.start_pool_task(
+                    task_id, "host-a/worktree", owner_session_id="native",
+                    expected_generation=generation, recovery_revision=revision,
+                )
+            assert denied.value.status_code == 401
+        for native, gen, epoch in (("other", generation, 0), ("native", generation + 1, 0),
+                                   ("native", generation, 1)):
+            with pytest.raises(DispatchError) as stale:
+                trusted.task_grant(
+                    task_id, "host-a/worktree", native, expected_generation=gen, expected_epoch=epoch,
+                )
+            assert stale.value.status_code == 409
+        grant = trusted.task_grant(
+            task_id, "host-a/worktree", "native", expected_generation=generation, expected_epoch=0,
+        )
+    with DispatchClient(
+        "http://testserver", task_token=grant["task_token"], transport=httpx.MockTransport(transport),
+    ) as worker:
+        with pytest.raises(DispatchError) as self_renewal:
+            worker.task_grant(
+                task_id, "host-a/worktree", "native", expected_generation=generation, expected_epoch=0,
+            )
+        assert self_renewal.value.status_code == 403
+        assert worker.start_pool_task(
+            task_id, "host-a/worktree", owner_session_id="native",
+            expected_generation=generation, recovery_revision=revision,
+        )["status"] == Status.STARTED

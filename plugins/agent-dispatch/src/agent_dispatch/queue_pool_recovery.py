@@ -42,17 +42,25 @@ def hold_recovery(conn: sqlite3.Connection, task_id: str, *, held: bool, ts: flo
             "COALESCE(recovery_hold_started_at, ?) WHERE task_id=?", (ts, task_id),
         )
     elif assignment["recovery_hold_started_at"] is not None:
-        delay = max(0.0, ts - assignment["recovery_hold_started_at"])
+        held_at = assignment["recovery_hold_started_at"]
+        delay = max(0.0, ts - held_at)
+        startup_delay = delay if held_at < assignment["startup_deadline"] else 0.0
         wake = conn.execute(
             "SELECT delivered_at FROM wake_outbox WHERE id=?", (assignment["recovery_wake_id"],),
         ).fetchone()
+        delivered = wake["delivered_at"] if wake is not None else None
+        delivery_pause = (
+            max(0.0, min(ts, delivered) - held_at)
+            if delivered is not None and startup_delay else 0.0
+        )
         if (
-            assignment["reachable_at"] is None and wake is not None
-            and wake["delivered_at"] is not None
-            and wake["delivered_at"] < assignment["startup_deadline"] + delay
+            assignment["reachable_at"] is None and delivered is not None
+            and delivered < assignment["startup_deadline"] + delivery_pause
         ):
-            delivered = wake["delivered_at"]
-            decision_pause = max(0.0, ts - max(assignment["recovery_hold_started_at"], delivered))
+            decision_pause = (
+                max(0.0, ts - max(held_at, delivered))
+                if held_at < delivered + DECISION_SECONDS else 0.0
+            )
             conn.execute(
                 "UPDATE task_pool_assignments SET reachable_at=?, next_nudge_at=?,"
                 " decision_deadline=? WHERE task_id=?",
@@ -61,13 +69,18 @@ def hold_recovery(conn: sqlite3.Connection, task_id: str, *, held: bool, ts: flo
             )
             conn.execute(
                 "UPDATE task_pool_assignments SET recovery_hold_started_at=NULL,"
-                " startup_deadline=startup_deadline+? WHERE task_id=?", (delay, task_id),
+                " startup_deadline=startup_deadline+? WHERE task_id=?", (startup_delay, task_id),
             )
             return
+        decision_delay = (
+            delay if assignment["decision_deadline"] is not None
+            and held_at < assignment["decision_deadline"] else 0.0
+        )
         conn.execute(
             "UPDATE task_pool_assignments SET recovery_hold_started_at=NULL,"
             " startup_deadline=startup_deadline+?, decision_deadline=decision_deadline+?,"
-            " next_nudge_at=next_nudge_at+? WHERE task_id=?", (delay, delay, delay, task_id),
+            " next_nudge_at=next_nudge_at+? WHERE task_id=?",
+            (startup_delay, decision_delay, decision_delay, task_id),
         )
 
 

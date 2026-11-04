@@ -59,6 +59,12 @@ cannot renew its own grant using `start`. Signing-key rotation invalidates old
 grants. Tokens must not be logged, included in event records or placed in public
 task results.
 
+The existing control-authorized `task-grant` operation can also renew an expired
+grant for an exact, requested pool recovery while suspended. It retains worker,
+native, generation and coordinator-epoch checks; an intentional suspension
+without a recovery request does not qualify. This neither extends recovery
+deadlines nor permits worker self-renewal.
+
 ## Identity is not send custody
 
 Scoped grants are conditional, not universal per-agent or per-worktree tokens:

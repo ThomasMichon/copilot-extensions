@@ -381,6 +381,8 @@ and cannot be replayed as a new attempt. Exact delivery proves reachability,
 not acceptance. It starts the 30-minute decision window, with five-minute
 same-native nudges. A failed nudge does not turn a reachable worker into an
 exhausted startup. Holds freeze these policy clocks and do not spend attempts.
+They do not revive a budget that expired before the hold. Reachability uses
+only hold time preceding delivery, not the later time spent waiting to clear it.
 There is no independent recovery timer, queue or identity registry.
 
 The worker must affirm the current request through the existing start command:
