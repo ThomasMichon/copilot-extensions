@@ -73,6 +73,31 @@ discharges the native hold.
   paste into a fresh session, which reads the Runbook, picks up exactly
   where the prior session left off, and repeats.
 
+
+<!-- backlog-reconciliation:7556:qualified-fifteen:2801:Coordination -->
+
+### Continuing #2801 custody
+
+- [ ] T2801-C1: Continue through this SAME existing Tasks UX host/per-phase Journal and
+  review flow with actual task-provider/backend, shared Manager presentation, Worktrees
+  observation and source/native/resource custodians. No empty assignee, age, silence or
+  generic Taking retires a claim; no source/resource assignment or new acknowledgement
+  ceremony.
+
+- [ ] T2801-C2: Keep #2453's SAME currently investigating UI/source custodian and
+  original native mouse/keyboard-to-correct-coordinator hold separate and unwaived. Do
+  not duplicate its implementation or infer completion/expiry from
+  backend/parsed-field/menu milestones; it is not a veto on unrelated finite temporal
+  clauses. Backend #2423/#3681 and every incumbent Plan/global Validation/checked
+  credit/first gate remain independent.
+
+- [ ] T2801-C3: Only normal reviewed ACTUAL direct P/localV/actual-globalV/C/J delivery
+  and ENTIRE current ROOT readback, retaining all original/refined/inherited clauses and
+  actual ownership/holds, may support the coordinator's later independent source
+  disposition. A title, adjacency, this proposal or old phase merge is not acceptance.
+  Keep the existing Active status and full prior Journal; no native, task, process,
+  claim or resource operation.
+
 ## Runbook — for whichever session is currently driving this effort
 
 **2026-10-08 direction:** Phases 10-11 below now include manual review policy,
@@ -1469,6 +1494,109 @@ delivered baseline, not coverage of raw cards.
   flow. Old2913/5304, a proposed patch or link is not this receipt. No UI/native
   submission, task/agent control or implementation is authorized.
 
+
+<!-- backlog-reconciliation:7556:qualified-fifteen:2801:Plan -->
+
+### Direct proposed temporal and owner-information acceptance from #2801
+
+_Agent-recommended additive tracking proposal; the entire original/refined/directly
+inherited acceptance and its finite evidence tiers remain binding._
+
+Preserve the incumbent Request, status, Participants, Coordination, every old
+Plan/global Validation row and check state, first unresolved gates and full Journal.
+These unchecked rows are proposed tracking, not implementation, accepted source
+transfer, native/release/installed proof, rollout permission or source/resource release.
+Existing issue and source custodians remain; unassigned metadata is not vacancy. No new
+universal ACK, every-host or whole-parent completion gate is introduced.
+
+#### Plan
+
+- [ ] T2801-P1: Add duration in the current lifecycle state as a renderable Tasks
+  field/column, using a real state baseline distinct from task age, claim age and
+  activity age.
+
+- [ ] T2801-P2: Ideally expose a compact historical state-transition timeline IF the
+  underlying queue/provider records transition timestamps; do not invent absent history
+  or impose an unconditional new history store.
+
+- [ ] T2801-P3: Surface liveness of the task's current owning agent/session in the Tasks
+  row OR at minimum its Actions dialog, reusing existing admitted Worktrees
+  liveness/status resolution rather than re-deriving a resolver.
+
+- [ ] T2801-P4: Retain the requested richer owning-agent information in the task Actions
+  flow and explicitly CONSIDER missing PID and last-activity timestamp in the relevant
+  dialog(s). Record a reasoned consideration/disposition, not new unconditional field
+  mandates.
+
+- [ ] T2801-P5: Surface elapsed age from a real current claimed_at baseline and/or an
+  explicitly labeled created_at fallback in the Tasks list for every lifecycle status,
+  not only Started or tasks with a live/headless body.
+
+- [ ] T2801-P6: Keep task age, current claim age, duration in current lifecycle state
+  and time since activity as separate labeled facts. Reclaims/resumes and
+  completed/abandoned tasks must not silently exchange those baselines or present a
+  frozen lifecycle duration as a continuously growing task age without explanation.
+
+- [ ] T2801-P7: Preserve missing/unavailable timestamps as unknown, handle provider
+  clock/skew and malformed data honestly, and retain task/machine/session/source
+  identity so another worker's timestamp cannot be displayed as this task's age.
+
+- [ ] T2801-P8: Use the existing declarative column/row and admitted observation
+  contracts; preserve narrow layouts and richer Actions information without a per-row
+  subprocess probe or a duplicate liveness resolver.
+
+- [ ] T2801-P9: Do not infer stuck/dead, completion, claim expiry, permission to
+  resume/reassign or authority to kill/clean from elapsed age alone. Operator
+  cancellation/choice and all existing hold/ownership gates remain unchanged.
+
+- [ ] T2801-P10: Cover queued/unclaimed, claimed, started, suspended/paused, submitted
+  and terminal states; absent claimed_at/created_at, restart/reclaim, future/skewed
+  timestamps and narrow display. This transfer authorizes no UI/native probe or
+  implementation by itself.
+
+#### Local Validation
+
+- [ ] T2801-V1: Use actual provider state-transition baseline and label the duration;
+  missing or inconsistent data remains unknown, never heartbeat or token/context length
+  presented as lifecycle time.
+
+- [ ] T2801-V2: Demonstrate the compact timeline when real task transition timestamps
+  exist; explicitly record unavailable history otherwise and preserve the original
+  conditional/ideal nature.
+
+- [ ] T2801-V3: Exercise the literal row-OR-Actions alternative using exact current
+  task/owner/machine/session/source binding; preserve headless-only LIVE and interactive
+  no-signal/stale/unknown semantics without another resolver or per-row probe.
+
+- [ ] T2801-V4: Show supported current owner/session details or honest unavailable
+  values in the actual Actions flow and record explicit PID/last-activity consideration;
+  do not convert 'consider' into compulsory new producer fields.
+
+- [ ] T2801-V5: Cover every lifecycle status with a real current claimed_at baseline
+  and/or explicitly labeled created_at fallback in the Tasks LIST, independently of
+  Started/headless/live signals. Liveness's row-OR-Actions alternative does not relax
+  this list requirement.
+
+- [ ] T2801-V6: Exercise task age/current claim age/current state duration/activity age
+  as four separate labeled baselines across reclaim/resume and completed/abandoned rows;
+  frozen state duration is not silently relabeled as growing task age.
+
+- [ ] T2801-V7: Cover unavailable/missing/malformed/future/skewed timestamps and exact
+  task/machine/session/source identity; another worker's timestamp or unknown freshness
+  must not be shown as this task's age.
+
+- [ ] T2801-V8: Reuse actual existing declarative rows/columns, narrow-width fitting and
+  admitted observations/richer Actions without a per-row subprocess or duplicate
+  liveness resolver.
+
+- [ ] T2801-V9: Verify elapsed age alone grants no stuck/dead classification,
+  completion, claim expiry, resume/reassign/kill/cleanup authority; preserve operator
+  cancellation/choice and every actual hold/owner gate.
+
+- [ ] T2801-V10: Cover queued/unclaimed, claimed, started, suspended/paused, submitted
+  and terminal cases, absent claimed_at/created_at, restart/reclaim, future/skew and
+  narrow display at the original finite tier; no unrelated all-host programme.
+
 ## Validation Plan
 
 - [ ] Resolve every directly retained #2802 Plan/Validation clause above at its original
@@ -1516,6 +1644,23 @@ delivered baseline, not coverage of raw cards.
       each through submission acceptance, rejection, and abandonment using
       the Completion Review card. Completed tasks remain readable and can
       seed a new follow-up, never reopen.
+
+
+<!-- backlog-reconciliation:7556:qualified-fifteen:2801:Validation-Plan -->
+
+- [ ] T2801-G1: Resolve EVERY direct T2801-P1-P10, V1-V10 and continuing C1-C3 clause at
+  its ORIGINAL finite provider/presentation/source/evidence tier. Preserve current-state
+  timing, ideal/conditional historical timing IF available, owning-agent liveness in the
+  row OR at minimum Actions and explicit PID/last-activity CONSIDERATION; ALL six
+  inherited #2876 rows retain mandatory Tasks-LIST age for EVERY status, distinct
+  task/claim/state/activity baselines, unknown/skew/reclaim/terminal/narrow-layout
+  honesty, existing declarative/admitted-observation reuse and no age-derived
+  control/expiry authority. Credit existing LIVE/LENGTH/cards/relay delivery without
+  treating it as whole temporal completion. Preserve existing native Confirm-delivery
+  hold under its SAME custodian as an independent case, not a new
+  whole-family/every-host/native-on-every-leaf prerequisite. Intake is not
+  implementation, current defect proof, native/release/installed acceptance, custody
+  transfer or parent completion.
 
 ## Proposal
 
@@ -3326,3 +3471,16 @@ UI consumers. Completed tasks stay terminal and readable, submitted tasks can
 accept/reject, and manual approval defaults on. No implementation checklist was
 marked done from this design update. Consume open #5668/#5701 work after merge
 rather than replacing it.
+
+<!-- backlog-reconciliation:7556:qualified-fifteen:2801:Journal -->
+
+### 2026-10-28 - Proposed #2801 temporal and owner-information intake
+
+The existing task-provider/column and Actions/status consumer boundaries are the precise
+proposed coordination home, rather than generic Manager adjacency. Added ten direct
+Plan/local Validation pairs, actual global Validation and continuing custody rows,
+preserving all six inherited #2876 clauses. Existing LIVE/LENGTH/cards/relay credit and
+the SAME independent #2453 native Confirm-delivery custodian/hold remain. This is
+authored tracking only; normal reviewed actual delivery and entire current readback
+precede any separate source judgment. No implementation, native result, resource release
+or assignment is asserted.
