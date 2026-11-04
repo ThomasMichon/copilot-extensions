@@ -295,6 +295,7 @@ def test_real_source_and_frozen_candidate_frontdoors_enforce_version_matrix(
     )
     (root / "sample.py").write_text(source, encoding="utf-8")
     _matrix_git(root, "init")
+    _matrix_git(root, "config", "core.autocrlf", "false")
     _matrix_git(root, "config", "user.name", "Example")
     _matrix_git(root, "config", "user.email", "example@example.com")
     _matrix_git(root, "add", ".")
