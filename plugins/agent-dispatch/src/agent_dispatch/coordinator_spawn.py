@@ -260,6 +260,12 @@ def register_spawn_routes(
     def placement_contract() -> dict:
         return pool_placement_contract()
 
+    @app.get("/tasks/{task_id}/pool-start/contract")
+    def task_start_contract(task_id: str) -> dict:
+        if queue.get(task_id) is None:
+            raise HTTPException(status_code=404, detail="no such task")
+        return {"pool_placement": pool_placement_contract()}
+
     @app.post("/pool-placements", dependencies=[Depends(pool_control)])
     def place_pool_task(body: PoolPlacementBody, request: Request) -> dict:
         gate = request.app.state.drain_gate

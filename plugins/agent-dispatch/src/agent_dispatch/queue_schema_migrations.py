@@ -390,6 +390,8 @@ def run_queue_schema_migrations(conn: sqlite3.Connection, *, now_fn) -> None:
     wake_columns = {r["name"] for r in conn.execute("PRAGMA table_info(wake_outbox)")}
     if "delivery_expires_at" not in wake_columns:
         conn.execute("ALTER TABLE wake_outbox ADD COLUMN delivery_expires_at REAL")
+    if "pool_recovery_revision" not in wake_columns:
+        conn.execute("ALTER TABLE wake_outbox ADD COLUMN pool_recovery_revision INTEGER")
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_wake_outbox_due "
         "ON wake_outbox(status, not_before, created_at)"

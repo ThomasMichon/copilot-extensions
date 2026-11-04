@@ -216,7 +216,15 @@ def _cmd_yield(args: argparse.Namespace) -> int:
 
 def _cmd_start(args: argparse.Namespace) -> int:
     generation = getattr(args, "pool_generation", None)
+    recovery = getattr(args, "pool_recovery_revision", None)
     native = getattr(args, "owner_session_id", None)
+    if recovery is not None and (recovery < 1 or generation is None):
+        print(
+            "agent-dispatch start: --pool-recovery-revision requires a positive revision "
+            "and --pool-generation",
+            file=sys.stderr,
+        )
+        return 2
     if generation is not None and (generation < 1 or not native or not native.strip()):
         print(
             "agent-dispatch start: --pool-generation requires a positive generation "
@@ -232,6 +240,7 @@ def _cmd_start(args: argparse.Namespace) -> int:
             return _core()._emit(c.start_pool_task(
                 args.task_id, worker_id, owner_session_id=native,
                 expected_generation=generation,
+                **({"recovery_revision": recovery} if recovery is not None else {}),
             ))
         return _core()._emit(
             c.start(args.task_id, worker_id, owner_session_id=native)

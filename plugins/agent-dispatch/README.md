@@ -693,12 +693,19 @@ started -> suspended -> started
   coordinator runs GC automatically every `AGENT_DISPATCH_GC_INTERVAL` seconds
   (default 60; `0` disables); `recover` forces a pass on demand.
 - `suspend <id> --reason <why>` is owner-gated and moves **started → suspended**.
-  For an interactive owner, `resume <id>` restores **suspended → started** under
+  For a pool assignment, `resume <id>` requests an exact-native continuation
+  while retaining **suspended** until the worker explicitly affirms its current
+  recovery revision; delivery alone does not start it. See
+  [affirmative suspended recovery](docs/pool-claim-start.md#affirmative-suspended-recovery)
+  for bounded attempts, holds and capacity-preserving exhaustion.
+  For a non-pool interactive owner, `resume <id>` restores **suspended → started** under
   the same owner and atomically enqueues its durable wake. A supervised owner
   without a captured interactive inbox instead releases to **queued** and
   settles its reservation for safe re-embodiment. `release <id>`
   explicitly clears ownership and moves **suspended → queued**. Suspended tasks
-  do not participate in liveness GC, claiming or retry accounting. Their
+  do not participate in liveness GC or claiming. Intentional waits do not spend
+  recovery attempts; an explicitly requested pool recovery has its own bounded
+  accounting on the existing assignment. Their
   reservations retain process capacity while startup or cooling is unresolved;
   see [startup and cooling fencing](docs/spawn-startup-fencing.md).
 - A bare `suspend` always attaches a **cooldown monitor** (default
@@ -706,8 +713,9 @@ started -> suspended -> started
   suppress with `--no-cooldown` for a caller that has arranged its own, more
   specific wait) -- see `agent_dispatch.monitors`. The coordinator's
   liveness-GC loop piggybacks a cooldown reconciler on the same always-on
-  cadence: once a monitor elapses, the task is auto-resumed under its
-  existing owner (a cold-headless owner's `resume` flips `resume_requested`
+  cadence: once a monitor elapses, pool tasks request affirmative recovery and
+  non-pool tasks are auto-resumed under their existing owner
+  (a non-pool cold-headless owner's `resume` flips `resume_requested`
   for the supervisor's own pool reservation poll rather than transitioning
   straight to `started`) -- turning a bare suspend into a genuine
   round-robin time-slice instead of an unwatched idle a task can get stuck
@@ -715,8 +723,9 @@ started -> suspended -> started
 - `complete <id> <owner>` is also legal directly from **suspended**. An external
   resolver may therefore record a satisfied dormant goal atomically under the
   preserved owner without waking a process or fabricating an active turn.
-- A steer submitted while suspended is stored and either resumes an interactive
-  task to   **started** with a durable wake, or releases a task without a captured inbox to
+- A steer submitted while suspended is stored and requests affirmative recovery
+  for a pool assignment, without bypassing a hold. For non-pool tasks it either
+  resumes an interactive task to **started** with a durable wake, or releases a task without a captured inbox to
   **queued** for re-embodiment, in the same transaction. A replacement body
   consumes pending steering immediately after it starts. The HTTP request never
   calls the bridge. The coordinator service drains interactive wakes

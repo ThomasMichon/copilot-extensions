@@ -41,8 +41,16 @@ def register_task_grant_route(
         task = queue.get(task_id)
         if task is None:
             raise HTTPException(status_code=404, detail="no such task")
+        recovery = (
+            queue.pool_startup(task_id)
+            if task.status == Status.SUSPENDED and task.resume_requested else None
+        )
+        recovery_requested = (
+            recovery is not None and recovery.recovery_requested_at is not None
+            and recovery.generation == task.generation and recovery.exhausted_at is None
+        )
         if (
-            task.status not in Status.HELD
+            task.status not in Status.HELD and not recovery_requested
             or task.owner != body.worker_id
             or task.owner_session_id != body.owner_session_id
             or task.generation != body.expected_generation
@@ -100,8 +108,16 @@ def resolve_task_authority(
     task = queue.get(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="no such task")
+    route = request.scope.get("route")
+    recovery_access = (
+        (request.method, getattr(route, "path", None)) in {
+            ("POST", "/tasks/{task_id}/pool-start"),
+            ("GET", "/tasks/{task_id}/pool-start/contract"),
+        }
+        and task.status == Status.SUSPENDED and task.resume_requested
+    )
     if (
-        task.status not in Status.HELD
+        task.status not in Status.HELD and not recovery_access
         or task.owner != scope.worker_id
         or task.owner_session_id != scope.owner_session_id
         or task.generation != scope.generation

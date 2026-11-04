@@ -1,0 +1,9 @@
+{
+  "comment": "Require revision-bound worker affirmation for suspended pool recovery; retain wake custody and bounded retry deadlines",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
