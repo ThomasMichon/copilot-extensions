@@ -56,6 +56,8 @@ def require_current(record: tracking.WorktreeRecord, expected: tracking.PRRecord
         if (fresh.worktree_id, fresh.repo, fresh.branch, fresh.worktree_path) != (
                 record.worktree_id, record.repo, record.branch, record.worktree_path):
             raise ValueError("Owning worktree identity changed before publication; reload it before retrying.")
+        if (fresh.machine, fresh.creation_nonce) != (record.machine, record.creation_nonce):
+            raise ValueError("Owning worktree incarnation changed before publication; reload it before retrying.")
         if not matches(pr_publish._publication_pr(fresh, expected), expected):
             raise ValueError("Tracked PR authority changed before publication; reload it before retrying.")
 
@@ -85,15 +87,18 @@ def persist_pull(config, record, target, pull, *, head_sha: str, marker_publishe
         return claimed_ref
 
 
-def provisional_lease(pr, remote: str, branch: str, cwd: str) -> str | None:
-    """An unleased first attempt may only create an absent ref, never adopt one."""
-    from . import pr_publish
+def provisional_lease(pr, remote: str, branch: str, cwd: str, *, record=None, prcfg=None) -> str | None:
+    """Create an absent ref or resume only a prepared, exact first push."""
+    from . import pr_creation_state, pr_publish
 
     if pr is None or pr.state != "creating" or pr.head_sha or pr.number is not None or pr.url or pr.rewrite_owner:
         return None
+    source = pr_creation_state.publication_source(record, pr, remote, branch, cwd, prcfg)
     tip = pr_publish._tip(remote, branch, cwd)
     if tip is None:
         raise ValueError("Cannot inspect the unleased provisional PR head; retry after restoring remote access.")
+    if tip and source and tip == pr.creation["push_head"]:
+        return tip
     if tip:
         raise ValueError("Unleased provisional PR head already exists; inspect and reconcile the ambiguous push before retrying.")
     return ""
