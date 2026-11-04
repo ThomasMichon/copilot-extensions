@@ -279,7 +279,7 @@ def real_application_bridge_home(tmp_path, monkeypatch):
     return home, command
 
 
-def _real_bridge_classification(command, *, mismatch=False):
+def _real_bridge_classification(command, *, mismatch=False, registry_error=False):
     from agent_procutil.owned_process import run_caller_owned
 
     root = Path(__file__).resolve().parents[3]
@@ -294,6 +294,10 @@ def _real_bridge_classification(command, *, mismatch=False):
         "assert Path(p.__file__).resolve()==Path(sys.argv[1])/'agent_bridge'/'provider_sources.py';"
         "report=p.scan_provider_registry();"
         + (
+            "assert not report.manifests;"
+            "assert report.snapshot.authority.value=='indeterminate';"
+            "assert any(f.reason=='registry-indeterminate' for f in report.findings),report.findings;"
+            if registry_error else
             "assert not report.manifests;"
             "assert any(f.reason=='bridge-install-mismatch' for f in report.findings),report.findings;"
             if mismatch else
@@ -439,3 +443,56 @@ def test_application_provider_large_valid_owned_target_retains_strict_bound(
     with pytest.raises(RuntimeError, match="Refusing to replace provider entry"):
         provider.register_installed_application()
     assert _snapshot(home) == before
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_application_provider_linked_registry_refused_like_real_consumer(
+    real_application_bridge_home, monkeypatch, existing, record_property,
+):
+    from agent_procutil.owned_process import run_caller_owned
+
+    home, command = real_application_bridge_home
+    actual = home / "actual-registry"
+    actual.mkdir()
+    alias = home / "bridge" / "providers.d"
+    alias.parent.mkdir()
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(alias.parent))
+    if existing:
+        with monkeypatch.context() as scoped:
+            scoped.setenv("AGENT_BRIDGE_PROVIDERS_DIR", str(actual))
+            provider.register_installed_application()
+    (actual / "foreign.keep").write_bytes(b"fixture-owned peer\n")
+    if os.name == "nt":
+        root = Path(__file__).resolve().parents[3]
+        # Match the existing installation-context junction fixture through the
+        # bounded native owner, without symbolic-link privileges or elevation.
+        def native(path):
+            value = str(path)
+            return value if value.startswith("\\\\?\\") else "\\\\?\\" + value
+
+        settled = []
+        created = run_caller_owned(
+            [os.environ["COMSPEC"], "/d", "/c", "mklink", "/J", native(alias), native(actual)],
+            timeout=10, max_stdout_bytes=65536, max_stderr_bytes=65536, cwd=root,
+            on_settled=lambda: settled.append(True),
+        )
+        assert settled
+        if created.returncode != 0:
+            pytest.skip(f"Native junction unavailable: {created.stderr or created.stdout}")
+        record_property("registry_link_kind", "native-windows-junction")
+    else:
+        alias.symlink_to(actual, target_is_directory=True)
+        record_property("registry_link_kind", "native-posix-directory-symlink")
+    metadata = alias.lstat()
+    assert (
+        alias.is_symlink() or getattr(metadata, "st_file_attributes", 0) & 0x400
+        or getattr(metadata, "st_reparse_tag", 0)
+    )
+    record_property("registry_reparse_tag", getattr(metadata, "st_reparse_tag", 0))
+    monkeypatch.setenv("AGENT_BRIDGE_PROVIDERS_DIR", str(alias))
+    result = _real_bridge_classification(command, registry_error=True)
+    assert "registry-indeterminate" in result["findings"]
+    before = _snapshot(actual)
+    with pytest.raises(RuntimeError, match="registry"):
+        provider.register_installed_application()
+    assert _snapshot(actual) == before

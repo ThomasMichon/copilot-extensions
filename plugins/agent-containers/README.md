@@ -69,6 +69,11 @@ resolving symlinks. A custom noncanonical directory name remains the intentional
 override escape hatch. The real-consumer regression uses the canonical Bridge
 test environment (`tools/run-plugin-tests.py agent-bridge --prepare-only`);
 it never invokes a provider command.
+An existing registry root must itself be an ordinary directory: setup refuses
+symbolic links, junctions and reparse points before target reads or writes,
+including unchanged-entry setup. A missing root may still be created. This
+matches the consumer's leaf-root check; it does not resolve or inspect every
+ancestor.
 
 The contained wheel/sdist/prepared-source resource packet checks each linked
 origin as a separate bounded item, sharing only its fixture-owned installed

@@ -4230,7 +4230,7 @@
         "plugins/agent-bridge/src/agent_bridge/startup_observation.py": "8620e8b587e07d22e8234a5392ce07207759c8a474682b9b529cd3487ad6f9ae",
         "plugins/agent-containers/scripts/standalone_build.py": "759d1e4ae06ed4f9c1f9dac1658f3412659bd4baffb363ccfa30e6d3dadc537f",
         "plugins/agent-containers/setup.py": "26029b05beca57b1d95aff89f6cc2ee25a7e0496496b7cdc386105605c283796",
-        "plugins/agent-containers/src/agent_containers/__main__.py": "04938bb9e2d3be2eab835d317c94b458194a76280354b735b33d1a0da38a6f2c",
+        "plugins/agent-containers/src/agent_containers/__main__.py": "cf79cade65a90551cd4465e2a1a418d62120abcc9fd30e1e5097e565e0e7a84d",
         "plugins/agent-containers/src/agent_containers/lifecycle.py": "0861d49e45406034d376dd00cdc0efa4757dda4eb1e252a5a5dc42978bf88291",
         "plugins/agent-containers/src/agent_containers/resolver.py": "d2a390fac65bcdd7f9e406a555d3fa07854caa4614a776b0302688bc77692df7",
         "plugins/agent-dispatch/src/agent_dispatch/spawn_diagnostics.py": "370d3f57d33db75e42e98441426fe46ea56b8706db8bd8fbb1089b3efaac43aa",

@@ -46,6 +46,19 @@ def register_installed_application() -> Path:
         and _normalized_path(directory.parent) != _normalized_path(config_root)
     ):
         raise RuntimeError(f"Provider registry targets a different Bridge installation: {directory}")
+    try:
+        root_info = directory.lstat()
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        raise RuntimeError(f"Cannot inspect provider registry: {directory}") from error
+    else:
+        if (
+            not stat.S_ISDIR(root_info.st_mode) or stat.S_ISLNK(root_info.st_mode)
+            or getattr(root_info, "st_file_attributes", 0) & 0x400
+            or getattr(root_info, "st_reparse_tag", 0)
+        ):
+            raise RuntimeError(f"Provider registry must be a directory, not a link or reparse point: {directory}")
     target = directory / MANIFEST_NAME
     command = Path.home() / ".local" / "bin" / (
         "agent-containers.cmd" if os.name == "nt" else "agent-containers"
