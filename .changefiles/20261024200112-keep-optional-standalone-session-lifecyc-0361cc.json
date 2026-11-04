@@ -1,0 +1,9 @@
+{
+  "comment": "Keep optional standalone session lifecycle planning in the existing detached reconciliation child.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
