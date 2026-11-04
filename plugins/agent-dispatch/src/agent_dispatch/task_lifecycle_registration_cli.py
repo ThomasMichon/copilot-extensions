@@ -95,6 +95,10 @@ def register_task_lifecycle_commands(sub) -> None:
         "--pool-generation", type=int,
         help="affirmatively accept this allocator-claimed generation; requires --owner-session-id",
     )
+    p.add_argument(
+        "--pool-recovery-revision", type=int,
+        help="affirm this suspended recovery episode; requires --pool-generation and --owner-session-id",
+    )
     p.set_defaults(func=_core()._cmd_start)
 
     from .pool_worker_decline_cli import cmd_decline

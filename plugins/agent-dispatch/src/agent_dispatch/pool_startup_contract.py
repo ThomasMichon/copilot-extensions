@@ -21,6 +21,7 @@ def pool_startup_contract() -> dict[str, object]:
         "fenced_same_native_retry": True,
         "fenced_retry_completion": True,
         "ordinary_same_native_retry": True,
+        "suspended_recovery_versions": [1],
         "startup_attempt_limit": 3,
         "nudge_seconds": 300,
         "decision_seconds": 1800,

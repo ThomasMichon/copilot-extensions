@@ -29,7 +29,13 @@ def retained_wake(captured: dict, outbox: str, wake_id: str) -> dict:
         )
         or not isinstance(send.get("delivery_token"), str) or not send["delivery_token"]
         or row["delivery_token"] is not None and row["delivery_token"] != send["delivery_token"]
-        or row["execution_scope_key"] is None
+        or row["execution_scope_key"] is None and not (
+            send.get("protocol") == "pool_recovery_wake/v1"
+            and outbox == "wake_outbox"
+            and type(row.get("pool_recovery_revision")) is int
+            and send.get("recovery_revision") == row["pool_recovery_revision"]
+            and isinstance(send.get("reservation_key"), str) and send["reservation_key"]
+        )
     ):
         raise TaskError("wake original send identity is incomplete or conflicting")
     if row["execution_send_state"] not in {"pending", "unknown", "sent"}:

@@ -182,6 +182,7 @@ class QueueStorageMixin:
         *,
         message: str | None,
         ts: float,
+        pool_recovery_revision: int | None = None,
     ) -> WakeOperation:
         """Insert one owner wake in the caller's task-state transaction."""
         if not task.owner:
@@ -211,6 +212,11 @@ class QueueStorageMixin:
                 ts,
             ),
         )
+        if pool_recovery_revision is not None:
+            conn.execute(
+                "UPDATE wake_outbox SET pool_recovery_revision=? WHERE id=?",
+                (pool_recovery_revision, operation_id),
+            )
         self._audit(
             conn,
             task.id,

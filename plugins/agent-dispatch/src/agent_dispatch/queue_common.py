@@ -367,6 +367,7 @@ class WakeOperation:
     delivery_expires_at: float | None = None
     execution_send_state: str | None = None
     execution_send_detail: str | None = None
+    pool_recovery_revision: int | None = None
 
     @classmethod
     def _from_row(cls, row: sqlite3.Row) -> WakeOperation:

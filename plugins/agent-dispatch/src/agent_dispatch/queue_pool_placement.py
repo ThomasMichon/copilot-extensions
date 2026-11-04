@@ -53,6 +53,7 @@ def pool_placement_contract() -> dict[str, object]:
         "instance_scoped_reservation_versions": [1],
         "atomic_claim_before_spawn": True, "affirmative_worker_start": True,
         "explicit_start_versions": [1],
+        "suspended_recovery_versions": [1],
         "configured_cohort_reservation_fencing_versions": [1],
         "worker_decline_preparation_versions": [1],
         "worker_decline_local_closeout_versions": [1],

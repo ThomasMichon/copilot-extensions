@@ -747,6 +747,14 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
             owner = task.get("owner")
             if task.get("status") != Status.SUSPENDED or not owner:
                 continue
+            try:
+                current = self.client.get_reservation(key)
+            except DispatchError:
+                continue
+            if current.get("reservation_pool_bound") is True:
+                # The coordinator's retained wake requests current-worker affirmation.
+                # A local process-resume return must never perform that acceptance.
+                continue
             local_sid = _parse_local_body_handle(res.get("session_handle"))
             if local_sid is None:
                 continue

@@ -89,6 +89,18 @@ cleanup/scalar/native/source-safety owners are related independent scope, not au
 measurement acceptance. Unassigned is not vacancy; no new ACK/expiry/contact/recovery
 permission.
 
+<!-- backlog-reconciliation:7556:qualified-thirteen:2816:Coordination -->
+
+The proposed #2816 family keeps confirmed-gone task-goal reconciliation AND
+the distinct queued/nonterminal pending-cleanup diagnosis under their existing
+task/evaluator, ground-liveness, supervisor and actual cleanup custodians.
+#6467 master supervision, #1918 per-attempt custody and #6677 manual-exit/
+rebind remain separate. Documentation does not appoint an executor, expire a
+live/nonexpiring claim or turn terminal housekeeping into automatic
+nonterminal cleanup. #2793 retains its WHOLE configuration outcome and exact
+configuration-owner mapping condition; this reliability root does not accept
+that separate whole mapping.
+
 ## Context
 
 Recurring maintenance occurrences are ordinary tasks today. Newer rows can fill
@@ -521,6 +533,49 @@ universal ACK, every-host or whole-parent completion gate is introduced.
   production sample and available/unavailable tier; do not query production telemetry or
   run native tasks during intake.
 
+<!-- backlog-reconciliation:7556:qualified-thirteen:2816:Plan -->
+
+### Proposed confirmed-gone goal recovery and separate queued cleanup diagnosis
+
+_Agent-recommended direct retention of all seven refined #2816 clauses.
+Current concurrent tri-state/class-specific fenced recovery and #3236's
+reported serial-probe repair are credit, not proof of every goal/cleanup case._
+
+- [ ] **R2816-P1:** Consume affirmative authoritative terminal/body-exit
+  evidence for the EXACT task owner/incarnation, distinguishing live,
+  unavailable, unattributable and genuinely UNKNOWN. Preserve
+  claim-before-registration and reused-worktree safety. Age, lease expiry,
+  CPU, missing cache, STOPPED display or held-unknown counts alone never
+  manufacture DEAD/GONE.
+- [ ] **R2816-P2:** BEFORE replay after confirmed body loss, evaluate the
+  actual goal/artifact through its existing evaluator and confirmation policy.
+  Accept achieved work only through that policy; otherwise recover remaining
+  work/progress or prominently triage ambiguity. Missing/failing evaluator
+  is not permission to complete or restart achieved business work.
+- [ ] **R2816-P3:** Preserve ownership classes: interactive explicit
+  suspend/rebind, restricted physical repair rather than replacement, and
+  task/status/owner/generation-fenced headless recovery. Live and
+  nonexpiring claims are not relaxed.
+- [ ] **R2816-P4:** Surface concrete task/owner, liveness source/freshness,
+  affirmative terminal evidence, uncertainty and recovery/triage outcome.
+  Delivered wake is transport evidence, not applied work or task transition;
+  unanswered wake requires re-evaluation, not automatic success/death.
+- [ ] **R2816-P5:** Independently detect and explain a QUEUED task below
+  dead-letter exhaustion whose latest reservation remains nonterminal,
+  especially reserving/releasing with pending cleanup, while retries are
+  blocked and diagnosis appears healthy. Distinguish legitimately progressing
+  preparation/release. Choose a bounded minutes-not-hours diagnostic policy;
+  time triggers diagnosis/escalation, not forced release or death.
+- [ ] **R2816-P6:** Compose actual worktree/cleanup obligations and existing
+  lifecycle owners. Clean/absent directory or old reservation is not process/
+  goal evidence. Preserve already-completed business results, failures,
+  attempts and history rather than replaying to clear housekeeping.
+- [ ] **R2816-P7:** Retain started headless, ordinary interactive, handoff
+  bookkeeping, live/unknown/positively gone, pre-registration/replacement
+  races, achieved/unfinished artifacts, delivered-but-unapplied wakes AND
+  the separate queued/nonterminal cleanup case. Use existing bounded probes
+  without weakened deadlines or a competing watchdog.
+
 ## Validation Plan
 - [ ] Complete every directly retained #2395 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and unfinished acceptance. Tracker consolidation is not implementation.
 
@@ -593,6 +648,25 @@ universal ACK, every-host or whole-parent completion gate is introduced.
   UNAVAILABLE-not-zero, existing telemetry/category credit and source custody; no
   whole-fleet/native-every-host prerequisite.
 
+<!-- backlog-reconciliation:7556:qualified-thirteen:2816:Validation-Plan -->
+
+- [ ] **R2816-V1:** Qualify EVERY R2816-P1 through P7 at its finite existing
+  task/evaluator/liveness/cleanup tier. Cross positive exact-incarnation
+  terminal evidence with live/unavailable/unknown and claim/registration/
+  replacement races; verify actual goal policy before replay and visible
+  ambiguous/missing-evaluator triage without duplicate business work.
+- [ ] **R2816-V2:** Independently cover QUEUED below-exhaustion
+  reserving/releasing-pending cleanup AND legitimately progressing
+  preparation/release. Make stalled obligation and actionable custody
+  visible at the chosen bounded diagnostic policy; preserve actual cleanup
+  authority, ownership-class fences and historical results. Original
+  durations/counts are impact data, not newly invented expiry thresholds.
+- [ ] **R2816-V3:** Exercise every P7 class and delivered-but-unapplied
+  outcome through the existing observable recovery surface. Stored wake,
+  healthy loop, clean worktree, age or STOPPED display alone proves neither
+  death nor completion. Retain bounded probes and source/native/installed
+  distinctions, not a new whole-fleet/native-every-host prerequisite.
+
 ## Proposal
 
 The initial proposal changes no runtime or deployment configuration. Category is
@@ -606,6 +680,20 @@ named-resource resolution so an older peer cannot silently accept but ignore a
 requested contract.
 
 ## Journal
+
+<!-- backlog-reconciliation:7556:qualified-thirteen:2816:Journal -->
+
+### 2026-10-29 - Proposed two-case goal and cleanup recovery retention
+
+Qualified the complete #2816 original and three refinements against the
+whole fixed receiving document, then added direct Plan/global Validation and
+continuing custody. Confirmed-gone goal/evaluator recovery and the separate
+queued pending-nonterminal cleanup diagnostic remain distinct. Credited
+concurrent tri-state probes, class-specific fencing and #3236's reported
+partial repair without declaring whole acceptance or treating historical
+durations as expiry policy. No task/queue/probe/worker/cleanup operation,
+source transfer or technical completion occurred; normal review, actual
+delivery and complete current readback remain outstanding.
 
 ### 2026-10-28 - Direct retained registry and deferral contract
 

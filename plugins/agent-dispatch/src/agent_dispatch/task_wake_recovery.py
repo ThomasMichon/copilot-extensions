@@ -47,6 +47,12 @@ def reconcile_wake(
             raise TaskError("task or original send changed during transport observation")
         current = retained_wake(current_snapshot, outbox, wake_id)
         replayed = current["execution_send_state"] == "sent"
+        ts = queue._now(None)
+        if outbox == "wake_outbox" and current.get("pool_recovery_revision") is not None:
+            conn.execute(
+                "UPDATE wake_outbox SET delivered_at=COALESCE(delivered_at, ?) WHERE id=?",
+                (ts, wake_id),
+            )
         if not replayed:
             detail = json.dumps({
                 "source": "bridge_native_receipt/v1", "receipt": receipt,
@@ -58,7 +64,7 @@ def reconcile_wake(
             )
             task = queue._fetch(conn, task_id)
             queue._audit(
-                conn, task_id, ts=queue._now(None), from_status=task.status,
+                conn, task_id, ts=ts, from_status=task.status,
                 to_status=task.status, worker=actor,
                 note=f"wake acceptance reconciled: {wake_id}: {reason}",
             )

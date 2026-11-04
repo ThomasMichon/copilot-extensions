@@ -55,6 +55,15 @@ clearly another agent.
 - **Topology:** independent per-phase PRs, landed serially.
 - **Host (owns PRs):** the driving agent/session.
 
+<!-- backlog-reconciliation:7556:qualified-thirteen:2965:Coordination -->
+
+The existing claimed policy driver retains #2965's old-to-new policy
+reconciliation, separate human-channel guidance and any authorized private
+consumer configuration. The additive proposal below does not restore the old
+private-repository exemption or ownership fallback, appoint another driver,
+change configuration or publish a contribution. Preserve the original Request,
+historical Plan, completed #5084 metadata and full Journal as history.
+
 ## Context
 
 - Current behavior: `plugins/ai-attribution/skills/ai-attribution/SKILL.md` §2
@@ -143,6 +152,32 @@ clearly another agent.
   Tracked here only as a pointer; the actual config change lands in the
   operator's private control repo, not copilot-extensions.
 
+<!-- backlog-reconciliation:7556:qualified-thirteen:2965:Plan -->
+
+### Proposed operative-policy reconciliation for #2965
+
+_Agent-recommended additive tracking clarification of the qualified current
+source contract; original wording and check states remain historical evidence,
+not authority to reverse later accepted policy._
+
+- [ ] **A2965-P1:** Record an explicit retained/superseded disposition for
+  EVERY original Phase 2/consumer public/internal/verified-private and
+  open/reply clause against the later reviewed contribution-audience policy.
+  Credit #5084's audience/override schema and resolved metadata, and #5121's
+  deliberately newer policy. Another-party contributions require disclosure
+  even in private/operator-owned repositories; narrow self-authored/bot-inline
+  exceptions, operator-only internal-host exception and `always` precedence
+  remain. Do not reactivate the old blanket private exemption, ownership
+  fallback or metadata-controlled weakening merely to tick old checkboxes.
+- [ ] **A2965-P2:** Reconcile actual consumer/trust/precedence and documented
+  fallback expectations explicitly. Ambiguity stays disclosure-safe;
+  weakening authority stays operator-authored and target guidance may only
+  add requirements. Metadata presence is not a real post or completed consumer.
+- [ ] **A2965-P3:** Preserve the DISTINCT original Phase 3 human chat/email
+  guidance: disclosure is required unless clearly addressing another agent.
+  Reconcile the Phase 4 private consumer pointer through its existing owner;
+  this public plan neither reads nor applies that private configuration.
+
 ## Validation Plan
 
 - Phase 1: `pytest` for `agent-worktrees`' related-entry parsing/round-trip;
@@ -155,11 +190,36 @@ clearly another agent.
 - Phase 3: doc-only; no automated test surface (chat channels are outside the
   hook's reach) — reviewed for clarity only.
 
+<!-- backlog-reconciliation:7556:qualified-thirteen:2965:Validation-Plan -->
+
+- [ ] **A2965-V1:** Resolve every A2965-P1/P2 old/current policy disposition
+  with opening/replying, self-authored/bot-inline/human contribution,
+  private/owned third-party, internal-host, `always`, ambiguity and
+  operator-only weakening controls. Reconcile rather than reactivate the
+  historical Phase 2 smoke assumptions; retain existing metadata/source
+  credit and distinguish documented policy from actual consumer evidence.
+- [ ] **A2965-V2:** Retain the original separate human chat/email clarity
+  review and explicit authorized consumer disposition. No real publication,
+  private configuration or new every-host/native qualification is required
+  by this documentary clarification.
+
 ## Proposal
 
 _Pending._
 
 ## Journal
+
+<!-- backlog-reconciliation:7556:qualified-thirteen:2965:Journal -->
+
+### 2026-10-29 - Proposed explicit later-policy reconciliation
+
+Qualified the complete current original and refinements against this whole
+document. Added unchecked finite reconciliation and matching global Validation
+without changing the original Request, Phase 1 credit, historical policy rows
+or claimed driver. #5084 metadata and the reported deliberately newer #5121
+policy remain distinct; human chat/email stays separate. This is a proposal,
+not a policy/configuration action, actual post, source completion or accepted
+transfer. Normal review, delivery and current readback remain outstanding.
 
 ### 2026-10-03 — Recovered from an abandoned worktree, Phase 1 completed and landed
 This effort's Phase 1 implementation sat uncommitted in a `copilot-extensions`
