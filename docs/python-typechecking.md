@@ -310,6 +310,33 @@ policy; `--changed` is an intentionally conservative local parity command.
 The YAML project exercises independent dependency preparation; additional
 project dependency contexts remain subsequent slices.
 
+## Project-local real import roots
+
+A project may append an optional ordered `import_roots` list of repository-relative
+directories. Omission or `[]` preserves the existing seven-field project defaults.
+For example, `["tools", "plugins/agent-worktrees/scripts"]` exposes those ordinary
+first-party helper directories after the existing checker import roots. These
+are real source directories, not module aliases, stubs or arbitrary MyPy options.
+Malformed, duplicate, missing, non-directory and redirected roots are refused;
+a checking root must contain Python source in the existing ownership inventory.
+Ambient `MYPYPATH`, `PYTHONPATH` and `PYTHONHOME` do not supply roots.
+
+Import delivery does not add helper files to the project's owned targets or
+certify their bodies. MyPy retains ordinary module identities, duplicate-module
+diagnostics and `--follow-imports silent`: consumed helper contracts supply
+types, while the helper owner qualifies its implementation independently.
+The Payload Invocation row uses these roots and remains pending. Both a named
+pending check and `--all` remain nonzero even after a clean diagnostic probe.
+
+Projects with explicit roots use the existing `--cache-dir` option with the null
+device rather than reusing incremental diagnostics for mutable helper inputs.
+Projects without roots retain their existing cache behavior and environment key.
+No new qualification receipt or committed-only source restriction is introduced.
+Local developer files retain the normal ownership inventory rules; frozen checks
+resolve roots relative to their candidate checkout. This does not replace the
+existing frozen-candidate owner's Git content-tree identity or qualify additional
+untracked, ignored or stub inputs by implication.
+
 ## Fixed fragment source views
 
 The canonical Installation Context project uses a checker-only composition at

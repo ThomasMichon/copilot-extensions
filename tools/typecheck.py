@@ -40,6 +40,7 @@ class Project:
     python_version: str
     platforms: tuple[str, ...]
     requirements: str
+    import_roots: tuple[str, ...] = ()
 
     def owns(self, path: str) -> bool:
         """Match exact files or complete directory prefixes, not filename globs."""
@@ -102,7 +103,7 @@ def load_projects(root: Path = ROOT) -> tuple[Project, ...]:
     defaults = {key: manifest[key] for key in ("python_version", "platforms", "requirements")}
     for value in rows:
         row = _object(value)
-        if not required <= set(row) <= required | set(defaults):
+        if not required <= set(row) <= required | set(defaults) | {"import_roots"}:
             raise TypecheckError("Invalid project fields")
         row = {**defaults, **row}
         name, level, python_version, requirements = (
@@ -118,16 +119,32 @@ def load_projects(root: Path = ROOT) -> tuple[Project, ...]:
             raise TypecheckError(f"{name}: invalid requirements path")
         include = tuple(_relative(path) for path in _strings(row["include"], "include"))
         exclude = tuple(_relative(path) for path in _strings(row["exclude"], "exclude", allow_empty=True))
+        import_roots = tuple(
+            _relative(path) for path in _strings(row.get("import_roots", []), "import_roots", allow_empty=True)
+        )
+        for path in import_roots:
+            _import_directory(root, path)
         platforms = _strings(row["platforms"], "platforms")
         if any(platform not in ("linux", "win32", "darwin") for platform in platforms):
             raise TypecheckError(f"{name}: unsupported platform")
         projects.append(Project(
             name, include, exclude, cast(Level, level), python_version, platforms,
             _relative(requirements),
+            import_roots=import_roots,
         ))
     if len({project.name for project in projects}) != len(projects) or not projects:
         raise TypecheckError("Project names must be unique and the portfolio nonempty")
     return tuple(projects)
+
+
+def _import_directory(root: Path, relative: str) -> Path:
+    directory = root.joinpath(*_relative(relative).split("/"))
+    if (
+        not directory.is_dir()
+        or directory.resolve() != root.resolve().joinpath(*relative.split("/"))
+    ):
+        raise TypecheckError(f"Import root must be an ordinary repository directory: {relative}")
+    return directory
 
 
 def _run(argv: list[str], root: Path, *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -294,11 +311,18 @@ def check_project(
             str(root.joinpath(*file.split("/")[:file.split("/").index("src") + 1]))
             for file in all_paths if "src" in file.split("/")
         )
+        ordered_imports = sorted(imports)
+        for relative in project.import_roots:
+            directory = _import_directory(root, relative)
+            if not any(file.startswith(relative + "/") for file in all_paths):
+                raise TypecheckError(f"Import root has no inventoried Python source: {relative}")
+            if str(directory) not in ordered_imports:
+                ordered_imports.append(str(directory))
         env = {
             key: value for key, value in os.environ.items()
             if key not in {"PYTHONPATH", "PYTHONHOME", "MYPYPATH"}
         }
-        env["MYPYPATH"] = os.pathsep.join(sorted(imports))
+        env["MYPYPATH"] = os.pathsep.join(ordered_imports)
         if INSTALLATION_ENTRY in files or INSTALLATION_ENTRY in all_paths:
             view = installation_view(
                 root, all_paths,
@@ -320,7 +344,10 @@ def check_project(
                 "--python-version", project.python_version, "--platform", platform,
                 "--explicit-package-bases", "--follow-imports", "silent",
                 "--check-untyped-defs", "--show-error-codes", "--no-pretty",
-                "--cache-dir", str(path / "mypy-cache" / project.name / platform),
+                "--cache-dir", (
+                    os.devnull if project.import_roots
+                    else str(path / "mypy-cache" / project.name / platform)
+                ),
             ]
             if strict or project.level == "strict":
                 argv.append("--strict")
