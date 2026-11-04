@@ -215,7 +215,7 @@ def reconcile_created(supervisor: Any, reservation: dict, task: dict) -> int:
 def start(
     task: dict, *, client: Any, agent: str, prompt: str,
     project: str | None = None, charter: str | None = None,
-    timeout: float = 180,
+    timeout: float = 180, no_pair: bool = False,
 ) -> dict:
     """Create without a prompt, durably store, then send to the retained handle."""
     prefix = agent_bridge_launch_prefix()
@@ -263,11 +263,6 @@ def start(
         except (DispatchError, TaskError, ValueError, AttributeError) as exc:
             raise BridgeCarriedSessionBusy(f"ordinary pool initial startup is unqualified: {exc}") from exc
     diagnostics.creation_key = reservation.get("creation_key")
-    assigned = bool(reservation.get("worktree") and not info) or bool(
-        info and info.get("fact_kind") == "resumed"
-    )
-    if assigned and not info and reservation.get("ordinary_assignment_error"):
-        raise BridgeCarriedSessionBusy(reservation["ordinary_assignment_error"])
     from .bridge import registered_agent_project
     harness = registered_agent_project(agent, strict=True)
     project = reservation.get("allocation_project") or harness or project
@@ -280,6 +275,23 @@ def start(
         )
     from .workspace_binding import bind_allocation
     from .spawn_factories import SpawnPreparationRetained
+    if execution_machine is None and no_pair:
+        raise BridgeUnavailable("legacy ordinary Bridge create cannot express the no-pair allocation override")
+    if execution_machine is not None and not info:
+        from .ordinary_pool_startup import prepare_owned_workspace
+        try:
+            reservation = prepare_owned_workspace(
+                task, reservation, client=client, project=project,
+                machine=execution_machine, no_pair=no_pair, timeout=timeout,
+            )
+        except (SpawnPreparationRetained, OSError, subprocess.SubprocessError, DispatchError,
+                RuntimeError) as exc:
+            raise CreatedAgentUnrecorded(f"ordinary workspace preparation retained: {exc}") from exc
+    assigned = bool(reservation.get("worktree") and not info) or bool(
+        info and info.get("fact_kind") == "resumed"
+    )
+    if assigned and not info and reservation.get("ordinary_assignment_error"):
+        raise BridgeCarriedSessionBusy(reservation["ordinary_assignment_error"])
     if assigned:
         if not project:
             raise BridgeCarriedSessionBusy("assigned execution project is unavailable")
@@ -324,13 +336,20 @@ def start(
             raise BridgeCarriedSessionBusy(str(exc)) from exc
         return record
 
+    initial_record = None
+
     def _store_info() -> None:
         from .ordinary_invocation import prepare, same_facts
         record = None
         if assigned:
             if reservation.get("ordinary_assignment_error"):
                 raise BridgeCarriedSessionBusy(reservation["ordinary_assignment_error"])
-            record = assignment_record()
+            if initial_record is not None:
+                # Bridge's keyed creation binds this sessionless incarnation to its new native.
+                current_task(client, task)
+                record = initial_record
+            else:
+                record = assignment_record()
         invocation = prepare(task, reservation, info, prompt, worktree_record=record,
                              agent=agent, charter=charter)
         if info.get("fact_kind") == "resumed":
@@ -478,6 +497,8 @@ def start(
                 session_id = info["session_id"]
             elif not sessionless(record) or known or retired or reservation.get("session_handle"):
                 raise BridgeCarriedSessionBusy("assigned worktree history is unknown; no fresh create permitted")
+            else:
+                initial_record = record
         elif reservation.get("session_handle") or reservation.get("legacy_acquisition"):
             raise BridgeCarriedSessionBusy("legacy allocation has no exact current workspace/native facts")
         # Bridge's existing repo@venue target selects the harness, not the task's lane.

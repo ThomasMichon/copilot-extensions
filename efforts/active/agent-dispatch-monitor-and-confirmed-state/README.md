@@ -24,8 +24,12 @@ is published in [#10319](https://github.com/ThomasMichon/copilot-extensions/pull
 It merged after exact-head approval and required CI as `7b0d58030f`.
 Its drain, allocation-driver, replacement-creation and retained-budget snapshot
 corrections pass 546 Dispatch and 256 unchanged Worktrees controls.
-Ordinary consumer source integration is being validated through the canonical
-Worktrees CLI, worker decline command/prompts and existing allocator supervision.
+Ordinary consumer source integration merged in
+[#10325](https://github.com/ThomasMichon/copilot-extensions/pull/10325)
+as `cfe20b2d97` after exact-head approval and required CI.
+Its canonical Worktrees CLI, worker decline command, independent decision
+nudges and existing allocator supervision pass 682 Dispatch and 247 Worktrees
+controls. Initial and retry templates retain their released bytes.
 Remote decline and installed/native qualification remain open.
 
 **Current consumer-adoption prerequisite (2026-11-03):** the
@@ -436,12 +440,16 @@ live claim token. No new blanket ACK or executor appointment is created.
       and replacement history. Ordinary worker/supervisor callers, remote and
       no-managed-worktree applicability, complete cohort and installed/native
       acceptance remain open.
-- [ ] Land ordinary decline consumers through the canonical Worktrees finalization
-      CLI, data-authenticated worker command/prompts and control-authenticated
+- [x] Land ordinary decline consumers through the canonical Worktrees finalization
+      CLI, data-authenticated worker command and control-authenticated
       existing supervisor observation. Qualify unsupported/failed/unknown
       closeout, retained original retry instructions and unchanged task-only
-      credentials. Remote/no-worktree and installed/native acceptance remain
-      separate gates.
+      credentials. Merged in
+      [#10325](https://github.com/ThomasMichon/copilot-extensions/pull/10325)
+      after exact-head approval and required CI; 682 Dispatch and 247 Worktrees
+      source controls pass. Decline guidance uses independent decision nudges,
+      preserving initial/keyed and retry templates. Remote/no-worktree,
+      complete cohort and installed/native acceptance remain separate gates.
 
 ### Phase 1 — The monitor vocabulary only (data only, no `Status`/table change)
 _(agent-recommended: sequencing shape, revised 2026-09-25 after actually

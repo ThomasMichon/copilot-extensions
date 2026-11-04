@@ -58,3 +58,35 @@ def initial_machine(task: dict, reservation: dict) -> str | None:
     ):
         raise TaskError("ordinary pool startup requires its actual assigned execution machine")
     return machine
+
+
+def prepare_owned_workspace(
+    task: dict, reservation: dict, *, client, project: str | None,
+    machine: str, no_pair: bool, timeout: float,
+) -> dict:
+    """Create through the existing Dispatch-aware owner before Bridge embodiment."""
+    if reservation.get("worktree") or reservation.get("agent_info"):
+        return reservation
+    from . import embody
+    from .workspace_binding import record_prepared
+
+    prepared = embody.prepare_reusable_worktree(
+        task, reservation, project=project, interface="acp", driver="ordinary-bridge",
+        supervisor=reservation["reserved_by"], timeout=timeout, no_pair=no_pair,
+        allocation_client=client,
+    )
+    record_prepared(
+        client, reservation, prepared, driver="ordinary-bridge", creating_host=machine,
+    )
+    current = client.get_reservation(reservation["key"])
+    if (
+        not isinstance(current, dict)
+        or current.get("worktree") != prepared["worktree"]
+        or current.get("worktree_ownership") != "created"
+        or current.get("allocation_project") != prepared["project"]
+        or current.get("worktree_path") != prepared["path"]
+        or current.get("creation_key") != reservation["creation_key"]
+    ):
+        from .workspace_binding import hold
+        hold("ordinary owned-workspace readback is unconfirmed; retain the original creation")
+    return current

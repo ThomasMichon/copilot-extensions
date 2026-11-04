@@ -50,12 +50,34 @@ def ordinary(
     monkeypatch.setattr(identity, "resolve_machine", lambda: "host-a")
     monkeypatch.setattr(bridge, "registered_agent_project", lambda *args, **kwargs: None)
     monkeypatch.setattr(ordinary_bridge, "agent_bridge_launch_prefix", lambda: ["bridge"])
+    from agent_dispatch import embody, ordinary_assignment
+
+    allocations = []
+    ground = {
+        "id": "worktree-a", "repo": "example", "path": str(admission_owner.workspace),
+        "status": "active", "creation_nonce": "allocation-a", "session_count": 0,
+        "last_session_id": None, "execution_leg": None, "execution_leg_opaque": False,
+        "session_backend": None, "session_backend_opaque": False, "sessions_indexed": True,
+        "dispatch_attempt_opaque": False,
+        "dispatch_attempt": {"task_id": requested.id},
+    }
+
+    def create_workspace(**kwargs: Any) -> dict:
+        assert q.get(requested.id).status == Status.CLAIMED and not calls
+        allocations.append(kwargs)
+        return {
+            "worktree": ground["id"], "project": ground["repo"], "path": ground["path"],
+        }
+
+    monkeypatch.setattr(embody, "create_worktree", create_workspace)
+    monkeypatch.setattr(ordinary_assignment, "read_owner", lambda *a, **k: dict(ground))
 
     def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append((argv, kwargs))
         if argv[2] == "create":
             assert not kwargs.get("input") and "--prompt-file" not in argv
             assert q.get(requested.id).status == Status.CLAIMED
+            ground.update(session_count=1, last_session_id="native-a", session_live=True)
             return subprocess.CompletedProcess(argv, 0, json.dumps({
                 "session_id": "bridge-a", "ready": True, "status": "awaiting_first_prompt",
                 "creation": {"worktree": {"creation_nonce": "allocation-a"}},
@@ -83,11 +105,12 @@ def ordinary(
         }), "")
 
     monkeypatch.setattr(ordinary_bridge, "subprocess", SimpleNamespace(
-        run=run, TimeoutExpired=subprocess.TimeoutExpired,
+        run=run, TimeoutExpired=subprocess.TimeoutExpired, SubprocessError=subprocess.SubprocessError,
     ))
     yield SimpleNamespace(
         q=q, api=api, task=snapshot, client=client, requests=requests, calls=calls, placed=placed,
         install_root=install_root,
+        allocations=allocations, ground=ground,
     )
     client.close()
 
@@ -133,7 +156,17 @@ def test_real_ordinary_create_store_send_and_affirmative_worker_start(ordinary: 
         o.client.start_pool_task(o.task["id"], "host-a/worktree-a",
                                 owner_session_id="native-a", expected_generation=o.task["generation"])
     result = launch(o)
+    assert len(o.allocations) == 1
+    assert {
+        key: o.allocations[0][key]
+        for key in ("task_id", "reservation_key", "attempt", "driver", "supervisor")
+    } == {
+        "task_id": o.task["id"], "reservation_key": o.placed["reservation"]["key"],
+        "attempt": 1, "driver": "ordinary-bridge", "supervisor": "allocator",
+    }
+    assert o.q.get_reservation(o.placed["reservation"]["key"]).worktree_ownership == "created"
     assert [argv[2] for argv, _ in o.calls] == ["create", "send"]
+    assert "--worktree-id" in o.calls[0][0]
     prompt = json.loads(o.calls[-1][1]["input"])["prompt"]
     assert "--evaluation" not in prompt and "claim --task" not in prompt
     assert f"start {o.task['id']} --pool-generation 1" in prompt
@@ -157,6 +190,37 @@ def test_real_ordinary_create_store_send_and_affirmative_worker_start(ordinary: 
     assert len(o.q.attachment_history(o.task["id"])) == 1
     assert o.q.get_reservation(o.placed["reservation"]["key"]).driver == "ordinary-bridge"
     assert "ordinary-bridge" in pool_startup_contract()["supported_drivers"]
+
+
+def test_pool_no_pair_is_applied_by_the_existing_allocation_owner(ordinary: SimpleNamespace) -> None:
+    o = ordinary
+    seed = startup_seed(o.task, o.client, route=" --shared")
+    ordinary_bridge.start(
+        o.task, client=o.client, agent="local", project="example", prompt=seed, no_pair=True,
+    )
+    assert o.allocations[0]["no_pair"] is True
+    assert "--worktree-id" in o.calls[0][0]
+
+
+def test_ambiguous_allocation_stops_before_bridge_without_another_key(
+    ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_dispatch import embody
+
+    o = ordinary
+
+    def unavailable(**kwargs: Any) -> dict:
+        assert kwargs["creation_key"] == o.placed["reservation"]["creation_key"]
+        raise embody.EmbodyUnavailable("original keyed owner outcome is unconfirmed")
+
+    monkeypatch.setattr(embody, "create_worktree", unavailable)
+    with pytest.raises(ordinary_bridge.CreatedAgentUnrecorded, match="unconfirmed"):
+        launch(o)
+    assert not o.calls
+    assert o.q.get(o.task["id"]).status == Status.CLAIMED
+    assert o.q.get_reservation(o.placed["reservation"]["key"]).creation_key == (
+        o.placed["reservation"]["creation_key"]
+    )
 
 
 def test_ordinary_worker_decline_keeps_distinct_bridge_and_native_custody(

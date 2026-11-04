@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve Dispatch-owned allocation before ordinary pool Bridge embodiment",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
