@@ -297,6 +297,9 @@ def test_provider_write_safety_is_capability_aware_not_a_universal_fence() -> No
         "never claim stale authority is current or blindly repeat the write",
     ):
         assert requirement in coordination, requirement
+    readme = " ".join(_read(PLUGIN / "README.md").split())
+    assert "Optional server fencing is not a universal prerequisite" in readme
+    assert "official readback without claiming atomicity" in readme
 
 
 def test_forge_polling_fallback_preserves_clocks_without_polling_native_tasks() -> None:

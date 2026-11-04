@@ -9,8 +9,12 @@ configurable independent lanes, retained per-PR context, repository-specific
 merge policy and existing agent-to-agent communication. The skill supplies
 guidance and synthetic coordination examples, not a new reviewer engine,
 runtime configuration, watcher, scheduler or grant of review/merge authority.
-Missing task-bound review tools, receipts or mutation fences remain explicit
-adapter blockers or policy-permitted review-only/manual handoffs.
+Missing required authority, bindings or receipts remain explicit adapter
+blockers or permitted manual handoffs. Optional server fencing is not a
+universal prerequisite: use supported provider safeguards, fresh preflight,
+revision binding and official readback without claiming atomicity. The skill
+also supports bounded polling fallback, original-reviewer recovery and
+work-conserving concurrency targets within actual authority and capacity.
 
 Other task and coordination skills:
 [agent-dispatch](skills/agent-dispatch/SKILL.md),
