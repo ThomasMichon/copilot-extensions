@@ -157,6 +157,16 @@ def _check_database_header(path, expected, *, initializing):
         raise PlanError("client admission refuses unsupported WAL database header")
 
 
+def _begin_write(connection, root):
+    connection.execute("BEGIN IMMEDIATE")
+    if os.name == "nt":
+        # Each DELETE-mode transaction needs a new, explicitly owned journal.
+        journal = root / (DATABASE + "-journal")
+        if not os.path.lexists(journal):
+            os.close(create_private_file(journal))
+        _ordinary_file(journal, sqlite_state=True)
+
+
 @contextmanager
 def _connection(root, *, database_root, readonly, initializing=False):
     before = _ordinary_file(root / DATABASE, sqlite_state=True)
@@ -362,7 +372,7 @@ def _initialize(root, identity, *, tables=None, schema_version=SCHEMA_VERSION,
             with _connection(
                 path / initialization, database_root=candidate, readonly=False, initializing=True,
             ) as connection:
-                connection.execute("BEGIN IMMEDIATE")
+                _begin_write(connection, path / initialization)
                 for sql in tables.values():
                     connection.execute(sql)
                 connection.execute("PRAGMA application_id = " + str(APPLICATION_ID))
@@ -416,7 +426,7 @@ def recover_client_admission(root, identity):
             unchanged()
         with _owned(root) as (path, database_root, unchanged):
             with _connection(path, database_root=database_root, readonly=False) as connection:
-                connection.execute("BEGIN IMMEDIATE")
+                _begin_write(connection, path)
                 _read_state(connection, identity)
                 unchanged()
     except (OSError, sqlite3.Error, subprocess.SubprocessError):
@@ -469,7 +479,7 @@ def admit_client_release(root, identity, selection, staged, policy, *, clock=lam
     try:
         with _owned(root) as (path, database_root, unchanged):
             with _connection(path, database_root=database_root, readonly=False) as connection:
-                connection.execute("BEGIN IMMEDIATE")
+                _begin_write(connection, path)
                 previous = _read_state(connection, identity)
                 receipt = _selected_receipt(
                     identity, selection, staged, policy, previous, clock,

@@ -386,7 +386,7 @@ def _legacy_custody(root, identity):
         client_admission._owned(root) as (path, database_root, unchanged),
         client_admission._connection(path, database_root=database_root, readonly=False) as connection,
     ):
-        connection.execute("BEGIN IMMEDIATE")
+        client_admission._begin_write(connection, path)
         client_admission._read_state(connection, identity)
         yield path, unchanged
 

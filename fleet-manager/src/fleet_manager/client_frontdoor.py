@@ -156,7 +156,7 @@ def _register_client_frontdoor(root, identity, selection, staged, *, command_dir
             if any(directory.is_relative_to(other) or other.is_relative_to(directory)
                    for other in (path, staged._root)):
                 raise PlanError("client commands require a separate explicit private directory")
-            connection.execute("BEGIN IMMEDIATE")
+            client_admission._begin_write(connection, path)
             namespace = path / construction.NAMESPACE
             artifact_staging._directory(namespace)
             construction._namespace(path, identity)

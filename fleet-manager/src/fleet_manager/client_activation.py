@@ -200,7 +200,7 @@ def _activate_client_runtime(root, identity, selection, staged, *, current_polic
             artifact_staging._primitive() as primitive,
             ExitStack() as retained,
         ):
-            connection.execute("BEGIN IMMEDIATE")
+            client_admission._begin_write(connection, path)
             namespace = path / construction.NAMESPACE
             if recovery is not None:
                 command_directory, _anchor, commands_unchanged = retained.enter_context(

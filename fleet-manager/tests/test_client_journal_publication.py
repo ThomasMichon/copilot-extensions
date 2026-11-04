@@ -31,7 +31,7 @@ def test_failed_attempt_preserves_old_journal_and_does_not_poison_retry(tmp_path
     construction._write(path, {"attempt": "old"})
     before = path.read_bytes(), path.stat().st_ino
     opened = set()
-    actual_open, actual_write, actual_replace = os.open, os.write, os.replace
+    actual_open, actual_write, actual_replace = construction.create_private_file, os.write, os.replace
 
     def observe_open(name, *args, **kwargs):
         fd = actual_open(name, *args, **kwargs)
@@ -52,7 +52,7 @@ def test_failed_attempt_preserves_old_journal_and_does_not_poison_retry(tmp_path
         return actual_replace(old, new, *args, **kwargs)
 
     with monkeypatch.context() as patch:
-        patch.setattr(os, "open", observe_open)
+        patch.setattr(construction, "create_private_file", observe_open)
         patch.setattr(os, "write", interrupt_write)
         patch.setattr(os, "replace", interrupt_replace)
         with pytest.raises(OSError, match="injected journal interruption"):
@@ -170,7 +170,7 @@ from fleet_manager import client_construction as construction
 path=Path(sys.argv[1])
 boundary=sys.argv[2]
 if boundary!="retry":
-    actual_open,actual_write,actual_replace=os.open,os.write,os.replace
+    actual_open,actual_write,actual_replace=construction.create_private_file,os.write,os.replace
     opened=set()
     def observe_open(name,*args,**kwargs):
         fd=actual_open(name,*args,**kwargs)
@@ -187,7 +187,7 @@ if boundary!="retry":
         if Path(new)==path:
             os._exit(47)
         return actual_replace(old,new,*args,**kwargs)
-    os.open,os.write,os.replace=observe_open,stop_write,stop_replace
+    construction.create_private_file,os.write,os.replace=observe_open,stop_write,stop_replace
 construction._write(path,{"attempt":boundary})
 print(json.dumps(construction._read(path)))
 """

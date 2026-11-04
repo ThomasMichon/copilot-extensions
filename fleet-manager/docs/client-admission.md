@@ -99,7 +99,10 @@ admission databases and client-generation metadata use the shared native
 private-state creator with explicit TokenUser ownership, including for elevated
 callers; an existing foreign path is never repaired. The caller still supplies
 an already-private root. SQLite rollback-journal creation and recovery retain
-their native behavior and the same ownership checks. POSIX
+the same format and ownership checks. After acquiring each write transaction's
+SQLite lock, Windows allocates an initially empty owner-private rollback file;
+SQLite owns its contents, commit deletion and crash recovery. A pre-existing
+foreign journal is refused, never restamped. POSIX
 requires current-user ownership and no group/other permission bits. These
 checks do not isolate state from a hostile process running as the same user,
 an administrator or another principal with overriding system privileges.

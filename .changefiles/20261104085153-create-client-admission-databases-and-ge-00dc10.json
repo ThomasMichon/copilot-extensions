@@ -1,5 +1,5 @@
 {
-  "comment": "Create client admission databases and generation metadata with explicit native owner-private security.",
+  "comment": "Create client admission databases, per-transaction rollback journals and generation metadata with explicit native owner-private security.",
   "changes": [
     {
       "plugin": "fleet-manager",

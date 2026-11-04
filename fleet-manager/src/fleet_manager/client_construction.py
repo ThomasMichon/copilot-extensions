@@ -513,7 +513,7 @@ def _admitted_custody(root, identity, selection, binding, staged, current_policy
             path, database_root=database_root, readonly=False,
         ) as connection,
     ):
-        connection.execute("BEGIN IMMEDIATE")
+        client_admission._begin_write(connection, path)
 
         def checkpoint():
             return _checkpoint(

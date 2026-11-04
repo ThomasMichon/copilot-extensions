@@ -358,7 +358,7 @@ def _reserve_generation(root, identity, selection, staged, *, generation, reques
             with client_admission._connection(
                 path, database_root=database_root, readonly=False,
             ) as connection:
-                connection.execute("BEGIN IMMEDIATE")
+                client_admission._begin_write(connection, path)
                 previous, _, reservations, fences = _read(connection, identity, location)
                 current = client_construction._compatible(
                     decode(manifest), current_target(), identity,
@@ -446,7 +446,7 @@ def _retire_generation(root, identity, reservation, *, clock=lambda: int(time.ti
             with client_admission._connection(
                 path, database_root=database_root, readonly=False,
             ) as connection:
-                connection.execute("BEGIN IMMEDIATE")
+                client_admission._begin_write(connection, path)
                 _, _, reservations, fences = _read(connection, identity, location)
                 if reservations.get(generation) != reservation:
                     raise PlanError("client retirement requires the exact reserved generation")
@@ -607,7 +607,7 @@ def _generation_root(root, identity, reservation):
         with client_admission._connection(
             path, database_root=database_root, readonly=False,
         ) as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            client_admission._begin_write(connection, path)
             admitted, _, reservations, fences = _read(connection, identity, location)
             _current(admitted, reservations, reservation, fences)
             raw = connection.execute(
