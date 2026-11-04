@@ -115,11 +115,48 @@ environment mutation is used.
 
 ### Windows native packet from a normal unelevated console
 
-From the candidate repository, a human can run this one PowerShell command:
+From the candidate repository, a human can select the two-cycle handover case:
 
 ```powershell
-py -3 tools/clean-room/scenarios/manager-automatic-updates/probe.py qualify --source . --workdir "$env:TEMP\mq-$([Guid]::NewGuid().ToString('N').Substring(0,8))" --cycles 2 --native-startup
+py -3 tools/clean-room/scenarios/manager-automatic-updates/probe.py qualify --source . --workdir "$env:TEMP\mq-$([Guid]::NewGuid().ToString('N').Substring(0,8))" --case handover --cycles 2 --native-startup
 ```
+
+### Independently bounded qualification jobs
+
+Keep the venue's whole-job timeout ceiling; do not extend it to fit the combined
+fixture. Use separate supervised jobs for input preparation, visible observer
+sensitivity, handover/cadence, failed-successor preservation and Linux native
+signal drain. Each lifecycle job creates fresh private roots and owns all of
+its workers through verified cleanup. Only the immutable prepared input crosses
+job boundaries; never keep a worker alive between budgets or move its cadence
+wait outside supervision.
+
+`qualify --case handover` selects only handover; `--cycles 2` retains the genuine
+300-second gap. `--case failed-successor --cycles 1` independently checks failed
+candidate preservation, and `--case signal-drain --cycles 1 --native-startup`
+selects only the Linux/WSL signal case. Give every invocation a distinct
+`--workdir`. The default `--case all` preserves the earlier combined interface,
+but is not the recommended native bounded-run entry.
+
+The real cadence wait and multiple OS processes are intentional, expensive
+native integration evidence, not unit-test work. Case-routing regressions use
+fakes without native APIs, workers or sleeps. Reports expose `requested_case`,
+`complete_case_set`, `intentional_cadence_wait_seconds`,
+`requires_process_boundary` and `case_elapsed_seconds` (including fixture
+construction and cleanup, not earlier input preparation). The outer supervisor
+must still account for the entire invocation. A selected-case pass does not
+claim the complete case set; a failed-successor-only Windows job cannot claim
+the two-cycle Job-lifetime proof.
+
+Bound complete input preparation and final preservation comparisons separately
+as well. Keep their receipts distinct from case results and compose acceptance
+only after all required same-source cases and preservation checks pass. A
+missing, failed or timed-out chunk is not an overall pass; splitting jobs does
+not reset an operator's independent aggregate limit or authorize another attempt.
+Regenerate prepared inputs after changing the probe; older source pins and
+approvals do not silently select the new case interface.
+
+### Windows venue and evidence requirements
 
 Do not elevate the console. The adapter checks actual TokenElevation,
 GetShellWindow/GetForegroundWindow, visible WinSta0, matching accessible input

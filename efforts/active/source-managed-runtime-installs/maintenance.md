@@ -139,3 +139,18 @@ Native startup changes, exact cadence, credentials, legacy-owner retirement,
 service impact and rollback must pass the adopter's own approval flow before
 enabling anything. The parent Plan and Validation Plan remain the broader
 source-managed campaign's completion gate.
+
+### Qualification granularity
+
+The [existing process scenario](../../../tools/clean-room/scenarios/manager-automatic-updates/README.md#independently-bounded-qualification-jobs)
+supports separate handover/cadence, failed-successor and native signal-drain
+cases. Preparation, observer sensitivity and final preservation have their own
+bounded jobs as well. Keep the venue's timeout/resource ceilings and any
+independent aggregate limit; do not extend a deadline to accommodate a combined
+run or leave a worker alive across job boundaries.
+
+Case-routing tests use fakes without native APIs, subprocesses or sleeps.
+Actual process lifetime and the genuine 300-second cadence belong only in the
+explicit native integration cases. Their reports expose scope, intentional
+wait and elapsed case cost; a subset pass cannot close the complete native
+matrix or real installation/adoption gates.

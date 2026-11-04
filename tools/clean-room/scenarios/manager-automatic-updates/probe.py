@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -18,11 +19,25 @@ import lifecycle  # noqa: E402
 import native  # noqa: E402
 
 
-def qualify(source: Path, workdir: Path, *, cycles: int, native_startup: bool) -> dict:
+CASES = ("all", "handover", "failed-successor", "signal-drain")
+
+
+def qualify(
+    source: Path, workdir: Path, *, cycles: int, native_startup: bool,
+    case: str = "all",
+) -> dict:
+    if case not in CASES:
+        raise ValueError("select a declared qualification case")
     if cycles not in (1, 2):
         raise ValueError("qualification supports one fast cycle or two real-cadence cycles")
+    if case not in ("all", "handover") and cycles != 1:
+        raise ValueError("only the handover case observes periodic cycles")
+    if case == "signal-drain" and (
+        not native_startup or not sys.platform.startswith("linux")
+    ):
+        raise native.UnsupportedNative("signal-drain requires native Linux/WSL startup")
     windows_native = native_startup and sys.platform == "win32"
-    if windows_native and cycles != 2:
+    if windows_native and case in ("all", "handover") and cycles != 2:
         raise native.UnsupportedNative("Windows native qualification requires --cycles 2 at real cadence")
     if native_startup:
         native.preflight()
@@ -36,17 +51,23 @@ def qualify(source: Path, workdir: Path, *, cycles: int, native_startup: bool) -
     ) as instance_environment:
         return _qualify_cases(
             source, workdir, manager, cycles=cycles, native_startup=native_startup,
-            instance_environment=instance_environment,
+            instance_environment=instance_environment, case=case,
         )
 
 
 def _qualify_cases(
     source: Path, workdir: Path, manager: dict, *, cycles: int, native_startup: bool,
-    instance_environment: dict[str, str],
+    instance_environment: dict[str, str], case: str = "all",
 ) -> dict:
+    started = time.monotonic()
     windows_native = native_startup and sys.platform == "win32"
     report = {
         "schema": 1, "passed": False, "cycle_kind": "finite-guarded-command-fixture",
+        "requested_case": case, "complete_case_set": case == "all",
+        "requires_process_boundary": True,
+        "intentional_cadence_wait_seconds": (
+            300 if cycles == 2 and case in ("all", "handover") else 0
+        ),
         "real_installation_cycles": False, "native_startup": native_startup,
         "windows_window_and_job_lifetime_proved": False,
         "legacy_controller_handoff_proved": False,
@@ -61,23 +82,27 @@ def _qualify_cases(
             try:
                 observer = WindowObserver(api)
                 with observer:
-                    report["handover"] = lifecycle.case(
-                        source, workdir / "h", manager, cycles=cycles,
-                        native_startup=True, windows_observer=observer,
-                        instance_environment=instance_environment,
-                    )
-                    report["failed_successor"] = lifecycle.case(
-                        source, workdir / "f", manager, cycles=1,
-                        failing_standby=True, windows_observer=observer,
-                        instance_environment=instance_environment,
-                    )
+                    if case in ("all", "handover"):
+                        report["handover"] = lifecycle.case(
+                            source, workdir / "h", manager, cycles=cycles,
+                            native_startup=True, windows_observer=observer,
+                            instance_environment=instance_environment,
+                        )
+                    if case in ("all", "failed-successor"):
+                        report["failed_successor"] = lifecycle.case(
+                            source, workdir / "f", manager, cycles=1,
+                            failing_standby=True, windows_observer=observer,
+                            instance_environment=instance_environment,
+                        )
                 packet = observer.packet()
                 report["windows_observation"] = packet
-                if not observation_passed(packet, report["handover"]):
+                if packet.get("passed") is not True or (
+                    "handover" in report and not observation_passed(packet, report["handover"])
+                ):
                     raise NativeBlocked(
                         "windows-observation-failed", "inspect the fixture window/Job observation packet",
                     )
-                report["windows_window_and_job_lifetime_proved"] = True
+                report["windows_window_and_job_lifetime_proved"] = "handover" in report
                 report["passed"] = True
                 return report
             finally:
@@ -85,16 +110,18 @@ def _qualify_cases(
                     report["windows_observation"] = observer.packet()
                 if observer is None or not observer.thread.is_alive():
                     api.close()
-        report["handover"] = lifecycle.case(
-            source, workdir / "handover", manager, cycles=cycles, native_startup=native_startup,
-            instance_environment=instance_environment,
-        )
-        report["failed_successor"] = lifecycle.case(
-            source, workdir / "failed-successor", manager, cycles=1, failing_standby=True,
-            native_startup=native_startup,
-            instance_environment=instance_environment,
-        )
-        if native_startup:
+        if case in ("all", "handover"):
+            report["handover"] = lifecycle.case(
+                source, workdir / "handover", manager, cycles=cycles, native_startup=native_startup,
+                instance_environment=instance_environment,
+            )
+        if case in ("all", "failed-successor"):
+            report["failed_successor"] = lifecycle.case(
+                source, workdir / "failed-successor", manager, cycles=1, failing_standby=True,
+                native_startup=native_startup,
+                instance_environment=instance_environment,
+            )
+        if native_startup and case in ("all", "signal-drain"):
             report["native_signal_drain"] = lifecycle.signal_drain_case(
                 source, workdir / "native-signal-drain", manager,
                 instance_environment=instance_environment,
@@ -102,6 +129,7 @@ def _qualify_cases(
         report["passed"] = True
         return report
     finally:
+        report["case_elapsed_seconds"] = time.monotonic() - started
         (workdir / "qualification.json").write_text(
             json.dumps(report, sort_keys=True, indent=2), encoding="utf-8",
         )
@@ -117,6 +145,8 @@ def main() -> int:
     run.add_argument("--source", type=Path, required=True)
     run.add_argument("--workdir", type=Path, required=True)
     run.add_argument("--cycles", type=int, choices=(1, 2), default=1)
+    run.add_argument("--case", choices=CASES, default="all",
+                     help="select one independently supervised lifecycle case; all preserves the combined run")
     run.add_argument("--native-startup", action="store_true",
                      help="explicitly authorize fixture-only current-user native registration")
     controls = sub.add_parser("observe-controls")
@@ -136,6 +166,7 @@ def main() -> int:
         else:
             print(json.dumps(qualify(
                 args.source, args.workdir, cycles=args.cycles, native_startup=args.native_startup,
+                case=args.case,
             ), sort_keys=True))
     except native.UnsupportedNative as exc:
         print(json.dumps({
