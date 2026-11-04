@@ -144,7 +144,7 @@ def test_ordinary_publication_and_collection_claim_share_one_domain_guard(
         if current_thread().name.startswith("collector"):
             with real_lock(*args, **{**kwargs, "timeout": 0, "wait": False}) as probe:
                 attempted.set()
-                assert not probe, "ordinary publication did not hold the namespace parent's guard"
+                assert not probe, "ordinary publication did not hold the namespace's guard"
         with real_lock(*args, **kwargs) as acquired:
             yield acquired
 
@@ -185,6 +185,45 @@ def test_native_case_distinct_machine_root_remains_visible_beside_typed_state(pa
     assert target.push(source, alternate).ok
     assert set(target.fleet_sync_status().machines) == {alternate}
     assert {item.key for item in iter_archive_sources(target._root())} == {alternate}
+
+
+def test_collection_claim_excludes_a_later_ordinary_publisher(
+    packet: Packet, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, target, _, source = packet
+    entered, attempted, release = Event(), Event(), Event()
+    real_claim, real_lock = namespace._claim_namespace, namespace.sync_lock
+
+    def paused_claim(root: Path) -> None:
+        entered.set()
+        assert release.wait(5)
+        real_claim(root)
+
+    @contextmanager
+    def observed_lock(*args: Any, **kwargs: Any) -> Iterator[bool]:
+        if current_thread().name.startswith("publisher"):
+            with real_lock(*args, **{**kwargs, "timeout": 0, "wait": False}) as probe:
+                attempted.set()
+                assert not probe, "collection claim did not hold the publisher's guard"
+        with real_lock(*args, **kwargs) as acquired:
+            yield acquired
+
+    monkeypatch.setattr(namespace, "_claim_namespace", paused_claim)
+    monkeypatch.setattr(namespace, "sync_lock", observed_lock)
+    with (
+        ThreadPoolExecutor(max_workers=1, thread_name_prefix="collector") as collector,
+        ThreadPoolExecutor(max_workers=1, thread_name_prefix="publisher") as publisher,
+    ):
+        typed = collector.submit(collect, packet)
+        try:
+            assert entered.wait(5)
+            ordinary = publisher.submit(target.push, source, namespace.DIRECTORY)
+            assert attempted.wait(5)
+        finally:
+            release.set()
+        assert typed.result(timeout=5).as_dict()["local_readback_verified"]
+        result = ordinary.result(timeout=5)
+        assert not result.ok and "typed-state namespace" in result.detail
 
 
 def test_native_case_alias_is_refused_before_any_session_publication(
@@ -289,12 +328,15 @@ def test_typed_collections_are_not_classified_as_empty_session_archive_sources(
 
 
 @pytest.mark.parametrize("relative", ["", "nested-root"])
+@pytest.mark.parametrize("renamed", [False, True])
 def test_targets_and_collection_claims_inside_owned_collections_are_refused(
-    packet: Packet, relative: str,
+    packet: Packet, relative: str, renamed: bool,
 ) -> None:
     cfg, target, _, source = packet
     collect(packet)
     typed = target._root() / namespace.DIRECTORY
+    if renamed:
+        typed = typed.rename(target._root() / "retained-exports")
     before = {item.relative_to(typed): item.read_bytes() for item in typed.rglob("*") if item.is_file()}
     root = typed / relative
     ordinary = LocalTarget({"path": str(root)})
@@ -348,6 +390,41 @@ def test_unmarked_ordinary_ancestors_do_not_require_out_of_root_guard_writes(
     monkeypatch.setattr(namespace, "_domain_lock", forbidden_guard)
     assert ordinary.push(source, "worker").ok
     assert not (target._root() / ".worktree-state-domain.lock").exists()
+
+
+def test_writable_namespace_named_root_needs_no_write_to_its_read_only_parent(
+    packet: Packet, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, target, _, source = packet
+    parent = target._root()
+    root = parent / namespace.DIRECTORY
+    root.mkdir(parents=True)
+    parent.chmod(0o500)
+    real_lock = namespace._domain_lock
+    locked = []
+
+    @contextmanager
+    def contained_guard(directory: Path) -> Iterator[None]:
+        assert directory == root, "publication attempted to write its read-only parent"
+        locked.append(directory)
+        with real_lock(directory):
+            yield
+
+    monkeypatch.setattr(namespace, "_domain_lock", contained_guard)
+    try:
+        assert LocalTarget({"path": str(root)}).push(source, "worker").ok
+        assert locked == [root]
+        assert not (parent / ".worktree-state-domain.lock").exists()
+    finally:
+        parent.chmod(0o700)
+
+
+def test_renamed_collection_remains_excluded_from_session_and_fleet_discovery(packet: Packet) -> None:
+    _, target, _, _ = packet
+    collect(packet)
+    (target._root() / namespace.DIRECTORY).rename(target._root() / "retained-exports")
+    assert target.fleet_sync_status().machines == {}
+    assert list(iter_archive_sources(target._root())) == []
 
 
 @pytest.mark.parametrize("kind", ["empty", "directory", "symlink", "future"])

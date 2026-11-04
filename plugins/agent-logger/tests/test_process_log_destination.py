@@ -30,7 +30,7 @@ def _source(tmp_path: Path) -> Path:
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX mkdir/openat ancestor races")
-@pytest.mark.parametrize("timing", ["before_open", "after_open", "before_mkdir"])
+@pytest.mark.parametrize("timing", ["during_admission", "before_open", "after_open", "before_mkdir"])
 def test_process_log_destination_creation_stays_in_pinned_parent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, timing: str,
 ) -> None:
@@ -42,6 +42,7 @@ def test_process_log_destination_creation_stays_in_pinned_parent(
     parked = tmp_path / "parked"
     original_open, original_mkdir = os.open, os.mkdir
     swapped = False
+    creating = False
 
     def swap() -> None:
         nonlocal swapped
@@ -53,11 +54,14 @@ def test_process_log_destination_creation_stays_in_pinned_parent(
         path: str | os.PathLike[str], flags: int, mode: int = 0o777,
         *, dir_fd: int | None = None,
     ) -> int:
-        trigger = path == "destination" and dir_fd is not None and not swapped
+        trigger = path == "destination" and dir_fd is not None and not swapped and creating
         if trigger and timing == "before_open":
             swap()
         fd = original_open(path, flags, mode, dir_fd=dir_fd)
-        if trigger and timing == "after_open":
+        if (trigger and timing == "after_open") or (
+            path == "destination" and dir_fd is not None and not creating
+            and not swapped and timing == "during_admission"
+        ):
             swap()
         return fd
 
@@ -65,6 +69,9 @@ def test_process_log_destination_creation_stays_in_pinned_parent(
         path: str | os.PathLike[str], mode: int = 0o777,
         *, dir_fd: int | None = None,
     ) -> None:
+        nonlocal creating
+        if path == "destination" and dir_fd is not None:
+            creating = True
         if path == "example" and dir_fd is not None and timing == "before_mkdir":
             swap()
         original_mkdir(path, mode, dir_fd=dir_fd)
@@ -74,7 +81,7 @@ def test_process_log_destination_creation_stays_in_pinned_parent(
     result = filesystem.LocalTarget({"path": str(root)}).push_process_logs(source, "example")
     assert swapped
     assert list(outside.iterdir()) == []
-    if timing == "before_open":
+    if timing in {"before_open", "during_admission"}:
         assert not result.ok
         assert list(parked.iterdir()) == []
     else:

@@ -73,8 +73,13 @@ does not allocate a missing destination or archive directory. Native alias check
 reject case-insensitive equivalents without hiding genuinely distinct
 case-sensitive machine directories. Non-directory entries are not probed as
 collection namespaces during fleet discovery.
-Admission checks every reserved destination prefix, including prefixes above a
-configured target root, and takes the corresponding namespace parent's guard.
+Admission checks every reserved destination prefix and every existing marked
+ancestor, including prefixes above a configured target root. Marker recognition
+does not depend on the directory retaining its original name.
+Potentially overlapping writers take the guard inside the namespace directory,
+not its parent, so an existing writable namespace-shaped root below a read-only
+parent remains usable. Claiming may create that directory; only the internal
+guard file is ignored when checking that a new claim is otherwise empty.
 Collection claims cannot nest inside an owned or partial collection. Invalid
 markers block mutation and are reported separately without dropping healthy
 fleet peers. Prefix-count overflow refuses before destination creation; it does
@@ -117,6 +122,7 @@ under a session identity.
 Raw and redacted copies also refuse entering an existing collection before
 creating destination directories, including missing parents below its export;
 the generic session archiver participates in destination namespace admission.
+Renaming a marked directory does not remove its preservation or discovery boundary.
 Recursive removal does not change permissions through external symbolic links.
 
 Preservation checks read directory metadata only, never ledger contents. Their

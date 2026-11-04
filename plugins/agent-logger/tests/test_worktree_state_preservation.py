@@ -137,11 +137,15 @@ def test_ordinary_session_transfer_never_copies_typed_namespace_payloads(packet:
 
 @pytest.mark.parametrize("redacted", [False, True])
 @pytest.mark.parametrize("missing_parent", [False, True])
+@pytest.mark.parametrize("renamed", [False, True])
 def test_ordinary_transfer_cannot_overwrite_an_existing_collection_member(
-    packet: Packet, redacted: bool, missing_parent: bool,
+    packet: Packet, redacted: bool, missing_parent: bool, renamed: bool,
 ) -> None:
     target, live = legacy_collection(packet)
-    victim = next((live / "worktree-state").rglob("manifest.json"))
+    namespace = live / "worktree-state"
+    if renamed:
+        namespace = namespace.rename(live / "retained-exports")
+    victim = next(namespace.rglob("agenda.sqlite3" if renamed else "manifest.json"))
     if missing_parent:
         victim = victim.parent / "newdir/file"
     before = files(live)

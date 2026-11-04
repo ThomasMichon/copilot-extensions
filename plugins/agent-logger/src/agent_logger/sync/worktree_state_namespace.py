@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import os
+import stat
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 from agent_logger.sync.lock import sync_lock
-from agent_logger.sync.provenance import existing_real_directory
+from agent_logger.sync.provenance import existing_real_directory, is_link_or_reparse
 from agent_logger.sync.publication_directory import PublicationDirectory, publication_directory
 
 DIRECTORY = "worktree-state"
@@ -38,8 +39,6 @@ def has_namespace(root: Path) -> bool:
 
 
 def is_namespace_directory(root: Path, name: str) -> bool:
-    if name.casefold() != DIRECTORY.casefold():
-        return False
     try:
         with publication_directory(root / name, create=False) as directory:
             try:
@@ -57,7 +56,17 @@ def is_namespace_directory(root: Path, name: str) -> bool:
 
 def _marked(root: Path, name: str) -> bool:
     try:
-        with publication_directory(root / name, create=False) as directory:
+        path = root / name
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            pass
+        else:
+            if is_link_or_reparse(path, info.st_mode):
+                raise OSError("destination directory is unsafe: namespace ancestor is indirect")
+            if not stat.S_ISDIR(info.st_mode):
+                return False
+        with publication_directory(path, create=False) as directory:
             try:
                 directory.stat(_MARKER)
             except FileNotFoundError:
@@ -65,6 +74,8 @@ def _marked(root: Path, name: str) -> bool:
             return True
     except FileNotFoundError:
         return False
+    except (OSError, ValueError) as error:
+        raise OSError(f"destination directory is unsafe: {root / name}: {error}") from error
 
 
 def _prefixes(destination: Path) -> list[tuple[Path, str]]:
@@ -73,7 +84,7 @@ def _prefixes(destination: Path) -> list[tuple[Path, str]]:
     current = Path(destination.anchor)
     prefixes: list[tuple[Path, str]] = []
     for name in destination.parts[1:]:
-        if name.casefold() == DIRECTORY.casefold():
+        if name.casefold() == DIRECTORY.casefold() or _marked(current, name):
             prefixes.append((current, name))
         current /= name
     if len(prefixes) > _MAX_PREFIXES:
@@ -123,8 +134,8 @@ def _reservation(
             # publication legs never remove that structural ancestor.
             if not final_claim and stable is not None and parent / name in stable.parents:
                 continue
-            stack.enter_context(publication_directory(parent))
-            stack.enter_context(_domain_lock(parent))
+            stack.enter_context(publication_directory(parent / name))
+            stack.enter_context(_domain_lock(parent / name))
             if not final_claim and _marked(parent, name):
                 yield False
                 return
@@ -142,7 +153,7 @@ def _claim_namespace(root: Path) -> None:
     with publication_directory(root / DIRECTORY) as directory:
         if _matches(directory):
             return
-        if directory.names():
+        if set(directory.names()) - {_GUARD}:
             raise ValueError("typed collection namespace contains unowned or partial evidence")
         if directory.fd is None:
             raise OSError("typed collection namespace requires native directory barriers")
