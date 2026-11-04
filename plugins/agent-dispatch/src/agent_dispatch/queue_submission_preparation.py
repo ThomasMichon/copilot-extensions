@@ -187,7 +187,7 @@ class QueueSubmissionPreparationMixin:
             previous = _latest(conn, task_id)
             if previous is not None:
                 value = json.loads(previous["submission_preparation"])
-                if value["request"] != request:
+                if _encoded(value["request"]) != _encoded(request):
                     raise TaskError("submission preparation conflicts with its original request")
                 return value
             value = {"version": 1, "request": request, "blocker": None}
@@ -229,7 +229,7 @@ class QueueSubmissionPreparationMixin:
                 expected_owner_session_id=request["owner_session_id"],
                 workspace=AssignmentWorkspace.from_dict(request["workspace"]),
             )
-            if any(request[key] != item for key, item in current.items()):
+            if _encoded({key: request[key] for key in current}) != _encoded(current):
                 raise TaskError("submission preparation binding changed")
             value["blocker"] = {"code": code, "message": message, "at": self._now(now)}
             conn.execute(

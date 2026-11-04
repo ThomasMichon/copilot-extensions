@@ -111,6 +111,9 @@ def test_suspension_retains_the_original_preparation_and_native(submission):
     "change",
     [
         {"result": {"answer": "different"}},
+        {"result": {"answer": [1, {"ok": 1}]}},
+        {"result": {"answer": [1, {"ok": 1.0}]}},
+        {"result": {"answer": [1.0, {"ok": True}]}},
         {"result_ref": None},
         {"request_id": "new-request"},
         {"expected_generation": 999},
