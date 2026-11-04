@@ -127,6 +127,37 @@ def test_manager_source_identity_uses_its_standalone_project(
         identity.read_source_identity(payload, VERSION, plugin=expected)
 
 
+def test_independent_project_source_needs_no_plugin_manifest(tmp_path):
+    payload = tmp_path / "application"
+    payload.mkdir()
+    project = payload / "pyproject.toml"
+    project.write_text(f'[project]\nname="Example_Service"\nversion="{VERSION}"\n')
+    digest = identity.assembly_hash(payload)
+    source = identity.SourceIdentity(
+        "example-service", VERSION, COMMIT, TREE, digest,
+        identity.runtime_version(VERSION, COMMIT, digest),
+    )
+    (payload / identity.SOURCE_FILE).write_text(json.dumps(source.document()))
+    assert identity.read_source_identity(payload, VERSION, plugin="example-service") == source
+    with pytest.raises(identity.SourceIdentityError, match="project identity"):
+        identity.payload_package_version(payload, "other-service")
+    project.write_text('[project]\nname="example-service"\n')
+    with pytest.raises(identity.SourceIdentityError, match="package version"):
+        identity.payload_package_version(payload, "example-service")
+
+
+@pytest.mark.parametrize("manifest", [
+    '{"name":"other-service","version":"1.0.0"}', '{"name":',
+])
+def test_independent_project_does_not_hide_an_invalid_plugin_manifest(tmp_path, manifest):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname="example-service"\nversion="1.0.0"\n',
+    )
+    (tmp_path / "plugin.json").write_text(manifest)
+    with pytest.raises((identity.SourceIdentityError, json.JSONDecodeError)):
+        identity.payload_package_version(tmp_path, "example-service")
+
+
 @pytest.mark.parametrize(
     "version", ["0.4.1-dev3", "0.4.1.dev3", "0.4.1-dev3+base", "0.4.1.dev3+base"],
 )

@@ -508,7 +508,10 @@ def payload_package_version(payload: Path, plugin: str) -> str:
         "index-service": "agent-index-service",
         "index-engine": "agent-index-engine",
     }
-    if plugin in standalone:
+    plugin_manifest = payload / "plugin.json"
+    if plugin in standalone or (
+        not plugin_manifest.exists() and not plugin_manifest.is_symlink()
+    ):
         import tomllib
 
         data = tomllib.loads((payload / "pyproject.toml").read_text(encoding="utf-8"))
@@ -516,12 +519,12 @@ def payload_package_version(payload: Path, plugin: str) -> str:
         if (
             not isinstance(manifest, dict) or not isinstance(manifest.get("name"), str)
             or re.sub(r"[-_.]+", "-", manifest["name"]).lower()
-            != standalone[plugin]
+            != standalone.get(plugin, plugin)
         ):
             raise SourceIdentityError("Materialized standalone project identity does not match")
     else:
         manifest = json.loads(
-            (payload / "plugin.json").read_text(encoding="utf-8"),
+            plugin_manifest.read_text(encoding="utf-8"),
             object_pairs_hook=_unique_object,
         )
         if not isinstance(manifest, dict) or manifest.get("name") != plugin:

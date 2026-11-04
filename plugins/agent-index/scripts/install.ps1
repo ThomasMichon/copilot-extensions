@@ -2653,7 +2653,7 @@ function New-IndexMutex {
 }
 
 function Enter-IndexStampLock {
-    param([string]$Scope, [int]$TimeoutSeconds = 20, [string]$LockRoot = $InstallDir)
+    param([string]$Scope, [int]$TimeoutSeconds = 20, [string]$LockRoot = $InstallDir, [switch]$RequireGlobal)
     $identity = [IO.Path]::GetFullPath($LockRoot).TrimEnd('/\')
     if ($env:OS -eq 'Windows_NT') { $identity = $identity.ToLowerInvariant() }
     $sha = [Security.Cryptography.SHA256]::Create()
@@ -2670,7 +2670,7 @@ function Enter-IndexStampLock {
     try {
         $stampMutex = New-IndexMutex -Name $stampMutexName
     } catch [System.UnauthorizedAccessException] {
-        if ($env:OS -ne 'Windows_NT') { throw }
+        if ($env:OS -ne 'Windows_NT' -or $RequireGlobal) { throw }
         Write-Warn "Global $Scope mutex creation denied -- using Local; cross-session serialization is unavailable"
         $stampMutex = New-IndexMutex -Name $stampMutexName.Replace('Global\', 'Local\')
     }

@@ -86,6 +86,7 @@ $PluginDir = '{pkg}'
 $LocalBin = '{tmp_path / "bin"}'
 $LinkDir = $VenvDir
 $LinkPython = $VenvPython
+$script:UvCommand = 'fixture-uv'
 function Ensure-Uv {{ param($InstallRoot) return 'fixture-uv' }}
 function Write-Warn {{ param($Msg) [Console]::Error.WriteLine($Msg) }}
 function uv {{ throw 'forbidden raw uv' }}
@@ -100,8 +101,8 @@ function Get-ActivationRole {{ return 'client' }}
 function Resolve-Zdd {{ return '{pkg}' }}
 function Resolve-VendoredLib {{
     param($LibName)
-    if ($LibName -eq 'dropin-registry') {{ return '{pkg}' }}
-    return $null
+    if ($LibName -in @('zdd', 'agent-procutil', 'single-instance-lease', 'update-driver', 'dropin-registry')) {{ return '{pkg}' }}
+    throw "unexpected fixture dependency lookup: $LibName"
 }}
 function Remove-ConsoleTrampolines {{ param($VenvDir) }}
 function Get-VersionedCurrent {{ return '' }}
