@@ -59,3 +59,10 @@ Source merge, containing release, installed selection, required service
 readiness and affected-host recovery are separate facts. Retain the parent
 tracker across partial slices. No record here authorizes host rollout, new
 capacity, authentication, process cleanup or a broader support-floor change.
+
+## Selected case outcomes
+
+| Case | Source and release | Qualified consumer boundary | Remaining acceptance |
+|---|---|---|---|
+| U8 | #10398 merged as `fbcbf22b0ef518519daf67f865a2f9b551f7af89`; containing release #10430 verified with matching planner bytes. | 257 focused passes/three platform skips; two additional real outer collected-update/production Codespaces cases prove repair, current repeat and failed incoming preservation. | Publish the joined acceptance packet; repository-shell fresh bootstrap, other production installers and required serving state are not implied. |
+| U9 | #10426 merged as `8d71dd2f275c3289801767440a0adef0b2abf162`; containing release pending. | 141 focused passes/twelve platform skips plus four native completion/publication controls and the two joined outer-consumer cases; real disposable venv, producer and generated CLI. | Publish the joined packet and observe containing release; native macOS/Bash 3.2 and live feed/service/affected-host lanes remain unperformed. |
