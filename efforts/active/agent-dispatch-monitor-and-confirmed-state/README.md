@@ -462,11 +462,19 @@ restoration of historical terminal enums follows.
       native cleanup custody and exact recovery-reset prerequisites.
       This source item does not close readiness, same-native rejection,
       non-circular decline, participating-writer or installed/native qualification.
-- [ ] Land the bounded [retained submission preparation source](journal/2026/11.04-submission-preparation.md):
+- [x] Land the bounded [retained submission preparation source](journal/2026/11.04-submission-preparation.md)
+      in [#10450](https://github.com/ThomasMichon/copilot-extensions/pull/10450),
+      merged as `1553c61c05` after current-head independent approval and required CI:
       exact proposed result/reference, current workspace/native and original
       request custody, actionable blockers and rollback-safe completion refusal.
       Provider observation, guarded submission, caller migration and rejected
       resubmission remain separate gates; ordinary activation stays disabled.
+- [ ] Land the bounded [nonfinalizing Worktrees readiness source](journal/2026/11.04-nonfinalizing-readiness.md),
+      retaining only the exact stored own-task responsibility while checking
+      normal preservation, fresh PR state and actual committed/dirty content.
+      Keep normal finalization blocked by that claim. Negotiated callers,
+      queue advancement, manual/absent-worktree applicability and installed/native
+      qualification remain separate gates.
 - [x] Land read-only [task-obligation provider evidence](journal/2026/11.03-task-obligation-provider.md)
       in [#10365](https://github.com/ThomasMichon/copilot-extensions/pull/10365),
       merged as `e9c3c3f9bd` after exact-head approval and required CI.

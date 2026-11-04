@@ -104,6 +104,48 @@ queue transaction, task-release operation or proof that the runner exited.
 Task release belongs to the coordinator's separately fenced transaction;
 physical retirement remains with its existing owner.
 
+## Internal nonfinalizing readiness
+
+`dispatch_worker_readiness.observe_ready` is a source-only expansion for an
+active allocator-created Linux/WSL workspace. It is not exposed by the CLI,
+advertised by either version-1 descriptor, or consumed by ordinary Dispatch
+submission. It never calls finalization, saves a record, settles a claim,
+changes task state or retires a process.
+
+The observer requires the original creation nonce, native head revision and
+exact retained task callback reference. It checks the actual managed checkout
+and reuses own-worker allocation, native-source and preservation admission.
+Only one actual stored, canonical, bound version-2 task relationship can be
+excepted: its task, original queue, audited assignment, request, creator and
+worker must agree with the protected reference. Normal finalization still
+blocks this same claim. Other unsettled claims, unknown metadata and offered
+handoffs remain blocking; even PR claims need settlement by their normal owner.
+
+Every tracked PR is freshly read through the configured authority, including
+locally cached merges. An open, unmerged, incomplete or unobservable PR blocks.
+Fresh merged heads feed the existing per-branch committed-content boundary
+check without modifying persisted PR metadata. With no tracked PR, the actual
+head and tracked worktree branch must be ancestors of the configured published
+base. This conservative ancestry proof does not accept an untracked squash or
+patch-equivalent publication. No fetch, probe commit, source repair or automatic
+publication is performed. Inherited Git repository/index/configuration selectors
+refuse before the existing merge-boundary probes; observation does not alter
+process-global environment.
+
+The observer rechecks custody, clean checkout and local branch/remote-ref
+identity before returning. `own_caller=True` additionally requires the actual
+invoking native process and cwd both before and after the content observation.
+Independent observation does not require the observer to impersonate that
+process. Neither form proves runner exit or freezes arbitrary out-of-band
+filesystem writes. Queue advancement must separately bind a new observation
+to its retained preparation outside the SQLite write transaction, then recheck
+task admission and ownership inside that transaction.
+
+Focused source controls are in `tests/test_dispatch_worker_readiness.py`.
+Negotiated transport/caller support, manual or absent-worktree applicability,
+Windows/native qualification, rejected-worker recovery and decline ordering
+remain pending. The ordinary assignment writer remains disabled.
+
 ## Remaining integration and validation
 
 This provider expansion does not apply exclusions, requeue a task or retire a
