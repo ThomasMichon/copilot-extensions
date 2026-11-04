@@ -142,12 +142,20 @@ identified otherwise; this study does not independently verify them.
 - **#3657 - supervised remote worker integration; 5 comments.** Credit the
   revised claim-ref-first ownership resolution, reverse join of venue rows,
   provider submenu, summaries/actions/steering, caller-model mirroring and
-  durable supervisor discovery. Preserve capability-honest Inspect that does
+  durable supervisor discovery. Keep the summary a pure read with no SSH and
+  honest blank degradation when Bridge is unavailable. Resolve an explicit
+  effort's actual driving worktree from its qualified outbound claim; cached
+  provider-row joins do not prove fresh authoritative claim/session identity.
+  Preserve the revised venue-row action design rather than reviving per-worktree
+  actions, and capability-honest Inspect that does
   not displace the Picker, worker-bound message/steer/optional interrupt,
   Watch and Show-venue navigation, actual
   claims/session/explicit-effort identity and Container enrichment
   consistency. Safe missing-session refusal is not successful delivery;
-  general Bridge UI is not a bound Watch. Retain successor rediscovery,
+  general Bridge UI is not a bound Watch. Retain Container/SSH outbound-claim
+  journaling on detached connect and the SSH venue view as explicit remaining
+  producer/presentation capabilities, not merely identity/navigation details.
+  Retain successor rediscovery,
   reattach and watch continuity, plus legitimate provider rescue/lifecycle
   differences. The original contributor explicitly kept this canonical
   integration open; no successor custodian or accepted receiver is named.
