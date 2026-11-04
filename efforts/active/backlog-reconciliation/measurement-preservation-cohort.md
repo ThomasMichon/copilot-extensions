@@ -18,8 +18,8 @@ One protected message relation and three protected description relations
 remain withheld before rendering. Retrieval scores, prior invalidations,
 unrelated candidates and the held member's row are unchanged.
 
-No whole current receiving ROOT, mandatory annex/history, standing vision,
-CI result or native execution was qualified. Product-source inspection is
+No complete current receiving ROOT/mandatory-annex/history package, standing
+vision, CI result or native execution was qualified. Product-source inspection is
 limited to #6026's two complete functions at the fixed pin below, not an
 entire module or the other six implementations. Historical delivery and
 validation reported in discussions remain attributed historical evidence.
@@ -204,9 +204,10 @@ recovery and durable push debt.
 
 Acceptance retains 10,000 historical directories with ONE changing active
 source, bounded subprocess/metadata counts and no per-directory full-offset
-pipeline. A second unchanged pass reads zero bytes and does not rescan
-unrelated history. Cover a new session, truncation, replacement, huge partial
-line, failed push, owner replacement/locks, whole-line continuation, RESET
+pipeline. A second unchanged pass transfers zero transcript payload bytes and
+does not rescan unrelated history. Cover a new session, truncation,
+replacement, huge partial line, failed push, owner replacement/locks,
+whole-line continuation, RESET
 and conditional upload; real shell round trips and continuation/RESET/debt
 fixtures remain. Workload content is synthetic, not actual transcripts.
 
@@ -228,6 +229,15 @@ owners retain files; incremental/whole-line/conditional-debt gains are positive,
 not newly measured savings. Mirror/index metadata is not telemetry content or
 a competing transport. Next research distinguishes actual active/quiet discovery
 from merely linearized offset lookup.
+
+The first review caught an accidental zero-read strengthening. A separate
+whole read of the 8,128-character [S4 transcript contract](../producer-work-reuse/transcripts.md)
+at `becc1eae724aeb717e4aba941704a71f0c6b406a` confirms bounded continuity
+checks remain permitted. The ordinary no-discovery-due unchanged pass sends
+zero transcript payload bytes and starts no push; nonzero control-envelope
+bytes are reported separately. Due pages and their full-cycle catch-up bound
+remain in the complete fixed 600-second workload. This is a fixed design
+contract read, not implementation, native qualification or whole-home intake.
 
 ## Independent completed-work comparisons
 
