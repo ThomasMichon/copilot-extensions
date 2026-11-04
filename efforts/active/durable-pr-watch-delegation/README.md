@@ -6,6 +6,10 @@
 - **Created:** 2026-10-09
 - **Status:** Active
 - **Vision:** `visions/plugins/agent-dispatch/README.md` / `hibernate-the-wait`; `visions/plugins/agent-worktrees/pull-requests/README.md` / `durable-shared-pr-transition-subscriptions`; `visions/plugins/agent-pull-requests/README.md`; `visions/machine-fleet/README.md` / `single-operator-fleet`
+- **Author-publication intent:** `agent-pull-requests` vision /
+  `complete-author-publication-and-metadata`,
+  `delegated-source-with-preserved-custody` and
+  `one-supported-workflow-in-consumer-guidance`
 - **Umbrella issue:** #6007
 - **Sub-issues:** #6286 (PR-owner installation-cell adoption); #7188 (first-class PR service and fleet deployment)
 
@@ -32,6 +36,7 @@ native/fleet switch alone does not deliver this service intake model.
 |-------------|---------------------|-------------|
 | Delegation driver | Proposal, implementation, validation, PR stewardship, deployment | This effort's source worktree and linked issue |
 | PR-service plan steward | First-class plugin/service and fleet-consumer scope amendment, review and integration | Separate managed planning worktree; #7188 |
+| Author-publication plan steward | Bounded author-publication proposal and vision amendment only | Public coordination issue #6007; existing runtime owners retained |
 
 ## Coordination
 
@@ -93,6 +98,10 @@ integration responsibility. Provider/inventory, credential, publication/claim
 and reviewer task owners remain unchanged; this is not a new generic producer
 framework, fleet controller or permission to activate a live backend.
 
+The [author-publication amendment](author-publication.md) refines the existing
+checkout-free/client-convergence lane. Its steward owns planning only; Worktrees
+publication/claim, #7051 conformance and #7188 service custody remain unchanged.
+
 ## Context
 
 The delegation implementation was split out of #5701 after review identified
@@ -125,6 +134,10 @@ existing PR-watch service; it does not introduce a parallel watch owner,
 fleet controller or credential issuer.
 
 ## Request
+
+The additional author-publication request is captured in public-safe form in
+[the bounded amendment](author-publication.md#request-and-authority).
+Its planning-only authority does not change the earlier grants or holds below.
 
 Operator continuation, verbatim:
 
@@ -565,6 +578,19 @@ not silently enlarged into presentation or migration custody.
 No implementation, account/credential use, tests, native/model/host probe, install,
 runtime update, shared-resource operation or deployment is authorized by this checklist.
 
+### Author publication and metadata convergence
+
+The [bounded amendment](author-publication.md) captures the public-safe request,
+credited baseline, unchanged owners and agent-recommended implementation.
+It extends the following checkout-free lane, not the fleet deployment scope.
+
+- [ ] Complete [A0: contract and target policy](author-publication.md#a0---contract-and-target-policy).
+- [ ] Complete [A1: policy-qualified foreign creation](author-publication.md#a1---policy-qualified-foreign-creation), retaining caller claims and delegated publication checks.
+- [ ] Complete [A2: verified author metadata](author-publication.md#a2---verified-author-metadata), including exact descriptions, reviewers and bidirectional work-item links.
+- [ ] Complete [A3: delegated source publication](author-publication.md#a3---delegated-source-publication) through the existing source-control owner.
+- [ ] Complete [A4: one documented front door](author-publication.md#a4---one-documented-front-door) across generic guidance and consumer adapters.
+- [ ] Complete [A5: qualification and adoption](author-publication.md#a5---qualification-and-adoption), with source, release and authorized installed acceptance distinguished.
+
 ### Direct checkout-free operation and inherited ADO matrix from #2700/#2881
 
 <!-- backlog-reconciliation:7556:transfer:2700:to:efforts/active/durable-pr-watch-delegation/README.md -->
@@ -750,6 +776,13 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [ ] Complete the author-publication amendment's
+  [validation matrix](author-publication.md#validation-agent-recommended):
+  caller/target isolation, delegated evidence and source races, exact metadata,
+  partial-effect recovery, source-publication policy, observation continuity,
+  actual consumer routing and separate native/live/installed evidence tiers.
+  Preserve every existing acceptance row and current owner.
+
 - [ ] Resolve the caller-driven backend, exact-set and reviewer-selection
   [validation contract](caller-driven-subscriptions.md#validation-agent-recommended)
   through actual author and reviewer consumers. A static configured-target
@@ -826,6 +859,20 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-03 - Propose bounded author-publication convergence
+
+- Extended the existing checkout-free/client-convergence lane rather than
+  opening another PR campaign or watcher. The public-safe request and
+  agent-recommended plan are in [author-publication.md](author-publication.md).
+- Credited existing foreign already-pushed creation, label repair, native
+  observation, replies, requeues and durable subscriptions. The remaining
+  proposal covers delegated publication-check qualification, metadata-only
+  repair, adopted-workspace source publication and consistent consumer routing.
+- Reviewed intent is the only requested delivery in this amendment. Existing
+  runtime reservations, publication/claim authority, #7051 conformance and
+  #7188 service ownership remain unchanged; implementation and rollout are
+  not authorized or claimed complete.
 
 ### 2026-10-31 - Accept the caller-driven registration proposal
 

@@ -3,7 +3,7 @@
 - **Subject:** The first-class pull-request plugin and independently operable PR service.
 - **Scope:** leaf (child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-31
+- **Last revised:** 2026-11-03
 - **Reality docs:** [PR plugin](../../../plugins/agent-pull-requests/README.md)
 
 ## Purpose & Intent
@@ -57,6 +57,24 @@ Independent clients register durable transition criteria and deadlines while
 sharing observation for an authorized target/account scope. Increasing
 subscriber count does not require one polling or wait process per subscriber.
 The registrar owns PR subscriptions, not a replacement task queue or fleet store.
+
+### complete-author-publication-and-metadata
+
+Authors create PRs and repair their metadata through the same shared domain
+surface used for status, discussion and observation. Full descriptions,
+requested expert reviewers, work-item relationships and provenance labels
+retain their intended meaning and are verified against authoritative provider
+state. Metadata repair does not require another source push or a duplicate PR,
+and preserves unrelated metadata and other reviewers' state.
+
+### delegated-source-with-preserved-custody
+
+A source-owning worker and a publication-owning caller can cooperate without a
+local target checkout at the caller. Their source identity, target repository,
+validation evidence, repository policy and credential scopes remain explicit
+and distinct. Worktrees retains source-control and resource obligations;
+delegation neither waives publication checks nor turns a configuration export
+into ownership or authority.
 
 ### caller-driven-backend-connections
 
@@ -157,6 +175,21 @@ refreshes action-specific checks, retains confirmed and unknown outcomes and
 reconciles before retry; it never invents atomic multi-action or head-conditional
 guarantees. Completion settings, other reviewers' state, caller policy and
 independent finding checks retain their existing owners.
+
+### one-supported-workflow-in-consumer-guidance
+
+Generic guidance and repository-specific consumers direct author publication,
+metadata repair, status and waiting through the supported PR-domain contract.
+Compatibility helpers compose or forward that contract rather than requiring
+agents to select another forge client. Repository-specific content supplies
+policy and evidence, not a parallel publication or polling implementation.
+Missing capabilities and unqualified installations remain explicit rather
+than authorizing a raw-backend workaround.
+
+Author mutations distinguish confirmed creation, persisted metadata and
+unresolved effects. Recovery keeps the existing PR identity and reconciles
+uncertainty before retrying; transport success alone is not proof of exact
+description storage, complete work-item relations or an accepted publication.
 
 ## Non-Goals / Boundaries
 
