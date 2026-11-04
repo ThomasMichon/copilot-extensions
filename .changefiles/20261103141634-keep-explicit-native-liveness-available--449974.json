@@ -1,0 +1,9 @@
+{
+  "comment": "Keep explicit native liveness available during Git observation contention and distinguish busy observation from cleanup",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
