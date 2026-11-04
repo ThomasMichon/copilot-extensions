@@ -59,6 +59,11 @@ with that name is neither adopted nor hidden. Fleet health excludes only a
 positively identified collection namespace, so retained revisions do not consume
 the machine-directory scan budget. Ordinary session pushes cannot enter that
 owned namespace.
+Namespace claiming and potentially overlapping ordinary publication share a
+domain guard held through the complete ordinary push. Native alias checks
+reject case-insensitive equivalents without hiding genuinely distinct
+case-sensitive machine directories. Non-directory entries are not probed as
+collection namespaces during fleet discovery.
 
 Only the verified `agenda.sqlite3` and original `manifest.json` are collected.
 Every new database, metadata and reference file requests mode `0600` in the

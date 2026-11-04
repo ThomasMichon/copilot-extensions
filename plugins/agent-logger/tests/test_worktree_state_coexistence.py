@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import os
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 import stat
+from threading import Event, current_thread
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
@@ -82,3 +86,86 @@ def test_session_push_cannot_enter_an_owned_typed_namespace(packet: Packet, mach
     pushed = target.push(source, machine)
     assert not pushed.ok and "typed-state namespace" in pushed.detail
     assert not (target._root() / namespace.DIRECTORY / "sync-meta.json").exists()
+
+
+def test_ordinary_publication_and_collection_claim_share_one_domain_guard(
+    packet: Packet, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, target, _, source = packet
+    entered, attempted, release = Event(), Event(), Event()
+    real_push, real_lock = target._push_sessions, namespace.sync_lock
+
+    def paused_push(*args: Any, **kwargs: Any) -> Any:
+        entered.set()
+        assert release.wait(5)
+        return real_push(*args, **kwargs)
+
+    @contextmanager
+    def observed_lock(*args: Any, **kwargs: Any) -> Iterator[bool]:
+        if current_thread().name.startswith("collector"):
+            attempted.set()
+        with real_lock(*args, **kwargs) as acquired:
+            yield acquired
+
+    monkeypatch.setattr(target, "_push_sessions", paused_push)
+    monkeypatch.setattr(namespace, "sync_lock", observed_lock)
+    with (
+        ThreadPoolExecutor(max_workers=1, thread_name_prefix="publisher") as publisher,
+        ThreadPoolExecutor(max_workers=1, thread_name_prefix="collector") as collector,
+    ):
+        ordinary = publisher.submit(target.push, source, namespace.DIRECTORY)
+        try:
+            assert entered.wait(5)
+            typed = collector.submit(collect, packet)
+            assert attempted.wait(5)
+        finally:
+            release.set()
+        assert ordinary.result(timeout=5).ok
+        with pytest.raises(ValueError, match="unowned"):
+            typed.result(timeout=5)
+    assert set(target.fleet_sync_status().machines) == {namespace.DIRECTORY}
+
+
+def test_native_case_distinct_machine_root_remains_visible_beside_typed_state(packet: Packet) -> None:
+    _, target, _, source = packet
+    collect(packet)
+    alternate = "Worktree-State"
+    if (target._root() / alternate).exists():
+        pytest.skip("fixture filesystem is case-insensitive")
+    assert target.push(source, alternate).ok
+    assert set(target.fleet_sync_status().machines) == {alternate}
+
+
+def test_native_case_alias_is_refused_before_any_session_publication(
+    packet: Packet, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, target, _, source = packet
+    collect(packet)
+    real_samefile = os.path.samefile
+
+    def case_alias(first: Any, second: Any) -> bool:
+        if Path(first).name == "Worktree-State" and Path(second).name == namespace.DIRECTORY:
+            return True
+        return real_samefile(first, second)
+
+    monkeypatch.setattr(os.path, "samefile", case_alias)
+    result = target.push(source, "Worktree-State")
+    assert not result.ok and "typed-state namespace" in result.detail
+    assert not (target._root() / "Worktree-State").exists()
+
+
+@pytest.mark.parametrize("kind", ["file", "symlink"])
+def test_non_directory_namespace_entry_cannot_discard_healthy_fleet_results(
+    packet: Packet, kind: str,
+) -> None:
+    _, target, _, source = packet
+    machine = target._root() / "worker"
+    machine.mkdir(parents=True)
+    write_sync_meta(machine, "worker", "local", "ok", 1)
+    entry = target._root() / namespace.DIRECTORY
+    if kind == "file":
+        entry.write_bytes(b"not a collection directory")
+    else:
+        entry.symlink_to(source, target_is_directory=True)
+    fleet = target.fleet_sync_status()
+    assert fleet.error == "" and set(fleet.machines) == {"worker"}
