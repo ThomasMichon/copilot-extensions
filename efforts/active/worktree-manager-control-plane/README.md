@@ -2204,6 +2204,50 @@ local AND global Validation, Coordination and Journal plus actual receiving
 readback precede any separate #4304 supersession. This amendment transfers no
 claim, appoints no executor and grants no adoption, implementation or rollout.
 
+<!-- backlog-reconciliation:7556:qualified-sixteen:4117-4437:Plan -->
+
+### Proposed finite preview and canonical Finalize consumer contracts
+
+_Agent-recommended additive tracking proposal. #4117 is a conditional
+Phase 4a public-engine/Manager consumer alignment, not a transfer of the
+standalone engine. #4437 is the distinct Phase 3 menu/action contract.
+Original Request, status, participants, checked credit and first gates stay._
+
+- [ ] **M4117-P1:** Retain the exact admitted `embody --new --dry-run`
+  preview with ZERO checkout, branch, tracking record, claim record, staged
+  seed, process/mux or runtime/plugin activation effects, including other
+  creation effects. Late no-spawn or refusal on a different front door is
+  not this no-allocation result.
+- [ ] **M4117-P2:** Resolve/report the intended plan BEFORE consequence;
+  never create and delete a worktree to simulate preview. Preserve truthful
+  unresolved/planned values and explicit validation/error/capability results
+  where facts cannot be resolved without allocation.
+- [ ] **M4117-P3:** Preserve valid existing-target/native previews and
+  actual execution semantics. Credit earlier source-only/policy refusals,
+  profile/no-mux suppression and #5715's distinct JSON preview boundary
+  without declaring the admitted new-worktree path complete.
+- [ ] **M4117-P4:** Keep planning/allocation with the actual public-engine
+  admission/creation owner and compose its existing consumer seam. Manager
+  installation, interactive New readiness or unrelated Phase 4a completion
+  is not a prerequisite for the standalone engine's pure preview.
+- [ ] **M4437-P1:** Offer canonical safe/refusing Finalize on EVERY supported
+  worktree row; BOTH menu presentation AND actual invocation must agree,
+  rather than limiting the route to conversation/unused buckets or changing
+  visibility alone.
+- [ ] **M4437-P2:** Explain unmerged/outstanding-objective/work/claim
+  refusals and expose the existing cleanup/claims/obligations help route.
+  An operator should follow dependencies, not substitute force cleanup.
+- [ ] **M4437-P3:** Reuse the canonical confirmation-gated asynchronous
+  Finalize path and result/progress handling. Reconcile the original
+  HEAD-ancestor-or-self-of-default AND no-outstanding-claims safety
+  explanation with the actual current canonical content/default-branch/
+  PR/obligation/owner policy. Do not reimplement a simplified historical
+  predicate, weaken current guards or add an unrelated new ancestry gate.
+- [ ] **M4437-P4:** Retain managed-child/controller, provider-capability,
+  live/unknown and source/resource boundaries. No hidden direct deletion,
+  backend bypass, new cleanup authority or whole-Manager/every-host native
+  programme follows from this finite menu/invocation proposal.
+
 ## Validation Plan
 
 - [ ] G1: Resolve EVERY directly retained #4096 original
@@ -2334,7 +2378,35 @@ rollout or unrelated parent completion. Each case preserves its original
 alternatives, refusal/compatibility conditions and source/consumer/native/build
 tiers without imposing every-host or native-on-every-leaf requirements.
 
+<!-- backlog-reconciliation:7556:qualified-sixteen:4117-4437:Validation-Plan -->
+
+- [ ] **M4117-V1:** Resolve M4117-P1 through P4 at the ORIGINAL finite
+  engine-owned preview/admission and actual consumer tier: all SEVEN effect
+  categories remain unchanged, planning precedes allocation, unresolved
+  facts are honest, and admitted new/existing-target plus refused/
+  unsupported cases preserve valid execution. No create-then-delete,
+  broad allocator redesign, Manager dependency or unrelated startup/native
+  prerequisite is added.
+- [ ] **M4437-V1:** Resolve M4437-P1 through P4 through BOTH actual menu
+  construction and canonical invocation/refusal/help across original row
+  classes, including dirty/unmerged/claimed, conversation/unused and real
+  managed/controller/provider refusal. Preserve confirmations, cancellation,
+  results, exact claim detail and existing ground guards. Prior extraction,
+  parity or executor delivery is credit, not every-row acceptance; no
+  Finalize or cleanup operation is authorized by this proposal.
+
 ## Coordination
+
+<!-- backlog-reconciliation:7556:qualified-sixteen:4117-4437:Coordination -->
+
+The proposed #4117/#4437 finite consumer rows retain the SAME Manager
+presentation/action, public-engine/admission/allocator, finality/controller/
+provider and source/resource custodians. Existing Participants, overlapping
+claims, phase assignments, standalone/plugin independence and dated
+Journal/open bounded-source process remain. This is planning only, not a new
+implementation appointment, source/resource transfer or blanket ACK gate.
+Normal review, actual complete delivery and current full receiving readback
+remain separate from any source-specific judgment.
 
 The direct #4304 reporting contract continues through this SAME Active ROOT's
 Plan, local AND actual global Validation, Journal and existing open bounded-
@@ -2436,6 +2508,22 @@ No product, native, credential, host, process, service or resource operation
 is authorized by tracker consolidation.
 
 ## Journal
+
+<!-- backlog-reconciliation:7556:qualified-sixteen:4117-4437:Journal -->
+
+### 2026-10-29 - Proposed finite preview and canonical-action acceptance
+
+- Added direct unchecked #4117/#4437 Plan, actual global Validation and
+  continuing custody after whole current contract and complete fixed-ROOT
+  qualification. All original rows, check states, Request, status and
+  history remain. #4117 keeps conditional engine-owned no-allocation
+  alignment; #4437 keeps BOTH menu and invocation/refusal/help.
+- Existing creation/recovery/parity/executor foundations remain credited.
+  #4095's actual background workspace fallback and #4101's ground runtime
+  triage remain independent; this root receives neither by theme.
+  No preview/create/Finalize/cleanup, implementation, native result,
+  transfer or source disposition occurred. Review, actual delivery and
+  complete current readback remain outstanding.
 
 ### 2026-10-28 - Direct retained adoption reporting
 

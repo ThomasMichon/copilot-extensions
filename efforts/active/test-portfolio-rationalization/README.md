@@ -55,6 +55,15 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
+<!-- backlog-reconciliation:7556:qualified-sixteen:4128:Coordination -->
+
+The proposed #4128 family retains its finite filesystem-registry owner and
+the existing Worktrees/registry/installation-context/fixture/runner/source
+custodians. #1303 retains broad containment; closed #1906 is the distinct
+historical persistent OS-environment mechanism, not a live claim or another
+transfer. Existing Phase 4 wave/Phase 7 intake, all budget/effect/storage
+limits and actual source/resource holds remain; no executor is appointed.
+
 The proposed finite #1012 conditional-field synchronization family below uses the
 existing Phase 4 Worktrees/Manager wave and Phase 7 intake, not a new timing
 campaign. Preserve the actual form/test, production-Picker, portfolio and
@@ -931,6 +940,37 @@ current readback remain outstanding.)_
   Preserve current containment, admission and owning cleanup; this document
   authorizes no import, collection, test, native interaction or host action.
 
+<!-- backlog-reconciliation:7556:qualified-sixteen:4128:Plan -->
+
+### Proposed finite all-authority filesystem-registry isolation
+
+_Agent-recommended direct retention through the existing Worktrees wave and
+domain intake. Existing checked isolation foundations remain credit; this
+is not a finding that every test is uncontained or a live escape occurred._
+
+- [ ] **T4128-P1:** Keep temporary-only resolution AND ACTUAL writes for
+  BOTH `projects.yaml` and `repos.yaml` under every supported registry
+  authority, including explicit validated installation-context `pluginRoot`
+  and inherited overrides. Synthetic context stays runner-owned; a valid
+  live context must not silently override isolated HOME.
+- [ ] **T4128-P2:** Cover first collection/import/session-fixture work
+  before function-autouse isolation, ordinary tests, workers/subprocesses
+  and teardown. Credit real legacy HOME/AGENT_HOME/USERPROFILE/Path.home
+  isolation, #6874's actual-writer correction and #7483's early session-seed
+  protection. A literal session fixture is a suggested mechanism, not
+  justification to discard correct per-test isolation.
+- [ ] **T4128-P3:** Exercise actual reconcile/prune/write for BOTH registries
+  with controlled hostile SYNTHETIC ambient/context configuration. Observe
+  temporary outputs, unchanged synthetic outside state, exceptional
+  setup/teardown, truthful environment/config restoration and subprocess
+  propagation. Never use a real registry or overwrite concurrent operator
+  state as fixture cleanup.
+- [ ] **T4128-P4:** Preserve all original assertions, effect/item/group/
+  plugin/storage limits and cheapest faithful unit/contained/periodic/native
+  tiers. Persistent User/Machine environment effects remain separately
+  owned. No blanket context-disabling workaround, real OS mutation or
+  whole-portfolio prerequisite substitutes for this finite authority proof.
+
 ## Validation Plan
 
 - [ ] G5921: Resolve EVERY direct #5921 P1-P6, V1-V5 and C1-C3 clause in the Phase4 finite clean-room verdict family at its ORIGINAL source/API consumer tier: actual Python AND Python-less version/schema/evidence-complete reduction and real caller shape, explicit malformed/incomplete/unjudged NON-PASS, correct valid control/classified-jam results/exits, literal-mode separation and source-safe diagnostics. Preserve all incumbent Plan/Validation, OPEN #1303, same owners and independent #5922/#8511/#4312/#688/#1475 gates. Administrative intake is not a reducer fix or executed evidence; no live box/model/all-host/native programme or unrelated whole-portfolio prerequisite is added, and this does not waive the ROOT's own whole completion gate.
@@ -1029,6 +1069,19 @@ current readback remain outstanding.)_
   executed proof; unrelated portfolio work is not an added finite-case
   prerequisite and this ROOT's own completion gate remains unchanged.
 
+<!-- backlog-reconciliation:7556:qualified-sixteen:4128:Validation-Plan -->
+
+- [ ] **T4128-V1:** Resolve ALL FIVE refined #4128 authority, first-touch,
+  actual-writer, restoration and separate-OS-mechanism clauses through
+  T4128-P1 through P4: BOTH filesystem registries AND explicit installation
+  contexts/overrides, early collection/import/session, ordinary functions,
+  workers and failure/teardown. Prove real temporary writes, unchanged
+  synthetic outside state and truthful restoration/propagation. Preserve
+  existing autouse/writer/session-seed credit and finite #4128 ownership;
+  temporary HOME, generic checked root-isolation, collection or one seed
+  family is not whole all-authority proof. No source transfer, live escape,
+  native-every-host or new blanket ACK is inferred.
+
 ## Proposal
 
 Approve the vision, framework, and phased campaign as the repository's
@@ -1037,6 +1090,21 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+<!-- backlog-reconciliation:7556:qualified-sixteen:4128:Journal -->
+
+### 2026-10-29 - Proposed finite filesystem-registry authority qualification
+
+- Added direct unchecked #4128 Plan, actual global Validation and continuing
+  custody after whole current contract and complete fixed-ROOT qualification.
+  Both filesystem writers, explicit contexts, early/session/worker/teardown
+  and restoration remain distinct from legacy HOME and one seed family's
+  real delivered protections.
+- Preserved #1303's broad scope, finite #4128 ownership, #1906's separate
+  historical OS mechanism and every incumbent checked family/first gate.
+  No import, collection, test, real registry/environment action,
+  implementation or source disposition occurred. Normal review, actual
+  delivery and complete current readback remain outstanding.
 
 ### 2026-10-28 - Proposed finite conditional-field synchronization family
 

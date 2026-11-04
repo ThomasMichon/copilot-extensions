@@ -31,6 +31,15 @@ credential mutation or service installation is authorized by this document.
 
 ## Coordination
 
+<!-- backlog-reconciliation:7556:qualified-sixteen:3979:Coordination -->
+
+The proposed finite #3979 headless/provider-miss family retains the actual
+local Vault/provider credential custodian and optional standalone,
+transport, broker, browser and native-interaction owners. `patient-dial`
+still owns planning publication ONLY; P0 design/operator review and
+implementation-owner admission remain pending. A Draft plan neither grants
+unlock permission nor transfers master material, credentials or resources.
+
 - **Topology:** one planning PR, then bounded per-slice PRs; source branches
   target `dev` and follow normal review and CI.
 - **Host (owns PRs):** `patient-dial` owns only this planning publication.
@@ -166,6 +175,33 @@ is a useful start, not a narrowing of the complete effort.
   outcomes separately. Close or transfer remaining tracked obligations before
   declaring the effort Done; no phase or PR alone satisfies that gate.
 
+<!-- backlog-reconciliation:7556:qualified-sixteen:3979:Plan -->
+
+### Proposed finite headless provider-miss transaction contract
+
+_Agent-recommended P1/local transaction clarification. This effort stays
+Draft; no runtime, interaction, credential or implementation admission._
+
+- [ ] **U3979-P1:** Keep provider-available, interactive controlling-terminal
+  SSH and fully headless non-WSL SSH/provider-miss branches distinct.
+  Provider-first and real inline TTY unlock are bounded credit;
+  unavailable/unlocked daemon cases are not the reachable locked/no-provider
+  miss.
+- [ ] **U3979-P2:** Preserve authorized NONINTERACTIVE unlock OR a mechanism
+  reaching the operator for the original headless case. Headlessness is not
+  consent; broker/provider integration stays optional for standalone use
+  and the actual Vault custodian retains verification.
+- [ ] **U3979-P3:** Make provider miss/error/needs-unlock actionable at the
+  originating CLI rather than silently returning failure after a boolean
+  helper. Typed daemon results are credit, not proof the CLI conveyed
+  explanation or reached the operator. Preserve useful next action without
+  exposing or relocating master material.
+- [ ] **U3979-P4:** Preserve narrowly owned local/provider/browser/native
+  transactions, redacted input and honest unavailable/refused controls.
+  No mandatory broker, new executor/credential grant or whole central/
+  federation/platform portfolio prerequisite is introduced for this
+  finite branch.
+
 ## Validation Plan
 
 All runtime acceptance below is **pending**, not evidence of an implementation.
@@ -183,6 +219,23 @@ The [validation matrix](validation.md) is the detailed, agent-recommended plan.
 - [ ] V10: complete vision coverage, portable platform results and separate
   source/release/installed/live completion records.
 
+<!-- backlog-reconciliation:7556:qualified-sixteen:3979:Validation-Plan -->
+
+- [ ] **U3979-V1:** Resolve U3979-P1 through P4 at the original supported
+  headless/provider/terminal consumer tier: authorized provider success,
+  controlling-terminal success, reachable locked fully headless miss and
+  unavailable/unlocked controls through the actual CLI/daemon boundary.
+  Qualify the selected original OR alternative and actionable
+  needs-unlock/error/next-action counterpart, with no secret-bearing
+  presentation. Boolean false/exit failure or invisible-dialog avoidance
+  alone is not the result; neither is a daemon-only mock.
+- [ ] **U3979-V2:** Keep Draft/P0 design and implementation-owner admission,
+  optional standalone/broker/transport and credential/native custody
+  intact. Separate source/fixture/native/installed results without making
+  every unrelated parent item a finite-case prerequisite. No real unlock,
+  operator ceremony, credential operation or policy selection is performed
+  by this planning retention.
+
 ## Proposal
 
 [Architecture](architecture.md), [validation](validation.md) and
@@ -192,6 +245,20 @@ The immediate next gate is operator design review and explicit implementation
 admission; publication alone does not start P1.
 
 ## Journal
+
+<!-- backlog-reconciliation:7556:qualified-sixteen:3979:Journal -->
+
+### 2026-10-29 - Proposed finite provider-miss acceptance
+
+Added direct unchecked #3979 Plan, actual global Validation and continuing
+custody after whole current contract and complete fixed-ROOT qualification.
+Provider-first/controlling-terminal improvements remain credit; fully
+headless provider miss still retains authorized unlock OR operator reach
+and actionable failure at the originating consumer. The effort remains
+Draft with all first gates and current planning-only ownership unchanged.
+No implementation, credential/native interaction, transfer or source
+disposition occurred; review, actual delivery and current readback remain
+outstanding.
 
 ### 2026-10-24 - Reviewed intent and initial proposal
 
