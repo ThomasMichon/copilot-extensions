@@ -13,6 +13,10 @@ from agent_procutil import no_window_kwargs
 from agent_bridge.creation_custody import CreationJournal, CreationRequest, legacy_creation
 from agent_bridge.db import Database, SCHEMA_VERSION
 from agent_bridge.db_adoption import open_existing_writable
+from agent_bridge.inbox_custody import (
+    schema_triggers as inbox_schema_triggers,
+    validate_schema as validate_inbox_schema,
+)
 from agent_bridge.provider_creation_launch_schema import COLUMNS, schema_triggers
 from agent_bridge.runtime_custody import RuntimeCustodyError
 from test_creation_custody import creation_request
@@ -130,12 +134,24 @@ def test_provider_migration_from_37_preserves_legacy_unknown_and_original_inputs
         tmp_db.execute_write(f"DROP TRIGGER {name}")
     for name in COLUMNS:
         tmp_db.execute_write(f"ALTER TABLE provider_embodiments DROP COLUMN {name}")
+    # Restore the pre-40 inbox guard before recreating a schema-37 database.
+    tmp_db.execute_write("DROP TRIGGER live_messages_handoff_input_immutable")
+    tmp_db.execute_write(
+        inbox_schema_triggers(exact_native=False)["live_messages_handoff_input_immutable"][1]
+    )
+    tmp_db.execute_write("ALTER TABLE live_messages DROP COLUMN exact_session")
     tmp_db.execute_write("UPDATE schema_version SET version=37")
+    columns = {row["name"] for row in tmp_db.execute_read("PRAGMA table_info(live_messages)")}
+    assert "exact_session" not in columns
+    validate_inbox_schema(tmp_db._get_conn(), exact_native=False)
     with pytest.raises(ValueError, match="current schema"):
         Database(tmp_db.db_path, read_only=True)
     migrated = Database(tmp_db.db_path)
     try:
-        assert migrated.execute_read("SELECT version FROM schema_version")[0][0] == SCHEMA_VERSION == 38
+        assert migrated.execute_read("SELECT version FROM schema_version")[0][0] == SCHEMA_VERSION
+        columns = {row["name"] for row in migrated.execute_read("PRAGMA table_info(live_messages)")}
+        assert "exact_session" in columns
+        validate_inbox_schema(migrated._get_conn())
         assert CreationJournal(migrated).read(request) == before
         rows = migrated.runtime_custody_inventory(owner)["rows"]["provider_embodiments"]
         row = next(row for row in rows if row["key_digest"] == legacy["key_digest"])
