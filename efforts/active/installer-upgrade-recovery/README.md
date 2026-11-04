@@ -697,3 +697,15 @@ through the seasoned dependency owner; UV-owned tooling outside the checkout
 preserved the source-read boundary. Required exact-head hosted CI must qualify
 the packet before this source unit can merge. These local budget failures are
 not represented as successful unit evidence.
+
+PR #10508's initial head `418da023bcc85f9189e5422040b88bc3d0efa88b`
+received actual hosted qualification in run `41912963474`: all 4,086 units
+passed in 95.477 seconds with coverage recorded once and fresh evidence
+uploaded. This is separate from the failed local Windows aggregate runs.
+The required gate remained red because this slice grew `update_cli.py` to
+1,001 lines. Moving the new pure-helper import to the normal module import
+section restores the existing 1,000-line cap without changing it or the
+decision's behavior. The module-size guard, Python lint and all eighteen new
+consumer controls pass after that correction. Current-head review and complete
+required CI still precede merge; the successful old-head unit job is not the
+new head's gate.
