@@ -67,4 +67,25 @@ capacity, authentication, process cleanup or a broader support-floor change.
 |---|---|---|---|
 | U8 | #10398 merged as `fbcbf22b0ef518519daf67f865a2f9b551f7af89`; containing release #10430 verified with matching planner bytes. Joined packet #10448 merged as `7fa780be4f7792d4453e6233a8e387b146e88750` and released through #10452. | 257 focused passes/three platform skips; two additional real outer collected-update/production Codespaces cases prove repair, current repeat and failed incoming preservation. | Repository-shell fresh bootstrap, other production installers and required serving state are not implied. |
 | U9 | #10426 merged as `8d71dd2f275c3289801767440a0adef0b2abf162`; containing release #10449 verified, Codespaces `0.5.248-dev1`. Joined packet #10448 is released through #10452. | 141 focused passes/twelve platform skips plus four native completion/publication controls and the two joined outer-consumer cases; real disposable venv, producer and generated CLI. | Native macOS/Bash 3.2 and live feed/service/affected-host lanes remain unperformed and separately owned. |
-| U10 | #10451 claimed; source review, CI, merge and containing release pending. | Seven focused native/identity controls and 234 existing preparation regressions pass. Normal preparation/register/repeat use an independent synthetic installer and actual native cwd launch; old corrupt receipt/payload bytes survive. | Native POSIX, live Copilot acquisition/hooks and installed-host rollout are unperformed; unsupported Git-metadata depth remains an actionable pre-effect failure. |
+| U10 | #10456 merged as `affb395f47114f88671c4aecd75c17b1000b74bd`; exact-source promotion 41857182391 and release #10463 verified. #10451 is closed. | Seven focused native/identity controls and 234 existing preparation regressions pass. Normal preparation/register/repeat use an independent synthetic installer and actual native cwd launch; old corrupt receipt/payload bytes survive. Canonical and materialized Bridge resolver bytes match the released source. | Native POSIX, live Copilot acquisition/hooks and installed-host rollout are unperformed; unsupported Git-metadata depth remains an actionable pre-effect failure. |
+
+## Reconciled existing construction owners
+
+The unsupported immutable-UV option correction is delivered in #9501, whose
+merge is contained in the actual qualified Dev for #10463. Its exact-head
+Windows/Linux bootstrap and UV lanes are recorded on that original PR, not
+reclassified as new executions here. Four current contained native source-build
+controls pass in 187.69 seconds with real UV and a synthetic backend. They
+exercise fresh/warm construction, leaf-only source invalidation, request-witness
+and Job-scope key stability, and meaningful build-environment invalidation.
+These are constructor consumers, not a complete ordinary suite update.
+
+#9290 retains its existing lifecycle/publication-envelope correction and the
+separate promoted-input/profile work. #9572 fixes Job-custody identity only;
+the four controls do not vary lifecycle tickets or prove the complete reported
+cache/deadline recovery. Coordination is retained in
+[comment 6635053007](https://github.com/ThomasMichon/copilot-extensions/issues/9290#issuecomment-6635053007).
+#7743/#7758/#9448 retain fresh-entry and existing-request recovery. #3004
+retains actual first-restarted-model knowledge prompting; the closed #1159
+write guard is not that acceptance. None of these owner records authorizes an
+installed retry or supersedes an open contributor implementation.
