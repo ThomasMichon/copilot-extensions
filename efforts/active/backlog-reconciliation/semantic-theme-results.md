@@ -77,7 +77,22 @@ acceptance are **not** claimed from a graph, title, list or link.
 | group-014: native CI timeout evidence | 7 admitted; 1 finite source completed; 5 tracking folds | [Test Portfolio](../test-portfolio-rationalization/README.md), existing release/fixture owners | [Seven-contract study](native-timeout-cohort.md); actual #10516 delivery and separate current judgments support five administrative supersessions, not causal repairs. #6662 remains OPEN; all 36 receiver rows, original limits, unknown causes and custody remain unchecked/unchanged. |
 | group-015: session intelligence and accounting | 6 historical; 5 admitted | Existing Session Intelligence and Large-Corpus Sync owners; five whole receiving documents read without a source/resource transfer | [Five-contract study](session-intelligence-cohort.md); eighteen whole texts, fifteen bounded comparisons and eleven complete source functions. CLOSED historical issue stays metadata-only, not an invented reference STOP. Two same-owner phase-tracking proposals have unchecked direct retention, pending reviewed delivery and separate judgments. |
 | group-018: attention and history readers | 5 admitted | Existing Bridge wait/history/event owners; eight whole home/prior-art documents distinguish scope, not a direct receiver | [Five-contract study](attention-history-cohort.md); seven whole texts, fifteen message comparisons and two current CLI functions. Inbox, archived baseline, AHP migration, truthful transport state and retrospective CLI review do not automatically accept the newer individual contracts; all five remain OPEN. |
+| group-019: native supervisor reconciliation | 5 admitted; 2 tracking folds | Actual OPEN #6137 BODY, existing supervisor/native/rollout owners | [Five-contract study](supervisor-reconciliation-cohort.md); twenty-one whole texts and fifteen bounded noncompletion relations. Two complete result/readiness families now have ten unchecked direct keeper rows; historical uncertainty and #7711/#9096 custody remain OPEN. |
+| group-020: native qualification and dependency caches | 5 admitted; 1 finite source completed | Existing test/fixture/generator owners; Test Portfolio is a candidate, not an accepted receiver | [Five-contract study](qualification-cache-cohort.md); nine whole texts and fifteen noncompletion comparisons. Independent exact source history verifies #9472's expectation repair; four sources remain OPEN with native, cache, interpreter and tamper boundaries intact. |
 | group-021: head succession | 4 | [Head Succession](../worktree-head-succession-hardening/README.md) | The home remains Draft; #84's OPEN canonical and #912's actual claim conditions survive. No automatic transfer or session operation. |
+
+### Qualification/cache core
+
+#7136, #9456, #9462, #9466 and #9472.
+
+The [five-contract study](qualification-cache-cohort.md) preserves the complete
+originals/refinements and fifteen bounded message/description comparisons.
+None of those retrieved relations proves completion. Independent source
+history instead identifies #9623's exact expected-manifest repair, preserved
+in the whole current test function and actual production manifest. Complete
+provider admission, exact-head gates and fresh source/readback checks support
+only #9472's finite COMPLETED disposition. Four sources remain OPEN; no
+native rerun, receiver acceptance, rollout or source/resource transfer follows.
 
 ### Native timeout and connection-lifetime core
 

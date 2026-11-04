@@ -231,6 +231,33 @@ checkpoint nor author eligibility, holds, requirements or source/resource custod
 
 ### Phase 2 - Continuing reconciliation
 
+The [qualification/cache study](qualification-cache-cohort.md) retains five
+whole contracts and fifteen bounded noncompletion comparisons. Actual source
+history independently identifies #9623's finite #9472 manifest-expectation
+correction; exact merged/current assertions, full provider gates and guarded
+live readback support its COMPLETED source disposition. The other four
+contracts remain OPEN, #9455 is not completed work, and no receiver or
+native/installed/custody acceptance follows. Two equal complete 15:12 PST
+scans count 1,007 whole open, 278 above 729, with 773 verified campaign
+closures. A separate excluded-origin departure supplies no credit.
+
+The [native-supervisor study](supervisor-reconciliation-cohort.md) retains
+five whole contracts, a freshly changed readiness observation and fifteen
+bounded noncompletion relations. Whole actual #6137 BODY delivery/readback
+and separate guarded judgments support #6218/#6294 tracking supersessions,
+with ten new acceptance rows unchecked. The historical keeper, explicitly
+held rollout and pending source/release lanes remain OPEN. The complete
+14:49 PST census is 1,009 whole open, 280 above 729, with 772 verified
+campaign closures; no technical, native or custody completion follows.
+
+The exact eight-document attention/history research and outcome delta merged
+in #10522 after its PR-description Documentation impact assessment was
+corrected, genuine current-head approval reported no active findings and
+required CI passed. All actual merged blobs match reviewed content; only its
+publication child finalized, retained. All 101 canonical/39 public parent
+states remain unchanged. Documentary delivery is not the fixed whole-queue
+checkpoint; continue the ranked graph and actual provider comparisons.
+
 The [attention/history study](attention-history-cohort.md) retains five whole
 originals/two refinements and fifteen message-level comparisons. Eight complete
 home/prior-art documents distinguish the Active cross-entity inbox, archived
@@ -854,6 +881,21 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [qualification/cache study](qualification-cache-cohort.md) distinguishes
+all original cache, raw-input, lifecycle-custody, exclusion and exact-manifest
+clauses. Fifteen retrieved relations remain noncompletion comparisons.
+The independently found #9472 source correction preserves the unchanged
+production manifest and routing assertions; actual provider/comment/closure
+readback is not a new native run, whole-suite acceptance or custody release.
+No remaining-source, receiver or parent check state is silently completed.
+
+The [native-supervisor study](supervisor-reconciliation-cohort.md) preserves
+all five whole contracts and fifteen comparison tiers. Two actual complete
+keeper-body deliveries/readbacks and separate guarded source dispositions
+are tracking acceptance only. All ten new rows stay unchecked; explicit
+historical OPEN, held operational rollout and pending source/release custody
+remain. No native/system or implementation result is claimed.
 
 The [native timeout/lifetime study](native-timeout-cohort.md) distinguishes
 #7820's verified finite source completion from the unresolved broader startup
