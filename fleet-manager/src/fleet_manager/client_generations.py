@@ -617,7 +617,7 @@ def _generation_root(root, identity, reservation):
                 if os.path.lexists(destination):
                     raise PlanError("client generation destination has no owned physical intent")
                 temporary = path / (".generation-" + generation + "-" + uuid.uuid4().hex)
-                temporary.mkdir(mode=0o700)
+                client_admission.private_directory(temporary)
                 client_construction._write_exclusive(temporary / _OWNER, binding)
                 client_admission._sync_directory(temporary)
                 client_admission._sync_directory(path)

@@ -17,6 +17,7 @@ import pytest
 
 import fleet_manager.client_admission as admission
 from fleet_manager.planning import PlanError, canonical
+from fleet_manager.private_state import private_directory
 from fleet_manager.release_selection import ReleaseSelection
 from test_artifact_staging import primitive as primitive, stage
 from test_client_distribution import FLAGS, run
@@ -35,7 +36,7 @@ def identity():
 
 def root_at(tmp_path):
     root = tmp_path / "private-client"
-    root.mkdir(mode=0o700)
+    private_directory(root)
     return root
 
 
@@ -53,7 +54,7 @@ def selection(fixture):
 @contextmanager
 def retained(fixture, tmp_path):
     parent = tmp_path / "private-stage"
-    parent.mkdir(mode=0o700, exist_ok=True)
+    private_directory(parent)
     context, trusted = stage(fixture, parent)
     with context as frozen:
         yield frozen, trusted

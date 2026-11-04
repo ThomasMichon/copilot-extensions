@@ -14,6 +14,7 @@ import pytest
 from fleet_manager import client_admission as admission, client_generations as generations
 from fleet_manager.__main__ import main
 from fleet_manager.planning import PlanError, canonical, digest
+from fleet_manager.private_state import private_directory
 from test_artifact_staging import primitive as primitive  # noqa: F401
 from test_client_admission import database_bytes, identity, independently_sign, retained, selection
 from test_client_construction import signed_wheel as signed_wheel, target  # noqa: F401
@@ -315,9 +316,9 @@ def test_actual_installed_console_generation_transitions(
     fixture["policy"]["keys"][0]["public_key"] = signed["public_key"]
     root = lineage_at(tmp_path)
     directory = tmp_path / "commands"
-    directory.mkdir(mode=0o700)
+    private_directory(directory)
     stage = tmp_path / "stage"
-    stage.mkdir(mode=0o700)
+    private_directory(stage)
     paths = inputs_at(tmp_path, fixture)
     console = Path(sys.executable).with_name("fleet-manager.exe" if os.name == "nt" else "fleet-manager")
     assert console.is_file(), "actual installed owner console required"

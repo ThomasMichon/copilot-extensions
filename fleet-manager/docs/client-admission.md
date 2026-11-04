@@ -94,7 +94,12 @@ read-only and does not recover or rewrite state.
 Roots and state/ownership files must be ordinary and private; files must also
 be singly linked.
 Windows validates owner/DACL grants on the root and state files, including
-inheritance-only grants that could expose subsequently created state. POSIX
+inheritance-only grants that could expose subsequently created state. New
+admission databases and client-generation metadata use the shared native
+private-state creator with explicit TokenUser ownership, including for elevated
+callers; an existing foreign path is never repaired. The caller still supplies
+an already-private root. SQLite rollback-journal creation and recovery retain
+their native behavior and the same ownership checks. POSIX
 requires current-user ownership and no group/other permission bits. These
 checks do not isolate state from a hostile process running as the same user,
 an administrator or another principal with overriding system privileges.

@@ -1,0 +1,9 @@
+{
+  "comment": "Create client admission databases and generation metadata with explicit native owner-private security.",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

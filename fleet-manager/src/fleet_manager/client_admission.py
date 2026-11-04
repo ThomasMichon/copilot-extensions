@@ -12,6 +12,7 @@ import time
 
 from . import artifact_staging
 from .planning import MAX_BYTES, PlanError, canonical, decode, identifier, integer, record
+from .private_state import create_private_file, private_directory
 from .private_state import windows_private as _windows_private
 from .release_selection import ReleaseSelection
 from .staging_cleanup import _windows_handle
@@ -355,8 +356,8 @@ def _initialize(root, identity, *, tables=None, schema_version=SCHEMA_VERSION,
             if (path / initialization).exists():
                 _clear_initialization(path / initialization)
             candidate = database_root / initialization
-            candidate.mkdir(mode=0o700)
-            descriptor = os.open(candidate / DATABASE, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+            private_directory(candidate)
+            descriptor = create_private_file(candidate / DATABASE)
             os.close(descriptor)
             with _connection(
                 path / initialization, database_root=candidate, readonly=False, initializing=True,

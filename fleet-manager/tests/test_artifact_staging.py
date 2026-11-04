@@ -879,8 +879,10 @@ def test_fresh_installed_console_admission_and_durable_reopen_without_hosting(tm
         path.write_bytes(canonical(value))
         files[name] = path
     root, parent, outside = (tmp_path / name for name in ("private-client", "private-stage", "outside"))
+    from fleet_manager.private_state import private_directory
+
     for directory in (root, parent, outside):
-        directory.mkdir(mode=0o700)
+        private_directory(directory)
     import cryptography
 
     crypto_site = Path(cryptography.__file__).resolve().parent.parent

@@ -3548,6 +3548,10 @@ strict six-consumer oracle checks the combined reports, refusing missing,
 duplicate, skipped, errored or failed cases. Reports are retained per platform.
 This optional portfolio does not expand required unit CI or qualify a complete
 installer, fresh-OS scenario, controller or live adopter.
+Positive roots and staging directories use the existing native private-state
+creator rather than treating POSIX mode bits as Windows ownership evidence.
+The installed consumers exercise explicit owner-private database and generation
+metadata creation without weakening the existing ACL or hot-journal checks.
 
 The agent-free `fleet-manager-client-admission` clean-room scenario includes
 those four actual generation consumers alongside admission/revocation/reopen
