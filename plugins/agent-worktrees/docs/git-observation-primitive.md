@@ -47,8 +47,12 @@ still pending. Do not discard it in a broad catch, render it as fresh facts,
 start another observation of the affected scope, or report successful shutdown.
 Preserve cancellation during both the operation and cleanup phases. A delayed
 outer catch must not attach an already-settled error to a newer active ticket.
-Pending snapshots display UNKNOWN without replacing cached bytes or ages;
-a previous bundle with a different project/worktree identity cannot be reused.
+Cleanup-pending snapshots display UNKNOWN without replacing cached bytes or
+ages; a previous bundle with a different project/worktree identity cannot be
+reused. Ordinary active observation does not invalidate a completed mux segment:
+its existing, uninvalidated freshness window remains usable without starting
+another Git operation or waiting for mutation admission. Expired, invalidated,
+cleanup-pending and retiring entries cannot take that read-only path.
 Windows standalone updater discovery starts only after its lease is held;
 contenders recheck live owner/session/runtime rather than lingering behind a
 current winner. Required replacements still wait for retained cleanup release.

@@ -328,6 +328,10 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             if kind == "snapshot":
                 return {"segment": segment_cache.pending_segment_for_path(core._hook_payload_cwd(payload))}
             raise HookUnavailable
+        if kind == "snapshot" and core.git_ops._windows_observation():
+            cached = segment_cache.get_cached(core._hook_payload_cwd(payload))
+            if cached is not None:
+                return {"segment": cached}
         nonlocal lifecycle_count
         is_lifecycle = kind == "sessionStart"
         provisioning_start_event = threading.Event() if is_lifecycle else None

@@ -289,10 +289,38 @@ class _StatusSegmentCache:
                 fact["confirmed"] = False
         return bundle
 
+    def get_cached(self, path: str) -> str | None:
+        """Read completed, fresh bytes without observation or project activation."""
+        input_key = self._key(path)
+        with self._lock:
+            key = self._aliases.get(input_key, input_key)
+            if key in self._invalidated or self._closing_observations:
+                return None
+            project = self._entry_projects.get(key) or self.project_for_observation_path(path) or ""
+            if self._blocked(project, path, cleanup_only=True):
+                return None
+            cached = self._entries.get(key)
+            if cached and time.monotonic() - cached[0] < self.ttl:
+                return cached[1]
+            return None
+
+    def snapshot(self, path: str) -> str | None:
+        cached = self.get_cached(path)
+        if cached is not None:
+            return cached
+        project = self.project_for_observation_path(path) or ""
+        if self.observation_blocked(project, path) or self.observation_busy():
+            return self.pending_segment_for_path(path)
+        return None
+
     def get(self, path: str) -> str:
         from . import __main__ as core
         from . import status_bar_cli
 
+        if git_ops._windows_observation():
+            cached = self.get_cached(path)
+            if cached is not None:
+                return cached
         project = cfg.project_name() if git_ops._windows_observation() else ""
         input_key = self._key(path)
         with self._lock:
