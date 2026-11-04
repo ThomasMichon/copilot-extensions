@@ -378,7 +378,10 @@ def test_actual_installed_console_generation_transitions(
     assert registered["selected"] and registered["registered"]
     assert invoke("inspect")["selected_generation"] == FIRST
     if transition == "register-commands":
-        assert invoke("register-commands", *exact, *sources, "--command-directory", str(directory))["reused"]
+        assert invoke(
+            "register-commands", *exact, *sources, "--command-directory", str(directory),
+            "--replacement-targets", str(replacement),
+        )["reused"]
         return
     invoke("remove-runtime", *exact, success=False)
     assert not invoke("inspect")["retired"]

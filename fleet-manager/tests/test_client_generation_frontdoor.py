@@ -113,6 +113,16 @@ def test_explicit_incoming_targets_replace_without_predecessor_copy_receipts(
     current = publish(installation, SECOND, replacement_targets=targets)
     assert current["selected"] and current["registered"] and pointer(root)[0] == SECOND
     assert (not receipt.exists()) if preserved is None else receipt.read_bytes() == preserved
+    publication = primitive._runtime_component("versioned_runtime_publication")
+    objects = {
+        path: publication.state_path(path)
+        for path in frontdoor.frontdoor._command_paths(directory)
+    }
+    before = database_bytes(root)
+    retry = publish(installation, SECOND, replacement_targets=targets)
+    assert retry["reused"] and not retry["mutations_performed"]
+    assert database_bytes(root) == before
+    assert {path: publication.state_path(path) for path in objects} == objects
     direct_health(first, directory.parent)
     direct_health(second, directory.parent)
 
@@ -163,6 +173,27 @@ def test_explicit_targets_refuse_a_snapshot_from_a_different_request(
 
 
 @pytest.mark.timeout(90)
+def test_explicit_retry_preserves_a_same_byte_foreign_replacement(primitive, installation):
+    root, directory, _fixture, _staged, _trusted, _first = installation
+    targets = frontdoor.inspect_command_targets(
+        root, identity(), state(root)[2][FIRST], command_directory=directory,
+    )
+    publish(installation, replacement_targets=targets)
+    command = frontdoor.frontdoor._command_paths(directory)[0]
+    foreign = directory / "foreign"
+    content = command.read_bytes()
+    foreign.write_bytes(content)
+    foreign.chmod(command.stat().st_mode)
+    os.replace(foreign, command)
+    object_identity = command.stat().st_ino
+    before = database_bytes(root)
+    with pytest.raises(PlanError, match="outside its recorded progress"):
+        publish(installation, replacement_targets=targets)
+    assert command.read_bytes() == content and command.stat().st_ino == object_identity
+    assert database_bytes(root) == before and pointer(root)[0] == FIRST
+
+
+@pytest.mark.timeout(90)
 def test_interrupted_default_health_retains_real_pending_proofs_and_retry_acknowledges(
     primitive, installation, monkeypatch,
 ):
@@ -195,11 +226,17 @@ def test_interrupted_default_health_retains_real_pending_proofs_and_retry_acknow
 
 @pytest.mark.timeout(90)
 @pytest.mark.parametrize("after", [False, True])
+@pytest.mark.parametrize("incoming", [False, True], ids=["implicit", "explicit"])
 def test_acknowledgement_crash_never_invents_selection_or_republishes_same_attempt(
-    primitive, installation, monkeypatch, after,
+    primitive, installation, monkeypatch, after, incoming,
 ):
     root, directory, _fixture, _staged, _trusted, first = installation
     commit = admission._commit
+    options = {
+        "replacement_targets": frontdoor.inspect_command_targets(
+            root, identity(), state(root)[2][FIRST], command_directory=directory,
+        ),
+    } if incoming else {}
 
     def interrupted(connection):
         row = connection.execute(
@@ -214,11 +251,11 @@ def test_acknowledgement_crash_never_invents_selection_or_republishes_same_attem
     with monkeypatch.context() as injected:
         injected.setattr(admission, "_commit", interrupted)
         with pytest.raises(PlanError, match="outcome is unknown"):
-            publish(installation)
+            publish(installation, **options)
     pending = pointer(root)
     assert (pending[0] == FIRST) is after
     objects = {path: path.stat().st_ino for path in frontdoor.frontdoor._command_paths(directory)}
-    result = publish(installation)
+    result = publish(installation, **options)
     assert result["selected"] and result["reused"] and result["mutations_performed"] is not after
     assert pointer(root)[0] == FIRST and pointer(root)[2] == pending[2]
     assert {path: path.stat().st_ino for path in objects} == objects
@@ -296,11 +333,17 @@ def test_default_directory_is_lineage_bound_not_a_new_path_on_retry(primitive, i
 
 @pytest.mark.timeout(90)
 @pytest.mark.parametrize("after", [False, True])
+@pytest.mark.parametrize("incoming", [False, True], ids=["implicit", "explicit"])
 def test_intent_durability_crash_precedes_every_shared_command_effect(
-    primitive, installation, monkeypatch, after,
+    primitive, installation, monkeypatch, after, incoming,
 ):
     root, directory, _fixture, _staged, _trusted, first = installation
     commit = admission._commit
+    options = {
+        "replacement_targets": frontdoor.inspect_command_targets(
+            root, identity(), state(root)[2][FIRST], command_directory=directory,
+        ),
+    } if incoming else {}
 
     def interrupted(connection):
         row = connection.execute("SELECT publication FROM lineage").fetchone()
@@ -313,21 +356,35 @@ def test_intent_durability_crash_precedes_every_shared_command_effect(
     with monkeypatch.context() as injected:
         injected.setattr(admission, "_commit", interrupted)
         with pytest.raises(PlanError, match="outcome is unknown"):
-            publish(installation)
+            publish(installation, **options)
     interrupted_pointer = pointer(root)
     assert interrupted_pointer[:2] == (None, None)
     assert (interrupted_pointer[2] is not None) is after
     assert not any(path.exists() for path in frontdoor.frontdoor._command_paths(directory))
-    assert publish(installation)["selected"]
+    if incoming and after:
+        attempt = decode(interrupted_pointer[2].encode())["publication"]
+        (root / frontdoor.HISTORY / attempt / "copy-forward.jsonl").write_bytes(b"lost own proof")
+    assert publish(installation, **options)["selected"]
     assert set(state(root)[2]) == {FIRST}
     direct_health(first, directory.parent)
 
 
 @pytest.mark.timeout(90)
+@pytest.mark.parametrize("incoming", [False, True], ids=["implicit", "explicit"])
 def test_copy_failure_recovery_objects_are_proved_and_retryable(
-    primitive, installation, monkeypatch,
+    primitive, installation, monkeypatch, incoming,
 ):
-    root, directory, _fixture, _staged, _trusted, first = installation
+    root, directory, fixture, staged, trusted, first = installation
+    generation, options, second = FIRST, {}, None
+    baseline = {}
+    if incoming:
+        publish(installation)
+        second = construct_generation(root, fixture, staged, trusted, SECOND, "forward-2")
+        generation = SECOND
+        options["replacement_targets"] = frontdoor.inspect_command_targets(
+            root, identity(), state(root)[2][SECOND], command_directory=directory,
+        )
+        baseline = {path: path.read_bytes() for path in frontdoor.frontdoor._command_paths(directory)}
     publication = primitive._runtime_component("versioned_runtime_publication")
     original = publication.CopyPublication.verify
 
@@ -340,12 +397,16 @@ def test_copy_failure_recovery_objects_are_proved_and_retryable(
     with monkeypatch.context() as injected:
         injected.setattr(publication.CopyPublication, "verify", interrupted)
         with pytest.raises(PlanError, match="outcome is unknown"):
-            publish(installation)
-    assert pointer(root)[:2] == (None, None)
-    assert not any(path.exists() for path in frontdoor.frontdoor._command_paths(directory))
+            publish(installation, generation, **options)
+    assert pointer(root)[0] == (FIRST if incoming else None)
+    assert {
+        path: path.read_bytes() for path in frontdoor.frontdoor._command_paths(directory) if path.exists()
+    } == baseline
     assert list((root / frontdoor.HISTORY).glob("*/copy-recovery.*.jsonl"))
-    assert publish(installation)["selected"]
+    assert publish(installation, generation, **options)["selected"]
     direct_health(first, directory.parent)
+    if second is not None:
+        direct_health(second, directory.parent)
 
 
 def higher_fixture(fixture, area, *, failed=False):

@@ -260,8 +260,8 @@ credentials, execute a runtime or authorize replacement. The trusted invoking
 owner must already have authority to replace that exact fixed command family;
 do not automatically feed an arbitrary discovered directory into this flow.
 
-The incoming path rechecks the entire observed family under the common native
-target leases before publication. A changed object, different reservation,
+Initial incoming publication rechecks the entire observed family under the common native
+target leases. An unaccounted changed object, different reservation,
 installation or directory refuses without rewriting commands. With unchanged
 explicit targets, historical producer receipt recovery is not a cutover
 prerequisite. The common copy owner captures fresh physical baselines, preserves
@@ -271,6 +271,17 @@ are not repaired, deleted or treated as incoming execution authority.
 Ordinary registration without explicit incoming targets retains its strict
 historical-ownership behavior. Old withdrawal/removal APIs retain their own
 physical proof requirements.
+
+An incoming attempt records an optional `replacement_targets_digest` in its
+existing publication intent. This correlates the original observation; it is
+not effect authority. Repeating the same input can verify the current
+producer's unchanged objects and acknowledge the original publication without
+republishing, including an interrupted acknowledgement. Partial/recovered
+progress may continue only from that attempt's captured baseline or native
+producer proofs; foreign and same-byte replacement objects still refuse.
+A fresh observation that matches current targets can start a new authorized
+attempt without requiring old proof recovery. This continuation does not walk
+predecessor-copy receipts or reacknowledge a withdrawing attempt.
 
 This is a fixed command-publication boundary, not the complete authoritative
 installer. Corrupt authoritative lineage/application state, full setup

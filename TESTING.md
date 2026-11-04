@@ -3479,7 +3479,13 @@ blocking independent successor startup. Explicit incoming target observations
 instead prove actual default selection with missing and malformed old copy
 receipts, preserving the damaged evidence. Wrong installation/reservation
 snapshots and changed physical targets, including same-byte replacements,
-refuse before command effects. `test_client_generation_publication_native.py`
+refuse before command effects. Original-observation retries also cover both
+acknowledgement durability boundaries, native copy recovery over an existing
+baseline and foreign same-byte replacements. Before-effect retries retain
+fresh-target admission even when the interrupted attempt's proof is lost.
+The installed register-console case repeats the original
+`--replacement-targets` file rather than silently switching modes.
+`test_client_generation_publication_native.py`
 pauses an independent publisher after real default health: another process can
 construct the successor while targets remain held; resumed acknowledgement
 refuses without rollback.

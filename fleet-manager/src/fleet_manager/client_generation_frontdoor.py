@@ -96,6 +96,19 @@ def _proofs(root, value, reservations, publication):
     )
 
 
+def _continued_targets(root, value, reservations, commands, publication):
+    _commands, proofs = _proofs(root, value, reservations, publication)
+    proof_root, entries = publication.read_context(
+        root / HISTORY / value["publication"] / "copy-context.json",
+    )
+    if proof_root != root or set(entries) != set(commands):
+        raise PlanError("incoming attempt context differs from its fixed command family")
+    for path in commands:
+        actual = publication.state_path(path, private=True)
+        if actual != entries[path][1] and actual not in proofs.get(path, ()):
+            raise PlanError("incoming attempt targets changed outside its recorded progress")
+
+
 def _legacy_commands(origin, identity, directory, publication):
     legacy = origin["legacy"]
     if legacy is None:
@@ -214,11 +227,13 @@ def publish_client_generation(root, identity, reservation, staged, *, command_di
     """Publish a healthy installed generation; never roll back after releasing lineage custody."""
     identity = admission._identity(identity)
     reservation = generations._reservation(reservation, identity)
+    incoming_digest = None
     if replacement_targets is not None:
         replacement_targets = decode(canonical(replacement_targets))
         record(replacement_targets, "fleet-manager.client-command-targets", {
             "identity", "reservation_digest", "directory", "targets", "mutations_performed",
         })
+        incoming_digest = digest(replacement_targets)
     construction._request(identity, reservation["selection"], staged, current_policy, current_target)
     intent_durable = False
     try:
@@ -273,24 +288,53 @@ def publish_client_generation(root, identity, reservation, staged, *, command_di
                 generation_checkpoint()
                 construction._completion(primitive, namespace, candidate, binding)
 
+            def same_incoming(value):
+                return (
+                    value is not None and value["generation"] == reservation["generation"]
+                    and value.get("replacement_targets_digest") == incoming_digest
+                    and not os.path.lexists(root / HISTORY / value["publication"] / REMOVAL)
+                )
+
+            def admit_targets(current, origin, reservations):
+                if replacement_targets is None:
+                    _owned_commands(
+                        root, current, origin, identity, reservations, directory, commands, publication,
+                    )
+                elif replacement_targets == _command_targets(
+                    identity, reservation, directory, commands, publication,
+                ):
+                    return
+                elif same_incoming(current):
+                    _continued_targets(root, current, reservations, commands, publication)
+                else:
+                    raise PlanError("explicit incoming command targets changed or differ from this request")
+
             # Reuse also takes targets first. No lineage lock is held across health.
             with publication.target_leases(root, list(commands)):
                 with writer() as (_connection, checkpoint):
                     _admitted, _origin, reservations, fences, previous = checkpoint()
                     reuse = (
-                        replacement_targets is None and previous is not None
+                        previous is not None
                         and previous["generation"] == reservation["generation"]
+                        and (replacement_targets is None or same_incoming(previous))
                     )
                     if reuse and os.path.lexists(root / HISTORY / previous["publication"] / REMOVAL):
                         reuse = False
-                    if reuse and replacement_targets is None:
-                        _commands, proofs = _proofs(root, previous, reservations, publication)
-                        reuse = all(
-                            publication.state_path(path, private=True) in proofs.get(path, ())
-                            and publication.state_path(path, private=True).digest
-                            == hashlib.sha256(content).hexdigest()
-                            for path, content in commands.items()
-                        )
+                    if reuse:
+                        try:
+                            _commands, proofs = _proofs(root, previous, reservations, publication)
+                            actual = {
+                                path: publication.state_path(path, private=True) for path in commands
+                            }
+                            reuse = all(
+                                actual[path] is not None and actual[path] in proofs.get(path, ())
+                                and actual[path].digest == hashlib.sha256(content).hexdigest()
+                                for path, content in commands.items()
+                            )
+                        except (OSError, RuntimeError, ValueError):
+                            if replacement_targets is None:
+                                raise
+                            reuse = False
                 if reuse:
                     frontdoor._health(directory, slot, healthy, descriptor, evidence, health)
                     with writer() as (connection, checkpoint):
@@ -343,25 +387,16 @@ def publish_client_generation(root, identity, reservation, staged, *, command_di
                     connection, checkpoint = transaction
                     _admitted, origin, reservations, _fences, current = checkpoint()
                     if value is None:
-                        if replacement_targets is None:
-                            _owned_commands(
-                                root, current, origin, identity, reservations, directory, commands, publication,
-                            )
-                        elif replacement_targets != _command_targets(
-                            identity, reservation, directory, commands, publication,
-                        ):
-                            raise PlanError("explicit incoming command targets changed or differ from this request")
+                        admit_targets(current, origin, reservations)
                     elif current != value:
                         raise PlanError("client generation publication intent changed during copy")
 
                 def before_effects():
                     nonlocal value, intent_durable
                     connection, checkpoint = transaction
-                    _admitted, _origin, _reservations, _fences, current = checkpoint()
-                    if replacement_targets is not None and replacement_targets != _command_targets(
-                        identity, reservation, directory, commands, publication,
-                    ):
-                        raise PlanError("explicit incoming command targets changed before publication")
+                    _admitted, origin, reservations, _fences, current = checkpoint()
+                    if replacement_targets is not None:
+                        admit_targets(current, origin, reservations)
                     value = {
                         "schema": "fleet-manager.client-generation-frontdoor", "version": 1,
                         "generation": reservation["generation"], "request_digest": digest(reservation),
@@ -370,6 +405,8 @@ def publish_client_generation(root, identity, reservation, staged, *, command_di
                         "directory": generations._location(directory),
                         "target_digest": reservation["target_digest"],
                     }
+                    if incoming_digest is not None:
+                        value["replacement_targets_digest"] = incoming_digest
                     construction._write_exclusive(workspace / "intent.json", value)
                     admission._sync_directory(workspace)
                     admission._sync_directory(history)

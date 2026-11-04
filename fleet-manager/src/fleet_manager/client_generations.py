@@ -35,12 +35,12 @@ def _publication(raw, reservations):
     value = decode(raw.encode("utf-8"))
     record(value, "fleet-manager.client-generation-frontdoor", {
         "generation", "request_digest", "publication", "previous", "directory", "target_digest",
-    })
-    if set(value) != {
-        "schema", "version", "generation", "request_digest", "publication", "previous",
-        "directory", "target_digest",
-    }:
-        raise PlanError("client generation publication has unsupported fields")
+    }, optional={"replacement_targets_digest"})
+    if "replacement_targets_digest" in value and (
+        not isinstance(value["replacement_targets_digest"], str)
+        or not _DIGEST.fullmatch(value["replacement_targets_digest"])
+    ):
+        raise PlanError("client generation incoming target binding is invalid")
     _generation(value["publication"])
     _generation(value["generation"])
     if value["previous"] is not None:
