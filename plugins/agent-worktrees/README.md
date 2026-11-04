@@ -716,11 +716,11 @@ session-start reconciliation and its single-flight owner are unchanged.
 
 This removes a child process, not the shell the hook host itself creates.
 
-The Python advisory fallback shares its status helper and tracking lookup
-between disposition and binding reminders within one callback. Distinct
+The Python advisory fallback shares its status helper and matching tracking
+lookup between disposition and binding reminders within one callback. Distinct
 `cwd`/`workingDirectory` inputs retain separate lookups; later callbacks
-observe tracking again, including previously absent records. Lookup failures
-are not retained. Reminder counters, cooldowns and late-guidance notices
+observe tracking again. Empty results can hide resolver failures and are
+retried, not retained. Reminder counters, cooldowns and late-guidance notices
 remain independent; this introduces no persistent memo or service startup.
 
 ## Same-Machine AHP Sessions

@@ -787,7 +787,11 @@ def _fallback_post(payload: dict, home: Path) -> dict:
         def tracking_lookup(cwd, home):
             key = cwd or os.getcwd()
             if key not in records:
-                records[key] = find_tracking(cwd, home)
+                found = find_tracking(cwd, home)
+                # The legacy resolver also returns None for resolution failures.
+                if found is None:
+                    return None
+                records[key] = found
             return records[key]
 
     if nudge is not None:

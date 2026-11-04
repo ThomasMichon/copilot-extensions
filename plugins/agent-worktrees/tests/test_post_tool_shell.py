@@ -141,7 +141,7 @@ def test_post_fallback_empty_result_is_fresh_and_cwd_scoped(
 
     monkeypatch.setattr(status, "_find_tracking_yaml", find)
     assert post_client._fallback_post(payload, tmp_path) == {}
-    assert calls == ([str(status_root), str(binding_root)] if distinct_cwd else [str(status_root)])
+    assert calls == [str(status_root), str(binding_root)]
     _post_record(tmp_path, binding_root.name)
     text = post_client._fallback_post(payload, tmp_path)["additionalContext"]
     assert f"bind-session --worktree-dir={binding_root}" in text
@@ -172,6 +172,27 @@ def test_post_fallback_preserves_late_notice_and_independent_failure(
     calls.clear()
     monkeypatch.setattr(status, "_find_tracking_yaml", lookup)
     assert post_client._fallback_post(payload, tmp_path) == {"additionalContext": "late guidance"}
+
+
+def test_post_fallback_retries_failure_swallowed_by_tracking_resolver(
+    post_client, monkeypatch, tmp_path,
+):
+    root, _record = _post_record(tmp_path, "worktree-a")
+    resolve = Path.resolve
+    attempts = []
+
+    def transient(path, *args, **kwargs):
+        if path == root:
+            attempts.append(path)
+            if len(attempts) == 1:
+                raise OSError("transient cwd resolution failure")
+        return resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", transient)
+    text = post_client._fallback_post({"cwd": str(root)}, tmp_path)["additionalContext"]
+    assert f"bind-session --worktree-dir={root}" in text
+    assert len(attempts) == 2
+    assert not (tmp_path / ".agent-worktrees" / "nudge-state" / "worktree-a.json").exists()
 
 
 @pytest.mark.parametrize("status_missing", [False, True])
