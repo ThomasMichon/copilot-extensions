@@ -279,7 +279,10 @@ def create_foreign_pr_from_branch(
         "reused": reused,
     }
     from .pr_metadata import include_publication_metadata
-    include_publication_metadata(result, pull)
+    include_publication_metadata(
+        result, pull, requested_draft=draft,
+        require_draft_observation=prcfg.provider == "azure-devops",
+    )
     if evidence is not None:
         from . import pr_foreign_checks
         result["publication_checks"] = pr_foreign_checks.after_create(

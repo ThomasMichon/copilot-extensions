@@ -87,7 +87,8 @@ Missing installed support blocks dependent migration, not ordinary supported
 observation and not permission to fall back to raw provider commands.
 
 ADO creation forwards the native draft request and retains the returned draft
-state. A contradicted or missing draft confirmation appears separately in
+state, including local and foreign retries of an existing PR. A contradicted
+or missing requested draft confirmation appears separately in
 `author_metadata.actions.draft`; missing confirmation also sets
 `draft_unconfirmed: true` and does not report `draft: true`. Keep the returned
 PR identity and reconcile its native state before readiness; never create a

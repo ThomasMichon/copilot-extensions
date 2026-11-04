@@ -157,6 +157,28 @@ def test_ado_retry_requires_the_authoritative_configured_base(monkeypatch, _trac
 
 
 class TestCreateForeignPrFromBranch:
+    @pytest.mark.parametrize("observed", [False, None, "true"])
+    def test_ado_reuse_retains_failed_or_unknown_requested_draft(
+        self, monkeypatch, _tracking_setup, observed,
+    ):
+        _, wid = _tracking_setup
+        monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug",
+                            lambda *_: _foreign_resolution(provider="azure-devops"))
+        pull = _FakePull(url="https://forge.invalid/7", number=7, draft=observed)
+        backend = _FakeProvider(existing=pull)
+        monkeypatch.setattr(providers, "get_provider", lambda *_: backend)
+        monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: None)
+        result = pr_foreign_create.create_foreign_pr_from_branch(
+            wid, _config(), target_repo="owner/other-repo", from_branch="topic",
+            title="fix", draft=True,
+        )
+        assert result["number"] == 7 and result["claimed"] and result["reused"]
+        assert not result["draft"] and not backend.calls
+        assert result["author_metadata"]["actions"]["draft"]["status"] == (
+            "failed" if observed is False else "unknown"
+        )
+        assert result.get("draft_unconfirmed", False) is (observed is not False)
+
     @pytest.mark.parametrize("reuse", [False, True])
     @pytest.mark.parametrize("observed", [False, True])
     def test_reports_observed_draft_for_new_and_reused_ado_pr(

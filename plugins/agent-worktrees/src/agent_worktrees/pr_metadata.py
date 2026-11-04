@@ -13,14 +13,32 @@ class MetadataPullResult(PullResult):
     metadata: dict = field(default_factory=dict)
 
 
-def include_publication_metadata(result: dict, pull) -> None:
+def draft_confirmation(observed) -> dict | None:
+    if observed is True:
+        return None
+    return {
+        "status": "failed" if observed is False else "unknown",
+        "error": "PR did not confirm the requested native draft state; reconcile this PR before readiness.",
+    }
+
+
+def include_publication_metadata(result: dict, pull, *, requested_draft=False,
+                                 require_draft_observation=False) -> None:
     if type(getattr(pull, "draft", None)) is bool:
         result["draft"] = pull.draft
     if getattr(pull, "label_error", ""):
         result["pr_label_error"] = pull.label_error
-    if getattr(pull, "metadata", None):
-        result["author_metadata"] = pull.metadata
-        if pull.metadata.get("actions", {}).get("draft", {}).get("status") == "unknown":
+    metadata = getattr(pull, "metadata", None) or {}
+    if requested_draft and require_draft_observation:
+        action = draft_confirmation(getattr(pull, "draft", None))
+        if action:
+            metadata = {
+                **metadata, "ok": False,
+                "actions": {**metadata.get("actions", {}), "draft": action},
+            }
+    if metadata:
+        result["author_metadata"] = metadata
+        if metadata.get("actions", {}).get("draft", {}).get("status") == "unknown":
             result["draft"] = False
             result["draft_unconfirmed"] = True
 

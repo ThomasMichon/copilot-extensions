@@ -2606,17 +2606,19 @@ class _FakeProvider:
     name: str = "gitea"
     captured: dict | None = None
     observed_draft: bool | None = None
+    creates: int = 0
 
     def authority_endpoint(self, api_base=""):
         return api_base
 
     def create_pull(self, scope, *, token=None):
+        self.creates += 1
         self.captured = {"scope": scope, "token": token}
         return PullResult(url="https://h/gitea/ext/pulls/99", number=99, state="open",
                           draft=self.observed_draft)
 
     def get_pull(self, repo, number, *, api_base="", token=None):
-        return PullResult(url="", number=number)
+        return PullResult(url="", number=number, draft=self.observed_draft)
 
     def remove_label(self, repo, number, label, *, api_base="", token=None):
         return ""
@@ -3059,6 +3061,20 @@ class TestCreatePRAutoOpen:
         # Native draft: the scope carries draft=True (no do-not-merge label).
         assert fake.captured["scope"].draft is True
         assert pr_ops.HOLD_LABEL not in fake.captured["scope"].labels
+
+    @pytest.mark.parametrize("open_pr", [None, False])
+    def test_retry_retains_observed_draft_without_opening_again(self, pr_repo, monkeypatch, open_pr):
+        config, wid, wt, _ = pr_repo
+        config = self._enable_open(config)
+        monkeypatch.setenv("EXT_TOKEN", "tok")
+        fake = _FakeProvider(observed_draft=True)
+        monkeypatch.setattr("agent_worktrees.providers.get_provider", lambda name: fake)
+        first = pr_ops.create_pr(wid, config, title="Add feature", draft=True)
+        assert first["draft"] is True
+        git_ops.git("checkout", first["branch"], cwd=wt)
+        retry = pr_ops.create_pr(wid, config, title="Add feature", open_pr=open_pr)
+        assert retry["success"] and retry["number"] == first["number"]
+        assert retry["draft"] is True and fake.creates == 1
 
     def test_auto_open_hold_is_deprecated_alias_for_draft(self, pr_repo, monkeypatch):
         # --hold is retained as a deprecated alias for --draft.

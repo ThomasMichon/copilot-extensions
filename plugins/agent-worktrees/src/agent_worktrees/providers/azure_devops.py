@@ -123,7 +123,7 @@ class AzureDevOpsProvider:
         data = json.loads(proc.stdout)
         number = data.get("pullRequestId")
         state = self._canonical_state(str(data.get("status", "active")).lower())
-        from ..pr_metadata import MetadataPullResult
+        from ..pr_metadata import MetadataPullResult, draft_confirmation
 
         result = MetadataPullResult(
             url=self._web_url(scope.api_base, project, name, number),
@@ -146,13 +146,7 @@ class AzureDevOpsProvider:
                 }
             if scope.draft and result.draft is not True:
                 result.metadata["ok"] = False
-                result.metadata.setdefault("actions", {})["draft"] = {
-                    "status": "failed" if result.draft is False else "unknown",
-                    "error": (
-                        "Created PR did not confirm the requested native draft state; "
-                        "reconcile this PR before readiness."
-                    ),
-                }
+                result.metadata.setdefault("actions", {})["draft"] = draft_confirmation(result.draft)
         return result
 
     def update_pull_metadata(self, repo, number, **kwargs):
