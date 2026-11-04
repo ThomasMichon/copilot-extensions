@@ -4660,7 +4660,8 @@ def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, mo
     assert list(checks)[-1] == "recent-tool-hook" and all(checks.values())
 
 
-def test_idle_exit_releases_installer_guard_while_late_accepted_read_drains(tmp_path, monkeypatch):
+@pytest.mark.parametrize("reopen", [None, "undrain", "promote"])
+def test_idle_exit_releases_installer_guard_while_late_accepted_read_drains(tmp_path, monkeypatch, reopen):
     from zdd import lifecycle
 
     from agent_worktrees import monitor_roots, self_retire, status_monitor_cutover as smc
@@ -4669,7 +4670,7 @@ def test_idle_exit_releases_installer_guard_while_late_accepted_read_drains(tmp_
 
     directory = tmp_path / "status-monitor-routing"
     accepted, finish = threading.Event(), threading.Event()
-    state = {"closed": False, "waits": 0, "guard_available": False}
+    state = {"closed": False, "waits": 0, "guard_available": False, "reopened": False, "superseded": False}
     servers, clients, results = [], [], []
     monkeypatch.setattr(m, "_monitor_lock_path", lambda: tmp_path / "status-monitor.lock")
     monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
@@ -4678,7 +4679,7 @@ def test_idle_exit_releases_installer_guard_while_late_accepted_read_drains(tmp_
     monkeypatch.setattr(smc, "publish_route", lambda *a, **k: None)
     monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
     monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: 42)
-    monkeypatch.setattr(self_retire, "is_superseded", lambda *a, **k: False)
+    monkeypatch.setattr(self_retire, "is_superseded", lambda *a, **k: state["superseded"])
     monkeypatch.setattr("agent_worktrees.runtime_monitor_identity.publish_lock", lambda *a, **k: True)
     monkeypatch.setattr(m.status_monitor_cli, "sweep_mux_pane_args", lambda: None)
     monkeypatch.setattr(m, "_monitor_sweep", lambda *a, **k: 0)
@@ -4742,6 +4743,11 @@ def test_idle_exit_releases_installer_guard_while_late_accepted_read_drains(tmp_
                 finish.set()
             clients[0].join(timeout=2)
             assert not clients[0].is_alive()
+            if reopen:
+                expected = {"draining": False} if reopen == "undrain" else {"adopted": True}
+                assert servers[0].handle(reopen, {}) == expected
+                assert servers[0].handle("health", {})["status"] == "ready"
+                state.update(reopened=True, superseded=True)
 
     monkeypatch.setattr(m.status_monitor_cli, "_wake_interruptible_wait", wait)
     try:
@@ -4751,7 +4757,9 @@ def test_idle_exit_releases_installer_guard_while_late_accepted_read_drains(tmp_
         exits = [event for event in lifecycle.read_events(directory)
                  if event["action"] == "monitor-exit"]
         assert [event["detail"]["phase"] for event in exits] == ["cleanup-begin", "cleanup-complete"]
-        assert all(event["detail"]["reason"] == "idle-no-demand" for event in exits)
+        expected_reason = "superseded-route" if reopen else "idle-no-demand"
+        assert all(event["detail"]["reason"] == expected_reason for event in exits)
+        assert state["reopened"] is bool(reopen)
     finally:
         finish.set()
         for thread in clients:

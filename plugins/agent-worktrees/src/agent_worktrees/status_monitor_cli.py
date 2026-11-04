@@ -602,11 +602,12 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     empty_strikes = 0
     idle_guard = None
     max_empty_strikes = 3
+    exit_reason = "loop-error"
 
     from . import status_monitor_recovery_contract as guarded_recovery
 
     def _handle_control(action: str, payload: dict, *, routing_held: bool = False) -> dict:
-        nonlocal admission_closed, published_lock
+        nonlocal admission_closed, published_lock, exit_reason
         if action == preparation.ACTION:
             with state_lock:
                 if published_lock or not preparation.cancel(
@@ -681,6 +682,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         if not _publish_lock():
                             _enter_drain_only_state()
                             return {"adopted": False, "error": "monitor discovery publication refused"}
+                    exit_reason = "loop-error"
             from . import runtime_monitor_grace
 
             runtime_monitor_grace.arm(
@@ -735,6 +737,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         if not _publish_lock(routing_held=routing_held):
                             _enter_drain_only_state()
                             return {"draining": True, "error": "monitor discovery publication refused"}
+                    exit_reason = "loop-error"
             trace.emit("complete", "ok")
             wake_event.set()
             return {"draining": False}
@@ -786,7 +789,6 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             and exit_trace.check("recent-tool-hook", hook_server is None or not hook_server.has_recent_hook_demand())
         )
 
-    exit_reason = "loop-error"
     try:
         repositories_runtime.start(interval)
         while True:

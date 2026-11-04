@@ -174,6 +174,8 @@ Completion means the existing teardown returned, not that a replacement is
 ready or that the process has been independently observed to exit.
 Committed idle retirement retains its idle reason while accepted work drains;
 the shared retiring latch alone does not establish a superseding route.
+A successful `undrain` or `promote` clears that pending idle cause after
+discovery publication succeeds, so a later retirement records its own cause.
 
 `last_idle_eligibility` contains only the checks actually evaluated by the
 most recent idle predicate, in their original order. `true` means that check
