@@ -99,7 +99,7 @@ def main(argv=None):
     generation_commands = generation.add_subparsers(dest="generation_command", required=True)
     for operation in (
         "initialize", "inspect", "inspect-command-targets", "construct",
-        "register-commands", "unregister-commands", "remove-runtime",
+        "register-commands", "unregister-commands", "remove-runtime", "install", "uninstall",
     ):
         forward = generation_commands.add_parser(operation)
         forward.add_argument("--root", type=Path, required=True)
@@ -110,20 +110,24 @@ def main(argv=None):
             inspection = forward.add_mutually_exclusive_group()
             inspection.add_argument("--generation")
             inspection.add_argument("--after")
-        if operation == "construct":
+        if operation in ("construct", "install"):
             forward.add_argument("--generation", required=True)
             forward.add_argument("--request", required=True)
             forward.add_argument("--selection", type=Path, required=True)
-        if operation in ("inspect-command-targets", "register-commands", "unregister-commands", "remove-runtime"):
+        if operation in (
+            "inspect-command-targets", "register-commands", "unregister-commands", "remove-runtime", "uninstall",
+        ):
             forward.add_argument("--reservation", type=Path, required=True)
-        if operation in ("construct", "register-commands"):
+        if operation in ("construct", "register-commands", "install"):
             for name in ("release", "proof", "policy", "sources", "staging-parent", "target"):
                 forward.add_argument("--" + name, type=Path, required=True)
-        if operation in ("inspect-command-targets", "register-commands", "unregister-commands"):
+        if operation in ("inspect-command-targets", "register-commands", "unregister-commands", "install", "uninstall"):
             forward.add_argument("--command-directory", type=Path, required=True)
+        if operation == "install":
+            forward.add_argument("--replace-commands", action="store_true", required=True)
         if operation == "register-commands":
             forward.add_argument("--replacement-targets", type=Path)
-        if operation == "unregister-commands":
+        if operation in ("unregister-commands", "uninstall"):
             forward.add_argument("--publication", required=True)
     try:
         args = parser.parse_args(argv)
@@ -242,7 +246,7 @@ def main(argv=None):
                 )
             else:
                 reservation = (
-                    None if operation == "construct" else _reservation(local(args.reservation), identity)
+                    None if operation in ("construct", "install") else _reservation(local(args.reservation), identity)
                 )
                 if operation == "inspect-command-targets":
                     from .client_generation_frontdoor import inspect_command_targets
@@ -252,10 +256,12 @@ def main(argv=None):
                     )
                 elif operation == "remove-runtime":
                     result = remove_client_generation(args.root, identity, reservation)
-                elif operation == "unregister-commands":
+                elif operation in ("unregister-commands", "uninstall"):
                     from .client_generation_frontdoor import unregister_client_generation
+                    from .client_installation import uninstall_client_generation
 
-                    result = unregister_client_generation(
+                    execute = uninstall_client_generation if operation == "uninstall" else unregister_client_generation
+                    result = execute(
                         args.root, identity, reservation, publication=args.publication,
                         command_directory=args.command_directory,
                     )
@@ -279,6 +285,15 @@ def main(argv=None):
                             result = construct_client_generation(
                                 args.root, identity, local(args.selection), staged,
                                 generation=args.generation, request=args.request, **options,
+                            )
+                        elif operation == "install":
+                            from .client_installation import install_client_generation
+
+                            result = install_client_generation(
+                                args.root, identity, local(args.selection), staged,
+                                generation=args.generation, request=args.request,
+                                command_directory=args.command_directory,
+                                replace_commands=args.replace_commands, **options,
                             )
                         else:
                             from .client_generation_frontdoor import publish_client_generation
