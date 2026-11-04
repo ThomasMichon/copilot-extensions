@@ -129,7 +129,7 @@ def check_root(root: Path) -> bool:
             raise RuntimeError("Stamped payload belongs to another product; uninstall refused")
     try:
         binding.publish_legacy_binding(
-            primitive, payload_root=SCRIPTS.parent, plugin_id="agent-mcp",
+            primitive, operation="teardown", payload_root=SCRIPTS.parent, plugin_id="agent-mcp",
             legacy_root=root, project_root=Path.cwd(),
         )
     except binding.SourceProvenanceUnavailable:
