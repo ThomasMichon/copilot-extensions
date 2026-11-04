@@ -305,10 +305,13 @@ def recovery_child(
     policy = tmp_path / "policy.json"
     policy.write_text(json.dumps(config.to_dict()))
     log = tmp_path / (slot.name + ".log")
+    from agent_ssh_service import local_service
+    data = Path(config.to_dict()["data_dir"]).resolve()
+    initial_cwd = getattr(local_service, "_launch_cwd", lambda path: path)(data)
     process = spawn_daemon(
         [sys.executable, "-I", "-B", "-c", _RECOVERY_CHILD, str(policy), str(slot), mode,
          json.dumps(asdict(local_control.current_peer())), str(tmp_path / "handled")],
-        cwd=Path(config.to_dict()["data_dir"]), log_path=log, env=environment,
+        cwd=initial_cwd, log_path=log, env=environment,
         instance=DaemonInstanceSpec(
             "agent-ssh-service", Path(config.to_dict()["data_dir"]).resolve(), Path(entry.__file__)),
     )
@@ -464,6 +467,33 @@ def test_admitted_external_dotdot_native_startup_reuse_keeps_config_and_fence_id
         assert ".." not in local_control.cell_directory(selected).parts
         request(selected, owner, "stop", wait_exit=True)
         assert process.wait(timeout=5) == 0, log.read_text()
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=6)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Win32 current-directory length")
+def test_native_long_data_root_is_not_a_CreateProcess_current_directory(
+    config: ServiceConfig, tmp_path: Path, native_environment: dict[str, str],
+) -> None:
+    from fleet_manager.private_state import private_directory
+    data = tmp_path / ("d" * (270 - len(str(tmp_path)) - 1))
+    private_directory(data)
+    document = config.to_dict()
+    document["data_dir"] = str(data)
+    config = ServiceConfig.from_dict(document)
+    assert len(str(data)) == 270
+    process, log = recovery_child(config, tmp_path, native_environment, "serve")
+    try:
+        record = wait_record(config, process)
+        assert request(config, record, "prepare")["prepared"]
+        assert request(config, record, "activate")["ready"]
+        assert request(config, record, "health")["ready"]
+        assert len(str(local_control.cell_directory(config))) > 270
+        request(config, record, "stop", wait_exit=True)
+        assert process.wait(timeout=6) == 0, log.read_text()
+        assert records(config) == []
     finally:
         if process.poll() is None:
             process.terminate()

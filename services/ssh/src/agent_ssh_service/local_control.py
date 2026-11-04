@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import asdict
 from concurrent.futures import Future
+from contextlib import contextmanager
 import hashlib
 import logging
 import os
@@ -11,7 +12,8 @@ from pathlib import Path
 import secrets
 import threading
 import time
-from collections.abc import Callable
+from tempfile import mkdtemp
+from collections.abc import Callable, Iterator
 from typing import Any, TYPE_CHECKING, cast
 
 from fleet_manager.private_state import create_private_file, private_directory, read_private_file
@@ -133,6 +135,41 @@ def remove_request(path: Path, deadline: Deadline) -> None:
             time.sleep(min(CONTROL_CADENCE, deadline.remaining()))
 
 
+@contextmanager
+def _request_listener(nonce: str) -> Iterator[tuple[WindowsListener | UnixListener, str]]:
+    listener: WindowsListener | UnixListener | None = None
+    directory = None
+    identity = None
+    try:
+        if os.name == "nt":
+            from zdd.private_windows import WindowsListener
+
+            address = "\\\\.\\pipe\\agent-ssh-service-" + nonce
+            listener = WindowsListener(address)
+        else:
+            from zdd.private_unix import UnixListener
+
+            directory = Path(mkdtemp(prefix="ssh-"))
+            identity = directory.lstat()
+            private_directory(directory)
+            address = str(directory / "c")
+            check(len(os.fsencode(address)) <= 107, "local-control-socket-path-limit")
+            listener = UnixListener(Path(address))
+        yield listener, address
+    finally:
+        try:
+            if listener is not None:
+                listener.close()
+        finally:
+            if directory is not None and identity is not None:
+                current = directory.lstat()
+                check((current.st_dev, current.st_ino) == (identity.st_dev, identity.st_ino)
+                      and not directory.is_symlink()
+                      and not getattr(current, "st_file_attributes", 0) & 0x400,
+                      "local-control-directory-changed")
+                directory.rmdir()  # Never recursively erase an unexpected replacement.
+
+
 def request(config: ServiceConfig, record: Document, operation: str, *,
             wait_exit: bool = False, timeout: float | None = None) -> Document:
     """Discovery is not health: authenticate and retain the actual service peer."""
@@ -141,43 +178,32 @@ def request(config: ServiceConfig, record: Document, operation: str, *,
     private_directory(cell)
     peer, expected = current_peer(), PeerIdentity(**record["peer"])
     nonce = secrets.token_hex(16)
-    listener: WindowsListener | UnixListener
-    if os.name == "nt":
-        from zdd.private_windows import WindowsListener
-
-        address = "\\\\.\\pipe\\agent-ssh-service-" + nonce
-        listener = WindowsListener(address)
-    else:
-        from zdd.private_unix import UnixListener
-
-        address = str(cell / (nonce + ".sock"))
-        listener = UnixListener(Path(address))
     path = cell / ("request-" + nonce + ".json")
     channel: Channel | None = None
     held = None
     limit = 15 if operation == "activate" else 10 if wait_exit else 3
     deadline = Deadline(limit if timeout is None else min(limit, max(0, timeout)))
-    try:
-        publish_new(path, {
-            "peer": asdict(peer), "address": address, "operation": operation,
-            "target": record["peer"], "config_identity": record["config_identity"],
-        })
-        channel = listener.accept(deadline, expected=expected)
-        held = channel.retain_peer(deadline)
-        write_frame(channel, {"operation": operation}, deadline)
-        result = attestation(record, read_frame(channel, deadline), operation)
-        channel.close()
-        channel = None
-        if wait_exit:
-            held.wait_exit(deadline)
-        return result
-    finally:
-        if held is not None:
-            held.close()
-        if channel is not None:
+    with _request_listener(nonce) as (listener, address):
+        try:
+            publish_new(path, {
+                "peer": asdict(peer), "address": address, "operation": operation,
+                "target": record["peer"], "config_identity": record["config_identity"],
+            })
+            channel = listener.accept(deadline, expected=expected)
+            held = channel.retain_peer(deadline)
+            write_frame(channel, {"operation": operation}, deadline)
+            result = attestation(record, read_frame(channel, deadline), operation)
             channel.close()
-        listener.close()
-        remove_request(path, deadline)
+            channel = None
+            if wait_exit:
+                held.wait_exit(deadline)
+            return result
+        finally:
+            if held is not None:
+                held.close()
+            if channel is not None:
+                channel.close()
+            remove_request(path, deadline)
 
 
 class LocalControl:

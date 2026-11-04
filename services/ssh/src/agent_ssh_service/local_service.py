@@ -22,6 +22,11 @@ class LocalStartupUncertain(RuntimeError):
         super().__init__("local-startup-outcome-unknown")
 
 
+def _launch_cwd(data: Path) -> Path:
+    # Win32 rejects long lpCurrentDirectory even with an extended executable.
+    return Path(data.anchor) if os.name == "nt" and len(str(data)) >= 260 else data
+
+
 def _matching(binding: Any, config: ServiceConfig) -> list[Document]:
     expected = config_identity(binding, config)
     matches = []
@@ -68,7 +73,7 @@ def start(binding: Any, policy_path: Path, config: ServiceConfig) -> Document:
         [engine._native_retained_path(binding.python), "-I", "-S", "-B", str(bootstrap),
          "-m", "agent_ssh_service",
          "__local-serve", "--config", str(policy_path)],
-        cwd=data, log_path=logs / "ssh-service.log",
+        cwd=_launch_cwd(data), log_path=logs / "ssh-service.log",
         instance=DaemonInstanceSpec(
             "agent-ssh-service", data, Path(__file__).with_name("__main__.py"),
         ),

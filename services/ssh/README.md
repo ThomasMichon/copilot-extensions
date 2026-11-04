@@ -104,6 +104,17 @@ loop; discovery is removed only after that worker has settled.
 Control-cell and launch I/O use the admitted data directory's physical path,
 while configuration bytes, credential references and fence/configuration
 identity retain the original admitted spelling.
+Windows long data roots remain the instance identity but are not passed as an
+overlong Win32 process current directory; the service uses absolute references.
+POSIX control requests place their temporary socket in a newly created,
+owner-private short directory, independent of data-root length. Native peer
+authentication and the strict socket-parent checks remain unchanged. Only the
+listener's own socket inode and an empty identity-matching directory are
+removed; unexpected entries/replacements are preserved with a cleanup refusal.
+An overlong configured temporary base still reports a socket-path limit.
+POSIX first provisioning also requires a private runtime root: the installed
+receiver never repairs a pre-existing broadly accessible root. Data/control
+roots and private runtime-root provisioning are separate requirements.
 Activation retains its disk worker through cancellation before removing native
 registration. Withdrawal marks the lifecycle stopped, and the original writer
 guard checks stopped/closed state at both claim and precommit. A retired incoming

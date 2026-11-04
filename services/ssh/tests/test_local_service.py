@@ -2,6 +2,8 @@
 import sys
 import asyncio
 import threading
+import os
+import tempfile
 from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
@@ -296,8 +298,10 @@ def test_new_owner_launches_native_source_qualified_interpreter_not_alternate(
 
     def spawn(command: list[str], **options: Any) -> SimpleNamespace:
         assert command[0] == native, "Source-qualified native spelling was not forwarded"
-        assert options["cwd"] == Path(config.to_dict()["data_dir"]).resolve()
-        assert options["instance"].runtime_root == Path(config.to_dict()["data_dir"]).resolve()
+        physical_data = Path(config.to_dict()["data_dir"]).resolve()
+        expected_cwd = Path(physical_data.anchor) if os.name == "nt" and len(str(physical_data)) >= 260 else physical_data
+        assert options["cwd"] == expected_cwd
+        assert options["instance"].runtime_root == physical_data
         assert config.encoded == original_config
         launched.append(command)
         return candidate
@@ -313,3 +317,66 @@ def test_new_owner_launches_native_source_qualified_interpreter_not_alternate(
         "state": "ready", "reused": False,
     }
     assert conversions == [selected.python]
+
+
+@pytest.mark.parametrize("extra_entry", [False, True])
+def test_posix_projected_request_uses_short_owned_socket_directory(
+    config: ServiceConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extra_entry: bool,
+) -> None:
+    """Transport projection only: no Linux peer-pidfd claim from this host test."""
+    import zdd.private_unix as unix
+    from zdd.private_protocol import PeerIdentity
+    selected = binding(tmp_path / "runtime")
+    record = owner_record(selected, config)
+    caller = PeerIdentity(111, "222", "fixture")
+    real_os = os
+    monkeypatch.setattr(local_control, "os", SimpleNamespace(**{**vars(real_os), "name": "posix"}))
+    monkeypatch.setattr(local_control, "current_peer", lambda: caller)
+    temporary: list[Path] = []
+    repo = Path(__file__).resolve().parents[3]
+    def create(*, prefix: str) -> str:
+        path = Path(tempfile.mkdtemp(prefix=prefix, dir=repo / ".test-venvs"))
+        temporary.append(path)
+        return str(path)
+    monkeypatch.setattr(local_control, "mkdtemp", create, raising=False)
+    from fleet_manager.private_state import private_directory as real_private
+    validated = []
+    def private(path: Path) -> None:
+        if path in temporary:
+            validated.append(path)  # POSIX privacy is a source contract, not NT ACL emulation.
+        else:
+            real_private(path)
+    monkeypatch.setattr(local_control, "private_directory", private)
+    class Listener:
+        def __init__(self, path: Path) -> None:
+            assert len(os.fsencode(str(path))) <= 107, "long data root leaked into Unix socket address"
+            assert path.parent in temporary
+            self.path = path
+        def accept(self, deadline: Any, *, expected: PeerIdentity) -> Any:
+            assert expected == PeerIdentity(**record["peer"])
+            return SimpleNamespace(
+                retain_peer=lambda _: SimpleNamespace(close=lambda: None), close=lambda: None)
+        def close(self) -> None:
+            if extra_entry:
+                (self.path.parent / "unexpected").write_text("preserved")
+    monkeypatch.setattr(unix, "UnixListener", Listener)
+    monkeypatch.setattr(local_control, "write_frame", lambda *args: None)
+    monkeypatch.setattr(local_control, "read_frame", lambda *args: {
+        "pid": 123, "process_start_time": "456", "version": record["slot"],
+        "config_identity": record["config_identity"], "ready": True,
+    })
+    try:
+        if extra_entry:
+            with pytest.raises(OSError):
+                local_control.request(config, record, "health")
+            assert (temporary[0] / "unexpected").read_text() == "preserved"
+        else:
+            assert local_control.request(config, record, "health")["ready"]
+            assert not temporary[0].exists()
+        assert validated == temporary
+    finally:
+        for path in temporary:
+            if (path / "unexpected").exists():
+                (path / "unexpected").unlink()
+            if path.exists():
+                path.rmdir()
