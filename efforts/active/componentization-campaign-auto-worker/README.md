@@ -51,6 +51,20 @@ working toward the genuinely judgment-heavy ones.
   future one) can pick up the coordinator role by reading that skill, without
   needing this effort's own history replayed.
 
+
+<!-- backlog-reconciliation:7556:qualified-fifteen:3372:Coordination -->
+
+### Continuing #3372 custody
+
+Keep #3372 the whole auto-coordinator objective, distinct from #2805's subject-matter
+discipline and actual per-file campaign/source/resource owners. Draft stays Draft;
+Phases 1-4 still require scope/sequence sign-off and retained first-dispatch/auto-fix
+human decisions. Existing manual methodology, ranking and reported detection/filing are
+credited, not inferred whole-loop completion. The historical baseline-ceiling example is
+not permission for widening or merge bypass. No live/private worker-state finding,
+enrollment, launch, factory, pool, schedule, takeover, claim expiry or source
+reassignment is authorized.
+
 ## Context
 
 Session history that produced this effort (see the parent effort's Journal
@@ -144,6 +158,51 @@ than writing down what already works.
       version (e.g. approving the very first dispatch of a new campaign,
       or any auto-fix PR the CI-blocker classifier proposes).
 
+
+<!-- backlog-reconciliation:7556:qualified-fifteen:3372:Plan -->
+
+### Direct proposed acceptance from #3372
+
+_Agent-recommended additive tracking proposal; the entire original/refined/directly
+inherited acceptance and its finite evidence tiers remain binding._
+
+Preserve the incumbent Request, status, Participants, Coordination, every old
+Plan/global Validation row and check state, first unresolved gates and full Journal.
+These unchecked rows are proposed tracking, not implementation, accepted source
+transfer, native/release/installed proof, rollout permission or source/resource release.
+Existing issue and source custodians remain; unassigned metadata is not vacancy. No new
+universal ACK, every-host or whole-parent completion gate is introduced.
+
+- [ ] **T3372-selection-dispatch-P:** For each eligible selected target, preserve
+  standing exclusions and active-campaign ownership, one isolated worktree per file and
+  incremental individually reviewed PR slices from the existing methodology. Backlog
+  selection/dispatch automation must not reduce the contract to a one-shot split, seize
+  an already active target or bypass normal review/merge gates.
+
+- [ ] **T3372-checkpoint-verifier-P:** Retain P2's merged/blocked/fully-done structured
+  checkpoints and independent live-repository verifier. Distinguish a genuinely blocked
+  target from one requiring a smaller reviewed slice; a worker self-report or a
+  decomposer role is not the independent completion witness.
+
+- [ ] **T3372-ci-boundary-P:** Retain P3's actual shared-CI comparison and classify
+  failure against the relevant repository state before choosing a correction. The
+  proposed auto-fix boundary remains undecided: the baseline-ceiling example grants no
+  baseline widening, merge bypass or source reassignment. Escalate nontrivial changes
+  through their actual owner/review path.
+
+- [ ] **T3372-monitor-recovery-P:** In the approved orchestration design, retain bounded
+  monitoring cadence and recovery for long-running campaign slices, using the existing
+  runbook and actual campaign ownership. Choose short versus long check-ins
+  deliberately; do not turn the historical 2-hour manual example into a universal
+  interval or infer death/expiry/takeover from silence.
+
+- [ ] **T3372-human-signoff-credit-P:** Preserve Phase 0's delivered manual
+  skill/registration/umbrella and the qualified own reports of ranking and
+  detector/deduplicated issue-filing delivery. Do not reopen these finite sources or
+  call all automation absent. Keep the whole autonomous coordinator objective and actual
+  human decisions distinct; Phases 1-4 require scope/sequence sign-off before
+  implementation.
+
 ## Validation Plan
 
 - [ ] The skill (Phase 0) is validated by direct reuse: a future
@@ -155,6 +214,37 @@ than writing down what already works.
       `agent-dispatch/supervisor.py`, and whatever's ranked next by
       `rank-module-size.py` at the time) rather than a synthetic test case,
       since the whole point is real-world reduction of coordinator load.
+
+
+<!-- backlog-reconciliation:7556:qualified-fifteen:3372:Validation-Plan -->
+
+- [ ] **T3372-selection-dispatch-V:** Against the actual then-remaining ranked backlog,
+  verify exclusion/active-campaign filtering and an eligible isolated target through
+  sequential independently reviewed slices. Record actual target/ranking and reviewed
+  checkpoints rather than treating historical example files or manual batch closure as
+  current proof.
+
+- [ ] **T3372-checkpoint-verifier-V:** Against the actual then-remaining ranked backlog,
+  verify an accurate checkpoint AND reject an inconsistent done/blocked self-report
+  using repository evidence. Exercise a genuine blocker versus a smaller-slice
+  continuation without changing active campaign ownership or review/merge gates.
+
+- [ ] **T3372-ci-boundary-V:** Use real campaign CI evidence to distinguish diff-caused,
+  genuinely shared/pre-existing and uncertain failures; record the actual basis, not
+  stale source narrative or synthetic-only success. Confirm no unapproved baseline
+  widening or gate bypass is performed and retained human auto-fix decisions are
+  honored.
+
+- [ ] **T3372-monitor-recovery-V:** With the actual approved backlog/campaign, record
+  selected cadence, a long-running slice and bounded stall/recovery handling through the
+  existing owner. Verify no continuous idle polling or inferred resource release; keep
+  genuinely blocked versus smaller-slice judgment and human escalation explicit.
+
+- [ ] **T3372-human-signoff-credit-V:** Qualify the complete selected automation
+  increment against the actual then-remaining backlog, retaining P4's
+  first-campaign-dispatch and auto-fix human checkpoints and Phase 0 direct-reuse
+  question. A ranker/detector/static role/independent worker or closed historical 3-file
+  batch cannot alone pass the whole-loop outcome.
 
 ## Proposal
 
@@ -188,3 +278,17 @@ effort plans.
   CI-blocker classification, orchestration wrapper) is this session's own
   proposed decomposition of "auto-worker," not something the operator
   specified in that level of detail.
+
+<!-- backlog-reconciliation:7556:qualified-fifteen:3372:Journal -->
+
+### 2026-10-28 - Proposed #3372 retained-contract amendment
+
+Retained isolated incremental reviewed slices, independently verified checkpoint
+reports, actual CI classification and its unapproved auto-fix boundary, deliberate
+monitoring/recovery and human sign-off as direct Plan/global Validation pairs.
+Validation still uses the actual then-remaining backlog; historical sample files, manual
+completion and detector/role existence are not whole-loop qualification. This is
+authored tracking only, pending normal review, actual delivery and complete current
+readback. All prior rows, checked credit, custodians and Journal remain; no
+implementation, activation, native/installed result, source closure or resource release
+is asserted.

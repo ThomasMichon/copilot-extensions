@@ -98,6 +98,10 @@ This is below-altitude tracker reconciliation: no standing vision is weakened
 to make the backlog appear smaller. A broader thematic consolidation may group
 work under an existing effort, but it cannot silently mark that effort Done.
 
+The [fifteen qualified contracts](receiving-qualified-fifteen.md) retain five
+direct draft amendments and ten source-specific outcomes. Publication does not
+establish receiving acceptance or authorize source issue closure.
+
 ## Request
 
 Operator request, with identifying organizational references redacted:
