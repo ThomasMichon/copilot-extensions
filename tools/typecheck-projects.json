@@ -541,7 +541,8 @@
         "services/pr"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict",
+      "requirements": "tools/typecheck-service-pr-requirements.txt"
     },
     {
       "name": "service-ssh",
