@@ -188,6 +188,12 @@ for its bounded scope and remaining takeover/foundation limitations.
 `--supervised-debug` uses the same exclusive authority under foreground
 supervision, never a second installation writer.
 
+Runtime installers may execute from a delivered or prepared payload directory.
+The collected plan preserves the resolved invoking repository separately in
+`COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT` for native and prepared-source
+installers, replacing any inherited staging context. Repository-scoped
+activation therefore does not depend on the installer's working directory.
+
 The default installation watchdog is **900 seconds** on both native shell
 front doors; the updater reserves another 30 seconds for cleanup. An explicit
 `AGENT_WORKTREES_INSTALL_DEADLINE_SEC` overrides
