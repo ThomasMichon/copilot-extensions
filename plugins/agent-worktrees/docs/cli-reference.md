@@ -311,6 +311,17 @@ Successful reading likewise grants **no local execution, takeover, mutation,
 or launch authorization**. Actual launch APIs retain execution-space,
 locality, head, duplicate and live-holder protections.
 
+### Worker lifecycle observations
+
+The separate `record --describe-closeout-contract` and
+`record --describe-readiness-contract` forms describe only their executing
+runtime's respective finalized-checkout and nonfinalizing readiness support.
+Their explicit observation modes inspect current managed workspace/native
+custody, unlike the metadata-only forms above; neither releases a task or
+retires a process. See the [provider reference](dispatch-worker-closeout.md#read-only-owner-observation)
+for exact arguments, version negotiation, preservation gates and failure
+semantics. Existing record metadata is not readiness or finalization proof.
+
 ## State-root and paired-worktree resolution
 
 `agent-worktrees state-root --json` resolves the repository that owns personal
