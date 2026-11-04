@@ -156,6 +156,20 @@ def test_guarded_isolated_timeout_reports_only_the_deadline(monkeypatch, tmp_pat
     assert "private" not in str(caught.value)
 
 
+def test_guarded_isolated_prelaunch_expiry_uses_real_deadline_guard(monkeypatch, tmp_path):
+    monkeypatch.setattr(guard.snapshots, "_open", lambda path: path.open("rb"))
+    monkeypatch.setattr(guard.subprocess, "Popen", lambda *_args, **_kwargs: pytest.fail("unexpected child"))
+    procutil = SimpleNamespace(
+        spawn_sync_in_kill_on_close_job=lambda *_args, **_kwargs: pytest.fail("unexpected child"),
+    )
+
+    with pytest.raises(guard.GuardedSelectionError, match="guarded native resolver deadline exceeded"):
+        guard._run_isolated(
+            {"control_bytes": 0}, tmp_path, {"worker.py": b"pass"},
+            _limits(), time.monotonic() - 1, procutil,
+        )
+
+
 def test_guarded_project_uses_the_configured_feed_metadata_policy(monkeypatch):
     observed = []
 

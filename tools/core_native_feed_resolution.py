@@ -868,7 +868,7 @@ def _run_isolated(request, root, sources, limits, deadline, procutil):
             custody = held.enter_context(snapshots._open(control))
             result = run_owned(
                 [executable, "-I", "-S", "-B", "-c", launch, str(worker), str(control)],
-                cwd=root, env=child_environment, timeout=deadline - time.monotonic(),
+                cwd=root, env=child_environment, timeout=max(0.001, deadline - time.monotonic()),
                 procutil=procutil, construction_fd=custody.fileno(), deadline=deadline,
             )
         if len(result.stdout) > _CONTROL_LIMIT:
