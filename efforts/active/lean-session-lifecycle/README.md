@@ -134,6 +134,12 @@ mini-effort retains those distinct open gates. Phase 2's source continuation
 landed separately in #10167; the remaining Validation Plan and tracking issues
 are not closed by either source slice.
 
+The acquisition prerequisite's source landed in #10198. The operator resumed
+the charter after its winddown. Bootstrap and installed qualification remain
+open in the mini-effort, including the flagged CMD resident-picker entry found
+during live process observation; no retained session is migrated by this source
+continuation.
+
 ### Phase 4 - Release and measured completion
 
 - [ ] Update consumers through the normal release/deploy flow and projection sync.

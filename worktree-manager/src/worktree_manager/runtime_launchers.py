@@ -76,8 +76,7 @@ def _cmd_binstub() -> str:
         "@echo off\r\n"
         "setlocal\r\n"
         'set "ERRORLEVEL="\r\n'
-        'if not defined CE_TERMINAL_LAUNCH if "%~1"=="" goto terminal_host\r\n'
-        'if not defined CE_TERMINAL_LAUNCH if "%~1"=="--project" if "%~3"=="" goto terminal_host\r\n'
+        'if not defined CE_TERMINAL_LAUNCH goto terminal_host\r\n'
         'goto runtime\r\n'
         ':terminal_host\r\n'
         'for %%P in (pwsh.exe) do if "%%~$PATH:P"=="" goto runtime\r\n'

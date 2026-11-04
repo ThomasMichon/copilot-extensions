@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve terminal-owned handoff for flagged Windows CMD Picker launches.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
