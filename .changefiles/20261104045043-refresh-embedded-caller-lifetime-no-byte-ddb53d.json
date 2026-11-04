@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh embedded caller-lifetime no-bytecode source",
+  "changes": [
+    {
+      "plugin": "libs/installation-context",
+      "type": "patch"
+    }
+  ]
+}
