@@ -149,6 +149,10 @@ def test_closeout_atomically_requeues_but_retains_native_capacity_and_history(q,
     assert reservation.state == SpawnState.RELEASING and reservation.release_requested
     assert reservation.startup_fenced and not reservation.conversation_retired
     assert reservation.session_handle == "native" and reservation.worktree == "worktree"
+    from agent_dispatch.task_obligations import read_snapshot
+    obligation = read_snapshot(q, task_id)
+    assert obligation["release_outcome"] == "unassigned_queued"
+    assert obligation["unassignment"]["worker_id"] == binding["worker_id"]
     assert q.pool_startup(task_id).startup_attempts == before[2].startup_attempts
     assert q.pool_startup(task_id).cooldown_stage == 1
     assert len(q.events(task_id)) == len(before[5]) + 1

@@ -31,6 +31,11 @@ worktree-owned durable placement and passive exact-store discovery.
 The [D1 source readback](journal/2026/11.03-sidecar-durable-placement.md) retains
 native durability, efforts initialization/export, consumer and archival gates.
 
+#10238 merged as `ca938fd8f998933624accae2ce8371001f58f24c`, delivering
+explicit new managed agenda initialization and complete consistent export/
+readback. The [D2 source readback](journal/2026/11.03-sidecar-managed-agenda-export.md)
+retains Manager/Bridge consumers, logger/rescue, native and original parent gates.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than
@@ -301,7 +306,8 @@ publication and installed support retain their separate qualification.
   lifetime and archival acceptance in the
   [linked worktree-state design](worktree-state-lifetime.md). Existing source
   approvals do not authorize actual data relocation, collection or deletion.
-  #10224 delivers D1's allocator/discovery source; D2-D5 and native durability
+  #10224 delivers D1's allocator/discovery source and #10238 D2's explicit
+  initialization/export. D3-D5 and native durability
   remain open rather than completing this combined acceptance.
 - [x] Attach the selected worktree provider to the actual Manager Timeline
   through the owning process boundary, with independent page/live cursors and

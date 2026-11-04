@@ -1,9 +1,11 @@
 # Mechanical closeout readiness before submission
 
-Status: **proposed integration design; implementation and qualification pending**.
+Status: **reviewed design; implementation and qualification pending**.
 Parent: [monitor and confirmed-state effort](README.md).
 Requirement: [assignment/startup outcome five](assignment-startup-amendment.md#prioritized-lifecycle-clarification).
 Coordination: [#9709](https://github.com/ThomasMichon/copilot-extensions/issues/9709).
+Design merged in [#10354](https://github.com/ThomasMichon/copilot-extensions/pull/10354)
+after exact-head independent approval and successful required CI.
 
 ## Selected behavior
 
@@ -33,8 +35,10 @@ queues evaluation nor reports successful submission.
 ## Current source boundary
 
 The CLI's completion command and client reach the coordinator's `/complete`
-route. Its queue transition immediately records `SUBMITTED`, clears the task
-owner and schedules configured verification. The HTTP MCP server calls that
+route. Its queue transition records `SUBMITTED` and clears the task owner.
+Verification-required tasks remain provisional and schedule their configured
+evaluator; existing tasks without required verification immediately reach
+`COMPLETED` by self-attestation. The HTTP MCP server calls that
 same queue method directly; the standalone MCP server proxies the client.
 Consequently, a CLI-only check would leave other supported callers unguarded.
 

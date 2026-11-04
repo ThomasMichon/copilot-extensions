@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
+from typing import Any
 
 from rich.text import Text
 from textual.widgets import Static
@@ -21,9 +23,32 @@ MAX_RETAINED_EVIDENCE_BYTES = 2 * MAX_WINDOW_BYTES
 MAX_RETAINED_WINDOWS = MAX_SOURCE_SCOPES
 
 
+def selected_head(
+    worktree: dict[str, Any], sessions: list[dict[str, Any]],
+    observer: tuple[str | None, str | None, str | None],
+) -> tuple[str, str, str] | None:
+    """Resolve the selected canonical head without borrowing another observer."""
+    heads = [row.get("id") for row in sessions if row.get("is_head") is True
+             and isinstance(row.get("id"), str) and row["id"]]
+    identity, project = worktree.get("id"), worktree.get("repo")
+    if not isinstance(project, str) or not project:
+        selected_project, selected_worktree, _ = observer
+        project = selected_project if selected_worktree == identity else None
+    if (
+        len(heads) == 1 and isinstance(identity, str) and identity
+        and isinstance(project, str) and project
+    ):
+        return project, identity, heads[0]
+    return None
+
+
 class TimelineAttachment:
-    def __init__(self, panel: CompanionTimelinePanel, *, cwd: str) -> None:
+    def __init__(
+        self, panel: CompanionTimelinePanel, *, cwd: str,
+        head_current: Callable[[tuple[str, str, str]], bool] | None = None,
+    ) -> None:
         self.panel, self.cwd = panel, cwd
+        self._head_current = head_current
         self.controller: TimelineController | None = None
         self._stop = asyncio.Event()
         self._revision = 0
@@ -78,10 +103,12 @@ class TimelineAttachment:
         self._retained_windows += (window,)
         self._retained_bytes += size
 
-    def _validate_retained(self, token: SourceToken, events: tuple[TimelineEvent, ...]) -> None:
+    def validate_events(self, token: SourceToken, events: tuple[TimelineEvent, ...]) -> None:
+        """Check shared active and retained proofs before any provider publishes."""
+        windows = self._retained_windows + ((self.panel.window,) if self._renderable() else ())
         for event in events:
             digest = None
-            for window in self._retained_windows:
+            for window in windows:
                 state = window.sources.get(token.identity.source_key)
                 if state is None or state.token.identity != token.identity:
                     continue
@@ -89,7 +116,7 @@ class TimelineAttachment:
                 if known is not None:
                     digest = window._digest(event) if digest is None else digest
                     if known != digest:
-                        raise TimelineSourceError("An immutable event conflicts with retained exhausted-window evidence.")
+                        raise TimelineSourceError("An immutable event conflicts with active or retained window evidence.")
 
     async def set_selection(
         self, selection: tuple[str, str, str] | None, *, reconcile: bool = False,
@@ -122,6 +149,8 @@ class TimelineAttachment:
                 initial = await source.prepare(revision, stop=stop)
                 if revision != self._revision or stop.is_set() or not self._renderable():
                     return
+                if self._head_current is not None and not self._head_current(selection):
+                    return
                 if (
                     not isinstance(initial, TimelineSnapshot)
                     or initial.token.request_epoch != revision
@@ -131,7 +160,7 @@ class TimelineAttachment:
                 ):
                     raise TimelineContractError("prepared snapshot changed the active selection or request epoch")
                 window = self.panel.window
-                self._validate_retained(initial.token, initial.events)
+                self.validate_events(initial.token, initial.events)
                 key = initial.token.identity.source_key
                 if reconcile and window.reconciliation_required and initial.availability is not Availability.OBSERVED:
                     raise TimelineContractError("reconciliation requires fresh observed owner facts")
@@ -152,13 +181,16 @@ class TimelineAttachment:
                     raise TimelineSourceError(result.reason)
 
                 def current() -> bool:
-                    return revision == self._revision and self._renderable()
+                    return (
+                        revision == self._revision and self._renderable()
+                        and (self._head_current is None or self._head_current(selection))
+                    )
 
                 def observation(value: TimelineSnapshot | LiveDelta | TimelineGap) -> None:
                     if not current():
                         return
                     if not isinstance(value, TimelineGap):
-                        self._validate_retained(value.token, value.events)
+                        self.validate_events(value.token, value.events)
                     result = (
                         self.panel.apply_snapshot(value) if isinstance(value, TimelineSnapshot)
                         else self.panel.apply_delta(value) if isinstance(value, LiveDelta)
@@ -169,7 +201,7 @@ class TimelineAttachment:
 
                 def page(value: HistoryPage) -> None:
                     if current():
-                        self._validate_retained(value.token, value.events)
+                        self.validate_events(value.token, value.events)
                         result = self.panel.prepend_page(value)
                         if not result.applied:
                             raise TimelineSourceError(result.reason)

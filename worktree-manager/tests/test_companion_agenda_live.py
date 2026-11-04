@@ -93,8 +93,8 @@ def widget(app):
     return content.plain if isinstance(content, Text) else content.label.plain
 
 
-async def until(pilot, predicate):
-    for _ in range(80):
+async def until(pilot, predicate, *, attempts=80):
+    for _ in range(attempts):
         if predicate():
             return
         await pilot.pause(0.025)

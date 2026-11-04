@@ -441,6 +441,18 @@ restoration of historical terminal enums follows.
       [#9773](https://github.com/ThomasMichon/copilot-extensions/pull/9773).
 - [ ] Resolve the amendment's remaining policy choices and complete its validation matrix
       at the stated source, mixed-version and installed/native evidence tiers.
+- [x] Review the [provisional submission and worktree-task responsibility design](submission-closeout-amendment.md)
+      in [#10354](https://github.com/ThomasMichon/copilot-extensions/pull/10354),
+      merged as `d347cb4d91` after current-head approval and required CI.
+      Readiness is not permanent finalization; the worktree owns its task
+      obligation through review/rejection. Decline ordering and explicit
+      abandoned-task disposition retain normal custody. Implementation,
+      same-worker post-stop recovery and installed/native qualification remain open.
+- [ ] Implement the reviewed worktree-owned assignment obligation and exact
+      completed or unassigned/unbound-queued settlement through existing claim
+      owners. Then qualify submission readiness, preserved rejected results,
+      same-workspace/native recovery and permanent finalization at their
+      respective source and installed/native boundaries.
 - [x] Land [worker-decline preparation](journal/2026/11.03-worker-decline-preparation.md)
       in [#10298](https://github.com/ThomasMichon/copilot-extensions/pull/10298),
       preserving native-fenced pending closeout and capacity. This provider

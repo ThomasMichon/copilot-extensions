@@ -13,6 +13,11 @@ the remaining consumer joins retain their proposed/unqualified status.
 #10224 supplies the separately negotiated worktree-data placement/discovery
 provider; its [owning contract](../../../plugins/agent-worktrees/docs/worktree-data.md)
 does not initialize agendas or complete rich consumer/archival integration.
+#10238 adds the optional efforts-owned
+[managed initialization](../../../plugins/efforts/skills/driving-effort-agendas/references/managed-placement.md)
+and [complete export/readback](../../../plugins/efforts/skills/driving-effort-agendas/references/agenda-export.md)
+contracts. They do not change the coarse observation wire or complete Manager,
+logger, installed or native acceptance.
 Providers advertise actual running support before independently installed
 callers use new syntax. Existing roster, agenda-v1/v2 and raw Bridge event
 contracts remain unchanged.

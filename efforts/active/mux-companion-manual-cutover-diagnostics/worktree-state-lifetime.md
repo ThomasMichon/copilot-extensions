@@ -5,10 +5,12 @@ Sidecar dependency: [S2 and its validation](sidecar-live-timeline.md).
 Standing intent: [worktree data](../../../visions/plugins/agent-worktrees/worktree-data/README.md).
 
 **Status: design reviewed in #10199; D1 placement/discovery source merged in
-#10224.** Native durability, efforts integration and D2-D5 remain open.
-Neither source merge performs a live data move, export, collection, cleanup
-or rollout. The [D1 readback](journal/2026/11.03-sidecar-durable-placement.md)
-records the exact source acceptance.
+#10224; D2 managed initialization/export source merged in #10238.** Native
+durability and D3-D5 remain open. No source merge performs a live data move,
+export, collection, cleanup or rollout. The
+[D1 readback](journal/2026/11.03-sidecar-durable-placement.md) and
+[D2 readback](journal/2026/11.03-sidecar-managed-agenda-export.md) record exact
+source acceptance.
 
 ## Request - verbatim
 
@@ -39,8 +41,10 @@ home through that interface.
 #10224 adds the worktree owner's bounded descriptor and exact-store passive
 discovery outside the checkout. The owning
 [worktree-data contract](../../../plugins/agent-worktrees/docs/worktree-data.md)
-records allocation and filesystem refusal semantics. Efforts initialization,
-Manager consumption and archival are still separate, unfinished integrations.
+records allocation and filesystem refusal semantics. #10238 composes explicit
+new managed initialization with complete consistent context-qualified export
+and local readback. Manager consumption, logger collection and legacy rescue
+remain separate, unfinished integrations.
 
 Existing cleanup can remove a checkout while retaining a lifecycle tombstone.
 That tombstone does not preserve arbitrary checkout-local agenda bytes.
@@ -156,9 +160,11 @@ not consequences of a reviewed design.
   fresh managed homes and read-only unsupported/unknown behavior; no live move.
   #10224 merged as `3da6f1c3e534fd2df0b65775ee17c6d252ec9c42`; this is
   source delivery with the native durability acceptance below still open.
-- [ ] D2. Have efforts consume managed placement for explicitly selected new
+- [x] D2. Have efforts consume managed placement for explicitly selected new
   stores and provide consistent complete export. Preserve standalone/legacy
   operation; do not automatically migrate an active lane.
+  #10238 merged as `ca938fd8f998933624accae2ce8371001f58f24c`; this is
+  source and isolated process delivery, not installed/native or archive proof.
 - [ ] D3. Connect Manager to that discovery and existing push revisions, then
   the owning rich reader, retaining one permanent Agenda subscription.
 - [ ] D4. Extend the existing logger collection and readback flow for exported
@@ -181,16 +187,23 @@ not consequences of a reviewed design.
   one admitted writer location; conflicting or partial registration is visible.
   #10224 qualifies new-home publication/faults and concurrent worktree allocation;
   no active-store relocation or native Windows durability is qualified.
-- [ ] Execute the owning allocation/retry durability control on native Windows
+- [ ] Execute the owning allocation/retry and complete-export durability controls on native Windows
   and record actual filesystem barriers separately from Linux API-double
   coverage. Hardware power-loss behavior and unsupported filesystems are not
   inferred from source tests.
+- [x] Qualify efforts-owned new managed initialization and complete local export/
+  readback in isolated processes, preserving declared identity and every
+  accepted operation/record under concurrent mutation. #10238 covers malformed
+  stored requests, integrity/completeness faults and exact retries. This is not
+  remote archival acknowledgment, restoration or native Windows acceptance.
 - [ ] A real producer-to-CLI-to-Manager join follows committed agenda revisions,
   pages backward while browsing and cancels all owned reads; unrelated views and
   the existing coarse subscription remain usable.
 - [ ] Owner export and archive readback preserve the complete declared ledger,
   immutable records, original identity and revision under concurrent mutation.
   Omitted/truncated/rewritten members fail the hash/completeness oracle.
+  #10238 delivers the owner export/local-readback source portion; actual logger
+  collection, destination acknowledgment and archive readback remain open.
 - [ ] Multiple contributing sessions reference one revision-bound worktree
   collection. Existing logger aggregate authorization, privacy, idempotency
   and destination ownership remain effective.

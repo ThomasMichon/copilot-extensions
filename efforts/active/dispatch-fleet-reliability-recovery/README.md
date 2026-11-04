@@ -39,6 +39,15 @@ Preserve the owning ground-layer, installer and configuration authorities.
 
 ## Coordination
 
+The proposed finite #5493 four-signature startup characterization stays with
+the SAME Coordinator/startup-attempt/container/native and ground/lifecycle
+custodians. Preserve #6467/#7486/#8051/#6793/#6470, scalar repair and all
+incumbent deferral/terminal-capacity reservations. Complete normal reviewed
+direct Plan/local AND ACTUAL global Validation/Coordination/Journal merge
+and permitted WHOLE CURRENT source/receiver/custody readback precede separate
+administrative disposition. A stopped/stale/uncertain row is not absence,
+rearm/replay permission or owner release; no new watchdog or generic ACK.
+
 - **Topology:** Independent per-slice worktrees and PRs may merge concurrently
   after their own gates pass; reconcile actual content conflicts.
 - **Host (owns PRs):** Coordinator; implementation participants may prepare
@@ -576,6 +585,42 @@ reported serial-probe repair are credit, not proof of every goal/cleanup case._
   the separate queued/nonterminal cleanup case. Use existing bounded probes
   without weakened deadlines or a competing watchdog.
 
+### Proposed finite four-signature startup characterization from #5493
+
+_(Agent-recommended direct Phase3/Phase7 consumer case; all rows unchecked.)_
+
+- [ ] **P5493-1:** Preserve the unresolved incident/disposition and score
+  ALL FOUR stopped-row collision, gone-mid-start, handshake closure and
+  briefly-live-BEFORE-CLAIM signatures separately, through applicable CURRENT
+  ordinary create/store/send AND direct same-target control. Retain the
+  original six-failure/seventh-attempt report, rearm windows,
+  `max_concurrent: 1` and default `max_attempts: 3` as attributed context,
+  not a new current recurrence or guessed common root cause.
+- [ ] **P5493-2:** Credit #6517 and ordinary Bridge owner-qualified allocation/
+  invocation/native/readiness identity, reservation readback, uncertain-create
+  retention, carried-busy deferral and known-gone resume safeguards. Do not
+  restore obsolete preallocation. Preserve exact task/exclusive/attempt/
+  reservation/conversation identity, partial work, original budgets/safe-retry
+  authority and separately owned infrastructure-attempt accounting.
+- [ ] **P5493-3:** A narrowed fix OR demonstrated duplicate disposition must
+  actually match the original signatures/conditions under supported current
+  paths; a similar LAUNCH_ACP title or later startup success is insufficient.
+  Keep cause UNKNOWN when unproved. No blind relaunch/rearm, label change,
+  session end, resource release or broader all-container campaign is implied.
+
+#### Local Validation - #5493
+
+- [ ] **V5493-1:** Through actual ordinary startup consumers plus direct
+  same-target control, record each matched signature, unavailable reproduction
+  or demonstrated duplicate evidence separately. Preserve exact creating/
+  resumed/stored/send identity, partial work and original attempt budgets;
+  unknown admission or a live/busy carried body cannot authorize replay.
+- [ ] **V5493-2:** Keep #6517 source/mock/native boundaries and current versus
+  obsolete path differences honest; preserve original finite evidence tiers,
+  Phase3/Phase7, #1145/#2207/#2395/#8778/#8779 and all startup communication/
+  process/lifecycle/cleanup/source/native custodians. This amendment performs
+  no startup, retry, reservation, reviewer or container operation.
+
 ## Validation Plan
 - [ ] Complete every directly retained #2395 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and unfinished acceptance. Tracker consolidation is not implementation.
 
@@ -667,6 +712,14 @@ reported serial-probe repair are credit, not proof of every goal/cleanup case._
   death nor completion. Retain bounded probes and source/native/installed
   distinctions, not a new whole-fleet/native-every-host prerequisite.
 
+- [ ] **G5493:** Resolve EVERY P5493/local Validation/continuing Coordination
+  clause for ALL FOUR signatures and ordinary AND direct paths, preserving
+  original identity, partial work, budgets, safe retry, delivered safeguards
+  and actual fix OR demonstrated-duplicate alternative. Preserve ALL incumbent
+  Plan/global Validation/Journal/Participants and owner holds. Paper intake
+  is not incident diagnosis, reproduction, technical/whole-fleet completion
+  or resource release; no every-host/unrelated whole-parent gate is added.
+
 ## Proposal
 
 The initial proposal changes no runtime or deployment configuration. Category is
@@ -680,6 +733,15 @@ named-resource resolution so an older peer cannot silently accept but ignore a
 requested contract.
 
 ## Journal
+
+### 2026-10-30 - Proposed four-signature ordinary-startup characterization
+
+Added unchecked direct #5493 Plan/local and ACTUAL global Validation with
+continuing same-owner coordination. Preserve collision/gone/handshake/briefly-
+live-before-claim distinctions, ordinary AND direct control, original attempt
+identity/bounds and #6517/current startup credit. Cause and accepted disposition
+remain unresolved; no obsolete path, reproduction, rearm, retry, label routing,
+session/container action, implementation or custody transfer is authorized.
 
 <!-- backlog-reconciliation:7556:qualified-thirteen:2816:Journal -->
 
