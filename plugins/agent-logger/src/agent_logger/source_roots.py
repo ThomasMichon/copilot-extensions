@@ -19,6 +19,7 @@ from agent_logger.sync.provenance import (
     is_link_or_reparse,
     open_regular_no_follow,
 )
+from agent_logger.sync.worktree_state_namespace import is_namespace_directory
 
 SOURCE_METADATA_MEMBER = ".archive-source.json"
 MAX_SOURCE_METADATA_BYTES = 1024 * 1024
@@ -355,6 +356,15 @@ def iter_archive_sources(
             mode = entry.lstat().st_mode
             if stat.S_ISREG(mode):
                 continue
+            if grouped and stat.S_ISDIR(mode) and not is_link_or_reparse(entry, mode):
+                try:
+                    if is_namespace_directory(entry.parent, entry.name):
+                        continue
+                except OSError as exc:
+                    if on_error is None:
+                        raise
+                    on_error(entry.relative_to(root).as_posix(), exc)
+                    continue
             layout: LayoutKind = (
                 "container"
                 if entry.name.endswith(".containers")
@@ -373,7 +383,13 @@ def iter_archive_sources(
             continue
         for candidate in candidates:
             try:
-                if stat.S_ISREG(candidate.lstat().st_mode):
+                mode = candidate.lstat().st_mode
+                if stat.S_ISREG(mode):
+                    continue
+                if (
+                    stat.S_ISDIR(mode) and not is_link_or_reparse(candidate, mode)
+                    and is_namespace_directory(candidate.parent, candidate.name)
+                ):
                     continue
             except OSError as exc:
                 if on_error is None:

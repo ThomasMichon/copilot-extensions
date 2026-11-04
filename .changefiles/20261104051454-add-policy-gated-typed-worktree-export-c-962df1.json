@@ -1,0 +1,9 @@
+{
+  "comment": "Add policy-gated typed worktree export collection and fresh local readback without enabling scheduled collection.",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}

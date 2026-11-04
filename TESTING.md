@@ -25,6 +25,31 @@ suppression, while the requested command retains its own interpreter flags.
 This source-boundary control does not expand required unit-only CI or qualify
 an installed rollout.
 
+Logger's opt-in `--test-file tests/test_worktree_state.py
+--test-file tests/test_worktree_state_coexistence.py
+--test-file tests/test_worktree_state_preservation.py
+--allow-explicit-tiers` packet checks typed local collection admission,
+creation-time privacy, fleet coexistence, corruption/partial-publication refusal
+and complete efforts export/readback
+through real isolated Python processes. It does not enable scheduled collection
+or qualify native Windows, an installed archive destination, remote durability
+or reclamation. See [the collection boundary](plugins/agent-logger/docs/worktree-state.md).
+The preservation cases exercise actually eligible old sessions and a verified
+ordinary archive containing no worktree collection; neither justifies erasing
+marked nested evidence.
+Raw and redacted copy refusals compare directory membership as well as file
+bytes, and the real efforts owner verifies the retained export afterward.
+Renamed markers remain protected, and deterministic interleavings qualify both
+claim-first and ordinary-publication-first namespace locking.
+Disposal beginning below a retained marker preserves bytes, directories and
+permissions; a marked `logs/` destination refuses ordinary process-log writes.
+Collections renamed to qualified or legacy provider-group names are excluded
+before expansion, preserving the source-discovery budget for ordinary peers.
+Invalid group markers report per-entry failures while preserving healthy inventory
+peers; actual group-enumeration budget failures still abort traversal.
+Actual directory-open counts at three path depths require one pinned ancestry
+walk per admission, and a newly written marker must be observed on the next call.
+
 The opt-in Manager `tests/test_companion_visual.py` packet compares actual
 Textual timeline renders against synthetic live-following and history-browsing
 SVG baselines, plus a selected-session view with visibly paused membership and

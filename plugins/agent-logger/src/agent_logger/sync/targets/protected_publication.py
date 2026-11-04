@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO
 
 from agent_logger.sync import protection as _protection
+from agent_logger.sync.worktree_state_preservation import refuse_collection_destination
 
 # ``filesystem`` imports this module while it is still loading; binding the
 # partially initialised module is safe because it is only read at call time.
@@ -85,6 +86,7 @@ def _protected_copy(
     :func:`_copy_replace`. With *compare_existing*, an identical destination
     is left in place.
     """
+    refuse_collection_destination(dst)
     try:
         source = _fs.open_regular_no_follow(src)
     except OSError as exc:
