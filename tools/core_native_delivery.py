@@ -32,7 +32,7 @@ from core_native_feed_resolution import (
     verify_guarded_projects,
     verify_lock_witness,
 )
-from core_native_public_feed import public_feed_policy
+from core_native_public_feed import public_feed_policy, require_public_feed
 from core_runtime_profile import (
     _core_manifest,
     _read,
@@ -412,6 +412,8 @@ def _build_from_snapshot(
                         selected, transaction, projections, uv=uv, download_origins=download_origins,
                         exclusions=first_exclusions, deadline=deadline,
                     )
+                    if nonsecret_feed_url is not None:
+                        require_public_feed(selected, transaction, nonsecret_feed_url, initial_feed)
                     witness, guarded_directory, snapshot_budget = compile_owners.enter_context(compile_guarded(
                         transaction, projections[1], initial_feed, floor=floor, cutoffs=cutoffs,
                         exclusions=first_exclusions, target_tags=target["tags"],

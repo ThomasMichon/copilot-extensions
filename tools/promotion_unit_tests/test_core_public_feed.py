@@ -116,3 +116,29 @@ def test_public_capture_requires_the_independently_selected_feed(monkeypatch):
             selected, transaction, ["original", "retained"], uv="uv",
             url="https://other.example/simple/", wheels=[], exclusions=(), deadline=10,
         )
+
+
+@pytest.mark.parametrize("change", ["headers", "other-feed", "multiple", "proxy", "invalid-url"])
+def test_public_preflight_refuses_nonanonymous_or_unselected_feeds(monkeypatch, change):
+    selected = SimpleNamespace(identity=SimpleNamespace(document=lambda: SOURCE))
+    transaction = SimpleNamespace(environment={})
+    feed = SimpleNamespace(index_url=URL, headers=())
+    inputs = SimpleNamespace(feeds=(feed,), proxies={})
+    monkeypatch.setattr(public, "_validated_trusted_index_url", lambda _environment: (URL, "fixture"))
+    public.require_public_feed(selected, transaction, URL, inputs)
+    if change == "headers":
+        feed.headers = (("X-Fixture", "value"),)
+    elif change == "other-feed":
+        feed.index_url = "https://other.example/simple/"
+    elif change == "multiple":
+        inputs.feeds = (feed, feed)
+    elif change == "proxy":
+        inputs.proxies = {"https": "fixture"}
+    else:
+        url = URL + "?query=value"
+        monkeypatch.setattr(public, "_validated_trusted_index_url", lambda _environment: (url, "fixture"))
+        with pytest.raises(ProfileError):
+            public.require_public_feed(selected, transaction, url, inputs)
+        return
+    with pytest.raises(ProfileError):
+        public.require_public_feed(selected, transaction, URL, inputs)

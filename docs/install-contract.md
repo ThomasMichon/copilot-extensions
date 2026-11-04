@@ -4332,9 +4332,9 @@ For a reproducible producer profile, the caller may explicitly supply
 affirmatively trusted HTTPS index and must be nonsecret throughout, including
 its path: the resulting identity is publicly reproducible rather than keyed.
 This mode refuses query/userinfo, credentials, multiple indexes and explicit
-download-origin restrictions. The existing keyed feed owner still performs
-acquisition and late revalidation; a separate capture records the stable
-anonymous policy in the candidate profile. This is not feed approval,
+download-origin restrictions before guarded feed requests. The existing keyed
+feed owner still performs acquisition and late revalidation; a separate capture
+records the stable anonymous policy in the candidate profile. This is not feed approval,
 attestation, publication or permission to expose a confidential URL. The
 portable identity binds core content rather than the enclosing source commit;
 the caller must still authenticate the currently selected source on every run.

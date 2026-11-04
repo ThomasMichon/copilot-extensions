@@ -89,15 +89,30 @@ def _public_identity(url: str, source: dict):
     return identify
 
 
-def public_feed_policy(
-    selected, transaction, projections, *, uv, url, wheels, exclusions, deadline,
-):
-    """Capture a stable public identity without changing local feed admission."""
+def _public_source(selected, transaction, url):
     trusted = _validated_trusted_index_url(transaction.environment)
     if trusted is None or trusted[0] != url:
         raise ProfileError("public feed differs from the affirmatively trusted native index")
     source = selected.identity.document()
-    identify = _public_identity(url, source)
+    return trusted, source, _public_identity(url, source)
+
+
+def _require_anonymous_feed(url, feed):
+    if len(feed.feeds) != 1 or feed.feeds[0].index_url != url or feed.feeds[0].headers or feed.proxies:
+        raise ProfileError("public feed must be anonymous and match the selected index")
+
+
+def require_public_feed(selected, transaction, url, feed):
+    """Refuse a nonanonymous or unselected feed before guarded requests."""
+    _public_source(selected, transaction, url)
+    _require_anonymous_feed(url, feed)
+
+
+def public_feed_policy(
+    selected, transaction, projections, *, uv, url, wheels, exclusions, deadline,
+):
+    """Capture a stable public identity without changing local feed admission."""
+    trusted, source, identify = _public_source(selected, transaction, url)
     policy = {
         "policyId": "sha256:" + identify(json.dumps({
             "source": source, "index": trusted, "downloadOrigins": (),
@@ -109,6 +124,5 @@ def public_feed_policy(
         wheels=wheels, profile_policy="native-source-profile",
         opaque_identity=identify, excluded_local_packages=exclusions,
     )
-    if len(feed.feeds) != 1 or feed.feeds[0].index_url != url or feed.feeds[0].headers or feed.proxies:
-        raise ProfileError("public feed must be anonymous and match the selected index")
+    _require_anonymous_feed(url, feed)
     return feed
