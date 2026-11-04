@@ -36,7 +36,7 @@ def unavailable(kind: str) -> dict | None:
 
 def run_start(
     python: Path, payload: dict, *, source_aware: bool, timeout: float,
-    decision_timeout: float,
+    decision_timeout: float, python_arguments: list[str] | None = None,
 ) -> dict | None:
     """Run current Start; ``None`` requests only the legacy packet fallback."""
     try:
@@ -45,6 +45,7 @@ def run_start(
         result = subprocess.run(
             [
                 str(python),
+                *(python_arguments or []),
                 "-m",
                 "agent_worktrees",
                 "session-lifecycle",
@@ -82,7 +83,9 @@ def run_start(
     return value if isinstance(value, dict) else {}
 
 
-def run_end(python: Path, payload: dict, *, timeout: float) -> dict:
+def run_end(
+    python: Path, payload: dict, *, timeout: float, python_arguments: list[str] | None = None,
+) -> dict:
     """Run source-bound End without permitting an older parser downgrade."""
     try:
         environment = os.environ.copy()
@@ -90,6 +93,7 @@ def run_end(python: Path, payload: dict, *, timeout: float) -> dict:
         result = subprocess.run(
             [
                 str(python),
+                *(python_arguments or []),
                 "-m",
                 "agent_worktrees",
                 "deregister-session",

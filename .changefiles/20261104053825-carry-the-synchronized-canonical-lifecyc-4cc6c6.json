@@ -1,0 +1,13 @@
+{
+  "comment": "Preserve canonical completed-runtime recovery in the existing standalone consumers.",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    }
+  ]
+}

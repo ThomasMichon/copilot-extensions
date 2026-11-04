@@ -251,6 +251,76 @@ def test_source_recovery_uses_explicit_identity_never_hash_order(
         assert "refusing unordered source fallback" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("broken", ["current-version", "last-known-good"])
+def test_undecodable_selector_retains_qualified_recovery(tmp_path: Path, broken: str) -> None:
+    runtime, first, _ = _source_slots(tmp_path)
+    (tmp_path / broken).write_bytes(b"\xff")
+    if broken == "current-version":
+        (tmp_path / "last-known-good").write_text(first, encoding="utf-8")
+        selected = runtime.resolve_python(tmp_path)
+        assert selected is not None and selected.parent.parent.name == first
+    else:
+        assert runtime.resolve_python(tmp_path) is None
+
+
+@pytest.mark.parametrize("selector", ["current-version", "last-known-good"])
+def test_unreadable_completion_preserves_read_only_recovery(tmp_path, monkeypatch, selector):
+    runtime, first, second = _source_slots(tmp_path)
+    (tmp_path / selector).write_text(first, encoding="utf-8")
+    if selector == "current-version":
+        (tmp_path / "last-known-good").write_text(second, encoding="utf-8")
+    construction = runtime._runtime_component("versioned_runtime_construction")
+    original = construction.read_completion
+    unavailable = runtime.marker_path(tmp_path, first)
+
+    def read(path, **kwargs):
+        if path == unavailable:
+            raise PermissionError("fixture completion is unreadable")
+        return original(path, **kwargs)
+
+    monkeypatch.setattr(construction, "read_completion", read)
+    with pytest.raises(PermissionError, match="unreadable"):
+        runtime.read_marker(tmp_path, first)
+    selected = runtime.resolve_python(tmp_path)
+    if selector == "current-version":
+        assert selected is not None and selected.parent.parent.name == second
+    else:
+        assert selected is None
+
+
+def test_unreadable_current_slot_preserves_healthy_last_known_good(tmp_path, monkeypatch):
+    runtime, first, second = _source_slots(tmp_path)
+    (tmp_path / "current-version").write_text(first, encoding="utf-8")
+    (tmp_path / "last-known-good").write_text(second, encoding="utf-8")
+    original = Path.exists
+
+    def exists(path):
+        if path == runtime.version_dir(tmp_path, first):
+            raise PermissionError("fixture current slot is unreadable")
+        return original(path)
+
+    monkeypatch.setattr(Path, "exists", exists)
+    selected = runtime.resolve_python(tmp_path)
+    assert selected is not None and selected.parent.parent.name == second
+
+
+def test_unreadable_versions_root_is_unavailable_to_read_only_resolution(tmp_path, monkeypatch):
+    runtime = identity._runtime()
+    versions = tmp_path / "versions"
+    versions.mkdir()
+    original = Path.iterdir
+
+    def entries(path):
+        if path == versions:
+            raise PermissionError("fixture versions are unreadable")
+        return original(path)
+
+    monkeypatch.setattr(Path, "iterdir", entries)
+    assert runtime.resolve_python(tmp_path) is None
+    with pytest.raises(PermissionError, match="unreadable"):
+        runtime.list_versions(tmp_path)
+
+
 @pytest.mark.parametrize("host", ["pwsh", "powershell", "bash"])
 @pytest.mark.parametrize("selector", [None, "current-version", "last-known-good"])
 @pytest.mark.parametrize("owner", ["canonical", "agent-worktrees"])
