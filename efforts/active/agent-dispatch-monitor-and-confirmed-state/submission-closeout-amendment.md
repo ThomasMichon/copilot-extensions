@@ -54,9 +54,17 @@ integration is not cohort activation or installed readiness qualification.
 
 The [retained submission preparation source](journal/2026/11.04-submission-preparation.md)
 adds queue-owned proposal and blocker custody without submitting work.
-It is under validation and review. It does not expose a caller capability,
+It merged in #10450 after current-head approval and required CI.
+It does not expose a caller capability,
 prove Worktrees readiness or permit prepared tasks to use legacy completion.
 Authoritative observation and guarded advancement remain the next integration.
+
+The [nonfinalizing Worktrees source](journal/2026/11.04-nonfinalizing-readiness.md)
+adds a bounded internal readiness observation without concluding the workspace
+or releasing its task claim. Its
+[provider reference](../../../plugins/agent-worktrees/docs/dispatch-worker-closeout.md#internal-nonfinalizing-readiness)
+owns applicability and limitations. Negotiated transport, queue advancement,
+ordinary activation and installed/native qualification remain pending.
 
 The CLI's completion command and client reach the coordinator's `/complete`
 route. Its queue transition records `SUBMITTED` and clears the task owner.

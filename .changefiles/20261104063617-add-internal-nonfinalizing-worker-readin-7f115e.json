@@ -1,0 +1,9 @@
+{
+  "comment": "Add internal nonfinalizing worker readiness that retains exact task responsibility",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
