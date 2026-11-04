@@ -1587,6 +1587,7 @@ def test_tool_profile_does_not_graft_through_ordinary_preferences(api, monkeypat
 @pytest.mark.parametrize("mode", [
     "selected", "absent", "source-failure", "presence-failure", "registry-failure",
     "self-restoring-resolver", "self-restoring-registry", "late-argument-rebind",
+    "absent-self-restoring-resolver",
 ])
 def test_execution_acquisition_original_decision_and_selected_callbacks(api, monkeypatch, mode):
     from dataclasses import dataclass
@@ -1612,7 +1613,7 @@ def test_execution_acquisition_original_decision_and_selected_callbacks(api, mon
         calls.append(("file", path))
         if mode == "presence-failure":
             raise ValueError("private presence body")
-        return mode != "absent" and path == present
+        return not mode.startswith("absent") and path == present
 
     def registry(anchor, *, config):
         assert anchor == str(roots[1]) and config is value
@@ -1621,9 +1622,12 @@ def test_execution_acquisition_original_decision_and_selected_callbacks(api, mon
             raise FileNotFoundError("private registry body")
         return {"fixture": object()}
 
-    def resolver(candidate, *, guest, configured, load_entries, preserve_native_hostname):
-        assert candidate == "fixture" and not guest and configured and preserve_native_hostname
+    def resolver(candidate, *, guest, configured, load_entries, preserve_native_hostname=False):
+        assert candidate == "fixture" and not guest and configured
+        assert preserve_native_hostname is (not mode.startswith("absent"))
         calls.append("resolver")
+        if load_entries is None:
+            return candidate
         try:
             assert "fixture" in load_entries()
         except FileNotFoundError:
@@ -1642,7 +1646,7 @@ def test_execution_acquisition_original_decision_and_selected_callbacks(api, mon
             return original(*args, **kwargs)
         monkeypatch.setattr(identity, callback, wrapper)
 
-    if mode == "self-restoring-resolver":
+    if mode in ("self-restoring-resolver", "absent-self-restoring-resolver"):
         restore("resolve_execution_machine", resolver)
     elif mode == "self-restoring-registry":
         restore("load_execution_registry", registry)
@@ -1659,6 +1663,8 @@ def test_execution_acquisition_original_decision_and_selected_callbacks(api, mon
 
     def fallback(*, value):
         calls.append("fallback")
+        if mode == "absent-self-restoring-resolver":
+            return identity.resolve_execution_machine(value, guest=False, configured=True, load_entries=None)
         return value
 
     api.stub("config", INREPO_CONFIG_DIRNAME=".agent-worktrees",
@@ -1673,7 +1679,9 @@ def test_execution_acquisition_original_decision_and_selected_callbacks(api, mon
                 api.config.execution_config(value, "fixture", {"machine": "fixture"}, {})
         else:
             result = api.config.execution_config(value, "fixture", {"machine": "fixture"}, {})
-            assert result.machine == ("fixture" if mode in ("absent", "registry-failure") else "selected")
+            assert result.machine == (
+                "fixture" if mode.startswith("absent") or mode == "registry-failure" else "selected"
+            )
             assert result.default_repo is value.default_repo
     expected = ["sources"]
     if mode != "source-failure":
@@ -1683,8 +1691,10 @@ def test_execution_acquisition_original_decision_and_selected_callbacks(api, mon
                 ("file", roots[0] / "machines.yaml"),
                 ("file", roots[1] / ".agent-worktrees" / "machines.yaml"), ("file", present),
             ])
-            if mode == "absent":
+            if mode.startswith("absent"):
                 expected.append("fallback")
+                if mode == "absent-self-restoring-resolver":
+                    expected.extend(["replacement", "resolver"])
             else:
                 expected.append("platform")
                 if mode == "self-restoring-resolver":
@@ -1696,7 +1706,7 @@ def test_execution_acquisition_original_decision_and_selected_callbacks(api, mon
     assert calls == expected
     owned = [o for o in observations if o.stage == "execution-machine"]
     uncertain = mode in (
-        "source-failure", "presence-failure", "registry-failure",
+        "absent", "absent-self-restoring-resolver", "source-failure", "presence-failure", "registry-failure",
         "self-restoring-resolver", "self-restoring-registry",
     )
     assert owned[-1].authority is (ScanAuthority.INDETERMINATE if uncertain else ScanAuthority.COMPLETE)
@@ -1706,7 +1716,7 @@ def test_execution_acquisition_original_decision_and_selected_callbacks(api, mon
             "registry-failure": "FileNotFoundError",
         }[mode]
         assert any(f.detail == detail for o in owned for f in o.findings)
-    if mode.startswith("self-restoring"):
+    if "self-restoring" in mode:
         assert any(f.reason == "owner-coverage-unavailable" for o in owned for f in o.findings)
         assert identity.load_execution_registry is registry and identity.resolve_execution_machine is resolver
     assert "private" not in repr(observations)

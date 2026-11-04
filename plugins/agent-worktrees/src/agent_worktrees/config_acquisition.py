@@ -251,6 +251,8 @@ def execution_config(config, configured_machine, machine_raw, global_raw):
                 break
         else:
             if machine_raw.get("machine") or global_raw.get("machine"):
+                failed(current_observations(), source, source, "owner-coverage-unavailable",
+                       "fallback resolver does not expose selected callback provenance")
                 config = replace(config, machine=cfg.detect_machine(value=config.machine))
     except Exception as exc:
         failed(current_observations(), source, source, "execution-machine-failed", type(exc).__name__)

@@ -4317,6 +4317,7 @@ def test_control_plane_acquisition_selected_wrapper_cannot_borrow_original_compl
 def execution_acquisition_sources(tmp_path, monkeypatch):
     from agent_worktrees import machine_identity, state_root
 
+    native_detect_machine = cfg.detect_machine
     calls = []
     roots = [tmp_path / "first", tmp_path / "second"]
     state = SimpleNamespace(roots=roots, present=roots[1] / "machines.yaml", failure=None)
@@ -4364,6 +4365,7 @@ def execution_acquisition_sources(tmp_path, monkeypatch):
 
     return SimpleNamespace(
         state=state, roots=roots, calls=calls, load=load, identity=machine_identity,
+        detect_machine=native_detect_machine,
     )
 
 
@@ -4385,7 +4387,9 @@ def test_execution_acquisition_original_selection_is_observed_without_replay(
         expected.append(("registry", str(source.roots[1])))
     assert source.calls == expected
     owned = [o for o in report.observations if o.stage == "execution-machine"]
-    assert owned and owned[-1].authority is ScanAuthority.COMPLETE
+    assert owned and owned[-1].authority is (
+        ScanAuthority.COMPLETE if selected else ScanAuthority.INDETERMINATE
+    )
     assert any(o.stage == "config-owner" and o.source == "execution-machine"
                for o in report.observations)
     assert report.authority is ScanAuthority.INDETERMINATE and report.reusable is False
@@ -4474,3 +4478,36 @@ def test_execution_acquisition_argument_rebinding_keeps_original_selected_callba
     owned = [o for o in report.observations if o.stage == "execution-machine"]
     assert owned and owned[-1].authority is ScanAuthority.COMPLETE
     assert report.reusable is False
+
+
+@pytest.mark.parametrize("callback", ["detect_machine", "resolve_execution_machine"])
+def test_execution_acquisition_absent_registry_keeps_fallback_callback_opaque(
+    execution_acquisition_sources, monkeypatch, callback,
+):
+    from dropin_registry import ScanAuthority
+
+    source = execution_acquisition_sources
+    source.state.present = None
+    monkeypatch.setattr(cfg, "detect_machine", source.detect_machine)
+    owner = cfg if callback == "detect_machine" else source.identity
+    original = getattr(owner, callback)
+    selected = []
+
+    def wrapper(*args, **kwargs):
+        selected.append(callback)
+        monkeypatch.setattr(owner, callback, original)
+        assert original(*args, **kwargs) == "fixture"
+        return "fallback-selected"
+
+    monkeypatch.setattr(owner, callback, wrapper)
+    report = source.load()
+    assert selected == [callback] and getattr(owner, callback) is original
+    assert report.value.machine == "fallback-selected"
+    expected = ["sources"]
+    for root in source.roots:
+        expected.extend(("file", root / rel) for rel in (".agent-worktrees/machines.yaml", "machines.yaml"))
+    assert source.calls == expected
+    owned = [o for o in report.observations if o.stage == "execution-machine"]
+    assert owned[-1].authority is ScanAuthority.INDETERMINATE
+    assert any(f.reason == "owner-coverage-unavailable" for o in owned for f in o.findings)
+    assert report.authority is ScanAuthority.INDETERMINATE and report.reusable is False

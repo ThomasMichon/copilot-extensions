@@ -62,7 +62,9 @@ ordered config-source anchors, short-circuited registry candidate checks,
 the selected resolver and its original registry callback. Failed legacy
 boolean presence checks remain uncertain, not confirmed absence. Originally
 suppressed registry failures retain type-only diagnostics, and fatal errors
-still propagate unchanged. Replaced callbacks remain opaque even when they
+still propagate unchanged. The no-registry fallback delegates to the existing
+machine detector and stays indeterminate without selected-callback provenance.
+Replaced callbacks remain opaque even when they
 restore the original function during execution. Completion describes only
 the selection decision; delegated source/registry frontiers stay opaque and
 the report remains non-reusable. No additional discovery or callback replay
