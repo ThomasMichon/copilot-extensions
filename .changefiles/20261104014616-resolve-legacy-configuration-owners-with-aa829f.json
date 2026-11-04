@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve legacy configuration owners with the executing version-slot retained runtime helper.",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

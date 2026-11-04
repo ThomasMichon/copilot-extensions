@@ -216,3 +216,168 @@ def test_unqualified_delivery_cannot_be_admitted_by_optional_absence(tmp_path, m
     monkeypatch.chdir(base)
     with pytest.raises(ConfigurationError, match="matching qualified owner"):
         config.load_config(str(selected))
+
+
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("delivered", [False, True])
+def test_slot_retained_resolver_qualifies_legacy_owner(tmp_path, monkeypatch, nested, delivered):
+    import shutil
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    real_report = configuration.owner_report
+    selected, base, knowledge, local, machine, report = setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(configuration, "owner_report", real_report)
+    home = tmp_path / "home"
+    own = home / ".agent-mcp"
+    slot = own / "versions" / "1.0.0"
+    prefix = slot / ".venv" if nested else slot
+    module = prefix / "lib" / "agent_mcp" / "configuration.py"
+    module.parent.mkdir(parents=True)
+    module.touch()
+    bootstrap = slot / ".runtime-bootstrap"
+    bootstrap.mkdir()
+    scripts = Path(configuration.__file__).parents[2] / "scripts"
+    for source in scripts.glob("versioned_runtime*.py"):
+        shutil.copy2(source, bootstrap / source.name)
+    runtime = configuration._peer_launch._load_primitive(
+        bootstrap / "versioned_runtime.py", "_test_mcp_retained_runtime",
+    )
+    peer = home / ".agent-worktrees"
+    python = peer / "versions" / "1.0.0" / "Scripts" / "python.exe"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    runtime.mark_complete(peer, "1.0.0")
+    (peer / "current-version").write_text("1.0.0", encoding="utf-8")
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setattr(sys, "prefix", str(prefix))
+    monkeypatch.setattr(configuration, "__file__", str(module))
+    monkeypatch.chdir(base)
+    for key in ("AGENT_MCP_HOME", "AGENT_RT_ROOT", "COPILOT_EXTENSIONS_CONTEXT", "AGENT_CONFIGURATION_CONTEXT"):
+        monkeypatch.delenv(key, raising=False)
+    if delivered:
+        monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps(report))
+    monkeypatch.setenv("AGENT_WORKTREES_ROOT", "must-not-select-this")
+    monkeypatch.setenv("GH_TOKEN", "must-not-reach-peer")
+    calls = []
+
+    def run(argv, **kwargs):
+        assert argv == [
+            str(python), "-I", "-X", "utf8", "-m", "agent_worktrees",
+            "state-root", "--configuration", "--json",
+        ]
+        assert kwargs["cwd"] == base
+        assert not set(kwargs["env"]) & {
+            "AGENT_CONFIGURATION_CONTEXT", "AGENT_RT_ROOT", "AGENT_WORKTREES_ROOT", "GH_TOKEN",
+        }
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, json.dumps(report).encode(), b"")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    write(knowledge, {"timeout": 37})
+    assert not (own / "scripts").exists()
+    assert config.load_config(str(selected)).timeout == 37
+    assert len(calls) == 1
+
+    if delivered:
+        changed = json.loads(json.dumps(report))
+        changed["context"]["repository_id"] = "another-repository"
+        monkeypatch.setenv("AGENT_CONFIGURATION_CONTEXT", json.dumps(changed))
+        with pytest.raises(ConfigurationError, match="matching qualified owner"):
+            config.load_config(str(selected))
+
+    monkeypatch.setattr(configuration, "__file__", str(tmp_path / "unrelated" / "configuration.py"))
+    assert configuration._legacy_report(base) is None
+    monkeypatch.setattr(configuration, "__file__", str(module))
+    runtime.marker_path(peer, "1.0.0").unlink()
+    assert configuration._legacy_report(base) is None
+    runtime.mark_complete(peer, "1.0.0")
+    (peer / ".installation-ownership.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(configuration._peer_launch.ContextRefused, match="installation-cell ownership"):
+        config.load_config(str(selected))
+
+
+def test_fresh_slot_loader_reads_qualified_peer_in_real_subprocess(tmp_path):
+    import os
+    import shutil
+    import subprocess
+    import venv
+    from pathlib import Path
+
+    import configuration_context
+    import configuration_layers
+
+    home = tmp_path / "home"
+    base = tmp_path / "repository"
+    knowledge = tmp_path / "knowledge"
+    base.mkdir()
+    knowledge.mkdir()
+    write(knowledge, {"timeout": 43})
+    selected = tmp_path / "selected.yaml"
+    selected.write_text("server:\n  url: https://example.invalid/mcp\n", encoding="utf-8")
+    report = {
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "qualified-repository", "execution_machine": "logical",
+            "installation_cell": "legacy", "binding": "bound",
+            "base_root": str(base), "knowledge_root": str(knowledge),
+        },
+    }
+
+    def environment(root):
+        prefix = root / "versions" / "1.0.0"
+        venv.EnvBuilder(with_pip=False).create(prefix)
+        python = prefix / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        result = subprocess.run(
+            [str(python), "-I", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"],
+            check=True, capture_output=True, text=True, timeout=30,
+        )
+        return prefix, python, Path(result.stdout.strip())
+
+    own = home / ".agent-mcp"
+    slot, python, packages = environment(own)
+    _, peer_python, peer_packages = environment(home / ".agent-worktrees")
+    import agent_mcp
+
+    for package in (agent_mcp, yaml, configuration_context, configuration_layers):
+        source = Path(package.__file__).parent
+        shutil.copytree(source, packages / source.name, ignore=shutil.ignore_patterns("__pycache__"))
+    bootstrap = slot / ".runtime-bootstrap"
+    bootstrap.mkdir()
+    scripts = Path(configuration.__file__).parents[2] / "scripts"
+    for source in scripts.glob("versioned_runtime*.py"):
+        shutil.copy2(source, bootstrap / source.name)
+    runtime = configuration._peer_launch._load_primitive(
+        bootstrap / "versioned_runtime.py", "_test_mcp_subprocess_runtime",
+    )
+    peer = home / ".agent-worktrees"
+    runtime.mark_complete(peer, "1.0.0")
+    (peer / "current-version").write_text("1.0.0", encoding="utf-8")
+    peer_module = peer_packages / "agent_worktrees"
+    peer_module.mkdir()
+    (peer_module / "__init__.py").touch()
+    (peer_module / "__main__.py").write_text(
+        "import json, os, sys\n"
+        "from pathlib import Path\n"
+        "assert sys.argv[1:] == ['state-root', '--configuration', '--json']\n"
+        "assert not set(os.environ) & {'AGENT_CONFIGURATION_CONTEXT', 'AGENT_RT_ROOT', 'GH_TOKEN'}\n"
+        "print(Path(__file__).with_name('report.json').read_text(encoding='utf-8'))\n",
+        encoding="utf-8",
+    )
+    (peer_module / "report.json").write_text(json.dumps(report), encoding="utf-8")
+    inherited = configuration._peer_launch.legacy_peer_environment(dict(os.environ))
+    inherited.update({
+        "HOME": str(home), "USERPROFILE": str(home),
+        "AGENT_CONFIGURATION_CONTEXT": json.dumps(report),
+    })
+    assert peer_python.is_file()
+    assert not (own / "scripts").exists()
+    result = subprocess.run(
+        [str(python), "-I", "-c",
+         "import sys; from agent_mcp.config import load_config; print(load_config(sys.argv[1]).timeout)",
+         str(selected)],
+        env=inherited, cwd=base, capture_output=True, text=True, timeout=45,
+    )
+    assert result.returncode == 0, result.stderr
+    assert float(result.stdout.strip()) == 43

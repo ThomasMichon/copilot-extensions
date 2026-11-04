@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 import yaml
@@ -43,6 +44,18 @@ def _legacy_report(root: Path) -> dict | None:
     if (peer / ".installation-ownership.json").exists():
         raise _peer_launch.ContextRefused("legacy configuration owner has installation-cell ownership")
     path = own_root / "scripts" / "versioned_runtime.py"
+    prefix_root = Path(sys.prefix)
+    slot = prefix_root.parent if prefix_root.name == ".venv" else prefix_root
+    if (
+        slot.parent.name == "versions"
+        and slot.parent.parent.resolve() == own_root.resolve()
+        and Path(__file__).resolve().is_relative_to(prefix_root.resolve())
+    ):
+        # New installs retain the canonical helper with the executing generation,
+        # not in the mutable root. Never borrow another interpreter's bootstrap.
+        retained = slot / ".runtime-bootstrap" / "versioned_runtime.py"
+        if retained.is_file():
+            path = retained
     if not path.is_file():
         return None
     resolver = _peer_launch._load_primitive(path, "_mcp_configuration_runtime")
