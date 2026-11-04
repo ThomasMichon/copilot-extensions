@@ -347,10 +347,12 @@ The root must already be an existing private directory; `initialize` and the
 explicit `install` composition can create the lineage database.
 Optional `initialize --legacy-root <path>` or `install --legacy-root <path>` imports
 the exact legacy origin and admitted floor without cleaning up or rewriting it.
-When supplied on retry, the origin must match the durable import. The existing
-lineage is authoritative: retry neither rereads the predecessor nor requires it
-to remain present. Omitting the option continues an existing lineage without
-changing its origin; it never discovers or imports a legacy installation.
+An `initialize` retry must repeat the same `--legacy-root`; omitting it after
+an import refuses. For `install`, a supplied origin must match the durable
+import, while omitting the option continues the existing lineage without
+changing its origin. Neither command rereads an already imported predecessor
+or requires it to remain present. Omitting the option never discovers or imports
+a legacy installation.
 Other primitive commands never initialize,
 chooses a release, allocates a generation/request or replays predecessor work.
 
