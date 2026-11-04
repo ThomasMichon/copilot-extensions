@@ -878,6 +878,54 @@ def test_optional_presence_observation_is_qualified_before_publication(producer,
         assert p.reader.read_map(p.callers[0], p.root).status == "unusable"
 
 
+@pytest.mark.parametrize("state", ["absent", "empty", "invalid", "unreadable"])
+def test_inrepo_completion_keeps_optional_absence_publishable(producer, monkeypatch, state):
+    from agent_worktrees import config, git_ops
+
+    p = producer
+    if state in ("invalid", "unreadable"):
+        p.module.refresh(p.callers, registry_root=p.root)
+    paths = [config.inrepo_config_path(caller) for caller in p.callers]
+    if state != "absent":
+        for path in paths:
+            path.parent.mkdir(parents=True)
+            path.write_text({
+                "empty": "", "invalid": "marker: [\n", "unreadable": "marker: value\n",
+            }[state])
+    original = config.load_config
+    original_open = open
+    values = []
+
+    def offline(*args, **kwargs):
+        assert args == ("symbolic-ref", "-q", "refs/remotes/origin/HEAD")
+        return SimpleNamespace(returncode=1, stdout="")
+
+    def unreadable(file, *args, **kwargs):
+        if isinstance(file, (str, os.PathLike)) and Path(file) in paths:
+            raise PermissionError("synthetic unreadable in-repository configuration")
+        return original_open(file, *args, **kwargs)
+
+    def load(*args, **kwargs):
+        anchor = p.callers[("first", "second").index(kwargs["project"])]
+        values.append(config._load_inrepo_config(str(anchor)))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(git_ops, "git", offline)
+    monkeypatch.setattr(config.registry_paths, "installation_context", lambda: None)
+    monkeypatch.setattr(config, "load_config", load)
+    if state == "unreadable":
+        monkeypatch.setattr("builtins.open", unreadable)
+    if state in ("absent", "empty"):
+        assert p.module.refresh(p.callers, registry_root=p.root)["published"] == 2
+        assert values == [{}, {}]
+        assert p.reader.read_map(p.callers[0], p.root).roots[0]["name"] == "target"
+        assert p.reader.read_map(p.callers[1], p.root).roots == []
+    else:
+        with pytest.raises(p.module.GuardPublicationError, match="configuration acquisition unavailable"):
+            p.module.refresh(p.callers, registry_root=p.root)
+        assert all(p.reader.read_map(caller, p.root).status == "unusable" for caller in p.callers)
+
+
 def test_unreadable_declared_guarded_checkout_is_not_complete_empty(producer, monkeypatch):
     from agent_worktrees import repos
 

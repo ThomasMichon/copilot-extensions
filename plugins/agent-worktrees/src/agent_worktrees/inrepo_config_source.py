@@ -419,8 +419,13 @@ def load_config_base(
     if observations is not None:
         if len(observations) == start:
             acquisition.opaque_source("inrepo-config-base")
-        # Repeating an original verdict marks completion without upgrading absence.
-        observe(observations, str(anchor), "inrepo-config-base", observations[-1].authority)
+        # Complete the owner decision without recasting child uncertainty or absence.
+        authority = (
+            ScanAuthority.ABSENT if all(
+                item.authority is ScanAuthority.ABSENT for item in observations[start:]
+            ) else ScanAuthority.COMPLETE
+        )
+        observe(observations, str(anchor), "inrepo-config-base", authority)
     return merged
 
 

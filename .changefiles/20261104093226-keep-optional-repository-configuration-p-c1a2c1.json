@@ -1,0 +1,9 @@
+{
+  "comment": "Keep optional repository configuration publishable without masking child acquisition failures",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
