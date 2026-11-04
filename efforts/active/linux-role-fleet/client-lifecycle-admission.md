@@ -271,12 +271,70 @@ and delayed legacy effects directly, not assume a schema bump fences a process
 already inside the old path.
 
 The forward-progress promise concerns an authorized, compatible replacement:
-missing/corrupt authoritative installation state, untrusted artifacts, invalid
-selection or foreign shared commands still produce explicit safety refusals,
-not an implicit floor reset or ownership takeover. These are distinct from old
-generation liveness and cleanup, which must not become replacement prerequisites.
-Successful generation installation and successful default-command cutover are
-reported separately whenever a shared-resource refusal leaves only the former.
+untrusted incoming artifacts, invalid current selection and incompatible
+application data still produce explicit failures. They are distinct from old
+generation liveness, installer metadata and cleanup. The current completion
+authority is
+[authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement):
+incoming readiness and every applicable current selection, not merely a directly
+usable candidate. Report construction, direct invocation and default-command
+cutover separately, but never call the whole installation complete while an
+applicable launcher or registration still selects its predecessor.
+
+### Authoritative replacement reconciliation
+
+**Agent-recommended continuation under the existing #6424 owner.** The
+forward-generation proposal predates the strengthened installer completion
+contract. Retained generation work remains useful construction, isolation and
+physical-publication evidence; it does not complete this contract if corrupt old
+receipts or an unfinished installer transaction can veto an explicit replacement.
+Preserve that work and its original evidence rather than weakening a refusal
+test and describing the result as a complete installer.
+
+The next integration must distinguish three boundaries:
+
+1. **Incoming authorization and application-state readiness.** The existing
+   release/selection owner supplies fresh authentic admitted inputs. The
+   incoming runtime must pass actual construction, compatibility and health
+   checks before receiving serving selection. Preserve configuration,
+   credentials and application databases, including any required compatible
+   data migration. Preserve the accepted release floor; this is not a
+   downgrade, factory-reset or new credential/release-authority path.
+2. **Authoritative current invocation selection.** An explicitly addressed
+   installation must publish all its applicable current-version launchers and
+   registrations through the existing publication/installer owner. Historical
+   copy receipts, unknown legacy layout, missing old monitor support, stale
+   pending transactions and predecessor acknowledgements are evidence to retain,
+   not permission that the old installation must grant. Use bounded
+   installation-scoped coordination and freshly attributed incoming effects;
+   do not require a separate old-recovery command or wait indefinitely on old
+   leases. A genuinely unrelated command, actual OS permission/I/O failure or
+   failed incoming readiness remains explicit, not an excuse to broaden the
+   addressed installation. No bytes-only deletion proof or global command
+   takeover is introduced.
+3. **Independent exact-generation retirement.** Existing withdrawal/removal
+   operations keep their strict physical-custody requirements. They may refuse
+   to delete unproved old objects without vetoing an otherwise successful
+   incoming installation. Do not repair missing old proofs by fabrication or
+   make retirement a required successful setup stage. The thin-client slice
+   never terminates foreground clients, session hosts, session-owned processes
+   or protected connectivity. Central-service retirement remains with its
+   existing owner and is not added as a client daemon or resident reaper.
+
+This amendment does not appoint another installer or change #6240 release,
+common publication, application-data migration, controller, connector or
+credential ownership. Reuse their supported boundaries; where the required
+authoritative-selection capability is absent, name and qualify that source
+prerequisite before wiring a replacement conductor. Keep old lifecycle APIs
+honest as incremental primitives rather than silently redefining their reports.
+Manual/explicit intent must survive every setup-to-installer boundary; automatic
+maintenance inhibition cannot become an explicit-update refusal.
+
+The first bounded delivery is reconciliation of the retained generation
+candidate with the current source and shared invocation owner. Integrate and
+qualify authentic incoming construction and complete selection together before
+advertising a managed install/update command. Keep unrelated controller/node
+and live-adopter duties open.
 
 ### Required evidence before claiming the contract
 
@@ -298,9 +356,24 @@ reported separately whenever a shared-resource refusal leaves only the former.
   recoverable evidence without blocking unrelated generation startup.
 - Failed new startup preserves the usable predecessor and the monotonic floor.
   Wrong authority/identity, lower or conflicting same-sequence selection,
-  stale generation, malformed state and foreign/same-byte object replacement
-  still refuse. Prove legacy adoption and a delayed already-running legacy
-  writer, not only a freshly invoked old command after migration.
+  stale incoming generation and actual foreign-object mutation still refuse.
+  Prove legacy adoption and a delayed already-running legacy writer, not only
+  a freshly invoked old command after migration. Keep physical deletion
+  refusal distinct from incoming publication authority.
+- Through the real incoming consumer, leave old publication proofs absent,
+  malformed or unframed; retain stale transaction/queue fences and an unavailable
+  old runtime. Each authorized replacement must reach incoming health and
+  complete applicable current selection without recovering or deleting that
+  predecessor. Retain the old bytes, metadata and real unknown outcomes.
+  A directly invoked candidate alone fails this acceptance criterion.
+- Verify every applicable default launcher selects the new generation from an
+  independent process. Interrupt and retry partial family publication without
+  stale selection, false success, rollback over a newer winner or loss of user
+  data. Exercise real incoming-health and OS permission/I/O failures as negative
+  controls; do not mock old-proof absence into a permission failure.
+- Preserve explicit versus automatic update classification through the actual
+  owner adapter. An automatic-maintenance hold inhibits only the automatic
+  request; explicit setup still reaches the freshly authenticated incoming path.
 - Cover real producer/retention/SQLite behavior, not health stubs alone.
   Record unit, subprocess/installed, isolated first-touch and available external
   tiers separately. Full fresh OS, controller/node, shared-data migration and
