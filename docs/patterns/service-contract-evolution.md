@@ -117,6 +117,23 @@ a parser-looking error is not proof of no effects across wrappers and remote
 hops. Preserve existing idempotency, custody and unknown-outcome semantics.
 Keep negative policy and safety requirements intact on every compatible path.
 
+## Explicit architecture cutovers
+
+A reviewed, explicitly announced architecture cutover is distinct from an
+ordinary upgrade inside a supported contract window. The
+[wheel-first migration boundary](../../visions/plugin-services/runtime-assembly/README.md#clean-break-wheel-first-migration)
+does not require a dual implementation of pre-wheel installer protocols or
+source-packet formats. Its
+[standalone force-fresh entry](../../visions/installer/README.md#legacy-force-fresh-installation)
+must let operators migrate independently of a working legacy installation.
+
+Name the retired boundary and the migration path before realization. Do not send
+new syntax to an arbitrary old executable, disguise an unsupported legacy call
+as success, or probe and replay effectful forms. The fresh path preserves
+configuration, durable state and unrelated/protected execution resources.
+After the cutover, the ordinary support declarations, expand/migrate/contract
+sequence and upgrade/rollback coverage above apply within the new model.
+
 ## Validation and review
 
 For a changed boundary, exercise the real parser/process or transport seam with
@@ -131,6 +148,7 @@ focused current/prior fixtures, not just mocks that assert new flags were sent:
 | Missing, invalid or out-of-range declaration | No guessed support, accidental side effects or blanket legacy rejection |
 | Unknown CLI argument / additive JSON property | Typo is rejected; only intentionally extensible fields tolerate additions |
 | Failure response | Actual contract/version gap and meaningful stdout/stderr survive wrappers |
+| Explicit pre-wheel cutover | Standalone fresh migration reaches the new model without healthy legacy tooling; addressed replacement preserves durable state |
 
 Scope tests to the affected boundary and supported window. This pattern does not
 add an exhaustive all-service/native matrix to required PR CI; follow

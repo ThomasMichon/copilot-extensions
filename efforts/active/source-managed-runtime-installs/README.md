@@ -161,6 +161,16 @@ locks describe different facts; no new competing artifact authority is needed.
 
 ## Request
 
+**Clean-break wheel/uv migration (2026-11-03), settled summary:** the
+first-party-wheel/uv flow need not remain backward-compatible with the legacy
+installation system. A public README-linked force-fresh install script lets
+operators recover from arbitrary old versions without a working legacy updater.
+Compatibility remains required within the new system afterward. The
+[verbatim direction](inception-transcript.md#clean-break-wheeluv-migration)
+and [migration acceptance](wheel-first-transition.md#legacy-cutover-and-future-compatibility)
+define the boundary; this is not authority to execute a host wipe or discard
+configuration, durable state, sessions or protected connectivity.
+
 **Authoritative replacement and completion (2026-11-03), verbatim:**
 
 > install is considered a success once all the *new* versions are up and running, and all the current-version pointers are updated to the incoming version. Outgoing versions are expected to self-retire and clean up after themselves when they detect they are not current; we can kick one async task from the install flow to force-kill all remaining outgoing daemons and schedules after a longer grace period than we expect cutover to take. Note that we don't kill session-keeping processes like session-host/etc, just the central daemons
@@ -447,6 +457,7 @@ disposable scope while preserving config and durable data.
   take Bridge/MCP application work or authorize host rollout.
 
 ### Phase W — Wheel-first independent suite (proposal extension)
+- [ ] Realize the [clean-break migration and future compatibility boundary](wheel-first-transition.md#legacy-cutover-and-future-compatibility), including a qualified public README-linked force-fresh entry independent of arbitrary legacy versions; reconcile inherited legacy-only compatibility requirements explicitly rather than retaining them as new-system prerequisites.
 - [x] Review and merge the [upstream intent checkpoint and W0–W4 plan](wheel-first-transition.md#plan-and-acceptance) before implementing the new direction. #9623 lands the intent; implementation and installation/fleet acceptance remain open.
 - [x] Capture the [ideal sequence, app matrix and contributor handoff](wheel-first-contributors.md), linked to the shared [application support guide](../../../docs/patterns/fast-application-install-and-cutover.md); documentation does not qualify unfinished apps.
 - [x] Release the bounded Manager/Worktrees fast-install slice (#9990, Main promotion #10024), preserving supported legacy paths for the rest. Whole-system bootstrap and rollout remain open.
@@ -1254,6 +1265,8 @@ implementation, rollout or parent completion is declared.
   alternatives, finite metrics/venues and unchanged source/resource ownership.
 
 ## Validation Plan
+
+- [ ] Prove the [legacy force-fresh and post-migration compatibility matrix](wheel-first-transition.md#legacy-cutover-and-future-compatibility): missing, broken or unsupported legacy tooling does not prevent addressed fresh installation, preserved configuration/data remain usable, and supported generations of the new model retain their declared upgrade/recovery behavior. A plan or README notice is not implementation or host authorization.
 
 - [ ] Exercise the [authoritative replacement contract](../../../docs/install-contract.md#authoritative-replacement-and-completion)
   across explicit versus automatic calls, missing/incompatible old monitor,
