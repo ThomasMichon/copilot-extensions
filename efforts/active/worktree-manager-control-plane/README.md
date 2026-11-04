@@ -2464,6 +2464,37 @@ explicit final numeric canonical remains OPEN even if this tracking lands.)_
   consumers. Credit design-only #3258, historic #3253 and #5914 source sweep
   only at their scopes; no automatic fleet enrollment or new all-host gate.
 
+### Proposed finite launcher deployment/readiness contract from #5611
+
+_(Agent-recommended direct tracking under existing Phase 7; all rows unchecked.)_
+
+- [ ] **P5611-1:** Reconcile the actual Python manifest deployment, intentional
+  script-installer relocation and unconditional historical local-wrapper
+  status requirement under the existing installer/readiness/Manager owners.
+  Credit the usable relocated launcher and completed Picker/mux relocation;
+  neither working launch nor a source comment settles the status policy.
+- [ ] **P5611-2:** Preserve the maintainer's explicit EITHER/OR choice:
+  consistently deploy the required manifest assets through script installers
+  OR accept an ACTUALLY USABLE supported Manager launcher in readiness/status,
+  failing only when NEITHER supported route exists. Do not require BOTH,
+  choose the policy in this amendment or resurrect a retired launcher.
+- [ ] **P5611-3:** Keep corresponding Windows `.cmd`/POSIX `.sh` and
+  Python/script install/update surfaces consistent, with meaningful missing,
+  incomplete and unsupported errors. Preserve optional Manager/direct
+  standalone behavior and #5479's separate setup/helper-bundle diagnostic.
+
+#### Local Validation - #5611
+
+- [ ] **V5611-1:** Through actual chosen status/deployment consumers, cover
+  usable relocated launcher with absent legacy file, required local assets,
+  neither usable route, broken/unsupported routes and Python/script policy.
+  Preserve Windows/POSIX consistency and genuine failure; source fixtures at
+  original supported tier do not require a new installed/every-host campaign.
+- [ ] **V5611-2:** Preserve completed relocation, optional Manager/direct
+  standalone and provider/installer boundaries. Silencing a genuine incomplete
+  deployment or satisfying both remedies is not the selected OR contract;
+  broader Configurator, restart and runtime gates stay independent.
+
 ## Validation Plan
 
 - [ ] G1: Resolve EVERY directly retained #4096 original
@@ -2649,7 +2680,24 @@ tiers without imposing every-host or native-on-every-leaf requirements.
   Generic creation/reattachment is partial credit, not per-venue parity;
   no new lifecycle authority, resource release or whole-parent gate.
 
+- [ ] **G5611:** Resolve EVERY P5611/local Validation/continuing Coordination
+  clause: ONE explicit owning maintainer wrapper-deployment OR actual-usable-
+  Manager recognition choice, consistent Windows/POSIX behavior and meaningful
+  NEITHER/missing/incomplete/unsupported outcomes. Preserve #5479 separation,
+  incumbent credit, actual custodians and original finite tiers. Intake is not
+  implementation, installed/native acceptance or whole Manager completion.
+
 ## Coordination
+
+The proposed #5611 finite deployment/readiness case retains actual installer,
+installation-status and relocated Manager-launcher/provider custodians.
+Preserve current Participants, Phase7/#7305/restart/configuration scopes,
+all prior Plan/global Validation/Journal/checkstates and holds. Use this
+existing dated Journal/open bounded-source process, not closed #352 or a new
+generic ACK. Normal reviewed COMPLETE direct Plan/local AND actual global
+Validation/Coordination/Journal merge and permitted WHOLE CURRENT source/
+receiver/custody readback precede separate judgment. No policy selection,
+implementation appointment, launcher/install action or resource release occurs.
 
 The proposed #5910/#5912/#5913 finite families use existing Phase8
 migration-intake/domain review and Journal/open bounded-source claiming.
@@ -2795,6 +2843,15 @@ No product, native, credential, host, process, service or resource operation
 is authorized by tracker consolidation.
 
 ## Journal
+
+### 2026-10-30 - Proposed finite launcher/readiness consistency
+
+Added unchecked direct #5611 Plan/local and ACTUAL global Validation with
+continuing same-owner coordination. Preserve the maintainer's wrapper
+deployment OR actual-usable-Manager status choice, meaningful neither-route
+failure, Windows/POSIX parity and completed relocation credit. All incumbent
+content/checkstates remain. This is local tracking, not installation,
+implementation, accepted receiving delivery or source/custody disposition.
 
 ### 2026-10-30 - Proposed approved-source and venue-consumer cases
 

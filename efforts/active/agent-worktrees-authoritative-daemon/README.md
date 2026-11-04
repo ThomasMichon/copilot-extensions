@@ -112,6 +112,16 @@ singleton transitions, central fleet exporter, or other pivots.
 
 ## Coordination
 
+The proposed finite #5942 semantic-default-list case continues through the
+SAME authoritative selection/list/tracking interfaces and existing source/
+integration custodians. Preserve all incumbent phases, #3761/#4120,
+tracking-integrity, streaming/client/exporter/native and resource holds.
+Normal review, actual COMPLETE direct Plan/local AND global Validation/
+Coordination/Journal merge and WHOLE CURRENT eligible source/receiver/custody
+readback precede separate administrative judgment. No assignment follows from
+empty assignees; no archive/delete/reset, lifecycle or cleanup authority is
+created, and no whole-daemon/native-every-host prerequisite is added.
+
 The complete direct #2558/#2706/#7097 finite cases continue through the SAME Active
 ROOT's existing guarded transaction, explicit catalog/inspection and repair
 responsibilities, actual global Validation and full Journal under the current #3761
@@ -1316,6 +1326,33 @@ contracts remain.
   the parent still keeps its own entire completion gate.
 
 
+### Proposed finite semantic archive exclusion from #5942
+
+_(Agent-recommended direct selection/list case; all rows unchecked.)_
+
+- [ ] **P5942-1:** Exclude semantic archives from real DEFAULT active-list
+  selection whether the checkout is RETAINED OR ABSENT, through BOTH plain
+  AND fresh JSON consumers. Checkout deletion must not be a prerequisite;
+  retained checkout/`.git` existence is not active/resumable status.
+- [ ] **P5942-2:** Preserve durable identity/lineage/history, direct archival
+  inspection, explicit active/archive/all query capabilities and existing
+  missing-checkout/unrelated-state filtering. Credit explicit-active and
+  absent-checkout filters and resident/held-feed foundations without claiming
+  they implement the missing semantic default predicate. #5943 is reported
+  documentation-only delivery; #2706's machine-wide query remains distinct.
+
+#### Local Validation - #5942
+
+- [ ] **V5942-1:** Qualify the actual selector -> plain renderer AND fresh
+  JSON cross-product: archived/active, retained/absent checkout and default/
+  explicit queries. A retained archived checkout must not leak into default
+  active output; cached/presence results or an explicit active filter are not
+  that default-consumer proof.
+- [ ] **V5942-2:** Preserve archival/history/identity inspection, original
+  missing-checkout filtering and unrelated states without deletion, archive
+  mutation, reset, session termination or inferred content safety. Original
+  finite source/consumer and installation/platform boundaries remain.
+
 ## Validation Plan
 
 ### Direct finite tracking-integrity acceptance
@@ -1402,6 +1439,13 @@ contracts remain.
       underlying fact with no real change having occurred"), checked here
       for the Worktrees pivot specifically.
 
+- [ ] **G5942:** Resolve ALL direct P5942/local Validation/continuing
+  Coordination clauses through BOTH actual ordinary listing consumers,
+  retaining retained OR absent checkout, active/archive/default/explicit
+  controls, history/identity access and missing-checkout behavior. Preserve
+  incumbent authority/schema/owner gates and finite tiers; documentary intake
+  is not implementation, whole-daemon completion or cleanup/custody permission.
+
 ## Proposal
 
 Phase 1's design and all three open questions are now resolved (see Plan
@@ -1410,6 +1454,15 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-10-30 - Proposed semantic archive default-list case
+
+Added unchecked direct #5942 Plan/local and ACTUAL global Validation with
+same-owner coordination after complete current-text and fixed primary-DOC
+qualification. Current acceptance explicitly includes RETAINED OR absent
+checkouts; the historical absent-only shorthand does not control. Preserve
+all prior phases/checkstates and reported partial credit. No archive/list
+execution, source change, cleanup, accepted transfer or source closure occurs.
 
 ### 2026-10-24 - Direct finite tracking-integrity intake
 

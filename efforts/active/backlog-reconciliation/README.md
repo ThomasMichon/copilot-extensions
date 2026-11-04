@@ -168,6 +168,14 @@ approved-source alternatives, same-owner title rendering, per-venue New and
 same-waiter transport visibility remain distinct. Protected #5472 and final
 numeric #5912 remain OPEN; publication is not implementation or custody change.
 
+The [fifteen successive contracts](receiving-successive-fifteen.md) retain
+four finite documentary proposals under four existing Active homes and eleven
+whole-contract outcomes. All fifteen complete metadata records match the
+admitted 43-text study. Native restart-loop proof, the maintainer's launcher
+OR choice, retained-or-absent semantic archive exclusion and four distinct
+startup signatures remain finite and independently owned. Canonical OPEN,
+claimed Phase 1, conditional-trigger and source-specific handoff gates survive.
+
 ## Request
 
 Operator request, with identifying organizational references redacted:
@@ -260,6 +268,12 @@ outcomes from agent-recommended research and prioritization mechanics.
   #5452 data threading. Every original/refined/direct-inherited clause,
   completed partial, explicit OPEN condition and actual holder survives.
   Documentary delivery is not technical acceptance or source disposition.
+  The [successive register](receiving-successive-fifteen.md) retains four
+  complete finite families and eleven whole canonical/claimed/authority/
+  conditional outcomes. #5574's native residual, #5611's maintainer OR
+  choice, #5942's retained OR absent checkout and #5493's FOUR signatures
+  preserve their original finite controls. #5676's specific final-OPEN
+  #5665 handoff remains separate from documentary publication.
 - [ ] Verify and publish supported dispositions, preserving source versus
   release versus rollout distinctions and all active ownership.
   The [roadmap follow-through register](roadmap-follow-through.md) records
