@@ -427,9 +427,42 @@ def test_ci_checks_job_cannot_be_gated_or_dependent(tmp_path: Path) -> None:
             ),
             encoding="utf-8",
         )
-        assert "ci.yml checks job must be ungated and dependency-free" in (
+        assert "ci.yml checks job must retain reviewed event admission and remain dependency-free" in (
             MODULE.validate_workflow(trusted)
         )
+
+
+@pytest.mark.parametrize("event,state,base,cancelled,expected", [
+    ("pull_request", "open", "dev", False, (True, True, True)),
+    ("pull_request", "closed", "dev", False, (False, False, False)),
+    ("pull_request", "", "dev", False, (True, True, True)),
+    ("pull_request", "open", "dev", True, (True, True, False)),
+    ("pull_request", "open", "main", False, (True, True, False)),
+    ("push", "", "", False, (True, False, False)),
+    ("workflow_dispatch", "", "", False, (True, True, False)),
+])
+def test_actual_job_admission_excludes_closed_pr_edits_only(event, state, base, cancelled, expected):
+    root = Path(__file__).resolve().parents[1]
+    workflow, errors = MODULE._load(root / ".github/workflows/ci.yml")
+    assert not errors
+    assert workflow["on"]["pull_request"]["types"] == [
+        "opened", "reopened", "synchronize", "edited",
+    ]
+    replacements = {
+        "github.event_name": repr(event),
+        "github.event.pull_request.state": repr(state),
+        "github.event.pull_request.base.ref": repr(base),
+        "always()": "True", "!cancelled()": repr(not cancelled),
+    }
+    actual = []
+    for name in ("checks", "unit-tests", "pr-gate"):
+        condition = workflow["jobs"][name].get("if", "True")
+        for expression, value in replacements.items():
+            condition = condition.replace(expression, value)
+        actual.append(eval(condition.replace("&&", " and ").replace("||", " or "), {
+            "__builtins__": {},
+        }))
+    assert tuple(actual) == expected
 
 
 def test_ci_guard_step_cannot_continue_on_error(tmp_path: Path) -> None:

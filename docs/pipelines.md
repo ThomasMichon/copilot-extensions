@@ -115,6 +115,13 @@ Current guards/metadata, base-retarget handling and the required aggregate
 remain independent. Manual CI and every Main release still execute units;
 this PR-only reuse neither changes nor supplies promotion qualification.
 
+Source CI jobs exclude closed pull requests, including post-merge description
+edits whose deleted feature head may no longer be fetched. Open-PR edits remain
+admitted so base retargets still receive source checks, units and the required
+aggregate. Push and manual admission are unchanged. The trusted-CI contract
+binds this exact job-level exclusion; missing state does not silently skip CI.
+Trusted metadata-only departure checks remain independent.
+
 The nonblocking marketplace-isolation inventory runs on pushes and manual CI,
 not again on each PR update. Admitted Dev-push executions retain that diagnostic;
 strict source guards and required validation remain in PR CI. A cancelled or
@@ -1209,7 +1216,7 @@ Every workflow under `.github/workflows/`, what triggers it, and what it
 does. Grouped by role; see each file's own header comment for full
 rationale and any known limitations.
 
-**PR-related gating** (not all run on every PR — `ci.yml` runs on every
+**PR-related gating** (not all run on every PR — `ci.yml` validates every open
 PR except those targeting `main`; trusted review, lockdown, and source-attribution PR checks target `dev`,
 with source-attribution refreshes on `main` push/manual dispatch; the reminder
 targets only `main`; `trusted-ci.yml` is now manual routing metadata only):
@@ -1217,8 +1224,8 @@ targets only `main`; `trusted-ci.yml` is now manual routing metadata only):
 CI explicitly includes `edited` alongside the default PR activities so a
 main-to-dev retarget immediately creates the required contribution checks.
 GitHub cannot filter this activity to base edits alone at workflow admission,
-so other PR edits also run CI; excluding main still prevents its redundant
-release-candidate invocation.
+so other edits also create CI runs. Closed-PR runs skip all source jobs;
+excluding main still prevents its redundant release-candidate invocation.
 
 Within each PR ref, a new head's `synchronize` event supersedes the older head's
 executing CI. Metadata-only edits still trigger CI, but do not cancel and
