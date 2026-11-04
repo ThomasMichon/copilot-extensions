@@ -531,6 +531,7 @@ class TestResolveRootCodename:
         # `creation_nonce`, regardless of timing) with a different origin,
         # but the OLD sidecar was never removed (what this invalidation
         # protects against even without explicit cleanup wiring).
+        (tmp_path / ".ext" / "worktrees" / "wt-child.yaml").unlink()
         recreated = _seed(
             tmp_path, monkeypatch, "ext", "wt-child",
             owner_ref="anomalous-potato/other-harness/wt-other-root#s9",

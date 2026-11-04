@@ -15,6 +15,14 @@ LIFETIME = "retained-relationship"
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}\Z")
 
 
+def writer_contract() -> dict:
+    """Describe this executing writer, never an installed or resident peer."""
+    return {
+        "schema": "copilot-extensions.worktree-record-writer", "version": 1,
+        "retained_relationships": 1, "creation_nonce": 1,
+    }
+
+
 def valid_request_id(value: object) -> bool:
     return isinstance(value, str) and _REQUEST_ID.fullmatch(value) is not None
 

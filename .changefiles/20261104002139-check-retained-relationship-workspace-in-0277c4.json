@@ -1,0 +1,9 @@
+{
+  "comment": "Check retained relationship workspace incarnations and declare executing ledger-writer support.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

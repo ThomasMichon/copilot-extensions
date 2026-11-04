@@ -391,6 +391,8 @@ def rendezvous_fields(server: CoalescingServer) -> dict:
     published list is always this process's FULL verb set, regardless of
     whether any request has been served yet.
     """
+    from . import resource_relationship
+
     _ensure_verb_modules_loaded()
     rv = server.rendezvous()
     return {
@@ -399,6 +401,7 @@ def rendezvous_fields(server: CoalescingServer) -> dict:
         "tracking_write_token": rv["token"],
         "tracking_write_generation": rv["generation"],
         "tracking_write_verbs": sorted(_VERBS),
+        "tracking_write_record_contract": resource_relationship.writer_contract(),
         # Only published when at least one verb actually needs it -- keeps
         # this payload, and every existing consumer's exact-field
         # expectations, unchanged for the overwhelming majority of verbs

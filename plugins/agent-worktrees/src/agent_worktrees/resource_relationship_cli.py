@@ -17,6 +17,9 @@ def cmd_resource_relationship(args) -> int:
                 "lifetime": relationship.LIFETIME, "metadata_version": relationship.METADATA_VERSION,
                 "handoff": False, "ref_encoding": "namespace:l1.base64url",
                 "inspect_absence": True,
+                "expected_creation_nonce": True,
+                "writer_scope": "executing-process",
+                "writer_contract": relationship.writer_contract(),
                 "max_ref_bytes": producer.MAX_REF_BYTES, "max_input_bytes": producer.MAX_INPUT_BYTES,
             })
             return 0
