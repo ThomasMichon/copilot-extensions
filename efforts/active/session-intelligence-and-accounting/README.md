@@ -50,6 +50,13 @@ authority and appoints no replacement implementer.
 
 ## Context
 
+The [weighted session-data cohort](../backlog-reconciliation/semantic-theme-results.md#session-data-cohort)
+indexes related #4976/#5665/#5677/#5678/#8682/#8735 work. It preserves
+#4976's remaining-home question, the independently claimed daily/adoption
+scope and #5676's separate final-OPEN handoff condition. This is snapshot
+navigation, not new receiving acceptance, accounting/retirement completion,
+another implementation appointment or corpus/resource authority.
+
 Existing agent-logger provides archive-aware session references, collation,
 segment manifests, sync change tracking, chronicle reservations, and an
 aggregate configuration compiler. Reuse those building blocks. Consumer
