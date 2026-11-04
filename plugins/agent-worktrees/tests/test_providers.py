@@ -3825,6 +3825,7 @@ class TestAzureDevOpsCapabilities:
 
     def test_get_comment_threads_uses_aad_when_no_pat(self, monkeypatch):
         azure, prov = self._prov()
+        monkeypatch.delenv("AZURE_DEVOPS_EXT_PAT", raising=False)
         payload = {"value": [{"id": 1, "status": "active",
                               "comments": [{"author": {"displayName": "R"},
                                             "content": "x", "commentType": "text"}]}]}

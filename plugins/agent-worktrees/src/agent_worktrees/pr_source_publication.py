@@ -38,8 +38,7 @@ def _sha(value: str, name: str, *, absent: bool = False) -> str:
 def _canonical_destination(repo, target_repo: str, workspace: str) -> str:
     matches = [
         entry for entry in repos.list_repos()
-        if entry.remote and git_ops.slug_from_url(entry.remote) == target_repo
-        and pr_worker_config.matches_remote(entry.remote, target_repo, repo.pr, workspace)
+        if entry.remote and pr_worker_config.matches_remote(entry.remote, target_repo, repo.pr, workspace)
     ]
     identities = {pr_publish._identity(entry.remote, workspace) for entry in matches}
     if len(identities) != 1 or any(entry.repo_class == "reference" for entry in matches):

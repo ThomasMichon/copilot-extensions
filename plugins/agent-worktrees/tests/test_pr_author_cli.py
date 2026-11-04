@@ -92,3 +92,38 @@ def test_foreign_create_reads_large_body_file_exactly_once_at_owner(author, monk
     ]) == 0
     assert observed["body"] == value
     assert json.loads(out.getvalue())["number"] == 7
+
+
+@pytest.mark.parametrize("state", ["closed", "merged", ""])
+def test_source_origin_never_labels_a_terminal_or_unknown_pr(author, monkeypatch, tmp_path, out, state):
+    from types import SimpleNamespace
+    from agent_worktrees import pr_source_publication, providers
+
+    monkeypatch.setattr(
+        pr_source_publication, "publish_source",
+        lambda *args, **kwargs: {"ok": True, "repo": "project/repo", "publication_state": "pushed"},
+    )
+    backend = SimpleNamespace(
+        find_pull_by_head=lambda *args, **kwargs: SimpleNamespace(state=state, number=7, url="https://forge.invalid/7"),
+        get_publication_labels=lambda *args, **kwargs: pytest.fail("wrong PR labels"),
+    )
+    monkeypatch.setattr(providers, "get_provider", lambda *_: backend)
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: None)
+    assert cli.main([
+        "pr-push", "--repo", "project/repo", "--workspace", str(tmp_path), "--branch", "topic",
+        "--expected-head", "a" * 40, "--publication-origin", "test",
+        "--publication-label", "source:test", "--json",
+    ]) == 1
+    result = json.loads(out.getvalue())
+    assert result["publication_state"] == "pushed"
+    assert not result["publication_labels"]["ok"]
+
+
+@pytest.mark.parametrize("outcome", ["changed-after-create", "unknown-after-create"])
+def test_human_create_output_warns_about_retained_unqualified_pr(capsys, outcome):
+    from agent_worktrees import finalize_cli
+
+    finalize_cli._warn_publication_labels({"publication_checks": {"ok": False, "outcome": outcome}})
+    captured = capsys.readouterr()
+    assert outcome in captured.out + captured.err
+    assert "do not recreate" in captured.out + captured.err

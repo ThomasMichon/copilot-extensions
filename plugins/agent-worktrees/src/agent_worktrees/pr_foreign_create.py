@@ -218,8 +218,11 @@ def create_foreign_pr_from_branch(
                 if not tracking._pr_is_terminal(
                     tracking.PRRecord(state=existing_state),
                 ):
-                    if getattr(existing, "base_ref", "") not in ("", base_branch):
-                        return {"error": "Existing source PR targets a different base; reconcile that PR.",
+                    existing_base = getattr(existing, "base_ref", "")
+                    if existing_base != base_branch and (
+                        existing_base or prcfg.provider == "azure-devops"
+                    ):
+                        return {"error": "Existing source PR has a different or unknown target base; reconcile that PR.",
                                 "repo": target_repo, "number": existing.number, "url": existing.url}
                     pull = existing
                     reused = True

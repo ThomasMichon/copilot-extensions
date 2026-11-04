@@ -18,6 +18,7 @@ class _FakePull:
         self.number = number
         self.state = state
         self.label_error = label_error
+        self.base_ref = "dev"
 
 
 class _FakeProvider:
@@ -132,6 +133,26 @@ def test_qualified_foreign_creation_retains_claim_and_postcreate_uncertainty(
     else:
         assert "reviewed source changed" in result["error"]
         assert not backend.calls
+
+
+@pytest.mark.parametrize("base", ["dev", "release", ""])
+def test_ado_retry_requires_the_authoritative_configured_base(monkeypatch, _tracking_setup, base):
+    _, wid = _tracking_setup
+    monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug",
+                        lambda *_: _foreign_resolution(provider="azure-devops"))
+    pull = _FakePull(url="https://forge.invalid/7", number=7)
+    pull.base_ref = base
+    backend = _FakeProvider(existing=pull)
+    monkeypatch.setattr(providers, "get_provider", lambda *_: backend)
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: None)
+    result = pr_foreign_create.create_foreign_pr_from_branch(
+        wid, _config(), target_repo="owner/other-repo", from_branch="topic", title="fix",
+    )
+    if base == "dev":
+        assert result["reused"] and result["claimed"]
+    else:
+        assert "target base" in result["error"] and result["number"] == 7
+    assert not backend.calls
 
 
 class TestCreateForeignPrFromBranch:

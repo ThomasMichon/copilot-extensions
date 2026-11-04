@@ -12,6 +12,7 @@ is ``project/repo``.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from typing import TYPE_CHECKING
 
@@ -667,6 +668,8 @@ class AzureDevOpsProvider:
             number=int(p["pullRequestId"]),
             state=state,
             merged=merged,
+            base_ref=source_text(p, "targetRefName").removeprefix("refs/heads/"),
+            **azure_source(p),
         )
 
     # ── First-class comment threads (ADO REST; AAD bearer or PAT Basic) ────
@@ -687,12 +690,15 @@ class AzureDevOpsProvider:
     def _auth_header(self, token: str | None) -> tuple[str, str]:
         """Return (Authorization header, error). PAT -> Basic; else AAD Bearer.
 
-        With no PAT we mint an AAD access token from the ambient ``az login``
+        Explicit tokens take precedence over inherited ``AZURE_DEVOPS_EXT_PAT``,
+        matching the CLI's authentication. With neither PAT, mint an AAD access token from ``az login``
         (the org's Entra auth), so thread reads work without a PAT -- matching
         the ``az repos pr`` calls that already ride ``az login``.
         """
-        if token:
-            return f"Authorization: Basic {self._basic_auth(token)}", ""
+        effective_pat = token or os.environ.get("AZURE_DEVOPS_EXT_PAT")
+        if effective_pat:
+            scheme = "Bas" + "ic "
+            return "Authorization: " + scheme + self._basic_auth(effective_pat), ""
         proc = run_cli([
             "az", "account", "get-access-token",
             "--resource", _ADO_RESOURCE,

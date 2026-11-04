@@ -25,6 +25,12 @@ def cmd_publication_labels(args):
 
 
 def _warn_publication_labels(result):
+    checks = result.get("publication_checks")
+    if checks and not checks.get("ok"):
+        output.warn(
+            "PR retained, but source qualification is unconfirmed: "
+            f"{checks.get('outcome', 'unknown')}. Reconcile this PR; do not recreate or push."
+        )
     metadata = result.get("author_metadata")
     if metadata and not metadata.get("ok"):
         output.warn("PR retained, but author metadata needs repair through pr-update; do not recreate or push.")

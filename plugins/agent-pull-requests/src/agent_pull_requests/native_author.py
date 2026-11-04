@@ -7,6 +7,38 @@ import subprocess
 from .native_command import run_command
 
 
+def add_parsers(subparsers, *, repo_type, handler):
+    from .native_cli import validate_selector
+
+    for name in ("author-capabilities", "update", "push"):
+        author = subparsers.add_parser(name, help={
+            "author-capabilities": "read target-qualified native author capabilities",
+            "update": "repair existing native PR metadata without pushing",
+            "push": "publish a pinned admitted source workspace through Worktrees",
+        }[name], allow_abbrev=False)
+        author.add_argument("--repo", required=True, type=repo_type)
+        author.add_argument("--worktrees-command", required=True, type=validate_selector)
+        author.add_argument("--json", action="store_true")
+        author.set_defaults(handler=handler)
+        if name == "author-capabilities":
+            continue
+        author.add_argument("--publication-origin")
+        author.add_argument("--publication-label", action="append", default=[])
+        if name == "update":
+            author.add_argument("--number", required=True, type=int)
+            author.add_argument("--title")
+            body = author.add_mutually_exclusive_group()
+            body.add_argument("--body")
+            body.add_argument("--body-file")
+            author.add_argument("--reviewer", action="append", default=[])
+            author.add_argument("--work-item", action="append", default=[])
+        else:
+            author.add_argument("--workspace", required=True)
+            author.add_argument("--head", required=True)
+            author.add_argument("--expected-head", required=True)
+            author.add_argument("--expected-remote-head", default=None)
+
+
 def capability(args, prefix: list[str], operation: str | None = None) -> dict:
     response = run_command(
         [*prefix, "pr-author-capabilities", f"--repo={args.repo}", "--json"], timeout=20.0,

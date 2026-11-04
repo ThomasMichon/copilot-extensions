@@ -221,6 +221,14 @@ transport. Existing consumer helpers remain supported until replacement
 acceptance; the generic workflow is not evidence that every consumer has
 migrated. #10383 and this amendment remain open through those dispositions.
 
+Current-head review identified missing ADO target-ref propagation, inherited-PAT
+repair, human-output qualification warnings, terminal-PR label selection and
+encoded destination handling. The source corrections have focused controls:
+84 Worktrees tests and 56 frontend/status tests passed after the fixes.
+Parser/dispatch ownership and pure presentation were extracted to stay within
+the existing hard/shrink-only module limits; no ceiling was widened.
+Required CI and another current-head review remain separate publication gates.
+
 ## Completion and next action
 
 The reviewed plan is in implementation, not complete. Drive the candidate

@@ -114,9 +114,15 @@ def cmd_push(args):
                 provider = providers.get_provider(prcfg.provider)
                 token = providers.account_token_for_slug(args.repo, prcfg)
                 pull = provider.find_pull_by_head(args.repo, args.branch, api_base=prcfg.api_base, token=token)
-                if pull is None:
+                if (
+                    pull is None or getattr(pull, "merged", False)
+                    or getattr(pull, "state", "") not in ("open", "active")
+                ):
                     result["publication_labels"] = {
-                        "ok": False, "error": "Source pushed without an existing PR; apply origin labels at create.",
+                        "ok": False, "error": (
+                            "Source pushed without a confirmed active PR; create or repair the intended PR "
+                            "and apply origin labels without repeating the push."
+                        ),
                     }
                 else:
                     result.update(number=pull.number, url=pull.url)

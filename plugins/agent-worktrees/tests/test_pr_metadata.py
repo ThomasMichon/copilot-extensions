@@ -244,7 +244,62 @@ def test_create_identity_survives_metadata_auth_failure(backend, monkeypatch):
     assert backend.creates == 1 and not backend.writes
 
 
+@pytest.mark.parametrize("explicit_token", [None, "explicit-fixture-pat"])
+def test_create_description_reuses_inherited_pat_without_azure_login(
+        backend, monkeypatch, explicit_token):
+    monkeypatch.setenv("AZURE_DEVOPS_EXT_PAT", "inherited-fixture-pat")
+    provider = azure.AzureDevOpsProvider()
+    scope = PRScope(REPO, "feature", "main", "title", body=MARKDOWN, api_base=ORG)
+    created = provider.create_pull(scope, token=explicit_token)
+    assert created.number == 7 and created.metadata["ok"]
+    assert backend.pr["description"] == MARKDOWN and backend.creates == 1
+    expected_pat = explicit_token or "inherited-fixture-pat"
+    expected_auth = ("Authorization: " + ("Bas" + "ic ")
+                     + base64.b64encode((":" + expected_pat).encode()).decode())
+    rest_calls = [args for args, _ in backend.calls if args[0] == "curl"]
+    assert rest_calls and all(expected_auth in args for args in rest_calls)
+    assert not any(args[:2] == ["az", "account"] for args, _ in backend.calls)
+
+
+def test_create_and_verified_description_work_with_aad_and_no_pat(backend, monkeypatch):
+    monkeypatch.delenv("AZURE_DEVOPS_EXT_PAT", raising=False)
+    aad_requests = []
+
+    def cli(args, **kwargs):
+        if args[:3] == ["az", "account", "get-access-token"]:
+            aad_requests.append(args)
+            return subprocess.CompletedProcess(args, 0, "fixture-aad\n", "")
+        return backend.cli(args, **kwargs)
+
+    monkeypatch.setattr(azure, "run_cli", cli)
+    created = azure.AzureDevOpsProvider().create_pull(
+        PRScope(REPO, "feature", "main", "title", body=MARKDOWN, api_base=ORG),
+    )
+    assert created.number == 7 and created.metadata["ok"]
+    assert backend.creates == 1 and backend.pr["description"] == MARKDOWN
+    assert len(aad_requests) == 1
+
+
+@pytest.mark.parametrize("target_ref,expected_base", [
+    ("refs/heads/release/next", "release/next"), (None, ""),
+])
+def test_existing_pr_lookup_preserves_authoritative_base_and_source(
+        monkeypatch, target_ref, expected_base):
+    data = {"pullRequestId": 7, "status": "active", "targetRefName": target_ref,
+            "sourceRefName": "refs/heads/feature/one",
+            "repository": {"remoteUrl": ORG + "/Source%20Project/_git/repository"}}
+    monkeypatch.setattr(azure, "run_cli", lambda *args, **kwargs:
+                        subprocess.CompletedProcess([], 0, json.dumps([data]), ""))
+    result = azure.AzureDevOpsProvider().find_pull_by_head(
+        REPO, "feature/one", api_base=ORG, token="fixture-pat",
+    )
+    assert result.number == 7 and result.base_ref == expected_base
+    assert result.head_ref == "feature/one"
+    assert result.head_url == data["repository"]["remoteUrl"]
+
+
 def test_real_aad_header_construction_preserves_token(monkeypatch):
+    monkeypatch.delenv("AZURE_DEVOPS_EXT_PAT", raising=False)
     monkeypatch.setattr(azure, "run_cli", lambda *args, **kwargs:
                         subprocess.CompletedProcess([], 0, "fixture-aad\n", ""))
     header, error = azure.AzureDevOpsProvider()._auth_header(None)

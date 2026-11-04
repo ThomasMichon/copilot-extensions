@@ -19,6 +19,7 @@ from typing import Any
 from agent_procutil import no_window_kwargs
 
 from . import __version__
+from .cli_output import render_status as _render_status
 
 _STATUS_QUERY = (
     "query($owner: String!, $name: String!, $number: Int!) { "
@@ -246,24 +247,6 @@ def _github_status(repo: str, number: int) -> dict[str, Any]:
         "reviewDecision": str(pull_request.get("reviewDecision") or ""),
         "transport": "agent-worktrees repos gh",
     }
-
-
-def _render_status(status: dict[str, Any]) -> str:
-    review = status["reviewDecision"] or "(none)"
-    mergeable = status["mergeable"] or "(unknown)"
-    draft = "yes" if status["isDraft"] else "no"
-    return "\n".join(
-        [
-            f"repo:            {status['repo']}",
-            f"number:          #{status['number']}",
-            f"state:           {status['state']}",
-            f"mergeable:       {mergeable}",
-            f"review decision: {review}",
-            f"draft:           {draft}",
-            f"title:           {status['title']}",
-            f"url:             {status['url']}",
-        ]
-    )
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
@@ -879,33 +862,8 @@ def build_parser() -> argparse.ArgumentParser:
             help="absolute attributable Worktrees command for native configured PR operations",
         )
 
-    for name in ("author-capabilities", "update", "push"):
-        author = subparsers.add_parser(name, help={
-            "author-capabilities": "read target-qualified native author capabilities",
-            "update": "repair existing native PR metadata without pushing",
-            "push": "publish a pinned admitted source workspace through Worktrees",
-        }[name], allow_abbrev=False)
-        author.add_argument("--repo", required=True, type=_validate_repo_slug)
-        author.add_argument("--worktrees-command", required=True, type=validate_selector)
-        author.add_argument("--json", action="store_true")
-        author.set_defaults(handler=_cmd_native)
-        if name == "author-capabilities":
-            continue
-        author.add_argument("--publication-origin")
-        author.add_argument("--publication-label", action="append", default=[])
-        if name == "update":
-            author.add_argument("--number", required=True, type=int)
-            author.add_argument("--title")
-            body = author.add_mutually_exclusive_group()
-            body.add_argument("--body")
-            body.add_argument("--body-file")
-            author.add_argument("--reviewer", action="append", default=[])
-            author.add_argument("--work-item", action="append", default=[])
-        else:
-            author.add_argument("--workspace", required=True)
-            author.add_argument("--head", required=True)
-            author.add_argument("--expected-head", required=True)
-            author.add_argument("--expected-remote-head", default=None)
+    from .native_author import add_parsers as add_author_parsers
+    add_author_parsers(subparsers, repo_type=_validate_repo_slug, handler=_cmd_native)
 
     watch = subparsers.add_parser(
         "watch", help="non-blocking subscription against the shared watch daemon"

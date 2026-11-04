@@ -22,6 +22,11 @@ The frontend checks that actual response before the dependent operation.
 Missing or older peers refuse: no raw forge fallback, automatic update,
 credential workaround or silent switch to GitHub.
 
+PATs are not required. Without an explicitly selected or already inherited
+compatibility credential, ADO operations reuse the existing Azure CLI/Entra
+authentication path. This workflow does not acquire a PAT, change credentials
+or require new token configuration.
+
 ## Candidate checks and source custody
 
 Creation from an already-pushed branch with configured checks requires the
