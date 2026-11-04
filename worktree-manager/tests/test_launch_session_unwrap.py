@@ -109,15 +109,14 @@ def test_launch_script_contains_unwrap_snippet():
 
 
 def test_bash_launcher_avoids_bash4_mapfile():
-    """macOS ships Bash 3.2; fixed phase submissions need no JSON argv reads."""
+    """macOS ships Bash 3.2; fixed maintenance requests need no JSON argv reads."""
     text = _LAUNCH_SCRIPT.read_text()
     assert "mapfile" not in text
-    assert "launch-update bootstrap" in text
-    assert "local _bootstrap_args=(launch-update bootstrap)" in text
-    assert "launch-update reconcile" in text
+    assert "local _automatic_args=(-m agent_worktrees)" in text
+    assert "_automatic_args+=(update --auto)" in text
+    assert "_automatic_args+=(launch-update automatic --auto --no-update --with-reconcile)" in text
+    assert '"$PYTHON" "${_automatic_args[@]}"' in text
     assert "UPDATE_ARGV" not in text and "_RARGV" not in text
-    assert '${_project_args[@]+"${_project_args[@]}"}' in text
-    assert '${_reconcile_project[@]+"${_reconcile_project[@]}"}' in text
 
 
 @pytest.mark.skipif(os.name != "posix", reason="Native Bash pane environment contract")

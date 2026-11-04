@@ -3091,6 +3091,19 @@ integration family. The disabled Windows rotation stays disabled; local
 contained Windows evidence is recorded separately. Required PR CI and promotion
 retain their existing unit-only policy.
 
+The Worktrees selection also includes `test_standalone_provisioning.py`.
+It checks zero foreground optional-planner work, both opt-outs, unchanged
+default preview and resident scheduling, and return while a real finite
+reconciliation child remains blocked. That child is a synthetic downstream
+worker, not an installer or serving runtime. The packet does not establish
+full cold-start latency, installed adoption or Windows/Linux interchangeability.
+
+The native launcher status packet submits the current canonical `update --auto`
+request twice within one launch and requires exactly one child invocation.
+Missing, error, legacy-lock, in-progress and completed legacy staging observations
+remain byte-for-byte unchanged; they are not update-admission or completion
+authority. Windows shells and native Bash exercise their own launcher bodies.
+
 ## Construction-source inventory
 
 With Python 3.11 or newer, `python tools/construction_inventory.py` reads the

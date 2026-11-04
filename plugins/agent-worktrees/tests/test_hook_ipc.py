@@ -1943,13 +1943,17 @@ def test_session_start_catalog_matches_native_emitter(monkeypatch, tmp_path):
         argv = [shell, str(root / "scripts" / "emit-command-catalog.sh")]
     if not shell:
         pytest.skip("Native catalog shell is unavailable")
+    environment = {**os.environ, "PYTHONPATH": ""}
+    if os.name == "nt":
+        # Compare supported peers, not an unrelated ambient Python launcher.
+        environment["PATH"] = str(Path(sys.executable).parent)
     result = hook_client.subprocess.run(
         argv, capture_output=True, text=True, check=True, timeout=15,
-        env={**os.environ, "PYTHONPATH": ""},
+        env=environment,
         **({"creationflags": hook_client.subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )
     native = _hook_catalog(json.loads(result.stdout)["additionalContext"])
-    assert _hook_catalog(hook_client._command_catalog_context()) == native
+    assert _hook_catalog(hook_client._command_catalog_context()) == native, result.stderr
 
 
 def test_session_start_main_folds_decision_context_and_emits_empty_result(
@@ -2825,7 +2829,7 @@ def test_combined_lifecycle_preserves_side_effect_snapshots(monkeypatch, tmp_pat
     monkeypatch.setattr(
         main,
         "_start_provisioning_if_needed",
-        lambda cwd, environment: "provisioning\n",
+        lambda cwd, environment, **kwargs: "provisioning\n",
     )
 
     result = main._run_session_lifecycle(
@@ -2888,7 +2892,7 @@ def test_session_lifecycle_calls_local_cache_refresh_as_a_backup(
         main, "_reconcile_knowledge_plugin_overlay", lambda payload, cwd: None
     )
     monkeypatch.setattr(
-        main, "_start_provisioning_if_needed", lambda cwd, environment: ""
+        main, "_start_provisioning_if_needed", lambda cwd, environment, **kwargs: ""
     )
 
     calls = []
@@ -2942,7 +2946,7 @@ def test_session_lifecycle_reports_local_cache_refresh_failure(
         main, "_reconcile_knowledge_plugin_overlay", lambda payload, cwd: None
     )
     monkeypatch.setattr(
-        main, "_start_provisioning_if_needed", lambda cwd, environment: ""
+        main, "_start_provisioning_if_needed", lambda cwd, environment, **kwargs: ""
     )
 
     from agent_worktrees import local_cache_refresh
