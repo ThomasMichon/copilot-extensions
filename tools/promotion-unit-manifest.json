@@ -4030,7 +4030,7 @@
         "worktree-manager/scripts/versioned_runtime.py": "f5a7dab6687584c0ffe104a4c80a06b0384032a539f59132dee205b672c158ed",
         "worktree-manager/scripts/versioned_runtime_leases.py": "eee7d2371fe91ce7b8b075f17753a8470c784c29a584d3ba4f62506f45598e2a",
         "worktree-manager/scripts/versioned_runtime_source.py": "b67a2fc6e487e2343a16fcc5df8a3e5d2ce5c6346f992debb002f1aae96ad58b",
-        "tools/promotion_unit_tests/test_core_release_delivery_contract.py": "ed67621d2855989e1eb79848e5d2450f43ca862b13fec3beb058fcc07a29291a",
+        "tools/promotion_unit_tests/test_core_release_delivery_contract.py": "eb4c8287e5897c47879d04d1c6402be8ddd7c86d439585e6698801582dc08f8a",
         "tools/core_runtime_profile.py": "df7864fc7f57f856612b5cfadd8140c4ccd4be8c3d2b2515ef1c40f84d84fd86",
         "tools/python_project_inventory.py": "6981a4cf50106c205847e5f946c23c09c5a0959cc5e2caf30920264c91c0b538",
         "tools/promotion_unit_tests/test_core_artifacts.py": "65af880e0df559bfc0e69d5f67357ded77576cd94511b65f2e8b5e5f42201181",

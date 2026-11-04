@@ -69,7 +69,14 @@ def test_reconstructed_core_refuses_unselected_inputs_before_use(monkeypatch, fa
         raw += b" "
     elif failure == "deadline":
         deadline = time.monotonic() - 1
-    with pytest.raises(ValueError), intake.retain_reconstructed_core(
+    expected = {
+        "entry-id": "differs from its selected source entry",
+        "entry-digest": "differs from its selected source entry",
+        "manifest": "requires the exact canonical manifest bytes",
+        "snapshot": "requires a retained wheel snapshot",
+        "deadline": "deadline exhausted or invalid",
+    }[failure]
+    with pytest.raises(ValueError, match=expected), intake.retain_reconstructed_core(
         manifest_data=raw, entry=entry, wheels=None, deadline=deadline, max_bytes=4096, max_wheels=2,
     ):
         pytest.fail("unselected core was exposed")
