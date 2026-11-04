@@ -16,6 +16,16 @@ from .queue_task_relationships import _matches_receipt, latest_relationship
 if TYPE_CHECKING:
     from .queue import TaskQueue
 
+_TASK_BOOKKEEPING = {
+    "updated_at",
+    "lease_expires_at",
+    "latest_progress",
+    "last_seen_at",
+    "last_liveness",
+    "activity",
+    "activity_updated_at",
+}
+
 
 def _state(queue: TaskQueue, conn: sqlite3.Connection, task_id: str, request_id: str) -> dict:
     prepared = _latest(conn, task_id)
@@ -78,7 +88,13 @@ def _state(queue: TaskQueue, conn: sqlite3.Connection, task_id: str, request_id:
     return {
         "preparation": value,
         "relationship": relationship,
-        "task": dict(conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()),
+        "task": {
+            key: value
+            for key, value in dict(
+                conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+            ).items()
+            if key not in _TASK_BOOKKEEPING
+        },
         "reservation": dict(reservation),
         "allocation": dict(allocation),
         "assignment": dict(

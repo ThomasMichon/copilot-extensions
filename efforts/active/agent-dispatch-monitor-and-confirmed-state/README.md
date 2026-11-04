@@ -487,7 +487,7 @@ restoration of historical terminal enums follows.
 - [ ] Land the bounded [internal Dispatch readiness consumer](journal/2026/11.04-consumer-readiness.md):
       negotiate the selected local Worktrees owner, derive its actual native
       head, retain the original claim/allocation and recheck queue custody after
-      observation. Prepared source passes 123 isolated controls; independent
+      observation. Corrected source passes 128 isolated controls; independent
       review, required CI and actual merge remain pending. Guarded advancement,
       ordinary caller migration and complete native qualification stay open.
 - [x] Land read-only [task-obligation provider evidence](journal/2026/11.03-task-obligation-provider.md)

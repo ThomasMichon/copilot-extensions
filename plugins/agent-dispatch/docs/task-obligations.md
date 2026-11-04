@@ -314,6 +314,11 @@ nonreleasing effects must agree; worker-provided success JSON is not input.
 External observation runs outside the SQLite transaction. A fresh locked
 queue read rechecks the proposal, task/native incarnation, relationship,
 allocation, holds and execution admission before returning evidence.
+Lease renewal, liveness/activity bookkeeping and progress updates do not change
+that binding. Other task changes, including result, goal, review policy,
+ownership or holds, still invalidate it. Normal Worktrees metadata may express
+the managed-checkout default as null; explicit false or invalid values refuse,
+and the readiness owner independently enforces actual managed custody.
 
 This method neither persists a readiness permission nor advances the task.
 Every invocation reacquires evidence; later advancement still needs its own

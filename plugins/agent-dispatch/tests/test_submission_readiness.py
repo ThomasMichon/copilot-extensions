@@ -242,6 +242,8 @@ def test_prior_or_incompatible_runtime_stops_at_discovery_without_fallback(ready
         ("dispatch_attempt", {}),
         ("head", {"head_revision": 7}),
         ("checkout_managed", False),
+        ("checkout_managed", 1),
+        ("checkout_managed", "true"),
     ],
 )
 def test_actual_record_mismatch_never_reaches_readiness(ready, field, value):
@@ -396,6 +398,50 @@ def test_changed_bound_receipt_ref_refuses_before_worktrees(ready):
     assert not calls and queue.get(task.id) == task
 
 
+@pytest.mark.parametrize("progress", [None, False, True])
+def test_unrelated_heartbeat_and_progress_during_observation_preserve_the_proposal(
+    ready,
+    monkeypatch,
+    progress,
+):
+    queue, owner, task, proposal, _, _, value, _ = ready
+    run = observation.procutil.run_background_capture
+    relationship = queue.task_relationship(task.id)
+    allocation = queue.list_reservations(task_id=task.id)
+
+    def beat(argv, **kwargs):
+        response = run(argv, **kwargs)
+        if "--readiness-operation" in argv:
+            if progress is None:
+                queue.heartbeat(task.id, task.owner, now=task.updated_at + 1)
+            else:
+                queue.record_progress(
+                    task.id,
+                    task.owner,
+                    phase="review",
+                    summary="Waiting for a verdict",
+                    extend_lease=progress,
+                    now=task.updated_at + 1,
+                )
+        return response
+
+    monkeypatch.setattr(observation.procutil, "run_background_capture", beat)
+    assert queue.observe_submission_readiness(task.id, request_id="proposal") == {
+        "preparation": proposal,
+        "observation": value,
+    }
+    fresh = queue.get(task.id)
+    assert fresh.updated_at != task.updated_at and fresh.status == task.status
+    assert (fresh.owner, fresh.owner_session_id, fresh.generation) == (
+        task.owner,
+        task.owner_session_id,
+        task.generation,
+    )
+    assert queue.submission_preparation(task.id) == proposal
+    assert queue.task_relationship(task.id) == relationship
+    assert queue.list_reservations(task_id=task.id) == allocation and len(owner.claims) == 1
+
+
 @pytest.mark.parametrize("provider", ["current", "prior", "rollback"])
 def test_selected_process_uses_actual_record_parser_and_refuses_prior_or_rollback(
     ready,
@@ -432,8 +478,27 @@ else:
     root = Path(root)
     sys.path[:0] = [str(root / "plugins/agent-worktrees/src")]
     sys.path[:0] = [str(p / "src") for p in (root / "libs").iterdir() if (p / "src").is_dir()]
-    from agent_worktrees import record_cli, dispatch_worker_readiness
+    from agent_worktrees import record_cli, record_read, dispatch_worker_readiness, tracking
     payload = json.loads(Path(replies).read_text())
+    tree = payload["metadata"]["context"]["worktree"]
+    record_path = Path(replies).with_name(tree["id"] + ".yaml")
+    data = {
+        "worktree_id": tree["id"], "repo": tree["repo"], "worktree_path": tree["path"],
+        "branch": "worktree/worker", "status": "active", "machine": "host-a", "platform": "linux",
+        "creation_nonce": tree["creation_nonce"], "dispatch_attempt": tree["dispatch_attempt"],
+        "sessions": [{"session_id": "native", "state": "active"}],
+        "head_transitions": [{"revision": 7, "session_id": "native", "reason": "registered"}],
+    }
+    record = tracking.parse_record_data(data, path=record_path)
+    tracking._save_record_contents_unlocked(record, record_path, current=None)
+    assert "checkout_managed" not in record_path.read_text()
+    record_read.cfg.project_name = lambda: tree["repo"]
+    record_read.configured_repositories = lambda project: {tree["repo"]}
+    record_read.cfg.tracking_dir = lambda project: record_path.parent
+    payload["metadata"]["context"]["worktree"] = record_read.read_exact_record(
+        tree["id"], include_workspace=True,
+    )
+    assert payload["metadata"]["context"]["worktree"]["checkout_managed"] is None
     record_cli.read_workspace_record = lambda cwd: payload["metadata"]["context"]
     def observe(worktree, task, reservation, native, **kwargs):
         value = payload["observation"]

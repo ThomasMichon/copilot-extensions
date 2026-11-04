@@ -102,9 +102,9 @@ def observe(request: dict, allocation: dict, task_claim_ref: str) -> dict:
                 "creation_nonce": workspace.creation_nonce,
                 "status": "active",
                 "dispatch_attempt_opaque": False,
-                "checkout_managed": True,
             },
         )
+        or (tree.get("checkout_managed") is not None and tree["checkout_managed"] is not True)
         or not _matches(tree.get("dispatch_attempt"), allocation)
         or not _matches(
             head,
