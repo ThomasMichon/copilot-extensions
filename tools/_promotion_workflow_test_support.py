@@ -197,7 +197,7 @@ def reviewed_helpers(repo: Path, source: Path) -> tuple[Path, str]:
     helpers = repo / "reviewed-helpers"
     if not helpers.exists():
         shutil.copytree(repo / "tools", helpers / "tools")
-        for name in ("promote_release.py", "promotion_python_artifacts.py",
+        for name in ("promote_release.py", "promotion_python_artifacts.py", "promotion_bundle_members.py",
                      "promotion_control.py", "promotion_candidate.py"):
             shutil.copyfile(source / "tools" / name, helpers / "tools" / name)
         inspector = Path("libs") / "installer-engine" / "installer_wheel_inputs.py"
