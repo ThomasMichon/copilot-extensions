@@ -315,6 +315,19 @@ retained bytes. Later filesystem replacement cannot change a lazy component
 import during the staging lifetime.
 
 Ordinary explicit package-manager installation/removal remains supported.
+An explicitly prepared wheel application also installs the ordinary thin
+client through the shared application installer: staging prepares its environment,
+and regular installation publishes the CLI without setup or service-start
+callbacks. It does not invoke an unsupported `__source-start` command or activate
+a Gateway/SSH host. Selected hosting roles still require their separate normal
+lifecycle; client installation is not enrollment or route readiness.
+Older prepared applications retain their original declaration; regenerate them
+from the fixed source and select a new generation rather than rewriting a
+completed slot.
+The opt-in native `pr_artifacts` packet in
+`installation-context-acceptance.yml` exercises fresh application staging,
+regular/repeated installation and the actual installed `doctor` on Linux and
+Windows. This is separate from required unit CI and live Gateway qualification.
 Native first-touch tests install the built wheel into a fresh package-manager
 target without dependencies/network access, run its installed console entry point
 and diagnostics, and remove that distribution while preserving separate user

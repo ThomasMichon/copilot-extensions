@@ -24,9 +24,9 @@ _START_CALLBACKS = {
     "agent-bridge", "agent-codespaces", "agent-containers",
     "agent-dispatch", "agent-dispatch-service", "agent-index",
     "agent-pull-requests", "agent-vault", "agent-index-engine",
-    "agent-index-service", "agent-ssh-service", "agent-chat-service", "fleet-manager",
+    "agent-index-service", "agent-ssh-service", "agent-chat-service",
 }
-_NO_CALLBACKS = {"agent-machines", "agent-ssh", "budget-guidance"}
+_NO_CALLBACKS = {"agent-machines", "agent-ssh", "budget-guidance", "fleet-manager"}
 
 
 def root_binding(name: str) -> tuple[str, str]:
