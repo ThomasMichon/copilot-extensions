@@ -582,3 +582,34 @@
   exhaustive capability-query inventory, bootstrap/updater completion and the
   parent handoff/singleton measurements remain open. No retained session was
   terminated or migrated.
+
+### 2026-11-04 - Whole-suite activation prerequisite
+
+- The existing hosted Windows whole-suite lane at source
+  `1eea3e286c32f4f09ddb9b560b88b5bc3f4347eb`, run `41797313035`, fails
+  baseline preparation in both normal and repair modes. Vault activation
+  reports a configuration/owner resolution refusal; neither mode reaches
+  replacement assertions. Both fixture settlements succeed.
+- #10397 tracks this bounded prerequisite. Its underlying cause remains
+  unestablished; an invalid owner or configuration must not be reclassified as
+  inactive to get a green result. Explicit opt-in and native ownership remain
+  unchanged.
+- Added a failure-only, bounded read of the retained fixture payload. It records
+  caught activation exceptions and a refused configuration owner's bounded
+  stderr without changing the reader or original failure. The actual-process
+  control passes with exit 3, unchanged reader bytes and ordinary cleanup.
+- A changed-input native run is collecting the missing diagnostic evidence.
+  This is investigation, not a production Vault fix or a passed whole-suite
+  gate. No deadline, installer, service or configuration policy was bypassed.
+- That exact-head run, `41802608780` at `ddb5d594bad08837ff4d2313cf7d103ad6f09917`,
+  also fails both preparations and settles both fixtures. The post-failure
+  reader replay returns inactive (exit 2), not the original refusal; it does
+  not establish the failure's cause or qualify a fix. Preparation-time
+  environment/interpreter and owner-readiness differences remain unresolved.
+- Retain bounded, value-free exception locations in the original activation
+  reader's failure report and preserve that report through the Windows
+  adapter. Actual Python, PowerShell 5.1 and PowerShell 7 controls pass for
+  invalid configuration, without exposing its value or installing a runtime.
+  Native ARM test preparation cannot build the existing cryptography extra
+  without OpenSSL; the existing x64 interpreter runs these controls under
+  the ordinary contained runner with successful cleanup.

@@ -1,0 +1,9 @@
+{
+  "comment": "Retain value-free activation failure locations and the native reader outcome.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

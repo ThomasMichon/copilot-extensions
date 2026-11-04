@@ -42,6 +42,10 @@ database selectors, environment variables and plugin visibility do not imply
 opt-in. Strings, numbers and null are not booleans. Malformed files, unsafe
 portable overrides, unresolved bindings and wrong-cell reports refuse rather
 than silently returning inactive.
+Reader failures retain their exception class and up to four function/line
+locations, without exception text, configuration values or source paths.
+Windows activation errors also retain the reader's exit code and readiness
+state, so an installer refusal remains distinguishable from inactive readiness.
 Activation does not load extension configuration providers or treat invocation
 database/credential environment variables as an opt-in declaration.
 
