@@ -1,0 +1,9 @@
+{
+  "comment": "Disable bytecode writes in the isolated caller-owned controller",
+  "changes": [
+    {
+      "plugin": "libs/agent-procutil",
+      "type": "patch"
+    }
+  ]
+}

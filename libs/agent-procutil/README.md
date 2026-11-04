@@ -572,6 +572,11 @@ strict UTF-8 text with the existing newline normalization. Both modes retain the
 same raw-byte stream budgets, caller lifetime and confirmed cleanup; binary
 output is encoded only inside the private POSIX completion transport.
 
+The internal POSIX Python controller explicitly disables bytecode writes with
+`-B`, including when isolated mode ignores inherited Python environment settings.
+This does not change the requested command's interpreter arguments or bytecode
+policy.
+
 `run_caller_owned(..., on_settled=callback)` optionally reports positive native
 scope settlement, separately from execution success. The callback runs once
 after known pre-launch preparation refusal, or after the entire strict Windows
