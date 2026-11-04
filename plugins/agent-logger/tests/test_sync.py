@@ -2321,6 +2321,101 @@ def test_engine_dry_run_makes_no_dest(tmp_path: Path) -> None:
     assert not dest.exists()
 
 
+def test_engine_worktree_collection_defaults_off(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    src = _make_source(tmp_path)
+    cfg = _cfg(tmp_path / "home", src, tmp_path / "dest")
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        pytest.fail("ordinary sync must not discover or export worktree state")
+
+    monkeypatch.setattr(engine, "_sync_worktree_state", forbidden, raising=False)
+    assert cfg.sync_worktree_state_enabled is False
+    assert engine.run_sync(cfg) == 0
+
+
+@pytest.mark.parametrize("raw", [None, True, [], "true", {"enabled": "true"}, {"enabled": 1}])
+def test_engine_rejects_malformed_worktree_collection_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, raw: object,
+) -> None:
+    src = _make_source(tmp_path)
+    cfg = _cfg(tmp_path / "home", src, tmp_path / "dest")
+    data = cfg.as_dict()
+    data["sync"]["worktree_state"] = raw
+    cfg = Config(data, cfg.home)
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        pytest.fail("malformed opt-in must be rejected before sync effects")
+
+    monkeypatch.setattr(engine, "_push_incremental", forbidden)
+    monkeypatch.setattr(engine, "_sync_worktree_state", forbidden, raising=False)
+    with pytest.raises(ValueError, match="sync.worktree_state"):
+        engine.run_sync(cfg)
+    assert not (tmp_path / "dest").exists()
+
+
+def _enable_worktree_collection(cfg: Config) -> Config:
+    data = cfg.as_dict()
+    data["sync"]["worktree_state"] = {"enabled": True}
+    return Config(data, cfg.home)
+
+
+def test_engine_worktree_collection_dry_run_has_no_effects(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    src = _make_source(tmp_path)
+    cfg = _enable_worktree_collection(
+        _cfg(tmp_path / "home", src, tmp_path / "dest"),
+    )
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        pytest.fail("dry-run must not inventory, export, or collect worktree stores")
+
+    monkeypatch.setattr(engine, "_sync_worktree_state", forbidden, raising=False)
+    assert cfg.sync_worktree_state_enabled is True
+    assert engine.run_sync(cfg, dry_run=True) == 0
+    assert not (tmp_path / "dest").exists()
+    assert not (cfg.home / "worktree-state-exports").exists()
+
+
+def test_engine_worktree_failure_is_not_hidden_by_session_success(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    src = _make_source(tmp_path)
+    dest = tmp_path / "dest"
+    cfg = _enable_worktree_collection(_cfg(tmp_path / "home", src, dest))
+    calls = []
+
+    def failed(actual_cfg: Config, target: object) -> int:
+        calls.append((actual_cfg, target))
+        assert (cfg.home / cfg.sync_lock_name).exists()
+        return 1
+
+    monkeypatch.setattr(engine, "_sync_worktree_state", failed, raising=False)
+    assert engine.run_sync(cfg) == 1
+    assert len(calls) == 1 and calls[0][0] is cfg
+    assert list(dest.glob("*/session-state/abc-123/events.jsonl"))
+
+
+def test_engine_retained_worktree_leg_runs_without_session_source(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    cfg = _enable_worktree_collection(
+        _cfg(tmp_path / "home", tmp_path / "missing", tmp_path / "dest"),
+    )
+    calls = []
+
+    def collected(actual_cfg: Config, target: object) -> int:
+        calls.append(actual_cfg)
+        assert (cfg.home / cfg.sync_lock_name).exists()
+        return 0
+
+    monkeypatch.setattr(engine, "_sync_worktree_state", collected, raising=False)
+    assert engine.run_sync(cfg) == 1  # The ordinary missing source is still a failure.
+    assert calls == [cfg]
+
+
 def test_engine_run_sync_second_run_skips_push_when_unchanged(
     monkeypatch, capsys, tmp_path: Path,
 ) -> None:

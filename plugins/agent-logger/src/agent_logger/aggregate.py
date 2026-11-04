@@ -21,6 +21,13 @@ from typing import Any, Protocol
 from urllib.parse import urlparse
 
 import yaml
+from agent_procutil.owned_budget import OwnedExecutionBudget
+
+from agent_logger.aggregate_io import (
+    load_yaml_mapping as _load_yaml_mapping,
+    load_yaml_text_mapping as _load_yaml_text_mapping,
+    observe_git as _git_observation,
+)
 
 UNCLASSIFIED = "unclassified"
 WILDCARD_WITNESS = "classified:*"
@@ -424,14 +431,18 @@ class FileSystemAggregateInputProvider:
         machine: MachineIdentity,
         home: Path,
         checkouts: Sequence[CheckoutDescriptor] | None = None,
+        budget: OwnedExecutionBudget | None = None,
     ) -> None:
         self.machine = machine
         self.home = home
         self.checkouts = tuple(checkouts) if checkouts is not None else None
+        self.budget = budget
 
     def load(self) -> AggregateInputs:
         config_path = self.home / "config.yaml"
-        machine_config = _load_yaml_mapping(config_path) if config_path.is_file() else {}
+        machine_config = (
+            _load_yaml_mapping(config_path, budget=self.budget) if config_path.is_file() else {}
+        )
         aggregate = machine_config.get("aggregate", {})
         if aggregate is None:
             aggregate = {}
@@ -447,6 +458,8 @@ class FileSystemAggregateInputProvider:
         raw_admissions = aggregate.get("admissions", [])
         if not isinstance(raw_admissions, list):
             raise ValueError("aggregate.admissions must be a list")
+        if self.budget is not None and len(raw_admissions) > 128:
+            raise ValueError("aggregate admissions exceed the typed sync repository budget")
 
         admissions: list[Admission] = []
         failures: list[DiscoveryFailure] = []
@@ -490,7 +503,7 @@ class FileSystemAggregateInputProvider:
                 )
                 try:
                     override = _parse_policy(
-                        _load_yaml_mapping(resolved_override),
+                        _load_yaml_mapping(resolved_override, budget=self.budget),
                         location=str(resolved_override),
                         default_id="machine-override",
                     )
@@ -540,16 +553,22 @@ class FileSystemAggregateInputProvider:
 
         descriptors = self.checkouts
         if descriptors is None:
-            descriptors, descriptor_failures = _discover_admitted_checkouts(admissions)
+            descriptors, descriptor_failures = _discover_admitted_checkouts(
+                admissions, budget=self.budget,
+            )
             failures.extend(descriptor_failures)
 
         discoveries: list[DiscoveredDeclaration] = []
         for descriptor in descriptors:
             try:
                 data = (
-                    _load_head_declaration(descriptor)
+                    (
+                        _load_head_declaration(descriptor)
+                        if self.budget is None
+                        else _load_head_declaration(descriptor, budget=self.budget)
+                    )
                     if descriptor.read_from_head
-                    else _load_yaml_mapping(descriptor.declaration_path)
+                    else _load_yaml_mapping(descriptor.declaration_path, budget=self.budget)
                 )
                 declaration = _parse_declaration(
                     data,
@@ -708,31 +727,22 @@ def compile_from_provider(provider: AggregateInputProvider) -> ResolvedPlan:
     return compile_aggregate(inputs)
 
 
-def _load_yaml_mapping(path: Path) -> dict[str, Any]:
-    return _load_yaml_text_mapping(path.read_text(encoding="utf-8"), str(path))
-
-
-def _load_yaml_text_mapping(text: str, location: str) -> dict[str, Any]:
-    data = yaml.safe_load(text)
-    if data is None:
-        return {}
-    if not isinstance(data, dict):
-        raise ValueError(f"{location} must contain a mapping")
-    return data
-
-
-def _load_head_declaration(descriptor: CheckoutDescriptor) -> dict[str, Any]:
+def _load_head_declaration(
+    descriptor: CheckoutDescriptor, *, budget: OwnedExecutionBudget | None = None,
+) -> dict[str, Any]:
     relative = descriptor.declaration_path.relative_to(descriptor.checkout)
-    result = _run_git(
+    result = _git_observation(
         descriptor.checkout,
         "show",
         f"HEAD:{relative.as_posix()}",
+        budget=budget,
     )
     return _load_yaml_text_mapping(result.stdout, str(descriptor.declaration_path))
 
 
 def _discover_admitted_checkouts(
     admissions: Sequence[Admission],
+    *, budget: OwnedExecutionBudget | None = None,
 ) -> tuple[tuple[CheckoutDescriptor, ...], tuple[DiscoveryFailure, ...]]:
     descriptors: list[CheckoutDescriptor] = []
     failures: list[DiscoveryFailure] = []
@@ -746,8 +756,11 @@ def _discover_admitted_checkouts(
             / "config.yaml"
         )
         try:
-            repository = repository_identity_from_checkout(
-                admission.authoritative_checkout
+            repository = (
+                repository_identity_from_checkout(admission.authoritative_checkout)
+                if budget is None else repository_identity_from_checkout(
+                    admission.authoritative_checkout, budget=budget,
+                )
             )
         except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
             failures.append(
@@ -771,19 +784,23 @@ def _discover_admitted_checkouts(
     return tuple(descriptors), tuple(failures)
 
 
-def repository_identity_from_checkout(checkout: Path) -> str:
+def repository_identity_from_checkout(
+    checkout: Path, *, budget: OwnedExecutionBudget | None = None,
+) -> str:
     """Read and normalize the authoritative checkout's ``origin`` remote."""
     if not checkout.is_absolute():
         raise ValueError("checkout path must be absolute")
-    _verify_authoritative_checkout(checkout)
-    result = _run_git(checkout, "remote", "get-url", "origin")
+    _verify_authoritative_checkout(checkout, budget=budget)
+    result = _git_observation(checkout, "remote", "get-url", "origin", budget=budget)
     if not result.stdout.strip():
         raise ValueError("authoritative checkout has no readable origin remote")
     return canonical_repository_identity(result.stdout.strip())
 
 
-def _verify_authoritative_checkout(checkout: Path) -> None:
-    result = _run_git(
+def _verify_authoritative_checkout(
+    checkout: Path, *, budget: OwnedExecutionBudget | None = None,
+) -> None:
+    result = _git_observation(
         checkout,
         "rev-parse",
         "--show-toplevel",
@@ -791,6 +808,7 @@ def _verify_authoritative_checkout(checkout: Path) -> None:
         "--git-common-dir",
         "HEAD",
         "refs/remotes/origin/HEAD",
+        budget=budget,
     )
     lines = [line.strip() for line in result.stdout.splitlines()]
     if len(lines) != 5:
@@ -811,31 +829,6 @@ def _verify_authoritative_checkout(checkout: Path) -> None:
         raise ValueError("secondary worktrees cannot be authoritative checkouts")
     if head != remote_head:
         raise ValueError("authoritative checkout is not at the remote default branch")
-
-def _run_git(checkout: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    env = os.environ.copy()
-    for key in (
-        "GIT_DIR",
-        "GIT_WORK_TREE",
-        "GIT_INDEX_FILE",
-        "GIT_COMMON_DIR",
-        "GIT_PREFIX",
-        "GIT_OBJECT_DIRECTORY",
-        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-    ):
-        env.pop(key, None)
-    result = subprocess.run(
-        ["git", "-C", str(checkout), *args],
-        capture_output=True,
-        text=True,
-        check=False,
-        env=env,
-        timeout=10,
-    )
-    if result.returncode != 0:
-        raise ValueError("authoritative checkout metadata is unavailable")
-    return result
-
 
 def _parse_declaration(
     data: dict[str, Any],

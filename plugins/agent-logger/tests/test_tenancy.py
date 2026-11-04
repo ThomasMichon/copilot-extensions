@@ -192,6 +192,84 @@ def test_machine_matches(machine, key, expected):
     assert tenancy.machine_matches(machine, key) is expected
 
 
+@pytest.mark.parametrize("layer", ["base", "machine"])
+def test_committed_tenant_cannot_enable_typed_collection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layer: str,
+) -> None:
+    from agent_logger.sync import engine
+
+    source = _make_copilot(tmp_path)
+    tenant = {
+        "id": "example",
+        "sync": {
+            "source": str(source), "usage_capture": False,
+            "targets": {"local": {"path": str(tmp_path / "destination")}},
+        },
+    }
+    if layer == "base":
+        tenant["sync"]["worktree_state"] = {"enabled": True}
+    else:
+        tenant["machines"] = {"worker": {"sync": {"worktree_state": {"enabled": True}}}}
+    block = tenancy.parse_tenant_block({"tenant": tenant}, source="fixture", default_id="example")
+    resolved = tenancy.resolve_tenant(
+        block, repo_name="example", repo_path=tmp_path / "repo",
+        config_path=tmp_path / "repo/.agent-logger.tenant.yaml",
+        machine="worker", home=tmp_path / "home",
+    )
+
+    def forbidden(*args: object) -> int:
+        pytest.fail("committed tenant settings must not enable retained-store exports")
+
+    monkeypatch.setattr(engine, "_sync_worktree_state", forbidden)
+    assert resolved.config.sync_worktree_state_enabled is False
+    assert any("worktree_state" in advisory for advisory in resolved.advisories)
+    assert engine.run_sync(resolved.config) == 0
+
+
+@pytest.mark.parametrize("local_enabled", [True, False, "true"])
+def test_typed_collection_opt_in_comes_from_local_tenant_supplement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, local_enabled: object,
+) -> None:
+    from agent_logger.sync import engine
+
+    source = _make_copilot(tmp_path)
+    home = tmp_path / "home"
+    supplement = home / "tenants/example.yaml"
+    supplement.parent.mkdir(parents=True)
+    supplement.write_text(yaml.safe_dump({
+        "sync": {"worktree_state": {"enabled": local_enabled}},
+    }), encoding="utf-8")
+    block = tenancy.parse_tenant_block({
+        "tenant": {
+            "id": "example",
+            "sync": {
+                "source": str(source), "usage_capture": False,
+                "targets": {"local": {"path": str(tmp_path / "destination")}},
+                "worktree_state": {"enabled": True},
+            },
+            "machines": {"worker": {"sync": {"worktree_state": {"enabled": False}}}},
+        },
+    }, source="fixture", default_id="example")
+    resolved = tenancy.resolve_tenant(
+        block, repo_name="example", repo_path=tmp_path / "repo",
+        config_path=tmp_path / "repo/.agent-logger.tenant.yaml", machine="worker", home=home,
+    )
+    calls = []
+
+    def collect(*args: object) -> int:
+        calls.append(args)
+        return 0
+
+    monkeypatch.setattr(engine, "_sync_worktree_state", collect)
+    if isinstance(local_enabled, str):
+        with pytest.raises(ValueError, match="sync.worktree_state"):
+            engine.run_sync(resolved.config)
+        assert not calls
+    else:
+        assert engine.run_sync(resolved.config) == 0
+        assert len(calls) == int(local_enabled)
+
+
 # --------------------------------------------------------------------------- #
 # per-machine resolution                                                       #
 # --------------------------------------------------------------------------- #

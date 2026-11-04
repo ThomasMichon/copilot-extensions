@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -18,7 +19,11 @@ from agent_logger import configuration_layers
 from agent_logger.aggregate import Admission, ExecutionMode
 from agent_logger.sync import worktree_state_pipeline as pipeline
 from agent_logger.sync.targets.filesystem import OneDriveTarget
-from agent_logger.sync.worktree_state import WorktreeStateError, WorktreeStateReceipt
+from agent_logger.sync.worktree_state import (
+    WorktreeStateError,
+    WorktreeStateReceipt,
+    WorktreeStateRevision,
+)
 from agent_logger.sync.worktree_state_providers import (
     EffortsExporter,
     ManagedPlacement,
@@ -250,10 +255,12 @@ def test_staging_cleanup_is_exact_and_failed_or_uncertain_exports_are_retained(
 
 
 @pytest.mark.contract("managed-worktree-export-collection")
+@pytest.mark.parametrize("entrypoint", ["explicit", "tick", "engine-missing-source"])
 def test_actual_native_retired_placement_exports_and_collects_under_current_policy(
     packet: Packet,
     native_owner: Path,
     efforts_payload: tuple[Path, Path, Path],
+    entrypoint: str,
 ) -> None:
     cfg, target, plan, source = packet
     _, root, script = efforts_payload
@@ -262,6 +269,61 @@ def test_actual_native_retired_placement_exports_and_collects_under_current_poli
         yaml.safe_dump({"projects": {"registered-alias": {}}}),
         encoding="utf-8",
     )
+    if entrypoint != "explicit":
+        declaration = root / ".copilot-extensions/agent-logger/config.yaml"
+        declaration.parent.mkdir(parents=True)
+        declaration.write_text(
+            yaml.safe_dump(
+                {
+                    "schema_version": 1,
+                    "repository": IDENTITY.repository,
+                    "default": {
+                        "claims": [
+                            {
+                                "id": "collect",
+                                "sources": {"repositories": [IDENTITY.repository]},
+                                "collection_target": "archive",
+                            }
+                        ]
+                    },
+                }
+            )
+        )
+        for arguments in (
+            ["add", ".copilot-extensions/agent-logger/config.yaml"],
+            ["commit", "-qm", "Declare fixture collection"],
+            ["update-ref", "refs/remotes/origin/main", "HEAD"],
+            ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"],
+        ):
+            subprocess.run(
+                ["git", "-C", str(root), *arguments],
+                check=True,
+                timeout=10,
+            )
+        cfg.home.mkdir()
+        (cfg.home / "config.yaml").write_text(
+            yaml.safe_dump(
+                {
+                    "aggregate": {
+                        "mode": "enforce",
+                        "admissions": [
+                            {
+                                "repository": IDENTITY.repository,
+                                "checkout": str(root),
+                                "collection_targets": {
+                                    "archive": {
+                                        "kind": "filesystem",
+                                        "identity": str(target._root()),
+                                    },
+                                },
+                            }
+                        ],
+                    },
+                }
+            )
+        )
+        cfg._data["sync"]["worktree_state"] = {"enabled": True}
+        cfg._data["sync"]["source"] = str(source.parent / "missing-session-source")
     (native_owner / "repos.yaml").write_text(
         yaml.safe_dump(
             {
@@ -308,24 +370,84 @@ def test_actual_native_retired_placement_exports_and_collects_under_current_poli
         timeout=30,
         check=True,
     )
+    if entrypoint != "explicit":
+        second = inventory.placements[1]
+        second_seed = source.parent / "second-seed"
+        second_seed.mkdir(mode=0o700)
+        subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                "-B",
+                "-c",
+                _PRODUCE,
+                str(script.parent),
+                str(second.state_home),
+                str(second_seed),
+                second.worktree,
+                second.store_id,
+                "rich",
+            ],
+            capture_output=True,
+            timeout=30,
+            check=True,
+        )
     before = {path: path.read_bytes() for path in native_owner.parent.rglob("*") if path.is_file()}
-    receipt = pipeline.collect_managed_worktree_state(
-        cfg,
-        target,
-        plan,
-        admission,
-        inventory,
-        placement,
-        OwnedExecutionBudget.from_timeout(120, cleanup_reserve=5),
+    identity = WorktreeStateRevision(
+        admission.repository,
+        placement.worktree,
+        placement.creation_nonce,
+        placement.store_id,
+        5,
     )
-    assert receipt.identity.worktree == placement.worktree
-    assert receipt.identity.revision == 5 and receipt.contributors_sha256 is not None
-    assert not receipt.as_dict()["remote_archive_acknowledged"]
-    retained = target._root() / receipt.identity.relative_directory
+    if entrypoint == "explicit":
+        receipt = pipeline.collect_managed_worktree_state(
+            cfg,
+            target,
+            plan,
+            admission,
+            inventory,
+            placement,
+            OwnedExecutionBudget.from_timeout(120, cleanup_reserve=5),
+        )
+        assert receipt.identity == identity
+    elif entrypoint == "tick":
+        from agent_logger.sync.worktree_state_tick import collect_pass
+
+        result = collect_pass(cfg, target)
+        assert len(result.completed) == 1 and not result.failed
+        assert [item.store for item in result.deferred] == [inventory.placements[1].store_id]
+    else:
+        from agent_logger.sync.engine import run_sync
+
+        assert run_sync(cfg) == 1  # Retained state lands; ordinary missing-source failure remains.
+    retained = target._root() / identity.relative_directory
+    receipt_data = json.loads((retained / "receipt.json").read_bytes())
+    assert receipt_data["identity"] == identity.as_dict()
+    assert receipt_data["contributors_sha256"]
+    assert not receipt_data["remote_archive_acknowledged"]
     assert (retained / "export/agenda.sqlite3").read_bytes() == (
         initial / "agenda.sqlite3"
     ).read_bytes()
     assert list((cfg.home / "worktree-state-exports").iterdir()) == []
+    if entrypoint != "explicit":
+        if entrypoint == "tick":
+            result = collect_pass(cfg, target)
+            assert [item.store for item in result.completed] == [second.store_id]
+            assert not result.failed
+        else:
+            assert run_sync(cfg) == 1
+        second_identity = WorktreeStateRevision(
+            admission.repository,
+            second.worktree,
+            second.creation_nonce,
+            second.store_id,
+            5,
+        )
+        assert (
+            target._root() / second_identity.relative_directory / "export/agenda.sqlite3"
+        ).read_bytes() == (second_seed / "agenda.sqlite3").read_bytes()
+        assert list((cfg.home / "worktree-state-exports").iterdir()) == []
     assert {
         path: path.read_bytes() for path in native_owner.parent.rglob("*") if path.is_file()
     } == before
