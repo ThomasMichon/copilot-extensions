@@ -420,6 +420,35 @@ readback precede any separate source judgment. #3422 is already CLOSED by
 metadata only, not a new fold; the other contracts, current holders and all
 parent states remain unchanged.
 
+The exact eight-file observation packet, including the corrected cursor-neutral
+ACP history recipe and explicit represented-session limitation, merged in
+#10485 as `9115efc73c4308444a5fb0cdb1efbd778650dba3`. Genuine corrected-head
+approval resolves the earlier Medium finding; all three provider-required
+checks passed and every actual merged/current blob equals the reviewed head.
+Only the independent publication child finalized, with checkout and branch
+retained. A separate fresh original/two-discussion qualification and complete
+current playbook readback support #3557's finite documented-separation OR.
+#3557 is now completed, not a new fused runtime or represented-history
+capability. The other six sources and all custodians remain unchanged.
+Two equal complete eleven-page scans at 19:16:40 UTC / 11:16:40 PST count
+1,019 whole open, 290 above 729: 745 eligible, 274 excluded, 680 original-cohort
+and 339 inflow. Eligible arrival #10487 and external departure #7963 remain
+metadata-only and uncredited; the sole campaign closure is #3557.
+
+The [continuity/lifecycle study](continuity-lifecycle-cohort.md) now integrates
+seven complete contracts and all discussions: 24 texts, 67,820 characters.
+Its eighth historical member remains withheld before new rendering because
+of protected lineage. Eight whole messages supply eighteen bounded comparisons;
+three graph-nominated PR relations stay withheld. Independently, #7942's
+literal #8026 candidate is now merged and matching current registration/module/
+test definitions credit its accepted source slice, not whole native/installed
+acceptance. Keep all 31 #3000 rows, six #3367 rows, six #5664 phases, writer
+AND recurring-schedule custody, native/custom compatibility and structural
+advisory separate. No whole receiving home, implementation appointment,
+source closure or resource transfer is accepted. Two complete equal
+eleven-page scans at 19:03:54 UTC / 11:03:54 PST remain 1,020 whole open,
+291 above 729, with no arrivals, departures or campaign credit.
+
 - [x] Holistically sweep the initial eligible backlog and build an issue/effort
   relationship graph; use alignment and theme to identify consolidation groups.
   The [initial graph snapshot](graph-overview.md) accounts for all 695 assigned
@@ -678,6 +707,15 @@ parent states remain unchanged.
 
 ## Validation Plan
 
+The [continuity/lifecycle study](continuity-lifecycle-cohort.md) preserves seven
+whole originals and all refinements, excludes protected #7694 before rendering,
+and retains three unqualified PR relations. Eighteen whole-message comparisons
+do not establish completion; #8026's separately qualified actual description
+and unchanged source/test definitions supply bounded source credit only.
+Every inherited row, native/source alternative, historical failure, existing
+owner and current parent check state survives. No linked protected-source retry,
+product execution, whole-home acceptance, rollout or custody change occurred.
+
 The [session/task-observation study](session-task-observation-cohort.md)
 preserves seven complete originals and all refinements, while excluding #6462
 before new rendering and retaining one protected commit relation. One whole
@@ -687,6 +725,13 @@ supports a finite documentation-only #3557 proposal, not accepted delivery,
 native/installed proof or another issue's receiving intake. #3422's already
 CLOSED metadata supplies no new text or closure credit. All original check
 states, alternatives and actual source/resource custodians remain.
+
+Actual #10485 delivery now satisfies only #3557's explicitly permitted finite
+design-decision alternative after its separate guarded judgment. Unknown usage,
+bounded optional rendered history, cursor-neutral ACP access, represented
+limitations and individual/non-atomic observations remain explicit. All
+original parent checks, the other six source contracts and source/resource
+custody remain; no new native/installed acceptance or implementation follows.
 
 The [mux lifecycle study](mux-lifecycle-cohort.md) distinguishes eight complete
 original contracts from excluded #8669 and its protected lineage. All 24
