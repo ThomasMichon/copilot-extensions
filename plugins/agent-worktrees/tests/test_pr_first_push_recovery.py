@@ -6,7 +6,7 @@ import pytest
 import yaml
 
 from agent_worktrees import config as cfg
-from agent_worktrees import git_ops, pr_creation_state, pr_ops, pr_publish, tracking
+from agent_worktrees import git_ops, pr_creation_state, pr_ops, pr_publication_state, pr_publish, tracking
 
 pytestmark = [
     pytest.mark.contract("agent_worktrees.pr_publish.publication_state"),
@@ -147,3 +147,71 @@ def test_action_time_authority_race_prevents_repush(pr_repo, monkeypatch, change
         assert current.creation_nonce == "new-incarnation"
     else:
         assert current.pr.creation["owner"] == "new-owner"
+
+
+def test_prepared_retry_refuses_changed_target_repository(pr_repo, monkeypatch):
+    config, wid, wt, remote, path, record, calls = uncertain_push(pr_repo, monkeypatch)
+    before = path.read_bytes()
+    result = pr_ops.create_pr(
+        wid, config, title="Example contribution", target_repo="other/repository", open_pr=False,
+    )
+    assert not result["success"] and "destination changed" in result["error"]
+    assert len(calls) == 1 and path.read_bytes() == before
+
+
+def test_remote_rewind_at_transport_keeps_exact_lease(pr_repo, monkeypatch):
+    config, wid, wt, remote, path, record, calls = uncertain_push(pr_repo, monkeypatch)
+    push = git_ops.push
+    expected = record.pr.creation["push_head"]
+    base = record.pr.creation["push_base"]
+
+    def rewind(*args, **kwargs):
+        assert kwargs["force_with_lease_expect"] == expected
+        git_ops.git("--git-dir", str(remote), "update-ref", f"refs/heads/{record.pr.branch}", base)
+        return push(*args, **kwargs)
+
+    monkeypatch.setattr(git_ops, "push", rewind)
+    result = pr_ops.create_pr(wid, config, title="Example contribution", open_pr=False)
+    assert not result["success"] and "stale info" in result["error"]
+    assert len(calls) == 2
+    assert pr_publish._tip("origin", record.pr.branch, str(wt)) == base
+    assert tracking.load_record(path).pr.state == "creating"
+
+
+def test_transport_uses_prepared_commit_after_source_moves(pr_repo, monkeypatch):
+    config, wid, wt, remote, path, record, calls = uncertain_push(pr_repo, monkeypatch)
+    push = git_ops.push
+    expected = record.pr.creation["push_head"]
+
+    def advance(*args, **kwargs):
+        assert args[1].partition(":")[0] == expected
+        (wt / "later.txt").write_text("later unpublished work\n")
+        git_ops.git("add", "later.txt", cwd=wt)
+        git_ops.git("commit", "-m", "Later work", cwd=wt)
+        return push(*args, **kwargs)
+
+    monkeypatch.setattr(git_ops, "push", advance)
+    result = pr_ops.create_pr(wid, config, title="Example contribution", open_pr=False)
+    assert result["success"], result
+    assert result["head_sha"] == tracking.load_record(path).pr.head_sha == expected
+    assert pr_publish._tip("origin", record.pr.branch, str(wt)) == expected
+    assert git_ops.git("rev-parse", "HEAD", cwd=wt).stdout.strip() != expected
+
+
+def test_settled_prepared_attempt_becomes_active_after_interleaving(pr_repo, monkeypatch):
+    config, wid, wt, remote, path, record, calls = uncertain_push(pr_repo, monkeypatch)
+    selected = record.pr
+    sibling = replace(
+        selected, pr_id="other-attempt", branch="feature/other", creation={},
+        opened_at=pr_publication_state.monotonic_opened_at(record),
+    )
+    record.prs.append(sibling)
+    tracking.save_record(record)
+    assert tracking.load_record(path).active_pr().pr_id == sibling.pr_id
+    result = pr_ops.create_pr(
+        wid, config, title="Example contribution", branch=selected.branch, open_pr=False,
+    )
+    assert result["success"], result
+    current = tracking.load_record(path)
+    assert current.active_pr().pr_id == selected.pr_id
+    assert current.prs[1] == sibling

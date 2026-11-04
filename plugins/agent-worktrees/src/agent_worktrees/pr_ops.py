@@ -726,7 +726,10 @@ def create_pr(
         return {**base, "error": pr_publish.UNREADABLE_REMOTE}
 
     try:
-        resume_source = pr_creation_state.publication_source(record, pr_publish._pr_for(record, feature_branch), publish_remote, feature_branch, worktree_path, prcfg)
+        candidate = pr_publish._pr_for(record, feature_branch)
+        if candidate is not None and "push_head" in candidate.creation:
+            pr_publication_state.unpublished_retry(candidate, feature_branch, prcfg.provider, default_pr_repo)
+        resume_source = pr_creation_state.publication_source(record, candidate, publish_remote, feature_branch, worktree_path, prcfg)
     except ValueError as exc:
         return {**base, "error": str(exc)}
     if head_branch == feature_branch or resume_source:
@@ -2366,7 +2369,10 @@ def _push_existing_feature(
         return {**base, "error": f"{error}\n{pushed.stderr.strip()}" if pushed.stderr else error}
     if record is not None:
         # target is always non-terminal here (a live match or a fresh record).
-        target.state = "open"
+        if pr_publication_state.unpublished(target):
+            pr_publication_state.settle_creation(record, target)
+        else:
+            target.state = "open"
         pr_publish.record_remote_identity(target, remote, repo.remote, pushed.head_repo, getattr(pushed, "head_identity", ""), pr_head.partition(":")[0] if ":" in pr_head else "")
         target.base_sha = getattr(pushed, "rebase_base_sha", "") or target.base_sha or target.creation.get("push_base", "")
         head_sha = target.head_sha = getattr(pushed, "published_head_sha", "") or head_sha

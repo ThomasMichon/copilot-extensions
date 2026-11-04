@@ -78,6 +78,9 @@ is lost. An unchanged retry uses the same attempt and branch: it can create an
 absent remote ref or lease the exact commit prepared before the first push.
 Both snapshot and refspec heads retain their original source; retrying does not
 rebase, resquash or choose a replacement head.
+Transport uses the prepared commit rather than a mutable local branch and retains
+its exact remote lease without a permissive fallback. Successful settlement makes
+that attempt current even when another head was allocated in the meantime.
 
 Changed source, worktree ownership, destination, provider endpoint or remote head,
 and unavailable observations, refuse before transport. The owner rechecks tracking
