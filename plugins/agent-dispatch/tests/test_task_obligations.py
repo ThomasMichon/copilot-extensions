@@ -3,6 +3,7 @@
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import asdict
+import sqlite3
 
 import httpx
 import pytest
@@ -103,6 +104,33 @@ def test_task_event_migration_preserves_actor_and_does_not_backfill_former_worke
     value = read_snapshot(migrated, task_id)
     assert value["unassignment"] is None and value["release_outcome"] is None
     assert migrated.events(task_id)[-1]["worker"] == "machine/worktree"
+
+
+@pytest.mark.parametrize("error", [None, "disk I/O error"])
+def test_stale_migration_column_snapshot_only_tolerates_actual_duplicate_column(q, error):
+    from agent_dispatch.queue_schema_migrations import run_queue_schema_migrations
+
+    interleaved = False
+    with q._connect() as conn:
+        class InterleavedConnection:
+            def execute(self, sql, *args):
+                nonlocal interleaved
+                if sql == "PRAGMA table_info(task_events)":
+                    interleaved = True
+                    # The other initializer added the column after this reader's snapshot.
+                    return [row for row in conn.execute(sql) if row["name"] != "unassigned_worker"]
+                if sql == "ALTER TABLE task_events ADD COLUMN unassigned_worker TEXT" and error:
+                    raise sqlite3.OperationalError(error)
+                return conn.execute(sql, *args)
+
+        if error:
+            with pytest.raises(sqlite3.OperationalError, match=error):
+                run_queue_schema_migrations(InterleavedConnection(), now_fn=q._now)
+        else:
+            run_queue_schema_migrations(InterleavedConnection(), now_fn=q._now)
+            assert sum(row["name"] == "unassigned_worker"
+                       for row in conn.execute("PRAGMA table_info(task_events)")) == 1
+    assert interleaved
 
 
 def test_hard_worktree_requirement_survives_claim_and_yield(q):
