@@ -81,8 +81,9 @@ def _build(root, monkeypatch):
     monkeypatch.setattr(builder, "LIBS_DIR", root / "libs")
     calls = []
 
-    def build(source, out_dir, *, toolchain, reserved_names):
+    def build(source, out_dir, *, toolchain, reserved_names, normalize_timestamps):
         assert toolchain is LOCK
+        assert normalize_timestamps
         package = next((source / "src").iterdir()).name
         filename = f"{package}-1.0-py3-none-any.whl"
         assert filename not in reserved_names
