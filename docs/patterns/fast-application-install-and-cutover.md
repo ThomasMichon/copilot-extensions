@@ -64,6 +64,38 @@ established by today's generated per-app installers.
 | Plugin connector | Loading a plugin may discover/report the installed backend and emit bounded guidance. It must not build, install, repair, stamp, register providers or start services merely on session start. Exact selected commands remain attributable. | Owning plugin hook and command declarations |
 | Timing and diagnostics | Measure the real cold, repeat and update front doors, including required preparation. Respect the actual caller deadline; the bounded core ordinary-install lane uses its existing 300-second budget. Report phase/child failure and elapsed time. Do not fix timeouts by lengthening waits or timing only an already-built inner step. | Existing installer and test runners |
 
+### Common forward environment contract
+
+The [standard-environment intent](../../visions/plugin-services/runtime-assembly/README.md#standard-python-environments)
+applies across Python runtime producers and consumers. For the generated
+application model, the project contains `pyproject.toml`, its exact `uv.lock`,
+and a physical project-local `.venv`. The interpreter is relative to that
+environment: `.venv/bin/python` on POSIX or `.venv\Scripts\python.exe` on
+Windows, with ordinary `pyvenv.cfg` and environment-prefix behavior.
+Installation, configuration/data and cache roots remain separate.
+
+Copy the application inputs, then construct the environment in its addressed
+slot; do not treat an already-created virtual environment as a relocatable
+artifact. Keep source and dependency synchronization with the installation
+owner. A consumer must not use an ordinary auto-syncing `uv run` as a
+readiness probe or let ambient environment settings redirect the selected
+runtime. Direct execution of the qualified environment does not require
+activation scripts.
+
+Use the existing installation/command owner and canonical physical-environment
+resolver rather than fabricating legacy receipts, flattening application
+projects or adding aliases for stale consumers. Retain only the documented
+compatibility interpretations that remain supported; they do not define the
+forward layout. Bytecode belongs in the existing external cache, not a mutable
+exception inside the completed slot.
+
+These are convergence requirements, not a claim that every consumer is
+converted. The [app matrix](../../efforts/active/source-managed-runtime-installs/wheel-first-contributors.md#per-app-tracking)
+and [native-consumer slice](../../efforts/active/source-managed-runtime-installs/native-application-consumers.md)
+retain their separate qualification boundaries. External references:
+[uv project environments](https://docs.astral.sh/uv/concepts/projects/layout/#the-project-environment)
+and [Python virtual environments](https://docs.python.org/3/library/venv.html).
+
 **Current stage limitation:** the shared generated `install --stage` synchronizes
 the environment and returns `staged`; it does not by itself prove canonical
 completion, app readiness, active publication or successful installation.
