@@ -232,6 +232,12 @@ updates do not rebind an unchanged source token or clear its pending backward
 request. Each history read captures its minimum admitted revision before
 starting, so a concurrent live advance cannot falsely turn that older atomic
 page into a rewound-store error or move the independent live boundary.
+Every admitted latest, catch-up and historical page monotonically retains its
+observed store revision under one reader lock. A later lower revision cannot
+pass merely because the higher revision arrived through a backward read.
+An already in-flight historical page still uses its start-time floor without
+lowering that shared fence. Display status reports the displayed latest page,
+not a newer store head seen only through historical metadata.
 An Agenda head-change notice invalidates every bound selected-head source even
 before the first Agenda token exists. An explicit refresh selecting a different
 canonical head supersedes the retired viewer scope without depending on optional

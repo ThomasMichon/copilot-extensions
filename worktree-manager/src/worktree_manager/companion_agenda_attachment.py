@@ -7,7 +7,7 @@ from collections.abc import Callable
 from copy import deepcopy
 import json
 from pathlib import Path
-from threading import Event
+from threading import Event, Lock
 from typing import Any
 
 from . import engine_client as ec
@@ -39,6 +39,14 @@ class AgendaReader:
         self.commands = AgendaCommands(project, worktree, store, cwd=cwd, project_root=project_root)
         self.codec = AgendaCodec(project, worktree, session, store)
         self.revision = 0
+        self._revision_lock = Lock()
+
+    def _retain_revision(self, revision: int, minimum: int, *, historical: bool = False) -> None:
+        with self._revision_lock:
+            floor = minimum if historical else max(minimum, self.revision)
+            if revision < floor:
+                raise OwnerReadError("source-replaced", "agenda store is behind accepted publication or retained evidence")
+            self.revision = max(self.revision, revision)
 
     def latest(
         self, publication: dict[str, Any], cancelled: Event, previous: str | None,
@@ -50,10 +58,9 @@ class AgendaReader:
         if page["type"] != "history-page" or page["before_cursor"] is not None:
             raise TimelineContractError("latest agenda read did not return a latest history page")
         revision = self.codec.revision(page["cursor"])
-        if revision < max(self.revision, publication["revision"]):
-            raise OwnerReadError("source-replaced", "agenda store is behind accepted publication or retained evidence")
         if revision == publication["revision"] and page["committed_at"] != publication["committed_at"]:
             raise TimelineContractError("agenda reader and publication disagree at the same revision")
+        self._retain_revision(revision, publication["revision"])
         pages = [page]
         if previous is not None:
             previous_revision = self.codec.revision(previous)
@@ -67,8 +74,7 @@ class AgendaReader:
                 earlier = self.codec.decode(_raw(self.commands.read(cancelled, history=True, before=before)))
                 if earlier["type"] != "history-page" or earlier["before_cursor"] != before:
                     raise TimelineContractError("agenda catch-up changed its requested history boundary")
-                if self.codec.revision(earlier["cursor"]) < revision:
-                    raise OwnerReadError("source-replaced", "agenda head regressed during catch-up")
+                self._retain_revision(self.codec.revision(earlier["cursor"]), revision)
                 pages.append(earlier)
             oldest = pages[-1]
             if not oldest["entries"] or self.codec.revision(oldest["entries"][0]["cursor"]) > previous_revision + 1:
@@ -77,15 +83,13 @@ class AgendaReader:
                     "agenda catch-up budget exhausted; retained rows were not discarded. "
                     "Close and reopen Companion for a fresh partial viewer window; canonical history is unchanged.",
                 )
-        self.revision = revision
         return list(reversed(pages))
 
     def history(self, cancelled: Event, cursor: str) -> dict[str, Any]:
         minimum_revision = self.revision
         self.commands.discover(cancelled)
         frame = self.codec.decode(_raw(self.commands.read(cancelled, history=True, before=cursor)))
-        if self.codec.revision(frame["cursor"]) < minimum_revision:
-            raise OwnerReadError("source-replaced", "agenda history returned a rewound store")
+        self._retain_revision(self.codec.revision(frame["cursor"]), minimum_revision, historical=True)
         return frame
 
 
@@ -319,7 +323,7 @@ class AgendaTimelineAttachment:
                 if not result.applied:
                     raise TimelineSourceError(result.reason)
                 self.status(
-                    f"Rich Agenda: accepted operations through revision {reader.revision}; "
+                    f"Rich Agenda: accepted operations through revision {reader.codec.revision(pages[-1]['cursor'])}; "
                     "partial history, caller-reported actors; not execution authority"
                 )
             except asyncio.CancelledError:

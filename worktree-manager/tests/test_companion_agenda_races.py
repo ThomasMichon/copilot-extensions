@@ -325,6 +325,46 @@ def test_live_update_preserves_an_inflight_backward_page_and_its_start_revision(
     asyncio.run(check())
 
 
+@pytest.mark.parametrize("advance", ["catch-up", "history"])
+def test_every_owner_page_retains_its_revision_fence(managed, monkeypatch, advance) -> None:
+    reader = AgendaReader(
+        ("example", "selected", "head-a"), "b" * 32,
+        cwd=str(managed["cwd"]), project_root=str(managed["cwd"]),
+    )
+    initial = reader.latest(managed["publication"]()["observation"], Event(), None)[0]
+    for _ in range(35):
+        managed["update"]()
+    publication = managed["publication"]()["observation"]
+    original = reader.commands.read
+    older = original(Event(), history=True)
+    assert older["next_before"] is not None
+    advanced = False
+
+    def read(cancelled, *, history=False, before=None):
+        nonlocal advanced
+        if advance == "catch-up" and before is not None and not advanced:
+            managed["update"]()
+            advanced = True
+        return original(cancelled, history=history, before=before)
+
+    monkeypatch.setattr(reader.commands, "read", read)
+    reader.latest(publication, Event(), initial["cursor"] if advance == "catch-up" else None)
+    if advance == "history":
+        managed["update"]()
+        reader.history(Event(), older["next_before"])
+    assert reader.revision == publication["revision"] + 1
+
+    def rewound(cancelled, *, history=False, before=None):
+        return older if history and before is None else original(
+            cancelled, history=history, before=before,
+        )
+
+    monkeypatch.setattr(reader.commands, "read", rewound)
+    with pytest.raises(OwnerReadError, match="source-replaced"):
+        reader.latest(publication, Event(), None)
+    assert reader.revision == publication["revision"] + 1
+
+
 @pytest.mark.parametrize("disabled", [False, True])
 def test_nested_launch_uses_selected_root_activation_and_respects_project_disable(
     managed, monkeypatch, disabled: bool,
@@ -355,7 +395,8 @@ def test_nested_launch_uses_selected_root_activation_and_respects_project_disabl
                 assert not app._timeline_panel.window.events
                 assert attachment.reader.commands.script is None
             else:
-                await until(pilot, lambda: attachment.token is not None)
+                # Discovery composes several independently bounded owner commands.
+                await until(pilot, lambda: attachment.token is not None, attempts=1200)
                 assert app._timeline_panel.window.events
             assert attachment.reader.commands.cwd == str(nested)
             assert attachment.reader.commands.project_root == str(managed["cwd"])
