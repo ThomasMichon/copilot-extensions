@@ -1,0 +1,9 @@
+{
+  "comment": "Read Windows Manager daemon status through native process observations without PowerShell or CIM helpers.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

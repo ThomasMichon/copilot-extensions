@@ -2198,6 +2198,15 @@ The existing update request's source identity includes this policy, so changing
 it after submission rejects the old request rather than running a different
 runtime selection under its name.
 
+## Read-only daemon status
+
+`worktree-manager daemons status [--json]` reports resident mux daemons for
+the selected Manager root. Windows reads the process census, command line,
+token SID and creation time through native APIs, without PowerShell or CIM
+probe processes. Current-user ownership, root and process incarnation are
+checked before and after health; an unavailable identity remains unverified.
+This diagnostic reader does not change daemon cutover or retirement authority.
+
 ## Restart evidence and notification transport
 
 The existing active mux daemon maintains a private, bounded recovery-evidence

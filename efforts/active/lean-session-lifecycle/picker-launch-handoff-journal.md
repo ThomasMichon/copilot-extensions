@@ -656,3 +656,75 @@
 - This journal receipt changes no packaged code, fixture or workflow from
   that qualified head. Current source review/CI, release and separately
   authorized installed proof remain independent gates.
+
+### 2026-11-04 - Released Manager and installed query inventory
+
+- #10388 merged as `5410f14a37f1524413bc535c64ee80f06a77a7d3` after
+  current-head Copilot approval, required CI and the ordinary native
+  normal/repair portfolio above. The released Manager `0.6.284-dev1` is
+  selected through the authorized normal bootstrap; its generated CMD entry
+  contains the flagged-argument correction. Its canonical daemon reader
+  reports one active, ready daemon on that version. This is not yet a new
+  installed CMD attachment or concurrent-launch qualification.
+- The subsequent engine-repair phase refused a same-version Worktrees
+  `1.24.462-dev1` content conflict. The canonical staged and delivered input
+  hashes agree with each other but differ from the selected slot's completion
+  hash. The cause of those different inputs is not established. The resulting
+  request is interrupted with unconfirmed transaction custody, not successful
+  or cleaned up. Preserve #10377's existing upgrade-recovery ownership.
+- A separately approved official queue release retained that failed history
+  and claimed no historical cleanup. A fresh request through the supported
+  standalone update entry also exits 1. Worktrees, Bridge, CodeSpaces,
+  Containers, Dispatch, Index and Logger report completed component updates;
+  the log ends during Machines construction without a final component
+  outcome. Its original failure cause and remaining effects need diagnosis.
+  Neither component progress nor the successful Manager bootstrap establishes
+  full-update completion; no automatic replay is licensed by this result.
+- Measured the actual selected Manager `0.6.284-dev1` and Worktrees
+  `1.24.462-dev1` capability queries through the installed terminal helper.
+  Each component's first query in a fresh terminal host and its warm repeat
+  created exactly five transient native Job members: the finite query owner,
+  the selected venv launcher, its base interpreter, and two console hosts.
+  Birth-pinned executable-image observations account for every process in
+  the Job's cumulative count. Every child exits before return; the terminal
+  root then exits and its caller-owned Job closes. No resident was started.
+- Image-qualified elapsed times were 1,561/1,282 ms for Manager and
+  1,574/1,386 ms for Worktrees, first/warm respectively. Native Job CPU was
+  1,359/859 ms and 1,172/672 ms respectively. These are bounded observations,
+  not latency guarantees or a claim of zero discovery work. First-query
+  means a new terminal host, not an uncached OS or a fresh installation.
+- Query inventory does not close the remaining installed attachment,
+  full-update, concurrent-session or handoff gates. The earlier monitor stack
+  samples were explicitly not CPU percentages; do not turn this query CPU
+  measurement into an unsupported before/after monitor CPU comparison.
+
+### 2026-11-04 - Native Manager observation prerequisite
+
+- The continuing driver explicitly adopted a worktree-owned execution agenda.
+  Its ordered launch, handoff and completion work retains this canonical
+  effort's full gate and independent obligations. A necessary Manager reader
+  prerequisite saves its installed-adoption return; it does not replace the
+  parent objective or authorize another installer.
+- A second ordinary observation of the same daemon reports unverified-owner;
+  the next canonical read raises the ten-second CIM census timeout. The
+  daemon's native incarnation remains unchanged. This invalidates a
+  two-cycle healthy-singleton claim, not the earlier individual ready result.
+- Claimed the bounded read-only correction on #5579 in
+  [comment 6642376457](https://github.com/ThomasMichon/copilot-extensions/issues/5579#issuecomment-6642376457).
+  Replace this diagnostic reader's Windows census, command line, owner SID
+  and birth lookups with native observations. Preserve current-user, root,
+  incarnation and post-health checks; cutover and retirement mutation helpers
+  remain unchanged. This closes the existing transient-observation intent,
+  not a new lifecycle authority.
+- Real native command-line/SID/birth reads succeed from both ARM64 and x64.
+  A fresh corrected-source consumer additionally exposes an indirect
+  platform-discovery subprocess in the shared birth helper; use the existing
+  native identity primitive directly on Windows instead. No installed
+  runtime or retained session is changed.
+- The final contained status/CLI/refusal/native packet passes 42 tests with
+  successful ordinary cleanup. A read-only corrected-source observation of
+  the actual selected daemon returns ready in 141 ms with subprocess probes
+  forbidden and the same native birth identity. This is measured source
+  consumer evidence, not a latency guarantee or installed adoption.
+- Source review, release, actual installed reader and CMD attachment,
+  full-update failure reconciliation and the parent gates remain open.
