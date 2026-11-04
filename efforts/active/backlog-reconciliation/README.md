@@ -498,14 +498,10 @@ count 1,019 whole open, 290 above 729: 745 eligible, 274 excluded,
 680 original-cohort and 339 inflow. No identity changes or closure credit occur.
 
 
-The exact seven-file venue study and prior delivery checkpoint merged in
-#10492 as `8e427db3bc2443c26ef0eaa47533aa8da30244e0` after genuine exact-head
-approval, no findings and successful required CI. An initial managed merge
-correctly refused the missing PR gate; the retry followed its actual success
-transition, not a bypass. All seven actual merged/current blobs equal the
-reviewed head. Only the independent publication child finalized, with checkout
-and branch retained, after its normal status observation settled the merged
-PR claim. None of the five sources or parent check states is closed.
+The venue study is delivered research documentation, not implementation or
+an accepted source/resource transfer. Its complete delivery and readback
+record remains in the [dated journal](<journal/2026/11.04 venue-runtime-contracts.md>).
+All five sources and every parent check state remain unchanged.
 Two equal complete eleven-page scans at 19:57:30 UTC / 11:57:30 PST remain
 1,019 whole open, 290 above 729, without identity changes or closure credit.
 
