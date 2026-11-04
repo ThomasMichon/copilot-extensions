@@ -9,6 +9,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from hashlib import sha256
+from pathlib import Path
 from uuid import uuid4
 
 import yaml
@@ -30,6 +31,7 @@ from agent_logger.sync.worktree_state import (
     admit_repository_collection,
     canonical_bytes,
     decode_object,
+    select_repository_collection,
 )
 from agent_logger.sync.worktree_state_pipeline import collect_managed_worktree_state
 from agent_logger.sync.worktree_state_providers import ManagedPlacement, read_project_inventory
@@ -64,10 +66,21 @@ class _Cursor:
     after_store: dict[str, str] = field(default_factory=dict)
 
 
-def _read_cursor(cfg: Config) -> _Cursor:
+def _cursor_name(cfg: Config, root: Path) -> str:
+    context = {
+        "destination": str(root),
+        "source": str(cfg.sync_source.absolute()),
+        "lock": cfg.sync_lock_name,
+        "machine": resolve_machine_identity(cfg).as_dict(),
+    }
+    key = sha256(canonical_bytes(context)).hexdigest()
+    return f"{Path(CURSOR_NAME).stem}-{key}.json"
+
+
+def _read_cursor(cfg: Config, name: str) -> _Cursor:
     try:
         with publication_directory(cfg.home, create=False) as directory:
-            with directory.open(CURSOR_NAME, protected=True) as stream:
+            with directory.open(name, protected=True) as stream:
                 raw = stream.read(MAX_CURSOR_BYTES + 1)
     except FileNotFoundError:
         return _Cursor()
@@ -95,7 +108,7 @@ def _read_cursor(cfg: Config) -> _Cursor:
     return _Cursor(value["after_repository"], value["after_store"])
 
 
-def _save_cursor(cfg: Config, cursor: _Cursor) -> None:
+def _save_cursor(cfg: Config, cursor: _Cursor, cursor_name: str) -> None:
     raw = canonical_bytes(
         {
             "schema": "agent-logger.worktree-state-sync-cursor",
@@ -107,13 +120,13 @@ def _save_cursor(cfg: Config, cursor: _Cursor) -> None:
     if len(raw) > MAX_CURSOR_BYTES:
         raise WorktreeStateError("typed collection cursor exceeds its byte budget")
     with publication_directory(cfg.home) as directory:
-        name = f".{CURSOR_NAME}.{uuid4().hex}.tmp"
+        name = f".{cursor_name}.{uuid4().hex}.tmp"
         try:
             with directory.create(name, mode=0o600) as stream:
                 stream.write(raw)
                 stream.flush()
                 os.fsync(stream.fileno())
-            directory.replace(name, CURSOR_NAME)
+            directory.replace(name, cursor_name)
         except BaseException:
             print(
                 f"session-sync: typed cursor publication uncertain; reconcile {cfg.home / name}",
@@ -157,18 +170,27 @@ def collect_pass(cfg: Config, target: Target) -> CollectionPass:
         ).load()
         plan = compile_aggregate(inputs)
         eligible: dict[str, Admission] = {}
+        root = None
         for admission in inputs.admissions:
             if not admission.enabled or admission.quarantine_reason:
                 continue
             try:
-                admit_repository_collection(cfg, target, plan, admission.repository)
+                selected_root = select_repository_collection(
+                    cfg,
+                    target,
+                    plan,
+                    admission.repository,
+                )
             except (OSError, ValueError) as error:
                 result.failed.append(WorkItem(admission.repository, detail=str(error)[:1024]))
             else:
-                eligible[admission.repository] = admission
-        if not eligible:
+                if selected_root is not None:
+                    root = selected_root
+                    eligible[admission.repository] = admission
+        if not eligible or root is None:
             return result
-        cursor = _read_cursor(cfg)
+        cursor_name = _cursor_name(cfg, root)
+        cursor = _read_cursor(cfg, cursor_name)
         cursor.after_store = {
             repository: key
             for repository, key in cursor.after_store.items()
@@ -191,7 +213,7 @@ def collect_pass(cfg: Config, target: Target) -> CollectionPass:
         try:
             admit_repository_collection(cfg, target, plan, repository)
             cursor.after_repository = repository
-            _save_cursor(cfg, cursor)
+            _save_cursor(cfg, cursor, cursor_name)
             inventory = read_project_inventory(admission, cfg.home, budget=budget)
             placements = {_store_key(placement): placement for placement in inventory.placements}
             ordered = _after(sorted(placements), cursor.after_store.get(repository, ""))
@@ -209,7 +231,7 @@ def collect_pass(cfg: Config, target: Target) -> CollectionPass:
                 )
                 continue
             cursor.after_store[repository] = key
-            _save_cursor(cfg, cursor)
+            _save_cursor(cfg, cursor, cursor_name)
             collect_managed_worktree_state(
                 cfg,
                 target,

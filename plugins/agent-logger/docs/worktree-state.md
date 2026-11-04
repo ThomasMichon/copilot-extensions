@@ -135,9 +135,17 @@ on synchronous filesystem operations or the whole existing sync pass, and does
 not qualify installed or remote-filesystem latency.
 
 At most eight eligible repositories are visited per pass, with one selected
-store per repository. A durable, private `worktree-state-sync-cursor.json` under
-Logger's home rotates repositories and stores, advancing before owner reads and
-exports so failed early attempts cannot starve independent sources. It records
+store per repository. Durable, private `worktree-state-sync-cursor-<key>.json`
+files under Logger's home rotate repositories and stores, advancing before owner
+reads and exports so failed early attempts cannot starve independent sources.
+The key hashes the admitted native destination, session source, sync lock name
+and complete executing-machine identity. Each collection context retains both
+positions independently; alternating tenants cannot prune or advance each other's
+progress. The former unscoped cursor is left untouched, not reused or deleted.
+Repositories with otherwise supported claims for another filesystem destination
+are outside this pass, not failed attempts. Global admission and privacy failures,
+missing/ambiguous claims and unsupported claim policies still refuse.
+The cursor records
 scheduling position, never authority, success, a cached revision or remote
 acknowledgment. Missing positions resume at the next sorted candidate; malformed
 cursor state refuses without overwriting it. Failed cursor publication retains
