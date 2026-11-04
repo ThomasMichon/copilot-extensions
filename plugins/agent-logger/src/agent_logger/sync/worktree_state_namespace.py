@@ -4,17 +4,22 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 from agent_logger.sync.lock import sync_lock
-from agent_logger.sync.provenance import ensure_real_directory
+from agent_logger.sync.provenance import existing_real_directory
 from agent_logger.sync.publication_directory import PublicationDirectory, publication_directory
 
 DIRECTORY = "worktree-state"
 _MARKER = ".collection-namespace.json"
 _CONTENT = b'{"schema":"agent-logger.worktree-state-namespace","version":1}\n'
 _GUARD = ".worktree-state-domain.lock"
+_MAX_PREFIXES = 32
+
+
+class NamespaceError(OSError):
+    """A reserved domain marker exists but cannot qualify the directory."""
 
 
 def _matches(directory: PublicationDirectory) -> bool:
@@ -29,20 +34,69 @@ def _matches(directory: PublicationDirectory) -> bool:
 
 def has_namespace(root: Path) -> bool:
     """A marker is a format discriminator, never collection or deletion authority."""
-    try:
-        with publication_directory(root / DIRECTORY, create=False) as directory:
-            return _matches(directory)
-    except FileNotFoundError:
-        return False
+    return is_namespace_directory(root, DIRECTORY)
 
 
 def is_namespace_directory(root: Path, name: str) -> bool:
-    if name.casefold() != DIRECTORY.casefold() or not has_namespace(root):
+    if name.casefold() != DIRECTORY.casefold():
         return False
     try:
-        return os.path.samefile(root / name, root / DIRECTORY)
+        with publication_directory(root / name, create=False) as directory:
+            try:
+                directory.stat(_MARKER)
+            except FileNotFoundError:
+                return False
+            if not _matches(directory):
+                raise NamespaceError("typed-state namespace marker is invalid or unsupported")
+            return True
     except FileNotFoundError:
         return False
+    except (OSError, ValueError) as error:
+        raise NamespaceError("typed-state namespace marker cannot be qualified") from error
+
+
+def _marked(root: Path, name: str) -> bool:
+    try:
+        with publication_directory(root / name, create=False) as directory:
+            try:
+                directory.stat(_MARKER)
+            except FileNotFoundError:
+                return False
+            return True
+    except FileNotFoundError:
+        return False
+
+
+def _prefixes(destination: Path) -> list[tuple[Path, str]]:
+    if ".." in destination.parts:
+        raise OSError("unsafe destination path: parent traversal is not supported")
+    current = Path(destination.anchor)
+    prefixes: list[tuple[Path, str]] = []
+    for name in destination.parts[1:]:
+        if name.casefold() == DIRECTORY.casefold():
+            prefixes.append((current, name))
+        current /= name
+    if len(prefixes) > _MAX_PREFIXES:
+        raise OSError("publication path has too many namespace prefixes")
+    return prefixes
+
+
+def _destination(root: Path, machine: str) -> Path:
+    relative = Path(machine)
+    if relative.is_absolute() or relative.drive or ".." in relative.parts:
+        raise OSError("unsafe destination path: machine path must be relative without parent traversal")
+    return root.expanduser().absolute() / relative
+
+
+def namespace_overlap(root: Path, machine: str) -> bool:
+    return any(_marked(parent, name) for parent, name in _prefixes(_destination(root, machine)))
+
+
+def _existing_ancestor(root: Path) -> Path:
+    for path in (root, *root.parents):
+        if existing_real_directory(path) is not None:
+            return path
+    raise OSError("publication root has no real existing ancestor")
 
 
 @contextmanager
@@ -54,14 +108,34 @@ def _domain_lock(root: Path) -> Iterator[None]:
 
 
 @contextmanager
+def _reservation(
+    destination: Path, *, root: Path, claiming: bool = False,
+) -> Iterator[bool]:
+    prefixes = _prefixes(destination)
+    stable = _existing_ancestor(root) if prefixes else None
+    with ExitStack() as stack:
+        for index, (parent, name) in enumerate(prefixes):
+            final_claim = claiming and index == len(prefixes) - 1
+            if not final_claim and _marked(parent, name):
+                yield False
+                return
+            # A real descendant makes an unmarked ancestor nonempty. These
+            # publication legs never remove that structural ancestor.
+            if not final_claim and stable is not None and parent / name in stable.parents:
+                continue
+            stack.enter_context(publication_directory(parent))
+            stack.enter_context(_domain_lock(parent))
+            if not final_claim and _marked(parent, name):
+                yield False
+                return
+        yield True
+
+
+@contextmanager
 def ordinary_publication(root: Path, machine: str) -> Iterator[Path | None]:
-    parts = Path(machine).parts
-    if not parts or parts[0].casefold() != DIRECTORY.casefold():
-        yield root
-        return
-    root = ensure_real_directory(root)
-    with publication_directory(root, create=False), _domain_lock(root):
-        yield None if is_namespace_directory(root, parts[0]) else root
+    root = root.expanduser().absolute()
+    with _reservation(_destination(root, machine), root=root) as allowed:
+        yield root if allowed else None
 
 
 def _claim_namespace(root: Path) -> None:
@@ -84,5 +158,8 @@ def _claim_namespace(root: Path) -> None:
 
 
 def claim_namespace(root: Path) -> None:
-    with publication_directory(root), _domain_lock(root):
+    root = root.expanduser().absolute()
+    with _reservation(root / DIRECTORY, root=root, claiming=True) as allowed:
+        if not allowed:
+            raise ValueError("collection root overlaps an owned or partial typed-state namespace")
         _claim_namespace(root)

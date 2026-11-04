@@ -17,9 +17,24 @@ from agent_logger.sync import worktree_state_namespace as namespace
 from agent_logger.source_roots import iter_archive_sources
 from agent_logger.sync.meta import write_sync_meta
 from agent_logger.sync.targets import filesystem
+from agent_logger.sync.targets.filesystem import LocalTarget
+from agent_logger.config import Config
 from .test_worktree_state import Packet, collect, plan_for, packet as packet
 
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="POSIX collection adapter")
+
+
+def collection_at(packet: Packet, layout: str) -> tuple[Packet, LocalTarget, Path, str]:
+    cfg, target, _, source = packet
+    corpus = target._root()
+    machine = namespace.DIRECTORY
+    if layout != "flat":
+        group = corpus / layout
+        target = LocalTarget({"path": str(group)})
+        cfg._data["sync"]["targets"]["local"]["path"] = str(group)
+        packet = cfg, target, plan_for(group), source
+        machine = f"{layout}/{machine}"
+    return packet, LocalTarget({"path": str(corpus)}), corpus, machine
 
 
 def test_every_publication_file_is_private_at_the_actual_creation_syscall(
@@ -42,9 +57,11 @@ def test_every_publication_file_is_private_at_the_actual_creation_syscall(
     assert {"agenda.sqlite3", "manifest.json", "receipt.json", "collection.json"} <= created
 
 
+@pytest.mark.parametrize("layout", ["flat", "host.containers"])
 def test_retained_revisions_never_enter_the_fleet_directory_budget(
-    packet: Packet, monkeypatch: pytest.MonkeyPatch,
+    packet: Packet, monkeypatch: pytest.MonkeyPatch, layout: str,
 ) -> None:
+    packet, viewer, _, _ = collection_at(packet, layout)
     _, target, _, _ = packet
     collect(packet)
     machine = target._root() / "worker"
@@ -62,9 +79,10 @@ def test_retained_revisions_never_enter_the_fleet_directory_budget(
         return real_scandir(path)
 
     monkeypatch.setattr(os, "scandir", no_typed_traversal)
-    fleet = target.fleet_sync_status()
-    assert fleet.error == "" and set(fleet.machines) == {"worker"}
-    assert fleet.machines["worker"].metadata["status"] == "ok"
+    fleet = viewer.fleet_sync_status()
+    key = "worker" if layout == "flat" else f"{layout}/worker"
+    assert fleet.error == "" and set(fleet.machines) == {key}
+    assert fleet.machines[key].metadata["status"] == "ok"
 
 
 def test_existing_machine_with_the_same_name_is_not_hidden_or_adopted(packet: Packet) -> None:
@@ -82,18 +100,25 @@ def test_existing_machine_with_the_same_name_is_not_hidden_or_adopted(packet: Pa
 
 
 @pytest.mark.parametrize("machine", ["worktree-state", "worktree-state/nested"])
-def test_session_push_cannot_enter_an_owned_typed_namespace(packet: Packet, machine: str) -> None:
+@pytest.mark.parametrize("layout", ["flat", "host.containers"])
+def test_session_push_cannot_enter_an_owned_typed_namespace(
+    packet: Packet, machine: str, layout: str,
+) -> None:
+    packet, ordinary, _, _ = collection_at(packet, layout)
     _, target, _, source = packet
     collect(packet)
-    pushed = target.push(source, machine)
+    machine = machine if layout == "flat" else f"{layout}/{machine}"
+    pushed = ordinary.push(source, machine)
     assert not pushed.ok and "typed-state namespace" in pushed.detail
     assert not (target._root() / namespace.DIRECTORY / "sync-meta.json").exists()
 
 
 @pytest.mark.parametrize("leg", ["sessions", "logs", "archives"])
+@pytest.mark.parametrize("layout", ["flat", "host.containers"])
 def test_ordinary_publication_and_collection_claim_share_one_domain_guard(
-    packet: Packet, monkeypatch: pytest.MonkeyPatch, leg: str,
+    packet: Packet, monkeypatch: pytest.MonkeyPatch, leg: str, layout: str,
 ) -> None:
+    packet, ordinary_target, _, machine = collection_at(packet, layout)
     _, target, _, source = packet
     entered, attempted, release = Event(), Event(), Event()
     names = {
@@ -102,7 +127,7 @@ def test_ordinary_publication_and_collection_claim_share_one_domain_guard(
         "archives": ("push_archives", "_push_archives"),
     }
     public, private = names[leg]
-    real_push, real_lock = getattr(target, private), namespace.sync_lock
+    real_push, real_lock = getattr(ordinary_target, private), namespace.sync_lock
     writer_source = source
     if leg == "logs":
         writer_source = source.parent / "producer-logs"
@@ -117,17 +142,19 @@ def test_ordinary_publication_and_collection_claim_share_one_domain_guard(
     @contextmanager
     def observed_lock(*args: Any, **kwargs: Any) -> Iterator[bool]:
         if current_thread().name.startswith("collector"):
-            attempted.set()
+            with real_lock(*args, **{**kwargs, "timeout": 0, "wait": False}) as probe:
+                attempted.set()
+                assert not probe, "ordinary publication did not hold the namespace parent's guard"
         with real_lock(*args, **kwargs) as acquired:
             yield acquired
 
-    monkeypatch.setattr(target, private, paused_push)
+    monkeypatch.setattr(ordinary_target, private, paused_push)
     monkeypatch.setattr(namespace, "sync_lock", observed_lock)
     with (
         ThreadPoolExecutor(max_workers=1, thread_name_prefix="publisher") as publisher,
         ThreadPoolExecutor(max_workers=1, thread_name_prefix="collector") as collector,
     ):
-        ordinary = publisher.submit(getattr(target, public), writer_source, namespace.DIRECTORY)
+        ordinary = publisher.submit(getattr(ordinary_target, public), writer_source, machine)
         try:
             assert entered.wait(5)
             typed = collector.submit(collect, packet)
@@ -146,7 +173,7 @@ def test_ordinary_publication_and_collection_claim_share_one_domain_guard(
             b"synthetic producer log\n"
         )
     else:
-        assert set(target.fleet_sync_status().machines) == {namespace.DIRECTORY}
+        assert set(ordinary_target.fleet_sync_status().machines) == {machine}
 
 
 def test_native_case_distinct_machine_root_remains_visible_beside_typed_state(packet: Packet) -> None:
@@ -165,14 +192,16 @@ def test_native_case_alias_is_refused_before_any_session_publication(
 ) -> None:
     _, target, _, source = packet
     collect(packet)
-    real_samefile = os.path.samefile
+    real_directory = namespace.publication_directory
 
-    def case_alias(first: Any, second: Any) -> bool:
-        if Path(first).name == "Worktree-State" and Path(second).name == namespace.DIRECTORY:
-            return True
-        return real_samefile(first, second)
+    @contextmanager
+    def native_case_directory(path: Path, *, create: bool = True) -> Iterator[Any]:
+        if path.name == "Worktree-State":
+            path = path.with_name(namespace.DIRECTORY)
+        with real_directory(path, create=create) as directory:
+            yield directory
 
-    monkeypatch.setattr(os.path, "samefile", case_alias)
+    monkeypatch.setattr(namespace, "publication_directory", native_case_directory)
     result = target.push(source, "Worktree-State")
     assert not result.ok and "typed-state namespace" in result.detail
     assert not (target._root() / "Worktree-State").exists()
@@ -197,26 +226,30 @@ def test_non_directory_namespace_entry_cannot_discard_healthy_fleet_results(
 
 @pytest.mark.parametrize("leg", ["logs", "missing-logs", "archives", "heartbeat",
                                "prune", "reconcile", "compact"])
-def test_every_auxiliary_mutation_leg_preserves_owned_collections(packet: Packet, leg: str) -> None:
+@pytest.mark.parametrize("layout", ["flat", "host.containers"])
+def test_every_auxiliary_mutation_leg_preserves_owned_collections(
+    packet: Packet, leg: str, layout: str,
+) -> None:
+    packet, ordinary, _, machine = collection_at(packet, layout)
     _, target, _, source = packet
     collect(packet)
     typed = target._root() / namespace.DIRECTORY
     before = {item.relative_to(typed): item.read_bytes() for item in typed.rglob("*") if item.is_file()}
     if leg in {"logs", "missing-logs", "archives"}:
         supplied = source / "missing" if leg == "missing-logs" else source
-        method = target.push_archives if leg == "archives" else target.push_process_logs
-        result = method(supplied, namespace.DIRECTORY)
+        method = ordinary.push_archives if leg == "archives" else ordinary.push_process_logs
+        result = method(supplied, machine)
         assert not result.ok and "typed-state namespace" in result.detail
     elif leg == "heartbeat":
-        target.heartbeat(namespace.DIRECTORY)
+        ordinary.heartbeat(machine)
     else:
         with pytest.raises(OSError, match="typed-state namespace"):
             if leg == "prune":
-                target.prune(namespace.DIRECTORY, 1)
+                ordinary.prune(machine, 1)
             elif leg == "reconcile":
-                target.reconcile_hub(namespace.DIRECTORY)
+                ordinary.reconcile_hub(machine)
             else:
-                target.compact_backlog(namespace.DIRECTORY, 1, "tar.gz")
+                ordinary.compact_backlog(machine, 1, "tar.gz")
     assert {item.relative_to(typed): item.read_bytes()
             for item in typed.rglob("*") if item.is_file()} == before
 
@@ -253,3 +286,93 @@ def test_typed_collections_are_not_classified_as_empty_session_archive_sources(
     (machine / "session-state").mkdir(parents=True)
     expected = "worker" if layout == "flat" else f"{layout}/worker"
     assert [item.key for item in iter_archive_sources(corpus)] == [expected]
+
+
+@pytest.mark.parametrize("relative", ["", "nested-root"])
+def test_targets_and_collection_claims_inside_owned_collections_are_refused(
+    packet: Packet, relative: str,
+) -> None:
+    cfg, target, _, source = packet
+    collect(packet)
+    typed = target._root() / namespace.DIRECTORY
+    before = {item.relative_to(typed): item.read_bytes() for item in typed.rglob("*") if item.is_file()}
+    root = typed / relative
+    ordinary = LocalTarget({"path": str(root)})
+    result = ordinary.push(source, "worker")
+    assert not result.ok and "typed-state namespace" in result.detail
+    with pytest.raises(OSError, match="typed-state namespace"):
+        ordinary.reconcile_hub("worker", dry_run=True)
+    with pytest.raises(OSError, match="typed-state namespace"):
+        ordinary.compact_backlog("worker", 1, "tar.gz", dry_run=True)
+    data = cfg.as_dict()
+    data["sync"]["targets"]["local"]["path"] = str(root)
+    nested = Config(data, home=cfg.home)
+    with pytest.raises(ValueError, match="overlaps"):
+        collect((nested, ordinary, plan_for(root), source))
+    assert {item.relative_to(typed): item.read_bytes()
+            for item in typed.rglob("*") if item.is_file()} == before
+    if relative:
+        assert not root.exists()
+
+
+def test_partial_namespace_markers_do_not_admit_ordinary_mutations(packet: Packet) -> None:
+    _, target, _, source = packet
+    typed = target._root() / namespace.DIRECTORY
+    typed.mkdir(parents=True)
+    (typed / ".collection-namespace.json").write_bytes(b"")
+    result = target.push(source, namespace.DIRECTORY)
+    assert not result.ok and "typed-state namespace" in result.detail
+    assert not (typed / "sync-meta.json").exists()
+
+
+def test_namespace_prefix_budget_refuses_before_creating_destinations(packet: Packet) -> None:
+    _, target, _, source = packet
+    result = target.push(source, "/".join([namespace.DIRECTORY] * 33))
+    assert not result.ok and "too many namespace prefixes" in result.detail
+    assert not target._root().exists()
+
+
+def test_unmarked_ordinary_ancestors_do_not_require_out_of_root_guard_writes(
+    packet: Packet, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, target, _, source = packet
+    root = target._root() / namespace.DIRECTORY / "ordinary-root"
+    root.mkdir(parents=True)
+    ordinary = LocalTarget({"path": str(root)})
+
+    @contextmanager
+    def forbidden_guard(parent: Path) -> Iterator[None]:
+        pytest.fail("an existing ordinary ancestor caused an out-of-root guard write")
+        yield
+
+    monkeypatch.setattr(namespace, "_domain_lock", forbidden_guard)
+    assert ordinary.push(source, "worker").ok
+    assert not (target._root() / ".worktree-state-domain.lock").exists()
+
+
+@pytest.mark.parametrize("kind", ["empty", "directory", "symlink", "future"])
+def test_invalid_namespace_evidence_is_reported_without_hiding_healthy_peers(
+    packet: Packet, kind: str,
+) -> None:
+    _, target, _, source = packet
+    machine = target._root() / "worker"
+    machine.mkdir(parents=True)
+    write_sync_meta(machine, "worker", "local", "ok", 1)
+    typed = target._root() / namespace.DIRECTORY
+    typed.mkdir()
+    marker = typed / ".collection-namespace.json"
+    if kind == "directory":
+        marker.mkdir()
+    elif kind == "symlink":
+        marker.symlink_to(source / "manifest.json")
+    else:
+        marker.write_bytes(b"" if kind == "empty" else b'{"version":2}')
+    fleet = target.fleet_sync_status()
+    assert fleet.error == "" and set(fleet.machines) == {"worker", namespace.DIRECTORY}
+    assert fleet.machines["worker"].metadata["status"] == "ok"
+    assert "namespace" in fleet.machines[namespace.DIRECTORY].error
+    errors: list[str] = []
+    assert [item.key for item in iter_archive_sources(
+        target._root(), on_error=lambda key, error: errors.append(key),
+    )] == ["worker"]
+    assert errors == [namespace.DIRECTORY]

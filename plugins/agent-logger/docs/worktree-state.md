@@ -68,6 +68,12 @@ does not allocate a missing destination or archive directory. Native alias check
 reject case-insensitive equivalents without hiding genuinely distinct
 case-sensitive machine directories. Non-directory entries are not probed as
 collection namespaces during fleet discovery.
+Admission checks every reserved destination prefix, including prefixes above a
+configured target root, and takes the corresponding namespace parent's guard.
+Collection claims cannot nest inside an owned or partial collection. Invalid
+markers block mutation and are reported separately without dropping healthy
+fleet peers. Prefix-count overflow refuses before destination creation; it does
+not truncate the protected path.
 
 Only the verified `agenda.sqlite3` and original `manifest.json` are collected.
 Every new database, metadata and reference file requests mode `0600` in the

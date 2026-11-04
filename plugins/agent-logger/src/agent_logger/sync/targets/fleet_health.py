@@ -10,7 +10,7 @@ import stat
 from agent_logger.sync.meta import read_sync_meta
 from agent_logger.sync.provenance import is_link_or_reparse, windows_extended_path
 from agent_logger.sync.targets.base import FleetSyncStatus, SyncStatus
-from agent_logger.sync.worktree_state_namespace import is_namespace_directory
+from agent_logger.sync.worktree_state_namespace import NamespaceError, is_namespace_directory
 
 
 @dataclass(frozen=True)
@@ -100,7 +100,16 @@ def read_fleet_status(root: Path, limits: FleetScanLimits) -> FleetSyncStatus:
                 path = directory / name
                 if not stat.S_ISDIR(mode) or is_link_or_reparse(path, mode):
                     continue
-                if not relative.parts and is_namespace_directory(root, name):
+                try:
+                    owned = is_namespace_directory(directory, name)
+                except NamespaceError as error:
+                    machines[(relative / name).as_posix()] = SyncStatus(
+                        supported=True, error=str(error),
+                    )
+                    if len(machines) > limits.machines:
+                        raise OSError(f"fleet metadata exceeds {limits.machines} machines")
+                    continue
+                if owned:
                     continue
                 pending.append((path, relative / name))
         return FleetSyncStatus(supported=True, machines=machines)

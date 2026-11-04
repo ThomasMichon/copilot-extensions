@@ -83,7 +83,7 @@ from agent_logger.sync.targets.hub_sessions import (
     _parse_iso,
 )
 from agent_logger.sync.targets.fleet_health import FleetScanLimits, read_fleet_status
-from agent_logger.sync.worktree_state_namespace import is_namespace_directory, ordinary_publication
+from agent_logger.sync.worktree_state_namespace import namespace_overlap, ordinary_publication
 
 #: Excluded from sync: legacy lock names, ``.lock``/``.tmp`` suffixes, and ``.hold`` (Copilot's restrictive-ACL ``inuse.<pid>.hold`` marker).
 _EXCLUDE_NAMES, _EXCLUDE_SUFFIXES = frozenset({".lock", "lock"}), (".lock", ".tmp", ".hold")
@@ -1615,8 +1615,7 @@ class FilesystemTarget(Target):
     ) -> Iterator[Path]:
         root = self._root() if root is None else root
         if readonly:
-            parts = Path(machine).parts
-            if parts and is_namespace_directory(root, parts[0]):
+            if namespace_overlap(root, machine):
                 raise OSError("machine path overlaps the typed-state namespace")
             yield root
             return
