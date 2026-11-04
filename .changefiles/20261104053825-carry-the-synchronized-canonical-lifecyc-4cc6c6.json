@@ -1,5 +1,5 @@
 {
-  "comment": "Carry the synchronized canonical lifecycle archive through its existing standalone consumers.",
+  "comment": "Preserve canonical completed-runtime recovery in the existing standalone consumers.",
   "changes": [
     {
       "plugin": "fleet-manager",

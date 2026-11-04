@@ -1,9 +1,0 @@
-{
-  "comment": "Synchronize the existing lifecycle archive with its accepted canonical process-owner source.",
-  "changes": [
-    {
-      "plugin": "wsl-setup",
-      "type": "patch"
-    }
-  ]
-}

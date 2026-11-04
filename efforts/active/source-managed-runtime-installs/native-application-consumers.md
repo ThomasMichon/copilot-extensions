@@ -289,3 +289,12 @@ Nine canonical recovery controls and ten post-hook controls pass (three
 post-hook platform skips). Module ceilings, strict runtime resolution and all
 13 generated manifests pass. This does not substitute for the new head's
 required hosted CI, review, merge or release.
+
+Fresh Linux R27 qualifies source `2d92adc369932a2312db7f1d56661c3b78885940`:
+all 4,061 tests pass with coverage in 169.290 seconds under the unchanged
+300-second budget. Its exact guest is absent and watched host state is unchanged.
+The subsequent cleanup changes delivery metadata/documentation only: Dev now
+already contains the canonical archives, so the obsolete WSL-only changefile
+is removed. Fleet/Chat retain declarations because their existing build
+resources still include the changed versioned-runtime library. Required hosted
+CI on the final published head remains an independent gate.
