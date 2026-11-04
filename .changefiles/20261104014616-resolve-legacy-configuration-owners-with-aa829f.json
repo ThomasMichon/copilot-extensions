@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve legacy configuration owners with the executing version-slot retained helper, preserve operator commands during teardown, and repair native validation fixtures.",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}
