@@ -1,0 +1,9 @@
+{
+  "comment": "Negotiate internal retained-task readiness observation through the selected Worktrees owner without advancing submission.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

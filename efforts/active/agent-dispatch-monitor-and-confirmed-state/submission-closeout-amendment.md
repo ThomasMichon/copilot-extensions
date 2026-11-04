@@ -64,7 +64,7 @@ adds a bounded internal readiness observation without concluding the workspace
 or releasing its task claim. It merged in #10455 after current-head independent
 approval and required CI. Its
 [provider reference](../../../plugins/agent-worktrees/docs/dispatch-worker-closeout.md#internal-nonfinalizing-readiness)
-owns applicability and limitations. Negotiated transport, queue advancement,
+owns applicability and limitations. Negotiated callers, queue advancement,
 ordinary activation and installed/native qualification remain pending.
 
 The [selected-runtime readiness transport](../../../plugins/agent-worktrees/docs/dispatch-worker-closeout.md#selected-runtime-readiness-transport)
@@ -72,8 +72,17 @@ adds a distinct version-1 readiness descriptor and strict record operations
 without changing version-1 finalized-closeout semantics. Its
 [source packet](journal/2026/11.04-readiness-transport.md) covers independent
 and own-native observation, partial/mixed refusal and unchanged legacy reads.
+It merged in #10460 after current-head independent approval and required CI.
 Consumer negotiation, guarded queue advancement and ordinary activation remain
 pending; a finalized observation is not a readiness fallback.
+
+The [internal Dispatch observation source](journal/2026/11.04-consumer-readiness.md)
+conditionally negotiates that provider from the selected local Worktrees
+command, derives the head from its actual workspace record and retains the
+original proposal, relationship and allocation. It rechecks queue custody after
+the external read without submitting work or weakening the persisted rollback
+guard. This is source preparation, not ordinary caller activation; guarded
+advancement and the broader lifecycle/native matrix remain pending.
 
 The CLI's completion command and client reach the coordinator's `/complete`
 route. Its queue transition records `SUBMITTED` and clears the task owner.
