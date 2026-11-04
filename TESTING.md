@@ -8,6 +8,13 @@ suppression, while the requested command retains its own interpreter flags.
 This source-boundary control does not expand required unit-only CI or qualify
 an installed rollout.
 
+Logger's opt-in `--test-file tests/test_worktree_state.py
+--allow-explicit-tiers` packet checks typed local collection admission,
+corruption/partial-publication refusal and complete efforts export/readback
+through real isolated Python processes. It does not enable scheduled collection
+or qualify native Windows, an installed archive destination, remote durability
+or reclamation. See [the collection boundary](plugins/agent-logger/docs/worktree-state.md).
+
 The opt-in Manager `tests/test_companion_visual.py` packet compares actual
 Textual timeline renders against synthetic live-following and history-browsing
 SVG baselines, plus a selected-session view with visibly paused membership and

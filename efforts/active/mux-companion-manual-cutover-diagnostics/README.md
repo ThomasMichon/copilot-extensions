@@ -471,8 +471,9 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       #10238 delivers D2's explicit managed initialization and complete export.
       #10251 delivers D3's rich Agenda consumer and its real isolated join.
       #10392 delivers passive Bridge membership consumption and the first
-      isolated three-owner demonstration. Known-session Bridge event/history
-      consumption, archival/rescue, native durability and
+      isolated three-owner demonstration. #10435 delivers the supported
+      selected-session Bridge event/history consumer and lifecycle controls.
+      Current answerability/PRE qualification, archival/rescue, native durability and
       whole S2-S5 and original root gates remain open.
 
 ## Validation Plan
@@ -550,6 +551,7 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+- [2026-11-04 - Selected-session Bridge consumer merged; archival and qualification next](journal/2026/11.04-sidecar-known-session-consumer.md)
 - [2026-11-04 - Bridge membership consumer merged; known-session observations next](journal/2026/11.04-sidecar-bridge-membership-consumer.md)
 - [2026-11-03 - Rich Agenda consumer merged; Bridge composition and archival remain open](journal/2026/11.03-sidecar-rich-agenda-consumer.md)
 - [2026-11-03 - Managed agenda initialization/export merged; Manager consumers next](journal/2026/11.03-sidecar-managed-agenda-export.md)

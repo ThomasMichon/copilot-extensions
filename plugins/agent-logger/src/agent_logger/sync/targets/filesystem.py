@@ -2236,6 +2236,10 @@ class LocalTarget(FilesystemTarget):
 
     name = "local"
 
+    def worktree_state_root(self) -> Path:
+        """Local stored bytes are not a cloud/remote archival acknowledgment."""
+        return self._root()
+
     def _root(self) -> Path:
         path = self.options.get("path")
         if path:
