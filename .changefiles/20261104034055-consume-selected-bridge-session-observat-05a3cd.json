@@ -1,0 +1,9 @@
+{
+  "comment": "Consume selected Bridge session observations and history without additional permanent readers",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

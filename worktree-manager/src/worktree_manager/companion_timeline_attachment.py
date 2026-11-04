@@ -248,10 +248,10 @@ class TimelineAttachment:
                     if not result.applied:
                         raise TimelineSourceError(result.reason)
                     if self._status is not None and isinstance(value, TimelineSnapshot):
-                        self._status(
+                        self._status(getattr(source, "status_message",
                             "partial owner-linked membership; liveness, head and answerability unknown; "
                             "linkage is not custody"
-                        )
+                        ))
 
                 def page(value: HistoryPage) -> None:
                     if current():

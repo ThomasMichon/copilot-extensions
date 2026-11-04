@@ -40,8 +40,15 @@ retains Manager/Bridge consumers, logger/rescue, native and original parent gate
 managed rich Agenda consumer through the existing single permanent subscription.
 The [source readback](journal/2026/11.03-sidecar-rich-agenda-consumer.md) records
 294 coupled controls, required unit qualification and the actual approved merge.
-Bridge consumption/three-source composition, logger/rescue, native and original
-parent gates remain open.
+Its remaining Bridge consumption and three-source work is continued below.
+
+#10392 merged as `e9a45cf979fc65a9fc4194fa02cf72325f898e67`, delivering
+passive Bridge membership consumption, independent source admission and the
+first isolated three-owner demonstration. The
+[source readback](journal/2026/11.04-sidecar-bridge-membership-consumer.md)
+records 296 coupled controls and synthetic visual baselines. Known-session
+event/history consumption, logger/rescue, native and original parent gates
+remain open.
 
 ## Guiding intent
 
@@ -323,8 +330,9 @@ publication and installed support retain their separate qualification.
 - [ ] Integrate Manager adapters with independent cursors, atomic view updates,
   stale/head/source replacement and cancellation.
   The selected worktree and rich Agenda adapters are delivered, including their
-  real isolated process/Textual joins in #10131/#10251. Bridge consumption and
-  complete three-source coverage remain open.
+  real isolated process/Textual joins in #10131/#10251. #10392 adds passive
+  membership and the first three-owner join; known-session Bridge consumption
+  and complete source coverage remain open.
 
 ### S3 - Bridge relationships and problem evidence
 
@@ -339,6 +347,9 @@ publication and installed support retain their separate qualification.
   retaining relationship/custody authority and remote unknowns.
   #10199 delivers the HTTP-52 provider and passive owning CLI. This is source
   delivery, not Manager membership consumption or installed adoption.
+- [x] Consume passive owner membership in Manager with selected-head fencing,
+  bounded replay and owned-reader retirement. #10392 delivers this source
+  consumer; known-session event/history and installed adoption remain separate.
 - [ ] Expose actual pending/cleared input and permission evidence without answer
   or control authority.
 - [ ] Deliver qualified pre-compaction evidence from a supported source adapter;
@@ -347,8 +358,10 @@ publication and installed support retain their separate qualification.
 
 ### S4 - Joined Sidecar and source delivery
 
-- [ ] Demonstrate one worktree: owner snapshot, claim/binding transition,
+- [x] Demonstrate one worktree: owner snapshot, claim/binding transition,
   committed agenda update and an owner-linked Bridge child on the real widget.
+  #10392 qualifies this isolated source join; the Bridge carrier/root binding
+  are fixture substitutions, not installed or native-client qualification.
 - [ ] Demonstrate older-page prepend and live append while browsing, current
   head changes, reconnection/gaps and complete observer cancellation.
 - [ ] Drive every source PR through current-head review, required CI and actual
@@ -371,6 +384,10 @@ publication and installed support retain their separate qualification.
   retained exhausted-window proof, expected transport failures and terminal
   resource custody independent of replaceable task slots. This is not the
   three-source or native-client acceptance below.
+- [x] Qualify the first Worktrees/rich-Agenda/Bridge-membership source join,
+  including blocked optional bootstrap, actual Refresh, independent live
+  updates and simultaneous evidence reconciliation. #10392's final packet
+  passes 296 cases; known-session, native and full source coverage remain open.
 - [ ] Exact field/enumeration, numeric/boolean, cursor/generation/identity,
   duplicate and malformed-source tests; no render-path I/O or inferred custody.
 - [ ] History/live splice and gap tests: coalescing is current state, not lost

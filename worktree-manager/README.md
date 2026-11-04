@@ -132,7 +132,7 @@ reconciliation information without accepting a new live position. Head,
 resident, record-incarnation and journal replacement failures remain explicit;
 Refresh obtains a new qualified selection. Hiding Timeline retires its optional
 reader and pages, and reopening obtains a fresh snapshot. The selected worktree
-reader, existing coarse Agenda subscription and optional Bridge membership
+reader, existing coarse Agenda subscription and optional selected Bridge
 reader provide three-source composition without a panel fleet poller. Rich
 Agenda reads reuse coarse publication demand and the
 [owner-managed placement/reader](../plugins/efforts/skills/driving-effort-agendas/references/managed-placement.md);
@@ -158,9 +158,33 @@ waits. Worktrees and Bridge preparations start independently, including after
 Refresh while Bridge evidence is exhausted. A blocked optional bootstrap cannot
 delay the healthy Worktrees reader or its live updates; each attachment retains
 its selected-head and revision fences. Unrelated-owner heartbeat progress retains
-transport continuity without a productive milestone. This adapter does not attach known-session event/history
-readers or infer pending input, SDK execution or compaction capacity.
+transport continuity without a productive milestone.
 See the [owning membership contract](../plugins/agent-bridge/docs/owner-membership.md).
+
+The keyboard-accessible Bridge feed selector defaults to membership discovery.
+An exact owned or represented session from the delivered complete membership
+state can instead be selected for the owner's separately negotiated
+[`observe-session` and `session-observation-history` reads](../plugins/agent-bridge/docs/session-observations.md).
+This replaces the one held Bridge reader; it does not add a permanent worker for
+each delegate. Membership discovery is explicitly paused while a session is
+selected. Returning to membership obtains fresh facts and resumes its push feed.
+Inactive streams retain loaded evidence and immutable proofs, not current
+availability. Their old head markers cannot restart an unrelated active reader.
+
+The selected worktree/head remains Manager's independent admission fence. The
+session's actual stored project/worktree, registry, durable identity when known,
+hosting generation and log incarnation stay separately qualified in its source
+facts and wire positions. Represented sources retain a null project rather than
+borrowing the parent project; arbitrary federated relationships are not acquired.
+The owner's snapshot tail, contiguous live pages and finite backward pages
+retain their native identities, content hashes, omission references and partial
+coverage. History never advances the live cursor. An empty log acquires only its
+real first-event continuity; replacement or retention gaps require Refresh.
+Missing recorded timestamps display as unknown instead of a fabricated clock.
+Historical input/resolution events do not prove current pending requests or
+answerability, and compaction starts do not qualify active pre-window capacity.
+No answer, session start, claim release or installed/native acceptance is implied.
+
 Integrity-budget exhaustion does not discard evidence on ordinary reconnect or
 tab reopening. With Timeline visible, explicit Refresh or Reconcile source first
 obtains a fresh owner-qualified snapshot and admits a separate bounded observation
