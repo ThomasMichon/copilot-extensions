@@ -29,13 +29,16 @@ def test_guarded_public_feed_produces_the_same_candidate_in_fresh_homes(
     _configure_native_tls(tmp_path, monkeypatch, state)
     home_key = "LOCALAPPDATA" if os.name == "nt" else "XDG_STATE_HOME"
     monkeypatch.setattr(governed_feed_trust, "_opaque_index_identity", original_identity)
-    source = {"source_commit": "a" * 40, "source_tree": "b" * 40, "main_head": "c" * 40}
     results, local_identities = [], []
     for index in (1, 2):
         home = tmp_path / f"home-{index}"
         home.mkdir()
         monkeypatch.setenv(home_key, str(home))
         local_identities.append(original_identity("nonsecret-test-input"))
+        source = {
+            "source_commit": str(index) * 40, "source_tree": str(index + 2) * 40,
+            "main_head": str(index + 4) * 40,
+        }
         deadline = time.monotonic() + 180
         destination = tmp_path / f"candidate-{index}.zip"
         result = producer._build_from_snapshot(
@@ -46,5 +49,8 @@ def test_guarded_public_feed_produces_the_same_candidate_in_fresh_homes(
         )
         results.append((result, destination.read_bytes()))
     assert local_identities[0] != local_identities[1]
-    assert results[0] == results[1]
+    assert results[0][0]["source_commit"] != results[1][0]["source_commit"]
+    assert results[0][0]["profile_sha256"] == results[1][0]["profile_sha256"]
+    assert results[0][0]["sha256"] == results[1][0]["sha256"]
+    assert results[0][1] == results[1][1]
     assert results[0][0]["approval"] == "unattested"

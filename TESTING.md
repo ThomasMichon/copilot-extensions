@@ -3561,7 +3561,7 @@ owned-worker timeout cleanup. Actor-free projection,
 candidate-witness and recheck controls live in
 `tools/promotion_unit_tests/test_guarded_core_contract.py`.
 `tools/test_core_public_feed_native.py` compares real local-TLS producer outputs
-across separate machine-local keyed identities. Actor-free controls in
+across separate machine-local keyed identities and source containers. Actor-free controls in
 `tools/promotion_unit_tests/test_core_public_feed.py` cover stable anonymous
 inputs and refusal of credentials, unsafe URLs and changed source policy.
 The fixture excludes inherited Git selectors, and Linux projection refuses
