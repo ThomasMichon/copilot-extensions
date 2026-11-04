@@ -29,6 +29,7 @@ import installer_native_feed as native_feed
 import installer_wheel_acquisition as acquisition
 import installer_wheel_inputs as inspection
 import installer_wheel_snapshot as snapshots
+from core_native_feed_errors import guarded_stop_reason
 from core_native_feed_target import require_native_target
 from installer_engine_process import ChildLaunchError, ChildTimeoutExpired, run_owned
 from packaging.requirements import InvalidRequirement, Requirement
@@ -102,6 +103,7 @@ def _worker_sources(deadline: float) -> dict[str, bytes]:
     sources = acquisition._worker_sources()
     extra = (
         Path(__file__), ROOT / "tools" / "core_native_feed_target.py",
+        ROOT / "tools" / "core_native_feed_errors.py",
         ROOT / "tools" / "runtime_wheel_inspection.py",
         ROOT / "tools" / "artifact_source_build.py",
         ROOT / "libs" / "installer-engine" / "installer_native_feed.py",
@@ -571,13 +573,15 @@ def _run_uv(argv, options, server, deadline):
             remaining = deadline - time.monotonic()
             if remaining <= 0 or server.budget.failed.is_set():
                 stop()
-                raise GuardedSelectionError("guarded native resolver was stopped")
+                raise GuardedSelectionError(guarded_stop_reason(server.budget.failure, deadline_expired=remaining <= 0))
             try:
                 status = process.wait(timeout=min(0.1, remaining))
                 break
             except subprocess.TimeoutExpired:
                 continue
         if status:
+            if server.budget.failed.is_set():
+                raise GuardedSelectionError(guarded_stop_reason(server.budget.failure, deadline_expired=False))
             raise GuardedSelectionError("guarded native resolver refused the candidate")
     finally:
         if process.poll() is None:
@@ -660,7 +664,7 @@ def _worker(request, control: Path) -> dict:
             server.server_close()
             thread.join()
     if server.budget.failure is not None:
-        raise GuardedSelectionError("guarded feed input was refused")
+        raise GuardedSelectionError(guarded_stop_reason(server.budget.failure, deadline_expired=False))
     downloads = control.parent / "downloads"
     downloads.mkdir()
     for url in sorted(server.served):
@@ -864,7 +868,7 @@ def _run_isolated(request, root, sources, limits, deadline, procutil):
             custody = held.enter_context(snapshots._open(control))
             result = run_owned(
                 [executable, "-I", "-S", "-B", "-c", launch, str(worker), str(control)],
-                cwd=root, env=child_environment, timeout=deadline - time.monotonic(),
+                cwd=root, env=child_environment, timeout=max(0.001, deadline - time.monotonic()),
                 procutil=procutil, construction_fd=custody.fileno(), deadline=deadline,
             )
         if len(result.stdout) > _CONTROL_LIMIT:
@@ -878,8 +882,9 @@ def _run_isolated(request, root, sources, limits, deadline, procutil):
         return response
     except GuardedSelectionError:
         raise
-    except (ChildLaunchError, ChildTimeoutExpired, subprocess.CalledProcessError, OSError,
-            ValueError, KeyError, TypeError) as error:
+    except ChildTimeoutExpired:
+        raise GuardedSelectionError("guarded native resolver deadline exceeded") from None
+    except (ChildLaunchError, subprocess.CalledProcessError, OSError, ValueError, KeyError, TypeError) as error:
         raise GuardedSelectionError("guarded worker failed: " + type(error).__name__) from None
 
 

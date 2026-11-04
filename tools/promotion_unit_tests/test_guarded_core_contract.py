@@ -67,6 +67,109 @@ def _limits():
     )
 
 
+class _PendingResolver:
+    def __init__(self):
+        self.killed = False
+        self.waits = []
+
+    def poll(self):
+        return -9 if self.killed else None
+
+    def kill(self):
+        self.killed = True
+
+    def wait(self, timeout):
+        self.waits.append(timeout)
+        return -9
+
+
+@pytest.mark.parametrize(("cause", "expected"), [
+    ("wheel feed request failed or timed out", "guarded feed request failed or timed out"),
+    ("wheel feed body read failed or timed out", "guarded feed response read failed or timed out"),
+    ("wheel acquisition request budget exceeded", "guarded feed request budget exceeded"),
+    ("guarded candidate changed after acquisition", "guarded candidate changed after acquisition"),
+    ("private-origin-and-credential-detail", "guarded feed input was refused"),
+], ids=["request", "body", "budget", "digest", "unknown"])
+def test_guarded_resolver_stop_reports_only_safe_failure_categories(monkeypatch, cause, expected):
+    process = _PendingResolver()
+    monkeypatch.setattr(guard.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    failed = threading.Event()
+    failed.set()
+    server = SimpleNamespace(budget=SimpleNamespace(failed=failed, failure=ValueError(cause)))
+
+    with pytest.raises(guard.GuardedSelectionError) as caught:
+        guard._run_uv(["unused"], {}, server, time.monotonic() + 30)
+
+    assert str(caught.value) == expected
+    assert "private-origin-and-credential-detail" not in str(caught.value)
+    assert process.killed and process.waits == [10]
+
+
+def test_guarded_resolver_stop_distinguishes_deadline(monkeypatch):
+    process = _PendingResolver()
+    monkeypatch.setattr(guard.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    server = SimpleNamespace(budget=SimpleNamespace(failed=threading.Event(), failure=None))
+
+    with pytest.raises(guard.GuardedSelectionError, match="deadline exceeded"):
+        guard._run_uv(["unused"], {}, server, time.monotonic() - 1)
+
+    assert process.killed and process.waits == [10]
+
+
+def test_guarded_resolver_exit_reports_a_recorded_feed_failure(monkeypatch):
+    failed = threading.Event()
+    server = SimpleNamespace(budget=SimpleNamespace(
+        failed=failed, failure=ValueError("wheel feed request failed or timed out"),
+    ))
+
+    class ExitedResolver:
+        exited = False
+
+        def poll(self):
+            return 1 if self.exited else None
+
+        def wait(self, timeout):
+            self.exited = True
+            failed.set()
+            return 1
+
+    monkeypatch.setattr(guard.subprocess, "Popen", lambda *_args, **_kwargs: ExitedResolver())
+    with pytest.raises(guard.GuardedSelectionError, match="guarded feed request failed or timed out"):
+        guard._run_uv(["unused"], {}, server, time.monotonic() + 30)
+
+
+def test_guarded_isolated_timeout_reports_only_the_deadline(monkeypatch, tmp_path):
+    def timeout(*_args, **_kwargs):
+        raise guard.ChildTimeoutExpired(
+            ["private-command"], 1, output=b"private-output", stderr=b"private-error",
+        )
+
+    monkeypatch.setattr(guard, "run_owned", timeout)
+    monkeypatch.setattr(guard.snapshots, "_open", lambda path: path.open("rb"))
+    with pytest.raises(guard.GuardedSelectionError) as caught:
+        guard._run_isolated(
+            {"control_bytes": 0}, tmp_path, {"worker.py": b"pass"},
+            _limits(), time.monotonic() + 30, SimpleNamespace(),
+        )
+
+    assert str(caught.value) == "guarded native resolver deadline exceeded"
+    assert "private" not in str(caught.value)
+
+
+def test_guarded_isolated_prelaunch_expiry_uses_real_deadline_guard(monkeypatch, tmp_path):
+    monkeypatch.setattr(guard.snapshots, "_open", lambda path: path.open("rb"))
+    monkeypatch.setattr(guard.subprocess, "Popen", lambda *_args, **_kwargs: pytest.fail("unexpected child"))
+    procutil = SimpleNamespace(
+        spawn_sync_in_kill_on_close_job=lambda *_args, **_kwargs: pytest.fail("unexpected child"),
+    )
+
+    with pytest.raises(guard.GuardedSelectionError, match="guarded native resolver deadline exceeded"):
+        guard._run_isolated(
+            {"control_bytes": 0}, tmp_path, {"worker.py": b"pass"},
+            _limits(), time.monotonic() - 1, procutil,
+        )
+
+
 def test_guarded_project_uses_the_configured_feed_metadata_policy(monkeypatch):
     observed = []
 
