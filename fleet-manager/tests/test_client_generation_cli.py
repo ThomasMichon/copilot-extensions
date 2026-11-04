@@ -341,6 +341,24 @@ def test_actual_installed_console_generation_transitions(
             "operation": operation, "seconds": time.monotonic() - started,
             "returncode": result.returncode,
         }), flush=True)
+        if success and result.returncode != 0 and operation == "construct":
+            from fleet_manager import client_construction as owner
+
+            namespace = root / ("generation-" + FIRST) / owner.NAMESPACE
+            version = f"client-{fixture['proof']['payload']['sequence']}-{digest(fixture['manifest'])}"
+            slot = namespace / "versions" / version
+            if (slot / ("Scripts" if os.name == "nt" else "bin")).is_dir():
+                try:
+                    with primitive.construction_lease(namespace, version) as descriptor:
+                        owner._run(
+                            [slot / ("Scripts/fleet-manager.exe" if os.name == "nt"
+                                     else "bin/fleet-manager"), "--version"],
+                            slot, "failed-candidate diagnostic", descriptor=descriptor,
+                        )
+                except Exception as error:
+                    cause = error.__context__ or error
+                    print("GENERATION_CLI_NESTED_FAILURE", repr(cause),
+                          (getattr(cause, "stderr", None) or "")[:4096], flush=True)
         assert result.returncode == (0 if success else 1), result.stderr
         if success:
             return json.loads(result.stdout)
