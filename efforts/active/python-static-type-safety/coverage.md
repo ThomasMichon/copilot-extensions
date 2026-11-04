@@ -8,13 +8,13 @@ not a second checker configuration.
 ## Snapshot and counting rules
 
 Snapshot: **2026-11-03**, merged Dev policy
-`18f110d637a2133ad5dd08610bf3ca789fd89115`, reconciled with
+`dcb8603d01a6b008b1f2d83a3ee0bd9824bbdead`, reconciled with
 `python tools/typecheck.py --inventory --json`.
 
-- **36 / 68 checker projects (52.9%)** have merged strict admission.
-- **315 / 7,780 physical Python files (4.0%)** belong to those strict scopes.
-- **32 projects remain pending; none are basic.**
-- All 7,780 tracked physical Python paths are classified. Classification,
+- **37 / 68 checker projects (54.4%)** have merged strict admission.
+- **342 / 7,806 physical Python files (4.4%)** belong to those strict scopes.
+- **31 projects remain pending; none are basic.**
+- All 7,806 tracked physical Python paths are classified. Classification,
   annotations, passing consumer tests and a prepared implementation do not
   count as strict enforcement.
 - Context Handoff's six files and Dispatch service's six files are included
@@ -31,6 +31,11 @@ Snapshot: **2026-11-03**, merged Dev policy
 - The refreshed inventory includes two additional files under the already
   strict Bootstrap Killswitch scope. Other additions remain in their pending
   owners rather than being attributed to Credential Relay.
+- Index service's complete 27-file scope is included after #10327 merged with
+  both targets, Python 3.10 native/copy qualification and fresh exact-input
+  source CI. The separately owned 400-file Index plugin remains pending.
+  The 26 newly inventoried files in Dispatch, Index, Worktrees and Worktree
+  Manager also remain pending under their respective owners.
 
 Project percentages are not code-volume or runtime-test percentages. Small
 shared-library projects and large plugins have very different sizes. Physical
@@ -41,10 +46,10 @@ owned files; the manifest remains authoritative for their exact boundaries.
 | Area | Checker projects | Merged strict projects | Physical Python files | Files in merged strict scopes |
 |------|-----------------:|-----------------------:|----------------------:|------------------------------:|
 | Shared libraries | 37 | 30 | 726 | 282 |
-| Plugins | 20 | 3 | 5,451 | 20 |
-| Services and managers | 7 | 1 | 931 | 6 |
+| Plugins | 20 | 3 | 5,462 | 20 |
+| Services and managers | 7 | 2 | 946 | 33 |
 | Tools and support | 4 | 2 | 672 | 7 |
-| **Total** | **68** | **36** | **7,780** | **315** |
+| **Total** | **68** | **37** | **7,806** | **342** |
 
 **Locked** means the complete declared project scope is admitted to strict
 MyPy on both declared analysis targets through a merged, reviewed change and
@@ -113,15 +118,15 @@ cross-cutting qualification gate below.
 | `agent-codespaces` | 279 | Pending | Runtime, venue/install helpers, fixtures and copies |
 | `agent-conduct-guidance` | 36 | Pending | Scripts, tests and owned copies |
 | `agent-containers` | 195 | Pending | Runtime, providers/install helpers, fixtures and copies |
-| `agent-dispatch` | 817 | Pending | Registry/worker/runtime subsystems, fixtures and copies |
-| `agent-index` | 398 | Pending | Client/server, scripts, fixtures and copies |
+| `agent-dispatch` | 820 | Pending | Registry/worker/runtime subsystems, fixtures and copies |
+| `agent-index` | 400 | Pending | Client/server, scripts, fixtures and copies |
 | `agent-logger` | 240 | Pending | Runtime, native installer fixtures and copies |
 | `agent-machines` | 173 | Pending | Configuration/requirement engine, scripts, fixtures and copies |
 | `agent-mcp` | 220 | Pending | Adapter/auth/runtime contracts, scripts, fixtures and copies |
 | `agent-pull-requests` | 210 | Pending | Provider/runtime contracts, scripts, fixtures and copies |
 | `agent-ssh` | 159 | Pending | Transport/configuration, native helpers, fixtures and copies |
 | `agent-vault` | 167 | Pending | Secret/runtime boundaries, native fixtures and copies |
-| `agent-worktrees` | 1,425 | Pending | Model/lifecycle/PR/launch subsystems, fixtures, installers and copies |
+| `agent-worktrees` | 1,431 | Pending | Model/lifecycle/PR/launch subsystems, fixtures, installers and copies |
 | `ai-attribution` | 5 | **Locked** | #10171 / merged #10176; both targets, native policy/hook controls and Python 3.9 helper compatibility |
 | `budget-guidance` | 87 | Pending | Reader/configuration/runtime contracts, fixtures and copies |
 | `context-handoff` | 6 | **Locked** | #10179 / merged #10192; both targets, native Python/Node controls and Python 3.10 helper qualification |
@@ -137,10 +142,10 @@ cross-cutting qualification gate below.
 | `fleet-manager` | 217 | Pending | Model/control/runtime subsystems, native boundaries and tests |
 | `service-chat` | 29 | Pending | Service/storage/admission boundaries and tests |
 | `service-dispatch` | 6 | **Locked** | #10184 / merged #10189; both targets, complete unchanged source and native fixture qualification |
-| `service-index` | 27 | Pending | Service/backend/storage boundaries and tests |
+| `service-index` | 27 | **Locked** | #10206 / merged #10327; both targets, Python 3.10 native/copy qualification and exact-input CI |
 | `service-pr` | 9 | Pending | Provider/service boundaries and tests |
 | `service-ssh` | 26 | Pending | Transport/service/native boundaries and tests |
-| `worktree-manager` | 617 | Pending | Model/picker/control/entrypoint subsystems and fixtures |
+| `worktree-manager` | 632 | Pending | Model/picker/control/entrypoint subsystems and fixtures |
 
 ## Tools and support
 

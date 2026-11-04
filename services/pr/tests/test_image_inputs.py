@@ -1,21 +1,27 @@
 """Real retained-wheel context controls; no image daemon or feed access."""
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 import hashlib
 import os
 from pathlib import Path
 import sys
 import time
+from typing import TYPE_CHECKING, Any, Callable, Iterator, cast
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "tools"))
-from pr_service_image_inputs import prepare_image_inputs
-from runtime_profile import ProfileError, SCHEMA, validate_profile
+if TYPE_CHECKING:
+    from tools.pr_service_image_inputs import ImageInputs, prepare_image_inputs
+    from tools.runtime_profile import ProfileError, RuntimeProfile, SCHEMA, validate_profile
+    from tools.wheel_input_fixture import wheel_bytes
+else:
+    from pr_service_image_inputs import ImageInputs, prepare_image_inputs
+    from runtime_profile import ProfileError, SCHEMA, validate_profile
+    from wheel_input_fixture import wheel_bytes
 from installer_wheel_inputs import WheelError, WheelLimits
-from installer_wheel_snapshot import retain_wheel_inputs
-from wheel_input_fixture import wheel_bytes
+from installer_wheel_snapshot import WheelSnapshot, retain_wheel_inputs
 
 
 BASE = "python@sha256:" + "a" * 64
@@ -23,7 +29,9 @@ LIMITS = WheelLimits(1 << 20, 1 << 20, 1 << 20, 1 << 16, 100, 100, 1 << 16)
 NAMES = ["agent-pull-requests-service", "agent-pull-requests", "fleet-manager", "agent-worktrees"]
 
 
-def fixture_inputs(tmp_path, *, omit=None, platform="linux"):
+def fixture_inputs(
+    tmp_path: Path, *, omit: str | None = None, platform: str = "linux",
+) -> tuple[RuntimeProfile, dict[str, Path]]:
     environment = {
         "implementation_name": "cpython", "implementation_version": "3.11.9",
         "os_name": "posix", "platform_machine": "x86_64", "platform_release": "6.0",
@@ -31,13 +39,15 @@ def fixture_inputs(tmp_path, *, omit=None, platform="linux"):
         "python_full_version": "3.11.9", "platform_python_implementation": "CPython",
         "python_version": "3.11", "sys_platform": platform,
     }
+    archives: dict[str, Path]
+    wheels: list[dict[str, Any]]
     archives, wheels = {}, []
     for name in NAMES:
         if name == omit:
             continue
         prefix = name.replace("-", "_")
         filename = prefix + "-1.0-py3-none-any.whl"
-        data = wheel_bytes(
+        data = cast(Callable[..., bytes], wheel_bytes)(
             name=prefix, prefix=prefix + "-1.0.dist-info/",
             metadata=f"Metadata-Version: 2.3\nName: {name}\nVersion: 1.0\n\n".encode(),
         )
@@ -62,10 +72,12 @@ def fixture_inputs(tmp_path, *, omit=None, platform="linux"):
 
 
 @contextmanager
-def retained(tmp_path, **changes):
+def retained(
+    tmp_path: Path, **changes: Any,
+) -> Iterator[tuple[RuntimeProfile, WheelSnapshot, float]]:
     profile, archives = fixture_inputs(tmp_path, **changes)
     deadline = time.monotonic() + 60
-    with retain_wheel_inputs(
+    with cast(Callable[..., AbstractContextManager[WheelSnapshot]], retain_wheel_inputs)(
         archives, {wheel["filename"]: wheel["sha256"] for wheel in profile.record()["wheels"]},
         max_wheels=10, max_archive_bytes=LIMITS.max_archive_bytes,
         max_total_bytes=LIMITS.max_archive_bytes, max_snapshot_bytes=LIMITS.max_archive_bytes,
@@ -74,13 +86,16 @@ def retained(tmp_path, **changes):
         yield profile, snapshot, deadline
 
 
-def prepare(profile, snapshot, deadline, **changes):
-    return prepare_image_inputs(
-        profile, snapshot, **dict(python_base=BASE, limits=LIMITS, deadline=deadline) | changes,
-    )
+def prepare(
+    profile: RuntimeProfile, snapshot: WheelSnapshot, deadline: float, **changes: Any,
+) -> AbstractContextManager[ImageInputs]:
+    options: dict[str, Any] = dict(python_base=BASE, limits=LIMITS, deadline=deadline) | changes
+    return cast(AbstractContextManager[ImageInputs], prepare_image_inputs(
+        profile, snapshot, **options,
+    ))
 
 
-def test_context_contains_only_recipe_complete_wheels_and_exact_lock(tmp_path):
+def test_context_contains_only_recipe_complete_wheels_and_exact_lock(tmp_path: Path) -> None:
     secret = tmp_path / "credential.txt"
     secret.write_text("must-not-enter-context")
     with retained(tmp_path) as (profile, snapshot, deadline):
@@ -104,7 +119,7 @@ def test_context_contains_only_recipe_complete_wheels_and_exact_lock(tmp_path):
 
 
 @pytest.mark.parametrize("base", ["python:3.11", "https://example.test/python", "python@sha256:abc", None])
-def test_unpinned_or_invalid_base_refuses(tmp_path, base):
+def test_unpinned_or_invalid_base_refuses(tmp_path: Path, base: str | None) -> None:
     with retained(tmp_path) as (profile, snapshot, deadline):
         with pytest.raises(ProfileError, match="pinned"):
             with prepare(profile, snapshot, deadline, python_base=base):
@@ -112,14 +127,14 @@ def test_unpinned_or_invalid_base_refuses(tmp_path, base):
 
 
 @pytest.mark.parametrize("name", NAMES)
-def test_required_distributions_cannot_be_omitted(tmp_path, name):
+def test_required_distributions_cannot_be_omitted(tmp_path: Path, name: str) -> None:
     with retained(tmp_path, omit=name) as (profile, snapshot, deadline):
         with pytest.raises(ProfileError, match="required"):
             with prepare(profile, snapshot, deadline):
                 pytest.fail("incomplete PR closure admitted")
 
 
-def test_foreign_platform_refuses(tmp_path):
+def test_foreign_platform_refuses(tmp_path: Path) -> None:
     with retained(tmp_path, platform="win32") as (profile, snapshot, deadline):
         with pytest.raises(ProfileError, match="Linux"):
             with prepare(profile, snapshot, deadline):
@@ -127,24 +142,24 @@ def test_foreign_platform_refuses(tmp_path):
 
 
 @pytest.mark.parametrize("deadline", [float("inf"), float("nan"), 0, True])
-def test_no_unbounded_or_expired_deadline(tmp_path, deadline):
+def test_no_unbounded_or_expired_deadline(tmp_path: Path, deadline: float) -> None:
     with retained(tmp_path) as (profile, snapshot, _):
         with pytest.raises(ProfileError, match="deadline"):
             with prepare(profile, snapshot, deadline):
                 pytest.fail("unbounded operation admitted")
 
 
-def test_builder_failure_cleans_owned_context_and_preserves_wheel_custody(tmp_path):
+def test_builder_failure_cleans_owned_context_and_preserves_wheel_custody(tmp_path: Path) -> None:
     with retained(tmp_path) as (profile, snapshot, deadline):
         with pytest.raises(RuntimeError, match="builder failed"):
             with prepare(profile, snapshot, deadline) as result:
                 context = result.path
                 raise RuntimeError("builder failed")
         assert not context.exists()
-        snapshot.verify()
+        cast(Callable[[], None], snapshot.verify)()
 
 
-def test_closed_snapshot_cannot_supply_context(tmp_path):
+def test_closed_snapshot_cannot_supply_context(tmp_path: Path) -> None:
     with retained(tmp_path) as (profile, snapshot, deadline):
         pass
     with pytest.raises((WheelError, ValueError, OSError)):
@@ -152,7 +167,7 @@ def test_closed_snapshot_cannot_supply_context(tmp_path):
             pytest.fail("released wheel custody admitted")
 
 
-def test_missing_retained_wheel_refuses_without_reopening_original(tmp_path):
+def test_missing_retained_wheel_refuses_without_reopening_original(tmp_path: Path) -> None:
     with retained(tmp_path) as (profile, snapshot, deadline):
         from dataclasses import replace
 
@@ -162,7 +177,7 @@ def test_missing_retained_wheel_refuses_without_reopening_original(tmp_path):
                 pytest.fail("missing retained archive admitted")
 
 
-def test_corrupt_wheel_bytes_refuse_even_with_profile_matching_digest(tmp_path):
+def test_corrupt_wheel_bytes_refuse_even_with_profile_matching_digest(tmp_path: Path) -> None:
     profile, archives = fixture_inputs(tmp_path)
     record = profile.record()
     wheel = record["wheels"][0]
@@ -170,7 +185,7 @@ def test_corrupt_wheel_bytes_refuse_even_with_profile_matching_digest(tmp_path):
     wheel["sha256"] = "sha256:" + hashlib.sha256(b"not a wheel").hexdigest()
     profile = validate_profile(record)
     deadline = time.monotonic() + 60
-    with retain_wheel_inputs(
+    with cast(Callable[..., AbstractContextManager[WheelSnapshot]], retain_wheel_inputs)(
         archives, {item["filename"]: item["sha256"] for item in record["wheels"]},
         max_wheels=10, max_archive_bytes=LIMITS.max_archive_bytes,
         max_total_bytes=LIMITS.max_archive_bytes, max_snapshot_bytes=LIMITS.max_archive_bytes,
@@ -181,7 +196,7 @@ def test_corrupt_wheel_bytes_refuse_even_with_profile_matching_digest(tmp_path):
                 pytest.fail("matching digest substituted for actual wheel inspection")
 
 
-def test_generated_context_installs_offline_into_fresh_environment(tmp_path):
+def test_generated_context_installs_offline_into_fresh_environment(tmp_path: Path) -> None:
     from agent_procutil.owned_process import run_caller_owned
 
     environment = tmp_path / "installed"

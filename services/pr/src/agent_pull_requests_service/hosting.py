@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+# Declare the real imported helper's type without hiding its admission decorator.
+daemon_entrypoint: Callable[..., Callable[[_Entry], _Entry]]
 from agent_procutil.daemon_instances import daemon_entrypoint
 
 import asyncio
@@ -13,6 +15,8 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from types import FrameType
+from typing import Any, Callable, TypeVar
 
 from agent_pull_requests.watch_service import WatchService
 from fleet_manager.credential_references import load_service_credentials
@@ -20,6 +24,7 @@ from fleet_manager.gateway_service_handler import RequestDisconnected
 
 from .config import HostConfig
 
+_Entry = TypeVar("_Entry", bound=Callable[..., object])
 
 class UnsettledService:
     """Retain this exact writer and its recoverable work until close succeeds."""
@@ -39,7 +44,7 @@ class UnsettledService:
                 await asyncio.sleep(min(1, self.timeout))
 
 
-async def _join_settlement(task: asyncio.Task) -> None:
+async def _join_settlement(task: asyncio.Task[None]) -> None:
     interrupted = False
     while not task.done():
         try:
@@ -73,7 +78,7 @@ class LaunchScope:
         return int(time.time()) + self.operation_seconds
 
 
-def _publish(path: Path, status: dict) -> bool:
+def _publish(path: Path, status: dict[str, Any]) -> bool:
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         with temporary.open("x", encoding="utf-8") as stream:
@@ -125,7 +130,9 @@ async def run(config: HostConfig, *, stop: asyncio.Event | None = None) -> None:
     await _run_service(config, stop=stop)
 
 
-@daemon_entrypoint("agent-pull-requests-service", source=__file__, purpose="production")
+@daemon_entrypoint(
+    "agent-pull-requests-service", source=__file__, purpose="production",
+)
 async def _run_service(config: HostConfig, *, stop: asyncio.Event | None = None) -> None:
     """Adopt existing state, then own exactly the existing WatchService lifetime."""
     stop = stop if stop is not None else asyncio.Event()
@@ -146,7 +153,7 @@ async def _run_service(config: HostConfig, *, stop: asyncio.Event | None = None)
     loop = asyncio.get_running_loop()
     previous = {}
 
-    def withdraw(_signal=None, _frame=None) -> None:
+    def withdraw(_signal: int | None = None, _frame: FrameType | None = None) -> None:
         scope.stopping.set()
         loop.call_soon_threadsafe(stop.set)
 
