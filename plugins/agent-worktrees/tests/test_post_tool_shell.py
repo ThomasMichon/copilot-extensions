@@ -63,6 +63,170 @@ def test_local_advisory_fallback_does_not_retry_daemon(monkeypatch):
     assert json.loads(stdout.getvalue()) == {"additionalContext": "local"}
 
 
+@pytest.fixture
+def post_client(monkeypatch):
+    spec = importlib.util.spec_from_file_location(
+        "post_tool_fallback_client", PLUGIN / "scripts" / "hook_client.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setenv("AGENT_WORKTREES_NUDGE", "on")
+    monkeypatch.setenv("AGENT_WORKTREES_NUDGE_CALLS", "2")
+    monkeypatch.setenv("AGENT_WORKTREES_NUDGE_MINUTES", "999")
+    return module
+
+
+def _post_record(home, name):
+    records = home / ".project" / "worktrees"
+    records.mkdir(parents=True, exist_ok=True)
+    root = home / name
+    root.mkdir()
+    record = records / f"{name}.yaml"
+    record.write_text(
+        f"state: active\nworktree_path: '{root}'\nhead_session: ''\n",
+        encoding="utf-8",
+    )
+    return root, record
+
+
+def test_post_fallback_shares_lookup_but_not_across_callbacks(
+    post_client, monkeypatch, tmp_path,
+):
+    root, record = _post_record(tmp_path, "worktree-a")
+    payload = {"cwd": str(root), "toolName": "view"}
+    scans = []
+    loads = []
+    original_glob = Path.glob
+    original_spec = importlib.util.spec_from_file_location
+
+    def glob(path, pattern):
+        if path == tmp_path:
+            scans.append(pattern)
+        return original_glob(path, pattern)
+
+    def spec(name, location, *args, **kwargs):
+        if Path(location).name == "nudge_status.py":
+            loads.append(location)
+        return original_spec(name, location, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "glob", glob)
+    monkeypatch.setattr(importlib.util, "spec_from_file_location", spec)
+    first = post_client._fallback_post(payload, tmp_path)
+    assert "bind-session" in first["additionalContext"]
+    assert scans == [".*"]
+    assert len(loads) == 1
+    second = post_client._fallback_post(payload, tmp_path)
+    assert "2 tool call(s)" in second["additionalContext"]
+    assert "bind-session" not in second["additionalContext"]
+    record.write_text("state: completed\nhead_session: bound\n", encoding="utf-8")
+    assert post_client._fallback_post(payload, tmp_path) == {}
+    assert scans == [".*"] * 3
+    assert not (tmp_path / ".agent-worktrees" / "nudge-state" / "worktree-a.json").exists()
+
+
+@pytest.mark.parametrize("distinct_cwd", [False, True])
+def test_post_fallback_empty_result_is_fresh_and_cwd_scoped(
+    post_client, monkeypatch, tmp_path, distinct_cwd,
+):
+    status_root = tmp_path / "worktree-a"
+    binding_root = tmp_path / "worktree-b" if distinct_cwd else status_root
+    payload = {"cwd": str(status_root), "workingDirectory": str(binding_root)}
+    status = post_client._load_sibling("nudge_status.py")
+    lookup = status._find_tracking_yaml
+    calls = []
+
+    def find(cwd, home):
+        calls.append(cwd)
+        return lookup(cwd, home)
+
+    monkeypatch.setattr(status, "_find_tracking_yaml", find)
+    assert post_client._fallback_post(payload, tmp_path) == {}
+    assert calls == ([str(status_root), str(binding_root)] if distinct_cwd else [str(status_root)])
+    _post_record(tmp_path, binding_root.name)
+    text = post_client._fallback_post(payload, tmp_path)["additionalContext"]
+    assert f"bind-session --worktree-dir={binding_root}" in text
+    sidecar = tmp_path / ".agent-worktrees" / "nudge-state" / "worktree-a.json"
+    assert sidecar.exists() is not distinct_cwd
+
+
+def test_post_fallback_preserves_late_notice_and_independent_failure(
+    post_client, monkeypatch, tmp_path,
+):
+    root, _record = _post_record(tmp_path, "worktree-a")
+    payload = {"cwd": str(root)}
+    status = post_client._load_sibling("nudge_status.py")
+    lookup = status._find_tracking_yaml
+    calls = []
+
+    def find(cwd, home):
+        calls.append(cwd)
+        if len(calls) == 1:
+            raise OSError("transient lookup failure")
+        return lookup(cwd, home)
+
+    monkeypatch.setattr(status, "_find_tracking_yaml", find)
+    assert "bind-session" in post_client._fallback_post(payload, tmp_path)["additionalContext"]
+    assert len(calls) == 2
+    monkeypatch.setattr(status, "_late_guidance_notice", lambda *args: "late guidance")
+    monkeypatch.setenv("AGENT_WORKTREES_NUDGE", "off")
+    calls.clear()
+    monkeypatch.setattr(status, "_find_tracking_yaml", lookup)
+    assert post_client._fallback_post(payload, tmp_path) == {"additionalContext": "late guidance"}
+
+
+@pytest.mark.parametrize("status_missing", [False, True])
+def test_post_fallback_default_cwd_and_missing_status_helper(
+    post_client, monkeypatch, tmp_path, status_missing,
+):
+    root, _record = _post_record(tmp_path, "worktree-a")
+    monkeypatch.chdir(root)
+    if status_missing:
+        load = post_client._load_sibling
+        monkeypatch.setattr(
+            post_client, "_load_sibling",
+            lambda name: None if name == "nudge_status.py" else load(name),
+        )
+    text = post_client._fallback_post({}, tmp_path)["additionalContext"]
+    assert f"bind-session --worktree-dir={root}" in text
+    assert post_client._fallback_post({}, tmp_path).get("additionalContext", "").count(
+        "2 tool call(s)"
+    ) == (0 if status_missing else 1)
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+def test_real_python_post_fallback_preserves_accounting_and_binding(tmp_path):
+    from agent_procutil import no_window_kwargs
+
+    root, record = _post_record(tmp_path, "worktree-a")
+    env = os.environ.copy()
+    env.update(
+        HOME=str(tmp_path), USERPROFILE=str(tmp_path),
+        AGENT_WORKTREES_NUDGE="on", AGENT_WORKTREES_NUDGE_CALLS="2",
+        AGENT_WORKTREES_NUDGE_MINUTES="999",
+    )
+    payload = json.dumps({"cwd": str(root), "toolName": "view"})
+
+    def invoke():
+        result = subprocess.run(
+            [sys.executable, str(PLUGIN / "scripts" / "hook_client.py"),
+             "postToolUse", "--local-fallback"],
+            input=payload, text=True, capture_output=True, env=env, timeout=10,
+            **no_window_kwargs(),
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == ""
+        return result.stdout
+
+    assert "bind-session" in json.loads(invoke())["additionalContext"]
+    second = json.loads(invoke())["additionalContext"]
+    assert "2 tool call(s)" in second
+    assert "bind-session" not in second
+    record.write_text("state: completed\nhead_session: bound\n", encoding="utf-8")
+    assert invoke() == ""
+
+
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")
 @pytest.mark.effect("network")

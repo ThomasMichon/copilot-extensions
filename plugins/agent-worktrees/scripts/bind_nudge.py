@@ -50,13 +50,17 @@ def _active_head(text: str) -> bool:
     return False
 
 
-def decide(payload: dict, *, home: Path | None = None) -> str | None:
+def decide(
+    payload: dict, *, home: Path | None = None, tracking_lookup=None,
+) -> str | None:
     home = Path(home) if home is not None else Path.home()
-    lookup = _load_nudge_module()
-    if lookup is None:
-        return None
+    if tracking_lookup is None:
+        lookup = _load_nudge_module()
+        if lookup is None:
+            return None
+        tracking_lookup = lookup._find_tracking_yaml
     cwd = str(payload.get("workingDirectory") or payload.get("cwd") or "")
-    found = lookup._find_tracking_yaml(cwd, home)
+    found = tracking_lookup(cwd, home)
     if not found:
         return None
     worktree_id, yaml_path = found

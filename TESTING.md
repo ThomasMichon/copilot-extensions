@@ -1,5 +1,16 @@
 # Testing copilot-extensions
 
+The manual `windows-coverage-rotation.yml` selector `post_tool_fallback=true`
+runs only Worktrees' post-tool shell, status/bind reminder and late-guidance
+consumer packet through the canonical hardened Linux container. Supply `ref`
+to select a published candidate; execution records its immutable checkout,
+selector, container profile and actual result. It cannot be combined with
+`launch_maintenance`. Required unit-only CI and the scheduled full portfolio
+are unchanged. The packet proves request-local lookup counts, reminder
+accounting/cooldowns, separate cwd inputs, callback freshness and actual Python
+entry output; skipped PowerShell/native-host cases are not passes. It does not
+qualify whole-hook latency, ACP/model admission, installed state or throughput.
+
 Procutil's explicit `tests/test_caller_owned_native.py -k
 controller_imports_do_not_write_bytecode` packet copies the package into a
 disposable source tree and executes the real POSIX controller. It checks that

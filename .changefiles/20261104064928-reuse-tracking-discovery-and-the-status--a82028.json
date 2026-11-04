@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse tracking discovery and the status helper within one advisory post-tool callback without retaining results across callbacks.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

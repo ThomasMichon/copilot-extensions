@@ -20,17 +20,19 @@ def workflow():
     return source_workflow(ROOT, "windows-coverage-rotation.yml")
 
 
-def condition(expression, event, ref, select, windows, linux, launch=False):
+def condition(expression, event, ref, select, windows, linux, launch=False, post_tool=False):
     context = {
         "always": True, "event": event, "ref": ref,
         "select": select, "windows": windows, "linux": linux,
         "launch": launch,
+        "post_tool": post_tool,
     }
     for old, new in (
         ("always()", "always"),
         ("github.event_name", "event"),
         ("inputs.ref", "ref"),
         ("!inputs.launch_maintenance", "not launch"),
+        ("!inputs.post_tool_fallback", "not post_tool"),
         ("needs.select.result", "select"),
         ("needs.test.result", "windows"),
         ("needs.linux-full.result", "linux"),
@@ -124,6 +126,30 @@ def test_targeted_launch_selection_preserves_container_and_exact_scope_evidence(
     )
     assert '"Linux launch-maintenance selection only; no Windows or broker qualification"' in evidence["run"]
     assert 'command += ["-k", selector]' in evidence["run"]
+
+
+@pytest.mark.parametrize("ref", ["", "dev", "feature"])
+def test_targeted_post_tool_scope_never_files_the_shared_portfolio_issue(ref):
+    source = workflow()
+    report = source["jobs"]["report"]
+    assert not condition(
+        report["if"], "workflow_dispatch", ref, "success", "skipped", "failure", post_tool=True,
+    )
+    triggers = source.get("on", source.get(True))
+    option = triggers["workflow_dispatch"]["inputs"]["post_tool_fallback"]
+    assert option["type"] == "boolean" and option["default"] is False
+    linux = source["jobs"]["linux-full"]
+    assert """inputs.post_tool_fallback && '["agent-worktrees"]'""" in linux["strategy"]["matrix"]["plugin"]
+    for name in (
+        "test_post_tool_shell", "test_nudge_status", "test_bind_nudge_script",
+        "test_late_worker_completion_reaches_actual_post_tool_hook",
+    ):
+        assert name in linux["env"]["TEST_SELECTOR"]
+    evidence = next(
+        step for step in linux["steps"] if step.get("name") == "Record exact execution scope and outcome"
+    )
+    assert "no native host, Windows or throughput qualification" in evidence["run"]
+    assert "Post-tool fallback discovery #6086" in evidence["run"]
 
 
 @pytest.mark.skipif(os.name == "nt", reason="The production report is a Linux Bash consumer")
