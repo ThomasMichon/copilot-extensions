@@ -292,6 +292,20 @@ retains the operator's wording.
 - [ ] Reconcile restart and missed-boundary evidence through the existing
   lifecycle owner, preserving unknown effects rather than blind replay.
 - [ ] Land directly related tests, docs and required changefiles.
+  - [x] Land incoming-start-first monitor replacement, exact native rollback
+    validation, bounded old-port exclusion and truthful cleanup scope (#10148).
+    The six-stage handoff/grace target is reviewed documentation, not full
+    implementation or installed-host acceptance.
+- [ ] Realize and qualify successor-originated handoff announcement, independent
+  predecessor staleness detection, verified new-install completion before old
+  drain, and successor-resident bounded grace expiry with exact native forced
+  retirement through the existing retirement owner. Preserve interrupted work,
+  unavailable-platform cleanup and pending process/runtime custody honestly;
+  documentation of this target is not its implementation or live qualification.
+  - [x] Land the bounded Worktrees announcement/grace implementation and its
+    Linux/Windows installed-monitor and mixed-version controls (#10266).
+    This qualifies that source component, not the broader authoritative
+    replacement target or selected-host acceptance.
 
 ### Phase 4 - Native and clean-room acceptance
 
@@ -344,6 +358,17 @@ retains the operator's wording.
   intent; a maintenance hold keeps installed tasks runnable but quiescent.
   The manual program wipe is not supported-uninstaller conformance evidence.
 - [ ] Verify containing normal Main release and exact released behavior.
+  - [x] Verify the containing #10266 release through normal promotion #10314:
+    Main `142a2a3c50f886a052136fa4aae5e10d6a0fb2f5`, admitted Dev
+    `18f110d637a2133ad5dd08610bf3ca789fd89115`, Worktrees 1.24.445-dev1.
+    Sixteen selected implementation/test/doc/workflow blobs match the reviewed
+    source; two shared-doc deltas are unrelated to the monitor contract.
+    Installed acceptance and the broader replacement target remain separate.
+  - [x] Verify the containing #10148 release through normal promotion #10219:
+    Main `50e353788ca085fd6ba3b97371c9be9ce1bd2301`, admitted Dev
+    `8edcdf8b0dc9e30ea1f1488e8a0f77104564a9d6`, Worktrees 1.24.433-dev1
+    and Bridge 0.9.281-dev1. Twelve documentation/monitor/ZDD blobs match
+    reviewed source; deployment and the full grace target remain separate.
   - [x] Verify the containing #9418 release through normal promotion #9422:
     Main `595c18f6eea91e8227fad1fc5b963fdb0df01bc6`, admitted Dev
     `326a72d1332afe351e7f5e8ac0841ecba56a8230`, Worktrees 1.24.333-dev1
@@ -886,6 +911,16 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
 
 ## Journal
 
+### 2026-11-03 - Successor announcement and resident grace source merged
+
+[Detailed journal](<journal/2026/11.03 successor-grace-qualification.md>).
+Source qualification and containing-release evidence; installed rollout and parent acceptance remain open.
+
+### 2026-11-02 - Windows caller-cleanup prerequisite qualified
+
+[Detailed journal](<journal/2026/11.02 caller-cleanup-prerequisite.md>).
+Caller-lifetime qualification, external readiness limits and existing execution custody remain distinct.
+
 ### 2026-10-28 - Blanket renderer admission removed
 
 [Merged source and final native evidence](<journal/2026/10.28 copied-posix-consumer.md#renderer-admission-removal-merged>).
@@ -904,6 +939,11 @@ the real same-process installation cycles remain open.
 [Forwarding evidence and the remaining renderer gate](<journal/2026/10.28 copied-posix-consumer.md#literal-manager-forwarding>).
 The literal-value repair is landed; opaque-renderer admission and complete
 Manager launch qualification remain open.
+
+### 2026-10-28 - Cache correction released; installed acceptance in progress
+
+[Detailed journal](<journal/2026/10.28 cache-release-and-installed-acceptance.md>).
+Cache release and installed-batch evidence do not qualify the containing unified update or session-survival gates.
 
 ### 2026-10-28 - Source-wheel deadline diagnosis
 
@@ -928,6 +968,20 @@ Manager launch qualification remain open.
   separation. The shared batch deadline and all content checks are unchanged.
   R9 records the remaining native installed-batch acceptance; these component
   results do not close the parent effort or establish the sole timeout cause.
+- #9441 merged as `611e819e298041a4f2b660d4c25900a4bc0149d5` after a
+  clean current-head owner Comment review, no open threads, green required CI,
+  and exact-head real-Setuptools acceptance on Linux and Windows
+  (`40766541130`, head `6cee7367aa9a5b3ee1a59daab75df3d92bd799b7`).
+  The review's pending-native-qualification caveat was resolved by that run.
+  The configured additional-CODEOWNER exception did not waive findings or CI.
+- Required unit CI initially rejected the stale admission digest. Refreshed
+  only the reviewed canonical source digest and verified the complete declared
+  closure; exact unit nodes, coverage targets, effect restrictions and budgets
+  are unchanged. Effectful native controls remain in their separate lane.
+- Re-read all Plan and Validation Plan items after merge. R9 remains open for
+  the containing release and actual installed batch; no generic reconstruction,
+  standby or same-process uninstall acceptance is inferred. Native source sync
+  retained the published recovery ref and advanced onto the merged range.
 
 ### 2026-10-28 - Copied POSIX consumer review corrections
 
@@ -2725,3 +2779,15 @@ Manager launch qualification remain open.
 ### 2026-10-28 - Additive retained #566 contract proposal
 
 Added direct per-source Plan, actual global Validation and continuing custody rows after whole-record and complete receiving-document research. Normal review and current complete receiving readback remain publication gates; this entry records authored tracking only, not a future merge or source disposition. All incumbent finite source/design/release/native credits remain at their actual tiers, with original alternatives, unknowns, source-specific holds and existing source/resource custodians preserved. No implementation, operational effect or claim release is authorized. The campaign's receiving register records delivery and later source judgments separately.
+
+### 2026-10-29 - Engine-repair driver handoff merged; live gate remains open
+
+[Detailed journal](<journal/2026/10.29 engine-repair-handoff.md>).
+Bounded repair and release evidence; whole-suite reconstruction and parent acceptance remain open.
+
+### 2026-10-29 - Custody handoff passed live; remaining installer broker cleanup
+
+[Installer and native consumer prerequisites](<journal/2026/10.29 reconstruction-source-qualification-1.md>);
+[native exit and contributor follow-through](<journal/2026/10.29 reconstruction-source-qualification-2.md>).
+The dated history preserves all failed and passing source evidence, original
+custody and remaining live gates. Component delivery does not complete this effort.
