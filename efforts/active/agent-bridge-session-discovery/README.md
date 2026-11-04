@@ -61,6 +61,20 @@ transport agent-bridge already has for `send`/`create`).
   respect actual source conditions; it does not require inventing native completion,
   a new ACK or an all-parent gate.
 
+
+<!-- backlog-reconciliation:7556:qualified-fifteen:2530:Coordination -->
+
+### Continuing #2530 custody
+
+Keep #2530 the discovery canonical, including both original axes, every inherited #2440
+identity/UX row and every #4044 unrestricted ANY-admitted-peer/all-project
+native-enumeration row. The incumbent discovery, companion identity/protocol,
+primary/elevated hosting, transport/authentication and current registry owners retain
+their actual seams. #60 state/liveness/mutation/purge and #4179's unified interface
+remain separate. Draft stays Draft; the pending Phase 2 wire-shape/deliverability
+decision remains. No new registry, source assignment, peer probe, message/send/create or
+ownership release is authorized.
+
 ## Context
 
 Filed as [copilot-extensions#2530](https://github.com/ThomasMichon/copilot-extensions/issues/2530)
@@ -288,6 +302,89 @@ or whole-parent completion gate is added.
   PROJECT axis: unfiltered no-flag/--all-projects behavior, explicit --project
   narrowing, labels and elevated merge retain their current contract.
 
+
+<!-- backlog-reconciliation:7556:qualified-fifteen:2530:Plan -->
+
+### Direct proposed acceptance from #2530
+
+_Agent-recommended additive tracking proposal; the entire original/refined/directly
+inherited acceptance and its finite evidence tiers remain binding._
+
+Preserve the incumbent Request, status, Participants, Coordination, every old
+Plan/global Validation row and check state, first unresolved gates and full Journal.
+These unchecked rows are proposed tracking, not implementation, accepted source
+transfer, native/release/installed proof, rollout permission or source/resource release.
+Existing issue and source custodians remain; unassigned metadata is not vacancy. No new
+universal ACK, every-host or whole-parent completion gate is introduced.
+
+- [ ] **T2530-compatibility-P:** Preserve existing unfiltered no-flag and explicit
+  --all-projects equivalence for owned ACP and represented native rows. Accept only the
+  existing top-level required-value --project/-p to narrow AFTER primary/elevated merge;
+  keep mutual exclusion with --all-projects. Filter SessionInfo.project versus
+  LiveSessionInfo.repo correctly and label human/JSON rows. This does not broaden state
+  visibility or alter registry mutation/GC.
+
+- [ ] **T2530-identity2440-1-P:** Publish a concise identity/command matrix covering
+  agent names, Bridge-owned session ids, current represented native-session
+  registrations, bare managed worktree handles and current qualified
+  machine/project/worktree addresses. Show actual supported copy/paste syntax and which
+  discovery/resolve command returns each consumable value.
+
+- [ ] **T2530-identity2440-2-P:** Explicitly map companion-tool bare worktree ids, full
+  worktree handles, last_session_id and binding.candidate_session_id to the accepted
+  target or a clear unsupported/stale/unregistered result. An internal ACP conversation,
+  historical native UUID or unjoined session must not be advertised as an
+  interchangeable Bridge session merely because the identifier looks valid.
+
+- [ ] **T2530-identity2440-3-P:** Preserve exact registered-id precedence,
+  worktree-to-current-head resolution, valid names/namespaces and cross-machine
+  identity. Do not guess a different peer, allocate a replacement or reinterpret a
+  qualified missing target as an agent to spawn.
+
+- [ ] **T2530-identity2440-4-P:** For unknown/ambiguous targets, identify supported
+  target forms and the appropriate read-only catalog/resolve command instead of
+  repeating only not-a-known-agent-or-session. Distinguish a stale registration, missing
+  session, unsupported address and actual daemon/protocol failure without leaking
+  foreign/private inventory.
+
+- [ ] **T2530-identity2440-5-P:** Align CLI help, command reference, agent-facing
+  guidance and discovery output so the same example works for the claimed owned or
+  represented path. Cover equivalent worktree handles whose Bridge id differs,
+  handoff/current-head turnover, valid exact/native registration, stale last/candidate
+  ids and namespace collisions without changing established semantics.
+
+- [ ] **T2530-mesh4044-1-P:** Preserve the original unrestricted mesh scope: a consumer
+  on ANY admitted peer machine can enumerate registered native live sessions across the
+  mesh through propagated or federated registries (or an explicitly accepted
+  equivalent). Include a mesh-wide/all-projects view; #2530's any-machine/same-repo
+  query alone is narrower and must not silently replace this original requirement.
+
+- [ ] **T2530-mesh4044-2-P:** Use each hosting Bridge's current registration as its
+  source authority. Return the actual logical machine/project/worktree/native-session
+  identity and honest registration/freshness/status evidence. A topology row, project
+  agent catalog, task assignment, known exact remote target or successful send is not
+  enumeration of the current remote native registry.
+
+- [ ] **T2530-mesh4044-3-P:** Preserve #2530's existing unfiltered local defaults and
+  accepted top-level --project/explicit --all-projects semantics. Optional narrowing
+  must be explicit and must not erase the new mesh-wide view. Respect the existing
+  SessionInfo.project versus LiveSessionInfo.repo distinction, owned/represented
+  classification and primary/elevated merge rather than inventing a second native
+  registry authority.
+
+- [ ] **T2530-mesh4044-4-P:** Aggregate within the existing admitted peer-bridge
+  transport/authentication and protocol owners. Surface partial, unreachable,
+  unsupported, unauthorized and genuine-empty results distinctly and within bounded
+  work; a failed peer is not evidence that no sessions exist there. Return actionable
+  supported identities without creating, resuming, relabeling or taking over an
+  unavailable session.
+
+- [ ] **T2530-mesh4044-5-P:** Preserve discovery/identity documentation and consumer/API
+  behavior, not merely a UI-local cache. Credit #6410 qualified point-address delivery
+  and the #2544 discovery plan as foundations, not completed federation. Resolve the
+  complete any-node/mesh-wide acceptance and supported native/compatibility cases
+  through the existing discovery owner before declaring this added scope complete.
+
 ## Validation Plan
 
 - [ ] `agent-bridge sessions --all-projects` / `agent-bridge live-sessions
@@ -333,6 +430,66 @@ or whole-parent completion gate is added.
   Project-unfiltered must not become state-unfiltered; preserve current default output
   and supported debug access.
 
+
+<!-- backlog-reconciliation:7556:qualified-fifteen:2530:Validation-Plan -->
+
+- [ ] **T2530-compatibility-V:** Cross no-flag, --all-projects, explicit project and
+  conflicting flags with mixed 2+ projects, primary plus reachable/unreachable elevated
+  persisted rows and both project/repo field names. Assert unchanged defaults, uniform
+  post-merge filtering and actual human/JSON labels; retain #60 live/wedged versus
+  include_dead/--all state controls independently. Existing real two-machine
+  deliverability validation remains, not native-on-every-leaf.
+
+- [ ] **T2530-identity2440-1-V:** Exercise actual supported names, exact Bridge IDs,
+  current represented native registrations, bare/full worktree handles and qualified
+  logical machine/project/worktree addresses; each published copy/paste example must
+  resolve to its claimed supported current target or an explicit unsupported outcome.
+
+- [ ] **T2530-identity2440-2-V:** Cover companion bare/full worktree handles,
+  last_session_id and binding.candidate_session_id with different Bridge/native IDs,
+  unjoined/internal/historical conversations and stale turnover. Do not equate UUID
+  shapes.
+
+- [ ] **T2530-identity2440-3-V:** Check exact registered-ID precedence, namespace
+  collisions, logical Windows/WSL identities, qualified missing targets and
+  worktree-to-current-head handoff; no guessed peer, replacement spawn or
+  reinterpretation.
+
+- [ ] **T2530-identity2440-4-V:** Cover ambiguous, missing, stale, unsupported and
+  actual daemon/protocol failures separately. Verify actionable read-only
+  catalog/resolve guidance and no foreign/private inventory disclosure.
+
+- [ ] **T2530-identity2440-5-V:** Verify CLI help, reference, agent guidance and
+  discovery examples agree for both owned and represented paths, including equivalent
+  worktree IDs with differing Bridge IDs, current-head turnover and native/stale
+  collisions.
+
+- [ ] **T2530-mesh4044-1-V:** From an arbitrary admitted peer, qualify unrestricted
+  all-project mesh native enumeration through propagated or federated hosting registries
+  OR an explicitly accepted equivalent; include a session outside the caller's repo on a
+  peer not supplied as a point target. Same-repo fanout alone must not pass.
+
+- [ ] **T2530-mesh4044-2-V:** Check each result's hosting Bridge registration, logical
+  machine/project/worktree/native identity, freshness and status. Topology, task
+  assignment, catalog or successful known-target send cannot substitute for registry
+  rows.
+
+- [ ] **T2530-mesh4044-3-V:** Cross unrestricted mesh view with explicit project
+  narrowing, local unfiltered/--all-projects defaults,
+  SessionInfo.project/LiveSessionInfo.repo, primary/elevated and owned/represented rows;
+  no second registry.
+
+- [ ] **T2530-mesh4044-4-V:** Through existing admitted auth/protocol seams, distinguish
+  bounded partial/unreachable/unsupported/unauthorized/confirmed-empty peers and
+  actionable supported identities; no creation/resume/relabel/takeover. Retain the
+  original ROOT's real two-machine acceptance without adding every-host or universal
+  native tests.
+
+- [ ] **T2530-mesh4044-5-V:** Qualify consumer/API and documentation alongside the
+  selected supported native/compatibility cases through the existing discovery owner.
+  Credit #6410 point delivery and #2544 design, but require complete
+  any-node/all-project enumeration before that scope is called complete.
+
 ## Proposal
 
 _Pending — Phase 2's exact wire shape needs a short design pass before
@@ -377,3 +534,16 @@ before implementing Phase 1.
 ### 2026-10-28 - Additive retained #60 contract proposal
 
 Added direct per-source Plan, actual global Validation and continuing custody rows after whole-record and complete receiving-document research. Normal review and current complete receiving readback remain publication gates; this entry records authored tracking only, not a future merge or source disposition. All incumbent finite source/design/release/native credits remain at their actual tiers, with original alternatives, unknowns, source-specific holds and existing source/resource custodians preserved. No implementation, operational effect or claim release is authorized. The campaign's receiving register records delivery and later source judgments separately.
+
+<!-- backlog-reconciliation:7556:qualified-fifteen:2530:Journal -->
+
+### 2026-10-28 - Proposed #2530 retained-contract amendment
+
+Retained the corrected unfiltered defaults, one top-level project option,
+labels/elevated merge, all five #2440 identity/UX clauses and all five #4044
+unrestricted mesh-native clauses as direct Plan/global Validation pairs. The plan and
+qualified point-delivery foundations remain credited, not represented as completed
+enumeration or an accepted stronger receiver. This is authored tracking only, pending
+normal review, actual delivery and complete current readback. All prior rows, checked
+credit, custodians and Journal remain; no implementation, activation, native/installed
+result, source closure or resource release is asserted.

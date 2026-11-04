@@ -94,6 +94,17 @@ budget-guidance's non-rollout exception.
   Use the standard context-handoff flow to hand off between phases; the
   Journal below is the resumption point.
 
+<!-- backlog-reconciliation:7556:qualified-fifteen:2729:Coordination -->
+
+### Continuing #2729 custody
+
+Keep #2729 as the complete hygiene canonical, current package/installer/interpreter and
+source/resource/activation custodians and original #2726 inheritance. Engine owner
+coordinates only its actual shared-mechanics/adopter boundary;
+Procutil/Manager/Worktrees are not silently lost to the service-engine rollout subset.
+Reviewed mapping is not accepted transfer, source appointment, owner expiry, environment
+scan or remediation permission.
+
 ## Context
 
 - **`visions/plugin-services` §Features/`self-contained-runtime`**: *"Every
@@ -546,6 +557,70 @@ seven-row ledger.
   intake fails, retain the whole source. No product/native/install/cache operation or
   implementation claim is authorized by this proposal.
 
+<!-- backlog-reconciliation:7556:qualified-fifteen:2729:Plan -->
+
+### Direct proposed acceptance from #2729
+
+_Agent-recommended additive tracking proposal; the entire original/refined/directly
+inherited acceptance and its finite evidence tiers remain binding._
+
+Preserve the incumbent Request, status, Participants, Coordination, every old
+Plan/global Validation row and check state, first unresolved gates and full Journal.
+These unchecked rows are proposed tracking, not implementation, accepted source
+transfer, native/release/installed proof, rollout permission or source/resource release.
+Existing issue and source custodians remain; unassigned metadata is not vacancy. No new
+universal ACK, every-host or whole-parent completion gate is introduced.
+
+#### Plan
+
+- [ ] **R2729-P1:** Retain the complete #2729 original AND directly inherited #2726
+  union, not only an installer diagnostic bullet: map Worktrees, Bridge, Dispatch,
+  Worktree Manager and Procutil to shared read-only detection/equivalent own command OR
+  explicit documented package exclusion. Preserve Procutil dependency/consumer coverage
+  and Worktrees hygiene despite its unrelated permanent service-engine-adoption
+  exception.
+
+- [ ] **R2729-P2:** Identify intended interpreter, own site schemes and
+  package/console-script source; distinguish runtime/dev-test/intentionally shared
+  global Python. Resolve supported editable artifacts and
+  wrong-existing/deleted/authorized-dev/unknown targets without finder execution or
+  suspect product import. Unreadable/permission/uninspected state is visibly
+  unavailable, never clean.
+
+- [ ] **R2729-P3:** Choose and document isolated per-worktree environment AND/OR loud
+  import/test source assertion, retaining supported intentional shared interpreters.
+  Prove silent wrong-checkout testing cannot recur; manually remembered scan/PYTHONPATH
+  alone does not satisfy this prevention.
+
+- [ ] **R2729-P4:** Carry applicable named Windows/POSIX owner-installer best-effort
+  NONFATAL detection/warnings, with at least ONE actual automatic post-update
+  integration and proved nonfatal failure. Keep result/health/lifecycle and manual
+  remediation; no automatic --fix/global uninstall. Consider existing fleet
+  coordination/shared-library reuse without mandating another watcher/framework.
+
+- [ ] **R2729-P5:** Preserve package/interpreter/artifact ownership, explicit
+  remediation consent, foreign/active metadata and .worktrees-not-ownership truth. Any
+  separately approved cleanup targets only exact verified interpreter/artifacts and
+  reports leftovers/failure, never a generic global sweep.
+
+#### Local Validation
+
+- [ ] **R2729-V1:** Whole named-package inclusion/exclusion and shared-detector coverage
+  must include correct/incorrect running interpreter and site schemes,
+  existing-wrong/deleted/intentionally authorized source, supported/inconclusive
+  editable artifacts, multiple candidates, console shadowing and read failures using
+  owned contained fixtures without executing suspect finders.
+
+- [ ] **R2729-V2:** Demonstrate the chosen prevention alternative detects wrong-source
+  test/import and preserves valid intentional shared/dev sources. Qualify actual
+  automatic post-update integration success AND warning/nonfatal failure without
+  changing installation result or entering manual-fix/global-uninstall authority.
+
+- [ ] **R2729-V3:** Retain explicit-consent/exact-artifact/foreign-active preservation
+  and truthful leftover failures as their own boundary. Keep native
+  Windows/POSIX/real-global evidence at its original appropriate separately authorized
+  tier; source/mock/merge/installed evidence and unknowns remain distinct.
+
 ## Validation Plan
 
 - [ ] Qualify manual replacement through unsupported old recovery/monitor and
@@ -606,6 +681,16 @@ seven-row ledger.
       then either (a) offset by later adopter conversions before this effort
       closes, or (b) carried by an explicit follow-up tightening item in the
       Plan/Validation Plan rather than silently treated as satisfied.
+
+<!-- backlog-reconciliation:7556:qualified-fifteen:2729:Validation-Plan -->
+
+- [ ] **R2729-G1:** Resolve EVERY direct #2729 original/refined/inherited #2726 P/localV
+  clause: ALL FIVE named distributions with diagnostics OR documented exclusions, exact
+  intended-interpreter/site/package/entrypoint truth, non-importing editable inspection,
+  isolated-env AND/OR loud-source prevention, applicable installer surfaces plus at
+  least one automatic NONFATAL post-update witness, explicit remediation custody and
+  full finite negative matrix. Preserve current engine exceptions/credit and all
+  existing owners; no whole-engine/every-host/new-watcher gate.
 
 ## Proposal
 
@@ -2080,6 +2165,18 @@ appropriately larger/riskier for one sitting):
   - `python3 tools/check-changefile-presence.py --base origin/dev`
   - `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-vault --reinstall --admission-wait 540`
     -> PASS (`260 passed, 12 skipped`)
+
+<!-- backlog-reconciliation:7556:qualified-fifteen:2729:Journal -->
+
+### 2026-10-28 - Proposed #2729 finite receiving contract
+
+Added direct unchecked Plan, local Validation, actual global Validation and continuing
+custody rows after whole-contract and fixed-document qualification. This records
+authored tracking only; normal review, actual delivery and full current readback remain
+outstanding. Retain the complete five-package AND directly inherited #2726 union,
+generic detector/report-first credit, interpreter/remediation custody and the distinct
+permanent service-engine exception. No product, native, release, resource or claim
+result is asserted.
 
 ### 2026-10-08 — `agent-codespaces` conversion prepared for review
 
