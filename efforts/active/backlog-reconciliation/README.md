@@ -467,6 +467,22 @@ packet staging. Only five remaining originals/35 texts are staged for direct
 complete reading; both held members and their source/subset retries stay
 withheld. No receiving fit, disposition or custody change follows.
 
+The [measurement/preservation study](measurement-preservation-cohort.md)
+integrates seven complete originals and sixteen comments: 23 texts,
+48,865 body characters. The inherited-held eighth member remains unrendered.
+Thirteen whole messages provide fourteen comparisons; two actual merged
+descriptions provide three more, while four protected relations stay withheld.
+Preserve configured landing/exact completion, historical vector repair,
+cross-platform preservation, reusable Win32 types, exact selected binding
+repair, selected-PR uncertainty and bounded active/quiet discovery as distinct
+outcomes. Two complete fixed-source functions retain #6026's per-call type
+pattern, not a measured leak or native failure. No whole receiver, source
+closure, appointment, runtime acceptance or custody transfer is qualified;
+all seven originals and every existing parent check state remain unchanged.
+Two equal complete eleven-page scans at 20:08:22 UTC / 12:08:22 PST count
+1,019 whole open, 290 above 729: 745 eligible, 274 excluded,
+680 original-cohort and 339 inflow. No identity changes or closure credit occur.
+
 The [venue/runtime-adapter study](venue-runtime-cohort.md) now reads the five
 remaining eligible originals and all thirty comments in full: 35 texts,
 66,668 body characters. The two inherited-held members stay excluded, and the
@@ -480,6 +496,25 @@ or custody transfer is qualified; all five sources remain OPEN.
 Two equal complete eleven-page scans at 19:43:39 UTC / 11:43:39 PST still
 count 1,019 whole open, 290 above 729: 745 eligible, 274 excluded,
 680 original-cohort and 339 inflow. No identity changes or closure credit occur.
+
+
+The venue study is delivered research documentation, not implementation or
+an accepted source/resource transfer. Its complete delivery and readback
+record remains in the [dated journal](<journal/2026/11.04 venue-runtime-contracts.md>).
+All five sources and every parent check state remain unchanged.
+Two equal complete eleven-page scans at 19:57:30 UTC / 11:57:30 PST remain
+1,019 whole open, 290 above 729, without identity changes or closure credit.
+
+The next existing eight-member core has unchanged metadata. Reference closure
+withholds #8377 before rendering because of protected lineage; seven originals
+and sixteen comments are fully read in one bounded scope. Thirteen independent
+whole messages and two qualified actual merged descriptions supply bounded
+comparisons, with another message and one description withheld before rendering.
+No whole receiving home is qualified. A separate immutable inspection of both
+complete affected #6026 functions still finds per-call structure definitions;
+that establishes the retained source pattern, not a measured leak or native
+failure. Integrate the complete seven-contract union without rereading held
+sources, transferring owners or turning partial/planning gains into completion.
 
 
 - [x] Holistically sweep the initial eligible backlog and build an issue/effort
@@ -739,6 +774,16 @@ count 1,019 whole open, 290 above 729: 745 eligible, 274 excluded,
   normal publication flow.
 
 ## Validation Plan
+
+The [measurement/preservation study](measurement-preservation-cohort.md)
+preserves seven complete contracts and all refinements without rereading
+assigned originals or retrying the inherited-held member. Seventeen bounded
+comparisons retain message/description tiers; four relations remain withheld
+before rendering. Scores, prior invalidations, unrelated/held rows and all
+incumbent checks survive. The two-function source read proves only #6026's
+retained allocation pattern, not runtime growth, native failure, a fix or
+whole-file acceptance. Historical gains, literal OPEN/handoff conditions,
+selected repair authority and released/installed residuals stay distinct.
 
 The [venue/runtime-adapter study](venue-runtime-cohort.md) preserves five whole
 originals and thirty comments without retrying either inherited-held member.

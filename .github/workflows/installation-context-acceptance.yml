@@ -1557,6 +1557,10 @@ jobs:
         run: python tools/seasoned_uv.py --uv uv --registry-only -- --system packaging
       - name: Locked builds, source verification and offline standalone install
         run: python tools/smoke_public_toolchain.py --standalone
+      - name: Stage, install and repeat the inert Fleet client application
+        env:
+          PYTEST_ADDOPTS: "-k regular_wheel_application_installs_an_inert_client"
+        run: python tools/run-standalone-tests.py fleet-manager --prepare --timeout 120
 
   pr-artifacts-windows:
     if: ${{ inputs.pr_artifacts }}

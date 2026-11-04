@@ -343,10 +343,11 @@ other runtimes and user configuration. Results distinguish
 
 `fleet-manager client-generation` is separate from the version-1 `client-state`
 commands. Every operation requires explicit `--root` and `--identity` paths.
-The root must already be an existing private directory; only `initialize`
-creates the lineage database. Optional `initialize --legacy-root <path>` imports
+The root must already be an existing private directory; `initialize` and the
+explicit `install` composition can create the lineage database.
+Optional `initialize --legacy-root <path>` imports
 the exact legacy origin and admitted floor without cleaning up or rewriting it.
-Retries must name the same origin. No other command implicitly initializes,
+Retries must name the same origin. Other primitive commands never initialize,
 chooses a release, allocates a generation/request or replays predecessor work.
 
 | Operation | Additional explicit inputs | Outcome |
@@ -356,6 +357,8 @@ chooses a release, allocates a generation/request or replays predecessor work.
 | `register-commands` | `--reservation`, `--command-directory`, authenticated inputs below | Owned default-command publication; returns its exact `publication` ID |
 | `unregister-commands` | `--reservation`, `--publication`, `--command-directory` | Exact-attempt withdrawal; does not remove a runtime |
 | `remove-runtime` | `--reservation` | Exact-generation retirement and native runtime cleanup; never installation retirement |
+| `install` | `--generation`, `--request`, `--selection`, `--command-directory`, `--replace-commands`, authenticated inputs below | Explicit initialization when absent, healthy construction and complete default command-family selection |
+| `uninstall` | `--reservation`, `--publication`, `--command-directory` | Exact-attempt withdrawal followed by exact-generation runtime removal; preserves the lineage and user state |
 
 Authenticated inputs are `--release`, `--proof`, `--policy`, `--sources`,
 `--target` and a separate existing private `--staging-parent`. Policy and target
@@ -366,6 +369,69 @@ report. Save the construction result's `reservation`, or recover it from
 does not repair a corrupt journal, initialize missing state or execute a runtime;
 stored selection/publication metadata is not fresh physical health evidence.
 Save `register-commands`' returned `publication` ID for exact withdrawal.
+`install` returns that same publication ID and the exact reservation, so its
+result supplies both inputs needed by `uninstall`.
+
+#### Explicit managed composition
+
+`install` is also the forward-update operation: supply a fresh generation and
+request with the independently selected same or higher release. It never picks
+a release, creates directories, changes PATH or starts a service. A missing
+`--replace-commands` refuses before initialization. That flag expresses the
+trusted caller's existing authority over the fixed command family in the exact
+supplied private directory; it is not permission to discover or take over
+unrelated commands. No automatic-maintenance invocation is exposed.
+
+Receiver support is declared in the selected immutable runtime's packaged
+`fleet_manager/client-lifecycle-contract.json`, schema
+`fleet-manager.client-lifecycle-contract`, version `1`, capability
+`explicit-generation-installation-v1`. It describes version-1 install/uninstall
+reports, not package-version equality or release permission. Read it from the
+runtime actually selected for execution, never a newer payload or another
+interpreter's package. A missing declaration means unknown managed-composition
+support: preserve the old primitive interface and do not automatically emit
+`install`/`uninstall` or replay an older effectful sequence after a failure.
+This is provider-first expansion; no autonomous caller migration or old-command
+removal occurs here. Manual users can also inspect that executable's
+`client-generation --help`. Rollback to an older provider removes this optional
+capability, not the previously supported commands.
+
+The composition initializes only an absent journal; existing version-2 lineage
+state is validated by its owners, not reinitialized or reset. Legacy adoption
+remains the explicit initialization operation above so the accepted floor is
+imported, never guessed. Construction, compatibility and installed direct health
+precede incoming publication. The existing publication owner proves every
+applicable default launcher and acknowledges selection only after their actual
+installed diagnostics pass. A directly healthy runtime alone is not successful
+`install`.
+
+Before publication, the composition durably saves the initial physical command
+target observation as `client-installation-targets.json` in the exact owned
+generation root. It uses existing generation custody and private, synced atomic
+metadata publication. A retry rereads this original observation; it does not
+silently treat newly changed command objects as a fresh replacement decision.
+The existing producer's baseline/progress proof admits an interrupted attempt's
+own changes. Missing incoming observation after publication refuses an exact
+retry rather than fabricating one. A new explicitly selected generation does
+not read or repair that predecessor's observation or copy receipts.
+
+The result is `fleet-manager.client-generation-installation`, version `1`,
+with explicit intent, direct command, reservation, publication and independently
+proved `installed`, `started`, `selected` and `registered` outcomes. These facts
+are local client readiness, not Gateway authentication or live fleet readiness.
+An error retains the exact request and real partial outcomes for inspection or
+retry; it does not undo a successful incoming runtime, lower the admission floor
+or clean up its predecessor.
+
+`uninstall` composes only the existing strict withdrawal and native runtime
+removal operations. A foreign command or busy retained runtime can refuse; retry
+keeps the original reservation/publication. Superseded commands remain selected
+for their successor, while exact-generation removal retains its independent
+proof requirements. The uninstallation result distinguishes absent commands
+from superseded commands. Neither outcome removes the lineage database,
+generation history, admission floor, configuration, credential references,
+backups or other retained runtimes. This is not whole-install identity retirement
+or a system package-manager uninstall.
 
 Inspection returns at most 64 reservations in generation-ID order. The
 `retired` mapping covers that same page; `reservation_count` reports the total
@@ -384,8 +450,8 @@ no target or foreign object is adopted or changed by that refusal.
 A refused publication does not undo an independently started direct command.
 Retry the same explicit request rather than silently allocating new identifiers.
 No command changes PATH, deletes the lineage, retires the installation or grants
-live rollout. Complete installation retirement and installer integration remain
-separate work.
+live rollout. Complete installation retirement, automatic maintenance, broader
+setup integration and live-adopter qualification remain separate work.
 
 A successful `fleet-manager.client-construction`, version `1`, reports
 `constructed: true`, `healthy: true`, the candidate/runtime fingerprint,

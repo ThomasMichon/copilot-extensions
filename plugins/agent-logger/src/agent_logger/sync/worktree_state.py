@@ -106,10 +106,12 @@ class WorktreeStateReceipt:
     manifest_sha256: str
     member_sha256: str
     member_bytes: int
+    contributors_sha256: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
-        return {
-            "schema": "agent-logger.worktree-state-receipt", "version": 1,
+        result = {
+            "schema": "agent-logger.worktree-state-receipt",
+            "version": 1 if self.contributors_sha256 is None else 2,
             "identity": self.identity.as_dict(), "destination": self.destination,
             "manifest_sha256": self.manifest_sha256,
             "members": {"agenda.sqlite3": {
@@ -119,6 +121,9 @@ class WorktreeStateReceipt:
             "remote_archive_acknowledged": False,
             "reclamation_authorized": False,
         }
+        if self.contributors_sha256 is not None:
+            result["contributors_sha256"] = self.contributors_sha256
+        return result
 
 
 def contributing_sessions(sessions: tuple[str, ...]) -> tuple[str, ...]:

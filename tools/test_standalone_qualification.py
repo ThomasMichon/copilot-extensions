@@ -142,6 +142,84 @@ def test_bridge_contracts_portfolio_keeps_existing_budgets_and_explicit_scope():
     assert "capture_reproducible_real_commit_preserves_history" in commands[1]
 
 
+@pytest.mark.parametrize("fault", [None, "consumer", "missing", "duplicate", "skipped"])
+def test_managed_fleet_packet_requires_all_exact_consumers_without_wider_budgets(
+    tmp_path, monkeypatch, capsys, fault,
+):
+    import os
+    import runpy
+    import shlex
+    import subprocess
+    import sys
+    from types import SimpleNamespace
+    import xml.etree.ElementTree as ET
+
+    workflow = source_workflow(SCRIPT.parent.parent, "installation-context-full.yml")
+    step = next(
+        step for step in workflow["jobs"]["fleet-client-generations-linux"]["steps"]
+        if step.get("name") == "Qualify explicit managed client installation and exact removal"
+    )
+    tests = tmp_path / "fleet-manager/tests"
+    tests.mkdir(parents=True)
+    for name in ("test_client_generation_cli.py", "test_unrelated.py"):
+        (tests / name).touch()
+    (tmp_path / ".test-venvs/fleet-client-consumers").mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "path", sys.path.copy())
+    monkeypatch.setenv("PYTEST_ADDOPTS", "--unsafe-inherited-selection")
+    original = dict(os.environ)
+    observed = []
+
+    def run(command, *, cwd, timeout, max_stdout_bytes, max_stderr_bytes, env=None):
+        assert cwd == tmp_path and max_stdout_bytes == max_stderr_bytes == 16 * 1024 * 1024
+        if command[1] == "tools/run-standalone-tests.py":
+            assert command == [
+                sys.executable, "tools/run-standalone-tests.py", "fleet-manager", "--timeout", "120",
+            ] and timeout == 180
+            arguments = shlex.split(env["PYTEST_ADDOPTS"])
+            assert arguments[0] == "--ignore=" + str(tests / "test_unrelated.py")
+            assert "--unsafe-inherited-selection" not in arguments
+            expression = arguments[arguments.index("-k") + 1]
+            assert expression.startswith("actual_installed_console_managed_lifecycle and ")
+            transition = expression.split()[-1]
+            observed.append(transition)
+            if fault == "consumer":
+                raise subprocess.CalledProcessError(1, command)
+            root = ET.Element("testsuites")
+            suite = ET.SubElement(root, "testsuite")
+            if fault != "missing" or transition != "higher":
+                case = ET.SubElement(
+                    suite, "testcase", name=f"test_actual_installed_console_managed_lifecycle[{transition}]",
+                )
+                if fault == "skipped" and transition == "higher":
+                    ET.SubElement(case, "skipped")
+                if fault == "duplicate" and transition == "higher":
+                    ET.SubElement(suite, "testcase", name=case.attrib["name"])
+            ET.ElementTree(root).write(arguments[arguments.index("--junitxml") + 1])
+        else:
+            assert command[1:3] == [
+                "-I", "tools/clean-room/scenarios/fleet-manager-client-admission/verify.py",
+            ] and command[-1] == "--managed" and timeout == 30
+            verifier = SCRIPT.parent / "clean-room/scenarios/fleet-manager-client-admission/verify.py"
+            with monkeypatch.context() as context:
+                context.setattr(sys, "argv", [str(verifier), *command[-2:]])
+                runpy.run_path(str(verifier), run_name="__main__")
+        return SimpleNamespace(stdout="", stderr="", check_returncode=lambda: None)
+
+    monkeypatch.setitem(sys.modules, "agent_procutil.owned_process", SimpleNamespace(run_caller_owned=run))
+    body = compile(step["run"], "<managed-fleet-workflow>", "exec")
+    if fault:
+        expected = subprocess.CalledProcessError if fault == "consumer" else AssertionError
+        with pytest.raises(expected):
+            exec(body, {})
+        assert "INSTALLED_MANAGED_CLIENT_LIFECYCLE_PASS" not in capsys.readouterr().out
+    else:
+        exec(body, {})
+        assert observed == ["retry", "forward-missing", "forward-malformed", "higher", "uninstall", "foreign"]
+        assert "INSTALLED_MANAGED_CLIENT_LIFECYCLE_PASS" in capsys.readouterr().out
+    assert dict(os.environ) == original
+
+
 def test_pane_argv_portfolio_is_manual_pinned_and_keeps_work_scoped():
     workflow = source_workflow(SCRIPT.parent.parent, "installation-context-full.yml")
     triggers = workflow["on"] if "on" in workflow else workflow[True]

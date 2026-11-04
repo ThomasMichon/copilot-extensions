@@ -22,7 +22,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
 from runtime_application_binstubs import global_binstubs, write_slot_binstubs
-from runtime_application_project import emit
+from runtime_application_project import emit, install_callbacks
 import runtime_application_install
 from local_install_profile import source_inputs as install_source
 from installer_wheel_snapshot import retain_wheel_inputs
@@ -275,6 +275,28 @@ def test_install_without_start_commits_one_update_after_unlocked_verification(
     assert (fixture.root / "current-version").read_bytes() == b"2.0\n"
     assert (fixture.root / "last-known-good").read_bytes() == b"2.0\n"
     assert (fixture.global_bin / "fixture-app.cmd").is_file()
+    assert (fixture.slot / "install-success.json").is_file()
+
+
+def test_fleet_client_install_publishes_without_a_host_callback(install_transaction, monkeypatch):
+    fixture = install_transaction
+    setup, start = install_callbacks("fleet-manager")
+    fixture.record.update(
+        name="fleet-manager", module="fleet_manager.__main__:main", commands=["fleet-manager"],
+        root_environment="FLEET_MANAGER_HOME", default_directory=".fleet-manager",
+        setup=setup, start=start,
+    )
+    (fixture.slot / "application.json").write_text(json.dumps(fixture.record), encoding="utf-8")
+
+    def refuse_callback(_record, arguments, *_):
+        if arguments:
+            pytest.fail("ordinary Fleet client installation must not invoke a hosting callback")
+
+    monkeypatch.setattr(runtime_application_install, "_run", refuse_callback)
+    runtime_application_install.install(fixture.slot, stage=False, global_bin=fixture.global_bin)
+    assert (fixture.root / "current-version").read_bytes() == b"2.0\n"
+    assert (fixture.root / "last-known-good").read_bytes() == b"2.0\n"
+    assert (fixture.global_bin / "fleet-manager.cmd").is_file()
     assert (fixture.slot / "install-success.json").is_file()
 
 
