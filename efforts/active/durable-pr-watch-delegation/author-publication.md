@@ -4,6 +4,10 @@ Return to the [owning effort](README.md#author-publication-and-metadata-converge
 This is a bounded implementation proposal within the existing checkout-free
 and client-convergence lanes, not a second PR effort or watcher.
 
+**Disposition:** the selected source contribution merged in #10402. Live,
+installed-consumer and remaining remote-only evidence duties are transferred
+to #10412, owned by ThomasMichon. The broader effort remains Active.
+
 ## Request and authority
 
 Public-safe capture of the requested outcome:
@@ -71,10 +75,10 @@ current behavior remains unchanged indefinitely.
 
 ### A0 - Contract and target policy
 
-- [ ] Reconcile the public front doors and their installed capability reporting
+- [x] Reconcile the public front doors and their installed capability reporting
   with this matrix. Distinguish managed caller, delegated source workspace,
   target repository, credential scope and publication profile.
-- [ ] Specify supported inputs and outcomes for an already-pushed candidate,
+- [x] Specify supported inputs and outcomes for an already-pushed candidate,
   delegated validation evidence and metadata-only repair. Resolve the target's
   publication enablement, branch conventions and human-completion policy
   explicitly; never inherit the caller's unrelated merge authority.
@@ -100,39 +104,39 @@ than weakening checks to make checkout-free creation appear supported.
 
 ### A1 - Policy-qualified foreign creation
 
-- [ ] Extend the existing foreign creation path to qualify the delegated
+- [x] Extend the existing foreign creation path to qualify the delegated
   candidate against the resolved publication policy. Validate evidence identity,
   source/target binding and applicable freshness before effects.
-- [ ] Refresh authoritative remote source identity at publication. Preserve
+- [x] Refresh authoritative remote source identity at publication. Preserve
   caller claims, idempotent existing-PR recovery, explicit unsupported outcomes
   and honest uncertainty where the provider cannot supply atomic fencing.
   Do not solve the current refusal by disabling publication checks.
 
 ### A2 - Verified author metadata
 
-- [ ] Reuse or extend the central provider operations for full descriptions,
+- [x] Reuse or extend the central provider operations for full descriptions,
   title, explicit reviewer requests and work-item links; compose the existing
   additive publication-label operation.
-- [ ] Preserve exact multiline/quote-heavy Markdown readback, unrelated metadata
+- [x] Preserve exact multiline/quote-heavy Markdown readback, unrelated metadata
   and reviewer sets, revision-guarded cross-project work-item linking and
   verification from both relation endpoints.
-- [ ] Retain created PR identity and per-action confirmed/unknown outcomes after
+- [x] Retain created PR identity and per-action confirmed/unknown outcomes after
   partial failure. Repair the same PR without repeating a source push or create;
   reconcile uncertain effects before retrying.
 
 ### A3 - Delegated source publication
 
-- [ ] Extend the existing source-publication owner for admitted adopted
+- [x] Extend the existing source-publication owner for admitted adopted
   workspaces or a supported adapter, without pretending `--workspace` performs
   adoption. Verify the canonical push destination and reviewed candidate.
-- [ ] Preserve target branch naming, hooks, existing remote changes and
+- [x] Preserve target branch naming, hooks, existing remote changes and
   merge-forward versus rebase policy. Do not copy unrelated caller commits,
   force a managed branch scheme onto the product, or move Git authority into
   the remote observation service.
 
 ### A4 - One documented front door
 
-- [ ] Update generic PR-workflow guidance and capability-directed examples for
+- [x] Update generic PR-workflow guidance and capability-directed examples for
   create, source update, metadata repair, status and waiting.
 - [ ] Inventory consumer skills, dispatch seeds, templates and competing helper
   triggers. Route supported operations through the same domain contract;
@@ -142,30 +146,38 @@ than weakening checks to make checkout-free creation appear supported.
   permission. Missing capability blocks dependent publication rather than
   authorizing raw forge calls, token workarounds or an automatic runtime update.
 
+The remaining consumer adapter, venue policy/authentication delivery and
+installed replacement acceptance belong to #10412. Generic source guidance
+does not close those rows.
+
 ### A5 - Qualification and adoption
 
 - [ ] Complete the validation matrix below and record source, release and
   installed-consumer evidence separately.
-- [ ] Assign any downstream migration and authorized rollout to named tracked
+- [x] Assign any downstream migration and authorized rollout to named tracked
   owners before closing this finite slice. Closing it does not close #6007,
   #7051, #7188 or their broader acceptance.
 
+Source validation is recorded below. The operator selected source-PR completion
+with live/installed adoption tracked separately; #10412 carries the remaining
+matrix rows and consumer work under the same retained domain owners.
+
 ## Validation (agent-recommended)
 
-- [ ] **Caller and target:** exercise a managed host with no target checkout,
+- [x] **Caller and target:** exercise a managed host with no target checkout,
   an already-pushed foreign branch, adopted source workspaces and invalid/
   ambiguous bindings. Prove no caller-provider fallback or lost PR claim.
-- [ ] **Publication evidence:** accept the correct source/policy/workspace
+- [x] **Publication evidence:** accept the correct source/policy/workspace
   evidence; refuse stale source, altered receipt/configuration, wrong target,
   wrong identity and source movement during preflight without weakening checks.
-- [ ] **Metadata:** verify full Markdown including blanks/quotes/Unicode,
+- [x] **Metadata:** verify full Markdown including blanks/quotes/Unicode,
   reviewer preservation, cross-project links on both sides, additive labels,
   and a metadata-only change with zero source pushes or duplicate creations.
-- [ ] **Uncertain effects:** inject timeouts before and after each write,
+- [x] **Uncertain effects:** inject timeouts before and after each write,
   failed readback and partial metadata/claim settlement. Preserve confirmed
   PR identity and reconcile the same operation rather than promising exactly
   once or blindly replaying it.
-- [ ] **Source updates:** preserve hooks, user branch naming, existing remote
+- [x] **Source updates:** preserve hooks, user branch naming, existing remote
   work and published-history policy; reject wrong destinations and unrelated
   caller source. Check actual publication, not only a review receipt helper.
 - [ ] **Observation continuity:** retain native policy/vote/thread semantics,
@@ -180,6 +192,11 @@ than weakening checks to make checkout-free creation appear supported.
   and a real isolated ADO lane when separately authorized and available.
   Record unavailable lanes and named follow-ups; mocks, source merge or a
   healthy service do not establish installed acceptance.
+
+Checked rows describe source/adapter and disposable real-Git controls, not
+live ADO or installed acceptance. The unchecked continuity, consumer and tier
+rows, plus remote-only transport qualification, are explicitly retained in
+#10412; they have not been silently waived.
 
 ## Implementation journal
 
@@ -229,10 +246,25 @@ Parser/dispatch ownership and pure presentation were extracted to stay within
 the existing hard/shrink-only module limits; no ceiling was widened.
 Required CI and another current-head review remain separate publication gates.
 
+### 2026-11-04 - Source merged; adoption transferred
+
+#10402 merged as `b036978b37993bdefee11e2d3f4c18557b5da4fb` after current-head
+Copilot approval, all five corrected review threads resolved, and successful
+required CI run `41810303402`. The tested source head was
+`75c96135bdd233823b195628983babce472f3127`. Two additional AAD-only controls
+passed: token construction and creation plus exact description readback with no
+PAT. PATs are not a prerequisite.
+
+The operator selected completion of the source PR with live/installed
+acceptance tracked separately. #10412 is the named, assigned continuation for
+remaining A4-A5 consumer migration, live/installed and remote-only evidence
+qualification. No rollout occurred, and no existing consumer helper was retired.
+This closes the finite source contribution, not #6007, #7051 or #7188.
+
 ## Completion and next action
 
-The reviewed plan is in implementation, not complete. Drive the candidate
-through normal review, required CI and actual merge, then reconcile each A0-A5
-exit against the merged source and separately retained adoption duties.
+The selected source contribution is merged. Continue separately authorised
+adoption from #10412; resolve the remaining A4-A5 and validation rows against
+actual installed/live evidence before declaring this whole amendment complete.
 The existing effort remains Active and every broader Plan/Validation row stays
 in force. This document contains no installed or rollout completion claim.
