@@ -33,7 +33,8 @@
         "efforts"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict",
+      "python_version": "3.11"
     },
     {
       "name": "fleet-manager",

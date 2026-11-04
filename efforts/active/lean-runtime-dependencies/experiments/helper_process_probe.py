@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable, Iterator
 import json
 import queue
 import statistics
-import subprocess
+import subprocess as subprocess
 import sys
 import threading
 import time
@@ -14,29 +15,50 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Any, TextIO, TypedDict, cast
 
 REPO = Path(__file__).resolve().parents[4]
 for library in ("zdd", "agent-procutil", "work-coalescing-singleton"):
     sys.path.insert(0, str(REPO / "libs" / library / "src"))
 
-from agent_procutil import no_window_kwargs  # noqa: E402
-from work_coalescing_singleton import CoalescingServer, client  # noqa: E402
+from agent_procutil import no_window_kwargs as no_window_kwargs  # noqa: E402
+from work_coalescing_singleton import CoalescingServer, client as client  # noqa: E402
 from zdd.routing import read_table  # noqa: E402
 
 CONSUMERS = ("alpha", "beta")
+Endpoint = tuple[str, int, str]
 
 
-def read(root: Path, consumer: str) -> dict:
+class Measurement(TypedDict):
+    requests: int
+    median_ms: float
+    p95_ms: float
+    wall_ms: float
+
+
+class ProbeReport(TypedDict):
+    python: str
+    platform: str
+    rounds_per_consumer: int
+    warm_direct_read: Measurement
+    fresh_process_per_read: Measurement
+    two_resident_helpers: Measurement
+    one_shared_helper: Measurement
+    closed_helper_refused_and_direct_path_preserved: bool
+    limits: str
+
+
+def read(root: Path, consumer: str) -> dict[str, str]:
     if consumer not in CONSUMERS:
         raise ValueError("unknown synthetic consumer")
     table = read_table(root / consumer, strict=True)
     if table != {"fixture": consumer}:
         raise RuntimeError("routing fixture missing or crossed consumer boundary")
-    return table
+    return cast(dict[str, str], table)
 
 
 def serve(root: Path) -> None:
-    def compute(kind: str, payload: dict) -> dict:
+    def compute(kind: str, payload: dict[str, Any]) -> dict[str, str]:
         if kind != "read":
             raise ValueError("unsupported probe operation")
         return read(root, payload["consumer"])
@@ -51,7 +73,7 @@ def serve(root: Path) -> None:
 
 
 @contextmanager
-def helper(root: Path):
+def helper(root: Path) -> Iterator[Endpoint]:
     process = subprocess.Popen(
         [sys.executable, str(Path(__file__).resolve()), "--serve", str(root)],
         stdin=subprocess.PIPE,
@@ -62,7 +84,7 @@ def helper(root: Path):
     )
     ready: queue.Queue[str] = queue.Queue()
     reader = threading.Thread(
-        target=lambda: ready.put(process.stdout.readline()), daemon=True
+        target=lambda: ready.put(cast(TextIO, process.stdout).readline()), daemon=True
     )
     reader.start()
     try:
@@ -75,8 +97,8 @@ def helper(root: Path):
         yield endpoint
     finally:
         if process.poll() is None:
-            process.stdin.write("\n")
-            process.stdin.flush()
+            cast(TextIO, process.stdin).write("\n")
+            cast(TextIO, process.stdin).flush()
         try:
             _, stderr = process.communicate(timeout=10)
         except subprocess.TimeoutExpired:
@@ -88,18 +110,20 @@ def helper(root: Path):
             raise RuntimeError(f"probe helper exited {process.returncode}: {stderr}")
 
 
-def request(endpoint: tuple[str, int, str], consumer: str) -> dict:
-    return client.request(
+def request(endpoint: Endpoint, consumer: str) -> dict[str, str]:
+    return cast(dict[str, str], client.request(
         *endpoint,
         kind="read",
         key=consumer,
         payload={"consumer": consumer},
         request_deadline_s=2,
         client_id=consumer,
-    )
+    ))
 
 
-def measure(operation, rounds: int) -> dict:
+def measure(
+    operation: Callable[[str], dict[str, str]], rounds: int
+) -> Measurement:
     def run(consumer: str) -> list[float]:
         samples = []
         for _ in range(rounds):
@@ -121,7 +145,7 @@ def measure(operation, rounds: int) -> dict:
     }
 
 
-def probe(rounds: int) -> dict:
+def probe(rounds: int) -> ProbeReport:
     with TemporaryDirectory(prefix=".probe-", dir=Path(__file__).parent) as directory:
         root = Path(directory)
         for consumer in CONSUMERS:
@@ -131,7 +155,7 @@ def probe(rounds: int) -> dict:
             )
         direct = measure(lambda consumer: read(root, consumer), rounds)
 
-        def cold(consumer: str) -> dict:
+        def cold(consumer: str) -> dict[str, str]:
             result = subprocess.run(
                 [
                     sys.executable, str(Path(__file__).resolve()),
@@ -143,7 +167,7 @@ def probe(rounds: int) -> dict:
                 timeout=15,
                 **no_window_kwargs(),
             )
-            return json.loads(result.stdout)
+            return cast(dict[str, str], json.loads(result.stdout))
 
         cold_result = measure(cold, min(rounds, 10))
         with helper(root) as first, helper(root) as second:

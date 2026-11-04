@@ -1,6 +1,9 @@
 """Disposable two-consumer measurement, not an installer or artifact authority."""
 
+from __future__ import annotations
+
 import argparse
+from collections.abc import Iterable, Mapping, Sequence
 import ctypes
 import hashlib
 import json
@@ -11,18 +14,77 @@ import subprocess
 import sys
 import time
 import tomllib
+from typing import Any, NotRequired, TypedDict, cast
 
 
-def require(condition, reason):
+class Inventory(TypedDict):
+    files: int
+    logical_bytes: int
+    unique_allocated_bytes: int
+    duplicate_file_links: int
+
+
+class Package(TypedDict):
+    name: str
+    version: str
+    files: int
+    logical_bytes: int
+
+
+class AllocationProof(TypedDict):
+    single: Inventory
+    hardlink: Inventory
+    independent_copy: Inventory
+
+
+class Artifact(TypedDict):
+    library: str
+    build_seconds: float | None
+    bytes: int
+    sha256: str
+
+
+class Consumer(TypedDict):
+    name: str
+    create_seconds: float
+    install_seconds: float
+    cold_help_seconds: float
+    libraries: list[str]
+    required_modules: list[str]
+    packages: list[Package]
+    runtime_files: Inventory
+    cache_and_runtimes: Inventory
+    incremental_allocated_bytes: int
+
+
+class ClosureReport(TypedDict):
+    python: str
+    source_commit: str
+    allocation: str
+    consumers: list[Consumer]
+    allocation_proof: NotRequired[AllocationProof]
+    artifacts: NotRequired[list[Artifact]]
+    two_runtime_union: NotRequired[Inventory]
+    independent_runtime_allocated_sum: NotRequired[int]
+    cross_runtime_hardlink_savings: NotRequired[int]
+    same_distribution_closures_as_reference: NotRequired[bool]
+    consumer_and_cache_retirement: NotRequired[dict[str, int | str | bool | float]]
+
+
+def require(condition: object, reason: str) -> None:
     if not condition:
         raise RuntimeError(reason)
 
 
-def run(argv, **kwargs):
+def run(
+    argv: Sequence[str | os.PathLike[str]], **kwargs: Any
+) -> tuple[str, float]:
     started = time.perf_counter()
     completed = subprocess.run(
         list(map(str, argv)), capture_output=True, text=True, timeout=180,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=(
+            cast(int, getattr(subprocess, "CREATE_NO_WINDOW")) if os.name == "nt" else 0
+        ),
         **kwargs,
     )
     if completed.returncode:
@@ -32,8 +94,8 @@ def run(argv, **kwargs):
     return completed.stdout, time.perf_counter() - started
 
 
-def allocated(path):
-    if os.name != "nt":
+def allocated(path: Path) -> int:
+    if sys.platform != "win32":
         return path.stat().st_blocks * 512
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
 
@@ -64,13 +126,13 @@ def allocated(path):
         if not query(handle, 1, ctypes.byref(info), ctypes.sizeof(info)):
             raise ctypes.WinError(ctypes.get_last_error())
         require(info.size == path.stat().st_size, "allocation probe size changed")
-        return info.allocation
+        return cast(int, info.allocation)
     finally:
         close(handle)
 
 
-def inventory(roots):
-    seen = set()
+def inventory(roots: Iterable[Path]) -> Inventory:
+    seen: set[tuple[int, int]] = set()
     logical = physical = files = duplicated = 0
     for root in roots:
         for path in root.rglob("*"):
@@ -91,10 +153,10 @@ def inventory(roots):
     )
 
 
-def sources(repo, project):
-    selected = set()
+def sources(repo: Path, project: Path) -> list[Path]:
+    selected: set[Path] = set()
 
-    def visit(path):
+    def visit(path: Path) -> None:
         path = path.resolve()
         if not path.is_relative_to(repo):
             raise ValueError("source dependency escapes the measured repository")
@@ -110,12 +172,12 @@ def sources(repo, project):
     return sorted(selected)
 
 
-def python_at(root):
+def python_at(root: Path) -> Path:
     return root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 
 
-def source_modules(repo, project):
-    modules = set()
+def source_modules(repo: Path, project: Path) -> list[str]:
+    modules: set[str] = set()
     for source in sources(repo, project):
         src = source / "src"
         names = {
@@ -130,9 +192,11 @@ def source_modules(repo, project):
 PACKAGE_PROBE = """
 from importlib.metadata import distributions
 from importlib.util import find_spec
+import csv
 import json
 from pathlib import Path
 import sys
+from typing import cast
 root = Path(sys.prefix).resolve()
 for module in json.loads(sys.argv[1]):
     spec = find_spec(module)
@@ -140,9 +204,12 @@ for module in json.loads(sys.argv[1]):
         raise RuntimeError("required module escapes runtime: " + module)
 packages = []
 for dist in distributions():
-    if not Path(dist.locate_file("")).resolve().is_relative_to(root):
+    if not Path(cast(Path, dist.locate_file(""))).resolve().is_relative_to(root):
         raise RuntimeError("distribution escapes runtime: " + dist.metadata["Name"])
-    paths = [dist.locate_file(item).resolve() for item in dist.files or []]
+    record = dist.read_text("RECORD")
+    entries = ([row[0] for row in csv.reader(record.splitlines())]
+               if record is not None else dist.files or [])
+    paths = [cast(Path, dist.locate_file(item)).resolve() for item in entries]
     if any(not path.is_relative_to(root) for path in paths):
         raise RuntimeError("recorded payload escapes runtime: " + dist.metadata["Name"])
     paths = [path for path in paths if path.is_file()]
@@ -152,14 +219,14 @@ print(json.dumps(sorted(packages, key=lambda item: item["name"])))
 """
 
 
-def packages(root, modules=()):
+def packages(root: Path, modules: Sequence[str] = ()) -> list[Package]:
     output, _ = run([
         python_at(root), "-I", "-B", "-c", PACKAGE_PROBE, json.dumps(list(modules)),
     ])
-    return json.loads(output)
+    return cast(list[Package], json.loads(output))
 
 
-def allocation_proof(root):
+def allocation_proof(root: Path) -> AllocationProof:
     probe = root / "allocation-proof"
     probe.mkdir()
     first = probe / "first.bin"
@@ -179,13 +246,16 @@ def allocation_proof(root):
     return dict(single=before, hardlink=linked, independent_copy=copied)
 
 
-def wheel_requirements(repo, project, wheels):
-    extras = {}
+def wheel_requirements(
+    repo: Path, project: Path, wheels: Mapping[str, Path]
+) -> str:
+    extras: dict[str, set[str]] = {}
     for source in sources(repo, project):
         metadata = tomllib.loads((source / "pyproject.toml").read_text(encoding="utf-8"))
         for requirement in metadata["project"].get("dependencies", []):
             match = re.match(r"^([A-Za-z0-9_.-]+)(?:\[([^\]]+)\])?", requirement)
             require(match is not None, "invalid requirement: " + requirement)
+            match = cast(re.Match[str], match)
             if match[2]:
                 extras.setdefault(match[1], set()).update(match[2].split(","))
     constraints = []
@@ -195,7 +265,7 @@ def wheel_requirements(repo, project, wheels):
     return "".join(constraints)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, required=True)
     parser.add_argument("--root", type=Path, required=True,
@@ -215,7 +285,7 @@ def main():
         if key not in ("UV_PROJECT_ENVIRONMENT", "VIRTUAL_ENV", "PYTHONPATH", "PYTHONHOME")
     }
     uv = [args.uv, "--cache-dir", cache]
-    report = dict(
+    report: ClosureReport = dict(
         python=sys.version,
         source_commit=run(["git", "-C", repo, "rev-parse", "HEAD"])[0].strip(),
         allocation="unique file-stream allocation; excludes filesystem metadata and external interpreter",
@@ -224,15 +294,15 @@ def main():
     report["allocation_proof"] = allocation_proof(root)
     roots = [cache]
     consumers = ("agent-containers", "agent-bridge")
-    wheels = {}
+    wheels: dict[str, Path] = {}
     if args.artifacts:
         wheelhouse = (args.reuse_wheels or root / "wheels").resolve()
         if not args.reuse_wheels:
             wheelhouse.mkdir()
-        libraries = set().union(*(
+        library_sources: set[Path] = set().union(*(
             set(sources(repo, repo / "plugins" / name)) for name in consumers
         ))
-        libraries = sorted(path for path in libraries if path.parent == repo / "libs")
+        libraries = sorted(path for path in library_sources if path.parent == repo / "libs")
         report["artifacts"] = []
         for library in libraries:
             metadata = tomllib.loads((library / "pyproject.toml").read_text(encoding="utf-8"))
@@ -241,12 +311,12 @@ def main():
                 wheel, = wheelhouse.glob(name.replace("-", "_") + "-*.whl")
                 elapsed = None
             else:
-                before = set(wheelhouse.glob("*.whl"))
+                existing_wheels = set(wheelhouse.glob("*.whl"))
                 _, elapsed = run([
                     *uv, "build", "--wheel", "--no-sources",
                     "--out-dir", wheelhouse, library,
                 ], env=env)
-                wheel, = set(wheelhouse.glob("*.whl")) - before
+                wheel, = set(wheelhouse.glob("*.whl")) - existing_wheels
             wheels[name] = wheel
             report["artifacts"].append(dict(
                 library=library.relative_to(repo).as_posix(), build_seconds=elapsed,
@@ -260,7 +330,7 @@ def main():
         modules = source_modules(repo, project)
         runtime = root / name
         before = inventory(roots)
-        override = []
+        override: list[str | Path] = []
         if args.artifacts:
             constraints_path = root / f"{name}-overrides.txt"
             constraints_path.write_text(
@@ -300,7 +370,9 @@ def main():
         report["two_runtime_union"]["unique_allocated_bytes"]
     )
     if args.reference_report:
-        reference = json.loads(args.reference_report.read_text(encoding="utf-8"))
+        reference = cast(
+            ClosureReport, json.loads(args.reference_report.read_text(encoding="utf-8"))
+        )
         for current, previous in zip(report["consumers"], reference["consumers"], strict=True):
             require(current["name"] == previous["name"], "reference consumer mismatch")
             require([(item["name"], item["version"]) for item in current["packages"]] == [
