@@ -8,8 +8,9 @@ ordinary caller has a separate default-off opt-in described below. Once a cohort
 fresh legacy spawning as described below.
 See the [lifecycle architecture](spawn-supervisor.md#assignment-lifecycle-current-versus-target)
 and [complete catalog owner](pool-publication.md) for those separate boundaries.
-The separate [worker decline preparation](pool-worker-decline.md) retains a
-current decision and failed-closeout blocker without yet finalizing or requeueing.
+The separate [worker decline provider](pool-worker-decline.md) retains a
+current decision and failed-closeout blocker, with an explicit coordinator-owned
+local observation/requeue boundary. Ordinary and remote closeout remain separate.
 
 ## Configured-cohort legacy reservation fence
 

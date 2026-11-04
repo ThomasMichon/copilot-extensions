@@ -1,0 +1,481 @@
+"""Authoritative reads and atomic requeue keep native capacity independently accountable."""
+
+from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
+import json
+import subprocess
+from dataclasses import asdict
+from threading import Barrier, Event
+
+import httpx
+import pytest
+
+from agent_dispatch import pool_decline_observation as observation
+from agent_dispatch.client import DispatchError
+from agent_dispatch.queue import TaskError, TaskQueue
+from agent_dispatch.queue_records import SpawnState, Status
+from tests import test_pool_placement_client as controls
+from tests import test_pool_worker_decline as worker_controls
+from tests.test_pool_placement import place, pool, task
+from tests.test_pool_worker_decline import prepared_worker, snapshot
+
+q = controls.q
+api = controls.api
+
+
+@pytest.fixture
+def ready(q, monkeypatch, request):
+    if getattr(request, "param", None):
+        monkeypatch.setattr(
+            worker_controls, "task", lambda queue, **kwargs: task(queue, dedup_key=request.param, **kwargs),
+        )
+    task_id, binding = prepared_worker(q)
+    q.prepare_pool_decline(task_id, **binding)
+    with q._connect() as conn:
+        conn.execute(
+            "UPDATE spawn_reservations SET allocation_project='example', worktree_path='/worker'"
+            " WHERE key=?", (binding["reservation_key"],),
+        )
+    arguments = {key: value for key, value in binding.items() if key not in {"exclusions", "note"}}
+    value = {
+        "ok": True, "contract": observation.CONTRACT, "version": 1, "operation": "observe-finalized",
+        "task_id": task_id, "reservation_key": binding["reservation_key"], "native_id": "native",
+        "worktree_id": "worktree", "creation_nonce": "created", "project": "example",
+        "path": "/worker", "machine": "host-a", "status": "finalized", "head_revision": 0,
+        "checkout_retained": True, "task_release": False, "process_retirement": False,
+        "checkout": {"head": "a" * 40, "branch": "worktree/worker"},
+        "allocation": {
+            "task_id": task_id, "reservation_key": binding["reservation_key"], "attempt": 1,
+            "driver": "cli", "supervisor": "allocator", "creator_machine": "host-a", "ownership": "created",
+        },
+    }
+    calls = []
+
+    def run(*argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
+
+    monkeypatch.setattr(observation.remote_dispatch, "local_machine", lambda: "HOST-A")
+    monkeypatch.setattr(observation.procutil, "run_agent_worktrees_capture", run)
+    return task_id, arguments, value, calls
+
+
+def test_closeout_atomically_requeues_but_retains_native_capacity_and_history(q, ready):
+    task_id, binding, value, calls = ready
+    before = snapshot(q, task_id)
+    closed = q.close_pool_decline(task_id, **binding, now=101)
+    receipt = closed.receipt
+    assert closed.applied
+    current = q.get(task_id)
+    reservation = q.get_reservation(binding["reservation_key"])
+    assert current.status == Status.QUEUED and current.generation == binding["generation"] + 1
+    assert current.excludes == ["capability:unrelated", "pool:worker", "worktree:worktree"]
+    assert current.not_before == 3701 and q.task_pool_assignment(task_id) is None
+    assert reservation.state == SpawnState.RELEASING and reservation.release_requested
+    assert reservation.startup_fenced and not reservation.conversation_retired
+    assert reservation.session_handle == "native" and reservation.worktree == "worktree"
+    assert q.pool_startup(task_id).startup_attempts == before[2].startup_attempts
+    assert q.pool_startup(task_id).cooldown_stage == 1
+    assert len(q.events(task_id)) == len(before[5]) + 1
+    assert receipt["observation"] == value and receipt["process_retirement"] is False
+    assert len(calls) == 1 and calls[0][1]["timeout"] == 15
+    retained = snapshot(q, task_id)
+    reopened = TaskQueue(q.db_path)
+    replay = reopened.close_pool_decline(task_id, **binding, now=9999)
+    assert replay.receipt == receipt and not replay.applied
+    assert snapshot(q, task_id) == retained and len(calls) == 1
+    with pytest.raises(TaskError, match="allocator"):
+        q.claim_one("other/worker", task_id=task_id, now=9999)
+    with pytest.raises(TaskError, match="capacity"):
+        place(q, task(q))
+    with pytest.raises(TaskError, match="native retirement pending"):
+        place(q, current)
+    assert not q.get_reservation(binding["reservation_key"]).conversation_retired
+
+
+@pytest.mark.parametrize("change", [
+    {"ok": 1}, {"version": True}, {"operation": "finalize-own"}, {"task_id": "foreign"},
+    {"reservation_key": "foreign"}, {"native_id": "foreign"}, {"worktree_id": "foreign"},
+    {"path": "/foreign"}, {"project": "foreign"}, {"machine": "host-b"},
+    {"creation_nonce": ""}, {"status": "active"}, {"head_revision": True},
+    {"checkout_retained": False}, {"process_retirement": True}, {"allocation": {}},
+    {"checkout": {}}, {"checkout": {"head": "not-a-commit", "branch": "worktree/worker"}},
+])
+def test_unqualified_owner_reply_never_changes_claim_or_routing(q, ready, change):
+    task_id, binding, value, _ = ready
+    value.update(change)
+    before = snapshot(q, task_id)
+    with pytest.raises(TaskError):
+        q.close_pool_decline(task_id, **binding)
+    assert snapshot(q, task_id) == before
+
+
+def test_observed_allocation_driver_must_match_retained_owner(q, ready):
+    task_id, binding, value, _ = ready
+    value["allocation"]["driver"] = "ordinary-bridge"
+    before = snapshot(q, task_id)
+    with pytest.raises(TaskError, match="changed its allocation"):
+        q.close_pool_decline(task_id, **binding)
+    assert snapshot(q, task_id) == before
+
+
+@pytest.mark.parametrize("kind", ["remote", "missing-host", "unsupported", "timeout", "malformed"])
+def test_missing_or_old_owner_never_falls_back_to_copied_worker_json(q, ready, monkeypatch, kind):
+    task_id, binding, _, calls = ready
+    if kind in {"remote", "missing-host"}:
+        monkeypatch.setattr(observation.remote_dispatch, "local_machine",
+                            lambda: "host-b" if kind == "remote" else None)
+    else:
+        def run(*a, **k):
+            if kind == "timeout":
+                raise subprocess.TimeoutExpired("probe", 15)
+            return subprocess.CompletedProcess(a, 0, "{}" if kind == "unsupported" else "not-json", "")
+        monkeypatch.setattr(observation.procutil, "run_agent_worktrees_capture", run)
+    before = snapshot(q, task_id)
+    with pytest.raises(TaskError):
+        q.close_pool_decline(task_id, **binding)
+    assert snapshot(q, task_id) == before
+    assert not calls
+
+
+@pytest.mark.parametrize("kind", ["hold", "steer", "native", "revision", "routing", "blocker"])
+def test_change_during_owner_read_refuses_stale_observation(q, ready, monkeypatch, kind):
+    task_id, binding, value, _ = ready
+
+    def raced(*args):
+        with q._connect() as conn:
+            if kind == "hold":
+                conn.execute("UPDATE tasks SET hold_reason='operator hold' WHERE id=?", (task_id,))
+            elif kind == "steer":
+                conn.execute("UPDATE tasks SET awaiting_steer=1 WHERE id=?", (task_id,))
+            elif kind == "routing":
+                conn.execute("UPDATE tasks SET excludes='[\"pool:other\"]' WHERE id=?", (task_id,))
+            elif kind == "blocker":
+                conn.execute("UPDATE pool_worker_declines SET blocker='new blocker' WHERE task_id=?", (task_id,))
+            else:
+                conn.execute(
+                    "UPDATE spawn_reservations SET " + (
+                        "session_handle='foreign'" if kind == "native" else "startup_revision=2"
+                    ) + " WHERE key=?", (binding["reservation_key"],),
+                )
+        return value
+
+    monkeypatch.setattr(observation, "observe", raced)
+    with pytest.raises(TaskError):
+        q.close_pool_decline(task_id, **binding)
+    assert q.get(task_id).status == Status.CLAIMED
+    assert not q.get_reservation(binding["reservation_key"]).release_requested
+
+
+def test_two_observers_commit_one_disposition_and_one_cooldown(q, ready, monkeypatch):
+    task_id, binding, value, _ = ready
+    barrier = Barrier(2)
+
+    def observed(*args):
+        barrier.wait(timeout=5)
+        return deepcopy(value)
+
+    monkeypatch.setattr(observation, "observe", observed)
+    before = len(q.events(task_id))
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        receipts = list(executor.map(lambda _: q.close_pool_decline(task_id, **binding), range(2)))
+    assert receipts[0].receipt == receipts[1].receipt
+    assert sorted(result.applied for result in receipts) == [False, True]
+    assert len(q.events(task_id)) == before + 1
+    assert q.pool_startup(task_id).cooldown_stage == 1
+
+
+def test_later_due_time_and_cooldown_stage_survive_decline(q, ready):
+    task_id, binding, _, _ = ready
+    with q._connect() as conn:
+        conn.execute("UPDATE tasks SET not_before=100000 WHERE id=?", (task_id,))
+        conn.execute("UPDATE task_pool_assignments SET cooldown_stage=4 WHERE task_id=?", (task_id,))
+    q.close_pool_decline(task_id, **binding)
+    assert q.get(task_id).not_before == 100000
+    assert q.pool_startup(task_id).cooldown_stage == 4
+
+
+@pytest.mark.parametrize("corruption", [None, "exhaustion_reason", "exhausted_at"])
+def test_client_observes_declined_cooldown_without_accepting_invalid_budget(
+    q, api, ready, corruption,
+):
+    from tests.test_pool_placement import headers
+
+    task_id, binding, _, _ = ready
+    response = api.post(
+        f"/tasks/{task_id}/pool-decline/closeout", headers=headers(),
+        json={"version": 1, **binding},
+    )
+    assert response.status_code == 200
+    retained = q.pool_startup_snapshot(task_id)
+    requests = []
+
+    def rewrite(request: httpx.Request, response: httpx.Response) -> httpx.Response:
+        if corruption is None or request.url.path.endswith("/contract"):
+            return response
+        payload = response.json()
+        payload["result"]["budget"][corruption] = (
+            "unknown_reason" if corruption == "exhaustion_reason" else None
+        )
+        return httpx.Response(200, json=payload)
+
+    with controls.connected(api, requests, rewrite=rewrite) as client:
+        if corruption is not None:
+            with pytest.raises(DispatchError, match="invalid budget observation"):
+                client.pool_startup_snapshot(task_id)
+        else:
+            observed = client.pool_startup_snapshot(task_id)
+            assert observed == json.loads(json.dumps(retained))
+            assert observed["budget"]["exhaustion_reason"] == "worker_declined"
+            assert observed["budget"]["cooldown_stage"] == 1
+            assert observed["budget"]["startup_attempts"] == 1
+            assert observed["task"]["generation"] == binding["generation"] + 1
+            assert observed["reservation"]["state"] == SpawnState.RELEASING
+            assert observed["native_id"] == binding["native_id"]
+    assert all(request.method == "GET" for request in requests)
+    assert q.pool_startup_snapshot(task_id) == retained
+
+
+@pytest.mark.parametrize("original_driver", ["cli", "ordinary-bridge"])
+def test_retired_decline_can_select_another_pool_without_reusing_finalized_workspace(
+    q, ready, monkeypatch, original_driver,
+):
+    from agent_dispatch import embody
+
+    task_id, binding, value, _ = ready
+    if original_driver == "ordinary-bridge":
+        info = {
+            "session_id": "bridge", "ready": True, "status": "awaiting_first_prompt",
+            "connection": {
+                "worktree_id": "worktree", "native_session_id": "native",
+                "repo": "example", "target_dir": "/worker",
+            },
+        }
+        with q._connect() as conn:
+            conn.execute(
+                "UPDATE spawn_reservations SET driver=?, agent_info=? WHERE key=?",
+                (original_driver, json.dumps(info), binding["reservation_key"]),
+            )
+        value["allocation"]["driver"] = original_driver
+    original = q.get_reservation(binding["reservation_key"])
+    with q._connect() as conn:
+        conn.execute(
+            "UPDATE tasks SET affinity=? WHERE id=?",
+            (json.dumps({"worktree": "worktree", "machine": "host-a", "topic": "preserved"}), task_id),
+        )
+    q.close_pool_decline(task_id, **binding)
+    q.retire_spawn(binding["reservation_key"], exact_absence=True)
+    q.publish_pool_catalog_scope(
+        "host-a", "linux", "publisher-0", generation=1, expected_revision=1,
+        registration_revision=q.pool_registration_revision(), expected_cohort_revision=1,
+        input_revision="second-pool", definitions=(pool(), pool("other")), now=4000,
+    )
+    reservation, reserved = q.reserve_spawn(
+        task_id, reserved_by="allocator", driver="cli",
+        pool_catalog_revision=q.pool_catalog_snapshot().revision, now=4000,
+    )
+    assert reserved and reservation.key != binding["reservation_key"]
+    assert reservation.worktree is None and reservation.session_handle is None
+    assert reservation.allocation_reservation_key == reservation.key
+    assert reservation.allocation_revision == original.allocation_revision + 1
+    assert reservation.creation_key != original.creation_key
+    assert q.task_pool_assignment(task_id).registration_id == "other"
+    assert q.pool_startup(task_id).cooldown_stage == 1
+    assert q.pool_startup(task_id).startup_attempts == 2
+    assert q.pool_startup(task_id).episode_start_attempt == 1
+    assert q.get(task_id).affinity == {"machine": "host-a", "topic": "preserved"}
+    assert q.get_reservation(original.key).conclusion_state == "pending"
+    replay, admitted = TaskQueue(q.db_path).reserve_spawn(
+        task_id, reserved_by="allocator", driver="cli",
+        pool_catalog_revision=q.pool_catalog_snapshot().revision, now=4001,
+    )
+    assert not admitted and replay.creation_key == reservation.creation_key
+    assert q.get_reservation(original.key).creation_key == original.creation_key
+    calls = []
+
+    def create(argv, **kwargs):
+        key = argv[argv.index("--creation-key") + 1]
+        assert key != original.creation_key
+        assert argv[argv.index("--dispatch-reservation-key") + 1] == reservation.key
+        calls.append(key)
+        return subprocess.CompletedProcess(argv, 0, json.dumps({
+            "worktree": {"id": "replacement", "path": "/replacement", "repo": "example"},
+            "creation": {"version": 1, "status": "complete", "replayed": len(calls) > 1},
+        }), "")
+
+    monkeypatch.setattr(embody, "_agent_worktrees_launch_prefix", lambda: ["worktrees"])
+    monkeypatch.setattr(embody.subprocess, "run", create)
+    for current in (reservation, replay):
+        prepared = embody.prepare_reusable_worktree(
+            asdict(q.get(task_id)), asdict(current), interface="cli", driver="cli", supervisor="allocator",
+        )
+        assert prepared["worktree"] == "replacement" and prepared["created"]
+    assert calls == [reservation.creation_key] * 2
+    q.record_spawn_worktree(
+        reservation.key, "replacement", ownership="created", allocation_project="example",
+        worktree_path="/replacement", creating_host="host-a", execution_machine="host-a", driver="cli",
+    )
+    q.record_spawn(
+        reservation.key, session_handle="native-2", worktree="replacement",
+        startup_complete=True, startup_revision=reservation.startup_revision,
+    )
+    budget = q.pool_startup(task_id)
+    queued = q.exhaust_pool_startup(
+        reservation.key, generation=q.get(task_id).generation,
+        startup_revision=reservation.startup_revision, now=budget.startup_deadline + 1,
+    )
+    q.retire_spawn(reservation.key, exact_absence=True, conclusion_state="skipped")
+    q.publish_pool_catalog_scope(
+        "host-a", "linux", "publisher-0", generation=1, expected_revision=2,
+        registration_revision=q.pool_registration_revision(), expected_cohort_revision=1,
+        input_revision="retry-pool", definitions=(pool(), pool("other")), now=queued.not_before,
+    )
+    retry, admitted = TaskQueue(q.db_path).reserve_spawn(
+        task_id, reserved_by="allocator", driver="cli",
+        pool_catalog_revision=q.pool_catalog_snapshot().revision, now=queued.not_before,
+    )
+    assert admitted and retry.worktree == "replacement"
+    assert retry.creation_key == reservation.creation_key
+    assert q.get(task_id).affinity == {"machine": "host-a", "topic": "preserved"}
+    assert q.get_reservation(original.key).conclusion_state == "pending"
+
+
+@pytest.mark.parametrize("required", [False, True])
+def test_decline_does_not_unpin_an_explicit_or_required_workspace(q, ready, required):
+    task_id, binding, _, _ = ready
+    with q._connect() as conn:
+        if required:
+            conn.execute("UPDATE tasks SET requires='[\"worktree:worktree\"]' WHERE id=?", (task_id,))
+        else:
+            conn.execute("UPDATE tasks SET target_worktree='worktree' WHERE id=?", (task_id,))
+    q.close_pool_decline(task_id, **binding)
+    q.retire_spawn(binding["reservation_key"], exact_absence=True, conclusion_state="skipped")
+    q.publish_pool_catalog_scope(
+        "host-a", "linux", "publisher-0", generation=1, expected_revision=1,
+        registration_revision=q.pool_registration_revision(), expected_cohort_revision=1,
+        input_revision="fresh-pool", definitions=(pool(),), now=4000,
+    )
+    before = snapshot(q, task_id)
+    with pytest.raises(TaskError, match="unsatisfiable explicit target"):
+        q.reserve_spawn(
+            task_id, reserved_by="allocator", driver="cli",
+            pool_catalog_revision=q.pool_catalog_snapshot().revision, now=4000,
+        )
+    assert snapshot(q, task_id) == before
+
+
+@pytest.mark.parametrize("ready", ["logical-work"], indirect=True)
+def test_distinct_logical_successor_does_not_replay_finalized_predecessor(q, ready):
+    task_id, binding, _, _ = ready
+    original = q.get_reservation(binding["reservation_key"])
+    q.close_pool_decline(task_id, **binding)
+    q.retire_spawn(original.key, exact_absence=True, conclusion_state="skipped")
+    q.abandon(task_id, permitted=True, reason="Explicit terminal disposition")
+    successor = task(q, dedup_key="logical-work")
+    replacement, admitted = q.reserve_spawn(
+        successor.id, reserved_by="allocator", driver="cli",
+        pool_catalog_revision=q.pool_catalog_snapshot().revision,
+    )
+    assert admitted and replacement.worktree is None
+    assert replacement.allocation_revision == original.allocation_revision + 1
+    assert replacement.creation_key != original.creation_key
+    assert replacement.allocation_reservation_key == replacement.key
+    assert q.get_reservation(original.key).worktree == original.worktree
+
+
+def test_only_control_can_request_coordinator_observation_and_no_receipt_is_accepted(q, api, ready):
+    task_id, binding, _, _ = ready
+    url = f"/tasks/{task_id}/pool-decline/closeout"
+    from tests.test_pool_placement import headers
+    assert api.post(url, json={"version": 1, **binding}).status_code == 401
+    assert api.post(url, headers=headers("data"), json={"version": 1, **binding}).status_code == 403
+    assert api.post(url, headers=headers(), json={
+        "version": 1, **binding, "finalized": True,
+    }).status_code == 422
+    result = api.post(url, headers=headers(), json={"version": 1, **binding})
+    assert result.status_code == 200 and result.json()["closeout"]["observation"]["status"] == "finalized"
+    assert q.get(task_id).status == Status.QUEUED
+
+
+def test_failed_owner_read_records_a_visible_closeout_blocker(q, api, ready, monkeypatch):
+    task_id, binding, _, _ = ready
+    monkeypatch.setattr(observation.remote_dispatch, "local_machine", lambda: "host-b")
+    from tests.test_pool_placement import headers
+    result = api.post(f"/tasks/{task_id}/pool-decline/closeout", headers=headers(),
+                      json={"version": 1, **binding})
+    assert result.status_code == 409
+    assert q.get(task_id).status == Status.CLAIMED
+    assert "remote custody retained" in q.pool_worker_decline(task_id).blocker
+    assert api.app.state.drain_gate.claims == 0
+
+
+def test_draining_refuses_closeout_before_observation_or_blocker(q, api, ready):
+    from tests.test_pool_placement import headers
+
+    task_id, binding, _, calls = ready
+    before = snapshot(q, task_id)
+    assert api.post("/drain", headers=headers("data"), json={"timeout": 1, "poll": .05}).json()["drained"]
+    result = api.post(f"/tasks/{task_id}/pool-decline/closeout", headers=headers(),
+                      json={"version": 1, **binding})
+    assert result.status_code == 409 and "draining" in result.json()["detail"]
+    assert not calls and snapshot(q, task_id) == before
+    assert api.app.state.drain_gate.claims == 0
+
+
+def test_drain_waits_for_observation_and_closeout_commit(q, api, ready, monkeypatch):
+    from tests.test_pool_placement import headers
+
+    task_id, binding, value, _ = ready
+    entered, finish, draining = Event(), Event(), Event()
+    gate = api.app.state.drain_gate
+    set_draining = gate.set_draining
+
+    def observed(*args):
+        entered.set()
+        assert finish.wait(5)
+        assert gate.claims == 1
+        return value
+
+    def observe_drain(value):
+        set_draining(value)
+        if value:
+            draining.set()
+
+    monkeypatch.setattr(observation, "observe", observed)
+    monkeypatch.setattr(gate, "set_draining", observe_drain)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        closeout = executor.submit(
+            api.post, f"/tasks/{task_id}/pool-decline/closeout", headers=headers(),
+            json={"version": 1, **binding},
+        )
+        try:
+            assert entered.wait(5)
+            drain = executor.submit(
+                api.post, "/drain", headers=headers("data"), json={"timeout": 5, "poll": .05},
+            )
+            assert draining.wait(5)
+            assert gate.claims == 1 and not drain.done()
+            assert q.get(task_id).status == Status.CLAIMED
+        finally:
+            finish.set()
+        assert closeout.result(timeout=5).status_code == 200
+        assert drain.result(timeout=5).json()["drained"]
+    assert gate.claims == 0 and q.get(task_id).status == Status.QUEUED
+
+
+def test_historical_api_replay_does_not_announce_a_later_task_as_queued(q, api, ready, monkeypatch):
+    from agent_dispatch.events import EventBus
+    from tests.test_pool_placement import headers
+
+    task_id, binding, _, calls = ready
+    events = []
+    monkeypatch.setattr(EventBus, "publish", lambda self, event: events.append(event))
+    url = f"/tasks/{task_id}/pool-decline/closeout"
+    first = api.post(url, headers=headers(), json={"version": 1, **binding})
+    assert first.status_code == 200 and len(events) == 2
+    q.abandon(task_id, permitted=True, reason="Explicit later disposition")
+    events.clear()
+    before = snapshot(q, task_id)
+    replay = api.post(url, headers=headers(), json={"version": 1, **binding})
+    assert replay.json() == first.json()
+    assert not events and len(calls) == 1 and snapshot(q, task_id) == before

@@ -1,11 +1,13 @@
-# Pool worker decline preparation
+# Pool worker decline and local closeout observation
 
 The explicit provider can retain a current worker's decline **before** its own
 workspace closeout. This is not legacy `yield`, successful finalization,
 requeue permission or native retirement. The
 [claim/start contract](pool-claim-start.md) advertises
 `worker_decline_preparation_versions: [1]` separately from
-`worker_decline_closeout_complete: false`.
+`worker_decline_local_closeout_versions: [1]` and
+`worker_decline_closeout_complete: false`. Local observation is an additive
+provider boundary, not complete ordinary-worker or remote-host integration.
 
 ## Current boundary
 
@@ -53,19 +55,79 @@ nudge or falling into legacy recovery. No new timer or cleanup owner is added.
 An explicitly authorized terminal task disposition retains the historical
 decline without deadlocking normal reservation retirement.
 
+## Coordinator-owned local closeout
+
+The control-authenticated `POST /tasks/{task_id}/pool-decline/closeout` accepts
+only version `1` and the original worker/native/generation/startup-revision/
+reservation binding. It accepts neither finalized JSON nor a caller-selected
+project, host, path, exclusion or outcome. The coordinator derives the original
+managed allocation from its durable reservation. An unknown or nonlocal
+execution host, reused/targeted allocation or missing project/path refuses
+without a remote or legacy fallback.
+
+The coordinator consumes the selected Worktrees runtime's read-only
+[closeout observation](../../agent-worktrees/docs/dispatch-worker-closeout.md#read-only-owner-observation).
+One bounded invocation with the explicit project observes the exact
+task/reservation/worktree/native. That read's own versioned response establishes
+support before the queue mutation; there is no per-call preflight subprocess.
+The observation must retain the reservation's allocation driver as well as its
+task, attempt, supervisor and workspace. The full observation/commit operation
+participates in coordinator drain accounting; new closeouts refuse while
+draining, before either observation or blocker mutation.
+No queue lock spans the external read. The final SQLite transaction rechecks the entire original task,
+assignment, reservation and immutable decline, including holds, steering,
+native identity, startup revision, routing and closeout blocker. Changed or
+uncertain evidence retains the claim; endpoint failures record a visible
+blocker when that same claim is still current.
+
+Only an unchanged successful observation atomically applies the original
+exclusions, advances the task generation to `QUEUED`, releases the logical
+pool assignment and requests native retirement. Task-wide 1/3/6/12-hour
+cooldown preserves any later scheduled due time; startup history and the
+escalation stage are not reset. The original reservation remains `RELEASING`,
+startup-fenced and capacity-accountable until normal exact-native retirement.
+The existing startup snapshot client accepts the retained `worker_declined`
+exhaustion reason, with its finite exhaustion time and original budget binding.
+Unknown reasons and inconsistent exhaustion timestamps still refuse.
+No process is stopped and no checkout is removed. Direct worker claiming
+cannot bypass this allocator-owned history.
+
+The response contains a durable `closeout` receipt under
+`pool_worker_decline/v1`. It records the original binding, queued generation,
+applied exclusions, eligibility time and owner observation. An exact repeated
+request returns that historical receipt without probing again, adding audit
+events or changing a later task incarnation. It is not a claim that the
+current task still has that historical queued generation. After native
+retirement, allocator placement can select another eligible pool while
+retaining counters and the original capacity history. Optional finalized
+workspaces are not carried into the next attempt; explicit/required workspace
+targets remain visible, unsatisfiable constraints rather than being unpinned.
+An optional replacement advances the durable allocation revision and keyed
+creation identity only after the prior revision's native custody has settled.
+The finalized predecessor and its creation journal remain intact; replacement
+replay retains the new key rather than retrying the predecessor's creation.
+An explicitly pinned old allocation revision is not silently advanced.
+Closeout lookup retains the original workspace independently of optional
+workspace carry, including an ordinary-Bridge-to-CLI driver transition.
+Replacement is admitted before the ordinary carry-cleanup guard: native
+retirement need not settle the finalized predecessor's separately accountable
+pending cleanup. The replacement transaction removes only a soft worktree
+affinity matching that declined workspace, preserving other affinities and
+hard targets so later startup retries cannot revive stale carry.
+
 ## Remaining integration
 
-There is deliberately no successful-closeout or requeue endpoint in this
-provider expansion. Ordinary CLI/prompts do not invoke it yet. The next
-consumer boundary must negotiate Worktrees support, finalize only the
+Ordinary CLI/prompts and supervision do not invoke closeout yet. The next
+consumer boundary must negotiate support, finalize only the
 declining worker's own correct workspace through its normal source/PR,
 outbound-claim, foreign/shared-session, pairing and follow-up gates, then
-commit exclusions and `QUEUED` atomically at Dispatch. It must preserve
-accountable native effects and ordinary physical-cleanup admission.
-A caller-supplied `finalized: true` field is not that contract.
+request coordinator observation rather than copying the finalizer's reply.
+Selected remote-host transport, no-managed-worktree applicability and the
+complete ordinary/native matrix remain open. Local source controls do not
+qualify those boundaries or authorize physical cleanup.
 
 Older or rolled-back peers missing preparation support refuse before POST;
 there is no equivalent legacy fallback. A provider that ignores a retained
 decline is not a supported rollback target for an adopted pending claim.
 Source controls do not establish installed adoption, complete decline
-closeout, routing enforcement after requeue or end-to-end worker acceptance.
+closeout or end-to-end worker acceptance.

@@ -18,8 +18,14 @@ the allocator's assignment; its source merged in
 [#10298](https://github.com/ThomasMichon/copilot-extensions/pull/10298).
 The [own-worker Worktrees provider slice](journal/2026/11.03-own-worker-closeout.md)
 adds exact local-native admission around normal finalization without task release.
-Its review/merge, coordinator-authoritative closeout observation, atomic
-routing/requeue and ordinary/native decline qualification remain integration work.
+Its source merged in [#10306](https://github.com/ThomasMichon/copilot-extensions/pull/10306).
+The [local coordinator observation and atomic routing/requeue slice](journal/2026/11.03-local-decline-closeout.md)
+is published in [#10319](https://github.com/ThomasMichon/copilot-extensions/pull/10319).
+Its drain, allocation-driver and replacement-creation review corrections have
+focused source controls passing, including retained decline-budget snapshots
+through the existing client; the revised review/merge gate remains open.
+Ordinary/remote decline integration and installed/native
+qualification remain open.
 
 **Current consumer-adoption prerequisite (2026-11-03):** the
 [independent resident lifetime slice](journal/2026/11.03-independent-resident-lifetime.md)
@@ -410,6 +416,13 @@ live claim token. No new blanket ACK or executor appointment is created.
       preserving native-fenced pending closeout and capacity. This provider
       expansion does not finish own-workspace finalization, routing/requeue,
       ordinary caller migration or native decline qualification.
+- [x] Land the [own-worker Worktrees finalization provider](journal/2026/11.03-own-worker-closeout.md)
+      in [#10306](https://github.com/ThomasMichon/copilot-extensions/pull/10306)
+      after exact-head approval, required CI and managed merge. Its 159 coupled
+      controls preserve normal gates, itemized follow-ups, overlapping native
+      sources and actual-cwd project binding. Coordinator-authoritative
+      closeout observation, atomic routing/requeue and ordinary/native decline
+      qualification remain open; no task release or runtime update is implied.
 - [ ] Implement and qualify the prioritized suspended-recovery and
       finalize-before-submission contracts through existing wake, worker,
       submission/evaluation and Worktrees owners; preserve every unrelated

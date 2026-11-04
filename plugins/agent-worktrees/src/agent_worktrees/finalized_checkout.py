@@ -11,7 +11,7 @@ from . import git_ops, tracking
 def snapshot(path: str) -> dict[str, str]:
     result = git_ops.git(
         "status", "--porcelain=v2", "--branch", "--untracked-files=normal",
-        cwd=path, timeout=5,
+        cwd=path, timeout=5, isolated_repository=True,
     )
     lines = result.stdout.splitlines()
     head = next((line.removeprefix("# branch.oid ") for line in lines if line.startswith("# branch.oid ")), "")

@@ -1,0 +1,13 @@
+{
+  "comment": "Observe local worker finalization before atomic decline requeue while retaining native capacity",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
