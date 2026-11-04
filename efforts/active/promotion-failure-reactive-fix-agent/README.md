@@ -99,6 +99,16 @@ ever weakening the review/merge discipline every other change goes through.
 
 ## Coordination
 
+The proposed finite #4783 hosted-execution family below remains with the
+existing driving agent, sandboxed workflow, fallback, monitoring, charter,
+attempt-policy, source and resource custodians. The constructed local lane
+is separate and unactivated. Preserve every incumbent guardrail and claim;
+this amendment grants no workflow dispatch, credential access, permission
+expansion, runner change or implementation assignment. Normal reviewed
+complete direct Plan/local and actual global Validation/Journal delivery,
+followed by permitted whole-current readback and a separate source judgment,
+remain outstanding. A platform limitation is not a repaired-execution PASS.
+
 - **Topology:** independent per-slice PRs against `dev`; no shared branch.
 - **Host (owns PRs):** the participant above, until split further.
 
@@ -844,6 +854,57 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
       live runs so far); it exists so a future maintainer has a concrete
       bar to check against, not to bless every candidate change once hit.
 
+### Finite hosted execution-capability qualification from #4783
+
+**Agent-recommended tracking amendment.** Preserve the complete original and
+current refined contract through the existing Phase 2 hosted-workflow owner.
+This is not activation or replacement by the offline local lane.
+
+- [ ] **P4783-1:** Retain the reported shell/MCP `Permission denied` after the
+  first one or two read-only commands, distinct from earlier ordinary
+  shell-allowlist/network denial. Preserve reflect-payload `EACCES` in both
+  agent and detection jobs without claiming it caused every refusal or that
+  a current universal failure was reproduced.
+- [ ] **P4783-2:** Diagnose the literal hosted command/allowlist/runtime
+  boundary. Compare an exactly allowed command with an expected policy
+  refusal; raw Python/pytest, compound commands and path traversal may
+  independently miss the allowlist. Runtime-version, action/image and
+  UID/permission changes remain hypotheses until attributable evidence;
+  do not widen permissions speculatively.
+- [ ] **P4783-3:** Preserve all six monitoring outcomes: one `noop` with no
+  verified fix, two `missing_tool` and three `report_incomplete`. Successful
+  authorization, agent execution or a green job is not shell-capability
+  repair. Independent signature fixes do not close this execution tracker;
+  keep the separately retained timeout and do not invent an unnamed fifth
+  fix from the historical count.
+- [ ] **P4783-4:** For a repaired-behavior claim, obtain the original separately
+  authorized post-fix hosted witness that an actually allowed shell command
+  succeeds. Otherwise retain the exact attributable platform limitation and
+  an explicit disposition, not a false PASS or evidence from another lane.
+  An unrelated agent-authored patch, source-only record or locally
+  constructed worker is not that witness.
+- [ ] **P4783-5:** Keep the hosted cloud workflow distinct from the constructed,
+  unactivated local-dispatch lane. Preserve separate #5890 recurrence/
+  attempt-budget policy and #5960 charter/input-reporting responsibilities,
+  existing monitoring, protected workflow/release/review guardrails and all
+  source/resource holds. No lane substitution or new owner is appointed.
+
+#### Local Validation for #4783
+
+- [ ] **V4783-1:** Record exact hosted source/run/command attribution,
+  allowlist decision, real permission boundary and reflect-write symptom.
+  Demonstrate the allowed-versus-policy-refused distinction without
+  promoting correlation or a runtime-version annotation to causation.
+- [ ] **V4783-2:** Preserve the original authorized post-fix hosted positive
+  when claiming repair, or explicitly retain the attributable unresolved
+  platform limit. Keep the six no-verified-fix outcomes and all current
+  independent acceptance intact; no secret inspection, permission change,
+  dispatch or runner/container operation occurs during tracking intake.
+- [ ] **V4783-3:** Qualify this finite original hosted boundary, not a new
+  every-host/native program. Preserve honest source/release/venue tiers,
+  separate direct-PR and guardrail trials, current budgets and custodians.
+  Neither local-lane construction nor this amendment completes the parent.
+
 ## Validation Plan
 
 - [ ] Satisfy the [local-lane acceptance checks](local-dispatch-lane.md#acceptance)
@@ -887,11 +948,32 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
       the test's assertion alone — proving it doesn't reflexively "fix"
       every red test by weakening the test.
 
+- [ ] **G4783:** Resolve every direct #4783 Plan/local Validation and continuing
+  Coordination clause at the original hosted execution boundary. Distinguish
+  actual allowlist denial from runtime refusal and reflect-write correlation;
+  a repair claim requires its separately authorized allowed-command hosted
+  witness. An attributable unresolved platform-limit disposition remains
+  non-PASS. Preserve monitoring evidence, separate local/charter/policy
+  owners, all incumbent gates and exact source/resource custody. Documentary
+  intake is not implementation, activation, source closure or parent completion.
+
 ## Proposal
 
 _Pending._
 
 ## Journal
+
+### 2026-10-30 - Proposed finite hosted execution-capability family
+
+- Added direct #4783 Plan/local and actual global Validation with continuing
+  same-custodian coordination after reading the complete qualified current
+  original/refinements and fixed documentary home. Preserve literal causal
+  uncertainty, six monitoring outcomes, the allowed-command hosted witness
+  and separately owned policy/charter/local-lane duties.
+- These are local documentary proposals pending normal review, actual complete
+  delivery, current readback and separate source judgment. No workflow,
+  credential, permissions, source implementation or resource was changed;
+  no repaired execution or whole-effort completion is claimed.
 
 ### 2026-10-10 — Offline local-lane construction
 

@@ -2248,6 +2248,102 @@ Original Request, status, participants, checked credit and first gates stay._
   backend bypass, new cleanup authority or whole-Manager/every-host native
   programme follows from this finite menu/invocation proposal.
 
+### Proposed finite intake: project selection and wheel support
+
+_(Agent-recommended documentary refinement of #4205 and #4305; unchecked,
+not an implementation assignment or accepted source disposition.)_
+
+#### #4205 - Complete selected-project contract
+
+- [ ] **M4205-P1:** Preserve one explicit/default/current-context/valid-alias
+  contract across runtime plugins AND the repository router. Actual chosen
+  repository configuration and authentication-policy consumers must receive
+  it; individual flags, overlays or deployment do not establish parity.
+- [ ] **M4205-P2:** Cover ALL NINE slugs: worktrees, bridge, ssh, dispatch,
+  codespaces, containers, logger, vault and mcp. Preserve BOTH
+  `<repo> <slug> ...` AND direct `agent-<slug> --project <repo> ...`
+  semantics, canonical worktrees namespace and bare worktrees verbs.
+  Any lower-layer native-selector/context alternative needs an attributable
+  reviewed requirement-preserving refinement, not silent removal.
+- [ ] **M4205-P3:** Keep one existing router, installed-or-enabled namespace
+  discovery, reserved-slug/real-verb collision precedence and new contributed
+  slugs. Define fleet-global/projectless no-op/refusal/warning behavior,
+  distinguish repository-valued data from policy selection, and reject
+  conflicting/unknown selections before effects. Preserve standalone
+  independence, defaults, caller-relative paths and source/install provenance;
+  no second registry, upward dependency or hidden process-CWD mutation.
+- [ ] **M4205-P4:** Logger's actual entrypoints use selected-repository policy,
+  logging profiles/style/output roots and applicable consumers through
+  `load_config(repo_start=...)` or its canonical successor. Preserve
+  machine/repository/environment precedence, authorization and provenance;
+  `--repo` annotation/catalog queries remain data selectors. Unsupported
+  execution selection is explicit, never silent incidental-CWD policy.
+- [ ] **M4205-P5:** Dispatch's common top-level grammar binds the actual lane,
+  repository policies/worker defaults and task authority. Retain functioning
+  `--repo` name/remote and command-family aliases, scripts/router forwarding,
+  documented precedence OR explicit conflict refusal, promised no-selector
+  CWD/all-repository operations and repository-valued records. Preserve the
+  selected central/local writer, exact task and caller/custody identity;
+  diagnostics reflect resolution, without writer failover or replay.
+- [ ] **M4205-P6:** CodeSpaces selected-host policy wins intended defaults and
+  same-key precedence rather than unrelated adoption/CWD/provider order.
+  Carry it through create/allocation AND reuse, connection/SSH AND applicable
+  setup/provisioning/relay. Reconcile first-wins defaults/repository/Connection
+  Owner fields and credential/provisioning unions without losing legitimate
+  contributions or documented compatibility.
+- [ ] **M4205-P7:** Keep selected policy host, product repository and persisted
+  venue-owning account distinct. Direct/routed CodeSpaces calls agree and
+  preserve authoritative account, claim/lifecycle/source/install and
+  auth/permission boundaries, explicit failure/no-selection behavior,
+  independent providers and safe teardown. Host selection grants no other
+  account or ambient fallback.
+- [ ] **M4205-P8:** Containers uses existing project/host authority for actual
+  fleet/lifecycle/execution/connection consumers, including ordinary AND
+  detached Copilot targets, not only Picker registration or display. Reconcile
+  explicit config override, canonical/legacy CWD files, runtime fallback and
+  bound knowledge overlay with selected-host/no-selection compatibility;
+  do not silently reinterpret higher-authority overrides.
+- [ ] **M4205-P9:** Actual container login/launch uses intended target/fleet
+  account policy, preserving explicit account choice, target/source/cell,
+  credential authorization and restricted/trusted admission/assignment fences.
+  No global account switch, credential projection grant or silent retargeting
+  follows from selecting a repository.
+- [ ] **M4205-P10:** Credit router discovery/collisions, Bridge/CodeSpaces
+  forwarding, selected SSH child-CWD qualification and Logger resolver
+  groundwork at their scopes, not all-nine/four-consumer completion.
+  Reconcile the existing Phase 7b/#1238 command-ownership proposal with
+  standing named-project intent through review; do not silently narrow
+  either the inherited direct surface or the unresolved decision.
+- [ ] **M4205-LV:** Prove every clause through actual Logger, Dispatch,
+  CodeSpaces and Containers consumers AND the exact nine-slug/two-surface
+  matrix: A from B AND neutral CWD, relevant target-CWD equivalence,
+  defaults, aliases, global verbs, conflicts/unknowns and policy/source
+  provenance. Retain meaningful supported positive/refusal/compatibility
+  controls and explicit unsupported/unknown results at original finite tiers.
+  Parser success or historical research intake is not whole parity; no
+  universal native/adopter migration is added.
+
+#### #4305 - Supported wheel forwarding
+
+- [ ] **M4305-P1:** Preserve original reported PSMux 3.3.4 context:
+  `send-keys -M` was unsupported after clearing default bindings. Establish
+  an actually supported forwarding mechanism OR an explicit reviewed,
+  accepted minimum/capability disposition, without guessing a version floor
+  or asserting the current installed version.
+- [ ] **M4305-P2:** Align canonical helper, shared passthrough fragment,
+  actual launcher consumer AND documentation for BOTH WheelUpPane AND
+  WheelDownPane after default clearing. Add meaningful regression IF FEASIBLE,
+  recording feasibility/disposition rather than inventing a mandatory test.
+- [ ] **M4305-P3:** Credit completed relocation, path/presence handling and
+  session-scoped application without reopening them or claiming wheel support.
+  Preserve opt-in personal managed blocks, unrelated settings, session-scoped
+  PSMux and ordinary tmux; no server-global/all-user or every-frontend change.
+- [ ] **M4305-LV:** Qualify the actual chosen supported target/mechanism OR
+  accepted minimum/disposition through the real helper/fragment/launcher and
+  both directions, with feasible regression and consistent docs. Keep source,
+  synthetic/native/installed tiers distinct; relocation or source-file
+  application is not wheel-operation proof. No all-host/native-wheel program.
+
 ## Validation Plan
 
 - [ ] G1: Resolve EVERY directly retained #4096 original
@@ -2395,7 +2491,31 @@ tiers without imposing every-host or native-on-every-leaf requirements.
   parity or executor delivery is credit, not every-row acceptance; no
   Finalize or cleanup operation is authorized by this proposal.
 
+- [ ] **M4205-G:** Resolve ALL M4205 Plan/local Validation and the complete
+  original/refined/direct-inherited Logger/Dispatch/CodeSpaces/Containers and
+  nine-slug contracts, including Phase 7b intent reconciliation. #4205 stays
+  OPEN until its WHOLE work is resolved; preserve each inherited source's
+  full accepted direct-intake/hold condition. A documentary merge is not
+  parity, execution, rollout, source/resource release or parent completion.
+- [ ] **M4305-G:** Resolve ALL M4305 Plan/local Validation: actual supported
+  wheel behavior OR accepted minimum/capability disposition, helper/fragment/
+  docs agreement, BOTH directions and regression IF FEASIBLE. Preserve
+  personal/session/tmux boundaries and original evidence tiers; documentary
+  intake is not wheel/native proof or settings/resource disposition.
+
 ## Coordination
+
+The proposed #4205/#4305 families continue through existing Phase 8
+migration-intake/domain review and dated Journal process. Router/configuration/
+four-consumer/account/source and Mux/helper/fragment/docs/personal-settings
+custodians retain their scopes; Phase 7b intent reconciliation stays explicit.
+Preserve all incumbents, claims, holds, completed credit and separate
+restart-recovery/AHP/update/native/installation duties. No appointment,
+blanket ACK, expiry or source/resource retargeting follows. Before any
+separate source judgment, require normal review and actual complete direct
+Plan/local AND actual global Validation/Coordination/Journal delivery,
+followed by permitted whole-current readback and the source's literal
+conditions; keep the source if any clause, fit or custody is unaccepted.
 
 <!-- backlog-reconciliation:7556:qualified-sixteen:4117-4437:Coordination -->
 
@@ -2508,6 +2628,16 @@ No product, native, credential, host, process, service or resource operation
 is authorized by tracker consolidation.
 
 ## Journal
+
+### 2026-10-30 - Proposed project-selection and wheel-support intake
+
+Whole eligible originals/refinements and complete fixed-pin ROOT research
+support unchecked #4205/#4305 documentary proposals. Preserve all-nine AND
+four-consumer selection, the unresolved Phase 7b intent decision, original
+wheel-target mechanism OR accepted disposition and feasible-only regression.
+Relocation/router groundwork remains credit. This local amendment records
+no review acceptance, merge, runtime result, settings change or closure;
+complete current receiving readback and separate source judgments remain.
 
 <!-- backlog-reconciliation:7556:qualified-sixteen:4117-4437:Journal -->
 

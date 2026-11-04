@@ -79,8 +79,11 @@ Existing submission/conversation phases and their custodians remain unchanged.
 [five lifecycle outcomes](assignment-startup-amendment.md#prioritized-lifecycle-clarification):
 claim/spawn/affirmative start ordering, explicit rejection and attempt/timeout
 semantics, reserved-slot/work-start deadline consistency, suspended recovery
-with retry/backoff, and finalize-before-`SUBMITTED`. Automatic finalization
-before evaluators remains a design option. An opt-in worktree-owned agenda
+with retry/backoff, and mechanical closeout readiness before `SUBMITTED`.
+The November 3 [submission clarification](submission-closeout-amendment.md)
+retains the worktree and task claim through review, resumes the same worker on
+rejection and permits permanent finalization only after `COMPLETED`.
+An opt-in worktree-owned agenda
 keeps this roster ahead of nonblocking discoveries without changing the
 canonical completion gate or existing source/native ownership.
 
@@ -176,8 +179,9 @@ particularly for Phase 3's crash-recovery behavior.
 The 2026-10-30 operator-directed intent is captured as a generic summary in the
 [assignment/startup amendment](assignment-startup-amendment.md#requested-direction).
 Its requested requirements, agent-recommended implementation means and unresolved
-policy choices are separated; it does not settle result-rejection reassignment
-or terminal-worktree policy.
+policy choices are separated. The November 3
+[submission clarification](submission-closeout-amendment.md) settles retained
+same-worker rejection and the worktree-owned task-claim lifetime.
 
 The 2026-10-07/08 direction is captured in
 [operator-direction.md](operator-direction.md), with settled decisions and
@@ -219,6 +223,17 @@ known end-states; a `monitors` system should complement `emitters`/
 | Tasks-pane slice owner | UI consumers after backend contracts land | The linked Tasks-pane effort and its coordination record |
 
 ## Coordination
+
+The proposed #4202/#4214 finite backend families retain existing task,
+writer/client, evaluator/history, steering, owner/session/generation,
+handoff and resource custodians. Planning remains documentation only;
+separately approved backend slices do not absorb Tasks-pane/UI/native
+hosting or #2879/#2887 source-specific reservations. Preserve all holds,
+nonexpiry and exact complete-transfer conditions. Normal review and actual
+complete direct Plan/local AND actual global Validation/Coordination/Journal
+delivery, followed by permitted whole-current readback, precede any separate
+source judgment. Unknown acceptance retains the source; no new ACK,
+assignment, identity store, writer failover or resource release follows.
 
 The finite #4464 producing-harness guidance contract below continues through
 existing producer/task-command/guidance owners and this ROOT's reviewed
@@ -444,8 +459,9 @@ restoration of historical terminal enums follows.
       conversation/confirmation and native-custody gate.
       The [affirmative suspended-recovery source](journal/2026/11.03-affirmative-suspended-recovery.md)
       retains exact current-worker acceptance, existing wake custody,
-      hold-aware clocks and capacity-preserving exhaustion. Source review,
-      actual merge and installed/native qualification remain pending;
+      hold-aware clocks and capacity-preserving exhaustion. Source merged in
+      [#10338](https://github.com/ThomasMichon/copilot-extensions/pull/10338)
+      after exact-head approval and required CI; installed/native qualification remains pending;
       finalize-before-submission is a separate remaining source contract.
 - [x] Land coordinator-owned local decline observation and atomic routing/requeue
       in [#10319](https://github.com/ThomasMichon/copilot-extensions/pull/10319)
@@ -1035,6 +1051,52 @@ not proof that the rightful worker received or applied the requirement._
   consumption/application through existing receipt/outbox machinery.
   Stored steer or accepted Bridge prompt is not a completed requirement.
 
+### Proposed finite intake: uncertain consume and identifier kinds
+
+_(Agent-recommended documentary refinement; no task mutation or service
+operation is authorized.)_
+
+- [ ] **D4202-P1:** After uncertain consume mutation response/read timeout,
+  read the EXACT task from the SAME selected authoritative writer BEFORE
+  concluding failure or retrying. Committed work may lose its reply;
+  never replay at another coordinator/database or infer noncommit from
+  generic transport failure.
+- [ ] **D4202-P2:** Continue only on independently confirmed expected
+  success for this exact task, attempt/incarnation/generation, worker AND
+  owner session. Shared worker_id is insufficient. Preserve binding CAS,
+  stronger ordinary success/claimed/started fences, true competing winner/
+  lost race and spent/retired handoff refusal.
+- [ ] **D4202-P3:** Continue idempotently with the correct consume transition
+  AND payload; preserve deferred-completion VERSUS baton and suspended/
+  deferred paths. Delivery is not work completion or permission to recreate
+  a spent baton. Failed/conflicting reconciliation stays visibly uncertain,
+  with no ownership reset, expiry/release or blind non-idempotent retry.
+- [ ] **D4202-P4:** Credit pre-delivery connection-only retries, keyed/
+  capability-qualified steering and existing selected re-fetch/fences at
+  their scopes, not generic consume retry. Preserve actual task/writer/
+  session custody and truthful unknown outcomes.
+- [ ] **D4202-LV:** Through the actual consume/client/authoritative-task
+  boundary, cover server-committed/lost-response AND true-lost-race cases,
+  exact-attempt success, same worker in another session, CAS/stale
+  generation, spent/retired baton and failed/conflicting reconciliation.
+  Prove same-writer read before retry, correct payload/transition and
+  deferred-versus-baton truth, with no second mutation or manufactured
+  release. No new native benchmark or service probe is required.
+- [ ] **D4214-P1:** Qualify semantic worker-versus-task wrong-kind refusal
+  at BOTH claim admission AND completion, including accidental task-as-worker
+  and worker-as-task/wrong object cases. Separate field names or an admitted
+  string later matching its own persisted owner are not independent proof.
+- [ ] **D4214-P2:** Preserve legitimate ARBITRARY worker names, accepted
+  identifier kinds, existing task existence/state/owner/session/generation/
+  native-incarnation and idempotent-completion fences. Credit the settled
+  typed/completion foundations; change only a proven uncovered boundary,
+  not a new global namespace, lexical restriction or identity registry.
+- [ ] **D4214-LV:** Exercise actual authoritative claim AND completion
+  wrong-kind refusals and valid arbitrary-name positive controls,
+  retaining all existing ownership/incarnation/error/idempotence safeguards.
+  Separate source/consumer/release proof from any original native request;
+  no fabricated live invalid-ID result or whole backend/UI/native gate.
+
 ## Validation Plan
 
 - [ ] Complete the [assignment/startup validation matrix](assignment-startup-amendment.md#validation-plan);
@@ -1283,6 +1345,18 @@ not proof that the rightful worker received or applied the requirement._
   direction remain; no speculative session selection, competing dedup or
   automatic task takeover.
 
+- [ ] **D4202-G:** Resolve ALL D4202 Plan/local Validation: exact same-writer
+  uncertain-result reconciliation, independently proved task/attempt/worker/
+  session/generation success, correct payload and deferred/baton semantics,
+  genuine-lost-race refusals and visible unknowns without replay or release.
+  Preserve every incumbent ROOT gate; documentary delivery is not task
+  completion, execution, custody transfer or parent completion.
+- [ ] **D4214-G:** Resolve ALL D4214 Plan/local Validation at original finite
+  tiers: semantic kind refusal at BOTH claim and completion AND legitimate
+  arbitrary-worker-name positives with existing typed/owner/incarnation
+  foundations intact. Intake is not an implemented namespace repair,
+  native request result or source/resource disposition.
+
 ## Proposal
 
 Historical Phase 2 API shapes, as recorded then (current state vocabulary and
@@ -1307,6 +1381,16 @@ extension policy are in the 2026-10-08 amendment):
 Phase 3/4's shapes are still pending their own design pass.
 
 ## Journal
+
+### 2026-10-30 - Proposed consume-response and identifier-kind intake
+
+Whole eligible #4202/#4214 originals/refinements and complete fixed-pin ROOT
+research support unchecked finite proposals. Existing retry/typed/completion
+foundations retain credit; same-writer exact-attempt uncertainty and BOTH
+semantic admission/completion outcomes remain distinct. No task, server,
+retry, identity probe or service operation occurred. Normal review, actual
+complete delivery, full-current receiving readback and separate source
+judgments remain; no owner, native/UI scope or resource is reassigned.
 
 <!-- backlog-reconciliation:7556:qualified-thirteen:3002:Journal -->
 

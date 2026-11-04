@@ -238,7 +238,7 @@ def test_guarded_configuration_refuses_unattributed_source_mappings(tmp_path):
         guard._local_configuration(transaction, tmp_path)
 
 
-def test_guarded_index_omits_withdrawn_candidates_without_actors():
+def _guarded_index(entries):
     index = object.__new__(guard._GuardedIndex)
     index.exclusions = set()
     index.lock = threading.RLock()
@@ -251,13 +251,18 @@ def test_guarded_index_omits_withdrawn_candidates_without_actors():
     index.project_locks, index.projects, index.files, index.offered = {}, {}, {}, {}
     index.filenames, index.candidate_count = set(), 0
     index.secret, index.base = "capability", "http://127.0.0.1:12345/capability"
+    index._project = lambda _name: (entries, "https://example.invalid/simple/", "https://example.invalid", "b" * 64)
+    return index
+
+
+def test_guarded_index_omits_withdrawn_candidates_without_actors():
     hint = ">=3.9" + ",>=3.9" * 100
     entries = [
         {"filename": f"fixture-{version}-py3-none-any.whl", "url": f"/{version}.whl",
          "hashes": {"sha256": DIGEST}, "requires-python": hint, "withdrawn": withdrawn}
         for version, withdrawn in (("1.0", False), ("2.0", True))
     ]
-    index._project = lambda _name: (entries, "https://example.invalid/simple/", "https://example.invalid", "b" * 64)
+    index = _guarded_index(entries)
 
     page = json.loads(index.page("fixture"))
 
@@ -265,6 +270,38 @@ def test_guarded_index_omits_withdrawn_candidates_without_actors():
     assert page["files"][0]["requires-python"] == hint
     assert hint not in json.dumps(index.offered)
     assert {item["filename"] for item in index.offered.values()} == {"fixture-1.0-py3-none-any.whl"}
+
+
+@pytest.mark.parametrize("bad_tag", ["py36+-none-any", "py3-none-any+", "py3..py2-none-any"])
+def test_guarded_index_ignores_invalid_tag_records_without_actors(bad_tag):
+    entries = [
+        {"filename": f"fixture-0.18-{bad_tag}.whl", "url": "/old.whl", "hashes": {"sha256": DIGEST}},
+        {"filename": "fixture-1.0-py3-none-any.whl", "url": "/good.whl", "hashes": {"sha256": DIGEST}},
+    ]
+    index = _guarded_index(entries)
+
+    page = json.loads(index.page("fixture"))
+
+    assert [item["filename"] for item in page["files"]] == ["fixture-1.0-py3-none-any.whl"]
+    assert {item["filename"] for item in index.offered.values()} == {"fixture-1.0-py3-none-any.whl"}
+
+
+@pytest.mark.parametrize("kind", ["unsafe-path", "wrong-project", "wrong-project-invalid-tag",
+                                  "bad-hash", "tag-expansion"])
+def test_guarded_index_still_refuses_unsafe_or_excessive_records(kind):
+    tags = ".".join(f"py{i}" for i in range(11)) + "-" + ".".join(f"abi{i}" for i in range(11)) + "-any"
+    filename = {
+        "unsafe-path": "../fixture-1.0-py3-none-any.whl",
+        "wrong-project": "other-1.0-py3-none-any.whl",
+        "wrong-project-invalid-tag": "other-1.0-py36+-none-any.whl",
+        "bad-hash": "fixture-1.0-py3-none-any.whl",
+        "tag-expansion": f"fixture-1.0-{tags}.whl",
+    }[kind]
+    entries = [{"filename": filename, "url": "/wheel.whl",
+                "hashes": {"sha256": "not-a-digest" if kind == "bad-hash" else DIGEST}}]
+
+    with pytest.raises(ValueError):
+        _guarded_index(entries).page("fixture")
 
 
 def test_guarded_compile_rechecks_retained_inputs_without_actors(tmp_path, monkeypatch):

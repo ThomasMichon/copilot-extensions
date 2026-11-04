@@ -38,6 +38,7 @@ from runtime_wheel_inspection import inspect_wheel_facts
 _PLACEHOLDER = "http://127.0.0.1:1/guarded-index-placeholder/simple/"
 _SOURCE_LIMIT = 1 << 20
 _CONTROL_LIMIT = 4 << 20
+_TAG_PART = re.compile(r"[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*")
 
 
 class GuardedSelectionError(ValueError):
@@ -361,6 +362,13 @@ class _GuardedIndex(ThreadingHTTPServer):
                 tokens = filename[:-4].split("-")
                 if len(tokens) < 5:
                     raise GuardedSelectionError("guarded index contains an invalid wheel name")
+                if any(_TAG_PART.fullmatch(part) is None for part in tokens[-3:]):
+                    # Preserve prefix/project validation before omitting an unselectable tag.
+                    prefix_probe = "-".join((*tokens[:-3], "py3", "none", "any")) + ".whl"
+                    wheel_name, _version, _build, _tags = parse_wheel_filename(prefix_probe)
+                    if canonicalize_name(wheel_name) != name:
+                        raise GuardedSelectionError("guarded index contains another project")
+                    continue
                 inspection.bounded_tag(
                     "-".join(tokens[-3:]), limit=self.wheel_limits.max_tags, deadline=self.deadline,
                 )

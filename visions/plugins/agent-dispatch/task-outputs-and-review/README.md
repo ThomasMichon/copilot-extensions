@@ -3,7 +3,7 @@
 - **Subject:** Durable, contract-bearing task conversations and outcomes.
 - **Scope:** leaf (child of [agent-dispatch](../README.md)).
 - **Status:** Draft
-- **Last revised:** 2026-10-09
+- **Last revised:** 2026-11-03
 - **Reality docs:** `plugins/agent-dispatch/src/agent_dispatch/`
   (`queue_steering.py`, `queue_lifecycle.py`, `queue_completion_review.py`,
   `wake.py`) and the Tasks pivot in `worktree-manager/`.
@@ -66,9 +66,27 @@ attributable evaluator decision.
 
 Operators and evaluators accept or reject the exact submission they inspected.
 Acceptance makes the task completed. Rejection returns the same task to
-eligible work with the feedback and prior progress available to its next
-worker. Neither rejection nor resubmission erases a previous answer. A stale
+eligible work in its retained worktree and agent conversation, with the feedback
+and prior progress available for the next attempt. An unavailable original
+owner is a visible recovery problem, not implicit permission for reassignment.
+Neither rejection nor resubmission erases a previous answer. A stale
 review cannot approve a newer output by accident.
+
+### submission-retains-worktree-responsibility
+
+A worktree assigned to a task holds a claim on that task as its outstanding
+obligation, not the reverse. Submission requires mechanical closeout readiness:
+unfinished source or disallowed obligations prevent it without automatically
+repairing, merging, abandoning or discarding work.
+
+Passing readiness does not permanently finalize the worktree. Its task claim
+protects it from cleanup throughout submission review and any rejected attempt,
+even while its worker process is stopped and its execution slot is released.
+Rejection resumes the same agent there. The claim settles only when the task
+is completed, or the agent is explicitly unassigned and the task returns to
+queued with no bound agent. A stopped process or expired lease is not either
+outcome. Permanent worktree finalization follows settled responsibility;
+physical reclamation retains its independent safety gates.
 
 ### durable-conversation-history
 
