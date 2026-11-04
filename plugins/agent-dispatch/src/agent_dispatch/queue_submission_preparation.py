@@ -140,6 +140,12 @@ def _binding(
 
 
 class QueueSubmissionPreparationMixin:
+    def observe_submission_readiness(self, task_id: str, *, request_id: str) -> dict:
+        """Internal owner observation only; ordinary submission stays disabled."""
+        from .queue_submission_readiness import observe
+
+        return observe(self, task_id, request_id=request_id)
+
     def submission_preparation(self, task_id: str) -> dict | None:
         """Read the retained proposal even if its owner or task state changed."""
         with self._connect() as conn:

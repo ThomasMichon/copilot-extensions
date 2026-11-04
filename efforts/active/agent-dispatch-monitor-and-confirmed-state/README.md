@@ -477,11 +477,19 @@ restoration of historical terminal enums follows.
       Keep normal finalization blocked by that claim. Negotiated callers,
       queue advancement, manual/absent-worktree applicability and installed/native
       qualification remain separate gates.
-- [ ] Land the bounded [selected-runtime readiness transport](journal/2026/11.04-readiness-transport.md):
+- [x] Land the bounded [selected-runtime readiness transport](journal/2026/11.04-readiness-transport.md)
+      in [#10460](https://github.com/ThomasMichon/copilot-extensions/pull/10460),
+      merged as `58fafdb385` after current-head independent approval and required CI:
       separate executing-provider descriptor, strict complete record requests
       and independent/own-native observation without finalization or task release.
       Keep version-1 finalized-closeout meaning unchanged. Consumer negotiation,
       queue advancement and ordinary/native activation remain separate gates.
+- [ ] Land the bounded [internal Dispatch readiness consumer](journal/2026/11.04-consumer-readiness.md):
+      negotiate the selected local Worktrees owner, derive its actual native
+      head, retain the original claim/allocation and recheck queue custody after
+      observation. Corrected source passes 128 isolated controls; independent
+      review, required CI and actual merge remain pending. Guarded advancement,
+      ordinary caller migration and complete native qualification stay open.
 - [x] Land read-only [task-obligation provider evidence](journal/2026/11.03-task-obligation-provider.md)
       in [#10365](https://github.com/ThomasMichon/copilot-extensions/pull/10365),
       merged as `e9c3c3f9bd` after exact-head approval and required CI.
