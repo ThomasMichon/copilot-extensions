@@ -115,6 +115,9 @@ user and attributable PowerShell entry scripts, generated Manager CMD/PowerShell
 entries and standalone Manager channel creation. Engine discovery, runtime
 selection answers and the selected interactive command remain synthetic;
 the production launcher's refusal path is exercised separately.
+The generated CMD entry is also exercised with project and resident-picker
+arguments, not only an empty invocation; both preparation interpreters must
+exit before the selected terminal command is attached.
 Return-path checks restore process-environment additions, removals and changed
 values before a caller reuses its PowerShell session, including callers with
 inherited native-error-as-exception preferences.
