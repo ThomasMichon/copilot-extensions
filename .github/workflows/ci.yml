@@ -25,6 +25,7 @@ env:
 jobs:
   checks:
     name: guards + lint
+    if: github.event_name != 'pull_request' || github.event.pull_request.state != 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -224,7 +225,7 @@ jobs:
       run: ruff check --select F,E9 --output-format=github .
   unit-tests:
     name: Eligible units with coverage
-    if: github.event_name != 'push'
+    if: github.event_name != 'push' && (github.event_name != 'pull_request' || github.event.pull_request.state != 'closed')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -292,7 +293,7 @@ jobs:
         retention-days: 7
   pr-gate:
     name: ${{ github.event_name == 'pull_request' && 'PR gate (required check)' || 'Non-PR CI summary' }}
-    if: always() && !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'main'
+    if: always() && !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.state != 'closed' && github.event.pull_request.base.ref != 'main'
     needs:
     - checks
     - unit-tests

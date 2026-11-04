@@ -35,7 +35,7 @@ def declarations():
         }},
         "env": {"PROMOTION_UNIT_PROFILE": "copilot-extensions.promotion-units/v1"},
         "jobs": {
-            "checks": {"runs-on": "ubuntu-latest", "steps": [{
+            "checks": {"if": GUARD.SOURCE_JOB_CONDITION, "runs-on": "ubuntu-latest", "steps": [{
                 "name": "Trusted self-hosted CI contract",
                 "run": "python tools/check-trusted-ci.py",
             }, {
@@ -44,7 +44,7 @@ def declarations():
                 "run": "python tools/check-marketplace-isolation.py",
             }]},
             "unit-tests": {
-                "if": "github.event_name != 'push'",
+                "if": GUARD.UNIT_JOB_CONDITION,
                 "runs-on": "ubuntu-latest", "timeout-minutes": 5,
                 "permissions": {"contents": "read", "actions": "read"},
                 "outputs": {
@@ -75,6 +75,7 @@ def declarations():
             },
             "pr-gate": {
                 "name": GUARD.UNIT_GATE_NAME,
+                "if": GUARD.UNIT_GATE_CONDITION,
                 "runs-on": "ubuntu-latest", "needs": ["checks", "unit-tests"],
                 "steps": [{
                     "name": "Require actual admitted unit evidence when selected",
@@ -141,13 +142,34 @@ def test_positive_compact_profile_has_no_self_hosted_pr_test_route(tmp_path):
     ("push", False), ("pull_request", True), ("workflow_dispatch", True),
     ("future-event", True), ("", True),
 ])
-def test_unit_job_omits_only_push_allocation(tmp_path, event, allocated):
+def test_unit_job_preserves_nonclosed_event_allocation(tmp_path, event, allocated):
     routing, ci = declarations()
     assert validate(tmp_path, routing, ci) == []
     condition = ci["jobs"]["unit-tests"]["if"]
-    assert eval(condition, {"__builtins__": {}}, {
-        "github": SimpleNamespace(event_name=event),
+    assert eval(condition.replace("&&", " and ").replace("||", " or "), {"__builtins__": {}}, {
+        "github": SimpleNamespace(event_name=event, event=SimpleNamespace(
+            pull_request=SimpleNamespace(state="open"),
+        )),
     }) is allocated
+
+
+@pytest.mark.parametrize("job,condition,error", [
+    ("checks", "github.event_name != 'pull_request'",
+     "ci.yml checks job must retain reviewed event admission and remain dependency-free"),
+    ("checks", None,
+     "ci.yml checks job must retain reviewed event admission and remain dependency-free"),
+    ("unit-tests", "github.event_name != 'push'",
+     "unit packet must have the reviewed independent hosted five-minute job"),
+    ("pr-gate", "always()",
+     "unit aggregate must require successful guards and the actual selected outcome"),
+], ids=["checks-broad", "checks-missing", "units-missing-closed", "aggregate-broad"])
+def test_job_event_admission_cannot_be_removed_or_broadened(tmp_path, job, condition, error):
+    routing, ci = declarations()
+    if condition is None:
+        ci["jobs"][job].pop("if")
+    else:
+        ci["jobs"][job]["if"] = condition
+    assert error in validate(tmp_path, routing, ci)
 
 
 def test_push_only_allocation_exclusion_is_required(tmp_path):

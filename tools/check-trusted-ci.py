@@ -19,7 +19,14 @@ TRUSTED_JOB_CONDITION = (
     "vars.TRUSTED_SELF_HOSTED_CI == 'enabled'"
 )
 UNIT_CONDITION = "steps.impact.outputs.run == 'true'"
-UNIT_JOB_CONDITION = "github.event_name != 'push'"
+SOURCE_JOB_CONDITION = (
+    "github.event_name != 'pull_request' || github.event.pull_request.state != 'closed'"
+)
+UNIT_JOB_CONDITION = "github.event_name != 'push' && (" + SOURCE_JOB_CONDITION + ")"
+UNIT_GATE_CONDITION = (
+    "always() && !cancelled() && github.event_name == 'pull_request' && "
+    "github.event.pull_request.state != 'closed' && github.event.pull_request.base.ref != 'main'"
+)
 UNIT_GATE_NAME = (
     "${{ github.event_name == 'pull_request' && "
     "'PR gate (required check)' || 'Non-PR CI summary' }}"
@@ -467,10 +474,11 @@ def _validate_ci(path: Path) -> list[str]:
             checks = _mapping(ci_jobs.get("checks"))
             if checks is None:
                 errors.append("ci.yml checks job is missing")
-            elif any(
-                key in checks for key in ("if", "needs", "continue-on-error")
+            elif (
+                checks.get("if") != (SOURCE_JOB_CONDITION if unit_profile else None)
+                or any(key in checks for key in ("needs", "continue-on-error"))
             ):
-                errors.append("ci.yml checks job must be ungated and dependency-free")
+                errors.append("ci.yml checks job must retain reviewed event admission and remain dependency-free")
             elif isinstance(checks.get("steps"), list):
                 for raw_step in checks["steps"]:
                     step = _mapping(raw_step)
@@ -664,6 +672,7 @@ def _validate_ci(path: Path) -> list[str]:
             )
             if (
                 set(gate.get("needs", [])) != {"checks", "unit-tests"}
+                or gate.get("if") != UNIT_GATE_CONDITION
                 or gate_step is None or set(gate_step) != {"name", "env", "run"}
                 or gate_step.get("name") != "Require actual admitted unit evidence when selected"
                 or gate_step.get("env") != {"RESULTS": "${{ toJson(needs) }}"}
