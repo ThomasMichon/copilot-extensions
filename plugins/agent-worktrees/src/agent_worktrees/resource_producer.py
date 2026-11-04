@@ -267,3 +267,11 @@ def preserve_claims(record, current, path: Path) -> None:
             merged.append(claim)
     merged.extend(authoritative.values())
     record.resources = merged
+
+
+def preserve_incarnation(record, current) -> None:
+    """Keep a lazy nonce backfill and refuse a different record incarnation."""
+    if current is not None and current.creation_nonce:
+        if record.creation_nonce and record.creation_nonce != current.creation_nonce:
+            raise ValueError("worktree creation_nonce changed; stale incarnation cannot overwrite its successor")
+        record.creation_nonce = current.creation_nonce

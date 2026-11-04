@@ -29,6 +29,9 @@ def test_actual_lazy_cli_capabilities_and_registered_reservation(owner, monkeypa
     assert capabilities["schema"] == relationship.SCHEMA
     assert capabilities["metadata_version"] == 2 and capabilities["handoff"] is False
     assert capabilities["inspect_absence"] is True
+    assert capabilities["expected_creation_nonce"] is True
+    assert capabilities["writer_scope"] == "executing-process"
+    assert capabilities["writer_contract"] == relationship.writer_contract()
     payload = {"kind": "bridge", "namespace": "bridge-remote", "request_id": "cli-one", "recovery": {}}
     monkeypatch.setattr(family.sys, "stdin", SimpleNamespace(buffer=io.BytesIO(json.dumps(payload).encode())))
     with output.capture_json_output() as captured:
@@ -114,3 +117,7 @@ sys.exit(main.main(argv))
     bound = execute("bind", {"token": pending["token"], "identity": {"native_id": "conversation"}})
     assert bound["phase"] == "bound"
     assert tracking.load_record(path).resources[0].producer == bound["producer"]
+    nonce = tracking.load_record(path).creation_nonce
+    inspected = execute("inspect", {"token": pending["token"], "expected_creation_nonce": nonce})
+    assert inspected["creation_nonce"] == nonce
+    assert inspected["writer_contract"] == relationship.writer_contract()

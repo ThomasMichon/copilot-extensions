@@ -443,6 +443,25 @@ def monkeypatch_config(monkeypatch, tmp_path: Path, tmp_tracking_dir: Path):
 
 
 @pytest.fixture
+def overwrite_record_nonce():
+    """Model persisted replacement/legacy damage outside the guarded writer."""
+    import yaml
+
+    def overwrite(path: Path, nonce: str | None):
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if nonce is None:
+            raw.pop("creation_nonce", None)
+        else:
+            raw["creation_nonce"] = nonce
+        path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+        record = tracking._load_record_uncached(path)
+        assert record.creation_nonce == (nonce or "")
+        return record
+
+    return overwrite
+
+
+@pytest.fixture
 def sample_record(tmp_tracking_dir: Path) -> tracking.WorktreeRecord:
     """A pre-built WorktreeRecord saved to the tracking dir."""
     rec = tracking.WorktreeRecord(

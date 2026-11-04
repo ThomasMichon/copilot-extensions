@@ -460,9 +460,16 @@ restoration of historical terminal enums follows.
       worktree routing, concurrent migration and unknown legacy custody.
       Ordinary claim admission/settlement, readiness, rejected-worker recovery
       and installed/native qualification remain open.
-- [ ] Land the [exact retained-task callback provider](journal/2026/11.03-task-relationship-provider.md),
-      preserving original queue identity and audited assignment continuity.
+- [x] Land the [exact retained-task callback provider](journal/2026/11.03-task-relationship-provider.md)
+      in [#10382](https://github.com/ThomasMichon/copilot-extensions/pull/10382),
+      merged as `7b030e364a` after exact-head approval and required CI.
+      Preserve original queue identity and audited direct-assignment continuity;
+      allocator placement actors are not actual worktree assignments.
       Provider proof is not ordinary assignment admission or live claim migration.
+- [ ] Land [incarnation-bound relationship writer support](journal/2026/11.04-relationship-writer-incarnation.md):
+      locked expected workspace identity, executing-handler receipts and actual
+      resident serializer declarations. Qualify participating writers separately;
+      this expansion does not enable ordinary assignment claims or readiness.
 - [x] Land [worker-decline preparation](journal/2026/11.03-worker-decline-preparation.md)
       in [#10298](https://github.com/ThomasMichon/copilot-extensions/pull/10298),
       preserving native-fenced pending closeout and capacity. This provider

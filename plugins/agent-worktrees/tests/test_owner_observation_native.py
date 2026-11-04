@@ -357,12 +357,10 @@ def test_capture_head_is_not_rewritten_as_current_head_or_actor(native):
     assert entry["payload"]["capture_head_session_id"] == "head"
 
 
-def test_replaced_record_cannot_adopt_an_old_receipt(native):
+def test_replaced_record_cannot_adopt_an_old_receipt(native, overwrite_record_nonce):
     owner, path, _home = native
     assert compute(owner, path)["ok"]
-    record = tracking.load_record(path)
-    record.creation_nonce = "new-record-incarnation"
-    tracking.save_record(record, path)
+    overwrite_record_nonce(path, "new-record-incarnation")
     publish(owner, path)
     assert native_entries(owner) == []
     assert owner.observation_read(selection())["completeness"] == "partial"

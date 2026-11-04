@@ -25,9 +25,14 @@ def _input(operation: str, payload: object) -> dict:
     }
     if not isinstance(operation, str) or operation not in keys:
         raise ValueError("unsupported relationship operation")
-    if not isinstance(payload, dict) or set(payload) not in keys[operation]:
+    if not isinstance(payload, dict) or set(payload) - {"expected_creation_nonce"} not in keys[operation]:
         raise ValueError(f"{operation}: invalid relationship input fields")
     producer.canonical_json(payload)
+    if "expected_creation_nonce" in payload and (
+        not isinstance(payload["expected_creation_nonce"], str)
+        or not payload["expected_creation_nonce"].strip()
+    ):
+        raise ValueError("relationship expected_creation_nonce must be a nonempty string")
     if "token" in payload and not producer.is_valid_token(payload["token"]):
         raise ValueError("invalid relationship token")
     if "request_id" in payload and not relationship.valid_request_id(payload["request_id"]):
@@ -43,6 +48,24 @@ def _input(operation: str, payload: object) -> dict:
     if operation == "bind" and not isinstance(payload["identity"], dict):
         raise ValueError("bind: identity must be a JSON object")
     return payload
+
+
+def _owner(args, path, payload, *, mutable):
+    record, owner = _owned_record(args, path, mutable=mutable)
+    if "expected_creation_nonce" in payload and (
+        record.creation_nonce != payload["expected_creation_nonce"]
+    ):
+        raise ValueError("relationship owner incarnation does not match expected_creation_nonce")
+    return record, owner
+
+
+def _incarnation(record, payload):
+    if "expected_creation_nonce" not in payload:
+        return {}
+    return {
+        "creation_nonce": record.creation_nonce,
+        "writer_contract": relationship.writer_contract(),
+    }
 
 
 def _matches(record, payload):
@@ -68,12 +91,13 @@ def _matches(record, payload):
     return claim
 
 
-def _response(record, claim):
+def _response(record, claim, payload):
     return {
         "schema": relationship.SCHEMA, "version": relationship.VERSION, "ok": True,
         "owner": tracking.format_claim_ref(record.execution_machine, record.repo, record.worktree_id),
         **{key: claim.producer[key] for key in ("creator", "request_id", "token", "phase")},
         "ref": claim.ref, "producer": copy.deepcopy(claim.producer),
+        **_incarnation(record, payload),
     }
 
 
@@ -138,30 +162,31 @@ def apply_resource_relationship(args: dict) -> dict:
         probe_subject, proof = None, None
         if operation == "close":
             with tracking._RecordLock(path, require_sidecar=True):
-                record, _ = _owned_record(args, path, mutable=False)
+                record, _ = _owner(args, path, payload, mutable=False)
                 claim = _matches(record, payload)
                 if claim.producer["phase"] == "closed":
-                    return _response(record, claim)
+                    return _response(record, claim, payload)
                 _require_mutable_owner(record)
                 if tracking.claim_handoff_reservation(record, claim):
                     raise ValueError("relationship is reserved by a handoff")
                 probe_subject = claim.ref
             proof = claim_providers.resolve_claim_status(probe_subject)
         with tracking._RecordLock(path, require_sidecar=True):
-            record, owner = _owned_record(args, path, mutable=operation not in {"inspect", "close"})
+            record, owner = _owner(args, path, payload, mutable=operation not in {"inspect", "close"})
             if operation == "reserve":
                 claim, changed = _reserve(record, owner, payload)
                 if not changed:
-                    return _response(record, claim)
+                    return _response(record, claim, payload)
             else:
                 claim = _matches(record, payload)
                 if claim is None:
                     return {
                         "schema": relationship.SCHEMA, "version": relationship.VERSION, "ok": True,
                         "owner": owner.canonical(), "request_id": payload["request_id"], "absent": True,
+                        **_incarnation(record, payload),
                     }
                 if operation == "inspect" or operation == "close" and claim.producer["phase"] == "closed":
-                    return _response(record, claim)
+                    return _response(record, claim, payload)
                 _require_mutable_owner(record)
                 if tracking.claim_handoff_reservation(record, claim):
                     raise ValueError("relationship is reserved by a handoff")
@@ -169,7 +194,7 @@ def apply_resource_relationship(args: dict) -> dict:
                     if claim.producer["phase"] == "bound":
                         if producer.canonical_json(claim.producer["identity"]) != producer.canonical_json(payload["identity"]):
                             raise ValueError("bound relationship identity is immutable")
-                        return _response(record, claim)
+                        return _response(record, claim, payload)
                     if claim.producer["phase"] != "pending":
                         raise ValueError("retired relationship cannot be rebound")
                     claim.producer = {
@@ -195,7 +220,7 @@ def apply_resource_relationship(args: dict) -> dict:
             kind=claim.kind, ref=claim.ref, worktree_id=record.worktree_id, machine=record.execution_machine,
             event="claimed" if operation == "reserve" else operation, project=record.repo,
         )
-        return _response(record, claim)
+        return _response(record, claim, payload)
     except (ValueError, TypeError, KeyError, OSError, RuntimeError, ExecutionSpaceError, yaml.YAMLError, RecursionError) as exc:
         logging.getLogger(__name__).warning("Relationship transaction refused: %s", exc)
         return {
@@ -204,4 +229,4 @@ def apply_resource_relationship(args: dict) -> dict:
         }
 
 
-tracking_write.register_verb("resource_relationship", apply_resource_relationship)
+tracking_write.register_verb("resource_relationship", apply_resource_relationship, version=2)

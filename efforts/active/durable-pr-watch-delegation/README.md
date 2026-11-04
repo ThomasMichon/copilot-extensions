@@ -270,7 +270,12 @@ _Operator-required outcome; agent-recommended slices and validation._
   terminal tombstone recovery.
   The first finite source leaf is the
   [inert attention projection](../../../plugins/agent-pull-requests/docs/attention.md);
-  it does not close normalized acquisition, durable cursors or serving adoption.
+  merged in #10390. It does not close normalized acquisition, durable cursors
+  or serving adoption.
+  The next bounded source leaf is the
+  [existing-owner conversation metadata journal](../../../plugins/agent-pull-requests/docs/conversation-journal.md)
+  and opt-in event reader; full body acquisition, coordinated terminal
+  retention, notifications and normal host adoption remain separate.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -901,6 +906,32 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-04 - Qualify the opt-in conversation cursor source
+
+- The bounded metadata journal and optional workspace event reader passed
+  136 container cases across journal/storage, actual CLI/SDK/TLS/Gateway,
+  current workspace consumers and legacy replay transactions.
+- Same-head input, duplicate/stale observations, cursor gaps, restart,
+  uncertain replacement and policy withdrawal are covered with synthetic
+  identities. Journal terminal metadata preserves unknown effects and caches;
+  it does not claim coordinated global compaction or live shadow evidence.
+- The source requires explicit layout/serving adoption and normal review.
+  New-provider normalization, terminal notification/retention, installed
+  consumers, actual provider qualification and the full parent gate remain open.
+
+### 2026-11-04 - Land the inert attention source leaf
+
+- #10390 merged as `24e0744f8b1f756b96df70f16ed33bbbeea4df99`
+  after current-head Copilot approval and successful required CI. The review
+  correction checks feedback consistency before terminal/draft projections.
+- The final focused container packet passed 36 attention cases; the earlier
+  combined packet passed 39 attention/watch-contract cases. Neither is
+  service, provider, installed or shadow acceptance.
+- Re-read the parent Plan/Validation. P1/P2 remain open. Next: qualify an
+  actual shared-owner journal/cursor and authenticated consumer path, preserving
+  replay, review receipts, explicit layout adoption and legacy CLI semantics.
+- No production backend, service, credential or review authority changed.
 
 ### 2026-11-03 - Land Author/Reviewer intent and qualify the existing baseline
 
