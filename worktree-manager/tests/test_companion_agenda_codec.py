@@ -181,6 +181,10 @@ def nested_value(depth):
     pytest.param([0] * 129, "array bound", id="oversized-array"),
     pytest.param(nested_value(2), None, id="bounded-nesting-and-json-values"),
     pytest.param(nested_value(17), "nesting bound", id="deep-owner-value"),
+    pytest.param("\x1b[31mreported red\x1b[0m", None, id="escaped-ansi-domain-value"),
+    pytest.param({
+        "\x00\x1bkey": "".join(chr(code) for code in (*range(32), 127)),
+    }, None, id="escaped-context-controls-and-member-name"),
 ], indirect=["owner"])
 def test_actual_owner_structural_display_limits_preserve_valid_source_and_stable_evidence(
     owner, display_limit,
@@ -211,6 +215,29 @@ def test_actual_owner_structural_display_limits_preserve_valid_source_and_stable
     wait()
     later = codec.events(codec.decode(raw(page())), token)[0]
     assert later.content() == event.content()
+    malformed = deepcopy(frame)
+    malformed["entries"][0]["result"]["persisted"] = False
+    with pytest.raises(TimelineContractError, match="persisted operation identity"):
+        codec.events(malformed, token)
+
+
+@pytest.mark.parametrize("owner", [nested_value(40)], indirect=True)
+def test_actual_owner_depth_forty_reaches_bounded_display_omission(owner):
+    codec, _, page, wait, *_ = owner
+    token = codec.token(0)
+    frame = codec.decode(raw(page()))
+    item = frame["entries"][0]
+    assert item["result"] is not None and item["omission"] is None
+    event = codec.snapshot(frame, token).events[0]
+    detail = json.loads(event.data_json)
+    assert canonical_payload(event.data_json) == event.data_json
+    assert detail["schema"] == "worktree-manager.agenda-detail-omission"
+    assert detail["encoded_bytes"] == len(encoded(item).encode())
+    assert detail["sha256"] == sha256(encoded(item).encode()).hexdigest()
+    assert detail["event_id"] == item["event_id"] and detail["cursor"] == item["cursor"]
+    assert detail["owner_omission"] is None and "Timeline payload limits" in event.details
+    wait()
+    assert codec.events(codec.decode(raw(page())), token)[0].content() == event.content()
     malformed = deepcopy(frame)
     malformed["entries"][0]["result"]["persisted"] = False
     with pytest.raises(TimelineContractError, match="persisted operation identity"):
@@ -426,15 +453,23 @@ def test_wrong_boundary_token_and_historical_snapshot_cannot_be_promoted(owner):
     assert other.token(0).identity.source_key != token.identity.source_key
 
 
-@pytest.mark.parametrize("fault", ["duplicate", "nul", "control", "nonfinite", "overflow-float", "oversize", "body"])
+@pytest.mark.parametrize("fault", [
+    "duplicate", "nul", "control", "unescaped-control", "surrogate",
+    "nonfinite", "overflow-float", "oversize", "body",
+])
 def test_strict_json_and_owner_byte_bounds(owner, fault):
     codec, _, page, *_ = owner
     value = page()
     if fault == "duplicate":
         data = raw(value).replace(b'"type":"history-page"', b'"type":"gap","type":"history-page"')
     elif fault in {"nul", "control"}:
-        value["entries"][0]["result"]["transition"]["display"] = "\x00" if fault == "nul" else "\x1b"
+        value["entries"][0]["operation_id"] += "\x00" if fault == "nul" else "\x1b"
         data = raw(value)
+    elif fault == "unescaped-control":
+        data = raw(value).replace(b'"operation":"init"', b'"operation":"in\x1bit"')
+    elif fault == "surrogate":
+        value["entries"][0]["result"]["transition"]["display"] = "placeholder"
+        data = raw(value).replace(b'"placeholder"', b'"\\ud800"')
     elif fault in {"nonfinite", "overflow-float"}:
         data = raw(value).replace(b'"revision":1', b'"revision":NaN' if fault == "nonfinite" else b'"revision":1e999')
     elif fault == "oversize":

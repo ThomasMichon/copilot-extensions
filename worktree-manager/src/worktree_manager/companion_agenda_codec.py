@@ -58,22 +58,20 @@ def _digest(value: Any) -> str:
     return value
 
 
-def _values(value: Any, depth: int = 0) -> None:
-    # Owner prose can exceed a Timeline display field. Admission precedes display omission.
-    _require(depth <= 32, "agenda JSON exceeds its nesting bound")
-    if isinstance(value, dict):
-        for key, item in value.items():
-            _values(key, depth + 1)
-            _values(item, depth + 1)
-    elif isinstance(value, list):
-        for item in value:
-            _values(item, depth + 1)
-    elif isinstance(value, str):
-        _require(not any(ord(char) < 32 and char not in "\n\r\t" or ord(char) == 127
-                         for char in value), "agenda text contains a control character")
-        value.encode("utf-8")
-    elif type(value) is float:
-        _require(math.isfinite(value), "agenda JSON contains a nonfinite number")
+def _values(value: Any) -> None:
+    # The frame byte bound contains traversal; domain JSON has no display-depth/control policy.
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, dict):
+            pending.extend(item.keys())
+            pending.extend(item.values())
+        elif isinstance(item, list):
+            pending.extend(item)
+        elif isinstance(item, str):
+            item.encode("utf-8")
+        elif type(item) is float:
+            _require(math.isfinite(item), "agenda JSON contains a nonfinite number")
 
 
 def _pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:

@@ -204,6 +204,11 @@ data. Display admission checks structural as well as encoded-byte limits; an
 owner-valid result outside those display limits becomes an explicit bounded
 omission, not a malformed-source error. Backward pages do not consume the live
 publication boundary.
+Rich frames retain their encoded-byte bound and strict protocol-field checks,
+but arbitrary domain JSON does not inherit protocol revision ranges, display
+depth limits or terminal-control restrictions. Iterative traversal preserves
+owner-valid nested and escaped data for bounded detail or explicit omission
+rather than making the entire rich source unavailable.
 
 Each notification starts a bounded latest page. At most four owner pages bridge
 a coalesced live jump; an unbridgeable boundary refuses visibly instead of
