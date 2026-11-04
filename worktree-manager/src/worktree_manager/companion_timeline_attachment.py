@@ -1,10 +1,10 @@
-"""Demand-driven selected worktree attachment; no provider or pane authority."""
+"""Demand-driven selected source attachment; no provider or pane authority."""
 
 from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Protocol
 
 from rich.text import Text
 from textual.widgets import Static
@@ -14,13 +14,19 @@ from .companion_timeline_contract import (
     Availability, HistoryPage, LiveDelta, MAX_WINDOW_BYTES, Provider, SourceToken,
     TimelineContractError, TimelineEvent, TimelineGap, TimelineSnapshot,
 )
-from .companion_timeline_controller import TimelineCleanupError, TimelineController, TimelineSourceError
+from .companion_timeline_controller import (
+    TimelineCleanupError, TimelineController, TimelineSource, TimelineSourceError,
+)
 from .companion_timeline_model import MAX_SOURCE_SCOPES, TimelineWindow
 from .companion_timeline_widget import CompanionTimelinePanel, SubwayTimeline
 from .companion_worktree_source import WorktreeTimelineSource
 
 MAX_RETAINED_EVIDENCE_BYTES = 2 * MAX_WINDOW_BYTES
 MAX_RETAINED_WINDOWS = MAX_SOURCE_SCOPES
+
+
+class PreparedTimelineSource(TimelineSource, Protocol):
+    async def prepare(self, epoch: int, *, stop: asyncio.Event) -> TimelineSnapshot: ...
 
 
 def selected_head(
@@ -46,9 +52,15 @@ class TimelineAttachment:
     def __init__(
         self, panel: CompanionTimelinePanel, *, cwd: str,
         head_current: Callable[[tuple[str, str, str]], bool] | None = None,
+        provider: Provider = Provider.WORKTREES,
+        source_factory: Callable[[tuple[str, str, str]], PreparedTimelineSource] | None = None,
+        status: Callable[[str], None] | None = None,
+        evidence_owner: TimelineAttachment | None = None,
     ) -> None:
         self.panel, self.cwd = panel, cwd
         self._head_current = head_current
+        self.provider, self._source_factory = provider, source_factory
+        self._status, self._evidence_owner = status, evidence_owner
         self.controller: TimelineController | None = None
         self._stop = asyncio.Event()
         self._revision = 0
@@ -73,13 +85,15 @@ class TimelineAttachment:
     def _error(self, token: SourceToken | None, message: str) -> None:
         if not self._renderable():
             return
+        if self._status is not None:
+            self._status(message)
         tokens = (token,) if token is not None else tuple(
             state.token for state in self.panel.window.sources.values()
-            if state.token.identity.provider is Provider.WORKTREES
+            if state.token.identity.provider is self.provider
         )
         for selected in tokens:
             self.panel.source_error(selected, message)
-        if not tokens:
+        if not tokens and self._status is None:
             self.panel.query_one(".timeline-state", Static).update(Text(
                 "Timeline unavailable; history unknown. " + message,
             ))
@@ -94,6 +108,9 @@ class TimelineAttachment:
         return self._retained_windows
 
     def _retain_exhausted(self, window: TimelineWindow) -> None:
+        if self._evidence_owner is not None:
+            self._evidence_owner._retain_exhausted(window)
+            return
         size = window.encoded_size + window._integrity_size()
         if (
             len(self._retained_windows) >= MAX_RETAINED_WINDOWS
@@ -105,6 +122,9 @@ class TimelineAttachment:
 
     def validate_events(self, token: SourceToken, events: tuple[TimelineEvent, ...]) -> None:
         """Check shared active and retained proofs before any provider publishes."""
+        if self._evidence_owner is not None:
+            self._evidence_owner.validate_events(token, events)
+            return
         windows = self._retained_windows + ((self.panel.window,) if self._renderable() else ())
         for event in events:
             digest = None
@@ -116,7 +136,10 @@ class TimelineAttachment:
                 if known is not None:
                     digest = window._digest(event) if digest is None else digest
                     if known != digest:
-                        raise TimelineSourceError("An immutable event conflicts with active or retained window evidence.")
+                        raise TimelineSourceError(
+                            "An immutable event conflicts; conflicting immutable event evidence "
+                            "in active or retained exhausted-window evidence."
+                        )
 
     async def set_selection(
         self, selection: tuple[str, str, str] | None, *, reconcile: bool = False,
@@ -143,9 +166,21 @@ class TimelineAttachment:
             stop = asyncio.Event()
             self._stop = stop
             project, worktree, head = selection
-            source = WorktreeTimelineSource(project, worktree, head, cwd=self.cwd)
-            self.panel.query_one(".timeline-state", Static).update(Text("Loading selected owner observations."))
             try:
+                if (
+                    self.provider is Provider.BRIDGE and self._head_current is not None
+                    and not self._head_current(selection)
+                ):
+                    self._error(None, "head changed; retained membership is not current; Refresh required")
+                    return
+                source = (
+                    self._source_factory(selection) if self._source_factory is not None
+                    else WorktreeTimelineSource(project, worktree, head, cwd=self.cwd)
+                )
+                if self._status is not None:
+                    self._status("loading selected owner observations")
+                else:
+                    self.panel.query_one(".timeline-state", Static).update(Text("Loading selected owner observations."))
                 initial = await source.prepare(revision, stop=stop)
                 if revision != self._revision or stop.is_set() or not self._renderable():
                     return
@@ -154,9 +189,11 @@ class TimelineAttachment:
                 if (
                     not isinstance(initial, TimelineSnapshot)
                     or initial.token.request_epoch != revision
-                    or initial.token.identity.provider is not Provider.WORKTREES
+                    or initial.token.identity.provider is not self.provider
                     or (initial.token.identity.project, initial.token.identity.worktree_id,
-                        initial.token.identity.head_session_id) != selection
+                        initial.token.identity.head_session_id) != (
+                            project, worktree, head if self.provider is Provider.WORKTREES else None,
+                        )
                 ):
                     raise TimelineContractError("prepared snapshot changed the active selection or request epoch")
                 window = self.panel.window
@@ -198,6 +235,11 @@ class TimelineAttachment:
                     )
                     if not result.applied:
                         raise TimelineSourceError(result.reason)
+                    if self._status is not None and isinstance(value, TimelineSnapshot):
+                        self._status(
+                            "partial owner-linked membership; liveness, head and answerability unknown; "
+                            "linkage is not custody"
+                        )
 
                 def page(value: HistoryPage) -> None:
                     if current():
@@ -215,7 +257,7 @@ class TimelineAttachment:
                         self._error(token, message)
 
                 self.controller = TimelineController(
-                    {Provider.WORKTREES: source}, observation=observation,
+                    {self.provider: source}, observation=observation,
                     page=page, gap=gap, error=error,
                 )
                 await self.controller.select((initial.token,))

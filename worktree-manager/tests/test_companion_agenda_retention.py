@@ -243,6 +243,7 @@ def test_agenda_invalidation_fences_a_successful_inflight_worktree_prepare(manag
 
 @pytest.mark.parametrize("overlap", [False, True])
 def test_hidden_demand_stops_rich_before_blocked_worktree_retirement(managed, monkeypatch, overlap) -> None:
+    real_selection = worktree_attachment.TimelineAttachment.set_selection
     configure(managed, monkeypatch)
     entered, release = asyncio.Event(), asyncio.Event()
     reads = []
@@ -255,6 +256,8 @@ def test_hidden_demand_stops_rich_before_blocked_worktree_retirement(managed, mo
     monkeypatch.setattr(AgendaReader, "latest", latest)
 
     async def blocked_retirement(self, selection, **kwargs):
+        if self.provider is Provider.BRIDGE:
+            return await real_selection(self, selection, **kwargs)
         if selection is None:
             entered.set()
             await release.wait()

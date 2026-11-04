@@ -164,6 +164,18 @@ required unit-only CI or qualify native Windows, installed rollout or migration
 of an active agent. Same-home legacy adoption additionally requires quiescence
 and the efforts-owned POSIX recovery/fencing checks.
 
+The optional Manager `tests/test_companion_bridge_source.py` packet adds real
+Bridge database membership commits, the owning membership parser/handler and
+bounded SSE/CLI pipes to the actual worktree-resident/Agenda/Textual join.
+Select it with `--allow-explicit-tiers`; the Bridge HTTP carrier and root CLI
+entry remain separately qualified by the Bridge suite. It checks passive
+capability refusal, unrelated-owner heartbeat continuity, retention gaps,
+independent cancellation, retained rows and selected-head retirement without
+starting an SDK actor. `test_companion_bridge_codec.py` and
+`test_companion_bridge_discovery.py` cover normalization and payload selection.
+These controls do not establish native performance, rollout or known-session
+event/history consumption, and do not expand required unit-only CI.
+
 The optional `uv_deployment_compatibility` native-acceptance selector runs the
 focused retained-dependency policy, Codespaces cold/warm installation,
 MCP/Dispatch caller compatibility and full coupled Logger batch/binstub packets
