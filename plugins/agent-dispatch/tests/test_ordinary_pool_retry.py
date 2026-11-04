@@ -19,6 +19,7 @@ from agent_dispatch.supervisor import Supervisor
 from tests import test_pool_placement_client as controls
 from tests._hosting_owner import admission_owner as admission_owner
 from tests.test_ordinary_pool_startup import launch, ordinary as ordinary
+from tests.test_pool_startup_retry import legacy_peer, legacy_v1_retry
 
 q = controls.q
 api = controls.api
@@ -71,6 +72,27 @@ def test_real_ordinary_retry_preserves_distinct_ids_and_resets_only_on_acceptanc
                             owner_session_id="native-a", expected_generation=1)
     assert o.q.get(o.task["id"]).status == Status.STARTED
     assert o.q.pool_startup(o.task["id"]).startup_attempts == 0
+
+
+@pytest.mark.parametrize("peer", ["client", "server"])
+def test_v1_ordinary_mixed_peer_and_retained_retry(
+    ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, peer: str,
+) -> None:
+    o = ordinary
+    key = failed(o)
+    legacy_peer(monkeypatch, peer)
+    pending = o.client.retry_pool_startup(o.task["id"], key, **arguments())
+    binding = {name: value for name, value in pending["invocation"].items()
+               if name not in {"idempotency_key", "prompt"}}
+    legacy = legacy_v1_retry(binding, 2, reservation=pending["reservation"])
+    assert pending["invocation"] == legacy
+    with o.q._connect() as conn:
+        conn.execute("UPDATE task_pool_assignments SET retry_invocation=? WHERE task_id=?",
+                     (json.dumps(legacy), o.task["id"]))
+    assert o.client.pool_startup_snapshot(o.task["id"])["budget"]["retry_invocation"] == legacy
+    assert complete(o, key)["invocation"] == legacy
+    assert o.q.get_reservation(key).session_handle == "local-body:bridge-a"
+    assert o.q.get(o.task["id"]).status == Status.CLAIMED
 
 
 def test_refused_first_prompt_retry_contains_original_queue_routing_and_charters(

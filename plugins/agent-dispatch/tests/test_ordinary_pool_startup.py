@@ -99,6 +99,34 @@ def launch(ordinary: SimpleNamespace) -> dict:
     )
 
 
+def released_pool_seed(task_id: str, *, generation: int, route: str = "",
+                       repo: str | None = None, all_repos: bool = False) -> str:
+    from agent_dispatch.embody_prompts import AUTOPILOT_CHARTER_NAME, _charter_read_step
+
+    ad = "agent-dispatch" + route
+    lane = " --all-repos" if all_repos else (f" --repo {repo}" if repo else "")
+    return (
+        f"You are a dispatched autopilot worker. Task {task_id} is already allocator-CLAIMED "
+        f"at generation {generation}; it is not queued for a new worker claim. "
+        f"Use `{ad}` for every command so routing stays with the original coordinator. "
+        "Use this worktree's own machine/worktree identity, not a synthetic worker id. "
+        f"{_charter_read_step(ad, task_charter=AUTOPILOT_CHARTER_NAME, concise=False)}"
+        f"Read `{ad} show {task_id}` and evaluate the charter's contract-net checks, "
+        f"including `{ad} list{lane}` for the duplicate sweep. Do not acquire another "
+        "claim or evaluation lease. Only if the task is still at the assigned generation, "
+        "CLAIMED and unowned, and you independently ACCEPT its contract, use "
+        f"`{ad} start {task_id} --pool-generation {generation}` with the actual retained "
+        "native session identity supplied below. Startup or prompt delivery is not acceptance. "
+        "If you cannot accept, retain the assignment and report the blocker; do not use "
+        "legacy yield/abandon as a substitute for pool-aware decline and workspace closeout. "
+        f"After acceptance, take steering with `{ad} steer take {task_id} --all`, record "
+        f"status beats with `{ad} progress {task_id} --phase <phase> --summary "
+        f'"<one line>", and only submit with `{ad} complete {task_id} --result-ref <ref>` '
+        "once the charter's actual goal and completion gates are met. Preserve all holds, "
+        "workspace/PR obligations and effect custody."
+    )
+
+
 def test_real_ordinary_create_store_send_and_affirmative_worker_start(ordinary: SimpleNamespace) -> None:
     o = ordinary
     with pytest.raises(DispatchError):
@@ -129,6 +157,39 @@ def test_real_ordinary_create_store_send_and_affirmative_worker_start(ordinary: 
     assert len(o.q.attachment_history(o.task["id"])) == 1
     assert o.q.get_reservation(o.placed["reservation"]["key"]).driver == "ordinary-bridge"
     assert "ordinary-bridge" in pool_startup_contract()["supported_drivers"]
+
+
+def test_ordinary_worker_decline_keeps_distinct_bridge_and_native_custody(
+    ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_dispatch import __main__ as cli, pool_worker_decline_cli
+
+    o = ordinary
+    result = launch(o)
+    key = o.placed["reservation"]["key"]
+    o.client.record_spawn(
+        key, session_handle=result["session"], worktree=result["worktree"],
+        startup_complete=True, startup_revision=1, session_info=result["session_info"],
+    )
+    monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "native-a")
+    monkeypatch.setattr(cli, "_identity", lambda args: ("host-a", "worktree-a"))
+    monkeypatch.setattr(cli, "_client", lambda *a, **k: controls.connected(o.api, [], control=False))
+    own_finalizations = []
+    monkeypatch.setattr(pool_worker_decline_cli, "_finalize",
+                        lambda binding, worktree: own_finalizations.append((binding, worktree)))
+    args = cli.build_parser().parse_args([
+        "--shared", "decline", o.task["id"], "--pool-generation", "1",
+        "--owner-session-id", "native-a", "--exclude-self", "worktree",
+        "--note", "This worker lacks the required dependency.",
+    ])
+    assert args.func(args) == 0
+    assert own_finalizations == [({
+        "task_id": o.task["id"], "generation": 1, "startup_revision": 1,
+        "reservation_key": key, "native_id": "native-a",
+    }, "worktree-a")]
+    assert o.q.pool_worker_decline(o.task["id"]).native_id == "native-a"
+    assert o.q.get_reservation(key).session_handle == "local-body:bridge-a"
+    assert o.q.get(o.task["id"]).status == Status.CLAIMED
 
 
 @pytest.mark.parametrize("machine", [None, "host-b"])
@@ -308,6 +369,45 @@ def test_exact_initial_receipt_replay_survives_worker_acceptance(ordinary: Simpl
     assert json.loads(o.calls[0][1]["input"]) == original
     assert o.q.get(o.task["id"]).status == Status.STARTED
     assert o.q.pool_startup(o.task["id"]).startup_attempts == 0
+
+
+@pytest.mark.parametrize("direction", ["upgrade", "rollback"])
+def test_initial_receipt_recovery_preserves_released_prompt_across_versions(
+    ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, direction: str,
+) -> None:
+    from agent_dispatch import embody_prompts, ordinary_invocation
+
+    o = ordinary
+    current = embody_prompts.pool_worker_prompt
+    prepare = ordinary_invocation.prepare
+
+    def released_reader(task: dict, reservation: dict, info: dict, prompt: str, **kwargs: Any) -> dict:
+        # The pre-change reader regenerated and compared the full initial invocation.
+        original = info.get("startup_invocation")
+        generated = prepare(task, reservation, {k: v for k, v in info.items() if k != "startup_invocation"},
+                            prompt, **kwargs)
+        if original is not None and not ordinary_invocation.same_facts(original, generated):
+            raise TaskError("ordinary startup invocation facts or exact prompt changed")
+        return generated
+
+    monkeypatch.setattr(embody_prompts, "pool_worker_prompt",
+                        released_pool_seed if direction == "upgrade" else current)
+    monkeypatch.setattr(ordinary_invocation, "prepare", released_reader if direction == "upgrade" else prepare)
+    seed = startup_seed(o.task, o.client, route=" --shared")
+    result = launch(o)
+    original = json.loads(o.calls[-1][1]["input"])
+    o.client.start_pool_task(o.task["id"], "host-a/worktree-a",
+                            owner_session_id="native-a", expected_generation=1)
+    before = o.q.get_reservation(o.placed["reservation"]["key"]), o.q.get(o.task["id"])
+    o.calls.clear()
+    monkeypatch.setattr(embody_prompts, "pool_worker_prompt",
+                        current if direction == "upgrade" else released_pool_seed)
+    monkeypatch.setattr(ordinary_invocation, "prepare", prepare if direction == "upgrade" else released_reader)
+    assert startup_seed(o.task, o.client, route=" --shared") == seed
+    assert launch(o) == result
+    assert len(o.calls) == 1 and "--receipt-only" in o.calls[0][0]
+    assert json.loads(o.calls[0][1]["input"]) == original
+    assert (o.q.get_reservation(o.placed["reservation"]["key"]), o.q.get(o.task["id"])) == before
 
 
 def test_committed_storage_unknown_retains_native_without_sending(

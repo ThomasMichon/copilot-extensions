@@ -79,6 +79,9 @@ def add_parsers(sub) -> None:
     )
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
     p.add_argument("--config", default=None)
+    p.add_argument("--dispatch-task-id", help="Finalize only the invoking declined Dispatch worker")
+    p.add_argument("--dispatch-reservation-key")
+    p.add_argument("--dispatch-native-id")
 
     p = sub.add_parser("push-changes", help="Push worktree changes to remote default branch")
     pr_publication_labels_cli.add_options(p)
@@ -338,6 +341,21 @@ def _explain_landing(worktree_id: str, config, use_json: bool) -> int:
 
 
 def cmd_finalize(args: argparse.Namespace) -> int:
+    dispatch = tuple(getattr(args, name, None) for name in (
+        "dispatch_task_id", "dispatch_reservation_key", "dispatch_native_id",
+    ))
+    if any(value is not None for value in dispatch):
+        if any(value is None for value in dispatch) or any(getattr(args, name, None) for name in (
+            "worktree_id", "worktree_id_flag", "config", "dry_run", "abandon",
+            "handoff_to", "force_open_pr", "explain_landing",
+        )):
+            return output._json_error(
+                "Dispatch closeout requires task, reservation and native IDs without finalize overrides", 2,
+            )
+        from . import dispatch_worker_closeout
+        return dispatch_worker_closeout.main([
+            "--task-id", dispatch[0], "--reservation-key", dispatch[1], "--native-id", dispatch[2],
+        ])
     use_json = getattr(args, "json", False)
     if use_json:
         ctx = output.stdout_to_stderr()

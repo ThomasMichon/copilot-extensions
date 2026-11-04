@@ -216,6 +216,32 @@ def test_prompt_is_not_identity_but_overwrite_is_conflict(intent):
                              agent_info=info, startup_invocation=changed)
 
 
+@pytest.mark.parametrize("change", ["native", "allocation", "selection"])
+def test_changed_seed_recovery_still_rechecks_binding_and_selection(intent, change):
+    import copy
+
+    _, task, reservation, info, prompt, invocation = intent
+    retained = {**copy.deepcopy(info), "startup_invocation": invocation}
+    current = asdict(reservation)
+    options = {}
+    if change == "native":
+        retained["connection"]["native_session_id"] = "foreign-native"
+    elif change == "allocation":
+        current["allocation_revision"] += 1
+    else:
+        options["charter"] = "different"
+    with pytest.raises(TaskError):
+        prepare(asdict(task), current, retained, prompt + " new source guidance", **options)
+
+
+@pytest.mark.parametrize("prompt", [None, ""])
+def test_recovery_never_replaces_invalid_retained_prompt_with_current_guidance(intent, prompt):
+    _, task, reservation, info, _, invocation = intent
+    retained = {**info, "startup_invocation": {**invocation, "prompt": prompt}}
+    with pytest.raises(TaskError, match="retained prompt"):
+        prepare(asdict(task), asdict(reservation), retained, "new source guidance")
+
+
 def test_actual_claim_increments_generation_without_rewriting_admission(intent):
     queue, task, reservation, info, _, invocation = intent
     record_created_agent(queue, reservation.key, task_generation=0,

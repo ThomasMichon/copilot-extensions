@@ -97,6 +97,17 @@ def register_task_lifecycle_commands(sub) -> None:
     )
     p.set_defaults(func=_core()._cmd_start)
 
+    from .pool_worker_decline_cli import cmd_decline
+    p = sub.add_parser("decline", help="Retain an allocator decline and finalize only your own workspace")
+    p.add_argument("task_id")
+    p.add_argument("--pool-generation", type=int, required=True)
+    p.add_argument("--owner-session-id", required=True)
+    exclusions = p.add_mutually_exclusive_group(required=True)
+    exclusions.add_argument("--exclude", action="append", help="Exact worktree:, pool: or machine: scope")
+    exclusions.add_argument("--exclude-self", choices=["worktree", "machine"])
+    p.add_argument("--note", required=True, help="Meaningful reason this assignment cannot be accepted")
+    p.set_defaults(func=cmd_decline)
+
     p = sub.add_parser(
         "suspend",
         help="park a started task as dormant while retaining its owner",

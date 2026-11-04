@@ -101,6 +101,8 @@ def prepare(
     previous = info.get("startup_invocation")
     if previous is not None:
         previous = historical_intent(previous)
+        if not isinstance(previous.get("prompt"), str) or not previous["prompt"].strip():
+            raise TaskError("ordinary startup retained prompt is unavailable")
     selection = {"agent": agent, "charter": charter}
     if previous is not None and not same_facts(previous["selection"], selection):
         raise TaskError("ordinary startup agent or charter selection changed")
@@ -138,7 +140,8 @@ def prepare(
     )
     result = {
         "version": 1, "invocation_key": key, "selection": selection,
-        "expected_native_session_id": actual.native, "prompt": rendered,
+        "expected_native_session_id": actual.native,
+        "prompt": previous["prompt"] if previous is not None else rendered,
         "binding": {
             "task_id": task["id"], "admission_generation": generation,
             "original_reservation_key": origin, "creation_key": reservation["creation_key"],

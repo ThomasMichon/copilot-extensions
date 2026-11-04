@@ -77,6 +77,21 @@ def test_factories_use_bridge_acquisition_and_stable_delivery(transport, mode):
     assert spawn.allocation_interface == mode
 
 
+def test_retained_cli_acquisition_keeps_the_released_full_request(transport):
+    from agent_dispatch.embody_prompts import pool_worker_prompt
+    from tests.test_ordinary_pool_startup import released_pool_seed
+
+    sample = task(spawn_session_handle=None)
+    options = dict(generation=2, route=" --shared", repo="example")
+    for seed in (released_pool_seed, pool_worker_prompt):
+        result = session_acquisition.acquire(
+            sample, mode="cli", prompt=seed(sample["id"], **options), project="example",
+        )
+        assert result.returncode == 0
+    assert transport[0][1] == transport[1][1]
+    assert transport[1][1]["delivery_id"] == "reservation-a:acquire"
+
+
 def test_absent_bridge_does_not_launch_directly(monkeypatch):
     monkeypatch.setattr(session_acquisition, "agent_bridge_launch_prefix", lambda: None)
     with pytest.raises(bridge.BridgeUnavailable, match="acquisition capability"):
