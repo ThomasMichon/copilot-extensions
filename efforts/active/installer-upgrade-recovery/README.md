@@ -6,7 +6,7 @@
 - **Created:** 2026-11-03
 - **Status:** Active
 - **Umbrella issue:** #10377
-- **Related issues:** #9489, #7743, #9448, #7758, #10180, #6820, #7028, #7947, #6389, #5472
+- **Related issues:** #9489, #7743, #9448, #7758, #10180, #6820, #7028, #7947, #6389, #5472, #10451
 - **Vision:** [authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
 
 ## Guiding Intent
@@ -496,3 +496,95 @@ recovery. The packet reuses the existing guarded Codespaces fixture rather than
 creating another installer. It remains on-demand and outside required unit-only
 CI. The test/documentation PR and #10426's containing release remain due; the
 other candidate owners and parent Plan/Validation gates remain open.
+
+### 2026-11-04 - Joined acceptance merged and producer release verified
+
+#10448 merged as `7fa780be4f7792d4453e6233a8e387b146e88750`
+at 13:39:04 UTC from Copilot-approved head
+`277d1b9bd1c040a6899404ea63d366d94cc5375a`. Required CI 41838618639
+passed, with an empty review-thread set. The continuing source worktree
+pulled forward. The two joined native cases now have reviewed, versioned
+consumer coverage; this is not repository-shell or installed-host acceptance.
+
+Containing promotion #10449 merged at 13:37:26 UTC. Its actual qualified
+Dev `8c64db93fc7bf165a362a17820211b352b7b9122` contains #10426's
+`8d71dd2f275c3289801767440a0adef0b2abf162`; released Main is
+`ec816c940921a5c7b42d3201ca2a6f4326e52aac`. The generation selector,
+both source-receipt adapters and both canonical runtime/construction helpers
+have matching blobs across the fix, qualified source and release. The native
+entry scripts differ only by the canonical repository-to-local installer-engine
+reference materialization. The released Codespaces version is `0.5.248-dev1`,
+with Worktrees `1.24.456-dev1`. This is released/pending authorized rollout,
+not a change to any running installation. #10448's later qualification-only
+change still needs its own containing release observation.
+
+The construction-family reconciliation also found existing delivered fixes,
+not another unclaimed source patch: #9623 supplies the packaged pywin32 static
+bootstrap allowance and #9878 preserves completion/settlement diagnostics.
+Both commits are in qualified Dev `03548e10d689419f3e887b0ac625c1df3c5669df`
+and release #10446; canonical construction blob
+`57f7bbb255475750d881f2bae74d29254be1ea8d` matches its Main snapshot.
+Ten strict packaged-pywin32 controls pass in 1.50 seconds (4.11 including
+isolated preparation/cleanup), without executing the bootstrap hook.
+The existing #7305 installed-consumer owner retains real-feed, Dispatch,
+normal published update and headed-CLI preservation acceptance, informed by
+[comment 6632045751](https://github.com/ThomasMichon/copilot-extensions/issues/7305#issuecomment-6632045751).
+No duplicate fix, installation or acceptance transfer is inferred.
+
+### 2026-11-04 - Windows venue fallback recovery
+
+#10451 records a surviving default-layout defect, reproduced before production
+edits: a real native Python child launches from a short control directory but
+fails with `WinError 267` from the existing 270-character prepared payload
+directory. The path exists; filesystem long-path support is not native process
+working-directory support. The bounded slice is coordinated with #8242 in
+[comment 6632477155](https://github.com/ThomasMichon/copilot-extensions/issues/8242#issuecomment-6632477155).
+Its cache/inventory, transport, closure and contributor-owned changes remain
+separate. Parked installation-cell coexistence/migration is not resumed.
+
+On Windows the owning fallback layout drops redundant marketplace/installation
+directories but retains the full SHA-256 of qualified source and complete
+declaration, beneath the same Git-local staging lifecycle. Registration validates
+the payload against that canonical home. POSIX layout is unchanged. Normal
+preparation selects a fresh short home without reading or rewriting an older
+malformed completion receipt, moving its payload, changing the marketplace
+source, or adding a recovery command. Immediate repeat reuses the completed
+short home. Revision/source changes remain distinct and old bytes survive.
+
+Seven focused controls pass in 7.92 seconds (81.03 including isolated
+preparation/cleanup), including real preparation, registration, native child
+launch and repeat; two selected plugins in one marketplace; declaration revision;
+and strict deep-root refusal before installation or registration. Native limit
+qualification caught an initial off-by-one: 258 UTF-16 units work, whereas 259
+fail because native normalization also needs a separator and NUL. The corrected
+preflight covers completed reuse and a surrogate-pair path, not just character
+count. It is an honest supported-path boundary, not a claim of arbitrary depth.
+
+All 234 existing preparation tests also pass in disjoint bounded packets.
+Stale tests that assumed literal `installation` directories now derive the
+canonical home; the independent fixture derives catalog identity from its
+actual private settings instead of ancestor names. A first combined run reached
+its 300-second limit, and concurrent cached-venv preparation interrupted later
+packets. Those packets were rerun only after the canonical runner restored its
+own test environment; no host runtime was repaired. Item, group and resource
+limits were not increased. New coverage remains on-demand, outside required
+unit-only CI.
+
+This closes a bounded authoritative-replacement/source-layout gap, not whole
+installation convergence. Synthetic acquisition and private fresh homes qualify
+the first-touch/older-footprint consumer contract without a network or live
+Copilot. Native POSIX, a fresh external VM, actual feeds/hooks, installed runtime
+selection and service readiness were not exercised in this Windows source-only
+lane; no rollout is authorized. Source review, required CI, merge and containing
+release remain due. The parent effort and #10377 remain active.
+
+### 2026-11-04 - Joined acceptance packet release observed
+
+#10452 merged at 14:16:22 UTC, publishing qualified Dev
+`150efa4dcbc8b129cf0735c4735beea8e3197542` as Main
+`bbdb61526541f2ba0c0e9fe0f69f671d4376237f`. That actual qualified source
+contains #10448's merge, and the outer Codespaces recovery test has identical
+blobs in the source merge, qualified Dev and released Main. This completes
+the qualification packet's containing-release observation for U8/U9; it is
+not another native run or an installed/runtime/service acceptance result.
+The remaining matrix boundaries and parent Plan/Validation gates stay open.
