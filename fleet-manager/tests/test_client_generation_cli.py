@@ -314,7 +314,8 @@ def test_actual_installed_console_generation_transitions(
     signed = independently_sign([fixture["proof"]["payload"]], tmp_path)
     fixture["proof"] = {**fixture["proof"], **signed["proofs"][0]}
     fixture["policy"]["keys"][0]["public_key"] = signed["public_key"]
-    root = lineage_at(tmp_path)
+    root = tmp_path / "l"
+    private_directory(root)
     directory = tmp_path / "commands"
     private_directory(directory)
     stage = tmp_path / "stage"

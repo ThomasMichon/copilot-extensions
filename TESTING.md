@@ -3536,8 +3536,11 @@ Missing state is never initialized by construction; selected-runtime removal
 refuses before retirement. These cases retain the 90-second item, 120-second
 caller and 45-second child bounds; they do not prove full installer integration,
 whole-installation retirement or live rollout.
-Each native case uses a short factory-owned root to avoid pip's separate Win32
-command-token limit; this is not arbitrary long-executable-path qualification.
+Each native case uses short factory-owned and lineage root names to stay below
+the native Win32 console-launcher path limit. The hosted Windows fixture's
+longer temporary prefix otherwise made its console path 263 characters while
+its interpreter remained within the limit. This is not arbitrary
+long-executable-path qualification.
 
 The manually selected `fleet-client-generations` portfolio in
 `installation-context-full.yml` runs these consumers on native Linux and Windows
