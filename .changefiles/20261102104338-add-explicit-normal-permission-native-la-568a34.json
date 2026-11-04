@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit normal-permission native launches without changing existing defaults",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

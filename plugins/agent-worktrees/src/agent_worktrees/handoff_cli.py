@@ -13,7 +13,7 @@ from . import reclaim_cli, resolve_launch_cli, status_monitor_runtime
 from .worktree_creation import LaunchSeedStagingFailure
 from . import bridge_acquisition_launch, bridge_seed_delivery, native_restart_launch
 from .launch_passthrough import passthrough_error as _passthrough_error
-from .launch_passthrough import add_launch_passthrough_args
+from .launch_passthrough import NORMAL_PERMISSIONS_LIVE_ERROR, add_launch_passthrough_args
 from .bridge_acquisition_launch import apply_bridge_scope as _apply_bridge_scope
 
 
@@ -165,35 +165,21 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
 
 
 def _resolve_codename_anywhere(codename_arg: str) -> tuple[str | None, str | None]:
-    """Resolve *codename_arg* to a LOCAL worktree id, falling back to a
-    cross-machine SSH scan (pr-attribution-codenames Phase 3) when no local
-    match exists.
-
-    Returns ``(worktree_id, None)`` on a local match, or ``(None, message)``
-    where *message* is a ready-to-surface error string covering all three
-    "not usable" outcomes: genuinely unmatched anywhere, matched on exactly
-    one OTHER machine (fail-closed -- this never attempts a remote launch,
-    only reports where to go), or an ambiguous cross-machine collision.
-    """
-    resolved_id = resolve_worktree_id_by_codename(codename_arg)
-    if resolved_id is not None:
-        return resolved_id, None
+    """Resolve a local target, reporting remote or ambiguous matches."""
     from . import codename_reverse_lookup
-    try:
-        remote = codename_reverse_lookup.resolve_codename_cross_machine_unique(codename_arg)
-    except codename_reverse_lookup.AmbiguousCodenameError as exc:
-        return None, str(exc)
-    if remote is not None:
-        return None, (
-            f"Codename '{codename_arg}' resolves to worktree "
-            f"'{remote.worktree_id}' on machine '{remote.machine}', not this "
-            f"machine. Resolve/embody it there directly (e.g. SSH to "
-            f"'{remote.machine}') -- remote launch is not supported."
-        )
-    return None, f"No worktree found with codename '{codename_arg}'"
+    return codename_reverse_lookup.resolve_local_target(
+        codename_arg, resolve_local=resolve_worktree_id_by_codename,
+    )
 
 
 def cmd_embody(args: argparse.Namespace) -> int:
+    try:
+        return _cmd_embody(args)
+    except _core().LaunchPreflightError as exc:
+        return output._json_error(str(exc), exit_code=3)
+
+
+def _cmd_embody(args: argparse.Namespace) -> int:
     """Create or resume a **detached** mux+Copilot CLI session in a worktree (D5).
 
     The agent-facing "embodiment" verb: spawn a durable, mux-wrapped interactive
@@ -223,6 +209,8 @@ def cmd_embody(args: argparse.Namespace) -> int:
     registration. ``--verify-timeout`` waits for mux existence, not native proof.
     """
     if native_restart_launch.is_restart_intent(args):
+        if getattr(args, "normal_permissions", False):
+            return output._json_error("--normal-permissions restart is unqualified", exit_code=3)
         return native_restart_launch.cmd_embody(args)
     make_new = getattr(args, "new", False)
     raw_id = getattr(args, "worktree_id", None)
@@ -308,6 +296,8 @@ def cmd_embody(args: argparse.Namespace) -> int:
     # Resume: a live mux session already embodies this worktree -- don't
     # duplicate (one live session per cwd). Report it and stop.
     already = sessions.has_mux_session(wt_id)
+    if already and getattr(args, "normal_permissions", False):
+        return output._json_error(NORMAL_PERMISSIONS_LIVE_ERROR, exit_code=3)
     acquisition = getattr(args, "bridge_acquisition", None)
     native_resume = acquisition if acquisition != "fresh" else None
     if acquisition and already:
@@ -523,6 +513,8 @@ def cmd_embody(args: argparse.Namespace) -> int:
         if acquisition and (error := bridge_acquisition_launch.refusal(args, launch_record, wt_id)):
             return output._json_error(error, exit_code=3)
         if sessions.has_mux_session(wt_id):
+            if getattr(args, "normal_permissions", False):
+                return output._json_error(NORMAL_PERMISSIONS_LIVE_ERROR, exit_code=3)
             output._json_output(
                 {
                     "ok": True,
@@ -586,6 +578,8 @@ def cmd_embody(args: argparse.Namespace) -> int:
             f"failed to create session wt-{wt_id}: {result.get('error')}",
             exit_code=4,
         )
+    if result.get("created") is False and getattr(args, "normal_permissions", False):
+        return output._json_error(NORMAL_PERMISSIONS_LIVE_ERROR, exit_code=3)
 
     return embody_completion.complete_launch(
         args, wt_id=wt_id, work_dir=work_dir, record=record, acquisition=acquisition,
@@ -641,6 +635,8 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
     seed = getattr(args, "seed", None)
 
     already = sessions.has_mux_session(wt_id)
+    if already and getattr(args, "normal_permissions", False):
+        return output._json_error(NORMAL_PERMISSIONS_LIVE_ERROR, exit_code=3)
     launch_preflight = None
     if getattr(args, "dry_run", False) or not already:
         launch_preflight = _preflight_launch(config, args, work_dir)
@@ -695,6 +691,8 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
     # the only concurrency guard this path needs (mirrors the worktree path's
     # own re-check pattern, just without the record-staleness half of it).
     if sessions.has_mux_session(wt_id):
+        if getattr(args, "normal_permissions", False):
+            return output._json_error(NORMAL_PERMISSIONS_LIVE_ERROR, exit_code=3)
         output._json_output({
             "ok": True,
             "worktree_id": wt_id,
@@ -719,6 +717,8 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
             exit_code=4,
         )
     if result.get("created") is False:
+        if getattr(args, "normal_permissions", False):
+            return output._json_error(NORMAL_PERMISSIONS_LIVE_ERROR, exit_code=3)
         output._json_output({
             "ok": True, "worktree_id": wt_id, "anchor": True, **deferred,
             "session": result["session"], "work_dir": work_dir,

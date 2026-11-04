@@ -278,3 +278,37 @@ class TestResolveCodenameCrossMachine:
                             lambda machine_key, *a, **k: "wt-B")
         match = crl.resolve_codename_cross_machine_unique("sturdy-crate")
         assert match == crl.RemoteCodenameMatch(machine="borealis", worktree_id="wt-B")
+
+
+class TestLocalTarget:
+    def test_local_match_does_not_scan_remote_machines(self, monkeypatch):
+        from agent_worktrees import __main__ as main
+        from agent_worktrees import handoff_cli
+
+        monkeypatch.setattr(main, "resolve_worktree_id_by_codename", lambda name: "wt-A")
+        monkeypatch.setattr(
+            crl, "resolve_codename_cross_machine_unique",
+            lambda name: pytest.fail("local match must not trigger SSH"),
+        )
+        assert handoff_cli._resolve_codename_anywhere("sturdy-crate") == ("wt-A", None)
+
+    @pytest.mark.parametrize("remote, message", [
+        (None, "No worktree found"),
+        (crl.RemoteCodenameMatch(machine="borealis", worktree_id="wt-B"),
+         "remote launch is not supported"),
+    ])
+    def test_missing_local_match_reports_the_remote_outcome(self, monkeypatch, remote, message):
+        monkeypatch.setattr(crl, "resolve_codename_cross_machine_unique", lambda name: remote)
+        worktree_id, error = crl.resolve_local_target("sturdy-crate", resolve_local=lambda name: None)
+        assert worktree_id is None and message in error
+
+    def test_ambiguous_remote_match_remains_a_refusal(self, monkeypatch):
+        def ambiguous(name):
+            raise crl.AmbiguousCodenameError(name, [
+                crl.RemoteCodenameMatch(machine="borealis", worktree_id="wt-B"),
+                crl.RemoteCodenameMatch(machine="ember", worktree_id="wt-C"),
+            ])
+
+        monkeypatch.setattr(crl, "resolve_codename_cross_machine_unique", ambiguous)
+        worktree_id, error = crl.resolve_local_target("sturdy-crate", resolve_local=lambda name: None)
+        assert worktree_id is None and "more than one machine" in error

@@ -23,6 +23,7 @@ from .launch_progress import preview_mode, step
 from .resolve_picker_cli import ResolvePickerContext, run_legacy_picker
 from .resolve_machine_cli import remote_selector_args as _remote_selector_args
 from .resolve_target import target_is_local as _target_is_local
+from .launch_passthrough import NORMAL_PERMISSIONS_LIVE_ERROR, add_normal_permissions_arg
 
 
 def _core():
@@ -231,6 +232,7 @@ def add_parsers(sub) -> None:
     parser = sub.add_parser("resolve", help="Resolve launch plan as JSON (for shell wrappers)")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--recovery", action="store_true")
+    add_normal_permissions_arg(parser)
     parser.add_argument(
         "--defer-projections", action="store_true", help=argparse.SUPPRESS,
         default=os.environ.get("AGENT_WORKTREES_DEFER_PROJECTIONS") == "1",
@@ -372,15 +374,30 @@ def add_parsers(sub) -> None:
 
 def cmd_resolve(args: argparse.Namespace) -> int:
     """Resolve a launch plan and emit it as JSON."""
-    with preview_mode(getattr(args, "dry_run", False)):
-        if getattr(args, "require_launch_attempt", False):
-            from . import launch_attempt
+    try:
+        with preview_mode(getattr(args, "dry_run", False)):
+            if getattr(args, "require_launch_attempt", False):
+                from . import launch_attempt
 
-            return launch_attempt.required(args, lambda: _cmd_resolve(args))
-        return _cmd_resolve(args)
+                return launch_attempt.required(args, lambda: _cmd_resolve(args))
+            return _cmd_resolve(args)
+    except _core().LaunchPreflightError as exc:
+        return output._json_error(str(exc), exit_code=3)
 
 
 def _cmd_resolve(args: argparse.Namespace) -> int:
+    if getattr(args, "normal_permissions", False) and (
+        any(getattr(args, name, None) for name in (
+            "machine", "new_worktree", "auto", "bare_resume", "restore",
+            "launch_request_b64", "launch_request_status",
+        ))
+        or not any(getattr(args, name, None) for name in ("worktree_id", "codename", "base"))
+    ):
+        return output._json_error(
+            "--normal-permissions resolve requires an explicit existing local target; "
+            "remote, New, picker and restore paths are unqualified",
+            exit_code=3,
+        )
     attempt_id = getattr(args, "launch_attempt_id", None)
     if attempt_id is not None and not getattr(args, "require_launch_attempt", False):
         from .launch_request import _protocol_fields
@@ -769,6 +786,10 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         return output._json_error(str(exc), exit_code=3)
     with step("Verifying worktree liveness", worktree_id=worktree_id):
         verdict = sessions.verify_worktree_active(record)
+    if getattr(state.args, "normal_permissions", False) and (
+        verdict is None or not verdict.probes_ok or not verdict.mux_probe_ok or verdict.active
+    ):
+        return output._json_error(NORMAL_PERMISSIONS_LIVE_ERROR, exit_code=3)
     try:
         with step("Preparing launch prompt", worktree_id=worktree_id):
             staged_seed = seed_for_attempt(yaml_path, record, state.args, verdict=verdict)

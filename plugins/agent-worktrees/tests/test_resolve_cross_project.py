@@ -166,6 +166,7 @@ def test_noninteractive_resume_reloads_config_after_relocation(tmp_path, monkeyp
     )
     monkeypatch.setattr(resolve_cli.cfg, "load_config", fake_load_config)
     monkeypatch.setattr(resolve_cli.cfg, "tracking_dir", lambda: other_dir)
+    monkeypatch.setattr(resolve_cli.agent_policy, "require", lambda *a, **k: None)
     monkeypatch.setattr(
         resolve_cli.tracking, "load_record", lambda path: type("Record", (), {"worktree_path": "/tmp/wt-1"})()
     )
