@@ -467,6 +467,21 @@ packet staging. Only five remaining originals/35 texts are staged for direct
 complete reading; both held members and their source/subset retries stay
 withheld. No receiving fit, disposition or custody change follows.
 
+The [session-intelligence study](session-intelligence-cohort.md) reads five
+unchanged OPEN originals and thirteen comments: 18 whole texts, 35,387 body
+characters. The historical sixth member is CLOSED metadata-only, without
+new text or closure credit. Nine whole-message comparisons and six description
+comparisons, including one explicitly reused earlier description, establish
+no source complete. Preserve all seven sync follow-ups, the complete canonical
+accounting programme and claimed catalog/daily/adoption phases, and actual
+bounded installed scheduled accounting. Five complete current receiving
+documents and eleven complete source functions now supply qualified bounded
+readback. Merely CLOSED metadata is not an invented reference STOP; every
+actual hold remains. Two same-owner phase-tracking candidates have direct
+unchecked canonical retention but still need reviewed delivery and separate
+judgments. No native, runtime,
+source/resource or accepted handoff effects follow; all five sources stay OPEN.
+
 The [measurement/preservation study](measurement-preservation-cohort.md)
 integrates seven complete originals and sixteen comments: 23 texts,
 48,865 body characters. The inherited-held eighth member remains unrendered.
@@ -774,6 +789,17 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [session-intelligence study](session-intelligence-cohort.md) preserves
+five whole contracts, all refinements, literal alternatives, historical partial
+credit and actual reserved owner lanes. Fifteen bounded relations remain
+message/description comparisons; one description is reused, not freshly
+qualified. The CLOSED historical issue's body remains unread; its metadata-only
+exclusion is not a new reference STOP on independent receiving readback.
+Every actual hold remains. Five whole documents and eleven source functions
+do not establish native/installed acceptance, reviewed direct intake, source
+closure or custody transfer. Every prior parent check and graph score/
+invalidation/unrelated/held row survives.
 
 The [measurement/preservation study](measurement-preservation-cohort.md)
 preserves seven complete contracts and all refinements without rereading
