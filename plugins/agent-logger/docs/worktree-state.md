@@ -60,7 +60,9 @@ positively identified collection namespace, so retained revisions do not consume
 the machine-directory scan budget. Ordinary session pushes cannot enter that
 owned namespace.
 Namespace claiming and potentially overlapping ordinary publication share a
-domain guard held through the complete ordinary push. Native alias checks
+domain guard held through session, process-log and archive publication as well
+as heartbeat and mutating retention/compaction operations. Read-only maintenance
+does not allocate a missing destination or archive directory. Native alias checks
 reject case-insensitive equivalents without hiding genuinely distinct
 case-sensitive machine directories. Non-directory entries are not probed as
 collection namespaces during fleet discovery.
@@ -97,7 +99,8 @@ The opt-in `agent-logger` `tests/test_worktree_state.py` and
 efforts export/readback in separate Python processes, complete-byte retention,
 multiple contributing sessions, exact retry, privacy/claim refusal, corruption,
 partial publication, creation-time permissions, namespace/fleet coexistence
-and redirected paths. It uses synthetic private fixtures,
+and redirected paths. The coexistence packet covers every mutating publication
+leg and deterministic session/log/archive claim interleavings. It uses synthetic private fixtures,
 not an operator's actual agenda or archive destination. Required unit-only CI
 admission and operational/native acceptance are separate gates; see
 [testing](../../../TESTING.md).

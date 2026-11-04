@@ -17,6 +17,11 @@ Each source leaf has the same optional `session-state/`, `archived/`,
 retained as flat observations; a name alone never proves their host, provider,
 or repository.
 
+Positively identified [typed worktree-state collections](worktree-state.md)
+are a separate domain, not empty session sources. Discovery excludes them in
+both flat roots and provider groups, while retaining unclaimed ordinary sources
+with the same name.
+
 ## Reader contract
 
 The iterator yields `ArchiveSource` records:

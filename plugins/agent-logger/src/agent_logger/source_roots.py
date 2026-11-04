@@ -19,6 +19,7 @@ from agent_logger.sync.provenance import (
     is_link_or_reparse,
     open_regular_no_follow,
 )
+from agent_logger.sync.worktree_state_namespace import is_namespace_directory
 
 SOURCE_METADATA_MEMBER = ".archive-source.json"
 MAX_SOURCE_METADATA_BYTES = 1024 * 1024
@@ -373,7 +374,13 @@ def iter_archive_sources(
             continue
         for candidate in candidates:
             try:
-                if stat.S_ISREG(candidate.lstat().st_mode):
+                mode = candidate.lstat().st_mode
+                if stat.S_ISREG(mode):
+                    continue
+                if (
+                    stat.S_ISDIR(mode) and not is_link_or_reparse(candidate, mode)
+                    and is_namespace_directory(candidate.parent, candidate.name)
+                ):
                     continue
             except OSError as exc:
                 if on_error is None:
