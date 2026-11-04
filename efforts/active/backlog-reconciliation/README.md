@@ -102,6 +102,11 @@ The [fifteen qualified contracts](receiving-qualified-fifteen.md) retain five
 direct draft amendments and ten source-specific outcomes. Publication does not
 establish receiving acceptance or authorize source issue closure.
 
+The [next eighteen contracts](receiving-qualified-eighteen.md) retain two
+direct draft amendments, one withheld amendment under a parked receiving
+effort, and fifteen source-specific outcomes. Existing claimant acceptance,
+resumption and source/resource boundaries remain separate from publication.
+
 ## Request
 
 Operator request, with identifying organizational references redacted:
