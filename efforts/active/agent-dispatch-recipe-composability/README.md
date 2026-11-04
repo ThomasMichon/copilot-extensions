@@ -55,6 +55,17 @@ fits.
 
 ## Coordination
 
+The finite #4959 inherited-script origin clarification below preserves ALL
+directly incorporated #5174 clauses under the existing recipe/registrar/
+base-engine/provider/source/resource custodians. #8300's bounded reservation
+is explicitly complete, not expired or reopened. Optional Phase5/#2570,
+catalog and motivating-consumer work retain separate owners and gates;
+they are not prerequisites for this finite origin repair. The OPEN umbrella
+and this Active effort remain until their own complete gates resolve.
+Normal review, actual complete delivery and full current receiving/source/
+custody readback precede any separate administrative judgment; no script,
+engine, provider, lease, task or runtime operation is authorized here.
+
 The direct #2570 lane is a concrete Phase 5 need under this existing
 base-engine/script-hook owner, not a new verifier loop or completion of generic hooks.
 Existing evaluator/registrar/domain/source custody, #5174 and motivating-consumer
@@ -420,6 +431,54 @@ Sources: https://github.com/ThomasMichon/copilot-extensions/issues/2570 ;
 https://github.com/ThomasMichon/copilot-extensions/pull/4709 ;
 https://github.com/ThomasMichon/copilot-extensions/pull/4962 .
 
+#### Finite inherited-script defining-origin follow-up from #4959
+
+**Agent-recommended tracking amendment.** Retain all five directly
+incorporated #5174 rows, while leaving completed reviewer/worker work credited.
+
+- [ ] **P4959-1:** Preserve ANY already-resolved declaration and recursive
+  repository/plugin chaining, script decisions invoked by the BASE engine
+  through its declared contract, and direct no-`extends` full emitter/
+  evaluator declarations. Keep every currently supported path field's
+  nearest defining-hop origin rather than outer-leaf/root rebasing.
+- [ ] **P4959-2:** Resolve ONE inherited relative script
+  `forge.command`/`forge.cwd` through actual defining-origin/base-engine
+  resolution and supported admission/execution. Until safe supported
+  execution is established, preserve required cross-repository inherited-
+  relative refusal as mitigation, NOT completed provenance. Retain valid
+  inherited absolute, same-repository and direct paths, nearest definitions,
+  explicit overrides/deferred placeholders and string/list command forms;
+  never weaken script, named-source, resource or selected-closure admission.
+- [ ] **P4959-3:** Preserve delivered `emitter.spec.cwd`, #8300 reviewer cwd/
+  effective worker-identity/deferred/serialized/scheduled/discovery contexts,
+  global defaults/shipped aliases and #8363 physical selected-closure
+  materialization. Do not reopen those bugs, treat the completed source
+  reservation as a live token or infer installed/live adoption from its
+  reported 512 contained cases.
+- [ ] **P4959-4:** Keep existing engine, scheduling, lease, quiet-period,
+  dedup, suspend/resume and source/resource ownership. No new engine or
+  bespoke loop, speculative hook/catalog dependency or private-consumer
+  rollout gate is introduced. Finite path qualification does not complete
+  every independent Plan/Validation item or close the umbrella.
+
+##### Local Validation for #4959
+
+- [ ] **V4959-1:** Exercise the actual inherited relative-script defining
+  origin versus outer leaf with distinct roots/decoy paths through real
+  declaration expansion and the existing base/provider boundary. Prove
+  admissible safe origin execution; unsupported or unsafe shapes retain
+  explicit required refusal and a tracked unresolved gap, not false success.
+- [ ] **V4959-2:** Preserve ALL direct #5174 field/nearest-definition/
+  override/placeholder/string-list/recursive/direct controls, valid absolute
+  and same-repository behavior, source/resource admission and explicit
+  failures. Retain credited reviewer/worker/emitter/global/alias contexts,
+  serialized/scheduled/discovery behavior and the four-operation provider
+  contract without rebuilding its scheduling or custody.
+- [ ] **V4959-3:** Record finite source versus release/isolated/installed/
+  native/live evidence honestly. Reuse valid bounded proofs without
+  reopening #8300; independent optional hooks/catalog/consumer gates remain
+  open but do not delay this finite repair.
+
 ## Validation Plan
 
 - [ ] Complete every directly retained #2570 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and unfinished acceptance. Tracker consolidation is not implementation.
@@ -467,6 +526,14 @@ https://github.com/ThomasMichon/copilot-extensions/pull/4962 .
       passed 305 tests with three platform-specific skips; other coupled
       packets overlap. Promotion and authorized installed proof remain separate.
 
+- [ ] **G4959:** Resolve EVERY direct P4959/V4959 and Coordination clause,
+  including ALL directly inherited #5174 rules and actual inherited relative-
+  script safe execution versus required refusal. Preserve #8300/#8363
+  credit, base-engine/direct compatibility and all incumbent completed/
+  unfinished Plan/Validation/Journal and independent custodians. A refusal
+  mitigation or documentary intake is not whole provenance completion,
+  installed adoption, umbrella closure or claim/resource release.
+
 ## Proposal
 
 _Pending — Phase 1's concrete chain-resolution + cycle-guard design will be
@@ -474,6 +541,17 @@ detailed here once implementation starts, if it grows beyond what the Plan
 items above already specify._
 
 ## Journal
+
+### 2026-10-30 - Finite inherited-script defining-origin clarification
+
+- Added direct #4959 Plan/local Validation, actual global Validation and
+  continuing coordination, retaining ALL directly incorporated #5174
+  clauses. The relative-script defining-origin gap remains distinct from
+  credited recursion, base-engine hooks, #8300 contexts and #8363 closure.
+- The bounded #8300 reservation stays complete; no old reviewer/worker bug
+  is reopened. Required refusal remains safety, not proof of origin-safe
+  execution. Review, actual delivery, full current readback and separate
+  judgments remain; no script/test/provider/task/native or rollout occurred.
 
 ### 2026-10-24 - Selected-closure materialization source merged
 

@@ -8,7 +8,7 @@
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
 - **Coverage:** [Portfolio tracker and merged lockdown records](coverage.md)
-- **Current slice:** Independent SSH service (#10211), Versioned Runtime and persistent dual-version checker (#10331), and retained effort-helper (#10215) qualification. PR service (#10204), Index service (#10206), Credential Relay (#10222), Harness Knowledge (#10185), Context Handoff (#10179), Dispatch service (#10184), Devcontainer (#10183), AI Attribution (#10171), Venue Copilot (#10166), Plugin Resolve (#10141), Plugin Activation (#10108), Machine Transport (#10107), Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
+- **Current slice:** Versioned Runtime and persistent dual-version checker (#10331), and retained effort-helper (#10215) qualification. SSH service (#10211), PR service (#10204), Index service (#10206), Credential Relay (#10222), Harness Knowledge (#10185), Context Handoff (#10179), Dispatch service (#10184), Devcontainer (#10183), AI Attribution (#10171), Venue Copilot (#10166), Plugin Resolve (#10141), Plugin Activation (#10108), Machine Transport (#10107), Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
@@ -32,7 +32,7 @@ definition of success.
 
 - **Topology:** Independent per-slice PRs, never a concurrently edited shared staging branch. The lead may integrate non-overlapping test cohorts into one bounded reviewed slice after their isolated validation.
 - **Host (owns PRs):** `lead` owns its PRs and verifies completion of delegated PRs.
-- **Delegates:** SSH service and Versioned Runtime/checker slice owners qualify independently in dedicated worktrees; PR and Index service admissions have merged. Heavy unit/native qualification is staggered for actual test capacity, not a shared PR merge queue. Each owner receives an explicit bounded qualification and publication assignment; the lead retains integration, shared coverage/global documentation, the effort and full completion judgment. Completed children are finalized only after their merged evidence returns to this tracker.
+- **Delegates:** The Versioned Runtime/checker slice owner qualifies independently in a dedicated worktree; SSH, PR and Index service admissions have merged. Heavy unit/native qualification is staggered for actual test capacity, not a shared PR merge queue. Each owner receives an explicit bounded qualification and publication assignment; the lead retains integration, shared coverage/global documentation, the effort and full completion judgment. Completed children are finalized only after their merged evidence returns to this tracker.
 - **Handoff:** A merged slice returns to the canonical README, updates its Plan/Validation/Journal, then selects the next unresolved item. A continuation retains #9807, this README, the current slice, live PRs and exactly one next action.
 - Existing contributor PRs are reviewed/coordinated, not superseded. Shared-library changes precede dependent activations; unrelated leaf activations may proceed independently.
 
@@ -180,6 +180,7 @@ rewrite.
 - [x] Strictly admit the complete unchanged Dispatch service Python source/test project (#10184 / merged #10189).
 - [x] Strictly admit all 27 Index service source/test/helper files on its existing Python 3.10 minimum, preserving independent core-plugin ownership (#10206 / merged #10327).
 - [x] Strictly admit all nine PR service source/test files on its existing Python 3.10 minimum, preserving original assertions and installed-runtime behavior (#10204 / merged #10332).
+- [x] Strictly admit all 26 SSH service source/test files on its existing Python 3.10 minimum, preserving native ownership and transport behavior (#10211 / merged #10348).
 - [ ] Activate each runtime plugin and standalone service independently, using basic mode only where needed and recording its remaining strict delta.
 - [ ] Tighten each activated runtime/service to strict through component-sized PRs; cover source, optional extras and platform-specific implementations.
 - [ ] Converge the larger Worktrees, Worktree Manager and Fleet Manager surfaces through subsystem-sized PRs, preserving lazy-loading and native behavior.
@@ -216,6 +217,7 @@ rewrite.
 - [x] Credential Relay preserves its production behavior, assertions and deadlines across both strict targets, Python 3.10 native/copy tests and fresh exact-input source CI (#10310).
 - [x] Index service preserves its original function/assertion contracts across both strict targets, Python 3.10 native/copy tests, composed-source qualification and fresh exact-input source CI; the eight original skips receive no additional credit (#10327).
 - [x] PR service preserves all 81 original functions and 114 assertion expressions across both strict targets, actual Python 3.10 installed/native tests and fresh exact-input source CI (#10332).
+- [x] SSH service preserves all 254 original function contracts, 299 assertion expressions and four embedded literals across both strict targets, actual Python 3.10 Linux/Windows qualification and fresh exact-input source CI (#10348).
 - [ ] Persistent dual-version controls reject a type error confined to the 3.11 TOML branch on both platforms through local/source/candidate entry points while preserving 3.10 runtime behavior (#10331).
 - [x] Fresh checker preparation and a credential-free local subprocess check exercise the real developer command without executing product code or collecting tests.
 - [x] Required source gate actually rejects a type regression on activated code.
@@ -2614,3 +2616,43 @@ composition prerequisites, and review/validation rules.
 - SSH service, Versioned Runtime/checker and retained effort-helper work
   continue independently. This effort, its Plan and its Validation Plan remain
   Active until every remaining project and cross-cutting gate is resolved.
+
+### 2026-11-03 - SSH service merged; retained helpers qualified locally
+
+- #10348 merged as `1a267c90284abce573370da582e3e70b215a76d5` after
+  actual Copilot approval on exact head
+  `bd12b7373c140d8ddd35bf07d44c409674b2d0ea`, green required CI run
+  `41781687518` and zero review threads. The actual merged commit retains
+  both required trailers. #10211 is closed; #9807 remains open.
+- Fresh provider packet `816bd981cd29b582cbe30c26146d9b0f8aa0d7b5`
+  passes **3,964 units in 61.198 seconds**, all 571 admitted input
+  fingerprints, 236 positive coverage targets and zero effects. Canonical
+  packet verification uses the actual provider Git manifest; all 571 actual
+  provider and merged Git input blobs independently match. The actual merge
+  differs from that packet candidate only in 13 effort Markdown documents;
+  it is not relabeled as the packet's original commit or whole tree.
+- Both 26-file strict targets pass. Actual Linux Python 3.10.22 passes
+  **165 cases**, retaining seven original Windows-only skips. Actual Windows
+  Python 3.10.22 passes **10 cases**, including every required Windows-only
+  case, retaining one original POSIX-only skip. The target-specific SDK
+  closures contain 45 and 46 distributions respectively. Original 254
+  function contracts, 299 assertion expressions and four embedded Python
+  literals remain; the two empty-query compatibility guards and copied-build
+  permission fixture are explicit, tested deltas.
+- The complete Plan and Validation Plan were reread. Every project row matches
+  the refreshed merged inventory: **39 / 68 strict projects (57.4%)** and
+  **377 / 7,816 physical Python files (4.8%)**. Twenty-nine projects remain
+  pending; none are basic. This admission adds 26 locked service files without
+  crediting any separately owned plugin or generated consumer.
+- Retained effort helpers (#10215) are locally prepared, not merged:
+  five physical files and five emitted targets pass both strict analysis
+  targets; actual Python 3.11 Linux and Windows each pass all 15 native
+  controls. All 39 original function contracts and 31 assertion expressions
+  remain. Refreshed composed-source qualification passes the current
+  3,972-node packet with caller-derived admission and isolated test resources;
+  eight independently added Dev controls are included without changing selection.
+  These five files remain pending until their own review and merge.
+- Versioned Runtime/checker's persistent 3.10/3.11 implementation (#10331)
+  remains prepared and independently uncredited while its metadata and native,
+  copied-source and composed qualification gates are resolved. This effort,
+  every unfinished Plan/Validation item and #9807 remain Active.

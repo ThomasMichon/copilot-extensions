@@ -3,6 +3,55 @@
 See the [configuration reference](docs/configuration.md) for native files,
 fields, precedence, source-relative provisioning and credential boundaries.
 
+Wheel-application regular installation invokes the app-owned `__source-setup`
+and `__source-start` receivers. Setup contributes the plain schema-0
+`providers.d/agent-codespaces.standalone.json`, referencing the exact installed
+version-neutral global command even if that command or Bridge is not installed
+yet. The explicit `AGENT_BRIDGE_PROVIDERS_DIR` override wins; otherwise the
+directory belongs to `AGENT_BRIDGE_CONFIG_DIR` or the default Bridge config root.
+Without a config override, an explicit `AGENT_BRIDGE_INSTALL_DIR` precedes the
+home-directory fallback, matching Bridge's own configuration-root resolution.
+An override whose final component is exactly `providers.d` must have a parent
+lexically matching that declared config root; otherwise setup refuses before
+creating directories or publishing. Comparison expands home/relative paths,
+normalizes path syntax and Windows case, but never resolves links or activates
+Source/Bridge to infer another installation. Other override directory names
+retain Bridge's explicit escape-hatch behavior.
+Publication is atomic, create-only and idempotent through the canonical drop-in
+writer. It never invokes a registration hook or backend.
+An identical concurrent reader may wait up to one second for this target's
+two-link publication window to settle. Reads retain the same file identity and
+require an ordinary single-link declaration before success. Persistent hardlinks,
+replacement or interruption refuse without rewriting either publisher's entry;
+the producer acquires no lock during this bounded read-only wait.
+
+The identity-bearing payload entry `agent-codespaces.json` stays separate and
+untouched. An eligible attributed entry retains Bridge's existing filename-order
+precedence only for the CodeSpaces plugin identity, regardless of marketplace;
+foreign plugin namespace entries refuse. When the CodeSpaces plugin is disabled,
+the installed app remains discoverable
+without source trust, redirects or Copilot activation. Bridge's existing
+unattributed-provider compatibility advisory still applies to the plain entry;
+this is not schema-1 attribution or backend readiness. Collisions at the plain
+destination or with other anonymous/foreign namespace entries refuse rather than
+overwrite, including a prior plain entry at the payload filename. Those entries
+require their owner's migration; application setup never silently downgrades one.
+The own destination retains its 64 KiB read limit. Ordinary peer JSON is read
+completely before namespace classification, matching Bridge; size alone never
+hides a foreign namespace, and duplicate keys use their final value. Unrelated
+or malformed JSON peers are isolated. Unsafe paths and storage failures,
+including unreadable peer enumeration, still refuse publication.
+
+Startup reads merged configuration without current-directory overlays and uses
+the existing finite Connection Owner ensure only when enabled and executing
+from the selected installed flat or nested source/profile slot. It does not
+register tasks or force a disabled Owner. The explicit startup receiver requires
+the selected completion's existing ownership proof and the same attributed
+process binding before ensuring an Owner; it refuses missing or unreadable
+attribution rather than falling back to legacy readiness. Ordinary legacy
+on-demand ensure keeps its compatibility behavior. Stage-only installation invokes
+neither callback; a staged environment is not installed/provider/serving readiness.
+
 GitHub Codespaces lifecycle management, SSH transport, and credential relay
 for Copilot CLI.
 

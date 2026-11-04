@@ -3,8 +3,9 @@
 import argparse
 import json
 from pathlib import Path
+from typing import cast
 
-from helper_closure_probe import packages, python_at, require, run
+from helper_closure_probe import ClosureReport, packages, python_at, require, run
 
 
 PROBE = """
@@ -24,7 +25,7 @@ print(hashlib.sha256(Path(zdd.__file__).read_bytes()).hexdigest())
 """
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--uv", type=Path, required=True)
@@ -33,7 +34,9 @@ def main():
     cache, first, second = (
         root / name for name in ("uv-cache", "agent-containers", "agent-bridge")
     )
-    report = json.loads((root / "closure-results.json").read_text(encoding="utf-8"))
+    report = cast(
+        ClosureReport, json.loads((root / "closure-results.json").read_text(encoding="utf-8"))
+    )
     require(report.get("same_distribution_closures_as_reference") is True,
             "retirement requires an accepted closure-parity report")
     require(cache.is_dir() and first.is_dir() and second.is_dir(),

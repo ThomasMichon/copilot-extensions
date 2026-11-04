@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-codespaces"
-version = "0.5.245-dev1"
+version = "0.5.246-dev1"
 description = "GitHub Codespaces lifecycle management, SSH transport, and credential relay"
 readme = "README.md"
 license = "MIT"
@@ -134,6 +134,8 @@ line-length = 99
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    "setuptools>=83.0.0",
+    "pydantic>=2.0",
 ]
 
 [tool.ruff.lint]

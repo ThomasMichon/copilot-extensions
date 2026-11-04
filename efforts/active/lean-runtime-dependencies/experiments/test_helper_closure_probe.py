@@ -6,6 +6,7 @@ import sys
 from tempfile import TemporaryDirectory
 import unittest
 import venv
+from typing import cast
 
 from helper_closure_probe import (
     allocation_proof, inventory, packages, python_at, run, sources, wheel_requirements,
@@ -13,7 +14,7 @@ from helper_closure_probe import (
 
 
 class ClosureProbeTests(unittest.TestCase):
-    def runtime_fixture(self, root):
+    def runtime_fixture(self, root: Path) -> tuple[Path, Path, Path]:
         runtime = root / "runtime"
         venv.EnvBuilder(with_pip=False, symlinks=False).create(runtime)
         output, _ = run([
@@ -32,7 +33,7 @@ class ClosureProbeTests(unittest.TestCase):
         )
         return runtime, site, metadata
 
-    def test_hardlinks_do_not_increase_unique_allocation(self):
+    def test_hardlinks_do_not_increase_unique_allocation(self) -> None:
         with TemporaryDirectory() as directory:
             proof = allocation_proof(Path(directory))
         self.assertEqual(proof["single"]["logical_bytes"], 4097)
@@ -46,7 +47,7 @@ class ClosureProbeTests(unittest.TestCase):
             2 * proof["single"]["unique_allocated_bytes"],
         )
 
-    def test_union_counts_cross_runtime_file_identity_once(self):
+    def test_union_counts_cross_runtime_file_identity_once(self) -> None:
         with TemporaryDirectory() as directory:
             first, second = (Path(directory) / name for name in ("first", "second"))
             first.mkdir()
@@ -60,7 +61,7 @@ class ClosureProbeTests(unittest.TestCase):
         self.assertEqual(combined["unique_allocated_bytes"], one["unique_allocated_bytes"])
         self.assertEqual(combined["duplicate_file_links"], 1)
 
-    def test_source_cycle_is_bounded(self):
+    def test_source_cycle_is_bounded(self) -> None:
         with TemporaryDirectory() as directory:
             repo = Path(directory).resolve()
             first, second = (repo / name for name in ("first", "second"))
@@ -74,7 +75,7 @@ class ClosureProbeTests(unittest.TestCase):
             )
             self.assertEqual(sources(repo, first), sorted([first, second]))
 
-    def test_escaping_source_is_refused(self):
+    def test_escaping_source_is_refused(self) -> None:
         with TemporaryDirectory() as directory:
             repo = Path(directory).resolve()
             (repo / "pyproject.toml").write_text(
@@ -83,7 +84,7 @@ class ClosureProbeTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "escapes"):
                 sources(repo, repo)
 
-    def test_wheel_override_preserves_required_metrics_extra(self):
+    def test_wheel_override_preserves_required_metrics_extra(self) -> None:
         with TemporaryDirectory() as directory:
             repo = Path(directory).resolve()
             (repo / "pyproject.toml").write_text(
@@ -95,7 +96,7 @@ class ClosureProbeTests(unittest.TestCase):
             actual = wheel_requirements(repo, repo, {"agent-procutil": wheel})
             self.assertEqual(actual, f"agent-procutil[metrics] @ {wheel.as_uri()}\n")
 
-    def test_existing_output_root_is_refused_before_installation(self):
+    def test_existing_output_root_is_refused_before_installation(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)
             sentinel = root / "sentinel.json"
@@ -104,13 +105,15 @@ class ClosureProbeTests(unittest.TestCase):
                 [sys.executable, str(Path(__file__).with_name("helper_closure_probe.py")),
                  "--repo", str(root), "--root", str(root), "--uv", "never-invoked"],
                 capture_output=True, text=True, timeout=15,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                creationflags=(
+                    cast(int, getattr(subprocess, "CREATE_NO_WINDOW")) if os.name == "nt" else 0
+                ),
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("FileExistsError", result.stderr)
             self.assertEqual(json.loads(sentinel.read_text()), {"preserve": True})
 
-    def test_retirement_guard_survives_optimized_python(self):
+    def test_retirement_guard_survives_optimized_python(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "closure-results.json").write_text("{}", encoding="utf-8")
@@ -119,22 +122,26 @@ class ClosureProbeTests(unittest.TestCase):
                  str(Path(__file__).with_name("helper_lifetime_probe.py")),
                  "--root", str(root), "--uv", "never-invoked"],
                 capture_output=True, text=True, timeout=15,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                creationflags=(
+                    cast(int, getattr(subprocess, "CREATE_NO_WINDOW")) if os.name == "nt" else 0
+                ),
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("retirement requires an accepted closure-parity report", result.stderr)
 
-    def test_measurement_guard_survives_optimized_python(self):
+    def test_measurement_guard_survives_optimized_python(self) -> None:
         result = subprocess.run(
             [sys.executable, "-O", "-c",
              "from helper_closure_probe import require; require(False, 'reject false evidence')"],
             cwd=Path(__file__).parent, capture_output=True, text=True, timeout=15,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=(
+                cast(int, getattr(subprocess, "CREATE_NO_WINDOW")) if os.name == "nt" else 0
+            ),
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("reject false evidence", result.stderr)
 
-    def test_in_runtime_metadata_cannot_hide_external_helper_import(self):
+    def test_in_runtime_metadata_cannot_hide_external_helper_import(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)
             runtime, site, _ = self.runtime_fixture(root)
@@ -146,7 +153,7 @@ class ClosureProbeTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "required module escapes runtime"):
                 packages(runtime, ["fixture_helper"])
 
-    def test_escaping_recorded_file_is_refused_not_filtered(self):
+    def test_escaping_recorded_file_is_refused_not_filtered(self) -> None:
         with TemporaryDirectory() as directory:
             runtime, _, metadata = self.runtime_fixture(Path(directory))
             with (metadata / "RECORD").open("a", encoding="utf-8") as record:
@@ -154,7 +161,7 @@ class ClosureProbeTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "recorded payload escapes runtime"):
                 packages(runtime)
 
-    def test_owned_helper_module_is_accepted(self):
+    def test_owned_helper_module_is_accepted(self) -> None:
         with TemporaryDirectory() as directory:
             runtime, site, _ = self.runtime_fixture(Path(directory))
             (site / "fixture_helper.py").write_text("VALUE = 1\n", encoding="utf-8")
