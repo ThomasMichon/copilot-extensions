@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 import sys
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -40,6 +42,34 @@ def test_foreign_package_version_cannot_claim_slot(tmp_path: Path) -> None:
     assert effective_runtime_version(
         "9.0.0", prefix=prefix, module_path=prefix / "lib" / "source_build.py",
     ) == "9.0.0"
+
+
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-8-sig"])
+def test_real_owner_attribution_reads_marker_with_optional_bom(tmp_path, encoding):
+    from agent_codespaces import source_build
+
+    root = tmp_path / "runtime"
+    slot = root / "versions" / SOURCE
+    slot.mkdir(parents=True)
+    (root / "current-version").write_text(SOURCE + "\n", encoding=encoding)
+    (slot / ".install-complete.json").write_text(json.dumps({"payload_hash": "a" * 64}))
+
+    def state_path(path, *, private):
+        assert private
+        if not path.exists():
+            return None
+        return SimpleNamespace(digest=hashlib.sha256(path.read_bytes()).hexdigest())
+
+    runtime = ModuleType("fixture_retained_runtime")
+    runtime._runtime_component = lambda _: SimpleNamespace(state_path=state_path)
+    runtime.read_marker = lambda home, version: json.loads(
+        (home / "versions" / version / ".install-complete.json").read_text()
+    )
+    identity = source_build._owner_slot_identity(runtime, root, SOURCE)
+    assert identity is not None
+    selected = source_build.OwnerRuntimeSelection(root, identity, runtime)
+    assert selected.selected_identity() == identity
+    assert not selected.superseded()
 
 
 @pytest.mark.parametrize("nested", [False, True])

@@ -55,7 +55,7 @@ class OwnerRuntimeSelection:
             proof = self.runtime._runtime_component("versioned_runtime_publication")
             selector = self.root / "current-version"
             before = proof.state_path(selector, private=True)
-            version = selector.read_text(encoding="utf-8").strip() if before else ""
+            version = selector.read_text(encoding="utf-8-sig").strip() if before else ""
             identity = _owner_slot_identity(self.runtime, self.root, version)
             if before is None or before != proof.state_path(selector, private=True):
                 return None
