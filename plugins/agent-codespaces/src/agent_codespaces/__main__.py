@@ -216,6 +216,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub = parser.add_subparsers(dest="command")
 
+    sub.add_parser("__source-setup", help=argparse.SUPPRESS)
+    sub.add_parser("__source-start", help=argparse.SUPPRESS)
+
     # --- ssh ---
     ssh_parser = sub.add_parser("ssh", help="SSH into a CodeSpace")
     ssh_parser.add_argument("name", help="CodeSpace name")
@@ -1077,6 +1080,12 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_relay_profile()
         if args.command == "config-migrate":
             return _cmd_config_migrate()
+        if args.command == "__source-setup":
+            from .owner_cli import cmd_source_setup
+            return cmd_source_setup(args)
+        if args.command == "__source-start":
+            from .owner_cli import cmd_source_start
+            return cmd_source_start(args)
         if args.command == "owner":
             from .owner_cli import cmd_owner
             return cmd_owner(args)

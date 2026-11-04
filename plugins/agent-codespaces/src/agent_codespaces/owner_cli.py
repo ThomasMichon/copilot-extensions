@@ -106,6 +106,50 @@ def _attach_owner_log() -> str | None:
     return str(path)
 
 
+def cmd_source_setup(_args: argparse.Namespace) -> int:
+    """Publish the plain application provider without starting its backend."""
+    from .application_provider import register_installed_application
+
+    register_installed_application()
+    return 0
+
+
+def cmd_source_start(_args: argparse.Namespace) -> int:
+    """Ensure only the config-wanted, selected installed Connection Owner."""
+    from importlib.metadata import version
+    from pathlib import Path
+
+    from agent_procutil._daemon_instance_identity import runtime_slot_paths
+
+    from .config import load_merged_config
+    from .source_build import capture_owner_runtime, effective_runtime_version
+
+    config = load_merged_config(include_cwd=False)
+    if not config.connection_owner.enabled:
+        return 0
+    prefix = Path(sys.prefix)
+    layout = runtime_slot_paths(prefix)
+    if layout is None or not Path(__file__).resolve().is_relative_to(prefix.resolve()):
+        raise RuntimeError("CodeSpaces callback must execute from its installed slot")
+    package = version("agent-codespaces")
+    reported = effective_runtime_version(package, prefix=prefix, module_path=Path(__file__))
+    normalized_package = package.lower().replace("-", ".").replace("_", ".")
+    normalized_slot = layout[0].lower().replace("-", ".").replace("_", ".")
+    if reported != layout[0] and normalized_package != normalized_slot:
+        raise RuntimeError("CodeSpaces callback package and slot generation differ")
+    if (layout[2] / "current-version").read_text(encoding="utf-8-sig").strip() != layout[0]:
+        raise RuntimeError("CodeSpaces callback generation is not selected")
+    selection = capture_owner_runtime(layout[2])
+    if selection is None or selection.selected_identity() != selection.identity:
+        raise RuntimeError("CodeSpaces callback requires selected completion attribution")
+    from .connection_owner import _PROCESS_SELECTION, ensure_owner_running
+
+    if _PROCESS_SELECTION is None or _PROCESS_SELECTION.identity != selection.identity:
+        raise RuntimeError("CodeSpaces callback Owner attribution differs from selected completion")
+
+    return 0 if ensure_owner_running(config) else 1
+
+
 def cmd_owner(args: argparse.Namespace) -> int:
     """Run the Connection Owner relay reconcile daemon (config-gated; default on).
 

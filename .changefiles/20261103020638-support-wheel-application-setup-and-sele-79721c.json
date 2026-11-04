@@ -1,0 +1,9 @@
+{
+  "comment": "Support wheel application setup and selected source-profile owner startup",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

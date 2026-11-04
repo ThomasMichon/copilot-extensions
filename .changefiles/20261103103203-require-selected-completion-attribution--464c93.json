@@ -1,0 +1,9 @@
+{
+  "comment": "Require selected completion attribution before explicit source startup",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "dev"
+    }
+  ]
+}
