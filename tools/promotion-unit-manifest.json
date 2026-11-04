@@ -4343,7 +4343,7 @@
         "tools/promotion_dispatch.py": "2055ff12c13a7b976dd4882be1473f9dc103a5072af1cfedf07c667353ddca56",
         "tools/promotion_frozen_candidate.py": "4f1401d36c9e432928815788cb21e8991f2da543e4c92030cb6e826df6bc072e",
         "tools/promotion_lifecycle.py": "8492254aaaf02f227d83d2882fe96d01e50c8161b3d94476b8870dd4501f42d4",
-        "tools/promotion_bundle_members.py": "8c21d38cdf8f31c64c9d6710b2c8a7ef9fdb44af29d4bbb19a33ce718f1326c6",
+        "tools/promotion_bundle_members.py": "b4e8c2455f1de09d8a3a794c077e9cb34d2ed3ce6171a60254f13d3f6daab23d",
         "tools/promotion_python_artifacts.py": "b6aaf5e6822b9d143862ce0a90e83a9aa5df4fdc35d012a68c5b473844c3497f",
         "tools/promotion_release_evidence.py": "e905ca27bb247ae5822f812aedcb3531b0fc46fb5386782a05baafad53c683f5",
         "tools/promotion_release_helpers.py": "b110cec1f135e59027f07e159e18663eaf232c864542016758a1efeb7ae65990",
