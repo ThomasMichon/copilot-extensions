@@ -852,7 +852,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 if superseded and not _drain_busy_reasons():
                     self_retire_confirms += 1
                     if self_retire_confirms >= self_retire_confirmations:
-                        exit_reason = "superseded-route"
+                        if exit_reason != "idle-no-demand":
+                            exit_reason = "superseded-route"
                         break
                 else:
                     self_retire_confirms = 0
@@ -952,12 +953,12 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                                 if _idle_candidate_still_empty():
                                     _enter_drain_only_state()
                                     handover.retiring = True
+                                    exit_reason = "idle-no-demand"
                                 else:
                                     idle_guard.release()
                                     idle_guard = None
                             if idle_guard is not None:
                                 if not _drain_busy_reasons():
-                                    exit_reason = "idle-no-demand"
                                     break
                                 # Accepted work drains under resident custody, not
                                 # the installer gate; admission stays closed.

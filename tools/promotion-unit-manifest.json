@@ -4100,7 +4100,7 @@
     ],
     "sources": {
         "plugins/agent-worktrees/src/agent_worktrees/hook_ipc.py": "9e52031f16398fb445a4a73272cf2f826f2da3148702805f7bfb6681b20e76af",
-        "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py": "09b8587a4e93f5d235e6c30f4cc5259f887f1c2f1d4ac933476819324a16f4ab",
+        "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py": "a9d301ad047263f4cee086966aafe8c240904b238073244dfaad5ca25828df38",
         "plugins/agent-worktrees/src/agent_worktrees/status_monitor_drain.py": "9bfa8fbbd4d9c4c0acbdc3ae4cb0149a5f26ea0699e1368f58550248d0b55c87",
         "tools/promotion_unit_tests/test_hook_demand.py": "45761f4036a60d19c5220102a27f6269315a7afe09d2cff267df4dc2430aa41e",
         "tools/promotion_unit_tests/test_automatic_update_policy.py": "89bc6b816b365470efaa77c0d15c2c6a546b6c62ed489468a8e8e7b529d14e72",

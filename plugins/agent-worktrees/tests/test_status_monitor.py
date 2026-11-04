@@ -4661,6 +4661,8 @@ def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, mo
 
 
 def test_idle_exit_releases_installer_guard_while_late_accepted_read_drains(tmp_path, monkeypatch):
+    from zdd import lifecycle
+
     from agent_worktrees import monitor_roots, self_retire, status_monitor_cutover as smc
     from agent_worktrees import runtime_monitor_retirements as retirements
     from agent_worktrees.worktrees_runtime import WorktreesRuntime
@@ -4746,6 +4748,10 @@ def test_idle_exit_releases_installer_guard_while_late_accepted_read_drains(tmp_
         assert m.cmd_status_monitor(argparse.Namespace(interval=1)) == 0
         assert state["guard_available"]
         assert results == [{"ok": True}]
+        exits = [event for event in lifecycle.read_events(directory)
+                 if event["action"] == "monitor-exit"]
+        assert [event["detail"]["phase"] for event in exits] == ["cleanup-begin", "cleanup-complete"]
+        assert all(event["detail"]["reason"] == "idle-no-demand" for event in exits)
     finally:
         finish.set()
         for thread in clients:
