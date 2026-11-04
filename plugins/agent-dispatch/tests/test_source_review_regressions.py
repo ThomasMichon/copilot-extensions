@@ -252,16 +252,25 @@ def test_dead_same_generation_route_only_withdraws_confirmed_stale_owner(tmp_pat
         assert routing.read_table(tmp_path).get("active") is None
 
 
-@pytest.mark.parametrize("observation", ["matching", "reused", "dead", "unknown", "missing-pid"])
+@pytest.mark.parametrize("observation", ["matching", "reused", "dead", "unknown", "missing-pid", "unavailable-sdk"])
 def test_route_owner_observation_distinguishes_unavailable_native_identity(monkeypatch, observation):
     from agent_dispatch import companion, source_start
+    from agent_procutil import _daemon_instance_identity
     from zdd import diagnostics
 
+    def native_birth(_pid):
+        if observation == "dead":
+            raise ProcessLookupError("confirmed native exit")
+        if observation == "unavailable-sdk":
+            raise PermissionError("native liveness unavailable")
+        return "native-birth"
+
+    monkeypatch.setattr(_daemon_instance_identity, "birth_identity", native_birth)
     token = {"matching": "birth", "reused": "other"}.get(observation)
     monkeypatch.setattr(diagnostics, "process_start_time", lambda _: token)
     monkeypatch.setattr(companion, "_process_exists", lambda _: observation == "unknown")
     endpoint = SimpleNamespace(pid=None if observation == "missing-pid" else 41, process_start_time="birth")
-    expected = "unknown" if observation == "missing-pid" else observation
+    expected = "unknown" if observation in {"missing-pid", "unavailable-sdk"} else observation
     assert source_start._route_owner_state(endpoint) == expected
 
 

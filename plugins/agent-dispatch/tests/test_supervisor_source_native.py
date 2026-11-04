@@ -53,6 +53,7 @@ def test_enabled_source_master_independent_handoff_and_standalone(tmp_path, comp
         "AGENT_DISPATCH_SUPERVISE_MODE=serve\nAGENT_DISPATCH_SUPERVISE_INTERVAL=2\n",
         encoding="utf-8",
     )
+    (root / "service.env").write_text("AGENT_DISPATCH_ENV=native-qualification\n", encoding="utf-8")
     token, control = uuid.uuid4().hex, uuid.uuid4().hex
     environment = {
         name: value for name, value in os.environ.items()
@@ -95,7 +96,7 @@ def test_enabled_source_master_independent_handoff_and_standalone(tmp_path, comp
                     return ready
         return None
 
-    def status(ready):
+    def status(ready, *, after_cycle=0):
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
             for path in (root / "control").glob("*.status.json"):
@@ -103,7 +104,7 @@ def test_enabled_source_master_independent_handoff_and_standalone(tmp_path, comp
                 if (
                     document.get("generation") == ready["generation"]
                     and document.get("runtime_version") == ready["runtime_version"]
-                    and document.get("cycle_id", 0) > 0
+                    and document.get("cycle_id", 0) > after_cycle
                     and document.get("updated_at", 0) >= document.get("cycle_started_at", float("inf"))
                     and document.get("progress", {}).get("phase") == "complete"
                 ):
@@ -111,7 +112,7 @@ def test_enabled_source_master_independent_handoff_and_standalone(tmp_path, comp
             time.sleep(0.02)
         raise AssertionError("selected supervisor did not complete its native cycle")
 
-    def invoke(phase, command, arguments=()):
+    def invoke(phase, command, arguments=(), *, success=True):
         started = time.monotonic()
         completed = subprocess.run(
             [host, "-NoProfile", "-File", str(command), *arguments],
@@ -122,7 +123,7 @@ def test_enabled_source_master_independent_handoff_and_standalone(tmp_path, comp
         phases.append({"phase": phase, "seconds": elapsed, "exit": completed.returncode})
         (evidence / f"{component}-{phase}.stderr.log").write_text(completed.stderr, encoding="utf-8")
         (evidence / f"{component}-{phase}.stdout.log").write_text(completed.stdout, encoding="utf-8")
-        assert completed.returncode == 0, completed.stderr[-16000:]
+        assert (completed.returncode == 0) is success, completed.stderr[-16000:]
         assert elapsed <= 300
         return completed
 
@@ -155,6 +156,8 @@ def test_enabled_source_master_independent_handoff_and_standalone(tmp_path, comp
             assert result["installer_exit"] == 0, Path(request["stderr"]).read_text(encoding="utf-8")[-16000:]
             ready = prepared(generation)
             assert ready
+            assert ready["settings"]["env"] == "native-qualification"
+            assert ready["settings"]["legacy_env"] is False
             master = _NativeProcess(ready["generation"]["pid"], ready["birth"])
             pins.append(master)
             current = endpoint()
@@ -173,6 +176,9 @@ def test_enabled_source_master_independent_handoff_and_standalone(tmp_path, comp
                 time.sleep(0.05)
             assert master.running() and coordinator.running()
             proof["initial_master_completed_cycle"] = status(ready)
+            proof["two_periodic_cycles_after_caller_jobs"] = status(
+                ready, after_cycle=proof["initial_master_completed_cycle"]["cycle_id"] + 1,
+            )
             proof["initial_master"] = ready
             proof["both_services_survived_all_caller_jobs"] = result["inner_job_closed"]
             with DispatchClient(current.base_url, token=token, control_token=control) as api:
@@ -183,6 +189,35 @@ def test_enabled_source_master_independent_handoff_and_standalone(tmp_path, comp
                 before = api.get(held["id"])
             data = root / "data" / "unfinished.json"
             data.write_text('{"unfinished":true}', encoding="utf-8")
+            if component == "agent-dispatch":
+                from agent_procutil._daemon_instance_identity import stop_identity
+
+                raw_route = routing.read_table(root / "routes")["active"]
+                assert routing.read_table(root / "routes").get("previous") is None
+                assert stop_identity(current.pid, "windows:" + current.process_start_time)
+                assert not coordinator.running()
+                assert routing.read_table(root / "routes")["active"] == raw_route
+                invoke("same-generation-coordinator-restart", slot / "install.ps1")
+                current = endpoint()
+                assert current.pid != raw_route["pid"]
+                pins.append(_NativeProcess(current.pid, "windows:" + current.process_start_time))
+                proof["same_generation_coordinator_restart"] = {
+                    "confirmed_dead_route": raw_route, "ready_endpoint": current.to_dict(),
+                    "supervisor_cycle": status(ready),
+                }
+                primary = root / "supervisor.env"
+                primary_bytes = primary.read_bytes()
+                try:
+                    primary.write_bytes(primary_bytes + b"AGENT_DISPATCH_SUPERVISE_LABELS=fixture-legacy\n")
+                    mismatch = invoke(
+                        "captured-settings-mismatch", profile / ".local" / "bin" / "agent-dispatch.ps1",
+                        ["__source-start"], success=False,
+                    )
+                    assert "settings" in mismatch.stderr
+                    assert master.running() and endpoint().pid == current.pid
+                    proof["captured_settings_mismatch_refused"] = True
+                finally:
+                    primary.write_bytes(primary_bytes)
             repair = slot.with_name(generation + ".repair." + uuid.uuid4().hex)
             shutil.copytree(application, repair)
             started = time.monotonic()

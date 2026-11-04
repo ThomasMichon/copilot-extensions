@@ -248,6 +248,8 @@ Startup strictly captures `service.env` before planning either service and reuse
 that snapshot. A confirmed-dead/reused same-generation coordinator can be withdrawn
 through guarded routing CAS; unavailable identity, a cutover breadcrumb or existing
 previous-generation custody still requires owner-led recovery.
+Native exit is checked separately from creation time: a retained Windows process
+handle can keep the original birth token queryable after the process has exited.
 
 `tests/test_source_start_native.py` consumes an explicitly prepared canonical
 Source/profile snapshot; it never rebuilds one. Its opt-in generated-frontdoor

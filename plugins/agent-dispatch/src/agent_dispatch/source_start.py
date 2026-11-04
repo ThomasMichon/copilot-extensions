@@ -94,10 +94,18 @@ def accept_readiness(payload, *, handle, version: str, config_identity: str, act
 
 
 def _route_owner_state(endpoint):
+    from agent_procutil._daemon_instance_identity import birth_identity
     from zdd.diagnostics import process_start_time
     from .companion import _process_exists
 
     if type(endpoint.pid) is not int or endpoint.pid <= 0 or not endpoint.process_start_time:
+        return "unknown"
+    try:
+        # Windows creation time remains readable after exit while handles survive.
+        birth_identity(endpoint.pid)
+    except ProcessLookupError:
+        return "dead"
+    except (OSError, ValueError):
         return "unknown"
     observed = process_start_time(endpoint.pid)
     if observed is not None:
