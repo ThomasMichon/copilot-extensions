@@ -432,6 +432,11 @@ live claim token. No new blanket ACK or executor appointment is created.
       finalize-before-submission contracts through existing wake, worker,
       submission/evaluation and Worktrees owners; preserve every unrelated
       conversation/confirmation and native-custody gate.
+      The [affirmative suspended-recovery source](journal/2026/11.03-affirmative-suspended-recovery.md)
+      retains exact current-worker acceptance, existing wake custody,
+      hold-aware clocks and capacity-preserving exhaustion. Source review,
+      actual merge and installed/native qualification remain pending;
+      finalize-before-submission is a separate remaining source contract.
 - [x] Land coordinator-owned local decline observation and atomic routing/requeue
       in [#10319](https://github.com/ThomasMichon/copilot-extensions/pull/10319)
       after exact-head approval and required CI. The
@@ -450,6 +455,15 @@ live claim token. No new blanket ACK or executor appointment is created.
       source controls pass. Decline guidance uses independent decision nudges,
       preserving initial/keyed and retry templates. Remote/no-worktree,
       complete cohort and installed/native acceptance remain separate gates.
+- [x] Land ordinary pool-owned workspace attribution and original keyed
+      creation recovery in
+      [#10334](https://github.com/ThomasMichon/copilot-extensions/pull/10334),
+      merged as `ab29b82b0a` after exact-head approval and successful CI.
+      The [source and negative-case receipt](journal/2026/11.03-local-decline-closeout.md#ordinary-allocation-source-merged)
+      retains 426 coupled controls, a 165-control hold-fence follow-up and
+      a distinct five-stage failed-closeout witness. Native success,
+      remote/no-managed-worktree, complete cohort, suspended recovery and
+      finalize-before-submission remain open.
 
 ### Phase 1 — The monitor vocabulary only (data only, no `Status`/table change)
 _(agent-recommended: sequencing shape, revised 2026-09-25 after actually

@@ -63,6 +63,7 @@ class QueueLifecycleMixin(QueueProgressMixin):
         expected_owner_session_id: str | None = None,
         expected_generation: int | None = None,
         require_pool_assignment: bool = False,
+        pool_recovery_revision: int | None = None,
         now: float | None = None,
     ) -> Task:
         """Move a ``claimed`` task to ``started`` (owner must match)."""
@@ -75,6 +76,12 @@ class QueueLifecycleMixin(QueueProgressMixin):
         if owner_session_id is not None:
             extra["owner_session_id"] = owner_session_id
         allowed, to = _task_transition_spec("start")
+        if pool_recovery_revision is not None:
+            allowed = {*allowed, Status.SUSPENDED}
+            extra.update(
+                lease_expires_at=ts + self.lease_seconds, resume_requested=0,
+                monitor_kind=None, monitor_not_before=None,
+            )
         return self._transition(
             task_id,
             allowed=allowed,
@@ -90,6 +97,7 @@ class QueueLifecycleMixin(QueueProgressMixin):
             expected_owner_session_id=expected_owner_session_id,
             expected_generation=expected_generation,
             require_pool_assignment=require_pool_assignment,
+            pool_recovery_revision=pool_recovery_revision,
         )
 
     def complete(
@@ -362,6 +370,8 @@ class QueueLifecycleMixin(QueueProgressMixin):
             if task.status in Status.CONCLUDED:
                 conn.execute("COMMIT")
                 raise TaskError(f"cannot hold a {task.status!r} task {task_id!r}")
+            from .queue_pool_recovery import hold_recovery
+            hold_recovery(conn, task_id, held=True, ts=ts)
             conn.execute(
                 "UPDATE tasks SET hold_reason = ?, hold_actor = ?, hold_at = ?,"
                 " updated_at = ? WHERE id = ?",
@@ -400,6 +410,8 @@ class QueueLifecycleMixin(QueueProgressMixin):
                 conn.execute("COMMIT")
                 return task
             _check_expected_status(task, expected_status)
+            from .queue_pool_recovery import hold_recovery
+            hold_recovery(conn, task_id, held=False, ts=ts)
             conn.execute(
                 "UPDATE tasks SET hold_reason = NULL, hold_actor = NULL,"
                 " hold_at = NULL, updated_at = ? WHERE id = ?",
@@ -714,6 +726,7 @@ class QueueLifecycleMixin(QueueProgressMixin):
         report_replay: bool = False,
         start_acquisition_authority: dict | None = None,
         require_pool_assignment: bool = False,
+        pool_recovery_revision: int | None = None,
     ) -> Task | tuple[Task, bool]:
         """Generic fenced transition helper.
 
@@ -740,9 +753,14 @@ class QueueLifecycleMixin(QueueProgressMixin):
             ):
                 raise TaskError("allocator claim has no accepted worker to perform this transition")
             if note == "start":
+                from .queue_pool_recovery import require_recovery_start
                 from .queue_pool_placement import require_pool_start
                 from .queue_pool_startup import require_pool_decision
                 ts = self._now(now)
+                require_recovery_start(
+                    conn, task, pool_recovery_revision,
+                    (extra or {}).get("owner_session_id"), expected_generation, ts,
+                )
                 require_pool_decision(conn, task, ts)
                 if require_pool_start(
                     conn, task, worker_id, (extra or {}).get("owner_session_id"),

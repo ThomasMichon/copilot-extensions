@@ -1,0 +1,443 @@
+"""Suspended pool recovery uses real queue fences, not transport acceptance."""
+
+from __future__ import annotations
+
+from dataclasses import replace
+
+import pytest
+from fastapi.testclient import TestClient
+import httpx
+
+from agent_dispatch.coordinator import create_app
+from agent_dispatch.coordinator_execution_wakes import deliver_execution_wake
+from agent_dispatch.queue import SpawnState, Status, TaskError, TaskQueue
+from agent_dispatch.queue_pool_recovery import prepare_recovery_wake, reconcile_recoveries
+from tests import test_pool_placement as placement_controls
+from tests.test_pool_placement import headers, place, pool, publish, record_native, task
+from tests.test_pool_placement_client import connected
+
+q = placement_controls.q
+
+
+def suspended(q: TaskQueue) -> tuple[str, str, int]:
+    publish(q, pool())
+    t = task(q)
+    reservation, _ = place(q, t)
+    record_native(q, reservation)
+    q.record_spawn(reservation.key, session_handle="native", startup_complete=True, startup_revision=1)
+    started = q.start(
+        t.id, "host-a/worktree", owner_session_id="native",
+        expected_generation=q.get(t.id).generation, now=101,
+    )
+    q.suspend(t.id, started.owner, reason="intentional wait", cooldown_seconds=None, now=102)
+    return t.id, reservation.key, started.generation
+
+
+def request(q: TaskQueue, task_id: str, now: float = 103) -> int:
+    q.resume(task_id, "host-a/worktree", wake_requested=True, now=now)
+    return q.pool_startup(task_id).recovery_revision
+
+
+def affirm(q: TaskQueue, task_id: str, generation: int, revision: int, now: float = 105):
+    return q.start(
+        task_id, "host-a/worktree", owner_session_id="native", expected_generation=generation,
+        expected_owner_session_id="native", pool_recovery_revision=revision, now=now,
+    )
+
+
+def test_intentional_wait_is_not_recovery_and_repeated_request_preserves_episode(q: TaskQueue) -> None:
+    task_id, key, generation = suspended(q)
+    before = q.get(task_id), q.pool_startup(task_id), q.get_reservation(key)
+    assert reconcile_recoveries(q, now=10000) == 0
+    assert (q.get(task_id), q.pool_startup(task_id), q.get_reservation(key)) == before
+    revision = request(q, task_id)
+    pending = q.get(task_id), q.pool_startup(task_id), q.list_wakes(task_id)
+    assert pending[0].status == Status.SUSPENDED and pending[0].generation == generation
+    assert pending[0].owner_session_id == "native" and pending[0].lease_expires_at is None
+    assert request(q, task_id, now=104) == revision
+    assert (q.get(task_id), q.pool_startup(task_id), q.list_wakes(task_id)) == pending
+    assert TaskQueue(q.db_path).pool_startup(task_id) == pending[1]
+
+
+def test_delivered_wake_waits_for_current_worker_affirmation(q: TaskQueue) -> None:
+    task_id, key, generation = suspended(q)
+    revision = request(q, task_id)
+    wake = q.claim_due_wake(now=104)
+    assert wake.pool_recovery_revision == revision
+    q.finish_wake(wake.id, wake.delivery_token, delivered=True, now=104)
+    assert reconcile_recoveries(q, now=105) == 1
+    budget = q.pool_startup(task_id)
+    assert budget.startup_attempts == 1 and budget.reachable_at == 104
+    assert budget.decision_deadline == 1904 and budget.next_nudge_at == 404
+    assert q.get(task_id).status == Status.SUSPENDED
+    with pytest.raises(TaskError, match="recovery revision"):
+        q.start(task_id, "host-a/worktree", owner_session_id="native",
+                expected_generation=generation, now=105)
+    started = affirm(q, task_id, generation, revision)
+    assert started.status == Status.STARTED and started.owner == "host-a/worktree"
+    assert started.generation == generation and started.lease_expires_at > 105
+    reset = q.pool_startup(task_id)
+    assert reset.startup_attempts == reset.cooldown_stage == 0
+    assert reset.recovery_requested_at is None and reset.recovery_revision == revision
+    assert q.get_reservation(key).session_handle == "native"
+    assert affirm(q, task_id, generation, revision, now=106) == started
+
+
+@pytest.mark.parametrize("change", ["revision", "native", "generation", "hold"])
+def test_stale_or_held_affirmation_cannot_mutate_recovery(q: TaskQueue, change: str) -> None:
+    task_id, key, generation = suspended(q)
+    revision = request(q, task_id)
+    if change == "hold":
+        q.set_hold(task_id, reason="operator hold", actor="operator", now=104)
+    before = q.get(task_id), q.pool_startup(task_id), q.get_reservation(key)
+    with pytest.raises(TaskError):
+        q.start(
+            task_id, "host-a/worktree",
+            owner_session_id="other" if change == "native" else "native",
+            expected_owner_session_id="native",
+            expected_generation=generation + int(change == "generation"),
+            pool_recovery_revision=revision + int(change == "revision"), now=105,
+        )
+    assert (q.get(task_id), q.pool_startup(task_id), q.get_reservation(key)) == before
+
+
+def test_three_known_pre_send_failures_exhaust_without_releasing_capacity(q: TaskQueue) -> None:
+    task_id, key, generation = suspended(q)
+    revision = request(q, task_id)
+    for attempt in range(1, 4):
+        wake = q.claim_due_wake(now=103 + attempt)
+        q.finish_wake(wake.id, wake.delivery_token, delivered=False, error="pre-send refusal",
+                      now=103 + attempt)
+        assert q.pool_startup(task_id).startup_attempts == attempt
+        assert reconcile_recoveries(q, now=104 + attempt) == 1
+    result, reservation = q.get(task_id), q.get_reservation(key)
+    assert result.status == Status.QUEUED and result.generation == generation + 1
+    assert result.owner is None and result.not_before == 3707
+    assert reservation.state == SpawnState.RELEASING and reservation.startup_fenced
+    assert reservation.release_requested and reservation.session_handle == "native"
+    assert q.pool_startup(task_id).cooldown_stage == 1
+    with pytest.raises(TaskError):
+        affirm(q, task_id, generation, revision, now=108)
+    with pytest.raises(TaskError, match="capacity"):
+        place(q, task(q), now=108)
+    assert len(q.list_wakes(task_id)) == 3
+
+
+def test_unknown_send_survives_restart_then_fences_late_acceptance(q: TaskQueue) -> None:
+    task_id, key, generation = suspended(q)
+    revision = request(q, task_id)
+    wake = q.claim_due_wake(now=104)
+    admission = q.admit_execution_wake(wake, provenance=None, now=104)
+    assert admission.identity is not None
+    q.settle_execution_wake(wake, admission, outcome="unknown", detail="original send interrupted")
+    assert q.finish_wake(wake.id, wake.delivery_token, delivered=False, now=105).status == "delivering"
+    reopened = TaskQueue(q.db_path)
+    assert reopened.recover_inflight_wakes(now=700) == 0
+    assert reconcile_recoveries(reopened, now=702) == 0
+    assert reconcile_recoveries(reopened, now=703) == 1
+    assert reopened.get(task_id).status == Status.QUEUED
+    assert reopened.get_reservation(key).state == SpawnState.RELEASING
+    with pytest.raises(TaskError):
+        affirm(reopened, task_id, generation, revision, now=704)
+    reopened.settle_execution_wake(wake, admission, outcome="sent", detail="late original return")
+    assert reopened.finish_wake(
+        wake.id, wake.delivery_token, delivered=True, now=705,
+    ).status == "stale"
+    assert reopened.get(task_id).status == Status.QUEUED
+
+
+def test_due_nudges_are_durable_and_do_not_reset_startup_budget(q: TaskQueue) -> None:
+    task_id, _, _ = suspended(q)
+    request(q, task_id)
+    wake = q.claim_due_wake(now=104)
+    q.finish_wake(wake.id, wake.delivery_token, delivered=True, now=104)
+    reconcile_recoveries(q, now=105)
+    assert reconcile_recoveries(q, now=403) == 0
+    assert reconcile_recoveries(TaskQueue(q.db_path), now=404) == 1
+    assert len(q.list_wakes(task_id)) == 2
+    assert q.pool_startup(task_id).startup_attempts == 1
+    assert q.pool_startup(task_id).decision_deadline == 1904
+    assert q.get(task_id).status == Status.SUSPENDED
+    assert reconcile_recoveries(q, now=1904) == 1
+    assert q.get(task_id).status == Status.QUEUED
+
+
+def test_exhaustion_preserves_later_due_time_and_taskwide_cooldown(q: TaskQueue) -> None:
+    task_id, _, _ = suspended(q)
+    with q._connect() as conn:
+        conn.execute("UPDATE task_pool_assignments SET cooldown_stage=2 WHERE task_id=?", (task_id,))
+        conn.execute("UPDATE tasks SET not_before=90000 WHERE id=?", (task_id,))
+    request(q, task_id)
+    assert reconcile_recoveries(q, now=703) == 1
+    assert q.get(task_id).not_before == 90000
+    assert q.pool_startup(task_id).cooldown_stage == 3
+
+
+def test_old_episode_cannot_affirm_a_later_suspension(q: TaskQueue) -> None:
+    task_id, _, generation = suspended(q)
+    revision = request(q, task_id)
+    affirm(q, task_id, generation, revision)
+    q.suspend(task_id, "host-a/worktree", reason="new monitored wait", now=106)
+    with pytest.raises(TaskError):
+        affirm(q, task_id, generation, revision, now=107)
+    next_revision = request(q, task_id, now=108)
+    assert next_revision > revision
+    with pytest.raises(TaskError):
+        affirm(q, task_id, generation, revision, now=109)
+    assert affirm(q, task_id, generation, next_revision, now=109).status == Status.STARTED
+
+
+def test_real_http_resume_returns_suspended_until_explicit_pool_start(q: TaskQueue) -> None:
+    task_id, _, generation = suspended(q)
+    client = TestClient(create_app(
+        q, token="data", control_token="control", enable_mcp=False, verification_interval=0,
+    ))
+    response = client.post(f"/tasks/{task_id}/resume", headers=headers(), json={
+        "worker_id": "host-a/worktree", "wake": True,
+    })
+    assert response.status_code == 200 and response.json()["status"] == Status.SUSPENDED
+    revision = q.pool_startup(task_id).recovery_revision
+    body = {
+        "worker_id": "host-a/worktree", "owner_session_id": "native",
+        "expected_owner_session_id": "native", "expected_generation": generation,
+        "pool_placement_version": 1, "pool_recovery_revision": revision,
+    }
+    accepted = client.post(f"/tasks/{task_id}/pool-start", headers=headers(), json=body)
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["status"] == Status.STARTED
+
+
+def test_cold_recovery_uses_existing_spawn_publication_without_acceptance(q: TaskQueue) -> None:
+    task_id, key, _ = suspended(q)
+    with q._connect() as conn:
+        conn.execute("UPDATE spawn_reservations SET state=? WHERE key=?", (SpawnState.COLD, key))
+    request(q, task_id)
+    wake = q.claim_due_wake(now=104)
+    prepare_recovery_wake(q, wake)
+    assert q.get_reservation(key).state == SpawnState.SPAWNED
+    assert q.get(task_id).status == Status.SUSPENDED
+    with pytest.raises(TaskError):
+        prepare_recovery_wake(q, replace(wake, pool_recovery_revision=99))
+
+
+def test_actual_delivery_boundary_retains_unknown_without_a_producer_scope(q: TaskQueue) -> None:
+    task_id, _, _ = suspended(q)
+    request(q, task_id)
+    wake = q.claim_due_wake(now=104)
+    assert deliver_execution_wake(q, wake, None, lambda: False) is False
+    retained = q.finish_wake(wake.id, wake.delivery_token, delivered=False, now=105)
+    assert retained.execution_send_state == "unknown" and retained.status == "delivering"
+    assert reconcile_recoveries(q, now=106) == 0
+    assert len(q.list_wakes(task_id)) == 1
+
+
+def test_interrupted_pre_send_attempt_is_not_replayed_or_free(q: TaskQueue) -> None:
+    task_id, _, _ = suspended(q)
+    request(q, task_id)
+    wake = q.claim_due_wake(now=104, lease_seconds=10)
+    assert q.recover_inflight_wakes(now=114) == 1
+    assert q.list_wakes(task_id)[0].status == "failed"
+    assert reconcile_recoveries(TaskQueue(q.db_path), now=115) == 1
+    assert q.pool_startup(task_id).startup_attempts == 2
+    next_wake = q.claim_due_wake(now=116)
+    assert next_wake.id != wake.id
+
+
+def test_sent_return_lost_before_finish_recovers_delivery_not_another_send(q: TaskQueue) -> None:
+    task_id, _, _ = suspended(q)
+    request(q, task_id)
+    wake = q.claim_due_wake(now=104, lease_seconds=10)
+    admission = q.admit_execution_wake(wake, provenance=None, now=104)
+    q.settle_execution_wake(wake, admission, outcome="sent", detail="original send accepted")
+    assert q.recover_inflight_wakes(now=114) == 1
+    assert q.list_wakes(task_id)[0].status == "delivered"
+    assert q.claim_due_wake(now=115) is None
+    reconcile_recoveries(q, now=115)
+    assert q.pool_startup(task_id).startup_attempts == 1
+    assert q.get(task_id).status == Status.SUSPENDED
+
+
+def test_failed_nudge_on_third_startup_attempt_keeps_decision_window(q: TaskQueue) -> None:
+    task_id, _, _ = suspended(q)
+    request(q, task_id)
+    for now in (104, 106):
+        wake = q.claim_due_wake(now=now)
+        q.finish_wake(wake.id, wake.delivery_token, delivered=False, now=now)
+        reconcile_recoveries(q, now=now + 1)
+    wake = q.claim_due_wake(now=108)
+    q.finish_wake(wake.id, wake.delivery_token, delivered=True, now=108)
+    reconcile_recoveries(q, now=109)
+    reconcile_recoveries(q, now=408)
+    nudge = q.claim_due_wake(now=409)
+    q.finish_wake(nudge.id, nudge.delivery_token, delivered=False, now=409)
+    assert reconcile_recoveries(q, now=410) == 0
+    assert q.get(task_id).status == Status.SUSPENDED
+    assert q.pool_startup(task_id).startup_attempts == 3
+    assert q.pool_startup(task_id).decision_deadline == 1908
+    assert reconcile_recoveries(q, now=708) == 1
+    assert q.get(task_id).status == Status.SUSPENDED
+
+
+@pytest.mark.parametrize("delivered", [None, 104])
+def test_hold_pauses_recovery_without_charging_attempts_or_cooldown(
+    q: TaskQueue, delivered: float | None,
+) -> None:
+    task_id, key, generation = suspended(q)
+    revision = request(q, task_id)
+    if delivered is not None:
+        wake = q.claim_due_wake(now=delivered)
+        q.finish_wake(wake.id, wake.delivery_token, delivered=True, now=delivered)
+    q.set_hold(task_id, reason="intentional operator wait", actor="operator", now=105)
+    q.set_hold(task_id, reason="updated explanation", actor="operator", now=200)
+    assert q.claim_due_wake(now=10000) is None
+    assert reconcile_recoveries(q, now=10000) == 0
+    q.clear_hold(task_id, actor="operator", now=10005)
+    budget = q.pool_startup(task_id)
+    assert budget.startup_attempts == 1 and budget.cooldown_stage == 0
+    assert budget.startup_deadline == 10603
+    assert budget.decision_deadline == (11804 if delivered is not None else None)
+    assert q.get_reservation(key).state == SpawnState.SPAWNED
+    assert affirm(q, task_id, generation, revision, now=10006).status == Status.STARTED
+
+
+def test_worker_can_affirm_after_delivery_before_gc_observes_it(q: TaskQueue) -> None:
+    task_id, _, generation = suspended(q)
+    revision = request(q, task_id)
+    wake = q.claim_due_wake(now=104)
+    q.finish_wake(wake.id, wake.delivery_token, delivered=True, now=702)
+    assert q.pool_startup(task_id).decision_deadline is None
+    assert affirm(q, task_id, generation, revision, now=704).status == Status.STARTED
+
+
+def test_renewed_monitor_fences_old_recovery_and_never_resumes_it(q: TaskQueue) -> None:
+    task_id, _, generation = suspended(q)
+    revision = request(q, task_id)
+    q.suspend(task_id, "host-a/worktree", reason="wait until tomorrow", cooldown_seconds=86400, now=104)
+    assert q.claim_due_wake(now=105) is None
+    assert reconcile_recoveries(q, now=10000) == 0
+    assert q.get(task_id).status == Status.SUSPENDED
+    assert q.get(task_id).monitor_not_before == 86504
+    assert q.pool_startup(task_id).startup_attempts == 1
+    with pytest.raises(TaskError):
+        affirm(q, task_id, generation, revision)
+
+
+def test_original_start_request_cannot_send_a_wake_after_worker_affirms(q: TaskQueue) -> None:
+    task_id, _, generation = suspended(q)
+    revision = request(q, task_id)
+    affirm(q, task_id, generation, revision)
+    assert q.claim_due_wake(now=106) is None
+    assert q.list_wakes(task_id)[0].status == "stale"
+
+
+def test_legacy_pending_resume_gets_new_fenced_episode_not_a_process_replay(q: TaskQueue) -> None:
+    task_id, _, _ = suspended(q)
+    with q._connect() as conn:
+        conn.execute("UPDATE tasks SET resume_requested=1 WHERE id=?", (task_id,))
+    assert reconcile_recoveries(q, now=103) == 1
+    assert q.pool_startup(task_id).recovery_revision == 1
+    assert q.pool_startup(task_id).startup_attempts == 1
+    assert q.get(task_id).status == Status.SUSPENDED
+    assert len(q.list_wakes(task_id)) == 1
+
+
+def test_legacy_unfinished_startup_is_visible_and_never_replayed(q: TaskQueue) -> None:
+    task_id, key, _ = suspended(q)
+    with q._connect() as conn:
+        conn.execute("UPDATE tasks SET resume_requested=1 WHERE id=?", (task_id,))
+        conn.execute("UPDATE spawn_reservations SET startup_complete=0 WHERE key=?", (key,))
+    assert reconcile_recoveries(q, now=103) == 0
+    budget = q.pool_startup(task_id)
+    assert budget.outcome_kind == "startup_unknown"
+    assert budget.outcome_detail.startswith("legacy suspended recovery retained:")
+    assert budget.recovery_requested_at is None and budget.startup_attempts == 0
+    assert reconcile_recoveries(q, now=104) == 0
+    assert q.pool_startup(task_id) == budget
+    assert q.list_wakes(task_id) == []
+
+
+def test_real_cli_negotiates_recovery_and_never_claims_another_task(
+    q: TaskQueue, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from agent_dispatch import __main__ as cli
+    task_id, _, generation = suspended(q)
+    revision = request(q, task_id)
+    api = TestClient(create_app(
+        q, token="data", control_token="control", enable_mcp=False, verification_interval=0,
+    ))
+    requests: list[httpx.Request] = []
+    monkeypatch.setattr(cli, "_client", lambda *_: connected(api, requests, control=False))
+    monkeypatch.setattr(cli, "_resolve_owner", lambda *_args, **_kw: "host-a/worktree")
+    args = cli.build_parser().parse_args([
+        "start", task_id, "--pool-generation", str(generation),
+        "--pool-recovery-revision", str(revision), "--owner-session-id", "native",
+    ])
+    assert args.func(args) == 0
+    assert '"status": "started"' in capsys.readouterr().out
+    assert [r.url.path for r in requests] == ["/health", f"/tasks/{task_id}/pool-start"]
+
+
+@pytest.mark.parametrize("support", [None, [], [True], [2]])
+def test_current_worker_refuses_old_or_incompatible_provider_before_recovery_effect(
+    q: TaskQueue, support: object,
+) -> None:
+    from agent_dispatch.client import DispatchUpgradeRequired
+    task_id, _, generation = suspended(q)
+    revision = request(q, task_id)
+    api = TestClient(create_app(
+        q, token="data", control_token="control", enable_mcp=False, verification_interval=0,
+    ))
+    requests: list[httpx.Request] = []
+
+    def old_provider(req: httpx.Request, response: httpx.Response) -> httpx.Response:
+        if req.url.path == "/health":
+            body = response.json()
+            body["pool_placement"]["suspended_recovery_versions"] = support
+            return httpx.Response(200, json=body)
+        return response
+
+    with connected(api, requests, control=False, rewrite=old_provider) as worker:
+        with pytest.raises(DispatchUpgradeRequired, match="suspended pool recovery"):
+            worker.start_pool_task(
+                task_id, "host-a/worktree", owner_session_id="native",
+                expected_generation=generation, recovery_revision=revision,
+            )
+    assert [r.url.path for r in requests] == ["/health"]
+    assert q.get(task_id).status == Status.SUSPENDED
+
+
+def test_task_scoped_native_can_affirm_only_its_current_recovery(q: TaskQueue) -> None:
+    from agent_dispatch.task_authority import mint_task_token
+    from agent_dispatch.task_scope import TASK_SCOPE_HEADER
+    task_id, _, generation = suspended(q)
+    revision = request(q, task_id)
+    api = TestClient(create_app(
+        q, token="data", control_token="control", enable_mcp=False, verification_interval=0,
+    ))
+    token = mint_task_token("control", None, task_id, "host-a/worktree", "native", generation)
+    body = {
+        "worker_id": "untrusted-body", "owner_session_id": "untrusted-body",
+        "expected_generation": generation, "pool_placement_version": 1,
+        "pool_recovery_revision": revision,
+    }
+    response = api.post(f"/tasks/{task_id}/pool-start", headers={TASK_SCOPE_HEADER: token}, json=body)
+    assert response.status_code == 200, response.text
+    assert response.json()["owner"] == "host-a/worktree"
+    assert response.json()["owner_session_id"] == "native"
+    foreign = task(q)
+    rejected = api.post(f"/tasks/{foreign.id}/pool-start", headers={TASK_SCOPE_HEADER: token}, json=body)
+    assert rejected.status_code == 403
+
+
+def test_held_steering_is_durable_without_starting_or_charging_recovery(q: TaskQueue) -> None:
+    task_id, _, _ = suspended(q)
+    q.set_hold(task_id, reason="wait for operator", actor="operator", now=103)
+    result = q.submit_steer(
+        task_id, fields={"decision": "retain this answer"}, sender="operator",
+        wake_requested=True, now=104,
+    )
+    assert result.status == Status.SUSPENDED and result.hold_reason == "wait for operator"
+    assert q.steer_log(task_id)[0]["fields"] == {"decision": "retain this answer"}
+    assert q.list_wakes(task_id) == []
+    assert q.pool_startup(task_id).recovery_requested_at is None
+    assert q.pool_startup(task_id).startup_attempts == 0

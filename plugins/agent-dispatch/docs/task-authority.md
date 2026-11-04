@@ -26,6 +26,7 @@ Supported operations are:
 | GET | `/tasks/{task_id}` | Current assigned task |
 | GET | `/tasks/{task_id}/payload` | Assigned task payload |
 | POST | `/tasks/{task_id}/start` | Start the already-bound incarnation, without minting a token |
+| POST | `/tasks/{task_id}/pool-start` | Affirm the exact pool assignment or current suspended recovery, without minting a token |
 | POST | `/tasks/{task_id}/progress` | Bounded progress |
 | POST | `/tasks/{task_id}/heartbeat` | Extend owned task lease |
 | POST | `/tasks/{task_id}/complete` | Existing completion transition |
@@ -41,6 +42,13 @@ state. Mutations also compare generation and session inside the queue's write
 transaction, so replacing the session after HTTP admission cannot authorize a
 stale update. The existing transition rules still apply. Mismatching worker
 fields are replaced by the token's verified identity, never trusted.
+
+Only `/pool-start` additionally admits a `SUSPENDED` owner with a current
+`resume_requested` recovery. The existing grant must still match its task,
+worker, native session, generation and epoch, and the start transaction
+requires the exact recovery revision and unexpired deadline. This exception
+does not authorize other suspended-worker routes or bypass a hold. See
+[affirmative suspended recovery](pool-claim-start.md#affirmative-suspended-recovery).
 
 The supervisor must obtain a fresh grant before expiry. A restricted worker
 cannot renew its own grant using `start`. Signing-key rotation invalidates old

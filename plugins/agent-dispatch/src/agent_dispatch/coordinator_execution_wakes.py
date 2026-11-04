@@ -13,6 +13,8 @@ from .queue_records import TaskError
 def deliver_execution_wake(
     queue: TaskQueue, wake: Wake, incarnation: str | None, deliver: Callable[[], bool]
 ) -> bool:
+    from .queue_pool_recovery import prepare_recovery_wake
+    prepare_recovery_wake(queue, wake)
     with queue._connect() as conn:
         row = conn.execute(
             f"SELECT execution_send_state FROM {wake_table(wake)} WHERE id = ?", (wake.id,)

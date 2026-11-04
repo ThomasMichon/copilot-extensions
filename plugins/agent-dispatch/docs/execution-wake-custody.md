@@ -63,7 +63,17 @@ remains eligible after scope closure without authorizing owner execution.
 custody entirely: they only release the existing hibernation claim, including
 after task completion or closure. This preserves the existing cleanup exception.
 
-Unqualified legacy wakes retain their original transport retry behavior, with
+Pool recovery wakes retain leased-token custody on the same wake row even
+without a qualified producer scope, using the local `pool_recovery_wake/v1`
+protocol. This is not producer enrollment or cohort qualification.
+The exact recovery revision is checked before transport; stale episodes cannot
+send. Pending or unknown sends keep the same no-replay barrier described above.
+Known-not-sent startup recovery can admit a new bounded wake through the
+[assignment recovery owner](pool-claim-start.md#affirmative-suspended-recovery),
+not by resetting the original row. Qualified recovery still requires canonical
+runtime provenance.
+
+Other unqualified legacy wakes retain their original transport retry behavior, with
 the final current-token/task/closure check. Historical qualification cannot
 silently disappear into that legacy path. A qualified caller missing canonical
 provenance or the coordinator application incarnation refuses transport visibly.

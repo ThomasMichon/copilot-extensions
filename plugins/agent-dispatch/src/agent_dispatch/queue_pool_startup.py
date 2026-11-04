@@ -36,6 +36,10 @@ def migrate_pool_startup(conn: sqlite3.Connection) -> None:
         "outcome_revision": "INTEGER",
         "outcome_at": "REAL",
         "retry_invocation": "TEXT",
+        "recovery_revision": "INTEGER NOT NULL DEFAULT 0",
+        "recovery_requested_at": "REAL",
+        "recovery_wake_id": "TEXT",
+        "recovery_hold_started_at": "REAL",
     }
     for name, declaration in additions.items():
         if name not in columns:
@@ -58,7 +62,8 @@ def begin_pool_episode(
         " startup_attempts=startup_attempts+1, startup_timeout=?, startup_deadline=?, reachable_at=NULL,"
         " next_nudge_at=NULL, decision_deadline=NULL, exhausted_at=NULL,"
         " exhaustion_reason=NULL, outcome_kind=NULL, outcome_detail=NULL,"
-        " outcome_revision=NULL, outcome_at=NULL, retry_invocation=NULL WHERE task_id=?",
+        " outcome_revision=NULL, outcome_at=NULL, retry_invocation=NULL,"
+        " recovery_requested_at=NULL, recovery_wake_id=NULL, recovery_hold_started_at=NULL WHERE task_id=?",
         (timeout, ts + timeout, task_id),
     )
 
@@ -107,7 +112,8 @@ def reset_pool_startup(conn: sqlite3.Connection, task_id: str) -> None:
         " cooldown_stage=0, startup_deadline=NULL, reachable_at=NULL,"
         " next_nudge_at=NULL, decision_deadline=NULL, exhausted_at=NULL,"
         " exhaustion_reason=NULL, outcome_kind=NULL, outcome_detail=NULL,"
-        " outcome_revision=NULL, outcome_at=NULL WHERE task_id=?", (task_id,),
+        " outcome_revision=NULL, outcome_at=NULL, retry_invocation=NULL,"
+        " recovery_requested_at=NULL, recovery_wake_id=NULL, recovery_hold_started_at=NULL WHERE task_id=?", (task_id,),
     )
 
 
@@ -150,6 +156,10 @@ class PoolStartupObservation:
     outcome_revision: int | None
     outcome_at: float | None
     retry_invocation: dict | None
+    recovery_revision: int
+    recovery_requested_at: float | None
+    recovery_wake_id: str | None
+    recovery_hold_started_at: float | None
 
 
 class _QueueOwner(Protocol):
@@ -174,6 +184,10 @@ def _observation(row: sqlite3.Row) -> PoolStartupObservation:
         outcome_kind=row["outcome_kind"], outcome_detail=row["outcome_detail"],
         outcome_revision=row["outcome_revision"], outcome_at=row["outcome_at"],
         retry_invocation=json.loads(row["retry_invocation"]) if row["retry_invocation"] else None,
+        recovery_revision=row["recovery_revision"],
+        recovery_requested_at=row["recovery_requested_at"],
+        recovery_wake_id=row["recovery_wake_id"],
+        recovery_hold_started_at=row["recovery_hold_started_at"],
     )
 
 

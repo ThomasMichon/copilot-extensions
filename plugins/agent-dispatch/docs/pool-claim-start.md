@@ -359,8 +359,57 @@ structured owner result. Old explicit placement/start callers and ordinary
 non-pool claims remain supported with their original wire forms and defaults.
 
 This is an explicit supervision transport, **not** automatic placement
-migration. Suspended recovery remains its existing independent path;
-these operations do not change its counters or holds.
+migration. Suspended recovery uses the separate continuation path below;
+these startup operations do not request recovery or override its holds.
+
+## Affirmative suspended recovery
+
+For an existing pool assignment, `resume`, an elapsed cooldown and submitted
+steering request continuation without changing `SUSPENDED` to `STARTED`.
+The assignment retains its task generation, owner and actual native session.
+Its monotonic `recovery_revision` identifies this request; replaying the
+request does not restart its clocks. No replacement worker is created.
+An intentional monitor or renewed suspension invalidates the old recovery
+request without erasing startup debt. Steering submitted under a hold remains
+durable but does not open a recovery episode or spend an attempt.
+
+The existing coordinator GC cadence reconciles recovery, using the existing
+assignment startup budget, task-wide cooldown stages and wake outbox.
+Up to three admitted startup wakes are allowed. A completed, known-not-sent
+attempt can admit a new wake; an unknown send retains its original custody
+and cannot be replayed as a new attempt. Exact delivery proves reachability,
+not acceptance. It starts the 30-minute decision window, with five-minute
+same-native nudges. A failed nudge does not turn a reachable worker into an
+exhausted startup. Holds freeze these policy clocks and do not spend attempts.
+There is no independent recovery timer, queue or identity registry.
+
+The worker must affirm the current request through the existing start command:
+
+```text
+agent-dispatch start <task-id> --pool-generation <generation> --pool-recovery-revision <revision> --owner-session-id <native-session>
+```
+
+The wake carries the current revision. The client checks the actual
+coordinator's `pool_placement.suspended_recovery_versions` support before
+posting to `/tasks/{id}/pool-start`; unsupported providers refuse without an
+effectful fallback. The queue checks the exact owner, native, generation,
+recovery revision and deadline inside its write transaction. Only successful
+affirmation restores the lease, writes `STARTED` and resets startup/cooldown
+counters. Successful process resume or prompt delivery alone never does.
+Task-scoped authority permits only this narrow suspended recovery start,
+not other suspended-worker mutations.
+
+Exhaustion returns the task to `QUEUED`, fences its generation and applies
+the same 1/3/6/12-hour task-wide cooldown while preserving a later
+`not_before`. Its reservation remains `RELEASING` with unresolved capacity
+retained; the native attachment history is preserved. Late affirmation and
+stale queued sends refuse. Exhaustion is not physical stop, retirement,
+absence evidence or permission to free the slot.
+
+Non-pool interactive and supervised continuation retain their legacy behavior.
+Full installed, mixed-lane and cohort qualification remains an
+[integration gate](#integration-boundary), not a claim made by these source
+tests.
 
 ## Existing supervisor consumer
 

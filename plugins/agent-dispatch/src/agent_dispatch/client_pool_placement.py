@@ -179,7 +179,7 @@ class PoolPlacementClientMixin:
 
     def start_pool_task(
         self, task_id: str, worker_id: str, *, owner_session_id: str,
-        expected_generation: int,
+        expected_generation: int, recovery_revision: int | None = None,
     ) -> dict:
         """Affirmatively accept the current placed claim under real worker facts."""
         if (
@@ -187,20 +187,27 @@ class PoolPlacementClientMixin:
             or not isinstance(worker_id, str) or not worker_id.strip()
             or not isinstance(owner_session_id, str) or not owner_session_id.strip()
             or not _positive_integer(expected_generation)
+            or recovery_revision is not None and not _positive_integer(recovery_revision)
         ):
             raise DispatchError(400, "pool acceptance requires task, worker, native identity and current generation")
         try:
             health = self.health()
         except ValueError as exc:
             raise DispatchUpgradeRequired("running coordinator returned an invalid health contract") from exc
-        _validate_contract(
+        contract = _validate_contract(
             health.get("pool_placement") if isinstance(health, dict) else None, explicit_start=True,
         )
+        if recovery_revision is not None:
+            versions = contract.get("suspended_recovery_versions")
+            if not isinstance(versions, list) or not any(type(v) is int and v == 1 for v in versions):
+                raise DispatchUpgradeRequired("running coordinator lacks affirmative suspended pool recovery")
         try:
             result = self._unwrap(self._http.post(f"/tasks/{task_id}/pool-start", json={
                 "worker_id": worker_id, "owner_session_id": owner_session_id,
-                "expected_generation": expected_generation, "expected_owner_session_id": None,
+                "expected_generation": expected_generation,
+                "expected_owner_session_id": owner_session_id if recovery_revision is not None else None,
                 "pool_placement_version": 1,
+                **({"pool_recovery_revision": recovery_revision} if recovery_revision is not None else {}),
             }))
         except ValueError as exc:
             raise DispatchError(502, "pool acceptance outcome is unknown: invalid response") from exc
