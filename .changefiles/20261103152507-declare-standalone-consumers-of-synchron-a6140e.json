@@ -1,0 +1,13 @@
+{
+  "comment": "Declare standalone consumers of synchronized canonical lifecycle assets",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    }
+  ]
+}
