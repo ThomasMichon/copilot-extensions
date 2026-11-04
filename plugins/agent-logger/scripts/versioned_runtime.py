@@ -259,7 +259,7 @@ def current_version(root: Path, link_name: str = CURRENT_LINK) -> str | None:
 def _read_current_marker(root: Path) -> str | None:
     try:
         txt = (root / CURRENT_VERSION_FILE).read_text(encoding="utf-8").strip()
-    except OSError:
+    except (OSError, UnicodeError):
         return None
     return txt or None
 
@@ -268,7 +268,7 @@ def read_last_known_good(root: Path) -> str | None:
     """The last version ``activate()`` published, or ``None`` if never stamped."""
     try:
         txt = (root / LAST_KNOWN_GOOD_FILE).read_text(encoding="utf-8").strip()
-    except OSError:
+    except (OSError, UnicodeError):
         return None
     return txt or None
 
@@ -1428,39 +1428,37 @@ def toss_incomplete(root: Path, link_name: str = CURRENT_LINK) -> list[str]:
 
 @contextmanager
 def retention_lease(root: Path, version: str, *, payload_hash: str | None = None,
-                    timeout: float = 60.0, poll_interval: float = 0.05):
+                    timeout: float = 60.0, poll_interval: float = 0.05,
+                    require_installed: bool = True):
     """Pin an existing candidate or rollback slot until its lifecycle settles.
 
     Shared holders coexist. Cleanup takes the same lease exclusively and
     rechecks selectors before deleting. An optional fingerprint admits only
     exact completed reuse, checked after acquiring ownership. Builders acquire
     this lease before releasing construction; retain it through cutover/drain
-    or rollback, never store a PID/timestamp pin inside the immutable slot.
+    or     rollback, never store a PID/timestamp pin inside the immutable slot.
+    A predecessor reference may pin an invalid entry without qualifying it as
+    an installed runtime; candidate fingerprint admission remains independent.
     """
     with retention_custody(
         root, version, payload_hash=payload_hash, timeout=timeout, poll_interval=poll_interval,
+        require_installed=require_installed,
     ) as (vdir, _):
         yield vdir
 
 
-@contextmanager
 def retention_custody(root: Path, version: str, *, payload_hash: str | None = None,
-                      timeout: float = 60.0, poll_interval: float = 0.05):
+                      timeout: float = 60.0, poll_interval: float = 0.05,
+                      require_installed: bool = True):
     """Yield a retained slot and borrowed descriptor under the same lease protocol.
     POSIX guardians may inherit it; callers must never close it themselves.
     """
-    with _kernel_lease(
-        root, version, kind="retention", shared=True,
-        timeout=timeout, poll_interval=poll_interval,
-    ) as descriptor:
-        vdir = version_dir(root, version)
-        if not vdir.is_dir() or _is_link(vdir):
-            raise FileNotFoundError(f"ordinary runtime slot not installed: {vdir}")
-        if payload_hash is not None:
-            decision = check_admission(root, version, payload_hash=payload_hash)
-            if decision != ADMIT_REUSE:
-                raise RuntimeError(f"runtime retention admission refused: {version}: {decision}")
-        yield vdir, descriptor
+    return _runtime_component("versioned_runtime_construction").retention_custody(
+        root, version, payload_hash=payload_hash, require_installed=require_installed,
+        timeout=timeout, poll_interval=poll_interval, kernel_lease=_kernel_lease,
+        version_dir=version_dir, is_link=_is_link,
+        check_admission=check_admission, admit_reuse=ADMIT_REUSE,
+    )
 
 
 def retain_runtime_helpers(slot: Path, *, complete: bool, context_source: Path | None = None) -> None:

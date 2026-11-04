@@ -6,7 +6,7 @@
 - **Created:** 2026-11-03
 - **Status:** Active
 - **Umbrella issue:** #10377
-- **Related issues:** #9489, #7743, #9448, #7758, #10180, #6820, #7028, #7947, #6389
+- **Related issues:** #9489, #7743, #9448, #7758, #10180, #6820, #7028, #7947, #6389, #5472
 - **Vision:** [authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
 
 ## Guiding Intent
@@ -260,3 +260,185 @@ planners. The legacy fallback now uses the canonical link classifier to exclude
 symlinks and junctions while retaining real-directory reuse. The affected native
 consumer and serving/footprint packet passes 78 tests with three platform skips,
 including unchanged old-slot evidence and real legacy-directory controls.
+
+### 2026-11-04 - First source unit merged; next producer recovery unit
+
+#10398 merged to `dev` as `fbcbf22b0ef518519daf67f865a2f9b551f7af89`.
+Copilot approved exact head `9bbf63f6b12aeb8212cfae880f6f1a00d96b0de1`;
+both review threads were resolved and required CI run 41805066341 passed.
+An earlier same-head CI run also passed, but the provider required the newer
+run before accepting the merge; no CI requirement was bypassed. All eleven
+authored files match the verified squash merge, and the source worktree has
+pulled forward. Containing release and installed application remain separate,
+unperformed outcomes. This completes the bounded #6389 planner reservation,
+not the parent convergence objective.
+
+The next serial unit is the Codespaces-only normal install/update repair
+adapter, claimed on #5472 in
+[comment 6627075322](https://github.com/ThomasMichon/copilot-extensions/issues/5472#issuecomment-6627075322).
+The actual contained Windows producer currently refuses a selected malformed
+or incomplete same-version slot and preserves its bytes; two existing
+consumer controls pass at that refusal contract. They do not prove recovery.
+The next regression must require a distinct admitted healthy generation and
+usable selected CLI without rewriting the retained old identity or resetting
+state. Pair PowerShell/POSIX adapters and retain source identity, healthy-repair
+reuse, failure preservation and applicable publication/service hooks.
+
+Shared construction/retention/guardian ownership, the Worktrees first adopter,
+#6928 watchdog work, #8826 diagnostics and #6389 lifecycle adapters remain
+separate. No production edit for this next unit preceded #10398's merge.
+The canonical effort and #10377 remain active; no shared-host installation,
+service change, credential operation or rollout is authorized by this journal.
+
+### 2026-11-04 - Codespaces native producer recovery
+
+The U9 normal `install` and `update` regressions failed against the pre-fix
+producer at construction admission for a selected incomplete same-version slot.
+The Codespaces adapter now selects a fresh repair generation before entering
+the unchanged lower construction guard. It reuses only an exact completed,
+isolated-CLI-healthy target; occupied incomplete, malformed, conflicting or
+unhealthy targets are not rewritten. Existing construction, completion,
+retention, activation and failed-candidate cleanup remain canonical.
+
+PowerShell and POSIX entries are paired. Source receipt validation keeps its
+strict base identity independently of the repair suffix, and source reuse also
+requires the exact deployment receipt. The manifest records the actual selected
+generation while preserving package/source identity. The normal updater's
+existing readiness reader already accepts that qualified repair identity; no
+additional caller syntax or updater patch is needed.
+
+The focused Windows packets pass 27 unique controls, with four native POSIX
+skips. They cover normal install/update and immediate reuse, source-qualified
+repair/reuse, malformed completion, failed dependency installation and incoming
+CLI health, fresh first touch, bootstrap/activation failure, and existing lower
+reuse/admission controls. Real disposable venvs and the generated command prove
+the selected fixture CLI runs; old-slot/configuration bytes remain unchanged,
+and failed incoming construction leaves selectors unchanged. Fake UV and guarded
+private profiles prevent package acquisition and host-service effects.
+
+Validation retained the existing 120-second native-child, 180-second item and
+300-second group bounds. The initial combined normal/source packet exceeded
+the group bound; a monolithic source-install-plus-repeat case also exceeded the
+item bound. Splitting source assertions around one module-scoped disposable
+installation passed in 162.15 seconds without increasing limits. The final
+normal/unit/lower-reuse packet passed 17 controls and four platform skips but
+exposed one stale exact diagnostic assertion. The fixture now accepts only the
+canonical confirmed-abort diagnostic, including its exit-1 suffix, and retains
+absence-of-candidate/selector assertions; that case and four fresh/failed-entry
+controls then passed in 191.82 seconds. These are bounded functional-packet
+measurements, not per-update latency or installed-host performance claims.
+
+Actor-free generation controls are on-demand, not an expansion of required
+unit-only CI. A full fresh VM/container, native POSIX execution and live external
+installation were not run in this Windows source-only lane; no such deployment
+is authorized here. The private synthetic fresh profile covers first-touch
+construction directly, but not real package feeds, service registration,
+CodeSpace connectivity, protected sessions or central retirement. README,
+testing recipes and the existing immutable-generation pattern describe that
+adoption boundary. Source review, required CI, merge and containing release
+remain pending; #10377 and the parent effort remain active.
+
+### 2026-11-04 - Review catches Bash 3.2 nounset compatibility
+
+#10426 received a current-head Comment review identifying a real macOS
+portability failure: the two new optional arrays could be empty under
+`set -u`, which Bash 3.2 treats as an unbound expansion. Both arrays now retain
+their mandatory command arguments, so they are never empty. Optional receipt
+and keep arguments still preserve their individual boundaries.
+
+Three focused controls execute the actual selection and activation functions
+under nounset, with absent/present receipts and no GC keep arguments. They pass
+on Git Bash 5.3.15 in 1.68 seconds (49.20 including isolated preparation and
+cleanup). The same on-demand packet accepts an explicit Bash 3.2 interpreter;
+native macOS/Bash 3.2 execution is unavailable in this source lane and is not
+claimed. These add three controls to the prior 27 unique passes. Windows
+runtime behavior, shared construction helpers and the existing four platform
+skips are unchanged. Review-fix lint/whitespace pass; current-head review and
+required CI must pass again before merge.
+
+### 2026-11-04 - Invalid predecessor reference is not runtime admission
+
+The next current-head Comment review exposed a surviving ordinary-entry
+failure when the selected base slot is a regular file. The focused real
+update regression failed at `ordinary runtime slot not installed` before
+fresh construction, despite the adapter selecting a distinct generation.
+The bounded prerequisite is coordinated on #5472 in
+[comment 6629192533](https://github.com/ThomasMichon/copilot-extensions/issues/5472#issuecomment-6629192533).
+It does not transfer shared guardian or Worktrees coordinator ownership.
+
+The existing canonical retention primitive now permits an explicit
+predecessor-reference pin without requiring that old entry to qualify as an
+installed directory. Only construction's predecessor pins select that mode.
+The same kernel ownership excludes cleanup; ordinary runtime/candidate
+retention remains strict by default, and payload-hash admission is independent.
+No invalid old entry is rewritten, no lock protocol is replaced, and
+installer guardian/process transport and candidate admission are unchanged.
+Adopting the maintained footprint plan would instead require migrating
+Codespaces' legacy removal profile and broaden the cleanup contract; that
+alternative was rejected for this fix.
+
+The canonical reference packet passes 19 controls, including three new strict
+default/preservation/admission controls. Normal update from the regular-file
+slot, immediate reuse and the two existing failed incoming controls pass
+three native cases in 129.90 seconds. Existing Bridge retention/construction
+packets pass 85 controls with eight explicit platform skips, including real
+competing holders, cleanup, process death and failed-candidate receipt custody.
+Together with the settled Codespaces cases this is 135 unique passes and
+twelve platform skips, not installed-host qualification.
+
+Canonical copies are synchronized across thirteen plugins, the Manager and
+Update Driver, with release changefiles for every affected consumer. MCP's
+maintained producer digests refresh without changing contract revision 36.
+The required unit manifest refreshes only three changed admitted source
+fingerprints; its 4,019 nodes, coverage targets and 300-second budget remain
+unchanged. That new source snapshot still requires hosted CI and a fresh
+passing review before merge. No rollout or whole-parent completion is claimed.
+
+The shared module-size guard rejected five lines of facade growth. Rather than
+widen its shrink-only ceiling, the touched custody implementation moved into
+the existing construction component behind the same public facade and kernel
+callbacks. The full module-size sweep now passes without a baseline edit;
+the canonical 19-control packet passes again, and native consumer qualification
+is repeated against that extraction before publication. Those final reruns pass
+85 Bridge controls with eight platform skips, and the three normal-entry/failure
+controls in 162.14 seconds. No baseline, test budget or candidate-admission requirement was
+relaxed to obtain those results.
+
+### 2026-11-04 - Undecodable selectors and stale retained helpers
+
+The next current-head review found two additional ordinary-update failures.
+Both reproduced through the real PowerShell entry: invalid UTF-8 current and
+last-known-good selectors blocked constructor/publication reads, and stale
+retained helpers passed the CLI launch check but failed completion verification.
+Canonical selector readers now handle undecodable old content without relaxing
+link, type, permission or other I/O checks. PowerShell's reuse probe additionally
+requires the exact retained helper bundle its completion step consumes.
+The existing canonical helper verifier is read-only; old slots are not restamped.
+POSIX completion does not require that bundle and retains its existing probe.
+
+Both native regressions now pass normal update and immediate repeat, preserving
+old-slot and configuration bytes. Two pure helper controls and two canonical
+publication controls also pass. The final focused evidence totals 141 unique
+passes and twelve platform skips, including repeated source-qualified, receipt,
+helper and shell packets. Existing child/item/group bounds remain unchanged.
+Canonical copies and maintained producer digests are synchronized; only three
+admitted source fingerprints change in the required unit manifest, not its
+4,019 nodes, coverage targets or 300-second budget.
+
+The same Windows source-only limitations remain: no native macOS/Bash 3.2,
+fresh external VM, real package feed, service registration or live installation
+is claimed. Required CI and a fresh current-head verdict remain merge gates.
+The earlier planner fix is released through #10430; it is not installed by
+this source work. The separate artifact-publication gap remains with #10432's
+existing owner. Neither containing release nor this PR authorizes rollout or
+completes #10377.
+
+The following review had no open findings but identified unexecuted native
+completion-failure controls. Both Install/Update cases reproduced a missing
+generation-selection fixture prerequisite before reaching completion refusal.
+The focused extracted-function fixture now records selection followed by
+completion, retaining the real activation function, unchanged selector and
+throwing publication callbacks. All four native broker/publication controls
+pass in 5.08 seconds (53.00 including isolated preparation/cleanup). This fixes
+test integration, not production behavior, and is additional to the 141-control
+evidence above. Current-head CI/review and reconciliation with Dev remain due.

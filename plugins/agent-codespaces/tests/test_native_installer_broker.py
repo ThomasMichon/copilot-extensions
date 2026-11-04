@@ -36,6 +36,7 @@ $VersionedRuntime=$true
 $SrcVersion='1.2.3'
 $script:Events=[Collections.Generic.List[string]]::new()
 function Write-Step {{ param($Message) }}
+function Select-InstallRuntimeGeneration {{ $script:Events.Add('select') }}
 function Deploy-Venv {{ return $true }}
 function Deploy-Package {{ return $true }}
 function Test-CodespacesRuntime {{ return $true }}
@@ -56,7 +57,7 @@ $script:Events | ConvertTo-Json -Compress
     )
     result = _run("ps1", script, tmp_path, _env(tmp_path))
     assert result.returncode == 0, result.stdout + result.stderr
-    assert json.loads(result.stdout.strip().splitlines()[-1]) == "complete"
+    assert json.loads(result.stdout.strip().splitlines()[-1]) == ["select", "complete"]
     assert selector.read_text(encoding="utf-8") == "previous"
 
 

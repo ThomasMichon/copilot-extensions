@@ -9,6 +9,7 @@ import stat
 import sys
 import tempfile
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
@@ -107,6 +108,26 @@ class CleanupOperations:
     _ownership_key: Callable[[Path, str], object]
     _construction_owners: object
     _remove_slot: Callable[..., bool]
+
+
+@contextmanager
+def retention_custody(
+    root: Path, version: str, *, payload_hash: str | None, require_installed: bool,
+    timeout: float, poll_interval: float, kernel_lease: Callable, version_dir: Callable,
+    is_link: Callable, check_admission: Callable, admit_reuse: str,
+):
+    with kernel_lease(
+        root, version, kind="retention", shared=True,
+        timeout=timeout, poll_interval=poll_interval,
+    ) as descriptor:
+        vdir = version_dir(root, version)
+        if require_installed and (not vdir.is_dir() or is_link(vdir)):
+            raise FileNotFoundError(f"ordinary runtime slot not installed: {vdir}")
+        if payload_hash is not None:
+            decision = check_admission(root, version, payload_hash=payload_hash)
+            if decision != admit_reuse:
+                raise RuntimeError(f"runtime retention admission refused: {version}: {decision}")
+        yield vdir, descriptor
 
 
 def require_immutable_environment(
@@ -464,10 +485,13 @@ def construction_session(runtime: RuntimeOperations, root: Path, version: str, *
             if os.path.lexists(last_good):
                 if runtime._is_link(last_good) or not last_good.is_file():
                     raise RuntimeError("last-known-good selector must be an ordinary file")
-                references.add(last_good.read_text(encoding="utf-8").strip())
+                try:
+                    references.add(last_good.read_text(encoding="utf-8").strip())
+                except UnicodeError:
+                    pass
         for previous in references:
             if previous:
-                retained.enter_context(runtime.retention_lease(root, previous))
+                retained.enter_context(runtime.retention_lease(root, previous, require_installed=False))
         building.enter_context(runtime.construction_lease(root, version))
         if plan is not None and plan.mode == "fresh" and os.path.lexists(runtime.version_dir(root, version)):
             raise RuntimeError("Fresh construction requires a distinct absent candidate")

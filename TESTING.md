@@ -2171,6 +2171,40 @@ The plugin smoke packet selects `test_bootstrap_driver.py`,
 and `test_write_session_guidance.py` with the same runner. Heavy native matrices
 remain outside required PR CI.
 
+The on-demand Codespaces generation-repair packet uses
+`--test-file tests/test_install_ps1_recovery.py --allow-explicit-tiers`.
+Select `normal_entry_repairs` and `test_source_entry_` in separate bounded
+invocations. The latter shares one disposable source installation across
+initial-repair and repeat-reuse assertions; it does not raise the existing
+120-second child, 180-second item or 300-second group limits. Both invoke the
+real native install/update entry with private fake UV and real venvs, then
+check the selected module and generated command, original slot/configuration,
+completion, deployment identity and no repeated construction. Separate
+`failed_repair_preserves` and `malformed_completion_state` selections cover
+incoming failure and malformed incumbent evidence. Actor-free selection and
+exact-source-receipt controls live in `tests/test_runtime_generation.py`.
+These Windows source controls do not qualify live service registration,
+CodeSpace connectivity, POSIX execution or installed rollout, and do not enter
+the required unit-only CI packet.
+
+`tests/test_installer_generation_shell.py` executes the real POSIX selection
+and activation functions under Bash nounset, checking absent/present source
+receipts, argument boundaries and GC with no keep arguments. It uses Git Bash
+on Windows or the available POSIX Bash; `CODESPACES_TEST_BASH` pins an explicit
+interpreter for stock macOS Bash 3.2 qualification. These are bounded shell
+controls, not package construction or native macOS runtime qualification when
+executed with another Bash version.
+
+The shared predecessor-retention prerequisite uses the `runtime-source` target
+with `--test-file tests/test_runtime_references.py`. Strict ordinary retention,
+missing/regular-file predecessor pinning, cleanup exclusion and completed
+candidate rejection remain separate assertions. The existing Bridge
+`test_runtime_retention.py` and `test_failed_construction.py` packets cover
+native competing holders, handoff, process death and failed-candidate custody.
+Codespaces' `normal_entry_repairs and file` selection exercises normal update
+and repeat from an actual regular file at the selected slot name. These
+on-demand packets retain their existing bounds and do not widen required CI.
+
 ## Optional SSH installation recipes
 
 The manual `installation-context-full.yml` portfolio `ssh-recipes` runs only
