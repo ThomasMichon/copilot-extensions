@@ -4367,7 +4367,7 @@
         "tools/promotion_unit_tests/test_manager_uninstall.py": "03ac1242560686175d4eb2174d269ee06cb8bafccd2e20115178ebad7b3b5cc6",
         "tools/promotion_unit_tests/test_materialized_local_sources.py": "d6be5a514e76350016af3f45cf30c40fecbf3b230421d7338edf8a17469319e8",
         "tools/promotion_unit_tests/test_mcp_home.py": "d1740e27b644f828638e8afdf6ee0f7bcec78953ca91bf969f6e5bedde0836e2",
-        "tools/promotion_unit_tests/test_namespace_contract.py": "980b4c8a8d029a01f20d9eb39aba8e9e83bf13c0ee273d4e85da93dec38f4338",
+        "tools/promotion_unit_tests/test_namespace_contract.py": "8e691a991ed59907727538ad3141ae5b6fb6f41ab7a123fc6c11127cfc87b46a",
         "tools/promotion_unit_tests/test_native_owned.py": "fa183e43ce186240c24ccaf475352ffd1dbeddd594999eb84a4050562d333d89",
         "tools/promotion_unit_tests/test_native_qualification_contract.py": "e108d1d598f95e04ccad78d48733adf0314ff6fa953673225de98eaf71c6b4f1",
         "tools/promotion_unit_tests/test_native_qualification_owner.py": "bb7cc5bd6ec685abc1157829fcd871f84985de0521bd54dc749e64aafd91fb9c",
