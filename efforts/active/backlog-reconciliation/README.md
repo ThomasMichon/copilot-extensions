@@ -231,6 +231,15 @@ checkpoint nor author eligibility, holds, requirements or source/resource custod
 
 ### Phase 2 - Continuing reconciliation
 
+The [interpreter/construction study](interpreter-construction-cohort.md)
+retains six whole originals/five refinements and seventeen bounded
+completed-work comparisons, with inherited-held material and two descriptions
+withheld. Four complete Vendored Installer documents support a finite #5955
+direct tracking proposal, not resumed adopters or source disposition.
+The other constructor, actual-child, urgent UV, diagnostic and public-update
+contracts remain distinct OPEN owner lanes; the feed receiver stays wholly
+withheld. Existing parent check states and every operational gate remain.
+
 The current research priority is the
 [weighted semantic consolidation method](semantic-density-consolidation.md):
 complete eligible-node coverage, ranked dense themes, effort-sized receiving
@@ -789,6 +798,14 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [interpreter/construction study](interpreter-construction-cohort.md)
+distinguishes all six literal contracts, eleven whole texts, seventeen bounded
+relations and two withheld descriptions. The complete four-document installer
+read supports only the proposed finite #5955 intake; reviewed actual delivery,
+current readback and fresh source/actor judgment remain mandatory before
+disposition. Existing native/consumer/public-environment and custody gates are
+not converted into completed work or new whole-parent prerequisites.
 
 The [session-intelligence study](session-intelligence-cohort.md) preserves
 five whole contracts, all refinements, literal alternatives, historical partial
