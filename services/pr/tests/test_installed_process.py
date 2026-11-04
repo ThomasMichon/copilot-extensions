@@ -10,11 +10,16 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from importlib import import_module
+from typing import Any, TypedDict, cast
 
+import pytest
 from cryptography.hazmat.primitives import serialization
 
 from agent_pull_requests_service.hosting import ready
 
+class ProcessFlags(TypedDict, total=False):
+    creationflags: int
 _EMBEDDED = """
 import asyncio,sys
 from pathlib import Path
@@ -36,13 +41,16 @@ asyncio.run(main())
 """
 
 
-def test_installed_host_process_register_observe_reconnect_restart_and_ack(tmp_path, monkeypatch):
+def test_installed_host_process_register_observe_reconnect_restart_and_ack(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # The existing Fleet fixture owns issuer, policy and TLS; do not add a fake Gateway.
     root = Path(__file__).resolve().parents[3]
     monkeypatch.syspath_prepend(str(root / "fleet-manager" / "tests"))
-    from gateway_service_transport_fixtures import eventually, running
+    fixtures = import_module("gateway_service_transport_fixtures")
+    eventually, running = fixtures.eventually, fixtures.running
 
-    async def scenario():
+    async def scenario() -> None:
         path = tmp_path / "host.json"
         state = tmp_path / "replay"
         status = state / "service-status.json"
@@ -61,9 +69,11 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(tmp_p
             f"pathlib.Path({str(calls)!r}).open('a').write('read\\n');"
             f"print(json.dumps({snapshot!r}))"
         )
-        flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+        flags: ProcessFlags = {
+            "creationflags": cast(int, getattr(subprocess, "CREATE_NO_WINDOW")),
+        } if os.name == "nt" else {}
 
-        async def command(*arguments):
+        async def command(*arguments: str) -> tuple[int | None, bytes, bytes]:
             process = await asyncio.create_subprocess_exec(
                 sys.executable, "-I", "-m", "agent_pull_requests_service", *arguments,
                 cwd=tmp_path, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -77,7 +87,7 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(tmp_p
                     process.kill()
                     await process.wait()
 
-        async def launch():
+        async def launch() -> asyncio.subprocess.Process:
             # Windows cannot deliver POSIX SIGTERM. Its control uses the public
             # foreground embedding stop event, not TerminateProcess as "drain".
             arguments = (
@@ -90,9 +100,10 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(tmp_p
                 stderr=asyncio.subprocess.PIPE, **flags,
             )
 
-        async def close(process):
+        async def close(process: asyncio.subprocess.Process) -> None:
             if process.returncode is None:
                 if os.name == "nt":
+                    assert process.stdin is not None
                     process.stdin.write(b"stop\n")
                     await process.stdin.drain()
                 else:
@@ -143,7 +154,9 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(tmp_p
                 assert (await command("serve", "--config", str(path)))[0] == 1
                 assert ready(status)
 
-                async def send(operation, payload=None):
+                async def send(
+                    operation: str, payload: dict[str, Any] | None = None,
+                ) -> dict[str, Any]:
                     for _ in range(100):
                         rig.h.clock.value = int(time.time())
                         target = "/api/v1/watch/project/" + operation
@@ -157,7 +170,7 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(tmp_p
                                 and value == {"error": "watch_store_busy"}
                             ):
                                 assert response.status == 200, value
-                                return value
+                                return cast(dict[str, Any], value)
                         # The real nonblocking store lock can be held by observation.
                         # This exact response precedes store entry; retain the
                         # original request identity and never retry uncertainty.
