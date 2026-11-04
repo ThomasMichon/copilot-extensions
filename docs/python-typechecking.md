@@ -329,6 +329,9 @@ Importable `.py` members must belong to the existing inventory, including owned,
 nonignored developer WIP. Extra ignored/unowned Python, first-party `.pyi`
 shadows or substitutes, symbolic links, reparse points and nonordinary inputs
 are refused. Third-party SDK stubs outside these roots are unchanged.
+Windows extension aliases such as `.PYI` count when the native lowercase lookup
+resolves to that same file. Ordinary `.PY` aliases retain their inventoried
+`.py` ownership spelling; POSIX case-distinct data is not reclassified.
 The ephemeral capture is verified before and after each platform analysis and
 again after checker-file cleanup, before releasing the environment lease.
 Changed or replaced roots/members and added/missing sources cannot credit a

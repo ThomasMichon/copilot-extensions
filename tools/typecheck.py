@@ -170,6 +170,18 @@ class _ImportInputs:
             raise TypecheckError("Declared import inputs changed during type checking")
 
 
+def _import_suffix(path: Path) -> str:
+    suffix = path.suffix
+    lower = suffix.lower()
+    if os.name == "nt" and suffix != lower and lower in {".py", ".pyi"}:
+        try:
+            if path.with_suffix(lower).samefile(path):
+                return lower
+        except OSError:
+            pass
+    return suffix
+
+
 def _import_inputs(root: Path, roots: tuple[str, ...], paths: tuple[str, ...]) -> _ImportInputs:
     owned = set(paths)
     directories: dict[str, tuple[int, int]] = {}
@@ -199,7 +211,7 @@ def _import_inputs(root: Path, roots: tuple[str, ...], paths: tuple[str, ...]) -
         while pending:
             parent, ancestors = pending.pop()
             for child in sorted(parent.iterdir()):
-                suffix = child.suffix
+                suffix = _import_suffix(child)
                 module = suffix in {".py", ".pyi"} and child.stem.isidentifier()
                 if not module and not child.name.isidentifier():
                     continue
@@ -215,13 +227,14 @@ def _import_inputs(root: Path, roots: tuple[str, ...], paths: tuple[str, ...]) -
                 identity = _import_identity(child)
                 if suffix == ".pyi":
                     raise TypecheckError(f"First-party import stubs cannot substitute for source: {name}")
-                if name not in owned:
+                owned_name = child.with_suffix(suffix).relative_to(root).as_posix()
+                if owned_name not in owned:
                     raise TypecheckError(f"Import source is unowned or ignored: {name}")
                 content = child.read_bytes()
                 if _import_identity(child) != identity:
                     raise TypecheckError(f"Import source identity changed during capture: {name}")
                 directories.update(ancestors)
-                files[name] = identity, content
+                files[owned_name] = identity, content
     if set(files) != expected:
         raise TypecheckError("Declared import source membership changed or is missing")
     return _ImportInputs(

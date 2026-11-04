@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import importlib.machinery
 import json
 import os
 from pathlib import Path
@@ -248,6 +249,48 @@ def test_import_inputs_accept_owned_wip_and_namespace_members_only(tmp_path: Pat
     (tmp_path / added).write_text("value: int = 2\n", encoding="utf-8")
     updated = typecheck._import_inputs(tmp_path, ("helpers",), (member, added))
     assert len(updated.files) == 2
+
+
+@pytest.mark.parametrize("suffix", [".PYI", ".PyI"])
+def test_import_inputs_follow_native_stub_extension_aliases(tmp_path: Path, suffix: str) -> None:
+    """A native lowercase lookup must not bypass the first-party stub refusal."""
+    helpers = tmp_path / "helpers"
+    helpers.mkdir()
+    (helpers / "contract.py").write_text("value: int = 1\n", encoding="utf-8")
+    shadow = helpers / ("contract" + suffix)
+    shadow.write_text("value: str\n", encoding="utf-8")
+    lookup = helpers / "contract.pyi"
+    aliases = os.name == "nt" and lookup.is_file() and lookup.samefile(shadow)
+    if aliases:
+        with pytest.raises(typecheck.TypecheckError, match="stubs cannot substitute"):
+            typecheck._import_inputs(tmp_path, ("helpers",), ("helpers/contract.py",))
+    else:
+        captured = typecheck._import_inputs(tmp_path, ("helpers",), ("helpers/contract.py",))
+        assert [name for name, _identity, _content in captured.files] == ["helpers/contract.py"]
+
+
+@pytest.mark.parametrize("suffix", [".PY", ".Py"])
+def test_import_inputs_preserve_native_owned_source_extension_aliases(
+    tmp_path: Path, suffix: str,
+) -> None:
+    """FileFinder proves the native source spelling without executing its body."""
+    helpers = tmp_path / "helpers"
+    helpers.mkdir()
+    source = helpers / ("contract" + suffix)
+    source.write_text("raise AssertionError('not executed')\n", encoding="utf-8")
+    finder = importlib.machinery.FileFinder(
+        str(helpers),
+        (importlib.machinery.SourceFileLoader, importlib.machinery.SOURCE_SUFFIXES),
+    )
+    spec = finder.find_spec("contract")
+    if spec is not None:
+        assert os.name == "nt"
+        assert (helpers / "contract.py").samefile(source)
+        captured = typecheck._import_inputs(tmp_path, ("helpers",), ("helpers/contract.py",))
+        assert [name for name, _identity, _content in captured.files] == ["helpers/contract.py"]
+        captured.verify(tmp_path)
+    else:
+        assert typecheck._import_suffix(source) == suffix
 
 
 @pytest.mark.parametrize("change", ["bytes", "missing", "added", "stub", "replacement", "root"])
