@@ -27,6 +27,15 @@ MANIFEST = "install-source.json"
 SCHEMA = "copilot-extensions.install-source"
 
 
+def _load_module(path: Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise ValueError("local artifact builder is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def repository_source(repository: Path, descriptor: dict | None, *, deadline: float) -> dict | None:
     if descriptor is None:
         names = preparation._git(repository, "remote", deadline=deadline).splitlines()
@@ -220,8 +229,6 @@ def build_projects(
     selected = tuple(roster) if projects is None else projects
     if not selected or len(set(selected)) != len(selected) or set(selected) - roster.keys():
         raise ValueError("local source requires unique declared Python projects")
-    from promote_release import _load_module
-
     identities = {}
     payloads = {
         key: source / (COMPONENTS[key.split(":", 1)[1]]

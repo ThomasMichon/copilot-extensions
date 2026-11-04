@@ -4971,6 +4971,16 @@ is a separate, explicit portfolio-wide choice. A first-party-only snapshot is
 preparation data and refuses runtime installation until its native profile is
 complete.
 
+The local builder loads the canonical artifact builder independently of the
+release controller. Its existing toolchain owner accepts an optional absolute
+`uv` executable and monotonic `deadline` for governed preparation. Interpreter
+discovery, environment creation, retained installation and version readback
+share the caller's remaining budget, checked before publication and success.
+The caller still owns process-tree containment. Public toolchain discovery does
+not yet support this bounded entry and refuses before requests; existing callers
+without a deadline retain their prior policy and behavior. These preparation
+primitives do not change Manager's ordinary bootstrap or source routing.
+
 `tools/local_install_profile.py --prepare-profile` completes one selected
 component's native dependency closure through the existing configured-feed
 compiler and acquisition owners. Supply `--component worktree-manager` or

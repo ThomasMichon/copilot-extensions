@@ -415,7 +415,7 @@ def test_suite_build_preserves_roster_versions_and_uses_one_toolchain(tmp_path, 
         __file__=build_python_artifacts.__file__, uer=build_python_artifacts.uer,
         resolve_vendored_libs=lambda root: [],
     )
-    monkeypatch.setattr(promote_release, "_load_module", lambda *a: builder)
+    monkeypatch.setattr(local, "_load_module", lambda *a: builder)
     admitted_toolchain = toolchain
 
     def build(component, *, out_dir, toolchain, builder=builder):
@@ -468,6 +468,27 @@ def test_suite_build_preserves_roster_versions_and_uses_one_toolchain(tmp_path, 
         assert project["artifact"]["version"] == version
 
 
+def test_local_builder_load_keeps_controller_and_module_state_independent(tmp_path, monkeypatch):
+    import builtins
+    import build_python_artifacts
+
+    original_import = builtins.__import__
+
+    def without_controller(name, *args, **kwargs):
+        if name == "promote_release":
+            pytest.fail("local artifact building imported the release controller")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", without_controller)
+    original_root = build_python_artifacts.REPO
+    builder = local._load_module(
+        Path(build_python_artifacts.__file__), "_local_install_artifact_builder",
+    )
+    builder.REPO = tmp_path
+    assert build_python_artifacts.REPO == original_root
+    assert builder.resolve_vendored_libs is not build_python_artifacts.resolve_vendored_libs
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows compact build workspace")
 @pytest.mark.parametrize("change", ["copy", "retained", "built"])
 def test_suite_refuses_changed_compact_or_retained_source(tmp_path, monkeypatch, change):
@@ -490,7 +511,7 @@ def test_suite_refuses_changed_compact_or_retained_source(tmp_path, monkeypatch,
         __file__=build_python_artifacts.__file__, uer=build_python_artifacts.uer,
         resolve_vendored_libs=lambda root: [],
     )
-    monkeypatch.setattr(promote_release, "_load_module", lambda *a: builder)
+    monkeypatch.setattr(local, "_load_module", lambda *a: builder)
     builds = []
 
     def build(component, *, out_dir, toolchain):
