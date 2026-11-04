@@ -32,18 +32,18 @@ catalog_path = cache / "marketplaces" / "opaque-clone" / ".github" / "plugin" / 
 if os.environ.get("VENUE_CALL_LOG"):
     with Path(os.environ["VENUE_CALL_LOG"]).open("a", encoding="utf-8") as stream:
         stream.write(json.dumps({"argv": sys.argv[1:], "cwd": str(Path.cwd())}) + "\n")
+native_settings_path = home / "settings.json"
+native = json.loads(native_settings_path.read_text()) if native_settings_path.exists() else {}
+registered = native.setdefault("extraKnownMarketplaces", {})
 if os.environ.get("VENUE_MARKETPLACE_CATALOG"):
     catalog = json.loads(Path(os.environ["VENUE_MARKETPLACE_CATALOG"]).read_text())
 else:
     # The synthetic remote repository contains these independent test entries.
     catalog = {
-        "name": home.parent.parent.name, "owner": {"name": "Synthetic Marketplace Publisher"},
+        "name": next(iter(registered)), "owner": {"name": "Synthetic Marketplace Publisher"},
         "plugins": [{"name": name, "source": f"./plugins/{name}", "version": "2.3.4"}
                     for name in ("remote", "native", "sample", "support", "external", "a", "b")],
     }
-native_settings_path = home / "settings.json"
-native = json.loads(native_settings_path.read_text()) if native_settings_path.exists() else {}
-registered = native.setdefault("extraKnownMarketplaces", {})
 
 
 def publish_catalog() -> None:

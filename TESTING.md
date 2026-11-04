@@ -1344,6 +1344,19 @@ ordinary inventory behavior and qualifies the reusable registered-cache proof.
 These fresh isolated fixtures qualify the explicit provider, not normal
 bootstrap, the production dependency closure, installation speed or rollout.
 
+Bridge's on-demand `tests/test_venue_path_length.py` exercises ordinary
+preparation and registration with an independent synthetic native installer.
+Run `python tools/run-plugin-tests.py agent-bridge --test-file tests/test_venue_path_length.py --allow-explicit-tiers`.
+The Windows packet reproduces native `WinError 267` at the older nested home,
+launches a real Python child from the compact replacement, preserves older
+bytes and unrelated settings, reuses the completed home without another
+installation, and separates plugin/source/revision identities. Native boundary
+controls cover 258-unit success, 259-unit refusal, UTF-16 surrogate pairs and
+already-completed reuse; a genuinely deeper root refuses before installation
+or settings publication. Portable controls retain POSIX layout. It uses no
+live Copilot, feed, service, runtime deployment, OS policy or shared cache.
+Native cases skip outside Windows; this is not hosted unit-only CI admission.
+
 The opt-in `installation-context-acceptance.yml` admitted-source jobs also run
 `tools/test_manager_source_install.py` and `tools/test_manager_source_native.py`.
 Profiles, refusal controls and Manager reuse run in disjoint partitions on

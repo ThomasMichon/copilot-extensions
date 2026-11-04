@@ -62,6 +62,15 @@ explicit target-local choices remain intact. Cache and receipt paths belong
 under the checkout's actual Git metadata, which can be outside the checkout
 for a linked worktree.
 
+For private native Git fallback installations on Windows, preparation uses the
+compact full-identity home described in the
+[shared preparation contract](../../../libs/plugin-resolve/README.md#trusted-venue-preparation).
+An ordinary retry prepares that home and preserves older nested bytes. If the
+payload working directory is still too long for native process creation,
+preparation fails before settings publication; shorten the checkout's actual
+Git metadata path rather than deleting caches or changing marketplace sources.
+This does not qualify every hook or change installed runtime ownership.
+
 ## Reading the examples
 
 Names and paths below are synthetic. `/example/controller-feature` is the
