@@ -16,6 +16,7 @@ from .coordinator_auth import _make_control_auth
 from .coordinator_categories import CategorySelection, register_category_routes
 from .coordinator_loops import DrainGate, DrainRequest
 from .coordinator_pool_decline import enrich_task
+from .task_obligations import enrich_task_detail
 from .coordinator_task_models import (
     AbandonBody,
     ActivityBody,
@@ -45,6 +46,7 @@ from .coordinator_task_models import (
     WorkerBody,
     YieldBody,
 )
+from .coordinator_task_views import _bulk_task_dict, _event_task_dict, _task_dict
 from .coordinator_verification import register_verification_routes
 from .events import EventBus
 from .queue_records import WorkerAdmissionInhibited
@@ -84,13 +86,6 @@ def _draft_scope(queue: TaskQueue) -> dict:
     }
 
 
-def _task_dict(task: Task) -> dict:
-    return {
-        **asdict(task), "steering_revision": task.steering_revision,
-        "card_draft_revision": task.card_draft_revision,
-    }
-
-
 def _run_waiter_summary(queue: TaskQueue, task_id: str) -> dict | None:
     """The active `run --detach` waiter for a task, trimmed to what a
     caller (the Tasks board, a claim-status callback, `agent-dispatch show`)
@@ -115,22 +110,6 @@ def _task_with_spawn_dict(queue: TaskQueue, task: Task) -> dict:
     if run_waiter is not None:
         result["run_waiter"] = run_waiter
     return enrich_task(queue, task.id, result)
-
-
-def _bulk_task_dict(task: Task, draft_scope: dict | None = None) -> dict:
-    result = _task_dict(task)
-    if draft_scope is not None:
-        result["draft_scope"] = draft_scope
-    result.pop("result")
-    return result
-
-
-def _event_task_dict(task: dict) -> dict:
-    result = dict(task)
-    result["has_result"] = result.pop("result", None) is not None or bool(
-        result.get("has_result")
-    )
-    return result
 
 
 def register_task_routes(
@@ -410,11 +389,7 @@ def register_task_routes(
             if policy is None:
                 raise HTTPException(status_code=404, detail="no such task")
             return {"exists": True, "native_restart_policy": policy}
-        from .task_obligations import read_snapshot
-
-        result = _task_with_spawn_dict(queue, _require(queue.get(task_id)))
-        result["task_obligation"] = read_snapshot(queue, task_id)
-        return result
+        return enrich_task_detail(queue, _task_with_spawn_dict(queue, _require(queue.get(task_id))))
 
     @app.get("/tasks/{task_id}/result")
     def get_result(task_id: str) -> dict:

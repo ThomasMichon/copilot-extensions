@@ -96,6 +96,10 @@ def _release_outcome(value: dict) -> str | None:
     return None
 
 
+def enrich_task_detail(queue: TaskQueue, detail: dict) -> dict:
+    return {**detail, "task_obligation": read_snapshot(queue, detail["id"])}
+
+
 def valid_snapshot(value: object, *, task_id: str) -> bool:
     """Reject unsupported or inconsistent evidence, including bool-as-version."""
     if not isinstance(value, dict) or not {
