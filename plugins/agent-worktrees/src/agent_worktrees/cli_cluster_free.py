@@ -6,6 +6,7 @@ not just parser help: transitive deferred-global dependencies need runtime proof
 
 CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "attribution_prepare_cli",
+    "agenda_cli",
     "identity_vault_cli",
     "claims_cli",
     "cleanup_gc_cli",
@@ -15,11 +16,13 @@ CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "handoff_cli",
     "handoff_successor_repair_cli",
     "installation_cli",
+    "historical_daemons_cli",
     "launch_attempt_inspection",
     "launch_registry",
     "list_cli",
     "maintenance_cli",
     "pane_lifecycle",
+    "owner_observation_cli",
     "picker_profiles_cli",
     "picker_reconcile_cli",
     "pr_state_cli",

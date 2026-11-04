@@ -5151,6 +5151,7 @@ def build_parser() -> argparse.ArgumentParser:
     status_bar_cli.add_parsers(sub)
     status_updater_cli.add_parsers(sub)
     status_monitor_cli.add_parsers(sub)
+    historical_daemons_cli.add_parsers(sub)
     status_monitor_runtime.add_parsers(sub)
     status_monitor_reap_stale.add_parsers(sub)
     pane_lifecycle.register_cli(sub)
@@ -5278,13 +5279,7 @@ def _hook_event_timestamp(payload: dict | None) -> str | None:
     return None
 
 
-def _emit_register_session_result(args: argparse.Namespace, result: dict) -> None:
-    text = json.dumps(result, separators=(",", ":"))
-    holder = getattr(args, "result_holder", None)
-    if isinstance(holder, list):
-        holder.append(text)
-    else:
-        print(text)
+from .output import _emit_register_session_result as _emit_register_session_result  # noqa: E402 -- early-bound compatibility seam
 
 
 # maintenance / doctor surfaces are componentized into maintenance_cli.py.
@@ -5426,6 +5421,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'status': ('status_cli', 'cmd_status'),
     'status-context': ('status_bar_cli', 'cmd_status_context'),
     'status-monitor': ('status_monitor_cli', 'cmd_status_monitor'),
+    'status-monitor-cleanup': ('historical_daemons_cli', 'cmd_status_monitor_cleanup'),
     'status-monitor-restart': ('status_monitor_runtime', 'cmd_status_monitor_restart'),
     'status-monitor-reap-stale': ('status_monitor_reap_stale', 'cmd_status_monitor_reap_stale'),
     'status-segment': ('status_bar_cli', 'cmd_status_segment'),
@@ -5611,6 +5607,7 @@ def _load_full_command_surface() -> None:
     global identifier_blocklist_cli
     global resource_producer_cli
     global resolve_launch_cli, resolve_machine_cli, resolve_picker_cli, resolve_system_cli, services_cli, session_binding_cli, session_inspection_cli, session_metadata_cli
+    global historical_daemons_cli
     global session_tracking_cli, status_bar_cli, status_cli, status_monitor_cli, status_monitor_reap_stale, status_monitor_runtime, status_updater_cli, sweep_finished_session_worktrees
     global sweep_managed_worktrees
     global sync_one, terminal_conclusion, update_cli, worktree_ops_cli, cmd_resolve_handoff_successor, handoff_cancel_cli
@@ -5655,6 +5652,7 @@ def _load_full_command_surface() -> None:
         status_bar_cli,
         status_cli,
         status_monitor_cli,
+        historical_daemons_cli,
         status_monitor_reap_stale,
         status_monitor_runtime,
         status_updater_cli,
@@ -6057,6 +6055,7 @@ def _load_full_command_surface() -> None:
         "status-context": cmd_status_context,
         "status-updater": cmd_status_updater,
         "status-monitor": cmd_status_monitor,
+        "status-monitor-cleanup": historical_daemons_cli.cmd_status_monitor_cleanup,
         "reconcile-sessions": cmd_reconcile_sessions,
         "status-monitor-restart": cmd_status_monitor_restart,
         "status-monitor-reap-stale": cmd_status_monitor_reap_stale,

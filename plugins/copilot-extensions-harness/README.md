@@ -3,9 +3,12 @@
 A **payload-only** Copilot CLI plugin that ships the **operator harness** for the
 copilot-extensions repo — the skills to work *on* the plugin suite. Its
 **primary purpose** is to make sure any agent using an enabling plugin can
-quickly identify which local scripts/processes/paths belong to this system and
-never monkey-patches a deployed copy — file a bug upstream or auto-update
-instead. Its **secondary purpose**, for repos that also choose to be
+quickly identify which local scripts/processes/paths belong to this system,
+restore canonical installer-equivalent artifacts within authorized repair, and
+never monkey-patch runtime code. The
+[footprint reference](../../docs/installation-footprint.md#installer-equivalent-repair)
+owns the inventory and verification map, including failed/refused installer
+subtasks and preserved state. Its **secondary purpose**, for repos that also choose to be
 contributors, is to describe the correct flow for landing a real fix. Enable it
 in any control repo and your agent knows how to **diagnose** the deployed
 runtimes, **contribute** changes to the plugins, and **validate** them on a
@@ -43,7 +46,7 @@ without a competing `sessionStart` output.
 
 | Skill | Priority | Covers |
 |-------|----------|--------|
-| [diagnosing-copilot-extensions](skills/diagnosing-copilot-extensions/SKILL.md) | **Primary (hard guidance)** | Identify what belongs to this system before touching it; never monkey-patch a deployed copy (file a bug upstream, sanitized, or auto-update instead); symptom → cause → action for deployed plugins; key paths, diagnostic commands, and the baseline-reset escape hatch |
+| [diagnosing-copilot-extensions](skills/diagnosing-copilot-extensions/SKILL.md) | **Primary (hard guidance)** | Resolve artifact ownership and source/payload/current/running differences; complete authorized canonical installer-equivalent repair when official subtasks fail/refuse; preserve state and verify consumers, never patch runtime package code or erase whole roots |
 | [diagnosing-validate-and-promote-failures](skills/diagnosing-validate-and-promote-failures/SKILL.md) | Secondary (opt-in) | Diagnose a red `validate-and-promote` release-pipeline run: isolate the failing per-plugin fan-out job via `gh run view --log`, classify a CI-environment-specific test bug apart from a genuine regression, and land the fix forward |
 | [contributing-to-copilot-extensions](skills/contributing-to-copilot-extensions/SKILL.md) | Secondary (opt-in) | Repo layout, the PR-required worktree flow (`create` → `create-pr`/`push-changes` → `pr-merge --now` → `finalize`), the submitter's hard **merged + finalized** completion gate, the **mandatory version bump**, test + install-contract gates, deploy-after-merge, and source-of-truth rules |
 | [validating-in-clean-room](skills/validating-in-clean-room/SKILL.md) | **Run · evaluate · author** clean-room validation (`tools/clean-room/`): fresh-box scenarios, `cr-report.json` + `cr-logs/`, jam taxonomy, Tier-E literal-mode judging, and the scenario contract |
