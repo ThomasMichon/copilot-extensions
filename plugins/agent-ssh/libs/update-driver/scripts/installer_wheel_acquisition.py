@@ -304,6 +304,7 @@ class _Client:
 
     def request(self, location, feed, origins, accept, *, index=False):
         chain = []
+        resets = 0
         while True:
             self.budget.check()
             location, origin = _url(location)
@@ -336,9 +337,15 @@ class _Client:
                     if not redirect:
                         raise WheelError("wheel feed redirect has no location") from None
                     location = urljoin(location, redirect)
+                    resets = 0
                 finally:
                     error.close()
-            except (OSError, URLError, ValueError):
+            except (OSError, URLError, ValueError) as error:
+                reason = error.reason if isinstance(error, URLError) else error
+                if isinstance(reason, ConnectionResetError) and resets == 0:
+                    resets = 1
+                    chain.pop()
+                    continue
                 raise WheelError("wheel feed request failed or timed out") from None
 
     def read(self, response, limit, *, output=None):

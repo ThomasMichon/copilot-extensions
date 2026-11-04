@@ -10,10 +10,14 @@ from collections.abc import Callable
 
 import pytest
 from textual.app import App, ComposeResult
+from textual.widgets import Select, Static
 
-from worktree_manager.companion_timeline_contract import LiveDelta, Provider, TimelineKind
+from worktree_manager.companion_timeline_contract import (
+    ActorKind, Durability, LiveDelta, Provider, TimelineKind,
+)
 from worktree_manager.companion_timeline_model import TimelineWindow
 from worktree_manager.companion_timeline_widget import CompanionTimelinePanel, SubwayTimeline
+from worktree_manager.companion_summary import bridge_status
 from _companion_timeline_fixtures import event, position, snapshot, token
 
 
@@ -23,12 +27,21 @@ BASELINES = Path(__file__).with_name("visual_baselines")
 class VisualApp(App[None]):
     TITLE = "Sidecar timeline - synthetic rendered fixture"
 
-    def __init__(self, window: TimelineWindow) -> None:
+    def __init__(self, window: TimelineWindow, *, session: bool = False) -> None:
         super().__init__()
         self.window = window
+        self.session = session
         self.theme = "textual-dark"
 
     def compose(self) -> ComposeResult:
+        if self.session:
+            yield Static(bridge_status(
+                self.window, "selected session: partial retained events; answerability unknown; membership discovery paused",
+            ))
+            yield Select([
+                ("Bridge feed: membership (discover delegates)", "membership"),
+                ("Session: helper-example (owned; reported link)", "session"),
+            ], value="session", allow_blank=False)
         yield CompanionTimelinePanel(self.window)
 
 
@@ -63,13 +76,28 @@ def offline_svg(svg: str) -> str:
     return re.sub(r"(?m)^[ \t]+$", "", svg)
 
 
-@pytest.mark.parametrize("state", ["live", "browsing"])
+@pytest.mark.parametrize("state", ["live", "browsing", "session"])
 def test_timeline_visual(
     state: str, record_property: Callable[[str, object], None],
 ) -> None:
     async def capture() -> str:
         window = visual_window()
-        app = VisualApp(window)
+        if state == "session":
+            membership = window.sources["bridge"].token
+            assert not window.source_error(membership, "Reader paused; retained evidence only.").applied
+            selected = replace(membership, identity=replace(membership.identity, source_key="bridge-session-example"))
+            assert window.bind(selected).applied
+            rows = (
+                replace(event(selected, 8, actor="helper-example", summary="Bridge session: ask_user_request"),
+                        kind=TimelineKind.INPUT_REQUEST, durability=Durability.UNKNOWN,
+                        details="Historical request occurrence; current answerability unknown. No answer action."),
+                replace(event(selected, 9, actor="helper-example", summary="Bridge session: compaction_start"),
+                        kind=TimelineKind.COMPACTION, durability=Durability.UNKNOWN,
+                        details="Pre-context classification unknown; active pre-window capacity is unqualified."),
+            )
+            rows = tuple(replace(row, actor=replace(row.actor, kind=ActorKind.BRIDGE_SESSION)) for row in rows)
+            assert window.apply_snapshot(snapshot(selected, rows)).applied
+        app = VisualApp(window, session=state == "session")
         async with app.run_test(size=(100, 32)) as pilot:
             timeline = app.query_one(SubwayTimeline)
             timeline.focus()
@@ -89,6 +117,9 @@ def test_timeline_visual(
                 assert timeline.capture_anchor().event == anchor.event
             else:
                 assert window.follow_live and timeline.is_vertical_scroll_end
+                if state == "session":
+                    await pilot.press("end", "enter")
+                    await pilot.pause()
             return offline_svg(app.export_screenshot())
 
     svg = asyncio.run(capture())

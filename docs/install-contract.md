@@ -4492,6 +4492,11 @@ streamed bytes and hands them to the existing exact `WheelSnapshot` owner.
 Index credentials stay on their own origin; receipts contain opaque feed/policy
 identities and origin-chain hashes, not credentials or URLs.
 
+A connection reset before response headers gets at most one retry per URL hop.
+Each attempt consumes the shared request budget and deadline and repeats the
+same origin and credential checks; the retry is not recorded as a redirect.
+Certificate, HTTP-status, integrity and partial-body failures are not retried.
+
 The configured feed may delegate its project metadata and selected file delivery
 through HTTPS redirects. Metadata cannot redirect to a public PyPI index.
 Only a current metadata entry matching the independently selected filename and

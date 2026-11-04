@@ -17,8 +17,10 @@ does not initialize agendas or complete rich consumer/archival integration.
 [managed initialization](../../../plugins/efforts/skills/driving-effort-agendas/references/managed-placement.md)
 and [complete export/readback](../../../plugins/efforts/skills/driving-effort-agendas/references/agenda-export.md)
 contracts. #10251 connects Manager discovery, rich reads and the existing coarse
-push subscription without changing that observation wire. Logger, three-source,
-installed and native acceptance remain open.
+push subscription without changing that observation wire. #10392 adds passive
+Bridge membership consumption and the first isolated three-owner demonstration.
+Known-session consumption, logger, complete source coverage, installed and native
+acceptance remain open.
 Providers advertise actual running support before independently installed
 callers use new syntax. Existing roster, agenda-v1/v2 and raw Bridge event
 contracts remain unchanged.
@@ -255,6 +257,19 @@ Known-session observers reuse current local, represented and remote transports.
 Represented sessions remain read-only and retain their weaker tail/history
 guarantees. Observer audiences are independently admitted under the existing
 owner/authentication scope; a new caller label is not authorization.
+
+Manager's selected-session consumer keeps one held Bridge reader: membership
+discovery by default, or an explicitly selected exact owned/represented member's
+semantic session feed. Session selection pauses discovery visibly; returning
+resumes it from fresh membership facts. Loaded inactive evidence retains its own
+identity/proofs, not current availability. History remains demand-driven.
+The normalized worktree identifies the selected owner context, while the actual
+session project/worktree and registry remain distinct in source facts and the
+qualified native positions. A represented source's null project is not inferred
+from its parent. Arbitrary federated relationship acquisition and concurrent
+per-delegate subscriptions are not part of this consumer.
+Missing source-recorded timestamps remain explicitly unknown; immutable event
+content does not acquire a different timestamp when another viewer loads it.
 
 ## Pre-compaction evidence and viewer policy
 
