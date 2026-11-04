@@ -454,7 +454,19 @@ restoration of historical terminal enums follows.
       same-workspace/native recovery and permanent finalization at their
       respective source and installed/native boundaries.
       The [actual-assignment source packet](journal/2026/11.04-assignment-relationships.md)
-      is under validation; ordinary writer/cohort activation remains disabled.
+      merged in #10413; ordinary writer/cohort activation remains disabled.
+- [x] Land actual direct-worker and allocator-workspace assignment claims in
+      [#10413](https://github.com/ThomasMichon/copilot-extensions/pull/10413),
+      merged as `6626b8426e` after current-head clean Copilot review and required
+      CI. Retain original cross-owner requests, successor/startup continuity,
+      native cleanup custody and exact recovery-reset prerequisites.
+      This source item does not close readiness, same-native rejection,
+      non-circular decline, participating-writer or installed/native qualification.
+- [ ] Land the bounded [retained submission preparation source](journal/2026/11.04-submission-preparation.md):
+      exact proposed result/reference, current workspace/native and original
+      request custody, actionable blockers and rollback-safe completion refusal.
+      Provider observation, guarded submission, caller migration and rejected
+      resubmission remain separate gates; ordinary activation stays disabled.
 - [x] Land read-only [task-obligation provider evidence](journal/2026/11.03-task-obligation-provider.md)
       in [#10365](https://github.com/ThomasMichon/copilot-extensions/pull/10365),
       merged as `e9c3c3f9bd` after exact-head approval and required CI.

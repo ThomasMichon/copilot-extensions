@@ -78,8 +78,8 @@ def _construction_diagnostics(
     prefix, boundary, cleanup = shell.rpartition("function script:Stop-RuntimeConstruction")
     assert boundary, "construction cleanup adapter changed; update fixture diagnostics"
     probes = (
-        ("$session.Process.StandardInput.WriteLine(", "abort-write", False),
-        ("$session.Process.StandardInput.Flush()", "abort-sent", True),
+        ("Send-RuntimeConstructionCommand $session (", "abort-write", False),
+        ("(@{command=$command} | ConvertTo-Json -Compress)\n        )", "abort-sent", True),
         ("$line = $session.Process.StandardOutput.ReadLine()", "reply-wait", False),
         ("$line = $session.Process.StandardOutput.ReadLine()", "reply-received", True),
         ("$session.Process.WaitForExit()", "exit-wait", False),
@@ -115,10 +115,16 @@ def _run(
     if host is None:
         pytest.skip("PowerShell host unavailable")
     script = "$ProgressPreference = 'SilentlyContinue'\n" + script
-    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    if diagnostics is not None:
+        path = diagnostics / "native-probe.ps1"
+        path.write_text(script, encoding="utf-8-sig")
+        arguments = ["-File", str(path)]
+    else:
+        encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+        arguments = ["-EncodedCommand", encoded]
     try:
         return subprocess.run(
-            [host, "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+            [host, "-NoProfile", "-NonInteractive", *arguments],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -445,7 +451,9 @@ exit $code
     assert result.returncode == 1, result.stdout + result.stderr
     assert "original-policy-failure" in result.stderr
     assert "dependency-fixture-denied" in result.stderr
-    assert "owned incomplete candidate was reclaimed" in result.stdout + result.stderr
+    assert "owned incomplete candidate was reclaimed" in " ".join(
+        (result.stdout + result.stderr).split()
+    )
     assert "lock-reacquired" in result.stdout
     assert not (root / "versions" / "2.0").exists()
     assert (root / "current-version").read_text(encoding="utf-8") == "1.0"

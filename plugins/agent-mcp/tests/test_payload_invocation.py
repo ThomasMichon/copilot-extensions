@@ -29,6 +29,8 @@ def test_payload_manifest_describes_agent_mcp_runtime() -> None:
         "purpose": "Wrap authenticate and materialize MCP servers",
         "installer": "init",
         "windowsCatalogShim": "cmd",
+        "inProcessCatalog": True,
+        "installerLifecycle": True,
         "provisionMode": "direct",
         "payloadRootEnv": "AGENT_MCP_PAYLOAD_ROOT",
         "payloadDispatcher": {
@@ -270,6 +272,29 @@ def _fake_runtime_gate_payload(
     return root
 
 
+def _configuration_fixture_environment(payload: Path) -> dict[str, str]:
+    # These gate tests fake installation receipts. Configuration-owner authority
+    # is tested separately; keep this child focused on native source selection.
+    import venv
+
+    probe = payload / "configuration-fixture"
+    venv.EnvBuilder(with_pip=False).create(probe)
+    python = probe / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    result = subprocess.run(
+        [str(python), "-I", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"],
+        capture_output=True, text=True, check=True, timeout=15,
+    )
+    (Path(result.stdout.strip()) / "gate_fixture.pth").write_text(
+        f"import site; site.addsitedir({str(Path(pytest.__file__).parent.parent)!r}); "
+        "from agent_mcp import configuration; configuration.owner_report = lambda root: None\n",
+        encoding="utf-8",
+    )
+    environment = dict(os.environ)
+    environment.pop("AGENT_CONFIGURATION_CONTEXT", None)
+    environment["TEST_AGENT_RT_PY"] = str(python)
+    return environment
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX runtime-gate test")
 def test_posix_runtime_gate_selects_cell_local_home_and_marketplace(
     tmp_path: Path,
@@ -296,12 +321,11 @@ def test_posix_runtime_gate_selects_cell_local_home_and_marketplace(
     context = runtime_root / "install.json"
     context.parent.mkdir(parents=True, exist_ok=True)
     context.write_text("{}\n", encoding="utf-8")
-    env = os.environ.copy()
+    env = _configuration_fixture_environment(payload)
     env.update(
         {
             "AGENT_MCP_PAYLOAD_ROOT": str(payload),
             "COPILOT_EXTENSIONS_CONTEXT": str(context),
-            "TEST_AGENT_RT_PY": sys.executable,
             "TEST_STATUS_JSON": json.dumps(
                 {
                     "status": "ready",
@@ -488,12 +512,11 @@ def test_windows_runtime_gate_selects_cell_local_home_and_marketplace(
     context = runtime_root / "install.json"
     context.parent.mkdir(parents=True, exist_ok=True)
     context.write_text("{}\n", encoding="utf-8")
-    env = os.environ.copy()
+    env = _configuration_fixture_environment(payload)
     env.update(
         {
             "AGENT_MCP_PAYLOAD_ROOT": str(payload),
             "COPILOT_EXTENSIONS_CONTEXT": str(context),
-            "TEST_AGENT_RT_PY": sys.executable,
             "TEST_STATUS_JSON": json.dumps(
                 {
                     "status": "ready",

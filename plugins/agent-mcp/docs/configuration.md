@@ -5,6 +5,14 @@ peer without `--configuration` contributes no extra layer, preserving native
 files/defaults. Binding/refusal, malformed or unsafe data and wrong-cell reports
 still fail. Optional absence never qualifies an unvalidated delivered projection.
 
+Legacy version-slot deployments use the canonical resolver retained in MCP's
+executing slot (`.runtime-bootstrap`), including nested `.venv` layouts. The
+module and interpreter prefix must belong to that MCP installation; an unrelated
+prefix cannot supply a resolver. Older root-level `scripts` deployments remain
+supported. Owner lookup remains read-only, completion-gated and independent of
+ambient command discovery. Delivered projections still require a matching fresh
+Worktrees owner report.
+
 [`src/agent_mcp/config.py`](../src/agent_mcp/config.py) owns `_read_file`,
 `resolve_config_path`, `parse_config`, and `validate_config`. Read/validate never
 mints credentials, runs a command, installs, repairs, connects to an upstream or
