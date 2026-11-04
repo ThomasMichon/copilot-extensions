@@ -226,10 +226,12 @@ def execution_config(config, configured_machine, machine_raw, global_raw):
         anchors = [repo.anchor] if repo is not None and repo.anchor else []
         if repo is not None and repo.anchor:
             from . import state_root
+            from .config_sources import _CONFIG_SOURCE_ANCHORS_OWNER
 
             anchors = [
-                item.anchor for item in state_root.config_source_anchors(
-                    config, base_anchor=repo.anchor, family="registry",
+                item.anchor for item in owner_call(
+                    state_root.config_source_anchors, _CONFIG_SOURCE_ANCHORS_OWNER,
+                    config, base_anchor=repo.anchor, family="registry", source="execution-config-sources",
                 )
             ]
         for anchor in anchors:

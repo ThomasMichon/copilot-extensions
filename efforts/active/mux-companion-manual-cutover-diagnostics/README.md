@@ -464,7 +464,8 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       intake, bounded Bridge membership and the reviewed data-lifetime design.
       #10224 delivers D1's durable placement and passive discovery source.
       #10238 delivers D2's explicit managed initialization and complete export.
-      Agenda/Bridge consumer integration, archival/rescue, native durability and
+      #10251 delivers D3's rich Agenda consumer and its real isolated join.
+      Bridge consumer integration, archival/rescue, native durability and
       whole S2-S5 and original root gates remain open.
 
 ## Validation Plan
@@ -542,7 +543,7 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
-- [2026-11-03 - Rich Agenda consumer source prepared; review and remaining integrations open](journal/2026/11.03-sidecar-rich-agenda-consumer.md)
+- [2026-11-03 - Rich Agenda consumer merged; Bridge composition and archival remain open](journal/2026/11.03-sidecar-rich-agenda-consumer.md)
 - [2026-11-03 - Managed agenda initialization/export merged; Manager consumers next](journal/2026/11.03-sidecar-managed-agenda-export.md)
 - [2026-11-03 - Durable placement source merged; efforts integration next](journal/2026/11.03-sidecar-durable-placement.md)
 - [2026-11-03 - Native intake and membership merged; durable discovery next](journal/2026/11.03-sidecar-native-membership.md)

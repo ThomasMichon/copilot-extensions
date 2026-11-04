@@ -1670,6 +1670,7 @@ def test_execution_acquisition_original_decision_and_selected_callbacks(api, mon
 
     api.stub("config", INREPO_CONFIG_DIRNAME=".agent-worktrees",
              detect_platform=platform, detect_machine=fallback)
+    api.load("config_sources")
     api.stub("state_root", config_source_anchors=sources)
     monkeypatch.setattr(Path, "is_file", is_file)
     with api.config.capture_config_observations() as observations:
@@ -1909,3 +1910,202 @@ def test_machine_registry_selected_callback_identity_survives_rebinding(api, mac
     else:
         assert source.config._parse_machines_yaml_file is original
     assert api.config.current_observations() is None
+
+
+@pytest.fixture
+def original_source_selection(api, monkeypatch):
+    from pathlib import PurePosixPath
+
+    calls = []
+    state = SimpleNamespace(failure=None, present=True)
+
+    class SourcePath(PurePosixPath):
+        def resolve(self):
+            return self
+
+        def is_file(self):
+            calls.append(("file", str(self)))
+            if state.failure == "presence":
+                raise PermissionError("private source presence body")
+            return state.present
+
+    config = SimpleNamespace(
+        repo_name="sample", knowledge_repo="knowledge",
+        default_repo=SimpleNamespace(anchor="base", requires_external_state_root=True, stateless=True),
+    )
+
+    def machine(base, *, project):
+        calls.append(("machine", base, project))
+        if state.failure == "machine":
+            raise ValueError("private machine source body")
+        return "local"
+
+    def knowledge(selected, **kwargs):
+        assert selected is config
+        calls.append(("knowledge", kwargs))
+        if state.failure == "knowledge":
+            raise LookupError("private knowledge source body")
+        return SimpleNamespace(requires_external=True, bound=True, path="knowledge")
+
+    def install_dir():
+        calls.append("install")
+        if state.failure == "install":
+            raise ValueError("private install source body")
+        return SourcePath("global")
+
+    api.stub("config", install_dir=install_dir)
+    api.stub("project_state", namespaced=lambda: False)
+    api.stub("machine_config", machine_config_root=machine,
+             machine_config_root_report=lambda *a, **k: pytest.fail("diagnostic reader must not replace original"))
+    api.stub("state_root", resolve_state_root=knowledge)
+    owner = api.load("config_sources")
+    monkeypatch.setattr(owner, "Path", SourcePath)
+    return SimpleNamespace(owner=owner, config=config, calls=calls, state=state)
+
+
+@pytest.mark.parametrize("family", ["registry", "configuration"])
+def test_original_config_source_selection_records_order_without_diagnostic_replay(api, original_source_selection, family):
+    source = original_source_selection
+    with api.config.capture_config_observations() as observations:
+        value = source.owner.config_source_anchors(source.config, base_anchor="base", family=family)
+    knowledge_options = {} if family == "registry" else {"repo_override": "knowledge"}
+    expected = [("machine", "base", "sample"), ("knowledge", {**knowledge_options, "cwd": None})]
+    if family == "configuration":
+        expected.extend(("install", ("file", "global/related.yaml")))
+    assert source.calls == expected
+    assert [(item.anchor, item.origin) for item in value] == [
+        ("base", "harness"), ("knowledge", "knowledge"),
+        *([("global", "machine")] if family == "configuration" else []), ("local", "machine"),
+    ]
+    assert any(o.stage == "config-source-anchors" and o.authority is ScanAuthority.COMPLETE for o in observations)
+    assert any(o.stage == "config-owner" and o.source == "config-source-machine-root" for o in observations)
+    assert not any(o.source == "machine-registry-config-sources" for o in observations)
+    report = source.owner.AcquisitionReport("sources", value, tuple(observations))
+    assert report.authority is ScanAuthority.INDETERMINATE and report.reusable is False
+    assert api.config.current_observations() is None
+
+
+@pytest.mark.parametrize("failure", ["machine", "knowledge", "install", "presence"])
+def test_original_config_source_selection_retains_fatal_errors_and_type_only_outcomes(
+    api, original_source_selection, failure,
+):
+    from configuration_layers import ConfigurationError
+
+    source = original_source_selection
+    source.state.failure = failure
+    expected = {"machine": ValueError, "knowledge": LookupError,
+                "install": ConfigurationError, "presence": ConfigurationError}[failure]
+    with api.config.capture_config_observations() as observations:
+        with pytest.raises(expected):
+            source.owner.config_source_anchors(source.config, base_anchor="base")
+    owned = [o for o in observations if o.stage == "config-source-anchors"]
+    assert owned and owned[-1].authority is ScanAuthority.INDETERMINATE
+    assert any(f.detail == expected.__name__ for f in owned[-1].findings)
+    assert "private " not in repr(observations)
+    assert source.calls.count(("machine", "base", "sample")) == 1
+    assert api.config.current_observations() is None
+
+
+def test_original_config_source_negative_probe_does_not_certify_absence(api, original_source_selection):
+    source = original_source_selection
+    source.state.present = False
+    with api.config.capture_config_observations() as observations:
+        value = source.owner.config_source_anchors(source.config, base_anchor="base")
+    assert [item.anchor for item in value] == ["base", "knowledge", "local"]
+    assert source.calls.count(("file", "global/related.yaml")) == 1
+    assert any(o.source == "global/related.yaml" and any(
+        finding.reason == "presence-provenance-unavailable" for finding in o.findings
+    ) for o in observations)
+
+
+@pytest.mark.parametrize("mode", ["self-restoring", "same-globals", "nested-report"])
+def test_original_config_source_replaced_selection_cannot_borrow_nested_owner(
+    api, original_source_selection, monkeypatch, mode,
+):
+    from types import FunctionType
+
+    source = original_source_selection
+    original = source.owner._config_source_anchors
+
+    def replacement(*args, **kwargs):
+        if mode == "self-restoring":
+            monkeypatch.setattr(source.owner, "_config_source_anchors", original)
+        if mode == "nested-report":
+            with api.config.capture_config_observations() as nested:
+                original(*args, **kwargs)
+            assert nested
+        else:
+            original(*args, **kwargs)
+        return []
+
+    if mode == "same-globals":
+        replacement = FunctionType(replacement.__code__, original.__globals__, closure=replacement.__closure__)
+    monkeypatch.setattr(source.owner, "_config_source_anchors", replacement)
+    with api.config.capture_config_observations() as observations:
+        value = source.owner.config_source_anchors(source.config, base_anchor="base", family="registry")
+    assert value == []
+    assert source.calls == [("machine", "base", "sample"), ("knowledge", {"cwd": None})]
+    owned = [o for o in observations if o.stage == "config-source-anchors"]
+    assert owned[-1].authority is ScanAuthority.INDETERMINATE
+    assert any(f.reason == "owner-coverage-unavailable" for o in owned for f in o.findings)
+
+
+@pytest.mark.parametrize("root", ["discovered", None], ids=["git-root", "default-fallback"])
+def test_original_config_source_default_root_preserves_one_value_lookup(api, original_source_selection, root):
+    source = original_source_selection
+
+    def git_root(cwd):
+        source.calls.append(("git-root", cwd))
+        return root
+
+    api.stub("state_root", _git_toplevel=git_root,
+             resolve_state_root=lambda *a, **k: SimpleNamespace(requires_external=False, bound=False, path=None))
+    with api.config.capture_config_observations() as observations:
+        value = source.owner.config_source_anchors(source.config, cwd="caller", family="registry")
+    assert [item.anchor for item in value] == [root or "base", "local"]
+    assert source.calls == [("git-root", "caller"), ("machine", root or "base", "sample")]
+    assert any(o.source == "config-source-git-root" and o.authority is ScanAuthority.INDETERMINATE
+               for o in observations)
+    assert any(o.stage == "config-source-anchors" and o.authority is ScanAuthority.COMPLETE for o in observations)
+
+
+@pytest.mark.parametrize("mode", ["self-restoring", "argument-rebinding"])
+def test_registry_source_callback_keeps_original_binding_and_replacement_provenance(
+    api, machine_registry_api, monkeypatch, mode,
+):
+    source = machine_registry_api
+    sources = api.load("config_sources")
+    selected = []
+    root = api.stub("state_root")
+    source.present.add("knowledge/.agent-worktrees/machines.yaml")
+    config = SimpleNamespace(default_repo=SimpleNamespace(anchor="registry"))
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("source callback was selected after argument evaluation")
+
+    def callback(value, **kwargs):
+        assert value is config and kwargs == {"base_anchor": "registry", "family": "registry"}
+        selected.append(mode)
+        if mode == "self-restoring":
+            monkeypatch.setattr(root, "config_source_anchors", sources.config_source_anchors)
+        return [SimpleNamespace(anchor="registry"), SimpleNamespace(anchor="knowledge")]
+
+    class Repo:
+        calls = 0
+
+        def __str__(self):
+            self.calls += 1
+            if self.calls == 2 and mode == "argument-rebinding":
+                monkeypatch.setattr(root, "config_source_anchors", forbidden)
+            return "registry"
+
+    monkeypatch.setattr(root, "config_source_anchors", callback, raising=False)
+    repo = Repo()
+    with api.config.capture_config_observations() as observations:
+        value = source.owner.overlay(repo, config=config)
+    assert str(value) == "knowledge/.agent-worktrees/machines.yaml"
+    assert repo.calls == 4 and selected == [mode]
+    assert source.calls == [("exists", "knowledge/.agent-worktrees/machines.yaml")]
+    assert any(o.source == "machine-registry-config-sources" and any(
+        finding.reason == "owner-coverage-unavailable" for finding in o.findings
+    ) for o in observations)

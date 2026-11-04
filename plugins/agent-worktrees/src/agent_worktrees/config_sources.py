@@ -10,6 +10,7 @@ from pathlib import Path
 from dropin_registry import ScanAuthority
 
 from . import config as cfg
+from . import config_acquisition as acquisition
 from .acquisition_report import AcquisitionReport, SourceObservation, failed, observe
 from .source_probes import probe_source
 
@@ -61,7 +62,19 @@ def config_source_anchors(
     ``family="registry"`` retains the existing protected machine-identity source
     selection; ordinary preference precedence does not reorder that authority.
     """
-    return _config_source_anchors(config, base_anchor=base_anchor, cwd=cwd, family=family)
+    start = acquisition.registry_call_started()
+    try:
+        value = acquisition.owner_call(
+            _config_source_anchors, _SOURCE_SELECTION_OWNER,
+            config, base_anchor=base_anchor, cwd=cwd, family=family,
+            source="config-source-anchors",
+        )
+    except Exception as exc:
+        failed(acquisition.current_observations(), "config-source-anchors", "config-source-anchors",
+               "source-selection-failed", type(exc).__name__)
+        raise
+    acquisition.owner_outcome(start, "config-source-anchors")
+    return value
 
 
 def knowledge_config_source(
@@ -265,12 +278,16 @@ def _config_source_anchors(
     from . import state_root
     from .machine_config import machine_config_root, machine_config_root_report
 
+    acquired = acquisition.current_observations() if observations is None else None
     if family not in {"configuration", "registry"}:
         raise ValueError("unsupported configuration source family")
     if base_anchor:
         base = base_anchor
     elif observations is None:
-        base = state_root._git_toplevel(cwd) or _default_anchor(config)
+        acquisition.opaque_source("config-source-git-root")
+        base = state_root._git_toplevel(cwd) or acquisition.owner_call(
+            _default_anchor, _DEFAULT_ANCHOR_OWNER, config, source="config-source-anchors",
+        )
     else:
         root_report = state_root._git_toplevel_report(cwd)
         observations.extend(root_report.observations)
@@ -279,9 +296,19 @@ def _config_source_anchors(
     if base:
         sources.append(ConfigSource(anchor=base, origin="harness", tier="repository"))
         observe(observations, base, "harness-source", ScanAuthority.COMPLETE)
+        observe(acquired, base, "harness-source", ScanAuthority.COMPLETE)
     else:
         failed(observations, "base-anchor", "config-sources", "base-unavailable", "no base anchor resolved")
-    selected = config if family == "registry" else _configuration_for_base(config, base)
+        failed(acquired, "base-anchor", "config-sources", "base-unavailable", "no base anchor resolved")
+    if family == "registry":
+        selected = config
+    else:
+        if observations is None:
+            acquisition.opaque_source("config-source-base-config")
+        selected = acquisition.owner_call(
+            _configuration_for_base, _BASE_CONFIGURATION_OWNER, config, base,
+            source="config-source-anchors",
+        )
     if family != "registry" and selected is not None:
         from . import project_state
 
@@ -297,6 +324,8 @@ def _config_source_anchors(
                        "source-selection-failed", type(error).__name__)
     try:
         if observations is None:
+            if selected is not None:
+                acquisition.opaque_source("config-source-machine-root")
             local = machine_config_root(base, project=selected.repo_name) if selected else None
         else:
             local = None
@@ -306,6 +335,7 @@ def _config_source_anchors(
                 observations.extend(local_report.observations)
     except Exception as exc:
         if observations is None:
+            failed(acquired, "machine-config", "config-sources", "source-selection-failed", type(exc).__name__)
             raise
         failed(observations, "machine-config", "config-sources", "source-selection-failed", type(exc).__name__)
         local = None
@@ -315,7 +345,11 @@ def _config_source_anchors(
     if selected is None:
         knowledge = None
     elif observations is None:
-        knowledge = read_knowledge(selected, base_anchor=base, cwd=cwd)
+        knowledge = acquisition.owner_call(
+            read_knowledge,
+            _KNOWLEDGE_REGISTRY_SOURCE_OWNER if family == "registry" else _KNOWLEDGE_CONFIG_SOURCE_OWNER,
+            selected, base_anchor=base, cwd=cwd, source="config-source-anchors",
+        )
     else:
         try:
             knowledge = read_knowledge(
@@ -328,16 +362,25 @@ def _config_source_anchors(
         sources.append(knowledge)
     if family != "registry":
         try:
+            if observations is None:
+                acquisition.opaque_source("config-source-install-root")
             global_root = cfg.install_dir()
             candidate = global_root / "related.yaml"
             present = (
                 candidate.is_file() if observations is None
                 else probe_source(candidate, "file", observations, "machine-wide-source")
             )
+            if observations is None:
+                if present:
+                    observe(acquired, str(candidate), "machine-wide-source", ScanAuthority.COMPLETE)
+                else:
+                    failed(acquired, str(candidate), "machine-wide-source", "presence-provenance-unavailable",
+                           "legacy presence result does not expose a raw stat outcome")
         except (OSError, ValueError) as error:
             failed(observations, "machine-wide", "config-sources", "source-selection-failed",
                    type(error).__name__)
             if observations is None:
+                failed(acquired, "machine-wide", "config-sources", "source-selection-failed", type(error).__name__)
                 raise ConfigurationError(
                     "machine-wide configuration root is unavailable"
                 ) from error
@@ -350,6 +393,7 @@ def _config_source_anchors(
                 ))
     if local:
         sources.append(ConfigSource(anchor=local, origin="machine", tier="repository_machine"))
+        observe(acquired, local, "machine-source-selection", ScanAuthority.COMPLETE)
     return sources
 
 
@@ -358,18 +402,21 @@ def _knowledge_config_source(config, *, base_anchor=None, cwd=None, observations
 
     from . import state_root
 
+    diagnostics = observations if observations is not None else acquisition.current_observations()
     binding = config.knowledge_repo
     if not isinstance(binding, str):
         raise ConfigurationError("knowledge binding must name a registered repository")
     if not binding:
-        observe(observations, "knowledge", "knowledge-source", ScanAuthority.ABSENT)
+        observe(diagnostics, "knowledge", "knowledge-source", ScanAuthority.ABSENT)
         return None
+    if observations is None:
+        acquisition.opaque_source("config-source-state-root")
     res = state_root.resolve_state_root(config, repo_override=binding, cwd=cwd)
     if not res.bound or not res.path:
-        failed(observations, binding, "knowledge-source", "knowledge-unavailable",
+        failed(diagnostics, binding, "knowledge-source", "knowledge-unavailable",
                "explicit knowledge source is unavailable")
         raise ConfigurationError("explicit knowledge binding is unresolved")
-    observe(observations, res.path, "knowledge-source", ScanAuthority.COMPLETE)
+    observe(diagnostics, res.path, "knowledge-source", ScanAuthority.COMPLETE)
     if not base_anchor or Path(res.path).resolve() != Path(base_anchor).resolve():
         return ConfigSource(anchor=res.path, origin="knowledge", tier="repository")
     return None
@@ -406,22 +453,26 @@ def _configuration_for_base(config, base):
 def _knowledge_registry_source(config, *, base_anchor=None, cwd=None, observations=None):
     from . import state_root
 
+    diagnostics = observations if observations is not None else acquisition.current_observations()
     try:
         repo = config.default_repo
     except KeyError:
-        failed(observations, "default-repo", "knowledge-source", "source-selection-failed",
+        failed(diagnostics, "default-repo", "knowledge-source", "source-selection-failed",
                "default repo is unavailable; knowledge requirement is unknown")
         return None
     if not (getattr(repo, "requires_external_state_root", False) or getattr(repo, "stateless", False)):
-        observe(observations, "knowledge", "knowledge-source", ScanAuthority.ABSENT)
+        observe(diagnostics, "knowledge", "knowledge-source", ScanAuthority.ABSENT)
         return None
+    if observations is None:
+        acquisition.opaque_source("config-source-state-root")
     res = state_root.resolve_state_root(config, cwd=cwd)
     if res.requires_external and res.bound and res.path:
-        observe(observations, res.path, "knowledge-source", ScanAuthority.COMPLETE)
+        observe(diagnostics, res.path, "knowledge-source", ScanAuthority.COMPLETE)
         if not base_anchor or os.path.abspath(res.path) != os.path.abspath(base_anchor):
             return ConfigSource(anchor=res.path, origin="knowledge")
-    elif observations is not None:
-        failed(observations, res.repo or "knowledge", "knowledge-source", "knowledge-unavailable",
+    elif diagnostics is not None:
+        failed(diagnostics, (res.repo or "knowledge") if observations is not None else "knowledge",
+               "knowledge-source", "knowledge-unavailable",
                "required knowledge source is unavailable")
     return None
 
@@ -436,3 +487,11 @@ def config_source_anchors_report(
         config, base_anchor=base_anchor, cwd=cwd, observations=observations, family=family,
     )
     return AcquisitionReport("config-source-anchors", value, tuple(observations))
+
+
+_DEFAULT_ANCHOR_OWNER = _default_anchor
+_BASE_CONFIGURATION_OWNER = _configuration_for_base
+_KNOWLEDGE_CONFIG_SOURCE_OWNER = _knowledge_config_source
+_KNOWLEDGE_REGISTRY_SOURCE_OWNER = _knowledge_registry_source
+_SOURCE_SELECTION_OWNER = _config_source_anchors
+_CONFIG_SOURCE_ANCHORS_OWNER = config_source_anchors

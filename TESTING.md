@@ -1,5 +1,12 @@
 # Testing copilot-extensions
 
+The opt-in Manager `tests/test_companion_visual.py` packet compares actual
+Textual timeline renders against synthetic live-following and history-browsing
+SVG baselines. It preserves current captures as JUnit properties for inspection
+without silently updating the expected screens. See
+`worktree-manager/tests/visual_baselines/README.md` for the bounded invocation,
+baseline-review procedure and rendered-fixture versus native-client limits.
+
 Generated application staging materializes the known POSIX Python interpreter
 aliases as regular files before inventory preparation or stage completion.
 Only links to the running interpreter may be converted; foreign targets,
@@ -174,6 +181,33 @@ their plugin and Manager docs. These synthetic process/socket tests do not enter
 required unit-only CI or qualify native Windows, installed rollout or migration
 of an active agent. Same-home legacy adoption additionally requires quiescence
 and the efforts-owned POSIX recovery/fencing checks.
+
+The optional Manager `tests/test_companion_bridge_source.py` packet adds real
+Bridge database membership commits, the owning membership parser/handler and
+bounded SSE/CLI pipes to the actual worktree-resident/Agenda/Textual join.
+Select it with `--allow-explicit-tiers`; the Bridge HTTP carrier and root CLI
+entry remain separately qualified by the Bridge suite. It checks passive
+capability refusal, unrelated-owner heartbeat continuity, retention gaps,
+independent cancellation, retained rows and selected-head retirement without
+starting an SDK actor. `test_companion_bridge_codec.py` and
+`test_companion_bridge_discovery.py` cover normalization and payload selection.
+The discovery packet invokes the real passive payload gate with an inherited
+foreign-plugin receipt and root and checks no provisioning. Replacement controls replay
+64 old members to 64 new members across bounded pages without transient current
+facts. The joined fixture exhausts Bridge evidence, refreshes the baseline, and
+checks the other providers' rows, proofs, purpose, browsing anchor and next
+Worktrees delta. Tokenless head invalidation and a blocked Bridge preparation
+separately check retirement and independent rich Agenda admission, including a
+new Agenda revision during exhausted-Bridge reconciliation. Model controls
+exhaust another provider's proof, cursor and byte partitions without starving
+an empty Bridge baseline. Malformed relationship IDs fail as contract errors;
+terminal cleanup failures retain their diagnostic without rescheduling cleanup.
+The rich Agenda retention packet exhausts both Worktrees and Agenda, reconciles
+their actual fresh baselines in both completion orders, preserves healthy Bridge
+bindings/proofs and accepts the next Agenda revision. Repeated head-change
+notifications cannot replace a latched cleanup-failure diagnostic.
+These controls do not establish native performance, rollout or known-session
+event/history consumption, and do not expand required unit-only CI.
 
 The optional `uv_deployment_compatibility` native-acceptance selector runs the
 focused retained-dependency policy, Codespaces cold/warm installation,
@@ -3637,6 +3671,17 @@ controls do not qualify delegated document/config-source frontiers or reuse.
 The plugin's `test_machines_yaml_location.py` separately exercises the real
 file/parser/merge/report path and empty/overlay cases; execution-identity
 fixtures retain an explicit registered knowledge-path boundary.
+Fourteen original config-source controls use the real selector with synthetic
+Git, machine-root, state-root and file boundaries. They preserve registry versus
+ordinary precedence, default-root fallback, fatal exception types and negative
+native-probe uncertainty without calling the separate diagnostic reader.
+Same-globals, nested-request and self-restoring replacements retain uncertainty.
+The registry consumer retains its selected source callback across argument-time
+rebinding.
+Two real-file registry consumer cases separately prove one selected document
+read and one state-root call, including a self-restoring source callback; these
+are contained plugin tests, not actor-free required CI. Deeper child frontiers,
+stable witnesses and memo consumers remain unqualified.
 The runner selects pytest's `parametrize_long_str_id_strategy=legacy` to
 preserve the manifest's full-value parameter IDs across pytest 9.1 and 9.2.
 This keeps exact node admission; it does not truncate, rename or omit long
