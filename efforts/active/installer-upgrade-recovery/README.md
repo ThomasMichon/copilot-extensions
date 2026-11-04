@@ -6,7 +6,7 @@
 - **Created:** 2026-11-03
 - **Status:** Active
 - **Umbrella issue:** #10377
-- **Related issues:** #9489, #7743, #9448, #7758, #10180, #6820, #7028, #7947, #6389
+- **Related issues:** #9489, #7743, #9448, #7758, #10180, #6820, #7028, #7947, #6389, #5472
 - **Vision:** [authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
 
 ## Guiding Intent
@@ -260,3 +260,80 @@ planners. The legacy fallback now uses the canonical link classifier to exclude
 symlinks and junctions while retaining real-directory reuse. The affected native
 consumer and serving/footprint packet passes 78 tests with three platform skips,
 including unchanged old-slot evidence and real legacy-directory controls.
+
+### 2026-11-04 - First source unit merged; next producer recovery unit
+
+#10398 merged to `dev` as `fbcbf22b0ef518519daf67f865a2f9b551f7af89`.
+Copilot approved exact head `9bbf63f6b12aeb8212cfae880f6f1a00d96b0de1`;
+both review threads were resolved and required CI run 41805066341 passed.
+An earlier same-head CI run also passed, but the provider required the newer
+run before accepting the merge; no CI requirement was bypassed. All eleven
+authored files match the verified squash merge, and the source worktree has
+pulled forward. Containing release and installed application remain separate,
+unperformed outcomes. This completes the bounded #6389 planner reservation,
+not the parent convergence objective.
+
+The next serial unit is the Codespaces-only normal install/update repair
+adapter, claimed on #5472 in
+[comment 6627075322](https://github.com/ThomasMichon/copilot-extensions/issues/5472#issuecomment-6627075322).
+The actual contained Windows producer currently refuses a selected malformed
+or incomplete same-version slot and preserves its bytes; two existing
+consumer controls pass at that refusal contract. They do not prove recovery.
+The next regression must require a distinct admitted healthy generation and
+usable selected CLI without rewriting the retained old identity or resetting
+state. Pair PowerShell/POSIX adapters and retain source identity, healthy-repair
+reuse, failure preservation and applicable publication/service hooks.
+
+Shared construction/retention/guardian ownership, the Worktrees first adopter,
+#6928 watchdog work, #8826 diagnostics and #6389 lifecycle adapters remain
+separate. No production edit for this next unit preceded #10398's merge.
+The canonical effort and #10377 remain active; no shared-host installation,
+service change, credential operation or rollout is authorized by this journal.
+
+### 2026-11-04 - Codespaces native producer recovery
+
+The U9 normal `install` and `update` regressions failed against the pre-fix
+producer at construction admission for a selected incomplete same-version slot.
+The Codespaces adapter now selects a fresh repair generation before entering
+the unchanged lower construction guard. It reuses only an exact completed,
+isolated-CLI-healthy target; occupied incomplete, malformed, conflicting or
+unhealthy targets are not rewritten. Existing construction, completion,
+retention, activation and failed-candidate cleanup remain canonical.
+
+PowerShell and POSIX entries are paired. Source receipt validation keeps its
+strict base identity independently of the repair suffix, and source reuse also
+requires the exact deployment receipt. The manifest records the actual selected
+generation while preserving package/source identity. The normal updater's
+existing readiness reader already accepts that qualified repair identity; no
+additional caller syntax or updater patch is needed.
+
+The focused Windows packets pass 27 unique controls, with four native POSIX
+skips. They cover normal install/update and immediate reuse, source-qualified
+repair/reuse, malformed completion, failed dependency installation and incoming
+CLI health, fresh first touch, bootstrap/activation failure, and existing lower
+reuse/admission controls. Real disposable venvs and the generated command prove
+the selected fixture CLI runs; old-slot/configuration bytes remain unchanged,
+and failed incoming construction leaves selectors unchanged. Fake UV and guarded
+private profiles prevent package acquisition and host-service effects.
+
+Validation retained the existing 120-second native-child, 180-second item and
+300-second group bounds. The initial combined normal/source packet exceeded
+the group bound; a monolithic source-install-plus-repeat case also exceeded the
+item bound. Splitting source assertions around one module-scoped disposable
+installation passed in 162.15 seconds without increasing limits. The final
+normal/unit/lower-reuse packet passed 17 controls and four platform skips but
+exposed one stale exact diagnostic assertion. The fixture now accepts only the
+canonical confirmed-abort diagnostic, including its exit-1 suffix, and retains
+absence-of-candidate/selector assertions; that case and four fresh/failed-entry
+controls then passed in 191.82 seconds. These are bounded functional-packet
+measurements, not per-update latency or installed-host performance claims.
+
+Actor-free generation controls are on-demand, not an expansion of required
+unit-only CI. A full fresh VM/container, native POSIX execution and live external
+installation were not run in this Windows source-only lane; no such deployment
+is authorized here. The private synthetic fresh profile covers first-touch
+construction directly, but not real package feeds, service registration,
+CodeSpace connectivity, protected sessions or central retirement. README,
+testing recipes and the existing immutable-generation pattern describe that
+adoption boundary. Source review, required CI, merge and containing release
+remain pending; #10377 and the parent effort remain active.

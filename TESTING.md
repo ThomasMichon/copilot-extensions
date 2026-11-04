@@ -2171,6 +2171,22 @@ The plugin smoke packet selects `test_bootstrap_driver.py`,
 and `test_write_session_guidance.py` with the same runner. Heavy native matrices
 remain outside required PR CI.
 
+The on-demand Codespaces generation-repair packet uses
+`--test-file tests/test_install_ps1_recovery.py --allow-explicit-tiers`.
+Select `normal_entry_repairs` and `test_source_entry_` in separate bounded
+invocations. The latter shares one disposable source installation across
+initial-repair and repeat-reuse assertions; it does not raise the existing
+120-second child, 180-second item or 300-second group limits. Both invoke the
+real native install/update entry with private fake UV and real venvs, then
+check the selected module and generated command, original slot/configuration,
+completion, deployment identity and no repeated construction. Separate
+`failed_repair_preserves` and `malformed_completion_state` selections cover
+incoming failure and malformed incumbent evidence. Actor-free selection and
+exact-source-receipt controls live in `tests/test_runtime_generation.py`.
+These Windows source controls do not qualify live service registration,
+CodeSpace connectivity, POSIX execution or installed rollout, and do not enter
+the required unit-only CI packet.
+
 ## Optional SSH installation recipes
 
 The manual `installation-context-full.yml` portfolio `ssh-recipes` runs only

@@ -175,7 +175,10 @@ try {{
 }} finally {{
     if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) {{
         try {{ Stop-RuntimeConstruction }} catch {{
-            if ($_.Exception.Message -ne 'Runtime construction aborted; the owned incomplete candidate was reclaimed') {{
+            if ($_.Exception.Message -notmatch (
+                '^Runtime construction aborted; the owned incomplete candidate was reclaimed' +
+                '(?: \\(construction helper exit 1\\):\\s*)?$'
+            )) {{
                 throw
             }}
         }}

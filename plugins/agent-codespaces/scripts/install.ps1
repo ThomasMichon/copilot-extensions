@@ -361,7 +361,7 @@ function Test-CodespacesRuntime {
     $ErrorActionPreference = 'Continue'
     try {
         $global:LASTEXITCODE = 1
-        & $Python -I -m agent_codespaces --help 2>&1 | Out-Null
+        & $Python -I -B -m agent_codespaces --help 2>&1 | Out-Null
         return ($LASTEXITCODE -eq 0)
     } finally {
         $ErrorActionPreference = $prevEAP
@@ -403,6 +403,7 @@ function Invoke-VersionedActivate {
     $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
     $gcArgs = @($vr, '--root', $InstallDir, '--link-name', '.venv', 'gc', '--protect-pids')
     if ($prev) { $gcArgs += @('--keep', $prev) }
+    if ($SrcVersion -ne $SourceVersion) { $gcArgs += @('--keep', $SourceVersion) }
     & $LinkPython @gcArgs 2>&1 | ForEach-Object { Write-ServiceChanged "gc: $_" }
     $ErrorActionPreference = $prevEAP
     return $true
@@ -939,6 +940,29 @@ function Invoke-Dev {
 }
 # === end mutable-dev-slot ===
 
+function Select-InstallRuntimeGeneration {
+    Assert-SourceRuntime
+    $py = Get-BootstrapPython
+    if (-not $py) { throw 'Construction requires a bootstrap Python interpreter' }
+    $nativeError = ''
+    $selectionArguments = @(
+        '-I', '-B', (Join-Path $ScriptDir 'runtime-generation.py'), '--root', $InstallDir,
+        '--version', $SourceVersion, '--payload-hash', (Get-PayloadHash)
+    )
+    if ($script:SourceRuntimeIdentity) {
+        $selectionArguments += @('--source-identity', $script:SourceRuntimeIdentity)
+    }
+    $candidate = Invoke-Hidden -FilePath $py -ArgList $selectionArguments -ErrorOutput ([ref]$nativeError)
+    if ($LASTEXITCODE -ne 0) { throw "Runtime generation selection failed: $candidate$nativeError" }
+    $script:SrcVersion = $candidate.Trim()
+    $script:VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
+    $script:VenvPython = if ([IO.Path]::DirectorySeparatorChar -eq '\') {
+        Join-Path $VenvDir 'Scripts\python.exe'
+    } else { Join-Path $VenvDir 'bin/python' }
+    $script:LinkDir = $VenvDir
+    $script:LinkPython = $VenvPython
+}
+
 function Deploy-Venv {
     Assert-SourceRuntime
     <# Create the Python venv via uv. Deps come from pyproject at package
@@ -1197,6 +1221,7 @@ function Write-CodespacesDeployManifest {
         $data = $script:SourceRuntimeIdentity | ConvertFrom-Json
         foreach ($property in $data.PSObject.Properties) { $fields[$property.Name] = $property.Value }
     }
+    $fields['runtime_version'] = $SrcVersion
     Write-DeployManifest -Service 'agent-codespaces' -Plugin 'agent-codespaces' `
         -InstallPath $InstallDir -PluginPath $PluginDir -VenvPath $LinkDir `
         -GetSourceKind { param($path) Get-SourceKind -PluginPath $path } `
@@ -1345,6 +1370,7 @@ function Invoke-Install {
         }
     }
 
+    Select-InstallRuntimeGeneration
     # Deploy venv
     if (-not (Deploy-Venv)) { throw 'Venv deployment failed' }
 
@@ -1545,6 +1571,7 @@ function Invoke-Update {
         return
     }
 
+    Select-InstallRuntimeGeneration
     # Re-deploy venv (update deps)
     if (-not (Deploy-Venv)) { throw 'Venv deployment failed' }
 
