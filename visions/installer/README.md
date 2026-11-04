@@ -263,6 +263,27 @@ selection follows live upstream Main; explicit locally promoted installation
 snapshots and admitted source checkouts/commits remain supported. Last-known-good
 Main ancestors retain their own release identity.
 
+### legacy-force-fresh-installation
+
+The repository README exposes a standalone force-fresh installation script for
+operators stranded on arbitrary versions of the pre-wheel installation system.
+It reaches the first-party-wheel/uv installation flow without requiring a
+working old Manager, launcher, installer protocol or particular legacy version.
+Legacy metadata is useful diagnostic input, not a prerequisite for applying the
+addressed fresh installation.
+
+The operation replaces addressed legacy runtime code and registrations while
+preserving configuration, durable data, active work and protected session and
+connectivity dependencies. Its intended scope and actual effects are legible;
+unrelated installations and unknown external resources are not blanket cleanup
+targets. Installation success, outgoing retirement and unresolved remnants
+remain distinct outcomes under the authoritative replacement contract.
+
+This is the explicit clean break into the new installation model. Subsequent
+generations within that model maintain their declared compatibility and
+supported recovery behavior; the migration path is not a permanent excuse to
+break future callers or erase user state.
+
 ### harness-selected-continuity-bootstrap
 
 A harness README can compose the standard upstream setup with a portable
@@ -326,9 +347,10 @@ coordination/replacement, not a persistent refusal or another approval demand.
 Raw self-install and rollback remain usable without the old Manager, tool
 commands, updater queue or services being replaced. Core source/toolchain
 construction comes before repository adoption and its authentication.
-Old installed wrappers/connectors either remain compatible or receive a
-supported, authorized refresh before activation; installed payload files are
-not patched ad hoc.
+Within the new model's support window, old installed wrappers/connectors either
+remain compatible or receive a supported, authorized refresh before activation.
+The pre-wheel migration uses the standalone force-fresh path instead of requiring
+legacy wrapper compatibility. Installed payload files are not patched ad hoc.
 
 Manual rescue authority is distinct from automatic-update admission. It does
 not clear another maintenance owner or a global automatic hold, and never grants

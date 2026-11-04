@@ -41,6 +41,16 @@ daemon.
 | How do the components actually relate? | [Architecture](docs/architecture.md) |
 | Where is the complete reading map? | [Documentation index](docs/README.md) |
 
+### Legacy installation migration (planned)
+
+The [wheel-first/uv transition](efforts/active/source-managed-runtime-installs/wheel-first-transition.md#legacy-cutover-and-future-compatibility)
+is a clean break from the pre-wheel installation system, not a promise of
+in-place compatibility with arbitrary legacy versions. A standalone force-fresh
+install script will be published here once implemented and qualified. It is
+intended to replace addressed legacy runtime code while preserving configuration
+and durable data. Compatibility remains a requirement within the new system;
+this notice is not an available recovery command or permission to remove files.
+
 ## Capability families
 
 - **Workspace and source control:** isolated worktrees, repository adoption,
