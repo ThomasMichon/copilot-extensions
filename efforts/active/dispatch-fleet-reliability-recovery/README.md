@@ -77,6 +77,18 @@ Preserve the owning ground-layer, installer and configuration authorities.
   #6812 updater observability. No production rollout or uncertain-turn resend
   follows from plan approval.
 
+
+<!-- backlog-reconciliation:7556:qualified-fifteen:2877:Coordination -->
+
+### Continuing #2877 custody
+
+Keep #2877 as the remaining measurement coordination owner exactly as its own refinement
+requires. Existing Coordinator/Supervisor/telemetry and source custodians remain; #6467
+process progress, #6543 categories, #8051 startup clocks,
+cleanup/scalar/native/source-safety owners are related independent scope, not automatic
+measurement acceptance. Unassigned is not vacancy; no new ACK/expiry/contact/recovery
+permission.
+
 ## Context
 
 Recurring maintenance occurrences are ordinary tasks today. Newer rows can fill
@@ -456,6 +468,59 @@ generic ACK ceremony or takeover of the broader lifecycle programmes.
 No host process, service, marker, override, watchdog, permission, credential or runtime
 is changed by this consolidation.
 
+
+<!-- backlog-reconciliation:7556:qualified-fifteen:2877:Plan -->
+
+### Direct proposed acceptance from #2877
+
+_Agent-recommended additive tracking proposal; the entire original/refined/directly
+inherited acceptance and its finite evidence tiers remain binding._
+
+Preserve the incumbent Request, status, Participants, Coordination, every old
+Plan/global Validation row and check state, first unresolved gates and full Journal.
+These unchecked rows are proposed tracking, not implementation, accepted source
+transfer, native/release/installed proof, rollout permission or source/resource release.
+Existing issue and source custodians remain; unassigned metadata is not vacancy. No new
+universal ACK, every-host or whole-parent completion gate is introduced.
+
+#### Plan
+
+- [ ] **R2877-P1:** Add a distinctly named finite Phase 3 measurement family: supported
+  optional telemetry/logging OR report command with
+  claimed/accepted-completed/abandoned/historical-dead-letter rates per unit time and
+  attributable pool/declaration; keep SUBMITTED distinct from accepted COMPLETED, and do
+  not resurrect retired task status.
+
+- [ ] **R2877-P2:** Define window/units/denominators/coverage and historical declaration
+  provenance, overlapping pools and explicit unknown attribution. Bind repeated
+  claims/retries/card revisions/operator answers to exact attempts/events for
+  queued-to-claim, claim-to-card and card-to-operator-steer distributions plus relevant
+  lifecycle states.
+
+- [ ] **R2877-P3:** Provide explainable churning/stalled signal through health OR
+  equivalent operator surface with actual documented invocation/configuration.
+  Distinguish operator/external/review waits, live quiet work, confirmed-gone ownership
+  and unavailable evidence; heartbeat/process-alive/counts alone are not progress.
+
+- [ ] **R2877-P4:** Reuse credited optional backend-neutral/content-safe lifecycle
+  events/JSONL spool and existing event/journal/config authorities;
+  missing/disabled/dropped/incomplete coverage is UNAVAILABLE, not zero/healthy. No
+  mandatory vendor, second task store, pruning, claim expiry or recovery authority.
+
+#### Local Validation
+
+- [ ] **R2877-V1:** Finite synthetic/event/report controls cover all four rate outcomes,
+  current accepted-completion semantics, repeated attempts/card revisions/answers, all
+  three duration pairs, overlapping/historical declaration attribution and unknown
+  denominators/missing/dropped/disabled coverage. Use the actual chosen report/config
+  surface, not emitter-only count proof.
+
+- [ ] **R2877-V2:** Qualify explainable progress/wait/unknown distinctions and optional
+  bounded fail-open sink behavior while preserving content safety, no second
+  authority/store and no task/claim effects. Record exact source, fixture versus
+  production sample and available/unavailable tier; do not query production telemetry or
+  run native tasks during intake.
+
 ## Validation Plan
 - [ ] Complete every directly retained #2395 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and unfinished acceptance. Tracker consolidation is not implementation.
 
@@ -516,6 +581,17 @@ is changed by this consolidation.
   against its full original/refined/inherited Plan scope and evidence tier.
   Preserve all original OR/AND choices, retained allocations and current
   custodians; tracker intake is not behavior completion or resource release.
+
+
+<!-- backlog-reconciliation:7556:qualified-fifteen:2877:Validation-Plan -->
+
+- [ ] **R2877-G1:** Resolve EVERY direct #2877 original/refined measurement P/localV
+  clause at its original finite report/telemetry tier: FOUR outcome rates, exact
+  attempt/card/answer duration distribution, window/denominator/historical-pool coverage
+  or unknown, usable operator invocation and explainable progress versus legitimate
+  wait. Retain optional safe backend-neutral/fail-open behavior and
+  UNAVAILABLE-not-zero, existing telemetry/category credit and source custody; no
+  whole-fleet/native-every-host prerequisite.
 
 ## Proposal
 
@@ -2871,3 +2947,15 @@ neither technical completion nor whole-effort closeout.
   bounded-recovery, daemon and health cohort passes 207 cases. No installer,
   provisioning or external rollout behavior changes. Fresh full resulting-head
   review, all current CI and managed merge remain required.
+
+<!-- backlog-reconciliation:7556:qualified-fifteen:2877:Journal -->
+
+### 2026-10-28 - Proposed #2877 finite receiving contract
+
+Added direct unchecked Plan, local Validation, actual global Validation and continuing
+custody rows after whole-contract and fixed-document qualification. This records
+authored tracking only; normal review, actual delivery and full current readback remain
+outstanding. Retain #2877's explicit measurement ownership, credited optional
+telemetry/spool/category work and all finite rate, duration, coverage,
+unknown-provenance and operator-report requirements. No product, native, release,
+resource or claim result is asserted.
