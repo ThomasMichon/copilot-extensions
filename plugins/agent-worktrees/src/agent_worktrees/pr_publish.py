@@ -521,6 +521,18 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
                 return git_ops.PushResult(ok=False, stderr=str(exc))
         from .git_push_transport import pinned_destination
         with pinned_destination(remote, destinations, tuple(transport_settings), fetch_url=fetch_url):
+            from . import pr_creation_state
+            try:
+                prepared = pr_creation_state.publication_source(
+                    record, pr, remote, pr.branch if pr else "", cwd, getattr(repo, "pr", None),
+                )
+                if prepared and (identity != pr.creation["identity"] or git_ops.git(
+                    "rev-parse", "--verify", f"{refspec.partition(':')[0]}^{{commit}}",
+                    cwd=cwd, isolated_repository=True,
+                ).stdout.strip() != pr.creation["push_head"]):
+                    raise ValueError("Prepared first-push destination or source changed before transport.")
+            except ValueError as exc:
+                return git_ops.PushResult(ok=False, stderr=str(exc))
             result = git_ops.push(remote, refspec, cwd=cwd, force_with_lease=force_with_lease,
                                   force_with_lease_expect=force_with_lease_expect, timeout=timeout, **rewrite_args)
             if (

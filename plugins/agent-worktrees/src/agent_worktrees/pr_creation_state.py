@@ -6,11 +6,12 @@ import hashlib
 import json
 from dataclasses import replace
 
-from . import pr_publication_state, pr_publish, providers, tracking
+from . import git_ops, pr_publication_state, pr_publish, providers, tracking
 
 CONTRACT = "agent-worktrees.pr-creation-cancellation.v1"
 _RESERVATION_KEYS = {"contract", "phase", "owner", "remote", "identity", "api_base", "binding"}
 _CANCELLATION_KEYS = {"reason", "at", "actor", "revision"}
+_PUBLICATION_KEYS = {"push_head", "push_source", "push_base", "push_binding"}
 
 
 def parse(raw: object) -> dict[str, str]:
@@ -96,8 +97,53 @@ def cancelled(pr: tracking.PRRecord) -> bool:
     return revision.isascii() and revision.isdecimal() and int(revision) < pr.pr_revision
 
 
-def start_publication(record: tracking.WorktreeRecord, pr: tracking.PRRecord | None) -> None:
-    """Invalidate cancellation durably BEFORE even an uncertain first push."""
+def _publication_binding(pr: tracking.PRRecord) -> str:
+    return _digest([
+        pr.creation.get("binding", ""),
+        *(pr.creation.get(k, "") for k in ("push_head", "push_source", "push_base")),
+    ])
+
+
+def publication_source(
+    record: tracking.WorktreeRecord | None, pr: tracking.PRRecord | None,
+    remote: str, branch: str, cwd: str, prcfg,
+) -> str:
+    """Return only the unchanged source of a durably prepared first push."""
+    if pr is None or pr.branch != branch or not pr_publication_state.unpublished(pr):
+        return ""
+    if not _PUBLICATION_KEYS.intersection(pr.creation):
+        return ""
+    if (
+        record is None or set(pr.creation) != _RESERVATION_KEYS | _PUBLICATION_KEYS
+        or not _bound(pr) or pr.creation["phase"] != "publishing"
+        or pr.creation["owner"] != owner(record)
+        or pr.creation["remote"] != remote
+        or pr.creation["identity"] != pr_publish.push_identity(remote, cwd=cwd)
+        or prcfg is None or pr.provider != prcfg.provider
+        or pr.creation["api_base"] != providers.get_provider(pr.provider).authority_endpoint(prcfg.api_base)
+        or pr.creation["push_binding"] != _publication_binding(pr)
+        or pr.creation["push_source"] not in (record.branch, pr.branch)
+        or not pr.creation["push_head"]
+        or len([p for p in record.prs if p.branch == branch and not tracking._pr_is_terminal(p)]) != 1
+    ):
+        raise ValueError("Prepared first-push authority changed; retain the attempt for explicit recovery.")
+    pr_publication_state.require_current(record, pr)
+    source = pr.creation["push_source"]
+    for ref in (source, "HEAD"):
+        observed = git_ops.git(
+            "rev-parse", "--verify", f"{ref}^{{commit}}", cwd=cwd, check=False,
+            isolated_repository=True,
+        )
+        if observed.returncode or observed.stdout.strip() != pr.creation["push_head"]:
+            raise ValueError("Prepared first-push source changed; retain the attempt for explicit recovery.")
+    return source
+
+
+def start_publication(
+    record: tracking.WorktreeRecord, pr: tracking.PRRecord | None, *,
+    remote: str = "", source_ref: str = "", head_sha: str = "", base_sha: str = "",
+) -> None:
+    """Invalidate cancellation and retain first-push intent before transport."""
     if pr is None:
         return
     path = record.yaml_path
@@ -109,6 +155,17 @@ def start_publication(record: tracking.WorktreeRecord, pr: tracking.PRRecord | N
         if owner(fresh) != owner(record) or not pr_publication_state.matches(current, pr):
             raise ValueError("PR creation authority changed before publication; reload the attempt.")
         if current.creation and current.creation.get("phase") != "publishing":
+            if _bound(current) and current.creation["owner"] == owner(fresh):
+                if remote != current.creation["remote"] or current.creation["identity"] != pr_publish.push_identity(
+                    remote, cwd=record.worktree_path,
+                ):
+                    raise ValueError("PR creation destination changed before publication.")
+                if head_sha and source_ref in (record.branch, pr.branch):
+                    current.creation = {
+                        **current.creation, "push_head": head_sha,
+                        "push_source": source_ref, "push_base": base_sha,
+                    }
+                    current.creation["push_binding"] = _publication_binding(current)
             current.creation = {**current.creation, "phase": "publishing"}
             current.pr_revision += 1
             tracking.save_record(fresh)

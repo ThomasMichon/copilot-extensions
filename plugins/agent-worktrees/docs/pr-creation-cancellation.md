@@ -69,8 +69,31 @@ still checks source alignment, every other PR/ref, dirty content, obligations,
 ownership and action-time safety. Cancellation is not permission to discard
 unmerged commits or finalize a worktree with unresolved responsibility.
 
+## Retrying an uncertain first push
+
+Before a newly reserved attempt enters transport, `create-pr` retains its exact
+source ref, commit and base alongside the existing owner and destination binding.
+This invalidates cancellation even when the push fails or its acknowledgement
+is lost. An unchanged retry uses the same attempt and branch: it can create an
+absent remote ref or lease the exact commit prepared before the first push.
+Both snapshot and refspec heads retain their original source; retrying does not
+rebase, resquash or choose a replacement head.
+
+Changed source, worktree ownership, destination, provider endpoint or remote head,
+and unavailable observations, refuse before transport. The owner rechecks tracking
+and source at the push boundary. Commit equality alone is not evidence that an
+unleased existing branch belongs to the attempt. Legacy ambiguous attempts without
+the durable prepared-source fields therefore remain blocked; this change does not
+authorize adopting an existing ref or editing its tracking record.
+
+These are additive persisted fields within the existing publication operation,
+not new CLI syntax. An older runtime retains its stricter existing-ref refusal;
+selecting a capable runtime still follows the ordinary authorized release/update
+flow. Source validation does not qualify an installed runtime or a live recovery.
+
 The bounded development regressions are
-`tests/test_pr_creation_cancel.py`, alongside the existing provisional retry,
+`tests/test_pr_creation_cancel.py` and `tests/test_pr_first_push_recovery.py`,
+alongside the existing provisional retry,
 publication-state and numbered-abandonment controls. Their disposable Git
 fixtures and read-only provider adapters do not qualify a production runtime or
 authorize cancellation of any real record.
