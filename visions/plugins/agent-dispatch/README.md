@@ -7,7 +7,7 @@
 - **Scope:** branch (a per-plugin vision under the
   [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-30
+- **Last revised:** 2026-11-03
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's `plugins/agent-dispatch/` (skill `agent-dispatch`, `pick-and-claim`)
 
@@ -970,8 +970,13 @@ submission being judged, and rejected outcomes remain in history.
 
 ### self-tracked-review-is-not-a-lane
 A **submitted** task holds no lane and blocks no pool slot —
-the worker that submitted it has already finished and released its claim; only
+the worker that submitted it has finished its execution turn; only
 the *review* remains outstanding, and review is a caller act, not agent work.
+Its worktree still holds the task as an outstanding obligation, preserving
+the same workspace and conversation for a rejected submission. That durable
+claim is not an active execution slot and does not permit permanent finalization
+or cleanup before accepted completion or explicit unassignment to unbound
+queued work. See the [submission responsibility contract](task-outputs-and-review/README.md#submission-retains-worktree-responsibility).
 An arbitrary backlog of submissions may sit for as long as the
 caller needs before being accepted, re-queued, or abandoned, exactly the way
 a *queued*, not-yet-embodied task may sit before a worker binds to it — waiting

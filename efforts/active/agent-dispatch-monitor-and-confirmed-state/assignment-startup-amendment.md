@@ -103,8 +103,8 @@ ordinary integration and installed/native qualification pending:**
   receipt does not perform that reset.
 
 This policy selects budgets and backoff, not an installed capability or a
-release. It does not resolve result-rejection reassignment or terminal-worktree
-closeout policy.
+release. Result-rejection and worktree-claim lifetime are separately clarified
+in the [submission design](submission-closeout-amendment.md).
 
 ### Selected pool scope and ordering
 
@@ -171,9 +171,11 @@ further speculative metadata prerequisites. The assigned outcomes are:
    work, preserving one assignment and accountable in-flight effects.
 4. Recover `SUSPENDED` work affirmatively to `STARTED`, or fence exhausted
    recovery before returning it to `QUEUED` with attempt counters and backoffs.
-5. Require worktree-backed agents to finalize before posting `SUBMITTED`.
-   Calling finalization automatically before evaluators is a design option,
-   not unconditional permission for a foreign evaluator to finalize a workspace.
+5. Require worktree-backed agents to pass mechanical closeout readiness before
+   posting `SUBMITTED`. The November 3 clarification retains the worktree and
+   its task claim through evaluation, resumes the same agent there on rejection,
+   and permits permanent finalization only after `COMPLETED`. Readiness is not
+   permission for a foreign evaluator to finalize a workspace.
 
 The selected three-attempt, five-minute nudge, thirty-minute decision and
 task-wide 1/3/6/12-hour cooldown policy above remains authoritative.
@@ -281,31 +283,43 @@ claims of an installed or complete automatic lane.
    capacity and returning `QUEUED` with the task-wide cooldown and retained
    historical evidence. Preserve intentional monitored waits and operator holds:
    being suspended is not itself a recovery failure.
-8. Require worktree-backed workers to finalize their own correct workspace
-   before submitting. Keep finalization and task submission separate
-   authoritative operations; a finalized-but-retained checkout is not proof of
-   process termination. Failed finalization must visibly block submission
+8. Require worktree-backed workers to pass mechanical closeout readiness for
+   their own correct workspace before submitting. Readiness, submission and
+   permanent finalization are separate authoritative operations. A stopped
+   worker is not a finalized worktree. Failed readiness must visibly block submission
    without losing the result or task ownership. Qualify task-aware closeout
    against its inbound task/session and preserve source, PR, outbound claim,
    foreign/shared workspace, pairing, follow-up and runtime-effect gates.
-   Assess automatic finalize-before-evaluators at the existing worker/evaluation
-   boundary; do not let a remote evaluator silently finalize a different owner's
-   worktree. Explicitly define the equivalent applicability/readiness result
-   for tasks without a managed worktree.
+   Retain the worktree's claim on the task until `COMPLETED`; a rejected
+   submission resumes the same agent/worktree for another attempt. Only
+   terminal acceptance permits permanent finalization and later qualified
+   cleanup. Explicit unassignment to `QUEUED` with no bound agent can also
+   settle that assignment's claim; submission, lease expiry and runner exit
+   cannot. The worktree owns the claim on the task, not the reverse.
+   A remote evaluator never silently finalizes another owner's
+   worktree. Define equivalent applicability/readiness for no-managed-worktree
+   tasks through the [submission design](submission-closeout-amendment.md).
 
 ## Remaining policy choices
 
-- Result rejection from `SUBMITTED`: returning work to its retained worker
-  versus explicit fenced reassignment or assignment reconsideration.
-- Finalize-before-`SUBMITTED` is now required for worktree-backed workers.
-  Automatic finalization before evaluators and the supported no-worktree
-  applicability contract still need a reviewed integration design. This does
-  not reopen completed tasks for housekeeping or require physical checkout
-  deletion before submission.
+- The November 3 clarification settles rejection routing: resume the same
+  agent in its retained worktree, preserving its task claim until `COMPLETED`.
+  Reassignment is not the default result-rejection outcome.
+- Mechanical closeout readiness is required before `SUBMITTED`, not permanent
+  worktree finalization. Checks refuse WIP, unmerged content, open PRs and
+  unsettled downstream responsibility without repairing or abandoning them.
+  Failed readiness retains result and task ownership. Passing readiness lets
+  the worker stop normally while its worktree and task claim remain alive.
+  Only `COMPLETED` permits permanent finalization; physical cleanup retains
+  its separate native-retirement and safety gates.
+  The supported no-worktree applicability and manual-worker integration still
+  need the [submission integration design](submission-closeout-amendment.md)
+  and its own review; an unsupported or unknown owner is not a
+  positively unmanaged workspace. This does not reopen completed tasks for
+  housekeeping or let an evaluator finalize a foreign workspace.
 
-These remain independent policy decisions; neither is resolved by the selected
-startup/cooldown policy. Unsatisfiable retained routing must remain visible,
-not silently unpinned.
+The remaining integration details are not resolved by startup/cooldown policy.
+Unsatisfiable retained routing must remain visible, not silently unpinned.
 
 ## Compatibility and ownership
 
@@ -388,9 +402,11 @@ the complete validation matrix remains open.
   prove selected counters/backoffs survive restart and late effects cannot
   manufacture `STARTED` or prematurely release capacity.
 - [ ] Worktree-backed worker guidance and supported submission/evaluation
-  consumers agree on finalize-before-`SUBMITTED`. Failed closeout retains result
-  and task custody; successful finalized-but-retained state does not imply the
-  process stopped. Own inbound-task/session integration does not deadlock, and
+  consumers agree on readiness-before-`SUBMITTED`. Failed readiness retains
+  result and task custody. Submission and worker exit do not finalize the
+  worktree or release its task claim; rejection resumes the same workspace
+  and conversation. Only `COMPLETED` permits permanent finalization and
+  separately qualified cleanup. Own inbound-task/session integration does not deadlock, and
   foreign/shared, source, PR, claim, follow-up and effect gates remain enforced.
   Qualify no-managed-worktree applicability explicitly.
 

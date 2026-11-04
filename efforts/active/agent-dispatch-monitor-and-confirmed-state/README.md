@@ -79,8 +79,11 @@ Existing submission/conversation phases and their custodians remain unchanged.
 [five lifecycle outcomes](assignment-startup-amendment.md#prioritized-lifecycle-clarification):
 claim/spawn/affirmative start ordering, explicit rejection and attempt/timeout
 semantics, reserved-slot/work-start deadline consistency, suspended recovery
-with retry/backoff, and finalize-before-`SUBMITTED`. Automatic finalization
-before evaluators remains a design option. An opt-in worktree-owned agenda
+with retry/backoff, and mechanical closeout readiness before `SUBMITTED`.
+The November 3 [submission clarification](submission-closeout-amendment.md)
+retains the worktree and task claim through review, resumes the same worker on
+rejection and permits permanent finalization only after `COMPLETED`.
+An opt-in worktree-owned agenda
 keeps this roster ahead of nonblocking discoveries without changing the
 canonical completion gate or existing source/native ownership.
 
@@ -176,8 +179,9 @@ particularly for Phase 3's crash-recovery behavior.
 The 2026-10-30 operator-directed intent is captured as a generic summary in the
 [assignment/startup amendment](assignment-startup-amendment.md#requested-direction).
 Its requested requirements, agent-recommended implementation means and unresolved
-policy choices are separated; it does not settle result-rejection reassignment
-or terminal-worktree policy.
+policy choices are separated. The November 3
+[submission clarification](submission-closeout-amendment.md) settles retained
+same-worker rejection and the worktree-owned task-claim lifetime.
 
 The 2026-10-07/08 direction is captured in
 [operator-direction.md](operator-direction.md), with settled decisions and
@@ -444,8 +448,9 @@ restoration of historical terminal enums follows.
       conversation/confirmation and native-custody gate.
       The [affirmative suspended-recovery source](journal/2026/11.03-affirmative-suspended-recovery.md)
       retains exact current-worker acceptance, existing wake custody,
-      hold-aware clocks and capacity-preserving exhaustion. Source review,
-      actual merge and installed/native qualification remain pending;
+      hold-aware clocks and capacity-preserving exhaustion. Source merged in
+      [#10338](https://github.com/ThomasMichon/copilot-extensions/pull/10338)
+      after exact-head approval and required CI; installed/native qualification remains pending;
       finalize-before-submission is a separate remaining source contract.
 - [x] Land coordinator-owned local decline observation and atomic routing/requeue
       in [#10319](https://github.com/ThomasMichon/copilot-extensions/pull/10319)
