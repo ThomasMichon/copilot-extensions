@@ -4193,6 +4193,39 @@ attestation through the existing release owner. The old subject's attestation
 cannot approve changed index bytes. No dependency bytes enter this index
 hand-off, and the default profile-only output remains unchanged.
 
+`tools/core_release_inputs.py` provides a retained-input adapter for the
+first-party core in the existing source-keyed Release. Given independently
+selected Dev, Main and content-tree identities and the source owner's ancestry
+check, `retain_released_core` authenticates the source index and its unique core
+bundle through the existing promotion attestation owner. It validates the
+manifest/entry binding, exact archive member set and wheel digests, then yields
+private retained index, manifest and wheel paths for the native producer.
+Those inputs remain held and rechecked until the context exits; callers must
+stage any output until that exit succeeds. The native producer still validates
+the selected source and actual wheel metadata. This adapter does not select or
+authenticate the source checkout, approve a runtime profile, provision
+third-party materials, publish a delivery, or enable an updater.
+
+`tools/core_release_delivery.py` combines that adapter with the native
+producer in one local candidate operation:
+
+```text
+python tools/core_release_delivery.py --repository <owner/repo> --source-checkout <repo> --source-commit <commit> --main-head <main-commit> --guarded-feed --materials <materials-json> --material-dir <materials-dir> --uv <uv> --output <delivery.zip>
+```
+
+The caller independently selects the committed source and Main head and
+provides materials and the native selection inputs. The command checks
+ancestry, reads the selected commit's release state, and derives its content
+tree through the promotion owner before authenticating the matching source
+Release. It stages the delivery until retained release-input and material
+custody checks have completed, then publishes locally without replacing an
+existing destination. Its JSON result includes an **unattested** candidate
+index and delivery digest; neither the changed index nor its delivery is
+approved by the original Release attestation. This command does not obtain
+materials, authorize a profile, sign, upload, install or activate anything.
+It also accepts the existing `--native-lock` and `--offline-wheel-pool`
+selection modes instead of `--guarded-feed`.
+
 `tools/core_native_delivery.py` connects that candidate producer to the
 existing native resolver and delivery owners:
 
