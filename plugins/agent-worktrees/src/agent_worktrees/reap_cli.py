@@ -238,6 +238,9 @@ def _remove_managed_worktree(
     yaml_path = tracking_path / f"{rec.worktree_id}.yaml"
     if reason := terminal_pair_progress.gc_preservation_reason(yaml_path):
         return False, [reason]
+    from .checkout_data import preservation_reason
+    if rec.worktree_path and (reason := preservation_reason(rec.worktree_path)):
+        return False, [reason]
     if force:
         try:
             sessions.kill_tmux_session(rec.worktree_id)
@@ -310,6 +313,8 @@ def _remove_managed_worktree(
             warns.append(f"worktree remove failed: {exc}")
         if warns:
             return False, warns
+        if reason := preservation_reason(rec.worktree_path):
+            return False, [reason]
     if rec.branch:
         try:
             branch_ref = f"refs/heads/{rec.branch}"

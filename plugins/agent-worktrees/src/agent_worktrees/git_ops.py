@@ -23,6 +23,7 @@ from pathlib import Path
 
 
 from . import env_scrub, git_tree_diff, push_timeout
+from .checkout_data import preservation_reason
 from .git_repository_environment import (
     _NO_HOOKS_PATH as _NO_HOOKS_PATH,
     _REPOSITORY_CONTEXT_ENV as _REPOSITORY_CONTEXT_ENV,
@@ -1495,6 +1496,8 @@ def create_worktree(
 
 def remove_worktree(anchor: str | Path, worktree_path: str) -> bool:
     """Remove a worktree. Returns True on success."""
+    if reason := preservation_reason(worktree_path):
+        raise ValueError(reason)
     result = git(
         "worktree", "remove", worktree_path, "--force",
         cwd=anchor, check=False,
