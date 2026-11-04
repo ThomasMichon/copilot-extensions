@@ -3612,6 +3612,14 @@ resolver. Synthetic source, resolver and registry boundaries retain probe
 order and call counts without actor effects. Full reports keep their opaque
 execution-owner frontier; these controls do not qualify machine-registry
 acquisition completeness, reuse or installed behavior.
+Eight machine-registry controls in the same packet borrow parser, merge,
+normalization and config-source boundaries. They check original acquisition
+order, alias filtering, type-only fatal/suppressed failures and selected callback
+identity through self-restoration or argument-time rebinding. These actor-free
+controls do not qualify delegated document/config-source frontiers or reuse.
+The plugin's `test_machines_yaml_location.py` separately exercises the real
+file/parser/merge/report path and empty/overlay cases; execution-identity
+fixtures retain an explicit registered knowledge-path boundary.
 The runner selects pytest's `parametrize_long_str_id_strategy=legacy` to
 preserve the manifest's full-value parameter IDs across pytest 9.1 and 9.2.
 This keeps exact node admission; it does not truncate, rename or omit long

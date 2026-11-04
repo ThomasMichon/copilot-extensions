@@ -1,0 +1,9 @@
+{
+  "comment": "Report original machine-registry acquisition outcomes without replay or reusable-frontier claims",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

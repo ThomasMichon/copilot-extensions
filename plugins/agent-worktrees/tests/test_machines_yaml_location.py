@@ -137,6 +137,156 @@ def test_load_rejects_non_mapping_ssh(tmp_path: Path):
         cfg.load_machines_yaml(tmp_path)
 
 
+@pytest.mark.parametrize("layout", ["canonical", "legacy", "both", "empty"])
+def test_machine_registry_acquisition_original_reads_and_merge(tmp_path, monkeypatch, layout):
+    import builtins
+
+    from dropin_registry import ScanAuthority
+
+    from agent_worktrees import config_acquisition as acquisition
+
+    canonical = tmp_path / cfg.INREPO_CONFIG_DIRNAME / "machines.yaml"
+    legacy = tmp_path / "machines.yaml"
+    if layout in ("canonical", "both", "empty"):
+        _write(canonical, "machines: {}\n" if layout == "empty" else
+               "machines:\n  common: {display_name: Canonical}\n")
+    if layout in ("legacy", "both"):
+        _write(legacy, "machines:\n  common: {display_name: Legacy}\n  extra: {}\n")
+    native_open, native_file = builtins.open, Path.is_file
+    calls = []
+
+    def open_source(path, *args, **kwargs):
+        if Path(path) in (canonical, legacy):
+            calls.append(("open", Path(path)))
+        return native_open(path, *args, **kwargs)
+
+    def is_file(path):
+        if path in (canonical, legacy):
+            calls.append(("file", path))
+        return native_file(path)
+
+    monkeypatch.setattr(builtins, "open", open_source)
+    monkeypatch.setattr(Path, "is_file", is_file)
+    value = cfg.load_machines_yaml(tmp_path)
+    original_calls = tuple(calls)
+    calls.clear()
+    with acquisition.capture_config_observations() as observations:
+        actual = cfg.load_machines_yaml(tmp_path)
+    assert actual == value
+    expected = [("file", canonical), ("file", legacy)]
+    if layout in ("legacy", "both"):
+        expected.append(("open", legacy))
+    if layout in ("canonical", "both", "empty"):
+        expected.append(("open", canonical))
+    assert calls == list(original_calls) == expected
+    if layout == "empty":
+        assert actual == {}
+    else:
+        assert actual["common"].display_name == ("Legacy" if layout == "legacy" else "Canonical")
+    owned = [o for o in observations if o.stage == "machine-registry"]
+    assert owned and owned[-1].authority is ScanAuthority.COMPLETE
+    assert [o.source for o in observations if o.stage == "machine-registry-parser"] == [
+        str(path) for operation, path in expected if operation == "open"
+    ]
+    assert any(o.stage == "config-owner" and o.authority is ScanAuthority.INDETERMINATE
+               for o in observations), "parser child acquisition must not become a stable frontier"
+
+
+@pytest.mark.parametrize("failure", ["malformed", "denied", "normalize"])
+def test_machine_registry_acquisition_original_fatal_error_is_not_replayed(tmp_path, monkeypatch, failure):
+    import builtins
+
+    from dropin_registry import ScanAuthority
+
+    from agent_worktrees import config_acquisition as acquisition
+
+    path = tmp_path / "machines.yaml"
+    _write(path, "machines: [\n" if failure == "malformed" else _MIN)
+    native_open = builtins.open
+    error = PermissionError("synthetic private registry bytes")
+    calls = []
+
+    def open_source(candidate, *args, **kwargs):
+        if Path(candidate) == path:
+            calls.append("open")
+            if failure == "denied":
+                raise error
+        return native_open(candidate, *args, **kwargs)
+
+    def normalize(*args, **kwargs):
+        calls.append("normalize")
+        raise error
+
+    monkeypatch.setattr(builtins, "open", open_source)
+    if failure == "normalize":
+        monkeypatch.setattr(cfg, "_mt_normalize_machine_entries", normalize)
+    with acquisition.capture_config_observations() as observations:
+        with pytest.raises(Exception) as caught:
+            cfg.load_machines_yaml(tmp_path)
+    if failure != "malformed":
+        assert caught.value is error
+    assert calls == (["open", "normalize"] if failure == "normalize" else ["open"])
+    owned = [o for o in observations if o.stage == "machine-registry"]
+    assert owned and owned[-1].authority is ScanAuthority.INDETERMINATE
+    assert any(f.detail == type(caught.value).__name__ for o in owned for f in o.findings)
+    assert "synthetic private" not in repr(observations)
+    assert "machines: [" not in repr(observations)
+
+
+def test_machine_registry_acquisition_overlay_failure_retains_original_fallback(tmp_path, monkeypatch):
+    from dropin_registry import ScanAuthority
+
+    from agent_worktrees import config_acquisition as acquisition
+
+    calls = []
+
+    def load(**kwargs):
+        calls.append(kwargs)
+        raise ValueError("synthetic private config failure")
+
+    monkeypatch.setattr(cfg, "load_config", load)
+    with acquisition.capture_config_observations() as observations:
+        with pytest.raises(FileNotFoundError) as caught:
+            cfg.load_machines_yaml(tmp_path)
+    assert calls == [{"include_control_plane_related_pr": False}]
+    assert str(tmp_path / cfg.INREPO_CONFIG_DIRNAME / "machines.yaml") in str(caught.value)
+    failures = [o for o in observations if o.stage == "machine-registry-overlay"]
+    assert any(o.authority is ScanAuthority.INDETERMINATE for o in failures)
+    assert any(f.detail == "ValueError" for o in failures for f in o.findings)
+    assert "synthetic private" not in repr(observations)
+
+
+@pytest.mark.parametrize("callback", ["_parse_machines_yaml_file", "_mt_merge_machines_yaml",
+                                    "_mt_normalize_machine_entries", "load_machines_yaml"])
+def test_machine_registry_acquisition_selected_wrapper_cannot_borrow_completion(
+    tmp_path, monkeypatch, callback,
+):
+    from dropin_registry import ScanAuthority
+
+    from agent_worktrees import config_acquisition as acquisition, machine_identity
+
+    _write(tmp_path / "machines.yaml")
+    original = getattr(cfg, callback)
+    calls = []
+
+    def selected(*args, **kwargs):
+        calls.append(callback)
+        monkeypatch.setattr(cfg, callback, original)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cfg, callback, selected)
+    with acquisition.capture_config_observations() as observations:
+        value = machine_identity.load_execution_registry(tmp_path)
+    assert list(value) == ["m1"]
+    assert calls == [callback]
+    assert getattr(cfg, callback) is original
+    assert any(
+        o.stage.startswith("machine-registry") and o.authority is ScanAuthority.INDETERMINATE
+        and any(f.reason == "owner-coverage-unavailable" for f in o.findings)
+        for o in observations
+    ), "the callable selected before its self-restoration is still a replacement"
+
+
 # ---------------------------------------------------------------------------
 # State-root config-overlay (E1e): a stateless harness with no machines.yaml of
 # its own redirects to the bound knowledge repo's machines.yaml.
@@ -166,6 +316,80 @@ def _bind(monkeypatch, harness, knowledge, *, stateless=True):
     monkeypatch.setattr(
         sr, "_checkout_path",
         lambda name: str(knowledge) if name == "knowledge" else None)
+
+
+@pytest.mark.parametrize("layout", ["canonical", "legacy"])
+def test_machine_registry_acquisition_report_uses_original_overlay_order(tmp_path, monkeypatch, layout):
+    import builtins
+    from types import SimpleNamespace
+
+    from dropin_registry import ScanAuthority
+
+    from agent_worktrees import config_acquisition as acquisition, state_root
+
+    harness, knowledge, unused = (tmp_path / name for name in ("harness", "knowledge", "unused"))
+    selected = knowledge / (cfg.INREPO_CONFIG_DIRNAME if layout == "canonical" else "") / "machines.yaml"
+    _write(selected, "machines: {}\n")
+    config = _stateless_config(harness)
+    calls = []
+    native_exists, native_open = Path.exists, builtins.open
+
+    def sources(value, **kwargs):
+        assert value is config
+        assert kwargs == {"base_anchor": str(harness), "family": "registry"}
+        calls.append("sources")
+        return [SimpleNamespace(anchor=str(root)) for root in (harness, knowledge, unused)]
+
+    def exists(path):
+        calls.append(("exists", path))
+        return native_exists(path)
+
+    def open_source(path, *args, **kwargs):
+        calls.append(("open", Path(path)))
+        return native_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(state_root, "config_source_anchors", sources)
+    monkeypatch.setattr(Path, "exists", exists)
+    monkeypatch.setattr(builtins, "open", open_source)
+    value = cfg.load_machines_yaml(harness, config=config)
+    original_calls = tuple(calls)
+    calls.clear()
+    report = cfg.load_machines_yaml_report(harness, config=config)
+    expected = [("exists", harness / cfg.INREPO_CONFIG_DIRNAME / "machines.yaml"),
+                ("exists", harness / "machines.yaml"), "sources",
+                ("exists", knowledge / cfg.INREPO_CONFIG_DIRNAME / "machines.yaml")]
+    if layout == "legacy":
+        expected.append(("exists", selected))
+    expected.extend([("exists", selected), ("open", selected)])
+    assert calls == list(original_calls) == expected
+    assert report.value == value == {}
+    assert report.authority is ScanAuthority.INDETERMINATE and report.reusable is False
+    assert not any(o.authority is ScanAuthority.ABSENT for o in report.observations)
+    assert any(o.source == "machine-registry-config-sources" and o.findings for o in report.observations)
+    assert acquisition.current_observations() is None
+
+
+def test_machine_registry_acquisition_report_replacement_empty_value_stays_uncertain(tmp_path, monkeypatch):
+    from dropin_registry import ScanAuthority
+
+    from agent_worktrees import config_acquisition as acquisition
+
+    original = cfg.load_machines_yaml
+    value = {}
+    calls = []
+
+    def replacement(*args, **kwargs):
+        calls.append((args, kwargs))
+        monkeypatch.setattr(cfg, "load_machines_yaml", original)
+        return value
+
+    monkeypatch.setattr(cfg, "load_machines_yaml", replacement)
+    report = cfg.load_machines_yaml_report(tmp_path, require_alias=False)
+    assert calls == [((tmp_path,), {"config": None, "require_alias": False})]
+    assert report.value is value and report.reusable is False
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert any(f.reason == "owner-coverage-unavailable" for f in report.findings)
+    assert acquisition.current_observations() is None
 
 
 def test_overlay_redirects_to_knowledge(tmp_path: Path, monkeypatch):

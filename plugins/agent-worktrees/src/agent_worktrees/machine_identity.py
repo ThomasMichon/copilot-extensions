@@ -35,6 +35,7 @@ from machine_transport import is_local_machine as _mt_is_local_machine
 from machine_transport.registry import machine_identity_names
 
 from . import config as cfg
+from . import config_acquisition as acquisition
 
 
 def configured_machine_binding(
@@ -107,8 +108,13 @@ def load_execution_registry(
     """Prefer checkout-local registry data, then its proven owning anchor."""
     try:
         return (
-            cfg.load_machines_yaml(repo_dir, config=config)
-            if config is not None else cfg.load_machines_yaml(repo_dir)
+            acquisition.owner_call(
+                cfg.load_machines_yaml, cfg._MACHINES_LOAD_OWNER, repo_dir,
+                config=config, source="machine-registry",
+            ) if config is not None else acquisition.owner_call(
+                cfg.load_machines_yaml, cfg._MACHINES_LOAD_OWNER, repo_dir,
+                source="machine-registry",
+            )
         )
     except FileNotFoundError:
         if config is None:
@@ -122,7 +128,10 @@ def load_execution_registry(
         owning_anchor = front_door_cli._git_toplevel(checkout)
         if owning_anchor is None or owning_anchor.resolve() != anchor.resolve():
             raise
-        return cfg.load_machines_yaml(anchor, config=config)
+        return acquisition.owner_call(
+            cfg.load_machines_yaml, cfg._MACHINES_LOAD_OWNER, anchor,
+            config=config, source="machine-registry",
+        )
 
 
 def resolve_execution_context(
