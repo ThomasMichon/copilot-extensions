@@ -64,6 +64,7 @@ acceptance are **not** claimed from a graph, title, list or link.
 |---|---|---|---|
 | group-001: fleet topology, routing and enrollment | 25 | [Linux Role Fleet](../linux-role-fleet/README.md), [Routing Foundation](../machine-fleet-routing-foundation/README.md), [Gateway/SSH Onboarding](../gateway-ssh-fleet-onboarding/README.md) | Split role placement, route/credential transport and enrollment into their existing owners; Vault design and #5940's authority gap do not become fleet acceptance. |
 | group-002: Picker/provider presentation | 17 | [Manager](../worktree-manager-control-plane/README.md), [Tasks UX](../agent-dispatch-tasks-pane-ux-overhaul/README.md) | Separate shared presentation/provider observation from task lifecycle and native Confirm delivery; retain credited extraction and existing phase owners. |
+| group-003: runtime entry, construction and helpers | 15 historical; 14 admitted | Existing entry, construction, helper and bootstrap owners; complete receiver fit unqualified | [Four-family contract study](runtime-entry-cohort.md); #810 excluded, #10061 separately completed, thirteen contracts retain conditions and incomplete home/history comparison. Held ROOT material is withheld. |
 | group-004: PR/review workflow | 14 | [PR Lifecycle](../pr-lifecycle-conformance/README.md), [Durable PR Watch](../durable-pr-watch-delegation/README.md) | Keep reviewer mechanics, workflow composition and contributor conformance distinct. Preserve #5183/#5211's recorded parked-home resumption gate; this route does not resume or receive that work. |
 | group-006: native fixture/cache disposal | 11 | [Test Portfolio](../test-portfolio-rationalization/README.md), original supported-uninstall owners | Start with the nine fixture/runner cases listed below. #9375/#10239 retain their separate uninstall-caller authority; no deletion, reaping, deadline relaxation or new native run follows. |
 | group-007: mux/client lifetime and input | 9 | [Manager](../worktree-manager-control-plane/README.md), [Installation-Independent Sessions](../installation-independent-sessions/README.md) | Preserve current restart, source, hosting and client owners; native terminal, input and retained-session gates are not historical relocation credit. |
@@ -74,6 +75,27 @@ acceptance are **not** claimed from a graph, title, list or link.
 | group-015: session intelligence and accounting | 6 | [Session Intelligence](../session-intelligence-and-accounting/README.md), [Large-Corpus Sync](../large-corpus-session-sync/README.md) | Preserve the canonical backend, independently claimed daily adoption and #4976's remaining-home question. Do not equate related data paths with completed accounting or retirement. |
 | group-018: attention and history readers | 5 | [Operator Attention](../operator-attention-contract/README.md), actual Bridge reader owners | Keep wait/deadline, history paging and event coverage separate; an attention home does not automatically receive the complete history contract. |
 | group-021: head succession | 4 | [Head Succession](../worktree-head-succession-hardening/README.md) | The home remains Draft; #84's OPEN canonical and #912's actual claim conditions survive. No automatic transfer or session operation. |
+
+### Runtime-entry core
+
+#4032, #4036, #4163, #4547, #5479, #5611, #5703, #7387, #8384,
+#8410, #9281, #9732, #10061 and #10071.
+
+The [fourteen-contract study](runtime-entry-cohort.md) integrates 55 whole
+original/discussion texts and four qualified merged descriptions. The graph's
+historical #810 member was already closed and excluded. Incomplete documentary
+home/history comparisons and held-ROOT-derived material supply no receiving
+acceptance. Preserve supported entry/caller identity, construction/staging,
+helper/status and bootstrap/uninstall as four distinct families.
+
+Ten PR relations receive bounded comparisons; the eleventh description
+reference is refused before rendering, with original retrieval scores retained
+as historical only. Commit-message candidates remain unresearched and previous
+invalidated targets remain invalid. Separate exact merged/current source,
+original-contract, review and CI verification supports #10061's finite completed
+guard-reader correction. Thirteen other contracts retain their own conditions.
+No new implementation, native/installed proof, appointment, rollout or source/
+resource transfer follows; whole-queue counts remain separately measured.
 
 ### PR-workflow core
 
