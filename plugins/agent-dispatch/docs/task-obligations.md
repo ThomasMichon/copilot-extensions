@@ -267,3 +267,32 @@ revisits the original ground owner. It never accepts a worker-supplied receipt.
 These routes are part of the existing task owner, not another obligation ledger.
 Source tests exercise both actual owners and the real Worktrees cleanup gate;
 they are not proof of installed writer-cohort or native lifecycle qualification.
+
+## Internal submission preparation
+
+The queue can retain an exact proposed result on its existing task audit event
+without changing task state, owner, lease, native binding or assignment.
+`prepare_submission` is an internal source prerequisite, not an advertised
+HTTP, CLI or MCP capability. It requires the current protected workspace
+assignment, exact generation and native owner. Unqualified legacy assignments,
+independent holds and closed execution admission refuse preparation.
+
+The retained request binds the original queue, assignment event/request,
+workspace incarnation, current continuation, worker/native, result and reference.
+Identical retries read the same proposal, including after a queue restart or
+ordinary progress/suspension. Different output or binding cannot overwrite it.
+Structured results use the queue's existing validation and byte bound; request
+ids, references and blocker text also have bounded inputs.
+
+An internal blocker write rechecks the current binding under the queue lock
+and retains the original result. It cannot certify readiness or submit work.
+The existing completion owner refuses tasks with retained preparations, and a
+persisted SQLite guard prevents older completion code from bypassing that
+refusal. Prepared audit requests cannot be rewritten or deleted. Unprepared
+baseline tasks retain their previous completion behavior.
+
+Authoritative nonfinalizing Worktrees readiness, independent observation,
+guarded advancement, negotiated caller migration and repeated rejected attempts
+remain unimplemented. Ordinary callers must not activate preparation until
+those provider and integration gates are qualified; no remote finalization,
+task-claim settlement or execution-slot release is introduced here.

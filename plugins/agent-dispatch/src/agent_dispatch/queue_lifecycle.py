@@ -235,6 +235,8 @@ class QueueLifecycleMixin(QueueProgressMixin):
             if task.owner not in (None, worker_id):
                 conn.execute("COMMIT")
                 raise TaskError(f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}")
+            from .queue_submission_preparation import require_unprepared_submission
+            require_unprepared_submission(conn, task_id)
             retire_waiters = getattr(self, "_retire_waiters_for_transition", None)
             if callable(retire_waiters):
                 wake_enqueued = retire_waiters(
