@@ -11,7 +11,7 @@ import math
 import threading
 
 from .generation_cache import GenerationCache
-from .attention import PRKey
+from .workspace_conversation import conversation_key as conversation_key
 from .owner_read import OwnerReadHandler, REQUEST_SCHEMA
 from .review_executor import execute_review
 from .review_intent import identifier
@@ -28,16 +28,6 @@ class WorkspaceUnavailable(RuntimeError):
 
 def encoded(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
-
-
-def conversation_key(scope: dict, namespace: str) -> PRKey:
-    """Map the current ADO workspace owner without conflating project/repository IDs."""
-    scope = _scope(scope)
-    return PRKey(
-        scope["provider"], scope["endpoint"],
-        json.dumps([scope["project_id"], scope["repository_id"]], separators=(",", ":")),
-        scope["number"], scope["principal_id"], namespace,
-    )
 
 
 class WorkspaceOperations:
@@ -118,6 +108,7 @@ class WorkspaceOperations:
                 ],
                 "generation_versions": [1], "owner_store_versions": [2],
                 **({"conversation_contract": conversation_contract} if self.conversations else {}),
+                **({"conversation_acquisition": "workspace-projection/v1"} if self.conversations else {}),
                 "max_generation_bytes": MAX_GENERATION_BYTES, "chunk_bytes": CHUNK_BYTES,
                 "refresh": "full_sections", "source": "existing_client_local_owner",
                 "provision_or_adopt": False,
@@ -176,6 +167,15 @@ class WorkspaceOperations:
                 "publication": publication, "descriptor": self._descriptor(generation),
                 "acquisition": copy.deepcopy(observed["acquisition"]),
             }
+            if self.conversations:
+                from .conversation_store import ConversationStore
+                result["conversation"] = (
+                    ConversationStore(self.store).observe_workspace(
+                        generation, expires_at=expires_at, checkpoint=check,
+                    )
+                    if publication["status"] == "published"
+                    else {"status": "not_observed", "reason": "cache_publication_not_confirmed"}
+                )
             if previous is not None:
                 result["comparison"] = compare_generations(generation, previous)
                 result["comparison"].pop("generation")

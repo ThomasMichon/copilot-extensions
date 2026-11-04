@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import base64
+from copy import deepcopy
 import csv
 from dataclasses import replace
 import hashlib
 import io
+from pathlib import Path
 import sys
 import time
 from types import SimpleNamespace
@@ -13,7 +15,7 @@ import zipfile
 
 import pytest
 
-from runtime_profile import ProfileError, SCHEMA, validate_profile
+from runtime_profile import ProfileError, SCHEMA, select_profile, validate_profile
 from runtime_profile_wheels import verify_profile_wheels
 from installer_wheel_inputs import WheelLimits, inspect_archive
 
@@ -122,6 +124,108 @@ def _verify(profile, wheels, **limits):
         "max_archive_bytes": 1 << 20, "max_unpacked_bytes": 1 << 20,
         "max_metadata_bytes": 1 << 16, **limits,
     })
+
+
+def _select_for_target(records, target, **options):
+    reference = records[0]
+    return select_profile(
+        records, approvals={validate_profile(item).lock_id: item["approval_source"] for item in records},
+        release=reference["release"], target=target, component=reference["component"],
+        roots=reference["roots"], mode=reference["mode"], **options,
+    )
+
+
+def test_compatible_target_revalidates_but_preserves_the_approved_record():
+    record = _record()
+    target = deepcopy(record["target"])
+    target["environment"].update(
+        platform_version="10.0.2", platform_release="10",
+        python_full_version="3.11.10", implementation_version="3.11.10",
+    )
+    with pytest.raises(ProfileError, match="unavailable"):
+        _select_for_target([record], target)
+    selected = _select_for_target([record], target, allow_compatible_target=True)
+    assert selected.profile == validate_profile(record)
+    assert selected.profile.record()["target"] == record["target"]
+
+
+@pytest.mark.parametrize("difference", [
+    "architecture", "device", "python-minor", "wheel-tag", "requires-python",
+    "new-dependency", "new-extra",
+])
+def test_compatible_target_refuses_changed_family_or_closure(difference):
+    record = _record()
+    target = deepcopy(record["target"])
+    target["environment"].update(
+        platform_version="10.0.2", python_full_version="3.11.10",
+        implementation_version="3.11.10",
+    )
+    if difference == "architecture":
+        target["environment"]["platform_machine"] = "ARM64"
+    elif difference == "device":
+        target["device"] = "other"
+    elif difference == "python-minor":
+        target["environment"].update(
+            python_version="3.12", python_full_version="3.12.0", implementation_version="3.12.0",
+        )
+    elif difference == "wheel-tag":
+        target["tags"] = ["cp312-cp312-win_amd64"]
+    elif difference == "requires-python":
+        record["wheels"][0]["requires_python"] = ">=3.11,!=3.11.10"
+    elif difference == "new-dependency":
+        record["wheels"][0]["requires_dist"].append('missing; platform_version >= "10.0.2"')
+    else:
+        record["wheels"][1]["provides_extras"] = ["detail"]
+        record["wheels"][0]["requires_dist"].append('counter[detail]; platform_version >= "10.0.2"')
+    with pytest.raises(ProfileError, match="unavailable"):
+        _select_for_target([record], target, allow_compatible_target=True)
+
+
+def test_compatible_target_keeps_approval_and_ambiguity_gates():
+    one = _record()
+    target = deepcopy(one["target"])
+    target["environment"]["platform_version"] = "10.0.2"
+    approved = validate_profile(one).lock_id
+    modified = deepcopy(one)
+    modified["wheels"][0]["sha256"] = "sha256:" + "3" * 64
+    with pytest.raises(ProfileError, match="whole-record approval"):
+        select_profile(
+            [modified], approvals={approved: one["approval_source"]}, release=one["release"],
+            target=target, component=one["component"], roots=one["roots"], mode=one["mode"],
+            allow_compatible_target=True,
+        )
+    two = deepcopy(one)
+    two["acquisition_policy"] = "other-policy"
+    with pytest.raises(ProfileError, match="ambiguous"):
+        _select_for_target([one, two], target, allow_compatible_target=True)
+    with pytest.raises(ProfileError, match="must be explicit"):
+        _select_for_target([one], target, allow_compatible_target="yes")
+
+
+def test_compatible_target_release_adapter_retains_the_authenticated_profile(monkeypatch):
+    import runtime_profile_release as authority
+
+    record = _record()
+    record.update(
+        mode="artifact", approval_source=authority.APPROVAL_SOURCE,
+        artifact={"artifact_id": "sha256:" + "4" * 64, "manifest_sha256": "sha256:" + "5" * 64},
+    )
+    index = {
+        "artifacts": [{"artifact_id": record["artifact"]["artifact_id"]}],
+        "runtime_profiles": {"schema": authority.SCHEMA, "version": 1, "profiles": [record]},
+    }
+    monkeypatch.setattr(authority, "_attested_index", lambda *_args, **_kwargs: (index, "sha256:" + "6" * 64))
+    target = deepcopy(record["target"])
+    target["environment"]["platform_version"] = "10.0.2"
+    selected = authority.select_release_profile(
+        Path("selected-index.json"), repository="example/plugins",
+        signer_digest="a" * 40, source_digest="a" * 40, source_ref="refs/heads/main",
+        release=record["release"], artifact=record["artifact"], target=target,
+        component=record["component"], roots=record["roots"], max_subject_bytes=1 << 20,
+        allow_compatible_target=True,
+    )
+    assert selected.selected.profile == validate_profile(record)
+    assert selected.subject_sha256 == "sha256:" + "6" * 64
 
 
 def test_shared_token_parser_retains_builder_numeric_version_policy():

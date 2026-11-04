@@ -53,6 +53,8 @@ def create_foreign_pr_from_branch(
     new: bool = False,
     publication_origin: str | None = None,
     publication_labels: tuple[str, ...] = (),
+    source_workspace: str | None = None,
+    expected_head: str | None = None,
 ) -> dict:
     """Open a PR on ``target_repo`` from ``from_branch`` (already pushed
     there by some other process) and claim it onto ``worktree_id``'s own
@@ -116,10 +118,13 @@ def create_foreign_pr_from_branch(
         }
     base_branch = base or repo_cfg.default_branch
 
-    if getattr(prcfg, "publication_checks", None) is not None:
+    if bool(source_workspace) != bool(expected_head):
+        return {"error": "--source-workspace and --expected-head must be supplied together.",
+                "repo": target_repo}
+    if getattr(prcfg, "publication_checks", None) is not None and not source_workspace:
         return {"error": (
             "Configured publication checks require the source worktree and reviewed candidate; "
-            "foreign --from-branch creation cannot prove that local receipt."
+            "pass --source-workspace and --expected-head for a reachable delegated source."
         ), "repo": target_repo}
 
     rec_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
@@ -190,6 +195,8 @@ def create_foreign_pr_from_branch(
         body=full_body, api_base=getattr(prcfg, "api_base", "") or "",
         labels=labels, draft=draft,
     )
+    evidence = None
+    creation_attempted = False
     try:
         provider = providers.get_provider(prcfg.provider)
         token = providers.account_token_for_slug(scope.repo, prcfg)
@@ -211,6 +218,12 @@ def create_foreign_pr_from_branch(
                 if not tracking._pr_is_terminal(
                     tracking.PRRecord(state=existing_state),
                 ):
+                    existing_base = getattr(existing, "base_ref", "")
+                    if existing_base != base_branch and (
+                        existing_base or prcfg.provider == "azure-devops"
+                    ):
+                        return {"error": "Existing source PR has a different or unknown target base; reconcile that PR.",
+                                "repo": target_repo, "number": existing.number, "url": existing.url}
                     pull = existing
                     reused = True
         if pull is None:
@@ -232,9 +245,25 @@ def create_foreign_pr_from_branch(
                     ),
                     "repo": target_repo,
                 }
+            if source_workspace:
+                from . import pr_foreign_checks
+                try:
+                    evidence = pr_foreign_checks.qualify(
+                        source_workspace, target_repo, from_branch, expected_head,
+                        repo_cfg, provider, token=token,
+                    )
+                except ValueError as exc:
+                    return {"error": str(exc), "repo": target_repo}
+            creation_attempted = True
             pull = provider.create_pull(scope, token=token)
     except (providers.ProviderError, OSError) as e:
-        return {"error": str(e), "repo": target_repo}
+        result = {"error": str(e), "repo": target_repo}
+        if creation_attempted:
+            result.update(
+                publication_state="unknown", head=from_branch, base=base_branch,
+                recovery="Reconcile the existing source PR before retrying; do not force a new PR.",
+            )
+        return result
 
     normalized_state = _OPEN_STATE_ALIASES.get(pull.state, pull.state) or "open"
     result: dict = {
@@ -253,8 +282,13 @@ def create_foreign_pr_from_branch(
         "pr_opened": True,
         "reused": reused,
     }
-    if getattr(pull, "label_error", ""):
-        result["pr_label_error"] = pull.label_error
+    from .pr_metadata import include_publication_metadata
+    include_publication_metadata(result, pull)
+    if evidence is not None:
+        from . import pr_foreign_checks
+        result["publication_checks"] = pr_foreign_checks.after_create(
+            evidence, target_repo, repo_cfg, provider, token=token,
+        )
 
     claimed_ref = None
     claim_worktree_id = worktree_id

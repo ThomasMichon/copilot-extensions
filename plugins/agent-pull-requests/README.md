@@ -153,6 +153,11 @@ the timeout elapses (exit code `3`).
 
 ### Explicit native provider commands
 
+Azure DevOps author-side creation, source publication and metadata-only repair
+use the [capability-directed author workflow](docs/author-operations.md).
+Those operations keep source admission and target policy in Worktrees; source
+support is distinct from release and installed-consumer qualification.
+
 Add `--worktrees-command <absolute-command>` to any of these four verbs to
 reuse the configured Worktrees PR command family, including Azure DevOps.
 Select the exact command from the session command catalog, not an ambient

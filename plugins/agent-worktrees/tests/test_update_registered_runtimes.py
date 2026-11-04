@@ -858,7 +858,7 @@ def test_current_init_only_plugin_skips_without_receipt(monkeypatch):
     )
 
     assert result == "SKIPPED (current)"
-    assert calls == []
+    assert _init_calls(calls) == []
 
 
 def test_module_names_reads_manifest(tmp_path):

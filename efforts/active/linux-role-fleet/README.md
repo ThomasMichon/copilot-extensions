@@ -407,6 +407,11 @@ Implementation sequencing below is **agent-recommended**:
   is proposed next: replacement construction/start must not wait for old
   retirement, cleanup or graceful handoff. Generation/floor fencing and a
   complete managed installer remain open.
+  Its [authoritative replacement reconciliation](client-lifecycle-admission.md#authoritative-replacement-reconciliation)
+  keeps incoming readiness plus complete current launcher/registration selection
+  as the completion gate. Retained generation work is not complete installation
+  when missing old proofs or stale installer state can veto that selection;
+  strict old-object deletion custody remains separate.
   None of these local prerequisites authorizes a live rollout.
   [Installation repair conductor](installation-repair-conductor.md) is the
   agent-recommended #6464 setup prerequisite proposal. Its ordinary-owner

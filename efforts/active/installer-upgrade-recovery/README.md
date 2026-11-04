@@ -4,9 +4,9 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** sequential bounded contribution PRs targeting `dev`
 - **Created:** 2026-11-03
-- **Status:** Draft
+- **Status:** Active
 - **Umbrella issue:** #10377
-- **Related issues:** #9489, #7743, #9448, #7758, #10180, #6820, #7028, #7947
+- **Related issues:** #9489, #7743, #9448, #7758, #10180, #6820, #7028, #7947, #6389
 - **Vision:** [authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
 
 ## Guiding Intent
@@ -96,18 +96,18 @@ authorize production updates, recovery mutations or new access.
 
 - [x] Establish #10377 and reconcile adjacent public workstreams before claiming
   their existing source units.
-- [ ] Land this canonical plan and acceptance matrix through repository review
-  before implementation.
+- [x] Land this canonical plan and acceptance matrix through repository review
+  before implementation: #10379, current-head approval and required CI.
 - [ ] Classify each selected candidate as a surviving source failure, released
   fix needing consumer proof, owned dependency or unsupported-contract migration.
   Hoist only additional generic gaps that do not already have an upstream issue.
 
 ### Phase 2 - Priority fixes and latest-flow recovery
 
-- [ ] Select the first bounded, unclaimed reproducible source gap, or obtain
+- [x] Select the first bounded, unclaimed reproducible source gap, or obtain
   explicit coordination with its existing owner. Record its old-footprint case
   before changing production code.
-- [ ] Fix the owning operation and directly dependent callers; add focused
+- [x] Fix the owning operation and directly dependent callers; add focused
   red-on-old coverage and actual parser/process or installer consumers.
 - [ ] Prove recovery through the latest supported normal install/update entry,
   including incoming readiness, complete current selection and preserved user
@@ -169,3 +169,94 @@ needs its remaining evidence reconciled rather than a duplicate source fix.
 Fresh-entry and first-foundation cases have existing owners and retained
 qualification boundaries. This plan proposes canonical coordination and
 acceptance, not completed implementation, release or installed recovery.
+
+### 2026-11-03 - Reviewed plan merged; first recovery case under reconciliation
+
+#10379 merged to `dev` as `589f9c41c544e671f1180621fc5c3202ed3ef674`
+after current-head Copilot approval, required green CI and an empty review-thread
+set. #10377 remains open. This clears the plan gate, not source implementation
+or installed recovery.
+
+The first candidate trace found that the registered/module runtime planners
+derive a current no-op from the deploy-manifest version, while the executor
+returns that status before invoking the installer. Missing/incomplete selected
+runtime recovery therefore needs a concrete consumer regression. Reconcile this
+non-serving-footprint case with #6389 and its existing serving/lifecycle owners
+before taking a source slice; a related tracker is not a new ownership grant.
+
+### 2026-11-04 - Selected-footprint recovery source unit
+
+The bounded non-serving footprint slice is claimed on #6389 in
+[comment 6625866728](https://github.com/ThomasMichon/copilot-extensions/issues/6389#issuecomment-6625866728).
+Its service adapters, independent retirement work and the other contributor's
+#6928 remain untouched. This is case U8 in the acceptance matrix, not a claim
+on all serving convergence.
+
+Three native regressions failed against the pre-fix source: the ordinary
+selected-target update returned success and `SKIPPED (current)` for a missing
+interpreter, incomplete slot or wrong selector without reaching the installer.
+The planner now qualifies that shortcut through the owning payload's existing
+read-only generation/completion/interpreter helpers. Missing or unsuccessful
+probe support reaches the normal installer; no old-footprint permission or
+additional recovery command is introduced. Source/profile identity checks,
+legacy selector-free venv support and Bridge's mandatory serving reconciliation
+remain intact.
+
+The focused Windows source packets passed 257 tests with three explicit platform
+skips. Four native selected-target controls also prove real shell invocation,
+usable fixture-venv Python, preserved configuration bytes, unchanged healthy
+slot bytes on immediate repeat and a failed repair remaining failed. These
+controls use a synthetic installer to isolate the updater contract; they do
+not qualify every production installer, package import, service readiness or
+an installed-host update. The first combined group exceeded its existing
+300-second bound; one-file groups passed under unchanged group, item, aggregate
+and resource limits. Ruff F/E9, whitespace and the 13-plugin install-contract
+guard passed.
+
+Performance is scoped to explicit update planning, not session hooks or launch.
+Each equal-version candidate adds one bounded read-only child per collected
+plan; the target consumer replans after payload acquisition, so it checks twice
+per update. Prepared-source identity checks are reused, not repeated in this
+probe. Ordinary marketplace payloads require no tree scan; source-qualified
+marketplace payloads retain the canonical source helper's assembly validation.
+Native timing and deterministic counts are recorded with the selected-target
+controls: 14 probes, median 0.680 seconds and maximum 1.031 seconds in the
+final Windows fixture run. Small fixture samples are not a portfolio or
+tail-latency guarantee. The inventory consumer shares this planner but has an
+eight-second Manager deadline; it retains advisory version/support planning
+without the new readiness probes. A focused control covers registered, module
+and engine inventory paths. Only actual update plans require the footprint.
+
+Source review, required CI, merge and containing release remain pending.
+Clean-room first provisioning is unchanged; this unit exercises affected
+existing footprints. Linux/macOS native and installed/external-venue operations
+were not run in this Windows source-only lane. No host rollout, service,
+credential, queue, protected-session or retirement effect is claimed. The
+parent effort and #10377/#6389 remain open.
+
+### 2026-11-04 - Marketplace profile currentness
+
+Ordinary Containers installations select `+base` or `+provider-exec` generations,
+not the unprofiled package version. Applying the generic source/repair generation
+helper to those healthy selections unnecessarily reached the installer on every
+repeat. Both healthy marketplace profiles reproduced that miss; six changed
+intent, incomplete and missing-interpreter controls retained reconstruction.
+
+The footprint probe now uses the owning Containers target selector for ordinary
+marketplace profiles, binding desired profile, package/source identity and
+deployed generation before the same completion/interpreter check. Prepared-source
+targets retain their existing qualification. The changed profile and native
+target-consumer packet passes 76 tests with three platform skips; the other
+already-qualified packets are unchanged. This corrects healthy reuse without
+loosening incomplete selection or source identity.
+
+### 2026-11-04 - Selector-free legacy directory qualification
+
+A stale `.venv` or `venv` link can survive a missing selector while pointing to
+an older completed runtime. Following that link does not prove that the matching
+manifest's requested generation exists. Six controls using actual Windows
+junctions reproduced false current skips across the engine/module/registered
+planners. The legacy fallback now uses the canonical link classifier to exclude
+symlinks and junctions while retaining real-directory reuse. The affected native
+consumer and serving/footprint packet passes 78 tests with three platform skips,
+including unchanged old-slot evidence and real legacy-directory controls.

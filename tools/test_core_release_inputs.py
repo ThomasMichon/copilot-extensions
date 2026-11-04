@@ -16,6 +16,7 @@ import promotion_python_artifacts as artifacts
 import pytest
 from test_core_native_delivery import delivery  # noqa: F401
 from test_promotion_artifact_readiness import HostedRelease
+from test_promotion_python_artifacts import _wheel_bytes
 
 DEV = "a" * 40
 TREE = "b" * 40
@@ -92,6 +93,125 @@ def test_release_intake_feeds_existing_core_producer(release):
     assert arguments["destination"].exists() and not destination.exists()
     assert not index_path.exists() and not manifest_path.exists() and not wheel_dir.exists()
     assert not server.writes
+
+
+@pytest.fixture
+def reconstruction(release, tmp_path):
+    _producer, arguments, server, proofs, entry, options = release
+    with zipfile.ZipFile(io.BytesIO(server.assets[entry["filename"]]["payload"])) as archive:
+        manifest_data = archive.read("manifest.json")
+    manifest = json.loads(manifest_data)
+    paths = {row["filename"]: arguments["wheel_dir"] / row["filename"] for row in manifest["wheels"]}
+    expected = {row["filename"]: row["sha256"] for row in manifest["wheels"]}
+    extra = tmp_path / "extra-1.0-py3-none-any.whl"
+    extra.write_bytes(_wheel_bytes("extra", "1.0"))
+    paths[extra.name] = extra
+    expected[extra.name] = "sha256:" + hashlib.sha256(extra.read_bytes()).hexdigest()
+    with intake.retain_wheel_inputs(
+        paths, expected, max_wheels=256, max_archive_bytes=4 << 20,
+        max_total_bytes=4 << 20, max_snapshot_bytes=4 << 20,
+        deadline=options["deadline"],
+    ) as snapshot:
+        yield {
+            "manifest_data": manifest_data, "entry": entry, "wheels": snapshot,
+            "deadline": options["deadline"], "max_bytes": 4 << 20, "max_wheels": 256,
+        }, server, proofs
+
+
+def test_reconstructed_core_matches_source_and_remains_available_for_attestation(reconstruction):
+    options, server, proofs = reconstruction
+    with intake.retain_reconstructed_core(**options) as path:
+        assert path.read_bytes() == server.assets[options["entry"]["filename"]]["payload"]
+        intake.verify_attestation_subject(
+            path, repository="example/plugins", signer_digest=SIGNER,
+            source_digest=SIGNER, source_ref="refs/heads/main", runner=server.gh,
+        )
+        assert proofs == [options["entry"]["filename"]]
+        assert not server.calls
+    assert not path.exists()
+
+
+@pytest.mark.parametrize("failure", [
+    "digest", "identity", "filename", "version", "manifest", "missing-wheel",
+    "bytes", "count", "deadline",
+])
+def test_reconstruction_refuses_changed_or_over_budget_inputs(reconstruction, failure):
+    options, _server, _proofs = reconstruction
+    options = dict(options)
+    options["entry"] = dict(options["entry"])
+    if failure == "digest":
+        options["entry"]["sha256"] = "0" * 64
+    elif failure == "identity":
+        options["entry"]["artifact_id"] = "sha256:" + "f" * 64
+    elif failure == "filename":
+        options["entry"]["filename"] = "other.zip"
+    elif failure == "version":
+        options["entry"]["version"] = "999"
+    elif failure == "manifest":
+        options["manifest_data"] = json.dumps(json.loads(options["manifest_data"]), indent=2).encode()
+    elif failure == "missing-wheel":
+        missing = json.loads(options["manifest_data"])["wheels"][0]["filename"]
+        options["wheels"] = options["wheels"].subset(tuple(
+            name for name in options["wheels"].paths if name != missing
+        ))
+    elif failure == "bytes":
+        names = {row["filename"] for row in json.loads(options["manifest_data"])["wheels"]}
+        options["max_bytes"] = len(options["manifest_data"]) + sum(
+            os.fstat(options["wheels"].archives[name].fileno()).st_size for name in names
+        )
+    elif failure == "count":
+        options["max_wheels"] = 1
+    else:
+        options["deadline"] = time.monotonic() - 1
+    with pytest.raises((ValueError, OSError)), intake.retain_reconstructed_core(**options):
+        pytest.fail("unmatched core bytes were exposed")
+
+
+def test_reconstruction_holds_its_subject_until_exit(reconstruction):
+    options, _server, _proofs = reconstruction
+    with pytest.raises((ValueError, OSError)), intake.retain_reconstructed_core(**options) as path:
+        path.write_bytes(b"changed")
+
+
+def test_reconstruction_obeys_its_own_deadline_during_final_wheel_check(reconstruction, monkeypatch):
+    options, _server, _proofs = reconstruction
+    deadline = time.monotonic() + 10
+    assert deadline < options["wheels"]._deadline
+    verify = intake.WheelSnapshot.verify
+    calls = []
+
+    def expire_during_final_check(snapshot):
+        calls.append(None)
+        if len(calls) == 3:
+            with monkeypatch.context() as scope:
+                scope.setattr(time, "monotonic", lambda: deadline + 1)
+                return verify(snapshot)
+        return verify(snapshot)
+
+    monkeypatch.setattr(intake.WheelSnapshot, "verify", expire_during_final_check)
+    with pytest.raises(ValueError, match="deadline"):
+        with intake.retain_reconstructed_core(**(options | {"deadline": deadline})):
+            pass
+    assert len(calls) == 3
+
+
+def test_reconstruction_rejects_a_different_retained_wheel(reconstruction, tmp_path):
+    options, _server, _proofs = reconstruction
+    original = options["wheels"]
+    name = json.loads(options["manifest_data"])["wheels"][0]["filename"]
+    changed = tmp_path / name
+    changed.write_bytes(b"different wheel bytes")
+    paths = dict(original.paths)
+    paths[name] = changed
+    expected = dict(original.digests)
+    expected[name] = "sha256:" + hashlib.sha256(changed.read_bytes()).hexdigest()
+    with intake.retain_wheel_inputs(
+        paths, expected, max_wheels=256, max_archive_bytes=4 << 20,
+        max_total_bytes=4 << 20, max_snapshot_bytes=4 << 20, deadline=options["deadline"],
+    ) as snapshot:
+        with pytest.raises(ValueError, match="retained wheels differ"), \
+                intake.retain_reconstructed_core(**(options | {"wheels": snapshot})):
+            pytest.fail("different wheel was exposed")
 
 
 def test_authenticated_core_still_requires_the_selected_source(release):

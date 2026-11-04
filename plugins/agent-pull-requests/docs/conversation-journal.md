@@ -98,6 +98,43 @@ The current ADO workspace adapter derives those from its existing authorized
 scope; the generic journal's provider tag does not qualify GitHub/Gitea adapters.
 There is no caller-supplied HTTP ingest operation.
 
+For explicitly enabled embeddings, successful existing-owner `load` and `sync`
+now project their acquired normalized ADO generation into the journal.
+Capabilities separately advertise `conversation_acquisition:
+workspace-projection/v1`; an older conversation reader need not support that
+optional acquisition feature to keep reading events. Disabled embeddings retain
+their prior behavior. The result adds `conversation` with its observation cursor
+or an explicit unavailable/stale/not-observed outcome. Cache CAS conflicts,
+capacity refusal and uncertain publication do not feed a generation into the
+journal. There is still no additional acquisition call, watcher or HTTP ingest.
+
+Cache publication and the journal transaction are distinct commits. Journal
+failure cannot roll back a confirmed cache publication or imply the load had no
+local effects. Read the cache's current generation before retrying with its
+current CAS value. The journal's own uncertain atomic replacement retains the
+existing same-observation reconciliation; do not reset its cursor or replay a
+forge operation.
+
+The projection hashes semantic section data, completeness and errors, never
+capture timestamps or the timestamp-dependent generation ID. Comment edits,
+deletions, thread status, policy/reviewer changes and target-only movement remain
+visible without a source push. `commits` summarizes PR/revision, iteration and
+changed-path evidence; it does not pretend the workspace enumerates all commits.
+Current comment/thread/policy and participant counts are not lifetime totals.
+Commit totals, cumulative review rounds and candidate-bound verdicts remain
+unknown unless independently known: an iteration is not a review round, and a
+current ADO reviewer vote does not identify a reviewed candidate. Previously
+known cumulative rounds and observed relationships cannot disappear.
+
+Native fractional observation intervals are conservatively widened to the
+journal's integer-second contract (floor earliest start, ceil latest end).
+Overlapping widened intervals can explicitly return `stale_observation` even
+when the native captures were ordered within one second; a later nonoverlapping
+refresh can reconcile current state. No inward truncation invents ordering.
+Missing exact head/target, status or supplied-section intervals is unavailable.
+Partial evidence cannot compact a terminal PR or reopen a tombstone; a fresh
+complete active observation explicitly starts the new epoch.
+
 New callers against prior servers do not emit `events` without discovery.
 An unknown optional conversation contract withdraws only `events`, leaving
 the older workspace operations usable. Older clients can continue ignoring the
@@ -114,7 +151,7 @@ proof-of-possession Gateway/channel and journal reader, with synthetic issuer
 identities and an explicitly supplied test host. It checks read-only storage,
 same-head dialogue, restart and policy withdrawal with zero forge writes.
 
-This is not executable bootstrap, installed host registration, automatic native
-normalization, shared selection intake, a full body reader, terminal outbox
+This is not executable bootstrap, installed host registration, autonomous
+acquisition, shared selection intake, a full body reader, terminal outbox
 compaction, three live providers or live shadow evidence. Production deployment,
 retained-service activation and independent source/effect ownership stay gated.
