@@ -456,6 +456,123 @@ Implementation sequencing below is **agent-recommended**:
 - [ ] Land truthful adoption, diagnostics and ownership docs; resolve or transfer
   every Plan and Validation Plan item before marking this effort Done.
 
+### Direct retained named deployment and configuration reconciliation
+
+Retain the complete finite #5861 follow-on directly under this #6030 effort.
+This is generic named deployment AND basic configuration reconciliation, not
+only runner loadouts or the Komodo adapter. #5789 remains the deliberately
+narrower discovery/health/search and fixed-service routing foundation; this
+amendment does not put deployment or configuration effects into its protocol.
+
+The following is an agent-recommended tracking amendment. It appoints no
+implementer, effect authority, source writer, resource owner or new coordinator.
+The admitted #5861 metadata records no current assignee/source claim; absence
+of a claim is not an execution appointment. Existing checked items and source
+credit remain unchanged.
+
+#### Plan
+
+- [ ] Resolve only explicitly authorized, typed named deployment and basic
+  configuration operations from trusted local declarations through the
+  existing installer/update/configuration and actual service authorities.
+  Refuse unsupported or untrusted declarations. No arbitrary shell, executable,
+  URL or remote-authored script/configuration payload may be hidden in a name,
+  broadcast, connector request or configuration operation.
+- [ ] Bind each request to its explicitly selected recipients, declared
+  availability roles and actual current operation/target authority. Preserve
+  provider identity/admission, destructive-action gates, machine-local
+  deployment boundaries, operator settings and existing direct/SSH operation.
+  Routing or an available connection alone supplies none of those authorities.
+- [ ] Obtain and retain each selected recipient's own acceptance and outcome,
+  with attributable operation/target correlation. Transport acknowledgement is
+  not downstream acceptance, installation, configuration application or
+  completion. Report unsupported, refused, stale and mixed recipient outcomes
+  independently; do not infer whole-fleet convergence from one success.
+- [ ] Keep offline, disconnected and otherwise unobserved recipient outcomes
+  unresolved/UNKNOWN as appropriate. Reconcile lost responses and interrupted
+  communication against the same original operation and its actual effect
+  owner; uncertainty never authorizes blind replay, duplicate side effects or
+  a successful completion claim.
+- [ ] Compose named operations with the existing package, configuration,
+  lifecycle and service owners. The Gateway is not a second package manager,
+  configuration authority or service supervisor. Preserve supported direct/SSH
+  paths and last valid operator state; do not require fleet adoption merely to
+  keep existing direct service operation usable.
+- [ ] Qualify the complete finite contract below using synthetic refusal and
+  uncertainty controls PLUS real controlled target/process boundaries and
+  separately governed actual installer/configuration outcomes. A routing,
+  planner, runner-only, Komodo-only or receipt-shape result cannot substitute
+  for the applicable named deployment/configuration effect-owner evidence.
+- [ ] Record exact evidence, remaining unsupported cases and existing owners
+  for this finite acceptance. Live rollout remains a separately authorized
+  operation after qualification. No adopter enrollment, migration, capacity
+  acquisition, implementation or live operation is authorized by this tracking
+  amendment.
+
+#### Local Validation
+
+- [ ] Prove authorized typed names resolve only trusted local declarations and
+  the intended existing installer/update/configuration authority. Denied,
+  unsupported and stale declarations fail explicitly, including attempts to
+  smuggle shell, executable, URL or remote-authored script/configuration data.
+- [ ] Prove exact recipient selection: no unselected recipient receives an
+  effect request; each selected recipient's declared availability and role/auth
+  scope are honored. Admission and destructive refusals preserve operator
+  settings, local deployment boundaries and unrelated targets/state.
+- [ ] Prove per-recipient acceptance and actual outcome remain separate from
+  transport acknowledgement and from each other. Mixed success/refusal/
+  unsupported/stale outcomes remain complete and attributable, without
+  inventing global success or silently dropping a selected target.
+- [ ] Prove offline/disconnected targets and lost responses retain unresolved
+  or UNKNOWN outcomes. Reconnection and same-original reconciliation through
+  the actual owner must not duplicate effects, relabel uncertainty as success
+  or silently dispatch a replacement operation.
+- [ ] Exercise real controlled target and process boundaries, including
+  interruption/outage and lost-response cases, rather than only callbacks,
+  serialized receipts or mocked acceptance. Preserve accepted-work custody
+  through the existing effect owner's supported settlement/recovery.
+- [ ] Prove actual named installer/update and basic configuration outcomes
+  through their separately governed owners, including supported failure/
+  recovery and preservation of existing operator state. Evidence distinguishes
+  requested, accepted, installed/applied and observed outcome; no single
+  adapter's success qualifies all generic operations or recipient roles.
+- [ ] Prove existing direct/SSH operation remains usable without the Gateway
+  becoming a package manager, configuration owner or service supervisor.
+  Provider identity/admission and destructive-action requirements remain
+  effective; qualification does not itself enroll or migrate any adopter.
+- [ ] Record the exact source/release/native/effect evidence tier and retained
+  unsupported gates. Actual controlled qualification precedes any separately
+  authorized live rollout; source merge or a released artifact alone is not
+  installed, running or live acceptance.
+
+#### Continuing Coordination
+
+This subsection receives tracking under #6030 without changing its Participants,
+existing source reservations, checked credit, resource custody or activation
+claims. #5789 retains fixed-service routing. Existing installer/update/config,
+provider/admission, credentials, machine-local deployment and service lifecycle
+owners retain their actual effects and source leaves. Completed release-assembly
+source is credited as completed, not reopened or reassigned; operational
+publication and proof-method interoperability remain independently governed.
+
+Coordinate a concrete overlapping source/interface or resource transition with
+its existing owner. Broad parent custody, age, a generic Taking notice or an ACK
+is not a new signoff requirement, veto or custody transfer. This finite #5861
+acceptance does not require completion of every unrelated #6030 child or other
+parent task, and no unrelated task can silently discharge its residual duties.
+
+Keep #5861 open unless and until the original campaign owner confirms actual
+normal-reviewed delivery of this complete direct intake at the real receiving
+revision, whole-current receiving Plan/Validation/Coordination and applicable
+history, and current original-contract/source/custody qualification. Reconcile
+any current incumbent source appointment without taking or retiring it.
+Only then may the authorized owner decide administrative tracking supersession
+into #6030 while retaining every unresolved acceptance obligation and original
+evidence. Draft text, a proposed link, a partial merge, theme overlap or this
+subsection's presence alone is insufficient. Otherwise KEEP #5861.
+Administrative consolidation, if separately decided, is not implementation
+completion, resource release, runtime activation or permission for live rollout.
+
 ### Direct retained Komodo substrate acceptance
 
 - [ ] Directly retain and resolve every original/refined/inherited #8860 Plan
@@ -491,6 +608,19 @@ All entries are **agent-recommended implementation gates**.
 - [ ] Synthetic clock and real writer tests prove the 30-day boundary,
   continuous rollover, idle/startup cleanup, concurrent append safety and
   protected incomplete-attempt handling; size/count-only rotation is not proof.
+- [ ] Direct retained #5861 named deployment AND basic configuration acceptance:
+  prove authorized typed names from trusted local declarations with no hidden
+  shell/executable/URL/remote-authored payload; exact selected-recipient,
+  declared-availability and role/auth scope; each recipient's own acceptance
+  and actual outcome, not transport acknowledgement; denied/unsupported/stale/
+  mixed outcomes and offline/disconnected/UNKNOWN/lost-response reconciliation
+  without duplicate effects. Use synthetic controls PLUS real controlled
+  target/process boundaries and actual separately governed installer/config
+  outcomes. Preserve provider identity/admission/destructive gates, local
+  deployment/operator settings, existing direct/SSH operation and existing
+  package/config/service authority. This generic gate is not runner-only or
+  Komodo-only, adds no unrelated parent prerequisite and precedes separately
+  authorized rollout; tracking/source delivery is not live qualification.
 - [ ] Pure contracts: explicit provider/adapter selection, fixed named operations,
   untrusted/ambiguous input refusal and no raw remote script/URL/executable API.
 - [ ] Reproducer acceptance follows its [isolation and fault matrix](persistent-isolated-reproducer.md#validation-plan):
@@ -542,6 +672,31 @@ Runtime package/API details belong to the implementation contract after review,
 not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
+
+### 2026-11-04 - Direct retained named reconciliation tracking
+
+This amendment places the complete finite #5861 named deployment and basic
+configuration contract directly in this effort's Plan, local Validation and
+Continuing Coordination, with a matching actual global Validation row.
+It preserves typed trusted-local names, no hidden remote payload, exact selected
+recipients and declared availability, per-recipient acceptance/outcome,
+offline/UNKNOWN/lost-response responsibility without duplicate effects, and
+existing direct/SSH, provider/destructive/local-settings boundaries. Synthetic
+controls do not replace real controlled target/process and actual installer/
+configuration evidence before separately authorized rollout.
+
+This is tracking intake, not implementation or an appointment. Existing #6030
+Participants, checked credit, source/resource/native custody, activation claims
+and narrower #5789 routing remain unchanged. Completed release-assembly source
+is not reopened; operational publication/proof interoperability remains separate.
+No whole-current source/custody qualification, reviewed merge receipt, live
+operation or #5861 closure is asserted by this entry.
+
+The original campaign owner must confirm actual normal-reviewed direct delivery,
+whole-current receiving readback and current original-contract/source/custody
+qualification before deciding any administrative tracking supersession. Until
+then KEEP #5861. All finite implementation and validation residuals remain open
+under their existing authorities; unrelated parent tasks are not new blockers.
 
 ### 2026-11-01 UTC - Keyed attribution source plan accepted
 
