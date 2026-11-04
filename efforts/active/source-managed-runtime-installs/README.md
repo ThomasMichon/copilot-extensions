@@ -80,6 +80,16 @@ service-supervision ownership changes.
 
 ## Coordination
 
+The proposed finite #5353 combined-trigger family continues through the
+existing Phase4b/#7758 execution driver and actual nested-workspace,
+source/slot, Bridge lifecycle and routing/adoption custodians. Preserve
+fresh-default convergence, healthy exact-runtime dispatch and legitimate
+admitted desired-source changes, not another installer or receipt veto.
+Normal review, actual complete direct Plan/local AND global Validation/
+Coordination/Journal delivery and permitted whole-current source/receiver/
+holder readback precede any separate source judgment. No new implementer,
+generic ACK, expiry, live incident retry or source/resource transfer follows.
+
 The complete #4015 family below continues through this existing Active ROOT's Plan,
 actual global Validation and Journal under the SAME declared implementation, source,
 adopter and native custodians. Closed source trackers are historical provenance, not
@@ -1264,6 +1274,47 @@ implementation, rollout or parent completion is declared.
   complete originals/refinements/inheritance, actual delivered credit,
   alternatives, finite metrics/venues and unchanged source/resource ownership.
 
+### Proposed finite combined admission qualification from #5353
+
+_(Agent-recommended additive tracking proposal; existing healthy shortcuts
+and serialization are credited, not missing code to reimplement.)_
+
+- [ ] **P5353-1:** Preserve ALL THREE original asks: trace the actual
+  nested/container create/provider-binstub ensure route, preserve the
+  expected healthy instance/version shortcut, and reconcile its interleaving
+  with background metadata adoption/convergence. Three historical incidents
+  and rotated logs are attributed observations, not a fresh unsafe example.
+- [ ] **P5353-2:** Qualify the COMBINED nested-create/binstub-readiness/
+  background-reconcile admission case under ONE legitimate acquisition/
+  execution owner. HELPER ADMISSION AND installer/cutover SERIALIZATION
+  must compose with coherent route/publication/adoption and no unintended
+  same-expected-healthy replacement; isolated lock/flag tests are not enough.
+- [ ] **P5353-3:** Credit healthy/no-spawn ensure, locked double-check and
+  live-start wait, forwarded routes, expected-instance compatibility,
+  STARTING/RUNNING busy handling and #6877/#6918's bounded improvements.
+  Container preparation is not reported as direct host deploy, and dynamic
+  adoption is metadata reconciliation, not itself spawn. These facts narrow
+  the causal question without proving every nested trigger.
+- [ ] **P5353-4:** Resolve the actual combined causal path through a matching
+  accepted controlled record/repair or explicit attributable disposition;
+  retain named uncertainty where evidence remains incomplete. Do not retry
+  a shared busy daemon, disable healthy shortcuts or ban legitimate admitted
+  selected updates. Preserve current fresh-default/reuse policy and #7758/
+  nested/source/slot/routing/Bridge owners without adding a parallel controller.
+- [ ] **V5353-1:** Map all three asks through the actual supported combined
+  caller/helper/background route in an authorized isolated owning lane or
+  accepted controlled record. Attribute expected instance/version/source,
+  trigger and route/adoption decisions; unavailable original logs remain
+  an evidence limitation, not an invented root cause.
+- [ ] **V5353-2:** Cover exact-healthy no-spawn, concurrent helper admission
+  AND serialized construction/cutover, forwarded/live-start/adopted routes
+  and publication/use races. One legitimate owner and no unintended
+  replacement coexist with valid selected-source convergence.
+- [ ] **V5353-3:** Preserve original finite source/native evidence tiers,
+  budgets and current standalone/first-use policy. Tracking or source-only
+  observations are not native incident repair, a new all-host matrix,
+  restart/cleanup authority or whole-parent completion.
+
 ## Validation Plan
 
 - [ ] Prove the [legacy force-fresh and post-migration compatibility matrix](wheel-first-transition.md#legacy-cutover-and-future-compatibility): missing, broken or unsupported legacy tooling does not prevent addressed fresh installation, preserved configuration/data remain usable, and supported generations of the new model retain their declared upgrade/recovery behavior. A plan or README notice is not implementation or host authorization.
@@ -1396,6 +1447,14 @@ operator-requested I/O-only refusal boundary.
   specifics; a generic portfolio/SDK row does not establish those outcomes.
   Paper intake is not implementation, native/installed acceptance or release.
 
+- [ ] **G5353:** Resolve EVERY P5353/local Validation/continuing Coordination
+  clause for the complete finite combined-trigger case: all THREE asks,
+  credited healthy shortcut, helper admission AND installer serialization,
+  ONE legitimate owner and coherent routing/adoption without unintended
+  replacement. Preserve legitimate selected updates, current policy,
+  budgets and same holders; documentary intake is not causal/runtime/native
+  proof, implementation ownership or custody/resource release.
+
 ## Proposal
 
 The [wheel-first extension](wheel-first-transition.md) cleared its initial
@@ -1417,6 +1476,15 @@ independent configuration choice rather than forcing the Manager and suite
 onto one branch.
 
 ## Journal
+
+### 2026-10-30 - Proposed combined-trigger admission case
+
+Added unchecked direct #5353 Plan/local AND actual global Validation and
+continuing same-owner coordination. Existing no-spawn/adoption/serialization
+credit and current fresh-default policy remain; the historical combined
+path needs attributable controlled qualification/disposition. No current
+outage, live retry, implementation, accepted receiving delivery, source
+closure, execution appointment or resource release is claimed.
 
 ### 2026-11-03 - Configured-feed redirect acquisition
 

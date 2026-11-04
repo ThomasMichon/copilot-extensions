@@ -68,6 +68,16 @@ as independent per-plugin PRs; see Coordination._
 
 ## Coordination
 
+The proposed #5356 qualification-only family stays with this existing
+Phase2 adopter/qualification process and the actual Windows installer-
+liveness, worker/guardian, source/adopter/native and whole-installer
+custodians. Preserve its bounded claim, separate #5820/#5472/#5529 duties,
+Worktrees' permanent service-engine exception and Budget's audit-only row.
+Normal review, complete actual direct Plan/local AND global Validation/
+Coordination/Journal delivery and permitted whole-current source/receiver/
+holder readback precede a separate source judgment. No duplicate guard,
+new assignee, generic ACK, age expiry or operational/custody authority.
+
 The direct #2871 audit is conjunctive across this ROOT and the other named receiving
 ROOT: Immutable Dev Slot retains six runtime families and Vendored Installer Engine the
 budget-guidance audit-only seventh row. Preserve the combined seven-family ledger, same
@@ -621,6 +631,47 @@ universal ACK, every-host or whole-parent completion gate is introduced.
   Windows/POSIX/real-global evidence at its original appropriate separately authorized
   tier; source/mock/merge/installed evidence and unknowns remain distinct.
 
+### Proposed qualification-only completed-slot/liveness case from #5356
+
+_(Agent-recommended additive tracking proposal. The supplied audited
+completed-slot guard already encloses BOTH venv AND package mutations;
+this is not a new product-source audit or a request to port that guard.)_
+
+- [ ] **P5356-1:** Retain actual NORMAL Windows install/update live-slot
+  safety, abandoned installer/UV diagnostics and truthful exits. Matching
+  completed LIVE content stays unchanged, conflicting/unverified completed
+  inputs refuse, and genuinely owned incomplete/abandoned work remains
+  distinguishable. Use existing reuse/refusal/distinct non-mutating
+  candidate policy, not blind stop-first or in-place rewrite.
+- [ ] **P5356-2:** Credit #5829's actual worker/tree custody, attempt/process-
+  birth completion fences, corrected inherited staging flags, restored
+  watchdog/deadline-plus-grace and real self-staged/lost-wrapper evidence.
+  Credit #5832's helper/snapshot adoption without calling either whole
+  package/liveness/slot, marker or lock-recovery acceptance.
+- [ ] **P5356-3:** Keep the reported stalled setuptools/jaraco/platform/
+  WMI-backed build distinct from successful fresh3.11/3.12 probes and the
+  unavailable original package exit2 cause. Neither global WMI outage,
+  every-modern-update hang nor a current unsafe completed-slot writer
+  follows from older source reports or historical Bridge corroboration.
+- [ ] **P5356-4:** Diagnose/warn about OR safely settle only positively
+  owned abandoned installer/UV work under existing authority. Preserve
+  healthy/live/UNKNOWN holders, live coordinators and previous-GOOD/data.
+  Payload-in-use loader error32 remains awareness/crosslink ONLY, not a new
+  loader repair mandate. Age, quiet CPU or parent absence is not kill proof.
+- [ ] **V5356-1:** QUALIFY the existing BOTH-mutation guard through normal
+  Windows matching-completed-live reuse, conflicting/unverified refusal
+  even force and actual owned incomplete/abandoned controls. No guard
+  reimplementation or stop-first workaround substitutes for these cases.
+- [ ] **V5356-2:** Preserve previous-GOOD/data, actual worker/attempt/birth
+  identity, build/cutover watchdog-plus-grace and truthful timeout/exit
+  diagnostics. Keep #5829's native credit, WMI/backend evidence and missing
+  original exit attribution separate rather than manufacturing a cause.
+- [ ] **V5356-3:** Qualify the chosen diagnostic/warning OR authorized owned
+  settlement alternative with healthy/live/unknown protection. Retain
+  original finite tiers/current bounds, #5832 credit and separate
+  liveness/immutable/whole-installer owners; no all-host/native programme
+  or unrelated parent prerequisite.
+
 ## Validation Plan
 
 - [ ] Qualify manual replacement through unsupported old recovery/monitor and
@@ -692,6 +743,14 @@ universal ACK, every-host or whole-parent completion gate is introduced.
   full finite negative matrix. Preserve current engine exceptions/credit and all
   existing owners; no whole-engine/every-host/new-watcher gate.
 
+- [ ] **G5356:** Resolve EVERY P5356/local Validation/continuing Coordination
+  clause as QUALIFICATION ONLY: delivered BOTH-mutation guard credited,
+  actual normal Windows completed/conflicting/owned-incomplete matrix,
+  previous-GOOD/data and truthful worker/attempt/watchdog/exit outcomes.
+  Preserve #5829/#5832 partials, distinct WMI/backend/exit evidence and
+  loader-awareness limit. Intake is not source repair, native/current-cause
+  proof, retirement permission, parent completion or resource release.
+
 ## Proposal
 
 **Phase 0 audit findings (2026-09-22):**
@@ -735,6 +794,15 @@ immutable-versioned-runtime slot contract. No scheduled task, no sibling
 installs, no service-specific config needed for this class of plugin.
 
 ## Journal
+
+### 2026-10-30 - Proposed qualification-only Windows liveness case
+
+Added unchecked direct #5356 Plan/local AND actual global Validation and
+same-custodian coordination. The supplied completed-slot guard baseline
+and #5829/#5832 progress remain credit, not reimplementation tasks.
+Normal-update/liveness/exit qualification stays finite and separate from
+whole-installer anchoring. No native run, loader repair, source fix,
+accepted receiving merge, assignment, closure or resource release occurred.
 
 ### 2026-10-22 - Direct retained acceptance from #2871
 

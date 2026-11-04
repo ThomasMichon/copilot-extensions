@@ -36,7 +36,7 @@ import sqlite3
 import threading
 import time
 from collections.abc import Callable
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 #: How long a cached bundle is trusted before an ordinary (non-forced) read
@@ -162,6 +162,7 @@ class WorktreeStatusCache:
         self._lock = threading.Lock()
         # key -> (bundle, computed_at, demanded_at)
         self._entries: dict[tuple[str, str], tuple[dict, float, float]] = {}
+        self._refreshing: dict[tuple[str, str], object] = {}
         # key -> last sweep-attempt timestamp (success OR failure). Separate
         # from `computed_at` (which only advances on success) so a
         # persistently-failing entry still rotates out of "stalest first"
@@ -330,6 +331,27 @@ class WorktreeStatusCache:
     def _observation_scope(self, project: str):
         return self._cleanup_owner.observation_scope(project) if self._cleanup_owner is not None else nullcontext(False)
 
+    @contextmanager
+    def _refresh_generation(
+        self, key: tuple[str, str], *, expected: tuple[dict, float] | None = None,
+    ):
+        token = object()
+        with self._lock:
+            entry = self._entries.get(key)
+            if expected is not None and (
+                entry is None or entry[0] is not expected[0] or entry[1] != expected[1]
+                or key in self._refreshing
+            ):
+                token = None
+            else:
+                self._refreshing[key] = token
+        try:
+            yield token
+        finally:
+            with self._lock:
+                if token is not None and self._refreshing.get(key) is token:
+                    self._refreshing.pop(key)
+
     # -- reads / refresh -----------------------------------------------------
 
     def get_or_refresh(
@@ -404,39 +426,35 @@ class WorktreeStatusCache:
                 self._delete_row(project, worktree_id, if_demanded_at=demanded_at)
         # Compute outside the lock: a single-worktree bundle is real work
         # (~5 git calls) and must never hold the cache lock for its duration
-        # -- callers for OTHER worktrees must not wait on it. Concurrent
-        # callers for the SAME worktree are protected instead by
-        # `CoalescingServer`'s own per-(kind, key) coalescing one layer up
-        # (see `worktree_status_daemon.py`), not by this cache.
+        # -- callers for OTHER worktrees must not wait on it. Forced, ordinary
+        # and sweep work can overlap; only the latest admitted generation may
+        # publish, even if an older observation finishes last.
         from . import push_timeout
-        try:
-            bundle = compute()
-        except (push_timeout.ObservationCleanupError, push_timeout.ObservationCleanupPending) as error:
-            if self._cleanup_owner is None:
-                raise
-            if isinstance(error, push_timeout.ObservationCleanupError):
-                self._cleanup_owner.retain_unclaimed_cleanup(project, None, error)
-            with self._lock:
-                entry = self._entries.get(key)
-                return self._cleanup_owner.degraded_bundle(
-                    project, worktree_id, entry[0] if entry else None,
-                )
-        # Stamp `computed_at`/`demanded_at` from completion time, not the
-        # `now` sampled before `compute()` ran -- a slow git refresh can
-        # exceed the TTL itself (each classification subprocess is allowed
-        # several seconds), so stamping from the pre-compute time could
-        # store a result already expired, immediately triggering another
-        # refresh on the very next read.
-        completed_at = self._now()
-        with self._lock, self._observation_scope(project) as blocked:
-            if blocked:
-                entry = self._entries.get(key)
-                return self._cleanup_owner.degraded_bundle(
-                    project, worktree_id, entry[0] if entry else None,
-                )
-            self._entries[key] = (bundle, completed_at, completed_at)
-            self._persist(project, worktree_id, bundle, completed_at, completed_at)
-        return bundle
+        with self._refresh_generation(key) as generation:
+            try:
+                bundle = compute()
+            except (push_timeout.ObservationCleanupError, push_timeout.ObservationCleanupPending) as error:
+                if self._cleanup_owner is None:
+                    raise
+                if isinstance(error, push_timeout.ObservationCleanupError):
+                    self._cleanup_owner.retain_unclaimed_cleanup(project, None, error)
+                with self._lock:
+                    entry = self._entries.get(key)
+                    return self._cleanup_owner.degraded_bundle(
+                        project, worktree_id, entry[0] if entry else None,
+                    )
+            # Completion time stamps only a result still eligible to publish.
+            completed_at = self._now()
+            with self._lock, self._observation_scope(project) as blocked:
+                if blocked:
+                    entry = self._entries.get(key)
+                    return self._cleanup_owner.degraded_bundle(
+                        project, worktree_id, entry[0] if entry else None,
+                    )
+                if self._refreshing.get(key) is generation:
+                    self._entries[key] = (bundle, completed_at, completed_at)
+                    self._persist(project, worktree_id, bundle, completed_at, completed_at)
+            return bundle
 
     def sweep_due(self, *, refresh: Callable[[str, str], dict]) -> int:
         """Refresh up to ``max_refresh_per_sweep`` demanded, TTL-expired
@@ -489,6 +507,7 @@ class WorktreeStatusCache:
                     and self._cleanup_owner.observation_blocked(key[0])
                 )
             }
+            sampled_bundles = {key: self._entries[key][0] for key in sampled}
             expired = [
                 key
                 for key, (_, _computed_at, demanded_at) in self._entries.items()
@@ -542,34 +561,36 @@ class WorktreeStatusCache:
         for (project, worktree_id), sampled_computed_at in sampled.items():
             if self._cleanup_owner is not None and self._cleanup_owner.observation_blocked(project):
                 continue
-            try:
-                bundle = refresh(project, worktree_id)
-            except Exception as error:
-                from .push_timeout import ObservationCleanupError
-                if self._cleanup_owner is not None and isinstance(error, ObservationCleanupError):
-                    self._cleanup_owner.retain_unclaimed_cleanup(project, None, error)
-                # Record the attempt even on failure -- see the docstring's
-                # `_last_attempted` rationale: this is what lets a
-                # persistently-failing entry rotate out of "stalest first"
-                # rather than monopolizing every cap slot forever.
+            with self._refresh_generation(
+                (project, worktree_id),
+                expected=(sampled_bundles[(project, worktree_id)], sampled_computed_at),
+            ) as generation:
+                if generation is None:
+                    continue
+                try:
+                    bundle = refresh(project, worktree_id)
+                except Exception as error:
+                    from .push_timeout import ObservationCleanupError
+                    if self._cleanup_owner is not None and isinstance(error, ObservationCleanupError):
+                        self._cleanup_owner.retain_unclaimed_cleanup(project, None, error)
+                    # Failed attempts still rotate out of the sweep's sampling cap.
+                    with self._lock, self._observation_scope(project) as blocked:
+                        if not blocked:
+                            self._last_attempted[(project, worktree_id)] = self._now()
+                    continue
+                ts = self._now()
                 with self._lock, self._observation_scope(project) as blocked:
-                    if not blocked:
-                        self._last_attempted[(project, worktree_id)] = self._now()
-                continue
-            ts = self._now()
-            with self._lock, self._observation_scope(project) as blocked:
-                if blocked:
-                    continue
-                self._last_attempted[(project, worktree_id)] = ts
-                existing = self._entries.get((project, worktree_id))
-                if existing is not None and existing[1] != sampled_computed_at:
-                    # Someone else (a request-driven refresh) already
-                    # produced a newer answer while this sweep's own
-                    # recompute was in flight -- discard this stale result
-                    # rather than clobber it.
-                    continue
-                demanded_at = existing[2] if existing is not None else ts
-                self._entries[(project, worktree_id)] = (bundle, ts, demanded_at)
-                self._persist(project, worktree_id, bundle, ts, demanded_at)
-            refreshed += 1
+                    if blocked:
+                        continue
+                    self._last_attempted[(project, worktree_id)] = ts
+                    existing = self._entries.get((project, worktree_id))
+                    if (
+                        self._refreshing.get((project, worktree_id)) is not generation
+                        or (existing is not None and existing[1] != sampled_computed_at)
+                    ):
+                        continue
+                    demanded_at = existing[2] if existing is not None else ts
+                    self._entries[(project, worktree_id)] = (bundle, ts, demanded_at)
+                    self._persist(project, worktree_id, bundle, ts, demanded_at)
+                refreshed += 1
         return refreshed
