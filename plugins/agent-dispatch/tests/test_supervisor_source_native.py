@@ -96,11 +96,20 @@ def test_enabled_source_master_independent_handoff_and_standalone(tmp_path, comp
         return None
 
     def status(ready):
-        for path in (root / "control").glob("*.status.json"):
-            document = json.loads(path.read_text(encoding="utf-8"))
-            if document.get("generation", {}).get("pid") == ready["generation"]["pid"]:
-                return document
-        raise AssertionError("selected supervisor did not publish its actual status")
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            for path in (root / "control").glob("*.status.json"):
+                document = json.loads(path.read_text(encoding="utf-8"))
+                if (
+                    document.get("generation") == ready["generation"]
+                    and document.get("runtime_version") == ready["runtime_version"]
+                    and document.get("cycle_id", 0) > 0
+                    and document.get("updated_at", 0) >= document.get("cycle_started_at", float("inf"))
+                    and document.get("progress", {}).get("phase") == "complete"
+                ):
+                    return document
+            time.sleep(0.02)
+        raise AssertionError("selected supervisor did not complete its native cycle")
 
     def invoke(phase, command, arguments=()):
         started = time.monotonic()
@@ -163,7 +172,7 @@ def test_enabled_source_master_independent_handoff_and_standalone(tmp_path, comp
                 assert time.monotonic() < until
                 time.sleep(0.05)
             assert master.running() and coordinator.running()
-            assert status(ready)["runtime_version"] == generation
+            proof["initial_master_completed_cycle"] = status(ready)
             proof["initial_master"] = ready
             proof["both_services_survived_all_caller_jobs"] = result["inner_job_closed"]
             with DispatchClient(current.base_url, token=token, control_token=control) as api:
@@ -203,7 +212,7 @@ def test_enabled_source_master_independent_handoff_and_standalone(tmp_path, comp
             successor = _NativeProcess(replacement["generation"]["pid"], replacement["birth"])
             pins.append(successor)
             assert successor.running()
-            assert status(replacement)["runtime_version"] == repair.name
+            proof["replacement_master_completed_cycle"] = status(replacement)
             until = time.monotonic() + 30
             while master.running():
                 assert time.monotonic() < until
@@ -222,6 +231,29 @@ def test_enabled_source_master_independent_handoff_and_standalone(tmp_path, comp
                 assert retained["reservation"] == reservation["reservation"]
             assert data.read_text(encoding="utf-8") == '{"unfinished":true}'
             proof["held_work_preserved"] = True
+            if component == "agent-dispatch":
+                from agent_procutil._daemon_instance_identity import stop_identity
+
+                stale = root / "run" / "supervisor-candidates" / (replacement["instance_id"] + ".json")
+                original_record = stale.read_bytes()
+                assert stop_identity(replacement["generation"]["pid"], replacement["birth"])
+                assert not successor.running()
+                assert stale.read_bytes() == original_record
+                invoke("stale-record-restart", repair / "install.ps1")
+                restarted = prepared(repair.name)
+                assert restarted and restarted["instance_id"] != replacement["instance_id"]
+                restart_pin = _NativeProcess(restarted["generation"]["pid"], restarted["birth"])
+                pins.append(restart_pin)
+                assert restart_pin.running()
+                proof["restart_master_completed_cycle"] = status(restarted)
+                assert stale.read_bytes() == original_record
+                with DispatchClient(current.base_url, token=token, control_token=control) as api:
+                    assert api.get(held["id"]) == before
+                    assert api.reserve_spawn(queued["id"])["reservation"] == reservation["reservation"]
+                proof["stale_record_restart"] = {
+                    "confirmed_exited": replacement, "native_exit": successor.exit_code(),
+                    "record_retained_unchanged": True, "ready_replacement": restarted,
+                }
             if component == "dispatch-service":
                 for original in (snapshot / "source", Path(os.environ["DISPATCH_C_BUILD_ROOT"]) / "source"):
                     destination = original.with_name(original.name + ".hidden-" + uuid.uuid4().hex)

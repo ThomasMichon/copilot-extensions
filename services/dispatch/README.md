@@ -53,6 +53,9 @@ singleton handoff, held-work preservation, caller-Job closure and exact native
 cleanup. The standalone case also runs installed frontdoors while the
 qualification's frozen source/staging trees are temporarily unavailable, then
 restores them. Ordinary tests skip this lane without those explicit inputs.
+The plugin case additionally stops only its birth-pinned, fixture-owned master
+through the SDK native-identity primitive, preserves the resulting stale
+preparation record and qualifies same-generation restart without deleting it.
 
 The stable, public install command (never changes across future repo
 reorganizations -- see
