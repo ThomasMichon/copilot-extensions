@@ -392,6 +392,34 @@ cwd remain separate. All eight sources remain OPEN, with no new ROOT intake,
 implementation appointment, execution or custody transfer. Continue through
 normal publication and a changed bounded graph/completed-work question.
 
+The exact seven-file mux research and finite-judgment follow-through merged in
+#10480 as `684feb6dadaf85612a7d1b6d1a51231561635550` after genuine exact-head
+approval, zero findings and successful required CI. All actual merged/current
+blobs equal the reviewed head. Only its independent publication child finalized,
+with checkout and branch retained. The source parent's older unpublished
+collection was not imported; all 39 public and 101 source parent checks survive.
+All eight mux sources and #7556 remain OPEN, without new source/native or custody
+effects. Two complete equal eleven-page scans at 18:33:50 UTC / 10:33:50 PST
+still count 1,018 whole open, 289 above 729: 744 eligible, 274 excluded,
+681 original-cohort and 337 inflow, with no arrivals, departures or closure credit.
+Continue the existing session/task-observation core: seven admitted originals
+and 21 whole texts are read, while the eighth is withheld before new rendering
+at a protected history boundary. No current whole-home acceptance follows.
+
+The [session/task-observation study](session-task-observation-cohort.md)
+integrates those seven complete contracts, one independently qualified merged
+description and thirteen whole commit messages. Twenty bounded comparisons
+retain distinct resolver parity, lifecycle/current-verdict, finite report
+choice, selected-target probe, launch provenance, pending-question answer and
+five worker-status outcomes; one further relation remains withheld. The whole
+current entity-model playbook still leaves #3557's finite OR unresolved.
+An authored documentation-only proposal explicitly chooses its already
+supported cheap-usage/opt-in-history composition, without a new runtime command
+or a mandatory native gate. Normal reviewed actual delivery and whole current
+readback precede any separate source judgment. #3422 is already CLOSED by
+metadata only, not a new fold; the other contracts, current holders and all
+parent states remain unchanged.
+
 - [x] Holistically sweep the initial eligible backlog and build an issue/effort
   relationship graph; use alignment and theme to identify consolidation groups.
   The [initial graph snapshot](graph-overview.md) accounts for all 695 assigned
@@ -649,6 +677,16 @@ normal publication and a changed bounded graph/completed-work question.
   normal publication flow.
 
 ## Validation Plan
+
+The [session/task-observation study](session-task-observation-cohort.md)
+preserves seven complete originals and all refinements, while excluding #6462
+before new rendering and retaining one protected commit relation. One whole
+merged description and thirteen whole messages establish bounded different/
+partial-contract comparisons, not source completion. The complete playbook
+supports a finite documentation-only #3557 proposal, not accepted delivery,
+native/installed proof or another issue's receiving intake. #3422's already
+CLOSED metadata supplies no new text or closure credit. All original check
+states, alternatives and actual source/resource custodians remain.
 
 The [mux lifecycle study](mux-lifecycle-cohort.md) distinguishes eight complete
 original contracts from excluded #8669 and its protected lineage. All 24

@@ -3,6 +3,7 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-04 - Seven session/task contracts, twenty bounded comparisons and a finite report-design documentation proposal](<journal/2026/11.04 session-task-observation-contracts.md>)
 - [2026-11-04 - Eight mux contracts, 21 bounded commit-message comparisons and one whole standing-vision alignment](<journal/2026/11.04 mux-lifecycle-contracts.md>)
 - [2026-11-04 - Independently verified finite caller-context and routed-probe completions; Python prerequisite acceptance remains unqualified](<journal/2026/11.04 finite-caller-and-probe-completions.md>)
 - [2026-11-04 - Eleven Bridge contracts, one qualified existing plan and three different-contract merged-description matches](<journal/2026/11.04 bridge-observation-contracts.md>)

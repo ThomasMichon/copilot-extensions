@@ -69,13 +69,32 @@ acceptance are **not** claimed from a graph, title, list or link.
 | group-005: Bridge observation, discovery and continuity | 11 | [Producer Work Reuse](../producer-work-reuse/README.md) for #7948 plan coverage only; other home references unqualified | [Five-family contract study](bridge-observation-cohort.md); preserve original ORs, typed outcomes, actual owners and native gaps. Partial held-home material is withheld; three merged-description relations address different contracts. |
 | group-006: native fixture/cache disposal | 11 | [Test Portfolio](../test-portfolio-rationalization/README.md), original supported-uninstall owners | Start with the nine fixture/runner cases listed below. #9375/#10239 retain their separate uninstall-caller authority; no deletion, reaping, deadline relaxation or new native run follows. |
 | group-007: mux/client lifetime and input | 9 historical; 8 admitted | Existing Manager, restart, source, hosting and client owners; whole receiver fit unqualified | [Eight-contract study](mux-lifecycle-cohort.md); #8669 withheld before new rendering, 21 message-only comparisons and three withheld edges. Native/human/installed residuals and actual reservations remain. |
-| group-009: session/task observation consumers | 8 | [Task Lifecycle](../agent-dispatch-monitor-and-confirmed-state/README.md), [Worker Observation](../worker-status-observability-hooks/README.md) | Distinguish CLI/API parity, observation, steering and actual session effects. Worker Observation is Draft, not an accepted implementation receiver. |
+| group-009: session/task observation consumers | 8 historical; 7 admitted | Existing Bridge/Dispatch/interface and actual source/resource owners; whole effort receivers unqualified | [Seven-contract study](session-task-observation-cohort.md); #6462 withheld before new rendering, twenty bounded comparisons and one withheld relation. The finite report-design documentation proposal needs reviewed delivery and a separate judgment. |
 | group-011: common venue/runtime adapters | 7 | [Venue Parity](../venue-parity/README.md), [Venue Staging](../venue-plugin-staging-parity/README.md), [Remote ACP Ownership](../remote-acp-host-ownership/README.md) | Keep adapters thin without transferring lifecycle, transport, credential or hosted-session custody by theme. |
 | group-013: interpreter and construction inputs | 7 | [Vendored Installer](../vendored-installer-engine/README.md), [Feed Construction](../feed-construction-release-gate/README.md) | Separate interpreter selection, native argument handling and source materialization. Preserve every original platform/feed/source and existing #7028 boundary. |
 | group-014: native CI timeout evidence | 7 | [Test Portfolio](../test-portfolio-rationalization/README.md), existing release/fixture owners | Match actual failed boundaries and unchanged budgets before repair or duplicate judgments; neither an isolated retry nor broad CI success proves the finite cause. |
 | group-015: session intelligence and accounting | 6 | [Session Intelligence](../session-intelligence-and-accounting/README.md), [Large-Corpus Sync](../large-corpus-session-sync/README.md) | Preserve the canonical backend, independently claimed daily adoption and #4976's remaining-home question. Do not equate related data paths with completed accounting or retirement. |
 | group-018: attention and history readers | 5 | [Operator Attention](../operator-attention-contract/README.md), actual Bridge reader owners | Keep wait/deadline, history paging and event coverage separate; an attention home does not automatically receive the complete history contract. |
 | group-021: head succession | 4 | [Head Succession](../worktree-head-succession-hardening/README.md) | The home remains Draft; #84's OPEN canonical and #912's actual claim conditions survive. No automatic transfer or session operation. |
+
+### Session/task-observation core
+
+#3555, #3556, #3557, #4049, #4119, #4418 and #5257.
+
+The [seven-contract study](session-task-observation-cohort.md) integrates
+21 whole original/discussion texts, one separately qualified complete merged
+description and thirteen whole commit messages. Protected #6462 and one
+commit relation remain withheld before rendering. Twenty bounded comparisons
+do not establish whole completion.
+
+Keep CLI/API parity, complete lifecycle/current-reservation observation,
+finite rendered-report design, selected-target probe, two launch axes,
+genuine pending-question answering and all five worker-status affordances
+distinct. The whole current playbook supports a documentation-only proposal
+for #3557's explicit OR: cheap standalone usage and opt-in expensive history.
+Actual reviewed delivery and current readback remain required before its
+separate judgment; all seven sources stay OPEN. No implementation appointment,
+runtime observation, installed acceptance or source/resource transfer follows.
 
 ### Mux lifecycle core
 
