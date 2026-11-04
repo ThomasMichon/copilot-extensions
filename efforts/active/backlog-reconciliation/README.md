@@ -449,6 +449,39 @@ source closure or resource transfer is accepted. Two complete equal
 eleven-page scans at 19:03:54 UTC / 11:03:54 PST remain 1,020 whole open,
 291 above 729, with no arrivals, departures or campaign credit.
 
+The exact eight-file continuity study and observation follow-through merged in
+#10490 as `bd2d9a1df6d938f64125ab39c717f4f818faaa41` after genuine exact-head
+approval, no findings and all three required checks passing. Every actual
+merged/current blob equals the reviewed head; only its independent child
+finalized, with checkout and branch retained. The complete equal eleven-page
+scans at 19:32:10 UTC / 11:32:10 PST remain 1,019 whole open, 290 above 729,
+with no arrivals, departures or additional closure credit.
+
+The next venue-core reader stopped at an inherited-reference gate before
+#9056 body rendering: its reference to already-withheld #7237 inherits the
+protected history boundary. An initial partial #954 rendering is not a
+completed contract study. The single-pass packet preflight had not propagated
+that newly withheld member before assignment; the error and old packet are
+retained, not silently credited. Transitive reference closure now runs before
+packet staging. Only five remaining originals/35 texts are staged for direct
+complete reading; both held members and their source/subset retries stay
+withheld. No receiving fit, disposition or custody change follows.
+
+The [venue/runtime-adapter study](venue-runtime-cohort.md) now reads the five
+remaining eligible originals and all thirty comments in full: 35 texts,
+66,668 body characters. The two inherited-held members stay excluded, and the
+incomplete reader attempt supplies no contract credit. Six whole messages
+provide twelve bounded comparisons; two actual merged descriptions provide
+two more, with one nominated description withheld before rendering. Preserve
+the entire venue programme and inherited finite contracts, assigned AHP lane,
+restricted runtime/custody phases and both wrappers' specific mapping
+conditions. No whole current receiving home, source completion, appointment
+or custody transfer is qualified; all five sources remain OPEN.
+Two equal complete eleven-page scans at 19:43:39 UTC / 11:43:39 PST still
+count 1,019 whole open, 290 above 729: 745 eligible, 274 excluded,
+680 original-cohort and 339 inflow. No identity changes or closure credit occur.
+
+
 - [x] Holistically sweep the initial eligible backlog and build an issue/effort
   relationship graph; use alignment and theme to identify consolidation groups.
   The [initial graph snapshot](graph-overview.md) accounts for all 695 assigned
@@ -706,6 +739,14 @@ eleven-page scans at 19:03:54 UTC / 11:03:54 PST remain 1,020 whole open,
   normal publication flow.
 
 ## Validation Plan
+
+The [venue/runtime-adapter study](venue-runtime-cohort.md) preserves five whole
+originals and thirty comments without retrying either inherited-held member.
+All twelve message and two description comparisons retain their exact evidence
+tiers; the protected description and held-source relations are unqualified.
+Scores, prior invalidations, unrelated candidates and every incumbent parent
+check state survive. Historic delivery is not a new native/installed run,
+complete receiver readback, assignee mapping receipt or credential custody.
 
 The [continuity/lifecycle study](continuity-lifecycle-cohort.md) preserves seven
 whole originals and all refinements, excludes protected #7694 before rendering,
