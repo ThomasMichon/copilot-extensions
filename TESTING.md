@@ -52,12 +52,18 @@ an installed rollout.
 Logger's opt-in `--test-file tests/test_worktree_state.py
 --test-file tests/test_worktree_state_coexistence.py
 --test-file tests/test_worktree_state_preservation.py
+--test-file tests/test_worktree_state_contributors.py
 --allow-explicit-tiers` packet checks typed local collection admission,
 creation-time privacy, fleet coexistence, corruption/partial-publication refusal
 and complete efforts export/readback
 through real isolated Python processes. It does not enable scheduled collection
 or qualify native Windows, an installed archive destination, remote durability
 or reclamation. See [the collection boundary](plugins/agent-logger/docs/worktree-state.md).
+The contributor cases preserve the complete optional owner projection separately
+from canonical session references, refuse a v1 receipt as richer acknowledgment,
+and verify actual retained metadata afresh. The separate-process owner test
+negotiates the selected payload's optional capability before using new syntax;
+original export/readback calls remain covered without it.
 The preservation cases exercise actually eligible old sessions and a verified
 ordinary archive containing no worktree collection; neither justifies erasing
 marked nested evidence.

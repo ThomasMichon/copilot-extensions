@@ -105,6 +105,9 @@ never a partial copy or transport no-op.
 
 Contributing sessions reference the same collection through additive,
 content-checked metadata; the agenda is not copied beneath each session.
+The original API requires a nonempty tuple of canonical session identifiers;
+that validation and schema-v1 receipt are unchanged when no contributor reader
+is supplied.
 An exact retry verifies actual retained bytes afresh before adding references.
 Conflicting or interrupted publications remain visible for owner-led
 reconciliation; the library neither overwrites nor deletes them.
@@ -118,6 +121,42 @@ digest and member size/hash. It reports **local readback verified** and
 **remote archive acknowledgment false**. Neither a receipt nor a successful local
 copy grants reclamation, retention changes, restoration, head ownership, claims,
 leases or live execution authority.
+
+### Optional complete contributor provenance
+
+Both collection and readback accept a keyword-only `contributors` owner reader.
+Before supplying it, the orchestration caller must negotiate
+`agenda-export-contributors-v1` through the exact selected Efforts payload's
+`info.optional_capabilities`. The callback returns that provider's complete
+`efforts.agenda-export-contributors`, version 1 projection for the selected export,
+not a live database or a session lookup. Missing support preserves the original
+API; it cannot satisfy a requirement for complete attribution. Provider discovery
+and automatic collection remain unimplemented.
+
+Logger checks the projection's exact raw-manifest digest, source identity,
+complete operation count, tuple uniqueness, first-acceptance order and bounds.
+Every nullable actor/session tuple and its original qualification and revision
+range is preserved in canonical `contributors.json` beside the collected export.
+No field is truncated, omitted, converted to a canonical session identifier or
+treated as authenticated/live authority. The owner still verifies its own
+ledger; Logger does not import Efforts or read its SQLite schema.
+The whole-result limits are 4,096 tuples and 1 MiB of ASCII-escaped JSON,
+separate from the smaller receipt/reference metadata budget.
+
+This explicit path permits an empty canonical-reference tuple when all accepted
+session provenance is unknown or noncanonical. Any separately supplied canonical
+references still use the original validation; they are not derived by coercing
+the projection. The original manifest and database remain unchanged.
+
+A schema-v2 collection intent and receipt bind the additional
+`contributors_sha256`. Fresh readback rederives the complete projection through
+the selected owner against the actual retained export and compares the stored
+bytes before returning that receipt. It never trusts a saved hash alone.
+An original schema-v1 receipt is not a provenance acknowledgment, and an
+immutable existing revision cannot silently change between v1 and v2.
+Conflicting or partial evidence is retained for owner reconciliation rather
+than upgraded, downgraded or overwritten. Neither version acknowledges remote
+archival or authorizes reclamation.
 
 ## Ancestor disposal and retained legacy evidence
 
@@ -161,3 +200,8 @@ admission and operational/native acceptance are separate gates; see
 The separate `tests/test_worktree_state_preservation.py` packet qualifies unsafe
 placement refusal and existing/restored nested-marker retention across prune,
 verified-archive reconciliation, compaction, replacement and generic cleanup.
+The focused `tests/test_worktree_state_contributors.py` packet checks optional
+lossless provenance, unknown/noncanonical identities, both metadata budgets,
+policy refusal, immutable v1/v2 separation and fresh corruption detection.
+The real separate-process export test also negotiates the selected provider's
+optional capability and round-trips both legacy and provenance-aware calls.

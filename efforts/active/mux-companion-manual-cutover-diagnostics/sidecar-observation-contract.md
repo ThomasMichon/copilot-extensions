@@ -24,7 +24,9 @@ history/live and lifecycle fences. #10447 adds Logger's
 [explicit typed collection/readback library](../../../plugins/agent-logger/docs/worktree-state.md),
 not owner discovery or scheduled orchestration. #10488 adds passive project-wide
 retained inventory at the Worktrees owner, not contributor discovery or a logger
-consumer. Logger integration, complete source coverage, qualified
+consumer. #10495 adds separately negotiated Efforts-owned contributor provenance
+from the same complete verified export cut, without changing its manifest or
+enabling a Logger consumer. Logger integration, complete source coverage, qualified
 current answerability/PRE, installed and native acceptance remain open.
 Providers advertise actual running support before independently installed
 callers use new syntax. Existing roster, agenda-v1/v2 and raw Bridge event
@@ -72,6 +74,7 @@ measurement support is not inferred from either receipt.
 | Bridge | `bridge-session-observation-history-v1` | `session-observation-history`: bounded supported retained history, not a raw-SSE query masquerading as a page |
 | Bridge | `bridge-compaction-evidence-v1` | Actual start/target evidence with per-record qualification; definitive pre-state only where the source fulfills its relationship |
 | efforts | `agenda-history-page-v1` | Rich `history-page` read through the owning payload command and an explicit allocator/registration locator; no new global binstub |
+| efforts | `agenda-export-contributors-v1` | Optional passive `contributors` read over a complete verified export; nullable caller metadata remains evidence, not live session or collection authority |
 
 CLI handlers require the actual project/worktree or qualified owner reference,
 selected session where applicable, contract version and JSON output. Follow and
