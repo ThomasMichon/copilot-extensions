@@ -10,6 +10,10 @@ import sys
 from typing import Any
 
 from . import config as cfg
+from .worktree_data_contract import (
+    PROJECT_INVENTORY_CAPABILITY as INVENTORY_CAPABILITY,
+    MAX_INVENTORY_BYTES,
+)
 
 CAPABILITY = "worktree-data-v1"
 VERSION = 1
@@ -32,6 +36,7 @@ def add_parsers(sub: argparse._SubParsersAction) -> None:
             selected = parser.add_mutually_exclusive_group(required=True)
             selected.add_argument("--capabilities", action="store_true")
             selected.add_argument("--worktree")
+            selected.add_argument("--inventory", action="store_true")
             parser.add_argument("--creation-nonce")
             parser.add_argument("--store-id")
             parser.add_argument("--placement-generation", type=int)
@@ -50,12 +55,12 @@ def _json_value(value: Any) -> Any:
     raise TypeError("placement response contains an unsupported value")
 
 
-def _emit(value: dict[str, Any]) -> None:
+def _emit(value: dict[str, Any], *, max_bytes: int = MAX_RESPONSE_BYTES) -> None:
     raw = json.dumps(
         {"schema": SCHEMA, "version": VERSION, **value},
         ensure_ascii=False, allow_nan=False, separators=(",", ":"), default=_json_value,
     )
-    if len(raw.encode("utf-8")) + 1 > MAX_RESPONSE_BYTES:
+    if len(raw.encode("utf-8")) + 1 > max_bytes:
         raise ValueError("placement response exceeds its bounded point-read size")
     sys.stdout.write(raw + "\n")
     sys.stdout.flush()
@@ -83,13 +88,19 @@ def project_unavailable(argv: list[str], message: str) -> int:
 def cmd_worktree_data(args: argparse.Namespace) -> int:
     """Use only the selected installation's durable-placement owner."""
     try:
-        if getattr(args, "capabilities", False):
+        capabilities = getattr(args, "capabilities", False)
+        inventory = getattr(args, "inventory", False)
+        if capabilities or inventory:
             if any(getattr(args, name, None) is not None for name in (
                 "creation_nonce", "store_id", "placement_generation",
             )):
-                return _failure("invalid-request", "capability discovery takes no store selectors")
-            _emit({"ok": True, "capabilities": [CAPABILITY]})
-            return 0
+                return _failure("invalid-request", "discovery takes no store selectors")
+            if capabilities:
+                _emit({
+                    "ok": True, "capabilities": [CAPABILITY],
+                    "optional_capabilities": [INVENTORY_CAPABILITY],
+                })
+                return 0
         project = cfg.project_name()
     except (RuntimeError, ValueError) as error:
         return _failure("project-unavailable", str(error))
@@ -100,7 +111,19 @@ def cmd_worktree_data(args: argparse.Namespace) -> int:
     except ImportError as error:
         return _failure("unavailable", f"placement implementation unavailable: {error}")
     try:
-        if args.command == "worktree-data-allocate":
+        if inventory:
+            from .worktree_data_inventory import read_project_worktree_data
+
+            value = read_project_worktree_data(project)
+            try:
+                _emit({
+                    "ok": True, "project": project,
+                    "capability": INVENTORY_CAPABILITY, "data": value.to_dict(),
+                }, max_bytes=MAX_INVENTORY_BYTES)
+            except ValueError:
+                return _failure("inventory-limit", "project inventory response exceeds byte limit")
+            return 0
+        elif args.command == "worktree-data-allocate":
             value = allocate_worktree_data(
                 project, args.worktree, creation_nonce=args.creation_nonce,
                 domain=args.domain, lane=args.lane, store_id=args.store_id,

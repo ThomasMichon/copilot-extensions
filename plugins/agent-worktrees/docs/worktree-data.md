@@ -13,6 +13,7 @@ invitation to provision a runtime or search the filesystem.
 
 ```text
 agent-worktrees --project PROJECT worktree-data-read --capabilities --json
+agent-worktrees --project PROJECT worktree-data-read --inventory --json
 agent-worktrees --project PROJECT worktree-data-read \
   --worktree FULL_ID --store-id STORE_ID --contract-version 1 --json
 agent-worktrees --project PROJECT worktree-data-allocate \
@@ -40,6 +41,46 @@ The JSON response distinguishes a registered placement from genuinely absent
 registration. Malformed, unreadable, partial or unsupported state is an error,
 never an empty successful inventory. The point-response bound is 128 KiB;
 overflow refuses rather than clipping a complete-looking descriptor set.
+
+### Project-wide retained discovery
+
+The optional `worktree-data-project-inventory-v1` capability admits
+`worktree-data-read --inventory`. Establish support through the **selected
+runtime's** existing `--capabilities` operation: its additive
+`optional_capabilities` list must contain that exact capability. The original
+`capabilities: ["worktree-data-v1"]` remains unchanged for existing clients.
+An absent optional declaration means project inventory is unsupported; it does
+not disable the original exact reads or permit a consumer filesystem crawl.
+No existing syntax is retired, and callers must repeat support selection after
+a provider rollback rather than send the new flag to an older parser.
+
+Inventory enumerates only the owner's retained registration directory, not the
+canonical worktree list. It therefore includes descriptors whose checkout and
+tracking record are gone, together with every registered store and its existing
+incarnation, placement, scope and qualification fields. The response retains
+the `agent-worktrees.worktree-data` envelope at version 1, names the optional
+capability, and places `project`, `repository_identity`, `scope`, `worktrees`
+and `live_authority` in `data`. `repository_identity` is the project owner's
+normalized repository remote (for example `network:example.com/owner/repo`),
+not a project alias or a caller assertion. The stored descriptor's strict
+version-1 schema is unchanged.
+
+At most 128 worktree registrations and a 1 MiB UTF-8 response are admitted.
+`inventory-limit` refuses overflow without emitting a partial success.
+Invalid, unsafe, partial or unreadable registrations likewise refuse the
+whole inventory; an empty list means no registered descriptors were observed,
+not that failed entries were omitted. A missing project-data root yields an
+empty inventory with `scope: null`, still requiring a resolvable repository.
+
+Root, repository/installation scope, namespace membership, descriptor and
+canonical-record metadata, and lane directory identities are rechecked before
+return. An observed registration change refuses the read; it is not permission
+to repair, initialize or retry a mutation. This is a bounded passive
+observation, not a transactional export across stores or a freshness lease.
+Domain owners must still export and verify each selected store at its own
+revision. Reads take no record locks, ensure no runtime and never traverse
+domain-store content. No consumer or scheduled collection is enabled merely
+by the provider capability.
 
 ## Explicit allocation
 

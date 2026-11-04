@@ -1,5 +1,16 @@
 # Testing copilot-extensions
 
+Worktrees' optional `--test-file tests/test_worktree_data_store.py
+--test-file tests/test_worktree_data_cli.py --allow-explicit-tiers` packet checks
+passive project-wide retained-descriptor inventory, explicit count/byte
+overflow, unsafe/partial state and registration-change refusal, and the actual
+root CLI after canonical-record retirement. It preserves the original exact
+read/allocation flow, including Efforts' existing capability reader and admitted
+project-root aliases. A work-count control requires one registration-root scan
+plus two descriptor-membership scans per worktree, without traversing domain
+contents. These isolated source controls do not qualify installed collection,
+native Windows inventory, remote latency or durable archive acknowledgment.
+
 The manual `windows-coverage-rotation.yml` selector `post_tool_fallback=true`
 runs only Worktrees' post-tool shell, status/bind reminder, late-guidance and
 guard-publication consumer packet through the canonical hardened Linux container. Supply `ref`

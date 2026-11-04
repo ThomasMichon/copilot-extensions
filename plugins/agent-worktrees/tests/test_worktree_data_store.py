@@ -29,7 +29,7 @@ NONCE = "0123456789abcdef"
 STORE = "a" * 32
 
 
-def _record(root: Path, **changes: Any) -> Path:
+def _record(root: Path, *, path_worktree_id: str = WORKTREE, **changes: Any) -> Path:
     directory = root / "worktrees"
     directory.mkdir(parents=True, exist_ok=True)
     value = {
@@ -42,7 +42,7 @@ def _record(root: Path, **changes: Any) -> Path:
         "platform": "linux",
     }
     value.update(changes)
-    path = directory / f"{WORKTREE}.yaml"
+    path = directory / f"{path_worktree_id}.yaml"
     # JSON is a YAML subset accepted by the canonical record owner.
     path.write_text(json.dumps(value), encoding="utf-8")
     return path
@@ -126,6 +126,157 @@ def test_inventory_and_store_selection_do_not_require_lane(owner: Path) -> None:
     selected = store.read_worktree_data(PROJECT, WORKTREE, store_id="b" * 32)
     assert selected is not None and selected.placements == (second,)
     assert store.read_worktree_data(PROJECT, WORKTREE, store_id="c" * 32) is None
+
+
+def test_project_inventory_includes_all_stores_and_missing_canonical_records(
+    owner: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_worktrees.worktree_data_inventory import read_project_worktree_data
+
+    first = _allocate()
+    second = _allocate(lane="other", store_id="b" * 32)
+    other = "retired-worktree"
+    _record(
+        owner, path_worktree_id=other, worktree_id=other, creation_nonce="other-incarnation",
+    )
+    third = _allocate(
+        worktree_id=other, creation_nonce="other-incarnation", store_id="c" * 32,
+    )
+    (owner / "worktrees" / f"{other}.yaml").unlink()
+    before = _snapshot(owner)
+    monkeypatch.setattr(tracking, "_RecordLock", lambda *_a, **_kw: pytest.fail("read locked"))
+    monkeypatch.setattr(
+        project_state, "ensure_project_state", lambda *_a: pytest.fail("read initialized"),
+    )
+    result = read_project_worktree_data(PROJECT)
+    assert result.repository_identity == f"network:example.invalid/{PROJECT}"
+    assert result.scope == first.scope
+    assert [entry.worktree_id for entry in result.worktrees] == [WORKTREE, other]
+    assert result.worktrees[0].placements == (first, second)
+    assert result.worktrees[1].placements == (third,)
+    assert result.worktrees[1].canonical_record == "missing"
+    assert not result.live_authority
+    assert _snapshot(owner) == before
+
+
+def test_empty_project_inventory_is_passive_and_owner_qualified(
+    owner: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_worktrees.worktree_data_inventory import read_project_worktree_data
+
+    before = _snapshot(owner)
+    result = read_project_worktree_data(PROJECT)
+    assert result.worktrees == () and result.scope.project == PROJECT
+    absent = read_project_worktree_data("absent-project")
+    assert absent.worktrees == () and absent.scope is None
+    assert absent.repository_identity == "network:example.invalid/absent-project"
+    assert not cfg.project_dir("absent-project").exists()
+    assert _snapshot(owner) == before
+    monkeypatch.setattr(
+        project_state, "_normalized_repository_remote",
+        lambda *_a: (_ for _ in ()).throw(ValueError("unregistered")),
+    )
+    with pytest.raises(WorktreeDataError) as failed:
+        read_project_worktree_data("unregistered")
+    assert failed.value.code == "owner-unavailable"
+
+
+@pytest.mark.parametrize("damage", ["partial", "alias", "incarnation", "foreign", "bad-name"])
+def test_project_inventory_refuses_incomplete_or_foreign_members(
+    owner: Path, damage: str,
+) -> None:
+    from agent_worktrees.worktree_data_inventory import read_project_worktree_data
+
+    _allocate()
+    base = owner / "worktree-state"
+    if damage == "partial":
+        (base / "interrupted").mkdir()
+    elif damage == "alias":
+        if os.name == "nt":
+            pytest.skip("native reparse fixture requires separate privilege qualification")
+        (base / "alias").symlink_to(base / WORKTREE, target_is_directory=True)
+    elif damage == "incarnation":
+        _record(owner, creation_nonce="new-incarnation")
+    elif damage == "foreign":
+        _change(owner, lambda document: document["scope"].update(repository="foreign"))
+    else:
+        (base / "not portable").mkdir()
+    with pytest.raises(WorktreeDataError):
+        read_project_worktree_data(PROJECT)
+
+
+@pytest.mark.parametrize("budget", ["count", "bytes"])
+def test_project_inventory_refuses_overflow_instead_of_truncating(
+    owner: Path, monkeypatch: pytest.MonkeyPatch, budget: str,
+) -> None:
+    from agent_worktrees import worktree_data_inventory as inventory
+
+    _allocate()
+    monkeypatch.setattr(
+        inventory, "MAX_PROJECT_WORKTREES" if budget == "count" else "MAX_INVENTORY_BYTES", 0,
+    )
+    with pytest.raises(WorktreeDataError) as failed:
+        inventory.read_project_worktree_data(PROJECT)
+    assert failed.value.code == "inventory-limit"
+
+
+def test_project_inventory_enumerates_only_registration_directories(
+    owner: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_worktrees import worktree_data_inventory as inventory
+
+    worktrees = [WORKTREE, "second", "third"]
+    for index, worktree in enumerate(worktrees):
+        _record(owner, path_worktree_id=worktree, worktree_id=worktree)
+        _allocate(worktree_id=worktree, store_id=f"{index:032x}")
+    scans = []
+    real_scan = os.scandir
+
+    def counted(path):
+        scans.append(Path(path))
+        return real_scan(path)
+
+    monkeypatch.setattr(os, "scandir", counted)
+    assert len(inventory.read_project_worktree_data(PROJECT).worktrees) == 3
+    base = owner / "worktree-state"
+    assert sorted(scans) == sorted([
+        base, *(base / worktree for worktree in worktrees),
+        *(base / worktree / "agendas" for worktree in worktrees),
+    ])
+
+
+@pytest.mark.parametrize("change", ["descriptor", "membership", "canonical", "remote", "base"])
+def test_project_inventory_rejects_changes_during_owner_read(
+    owner: Path, monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
+    from agent_worktrees import worktree_data_inventory as inventory
+
+    _allocate()
+    real_read = store.read_worktree_data
+
+    def changing_read(*args, **kwargs):
+        result = real_read(*args, **kwargs)
+        if change == "descriptor":
+            _change(owner, lambda document: document.update(creation_nonce="changed"))
+        elif change == "membership":
+            (owner / "worktree-state" / "new-registration").mkdir()
+        elif change == "canonical":
+            _record(owner, creation_nonce="changed")
+        elif change == "remote":
+            monkeypatch.setattr(
+                project_state, "_normalized_repository_remote",
+                lambda *_a: "network:example.invalid/changed",
+            )
+        else:
+            base = owner / "worktree-state"
+            base.rename(owner / "retained-original")
+            base.mkdir()
+        return result
+
+    monkeypatch.setattr(store, "read_worktree_data", changing_read)
+    with pytest.raises(WorktreeDataError) as failed:
+        inventory.read_project_worktree_data(PROJECT)
+    assert failed.value.code == "identity-conflict"
 
 
 def test_retired_checkout_and_missing_canonical_record_retain_discovery(owner: Path) -> None:
