@@ -104,6 +104,13 @@ The [source readback](journal/2026/11.04-sidecar-existing-tick-collection.md)
 closes D4's source integration, not D5 legacy preservation, actual archive
 acknowledgment, installed/native qualification or any original parent gate.
 
+#10528 merged as `7b48858d2b21dfa819c14ca34013dff973c14b69`, delivering
+conservative checkout-local agenda preservation and actual isolated retirement
+of checkouts with independent managed data. The
+[source readback](journal/2026/11.04-sidecar-checkout-preservation.md) closes
+that source preservation criterion, not D5 rescue, restoration/reclamation,
+actual archive acknowledgment or native/installed acceptance.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than

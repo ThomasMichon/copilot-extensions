@@ -650,3 +650,152 @@ second repair entry. #3004's first actual restarted-model prompt is distinct
 from #1159's completed stateless write guard. Source, containing release,
 contained consumers and affected-host readiness remain separate facts. The
 remaining selected Plan/Validation items and original holds are unchanged.
+
+### 2026-11-04 - Bounded automatic launch-freshness source unit
+
+The retained #2404 scope is claimed under #7030 in
+[comment 6640613933](https://github.com/ThomasMichon/copilot-extensions/issues/7030#issuecomment-6640613933),
+as U11 in the acceptance matrix. ROOT coordination, first-use adapters and the
+existing native application's external-cache correction remain with their
+declared owners.
+
+Read-only inspection found inconsistent decisions: reconciliation compared
+against the serving version preferentially, staging treated version inequality
+as apply-worthy, and pre-launch/native execution admission did not share the
+source/freshness decision. The candidate now uses one read-only guard, preserves
+independently selected sources and both installed/serving freshness, and compares
+prepared facts again at actual apply. Existing publication, context and root
+admission remain independent. Explicit update/recovery is not gated by this
+automatic-action decision.
+
+The eighteen new consumer regressions (including four real child-process
+protocol controls) and all 106 retained publication-policy cases pass.
+The combined file exceeded its unchanged 300-second group limit;
+the same complete case inventory passes in three disjoint selections. The
+staging/monotonic compatibility packet passes 75 cases after replacing only
+affected shorthand test versions with real package-version spellings. The
+durable launch consumer packet passes 53 cases with one explicit platform skip.
+Ten actor-free decision units, Python lint and the thirteen-plugin install,
+documentation and version guards also pass. Exact whole-packet unit admission,
+review, merge and containing release remain pending. These isolated source
+controls do not establish native installed adoption or close #7030, #7028 or
+this parent effort.
+
+The declared enforced MyPy portfolio subsequently passed all forty strict
+projects for both Linux and Windows type targets, after explicit preparation
+of its missing checker environments. Worktrees and repository tools remain
+pending projects; this does not claim their typing admission. Tracking-write,
+headless-launch, daemon and asyncio-timeout source guards pass.
+
+The complete normal unit packet remains locally unqualified. All 4,086 selected
+tests passed, but the first run exceeded the unchanged 300-second aggregate
+budget. A second run without another owned validation job still failed aggregate
+accounting: pytest took 287.63 seconds, with admission, source-bytecode
+preparation and temporary teardown also inside the packet clock. No source,
+node selection, coverage or budget was relaxed. Missing tooling was prepared
+through the seasoned dependency owner; UV-owned tooling outside the checkout
+preserved the source-read boundary. Required exact-head hosted CI must qualify
+the packet before this source unit can merge. These local budget failures are
+not represented as successful unit evidence.
+
+PR #10508's initial head `418da023bcc85f9189e5422040b88bc3d0efa88b`
+received actual hosted qualification in run `41912963474`: all 4,086 units
+passed in 95.477 seconds with coverage recorded once and fresh evidence
+uploaded. This is separate from the failed local Windows aggregate runs.
+The required gate remained red because this slice grew `update_cli.py` to
+1,001 lines. Moving the new pure-helper import to the normal module import
+section restores the existing 1,000-line cap without changing it or the
+decision's behavior. The module-size guard, Python lint and all eighteen new
+consumer controls pass after that correction. Current-head review and complete
+required CI still precede merge; the successful old-head unit job is not the
+new head's gate.
+
+### 2026-11-04 - Launch-freshness review corrections qualified locally
+
+Eight regressions reproduced all four substantive findings from #10508 before
+correction: preexisting selector/manifest disagreement, successful owned
+acquisition invalidating its own planned runtime action, omitted constructor
+inputs, and comparison of a repair slot with a package version. The revision
+uses the existing canonical selection primitive for versioned roots, retains
+source/profile and exact package consistency, fingerprints owned construction
+inputs separately, and defers successful acquisitions to the next normal
+planning pass. Explicit update/recovery remains unchanged.
+
+All 149 isolated consumer controls pass: forty new cases and 109 retained
+cases, run in bounded disjoint groups. The retained inventory includes three
+additional namespaced execution controls. Independent namespaced planning and
+execution contracts now run separately; intentionally malformed JSON avoids
+an unused lookup. Item and aggregate deadlines are unchanged. Earlier combined
+and per-item timeout attempts remain failures, not successful evidence.
+The final staging/monotonic compatibility packet passes 75 cases; all seventeen
+actor-free units pass and their three admitted source hashes match. Python
+F/E9 lint, six-source module caps, thirteen-plugin install contract,
+documentation consistency, tracking/headless/daemon/asyncio source guards and
+whitespace checks pass. The forty admitted strict projects' earlier Linux and
+Windows type-target results still apply to unchanged admitted source; pending
+projects are not newly admitted.
+
+The canonical lookup is an actual read-only caller-owned subprocess, bounded
+to fifteen seconds and 64 KiB per stream. Fixture completion/interpreter
+observations are synthetic: the selected fixture interpreter is never run.
+This proves selection and protocol behavior, not installed runtime health,
+native lifecycle activation or whole-launch latency. No host rollout, external
+venue or shared installation was changed. The previous failed local aggregate
+unit runs and initial-head hosted success remain separate evidence.
+Current-head hosted CI and a fresh review must qualify this revision before
+merge; containing release is still due. #7030, #7028 and this parent remain
+open with their existing native and construction owners.
+
+### 2026-11-04 - External construction-input review correction
+
+Exact head `2b739eb101ceb268a5b97b4ff5b3d53ac14e6bc3` passed required
+CI 41935837433, including 4,108 executed units in 94.401 seconds with coverage
+recorded once and fresh evidence uploaded. Review 5777656241 confirmed all five
+prior findings resolved, but identified another input-closure gap: declared
+local dependencies outside the payload were not fingerprinted.
+
+Three actual cached-action controls reproduced that gap before correction.
+The construction-only fingerprint now follows transitive declared local
+sources, handles cycles, includes external file inputs, and refuses missing
+declared inputs. It does not import dependency code, execute another process
+or grant installer admission. Generated dependency environments remain excluded,
+and ordinary staging keeps its existing curated fingerprint.
+
+All forty-three new freshness consumer cases pass in 147.48 seconds of pytest
+(191.17 seconds including preparation and cleanup). The staging/monotonic
+compatibility packet passes 75 cases in 13.85 seconds (21.81 seconds total).
+Python lint, unchanged module ceilings, documentation consistency and all four
+source AST guards pass. The earlier 109 retained cases and seventeen pure units
+are separate retained evidence; their admitted production sources are unchanged
+by this correction. No test limit or required gate was weakened.
+The revised head still needs its own hosted CI and passing review before merge;
+the previous head's green result is not substituted. Parent, native acceptance,
+release and rollout boundaries remain unchanged.
+
+### 2026-11-05 - Python 3.10 construction-observer compatibility
+
+Head `0d1df88228f1c67dc59aa2f02db4a0a7417db280` passed required CI
+41938167466, but review 5777812790 correctly identified that importing stdlib
+`tomllib` unconditionally broke the declared Python 3.10 floor. Three
+missing-stdlib consumer regressions failed before correction. The observer
+now falls back to `tomli`, declared as a conditional runtime dependency below
+Python 3.11. The dev extra also supplies the real backport on newer test
+interpreters; no supported Python floor or fallback failure is hidden.
+
+All six direct/transitive/missing-input controls pass under actual CPython
+3.10.22 in 23.70 seconds (84.88 seconds including canonical isolated preparation
+and cleanup). Installed runtime metadata selects the backport on 3.10 and its
+real import succeeds. After restoring the ordinary CPython 3.12 test environment,
+all forty-six freshness consumer controls pass in 121.07 seconds (158.72 total),
+including real backport parsing with stdlib TOML explicitly unavailable.
+This is contained test-runtime qualification, not an installed-host update.
+
+Lint, module ceilings, thirteen-plugin install contract and whitespace checks
+pass. The Python-only dependency-age audit covers 541 declarations with zero
+violations at the unchanged seven-day minimum. The local all-ecosystem audit
+remains failed: four public npm metadata TLS handshakes failed with certificate
+validation enabled. The attempted plugin-directory audit found zero declarations
+and is not evidence; the repository-root Python audit is the counted result.
+TLS and age policy remain unchanged. The new head must pass its actual complete
+hosted declaration audit, required CI and fresh review before merge. Earlier
+green heads do not clear those gates; parent and rollout boundaries remain open.

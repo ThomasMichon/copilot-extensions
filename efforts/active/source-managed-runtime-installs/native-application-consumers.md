@@ -74,9 +74,12 @@ and retained-wheel/profile changes are not taken over.
   behavior. A healthy selected application remains callable despite payload
   skew; unsupported or missing requirements produce actionable diagnostics,
   not silent exits, runtime reconstruction or whole-hook suppression.
-- [ ] Route affected hook/command imports through the existing external-cache
+- [x] Route affected hook/command imports through the existing external-cache
   owner. Preserve caching and normal non-deployment hook duties without new
   slot files, cache exemptions, site-startup hooks or deletion of prior state.
+  The released cold/repeated consumer proves unchanged runtime files and
+  positive creation/reuse of all 602 external cache files. Actual changed-input
+  acceptance remains a separate unchecked validation item below.
 - [ ] Qualify the exact native consumer, then publish source changes through
   review/CI and actual Main promotion. Record released-consumer results and
   remaining adoption scope separately; no host rollout is included.
@@ -112,6 +115,156 @@ and retained-wheel/profile changes are not taken over.
   application in the contributor matrix.
 
 ## Journal
+
+### 2026-11-05 - Released cold/warm consumer qualified; changed-input timing remains
+
+The fresh exact-role witness passes both complete installations, installed
+commands/imports, unavailable-source and argument-refusal preservation, and
+authenticated serving under a real consumer. After release it confirms native
+exit in 86.35 seconds, no active route and the original PID retained only as
+previous. This directly validates the demand-aware and active-versus-previous
+fixture corrections without changing production service policy.
+
+Cold and repeated public standalone reconciliation launch and complete with
+canonical version-1 `ok: true` status, no failed operations and the actual
+repository path. Every compared runtime file, version selection and redirect
+is unchanged through native hook/catalog/end, explicit reconciliation and an
+unchanged refresh. All 602 external bytecode files are reused without rewrite.
+No prewarming, bytecode suppression or backend-file exclusion is introduced.
+Container native activation remains explicitly unqualified.
+
+The aggregate remains three passes and one failure: no changed default-head
+release appears within the original 480-second bound. The exact guest is
+absent and all watched host state remains unchanged. Ordinary promotion #10532
+lands immediately after that window and changes the payload from
+`1.24.465-dev1` to `1.24.466-dev1`; it cannot retroactively qualify the failed
+attempt. The following frozen candidate's Worktrees tree is identical, so
+another guest is not launched for it. A finite read-only metadata observer
+waits for a genuinely changed pending payload, without pinning a prior
+frontend, forcing release or extending the witness limits. Changed-input and
+full native-activation acceptance remain separate open work.
+
+### 2026-11-04 - Actual Main release verified independently of the recovery run
+
+#10523 is provider-confirmed merged at `2026-11-04T22:41:59Z`, Main
+`3b7ef44ed5d98093d18e971c55f3a5fb73d197b5`, from candidate
+`c0cbedefc231063dc64ec1161f6f4f64cd9a73ce`. The actual release state admits
+Dev `d30a64fa4bc0e8514275fcf82df76425e41e868b`; Git ancestry contains #10505's
+merge and all three reviewed standalone/guidance consumer blobs match.
+The actual producing promotion run is successful `41925387683`, not the
+older recovery run.
+
+The older run's attempt 2 completes without a promotion PR and skips downstream
+qualification/publication/merge. Its green status alone is not release proof.
+The newer actual Main receipt and code establish the release and successful
+credential-dependent publication. The full actual Main export verifies ten
+critical consumer blobs and archive SHA-256
+`a4bdf834c3f4789e622c17682781cfc296bcdf0116e465b8c7d75b65223375fd`.
+No host rollout or full native activation is inferred.
+
+The distinct released consumer constructs the pair and completes Manager
+installation/readiness/preservation. Worktrees installation, command/import
+readiness and initial authenticated serving pass; the actual installed files
+match all three reviewed target blobs. The unsupported argument is explicitly
+refused and selections plus completion bytes stay unchanged, but the following
+canonical monitor-serving check returns false while command/import checks pass.
+The result is two passes and one failure before native update. Its exact guest
+is absent and watched host state remains unchanged.
+
+The cause is unestablished, not declared flaky or uniquely attributed to a
+source change. A fresh witness adds only failure-time read-only serving
+diagnostics and bounded log retention, without readiness retry or weaker
+assertions. Installed consumer/update qualification remains open.
+
+That witness reproduces the failure, but its route diagnostic itself raises
+`AttributeError`; the bounded monitor log is retained. The source contract
+explicitly permits idle exit after three empty sweeps without a real consumer.
+The fixture has no active consumer demand during preservation checks. A new
+fresh witness therefore retains the installed owner's real transition-demand
+subscription during those unchanged checks, releases it explicitly, and also
+requires native idle exit afterward. It does not fake session adoption, suppress
+idle exit, restart the service or weaken the serving assertion. Both outcomes
+must be observed before treating the missing demand as the fixture cause.
+Missing/empty-route diagnostic controls fail on the old helper and pass after
+the guard correction; unavailable observations remain explicit. No production
+or service-policy change is made.
+
+With the real consumer present, the next witness passes initial serving,
+after-refusal serving and serving without the preparation source, together
+with command/import and selector/completion preservation. It still fails the
+new 120-second post-release native-exit/route-removal control. That boundary
+lacks sufficient final state, and canonical client release is best-effort;
+a returned context is not remote unsubscription proof. The exact guest is
+absent and watched host state is unchanged. Another fresh witness adds only
+final-state capture before that same assertion, preserving its bound and
+all positive checks. Synthetic timeout/read-error/native-exit controls verify
+capture without accepting unavailable observations. No complete fixture-cause
+or product-regression conclusion is claimed yet.
+
+The final-state witness proves native process exit and loss of its birth
+identity; the old listener refuses connections. Its remaining failed assertion
+uses `read_active_endpoint(..., verify_listener=False)`, which deliberately
+searches both active and retained previous entries. Canonical `clear_if_owner`
+demotes its active endpoint to previous for in-flight fallback compatibility.
+The witness has not captured raw route roles, so it cannot infer a remaining
+active entry from that convenience reader alone.
+
+A fresh correction checks the raw active role, preserves valid previous
+retention, and still requires original native exit within the same bound.
+Controls reproduce the old retained-fallback false failure; dead-active,
+native-live and unknown-role inputs still refuse. No production routing or
+service policy changes. Actual plugin input must still change before update
+acceptance can pass.
+
+### 2026-11-04 - Main promotion blocked by release credential scope
+
+Run `41920408755` admits Dev
+`be98510a8f4e98b4377de29f756111a05f89027f`, which contains the #10505 merge.
+Source admission, frozen candidate, unit coverage, first-party wheel build and
+artifact attestation pass. The sole failed job is `Promote dev -> main`
+(`126896518220`): GitHub refuses the exact candidate
+`edf092097252cbc9cc60ed11aec1df1d958365b0` push because the release PAT lacks
+`workflow` scope for `.github/workflows/installation-context-full.yml`.
+
+The existing watchdog issue #10515 owns the tracked authorization blockage;
+this is not a runtime-test failure or a demonstrated flake. No promotion PR,
+forced retry, credential substitution, permission expansion or bypass is
+attempted. The existing release credential owner must repair the authorization
+before the documented exact-candidate recovery can proceed. Source merge is
+not release, and released native/update acceptance remains open.
+
+The credential owner subsequently reports adding Workflows read/write.
+Recovery is requested for only the existing failed publication job on the same
+run, retaining its original candidate and qualification. That request does not
+prove successful publication. The bounded disposable witness expires waiting
+for actual Main before any backend build or install. Its exact guest is absent,
+but two watched host selectors change under an unknown owner; host preservation
+is not claimed or restored. The failed attempt remains separate from any
+future fresh witness.
+
+### 2026-11-04 - Standalone correction merged; release and update proof remain
+
+#10505 merged to Dev at `2026-11-04T21:37:29Z`, commit
+`39dcfd9404de537b78d4d49bf872cf9c8a537df4`. Genuine Copilot review
+`5775823654` covered published head
+`05ccf04f616333d5e32c68f77e4aa99fbeac2598`; its sole Low finding was addressed
+in the PR description and the actual thread resolved. The Performance impact
+section records synchronous completion/RECORD identity work, its frequency and
+scaling, reuse/invalidation, a reproducible timing flow and unavailable native
+latency/CPU/tail evidence. Cache reuse is not latency qualification.
+
+The description update initially flattened the required source marker.
+Attribution correctly failed, then passed after the actual assigned marker
+was restored on its own line and the complete scalar body roundtrip verified.
+Unit coverage, guards/lint, identifier and workflow-lockdown guards and the
+required PR gate pass on the unchanged source head. The managed Maintainer
+merge bypassed only the separate review-count gate, not CI or feedback.
+Both #7028 and #7030 remain open.
+
+The continuing source worktree synchronized to the actual squash merge.
+Main promotion, released positive reconciliation and genuinely changed native
+payload input remain the next gates. No host rollout, full native-activation
+qualification or completion of the broader application objective is claimed.
 
 ### 2026-11-04 - Released worker verified; standalone reconciliation remains
 

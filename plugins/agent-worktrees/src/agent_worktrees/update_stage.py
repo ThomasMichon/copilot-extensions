@@ -193,7 +193,41 @@ def discover_plugin_dir(home: Path | None = None) -> tuple[Path | None, str]:
     return None, ""
 
 
-def fingerprint(plugin_dir: Path) -> str:
+def _construction_roots(plugin_dir: Path) -> set[Path]:
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        import tomli as tomllib
+
+    pending = [plugin_dir]
+    roots: set[Path] = set()
+    while pending:
+        declared = pending.pop()
+        if declared.is_symlink():
+            raise ValueError(f"Construction input is a symlink: {declared}")
+        root = declared.resolve(strict=True)
+        if root in roots:
+            continue
+        roots.add(root)
+        if root.is_file():
+            continue
+        manifest = root / "pyproject.toml"
+        if root == plugin_dir.resolve() and not manifest.exists():
+            continue
+        sources = tomllib.loads(manifest.read_text(encoding="utf-8"))
+        for section in ("tool", "uv", "sources"):
+            sources = sources.get(section, {})
+            if not isinstance(sources, dict):
+                raise ValueError(f"Invalid local construction sources: {manifest}")
+        for source in sources.values():
+            path = source.get("path") if isinstance(source, dict) else None
+            if not isinstance(path, str) or not path:
+                raise ValueError(f"Unsupported local construction source: {manifest}")
+            pending.append(root / path)
+    return roots
+
+
+def fingerprint(plugin_dir: Path, *, construction_inputs: bool = False) -> str:
     """Hash the version/launcher/installer files plus the actual application
     source (#2609) to detect a real change.
 
@@ -221,6 +255,10 @@ def fingerprint(plugin_dir: Path) -> str:
     every platform ``sha256sum`` already is. Those two independently hash a
     different file set for a different purpose (a persisted, cross-run
     completion-marker comparison) and are unaffected by this choice.
+
+    ``construction_inputs`` captures the payload and its transitive declared
+    local sources for cached installer actions, excluding generated environments,
+    caches and build output. Ordinary staging retains its curated fingerprint.
     """
     import hashlib
 
@@ -231,33 +269,57 @@ def fingerprint(plugin_dir: Path) -> str:
             try:
                 h.update(fp.read_bytes())
             except Exception:
+                if construction_inputs:
+                    raise
                 h.update(b"<unreadable>")
         h.update(b"\x00")
 
-    source_roots = [plugin_dir / "src"]
-    libs_dir = plugin_dir / "libs"
-    if libs_dir.is_dir():
-        for lib in sorted(p for p in libs_dir.iterdir() if p.is_dir()):
-            candidate = lib / "src"
-            if candidate.is_dir():
-                source_roots.append(candidate)
-    for root in source_roots:
-        if not root.is_dir():
-            continue
-        for fp in sorted(root.rglob("*")):
-            relative = fp.relative_to(plugin_dir)
-            if (
-                not fp.is_file() or fp.suffix in (".pyc", ".pyo")
-                or "__pycache__" in relative.parts
-                or any(part.endswith((".egg-info", ".dist-info")) for part in relative.parts)
-            ):
+    files = []
+    if construction_inputs:
+        def scan_error(error):
+            raise error
+
+        generated = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache"}
+        for root in _construction_roots(plugin_dir):
+            if root.is_file():
+                files.append(root)
                 continue
-            h.update(str(relative).replace("\\", "/").encode("utf-8"))
-            try:
-                h.update(fp.read_bytes())
-            except Exception:
-                h.update(b"<unreadable>")
-            h.update(b"\x00")
+            for directory, directories, names in os.walk(root, onerror=scan_error):
+                project = (Path(directory) / "pyproject.toml").is_file()
+                directories[:] = [
+                    name for name in directories
+                    if name not in generated and not name.endswith((".egg-info", ".dist-info"))
+                    and not (project and name in {"build", "dist"})
+                ]
+                files.extend(Path(directory) / name for name in names)
+        files = sorted(set(files))
+    else:
+        source_roots = [plugin_dir / "src"]
+        libs_dir = plugin_dir / "libs"
+        if libs_dir.is_dir():
+            for lib in sorted(p for p in libs_dir.iterdir() if p.is_dir()):
+                candidate = lib / "src"
+                if candidate.is_dir():
+                    source_roots.append(candidate)
+        for root in source_roots:
+            if root.is_dir():
+                files.extend(sorted(root.rglob("*")))
+    for fp in files:
+        relative = fp.relative_to(plugin_dir) if fp.is_relative_to(plugin_dir) else fp
+        if (
+            not fp.is_file() or fp.suffix in (".pyc", ".pyo")
+            or "__pycache__" in relative.parts
+            or any(part.endswith((".egg-info", ".dist-info")) for part in relative.parts)
+        ):
+            continue
+        h.update(str(relative).replace("\\", "/").encode("utf-8"))
+        try:
+            h.update(fp.read_bytes())
+        except Exception:
+            if construction_inputs:
+                raise
+            h.update(b"<unreadable>")
+        h.update(b"\x00")
     return h.hexdigest()
 
 
@@ -419,6 +481,12 @@ def stage(
                         if "COPILOT_EXTENSIONS_CONTEXT" in installer_environment else None
                     ),
                 )
+                if deployment_diagnostic is None:
+                    from .reconcile_freshness import check_runtime_freshness
+
+                    result["runtime_freshness"], deployment_diagnostic = (
+                        check_runtime_freshness("agent-worktrees", plugin_dir, runtime_root)
+                    )
         except ValueError as error:
             result["venv_drift_error"] = str(error)
             result["runtime_apply_blocked"] = "installation-context-invalid"

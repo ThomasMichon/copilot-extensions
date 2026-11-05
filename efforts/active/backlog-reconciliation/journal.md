@@ -3,6 +3,12 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-04 - Three repository-authority contracts, closed metadata exclusion and nine comparisons](<journal/2026/11.04 repository-authority-contracts.md>)
+
+- [2026-11-04 - Four finalization/recovery contracts, twelve comparisons and retained historical intake](<journal/2026/11.04 finalization-recovery-contracts.md>)
+
+- [2026-11-04 - Four lifetime/reclaim contracts, ten comparisons and two whole-description withholds](<journal/2026/11.04 lifetime-control-contracts.md>)
+
 - [2026-11-04 - Four standalone/declaration contracts, eleven comparisons and two whole Active homes](<journal/2026/11.04 standalone-declaration-contracts.md>)
 
 - [2026-11-04 - Two whole installation contracts, five comparisons and retained parked/consumer boundaries](<journal/2026/11.04 installation-scope-contracts.md>)
