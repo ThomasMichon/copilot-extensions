@@ -13,9 +13,10 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 PRODUCTS = ("agent-machines", "agent-containers")
+ALL_PRODUCTS = (*PRODUCTS, "agent-codespaces")
 GIT_BASH = Path(r"C:\Program Files\Git\bin\bash.exe")
 BASH = str(GIT_BASH) if GIT_BASH.is_file() else shutil.which("bash")
-LINUX_FLOCK = sys.platform.startswith("linux") and BASH is not None and shutil.which("flock") is not None
+POSIX_FLOCK = sys.platform in ("linux", "darwin") and BASH is not None and shutil.which("flock") is not None
 
 
 def _posix(path: Path) -> str:
@@ -24,12 +25,22 @@ def _posix(path: Path) -> str:
 
 
 def _script(tmp_path: Path, product: str, root: Path, body: str) -> Path:
-    helper = REPO / "plugins" / product / "scripts" / "legacy-transaction.sh"
+    scripts = REPO / "plugins" / product / "scripts"
+    helper = scripts / ("install-transaction.sh" if product == "agent-codespaces" else "legacy-transaction.sh")
+    adapters = ""
+    if product == "agent-codespaces":
+        adapters = "\n".join((
+            f"SCRIPT_DIR={shlex.quote(_posix(scripts))}",
+            f"_bootstrap_python() {{ printf '%s' {shlex.quote(_posix(Path(sys.executable)))}; }}",
+            "_enter_install_lock() { enter_codespaces_install_transaction; }",
+            "_exit_install_lock() { exit_codespaces_install_transaction; }",
+        ))
     script = tmp_path / ("gate-" + str(len(list(tmp_path.glob("gate-*")))) + ".sh")
     script.write_text("\n".join((
         "set -euo pipefail",
         f"INSTALL_DIR={shlex.quote(_posix(root))}",
         f". {shlex.quote(_posix(helper))}",
+        adapters,
         "trap '_exit_install_lock' EXIT",
         body,
     )), encoding="utf-8", newline="\n")
@@ -46,18 +57,18 @@ def _environment(fallback: bool) -> dict[str, str]:
     return env
 
 
-def _run(script: Path, fallback: bool) -> subprocess.CompletedProcess[str]:
-    if not BASH:
+def _run(script: Path, fallback: bool, bash: str | None = BASH) -> subprocess.CompletedProcess[str]:
+    if not bash:
         pytest.skip("Bash unavailable")
     return subprocess.run(  # noqa: S603 - fixed owned gate fixture
-        [BASH, _posix(script)], env=_environment(fallback), capture_output=True,
+        [bash, _posix(script)], env=_environment(fallback), capture_output=True,
         input="", text=True, timeout=10,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
 
 
-@pytest.mark.skipif(not LINUX_FLOCK, reason="Real Linux flock/fcntl interoperability")
-@pytest.mark.parametrize("product", PRODUCTS)
+@pytest.mark.skipif(not POSIX_FLOCK, reason="Real POSIX flock/fcntl interoperability")
+@pytest.mark.parametrize("product", ALL_PRODUCTS)
 @pytest.mark.parametrize("holder_fallback", (False, True))
 def test_actual_native_and_python_backends_contend_in_both_directions(
     tmp_path: Path, product: str, holder_fallback: bool,
@@ -149,7 +160,7 @@ def test_missing_both_primitives_fails_closed_and_closes_fd8(tmp_path: Path, pro
     assert not (root / ".install.lock.pid").exists()
 
 
-@pytest.mark.skipif(not LINUX_FLOCK, reason="Real Linux kernel lock release")
+@pytest.mark.skipif(not POSIX_FLOCK, reason="Real POSIX kernel lock release")
 @pytest.mark.parametrize("product", PRODUCTS)
 @pytest.mark.parametrize("fallback", (False, True))
 @pytest.mark.parametrize("exit_mode", ("failure", "eof"))
@@ -169,7 +180,7 @@ def test_owned_gate_releases_after_failure_or_stdin_eof(
     assert (lock.read_bytes(), lock.stat().st_ino) == before
 
 
-@pytest.mark.skipif(not LINUX_FLOCK, reason="Actual Linux native publishers and kernel contention")
+@pytest.mark.skipif(not POSIX_FLOCK, reason="Actual POSIX native publishers and kernel contention")
 @pytest.mark.parametrize("product", PRODUCTS)
 @pytest.mark.parametrize("publisher_fallback", (False, True))
 def test_actual_init_stamp_publisher_obeys_opposite_backend_holder(
@@ -206,3 +217,52 @@ def test_actual_init_stamp_publisher_obeys_opposite_backend_holder(
     finally:
         stdout, stderr = holder.communicate("\n", timeout=5)
         assert holder.returncode == 0, stdout + stderr
+
+
+@pytest.mark.skipif(not POSIX_FLOCK, reason="Real POSIX descriptor identity")
+@pytest.mark.parametrize("product", ALL_PRODUCTS)
+@pytest.mark.parametrize("bash", list(dict.fromkeys(filter(None, (BASH, "/bin/bash")))))
+def test_existing_lock_descriptor_matches_under_available_shells(
+    tmp_path: Path, product: str, bash: str,
+) -> None:
+    if not Path(bash).is_file():
+        pytest.skip("Selected Bash is unavailable")
+    root = tmp_path / "runtime"
+    root.mkdir()
+    lock = root / ".install.lock"
+    lock.write_bytes(b"persistent contents")
+    before = lock.stat().st_dev, lock.stat().st_ino, lock.read_bytes()
+    result = _run(_script(tmp_path, product, root, "_enter_install_lock 1"), False, bash)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (lock.stat().st_dev, lock.stat().st_ino, lock.read_bytes()) == before
+
+
+@pytest.mark.skipif(not POSIX_FLOCK, reason="Real POSIX lock inode substitution")
+@pytest.mark.parametrize("product", ALL_PRODUCTS)
+@pytest.mark.parametrize("replacement", ("regular", "symlink"))
+def test_lock_path_substitution_after_acquisition_is_refused(
+    tmp_path: Path, product: str, replacement: str,
+) -> None:
+    root = tmp_path / "runtime"
+    root.mkdir()
+    lock = root / ".install.lock"
+    lock.write_bytes(b"original")
+    inode = lock.stat().st_ino
+    substitute = (
+        'ln -s "$INSTALL_DIR/original" "$INSTALL_DIR/.install.lock"'
+        if replacement == "symlink" else
+        'printf replacement >"$INSTALL_DIR/.install.lock"'
+    )
+    result = _run(_script(tmp_path, product, root, "\n".join((
+        "flock() {",
+        'command flock "$@" || return',
+        'mv "$INSTALL_DIR/.install.lock" "$INSTALL_DIR/original"',
+        substitute,
+        "}",
+        "if _enter_install_lock 1; then echo incorrectly-admitted; exit 9; fi",
+        "echo refused",
+    ))), False)
+    assert result.returncode == 0 and result.stdout.strip() == "refused", result.stdout + result.stderr
+    assert (root / "original").stat().st_ino == inode
+    assert (root / "original").read_bytes() == b"original"
+    assert lock.is_symlink() == (replacement == "symlink")

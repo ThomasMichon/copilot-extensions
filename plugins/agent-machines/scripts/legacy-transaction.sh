@@ -43,6 +43,20 @@ _exit_install_lock() {
     fi
 }
 
+_install_lock_identity_matches() {
+    local path="$INSTALL_DIR/.install.lock" opened named
+    [[ -f "$path" && ! -L "$path" ]] || return 1
+    if [[ "${OSTYPE:-}" == darwin* ]]; then
+        # With no pathname, BSD stat uses fstat(stdin), not the /dev/fd filesystem.
+        opened="$(/usr/bin/stat -f '%d:%i' <&8)" || return 1
+        named="$(/usr/bin/stat -f '%d:%i' "$path")" || return 1
+        [[ "$opened" == "$named" ]] || return 1
+    else
+        [[ "$path" -ef /dev/fd/8 ]] || return 1
+    fi
+    [[ ! -L "$path" ]]
+}
+
 _python_install_fd_lock() {
     local timeout="$1" candidate python=""
     while IFS= read -r candidate; do
@@ -98,7 +112,7 @@ _enter_install_lock() {
         exec 8>&-
         return 1
     fi
-    if ! [[ "$INSTALL_DIR/.install.lock" -ef /dev/fd/8 ]] ||
+    if ! _install_lock_identity_matches ||
         ! _validate_install_root || ! _legacy_install_receipts_clear; then
         exec 8>&-
         return 1
