@@ -252,6 +252,28 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [twelve whole consumer/ownership contracts](whole-consumer-ownership-contracts.md)
+integrate 38 whole texts and thirty-six ranked relationships. All twelve stay
+OPEN with independent elevated, shell, runtime/source, cursor, hook, WSL,
+consume and identifier outcomes. Both selector surfaces and all nine slugs,
+the complete Index lock span/alias-watermark cases, tracking-only Bridge
+programme and finite warning attribution survive. The
+[research journal](<journal/2026/11.05 whole-consumer-ownership-contracts.md>)
+records no receiving agreement, new closure credit or custody effects.
+
+The ten-contract checkpoint is actually delivered in #10678 after genuine
+exact-head approval, no review issues/threads and nine complete successful/
+skipped checks, including the required PR gate. All seven merged blobs equal
+the approved head; only its publication child finalized, retained. The
+[delivery journal](<journal/2026/11.05 live-consumer-policy-contracts.md>)
+records two equal complete 01:11 PST scans: 1,011 whole open, 282 above 729;
+736 creator-eligible, 275 excluded, 672 original-cohort and 339 inflow.
+There are no arrivals, departures or new credit; dispositions remain 777
+and the parent stays Active. Twelve following whole contracts and thirty-six
+ranked relationships are researched for integration. Preserve all-nine-slug
+selection, original finite outcomes, real Index alias/checkpoint obligations
+and the ordered Bridge programme's tracking-only completion boundary.
+
 The [ten live-consumer/policy contracts](live-consumer-policy-contracts.md)
 integrate forty whole texts and thirty ranked relationships, including the
 newly qualified complete current PR-operations canonical and all eleven
