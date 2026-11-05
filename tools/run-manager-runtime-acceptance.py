@@ -38,7 +38,9 @@ def main() -> int:
     )
     if prepared.returncode:
         return prepared.returncode
-    python = REPO / ".test-venvs" / sys.platform / "worktree-manager" / (
+    from plugin_test_resources import venv_root
+
+    python = venv_root(REPO) / "worktree-manager" / (
         "Scripts/python.exe" if os.name == "nt" else "bin/python"
     )
     filename = {

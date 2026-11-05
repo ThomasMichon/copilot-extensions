@@ -6412,8 +6412,8 @@ recomputed on every invocation. Each AST visitor resolves its bound dispatch
 method once per node type and file, retaining the same traversal and scope
 handling without repeated dynamic method lookup.
 
-`tools/run-plugin-tests.py` builds/reuses a cached dev venv per plugin under
-`.test-venvs/<platform>/` (git-ignored; uses `uv`, so vendored
+`tools/run-plugin-tests.py` builds/reuses a cached dev venv per plugin in
+external scratch (uses `uv`, so vendored
 `[tool.uv.sources]` path deps resolve) and runs `pytest`:
 
 ```bash
@@ -6423,6 +6423,27 @@ python tools/run-plugin-tests.py --all                  # every plugin with a su
 python tools/run-plugin-tests.py agent-bridge --guards  # just the fast @pytest.mark.guard checks
 python tools/run-plugin-tests.py agent-bridge -k picker # pass-through pytest -k filter
 ```
+
+Both shared runners resolve `AGENT_SCRATCH_ROOT` as an absolute directory,
+or use a per-user `copilot-extensions-tests-<user-key>` directory under the
+OS temporary directory when it is unset. Relative, file, linked/reparse,
+or checkout-internal scratch roots fail explicitly, without falling back or
+touching existing checkout-local environments.
+
+A retained `ce-tests-<canonical-checkout-key>/venvs/<platform>/<target>` cache
+keeps different checkouts and targets independent; canonical spellings of the
+same checkout reuse it. Its `scratch-owner.json` records source ownership and
+creation time, not cleanup permission. Disposable runs and dependency overrides
+use exclusively allocated, timestamped directories below that cache's `runs/`,
+with their own ownership breadcrumbs and the existing process-aware cleanup.
+Nested test tools receive a sandbox-local `AGENT_SCRATCH_ROOT`, never the host's
+retained scratch root. Pytest's cache and interpreter bytecode caches also
+stay in the disposable sandbox. Environment leases, source fingerprints and unreaped-tree
+retention remain unchanged. `--list` does not allocate or validate scratch.
+Old `.test-venvs` and `.test-runs` directories are neither migrated nor deleted.
+Changing scratch storage starts a separate cache; keep the same setting between
+`--prepare-only` and execution. This does not relocate unrelated tools' caches
+or caller-selected reports.
 
 For a focused lane, repeat `--test-file tests/test_name.py` with exactly one
 named plugin to avoid importing unrelated test modules. The selector accepts
@@ -6849,7 +6870,7 @@ group cleanup still follows confirmed process reaping; an unreaped scope
 retains its sandbox, including overlong files.
 
 > **Cached local dependencies are source-bound, not editable.** Path dependencies
-> install as retained copies in `.test-venvs/<platform>/<target>`. The runner
+> install as retained copies in the source-bound scratch venv. The runner
 > fingerprints their complete canonical/transitive local source graph, explicit
 > companion projects and retained standalone build resources, not just package
 > versions or manifests. Changed, added or removed source files trigger a rebuild;
@@ -7658,9 +7679,11 @@ their target cannot be inferred safely without executing them. This explicit
 address must name the environment they actually use, so different launchers
 sharing it contend. The override requires `--python` and cannot be used with
 `--prepare`; it is not an environment-exclusion bypass.
-`--prepare` remains restricted to repository `.test-venvs` interpreters;
+`--prepare` is restricted to that component's exact managed scratch interpreter;
 preparation and test use share one held lease. POSIX venv `bin/python`
 symlinks are invoked as venv launchers, not resolved to the base interpreter.
+An old checkout-local interpreter may still be explicitly selected with
+`--python` for execution, but is never provisioned or migrated implicitly.
 
 Windows standalone cleanup retains extended-length paths and the unchanged
 15-second transient sharing retry. A read-only regular file may have its write
@@ -7736,7 +7759,7 @@ and unchanged POSIX handling.
 ```powershell
 $env:PYTHONPATH = "$(Join-Path $PWD 'libs\ssh-manager\src');$(Join-Path $PWD 'libs\agent-procutil\src')"
 $env:SSH_MANAGER_WINDOWS_PROXY_TEST = '1'
-& .\.test-venvs\win32\agent-bridge\Scripts\python.exe -m pytest -q libs\ssh-manager\tests\test_proxy_windows.py
+python tools/run-plugin-tests.py ssh-manager --test-file tests/test_proxy_windows.py
 ```
 
 The portable proxy contracts cover binary forwarding, routing identity, and

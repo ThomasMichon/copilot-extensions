@@ -38,6 +38,11 @@ finally:
     sys.path[:] = _previous_path
 
 
+@pytest.fixture(autouse=True)
+def runner_scratch(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(tmp_path.parent / "runner-scratch"))
+
+
 def test_unreaped_tree_retains_sandbox_without_cleanup(monkeypatch, tmp_path, capsys):
     plugin = tmp_path / "alpha"
     sandbox_paths = []
@@ -139,7 +144,7 @@ def test_junit_reporting_refuses_non_execution_modes(arguments, tmp_path: Path) 
     assert not list(tmp_path.iterdir())
 
 
-@pytest.mark.skipif(os.name != "nt", reason="native Windows short TEMP alias")
+@pytest.mark.skipif(os.name != "nt", reason="native Windows short scratch alias")
 def test_short_temp_alias_reaches_real_daemon_registry(monkeypatch, tmp_path, cleanup_runner):
     import ctypes
 
@@ -147,7 +152,7 @@ def test_short_temp_alias_reaches_real_daemon_registry(monkeypatch, tmp_path, cl
     length = ctypes.windll.kernel32.GetShortPathNameW(str(tmp_path), buffer, len(buffer))
     if not length or length >= len(buffer) or Path(buffer.value) == tmp_path:
         pytest.skip("filesystem has no short alias for the temporary parent")
-    monkeypatch.setenv("TEMP", buffer.value)
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", buffer.value)
     observed = []
 
     def run_contained(*args, **kwargs):
@@ -175,7 +180,7 @@ def test_temp_parent_is_canonical_before_sandbox_and_native_admission(
     nested = tmp_path / "nested"
     nested.mkdir()
     requested = nested / ".." if noncanonical else tmp_path
-    monkeypatch.setenv("TEMP", str(requested))
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(requested))
     original = runner._TestSandbox
     parents = []
 
@@ -194,7 +199,7 @@ def test_temp_parent_is_canonical_before_sandbox_and_native_admission(
     monkeypatch.setattr(runner, "_TestSandbox", CanonicalSandbox)
     monkeypatch.setattr(runner, "run_contained", admitted)
     assert cleanup_runner() == 0
-    assert parents == [tmp_path.resolve()]
+    assert parents == [runner.runs_root(runner.REPO)]
 
 
 def test_plugin_budget_includes_final_sandbox_cleanup(
@@ -1963,6 +1968,7 @@ def test_default_environment_redirects_all_mutable_roots(tmp_path: Path) -> None
         {
             "PATH": os.environ.get("PATH", ""),
             "HOME": "/real/home",
+            "AGENT_SCRATCH_ROOT": "/real/scratch",
             "AGENT_WORKTREES_HOME": "/real/agent-worktrees",
             "AGENT_WORKTREES_PROJECTS_YAML": "/real/projects.yaml",
             "GH_TOKEN": "not-a-real-token",
