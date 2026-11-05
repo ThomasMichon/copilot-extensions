@@ -1237,6 +1237,27 @@ def _stub_anchor_config(monkeypatch, *, repo_name="example-web", anchor="/w/anch
 
 
 class TestCmdEmbodyAnchor:
+    @pytest.mark.parametrize("live, dry_run", [(True, False), (True, True), (False, True)])
+    def test_existing_or_preview_anchor_does_not_claim_a_bridge_seed(
+        self, monkeypatch, capfd, live, dry_run,
+    ):
+        from agent_worktrees import bridge_seed_delivery
+
+        _stub_anchor_config(monkeypatch)
+        monkeypatch.setattr(sessions, "has_mux_session", lambda _: live)
+        monkeypatch.setattr(sessions, "mux_copilot_pane", lambda _: "%1")
+        monkeypatch.setattr(sessions, "mux_new_session", lambda *a, **k: pytest.fail("no spawn"))
+        monkeypatch.setattr(bridge_seed_delivery, "claim", lambda *a: pytest.fail("no claim"))
+        assert m.cmd_embody(_ns(
+            anchor=True, dry_run=dry_run, bridge_seed_operation="operation",
+        )) == 0
+        result = json.loads(capfd.readouterr().out)
+        assert result["session"] == "wt-anchor-example-web"
+        if dry_run:
+            assert result["dry_run"]
+        else:
+            assert result["created"] is False
+
     def test_anchor_mutually_exclusive_with_worktree_id(self, capfd):
         rc = m.cmd_embody(_ns(anchor=True, worktree_id="x"))
         assert rc == 2

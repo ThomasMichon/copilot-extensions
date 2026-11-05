@@ -126,7 +126,7 @@ window, shutdown policy and recovery custody.
 - [ ] Run focused runtime tests, required unit/contract checks and touched-source lint.
 - [ ] Record native/clean-room evidence and explicit skipped-lane reasons;
   source fixtures do not qualify installed rollout or disruptive maintenance.
-- [ ] Re-read the operator capture against the original request before publication.
+- [x] Re-read the operator capture against the original request before publication.
 
 ## Proposal
 
@@ -226,3 +226,6 @@ claims, and recover partial/unknown results without blindly replaying actions.
 - Recorded the general maintenance-window intent and the existing status-first
   resume command/default wording. No disruptive executor, host package update,
   active-session stop, reboot or installed runtime rollout was performed.
+- Final live-no-op audit included anchor joins and dry-run previews: neither
+  now claims Bridge-deferred startup text. The expanded Worktrees packet passed
+  129 tests, with touched-source lint and module-size checks green.

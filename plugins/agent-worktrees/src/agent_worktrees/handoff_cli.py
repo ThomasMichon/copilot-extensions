@@ -278,11 +278,6 @@ def cmd_embody(args: argparse.Namespace) -> int:
             return refusal
 
     if anchor_mode:
-        if getattr(args, "bridge_seed_operation", None):
-            try:
-                args._bridge_seed_report = bridge_seed_delivery.claim(args)
-            except ValueError as exc:
-                return output._json_error(str(exc), exit_code=3)
         return _cmd_embody_anchor(args, config)
 
     # Resolve target worktree id + path (creating a fresh worktree for --new).
@@ -616,7 +611,7 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
         return output._json_error(
             f"project {repo_name!r} has no resolved anchor path", exit_code=2,
         )
-    deferred = getattr(args, "_bridge_seed_report", {})
+    deferred = {}
     wt_id = f"anchor-{repo_name}"
     seed = getattr(args, "seed", None)
 
@@ -660,6 +655,11 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
         })
         return 0
 
+    if getattr(args, "bridge_seed_operation", None):
+        try:
+            deferred = bridge_seed_delivery.claim(args)
+        except ValueError as exc:
+            return output._json_error(str(exc), exit_code=3)
     launch_cmd = _build_launch_cmd(
         config, args, work_dir, profile=None, preflight=launch_preflight,
     )
