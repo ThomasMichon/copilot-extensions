@@ -247,10 +247,28 @@ class QueueSubmissionPreparationMixin:
             )
             previous = _latest(conn, task_id)
             if previous is not None:
+                from .queue_submission_resubmission import rejected_preparation, retained_lineage
+
                 value = json.loads(previous["submission_preparation"])
-                if _encoded(value["request"]) != _encoded(request):
+                if value["request"]["request_id"] == request_id:
+                    if value.get("advancement") is not None:
+                        raise TaskError("submission preparation request was already consumed")
+                    lineage = retained_lineage(conn, value["request"])
+                    if lineage is not None:
+                        request["resubmission"] = lineage
+                    if _encoded(value["request"]) != _encoded(request):
+                        raise TaskError("submission preparation conflicts with its original request")
+                    return value
+                if conn.execute(
+                    "SELECT 1 FROM task_events WHERE task_id=?"
+                    " AND submission_preparation IS NOT NULL"
+                    " AND json_extract(submission_preparation, '$.request.request_id')=? LIMIT 1",
+                    (task_id, request_id),
+                ).fetchone() is not None:
+                    raise TaskError("submission preparation request was superseded")
+                if value.get("advancement") is None:
                     raise TaskError("submission preparation conflicts with its original request")
-                return value
+                request["resubmission"] = rejected_preparation(conn, previous, request)
             value = {"version": 1, "request": request, "blocker": None}
             conn.execute(
                 "INSERT INTO task_events"
@@ -281,6 +299,8 @@ class QueueSubmissionPreparationMixin:
             request = value["request"]
             if request["request_id"] != request_id:
                 raise TaskError("submission preparation request changed")
+            from .queue_submission_resubmission import retained_lineage
+            retained_lineage(conn, request)
             task = self._fetch(conn, task_id)
             if task is None:
                 raise TaskError(f"no such task {task_id!r}")

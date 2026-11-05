@@ -143,6 +143,12 @@ wire-valid owner. The [source readback](journal/2026/11.04-sidecar-native-client
 records browsing, push, resize, return/reopen, pane/PID and cleanup controls;
 Windows/PSMux, popup, installed and native performance remain separate.
 
+#10642 merged as `4a66209b675326368420c3a564b764beb57882a9`, delivering
+the requested sparse concept-fidelity correction and diagnosed source/error
+handling fixes. The [source readback](journal/2026/11.05-sidecar-sparse-presentation.md)
+records healthy ordinary/narrow demonstrations, twelve rendered comparisons
+and exact evidence limits without closing S2-S5 or original parent acceptance.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than
@@ -527,17 +533,28 @@ publication and installed support retain their separate qualification.
 
 ### Presentation correction - sparse concept fidelity
 
-- [ ] Trace the displayed data/error states to their actual producers and
+- [x] Trace the displayed data/error states to their actual producers and
   distinguish a deliberately paused reader from a failed source. Fix confirmed
   source/consumer defects without suppressing genuine uncertainty.
-- [ ] Deliver compact purpose-first chrome, readable collapsed timeline rows
+- [x] Deliver compact purpose-first chrome, readable collapsed timeline rows
   and explicit bounded evidence disclosure, matching the original ASCII
   concept's information hierarchy rather than a raw event-log console.
-- [ ] Qualify the actual full app at ordinary and narrow sizes, healthy and
+- [x] Qualify the actual full app at ordinary and narrow sizes, healthy and
   degraded, with viewport/input/cancellation controls and reviewed visual
   comparisons. Keep installed/native and whole-parent acceptance separate.
 
+Source receipt: #10642. The actual private three-owner app, deterministic
+production-chrome comparisons and separately selected native-client controls
+retain their distinct tiers. No installed/native-performance or popup acceptance
+is inferred from these presentation checks.
+
 ## Validation Plan
+
+- [x] Sparse presentation: actual healthy three-owner full/narrow app controls,
+  separately degraded and collapsed-error comparisons, literal diagnostics,
+  paused-versus-failed state, successful-admission recovery and missing/boundary
+  clocks. #10642 preserves source identities, viewport/input/cancellation
+  contracts and unknown evidence; this is not whole S2-S5 acceptance.
 
 - [x] Qualify the selected worktree's real private resident, owning CLI and
   Textual join, including live publication, backward history and observer
