@@ -4656,7 +4656,7 @@
         "tools/seasoned_public_feed.py": "ee4caa163a7fa9effa12aca5f5019ec5a038fbf5d94cf6a767a981d3ef4a4c33",
         "tools/seasoned_uv.py": "a4e0cf269da3eff0833188b69b5ccfe3445f17fc8a3b814923273559dc0c31d9",
         "tools/standalone_consumers.py": "f5a47994e33e78c24ad2b8793d9b9e8a9dfe7d3116da3f237d4fcabdc224b89f",
-        "tools/standalone_python_artifacts.py": "1e0ea251213e22eb5aaab6d0be684dda08b8f54f465c43ff1da5025e5e4ac4ba",
+        "tools/standalone_python_artifacts.py": "1a7e6e149adda0da9d0593b37960feb4cc2027ed6220ec29ca48c84134384dd1",
         "tools/tag_promotion.py": "06ffc590cf6a32a4e20ff226b76d49e88b7bf7b33e4eeeb3e08a269b20d96ae9",
         "tools/test_check_docs_consistency.py": "18746b96d0ddd72d1750fffb1149921cd002434bde1781cbaa8791646903626b",
         "tools/test_native_qualification_owner.py": "325786511669ba666a36944d4899bb70a99e15952718075fdcd481e80f2dc0cc",

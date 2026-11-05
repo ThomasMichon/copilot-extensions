@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+import sys
 
 from standalone_consumers import standalone_build_resources
 
@@ -13,6 +14,9 @@ COMPONENTS = {
     "index-service": "services/index", "index-engine": "plugins/agent-index/server",
 }
 TRUSTED_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(TRUSTED_ROOT / "libs" / "versioned-runtime"))
+from standalone_build import embedded_members, embedded_projects
+
 _RESOURCE_PACKAGES = {
     "worktree-manager": "worktree_manager",
     "fleet-manager": "fleet_manager",
@@ -65,11 +69,7 @@ def source_closure(component: str, root: Path, builder) -> tuple[Path, list, tup
 
         data = validate_static_build(source, trusted_setup=(TRUSTED_ROOT / COMPONENTS[component] / "setup.py").read_bytes())
         if data.get("dependency-groups", {}).get("first-party-core"):
-            import runpy
-
-            declared = runpy.run_path(str(
-                TRUSTED_ROOT / "libs/versioned-runtime/standalone_build.py",
-            ))["embedded_projects"](source)
+            declared = embedded_projects(source)
             if {directory.resolve() for directory, _data in declared.values()} != {
                 directory.resolve() for _name, directory in dependencies
             }:
@@ -137,9 +137,7 @@ def injected_resources(component: str, root: Path) -> dict[str, Path]:
     elif component == "worktree-manager":
         from plugin_runtime_resources import application_resources
         result.update(application_resources(root / COMPONENTS[component], "worktree_manager"))
-        import runpy
-
-        embedded = runpy.run_path(str(trusted))["embedded_members"](root / COMPONENTS[component])
+        embedded = embedded_members(root / COMPONENTS[component])
         if result.keys() & embedded.keys():
             raise ArtifactBuildError("embedded first-party members collide with application resources")
         result.update(embedded)

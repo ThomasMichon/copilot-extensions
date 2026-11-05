@@ -83,6 +83,13 @@ def test_manager_embedded_metadata_covers_the_canonical_third_party_projection(t
         bundle_lock.collect_inputs(ROOT, root_names=(data["project"]["name"],))
 
 
+def test_standalone_embedded_helpers_preserve_closed_release_source_admission():
+    from promotion_release_helpers import helper_closure
+
+    sources, _decisions = helper_closure(ROOT, entrypoints=("standalone_python_artifacts",))
+    assert "libs/versioned-runtime/standalone_build.py" in sources
+
+
 def _embedded_source(tmp_path):
     source = _source(tmp_path, "worktree-manager")
     library = tmp_path / "libs/agent-procutil"
