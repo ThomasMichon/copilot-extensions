@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse configuration discovery within one-shot PR reads while retaining per-invocation policy freshness.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -2,9 +2,24 @@
 
 from __future__ import annotations
 
+from functools import wraps
 from pathlib import Path
 
 import yaml
+
+
+def scoped_read_dispatch(dispatch):
+    @wraps(dispatch)
+    def scoped(argv):
+        if argv[:1] and argv[0] in ("snapshot", "status", "threads"):
+            from .config_cache import ConfigCacheSession
+            from .inrepo_config_source import resolution_budget
+
+            with ConfigCacheSession().scope(), resolution_budget(reuse_snapshots=True):
+                return dispatch(argv)
+        return dispatch(argv)
+
+    return scoped
 
 
 def resolve_read_repo_config(config, repository, *, explicit=False):
