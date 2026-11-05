@@ -1347,3 +1347,20 @@ an accepted-but-incomplete request also fails promptly rather than consuming
 the whole item deadline. The prior Linux signal-timeout cleanup settles both
 original lifecycle records; Windows retains four settled records plus one
 `launch-outcome-unknown` hold. Neither historical hold is modified or waived.
+
+Run `42034236248` at `a9b14b243917` qualifies the full Linux portfolio. Actual
+native stamp/provision completes in 98.97 seconds after all caller groups are
+destroyed; both cold callers coalesce, bounded controls die, acknowledged
+owners survive and all six original lifecycle records settle with empty final
+inventory. Hook times are 1.104/1.134/1.115 seconds. This is native Linux
+caller-group proof, not another contained substitute.
+
+Windows' native stamp also completes after both caller Jobs close, with two
+coalesced callers and acknowledged-owner survival. The generic restrictive
+negative and desktop witness pass; no visible windows or foreground changes
+are observed. Provision then fails after runtime/command publication because
+the fixture's credential-free OS map omitted `COMPUTERNAME`, which the existing
+deployment metadata writer requires. All eleven original lifecycle records
+settle. The map now preserves that required native metadata; the production
+installer is not changed to hide a missing prerequisite. Full exact-head
+Windows qualification, current CI/review, merge and release remain open.

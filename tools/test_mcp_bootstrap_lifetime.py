@@ -40,6 +40,7 @@ def test_consumer_map_keeps_only_fixture_inputs_and_its_lease(tmp_path):
         "AGENT_MCP_PINNED_CONTEXT": "foreign", "UV_CACHE_DIR": str(tmp_path / "cache"),
         "XDG_RUNTIME_DIR": str(tmp_path / "native-runtime"),
         "DBUS_SESSION_BUS_ADDRESS": "unix:path=fixture-native-bus",
+        "COMPUTERNAME": "fixture-native-host",
     }, {"COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT": "fixture-lease"})
     assert "GITHUB_TOKEN" not in result and "AGENT_MCP_PINNED_CONTEXT" not in result
     assert result["COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT"] == "fixture-lease"
@@ -47,6 +48,7 @@ def test_consumer_map_keeps_only_fixture_inputs_and_its_lease(tmp_path):
     assert result["UV_CACHE_DIR"] == str(tmp_path / "cache")
     assert result["XDG_RUNTIME_DIR"] == str(tmp_path / "native-runtime")
     assert result["DBUS_SESSION_BUS_ADDRESS"] == "unix:path=fixture-native-bus"
+    assert result["COMPUTERNAME"] == "fixture-native-host"
 
 
 def test_cli_without_explicit_consent_does_not_create_fixture(tmp_path):
