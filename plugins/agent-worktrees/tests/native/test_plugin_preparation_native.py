@@ -1,4 +1,4 @@
-"""Opt-in native acquisition/CLI controls; no real plugin installation."""
+"""Opt-in native acquisition/CLI controls with caller-contained fixture state."""
 
 import json
 import os

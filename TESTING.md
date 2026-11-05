@@ -21,8 +21,9 @@ unit-only CI is unchanged.
 Worktrees' opt-in `--test-file tests/test_plugin_preparation.py --test-file
 tests/native/test_plugin_preparation_native.py --allow-explicit-tiers` packet
 checks strict enabled-payload selection, stale inputs, source conflicts and
-partial results. Native cases run the real CLI and activation-preservation
-process boundary with a finite synthetic acquisition child. They do not install
+partial results. The initial two native cases run the real CLI and
+activation-preservation process boundary with a finite synthetic acquisition
+child. Those cases do not install
 real plugins or qualify provider authentication, runtime/service readiness or
 cold-machine onboarding. The native file stays outside default required CI.
 With `NATIVE_COPILOT_TEST_EXE` explicitly selecting an existing native executable,
