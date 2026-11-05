@@ -72,6 +72,7 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     history_entered, block_history = Event(), Event()
     old_cli, old_provider = tmp_path / "old-current-cli", tmp_path / "old-current-provider"
     declaration_override, reject_flag = tmp_path / "cli-declaration.json", tmp_path / "reject-current-flag"
+    refusal_version = tmp_path / "refusal-version.json"
     owner_loop = asyncio.new_event_loop()
     owner_thread = Thread(target=owner_loop.run_forever)
     owner_thread.start()
@@ -195,7 +196,13 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "ver.set_defaults(func=version)\n"
         f"if os.path.exists({str(reject_flag)!r}) and '--current-requests' in sys.argv:\n"
         "    parser.error('unrecognized arguments: --current-requests')\n"
-        "args=parser.parse_args(); args.func(args)\n",
+        "args=parser.parse_args()\n"
+        f"if args.command=='observe-session' and args.current_requests and os.path.exists({str(refusal_version)!r}):\n"
+        "    print(json.dumps({'schema':'bridge-session-observations-v1',"
+        f"'version':json.load(open({str(refusal_version)!r})),'kind':'error','code':'unsupported',"
+        "'message':'selected daemon does not support bridge-session-current-requests-v1'}),flush=True)\n"
+        "    raise SystemExit(3)\n"
+        "args.func(args)\n",
         encoding="utf-8",
     )
     script.chmod(0o700)
@@ -207,6 +214,7 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "manager": manager,
         "owner_loop": owner_loop, "old_cli": old_cli, "old_provider": old_provider,
         "declaration_override": declaration_override, "reject_flag": reject_flag,
+        "refusal_version": refusal_version,
     }
     try:
         yield result

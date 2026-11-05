@@ -8,6 +8,7 @@ from dataclasses import replace
 from datetime import timedelta
 import importlib
 import json
+import os
 from types import SimpleNamespace
 from threading import Thread
 
@@ -27,7 +28,10 @@ from test_companion_agenda_live import current_data, until
 from test_companion_bridge_codec import OWNER, member
 from test_companion_bridge_session_source import semantic_peer as semantic_peer, source
 
-pytestmark = [pytest.mark.portfolio_tier("T3"), pytest.mark.effect("filesystem")]
+pytestmark = [
+    pytest.mark.portfolio_tier("T3"), pytest.mark.effect("filesystem"),
+    pytest.mark.skipif(os.name == "nt", reason="POSIX private CLI pipe; native Windows qualification is separate"),
+]
 
 
 @pytest.fixture
@@ -237,6 +241,19 @@ def test_unrecognized_optional_invocation_never_retries_baseline(semantic_peer, 
 
     async def check() -> None:
         with pytest.raises(bridge.OwnerReadError, match="unrecognized arguments"):
+            await source(tmp_path).prepare(1, stop=asyncio.Event())
+        assert not semantic_peer["requests"]
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("version", [True, 1.0])
+def test_malformed_prequery_refusal_never_retries_baseline(semantic_peer, tmp_path, version) -> None:
+    semantic_peer["refusal_version"].write_text(json.dumps(version))
+    semantic_peer["log"].append("turn_complete", {})
+
+    async def check() -> None:
+        with pytest.raises(TimelineContractError, match="action or version"):
             await source(tmp_path).prepare(1, stop=asyncio.Event())
         assert not semantic_peer["requests"]
 

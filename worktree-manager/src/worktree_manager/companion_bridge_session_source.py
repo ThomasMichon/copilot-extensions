@@ -69,7 +69,7 @@ class SessionCommands(MembershipCommands):
         stream = self.command([*arguments, *(["--current-requests"] if optional else [])], cancelled)
         try:
             first = next(stream, None)
-            if optional and first == {
+            if optional and isinstance(first, dict) and type(first.get("version")) is int and first == {
                 "schema": "bridge-session-observations-v1", "version": 1, "kind": "error",
                 "code": "unsupported",
                 "message": f"selected daemon does not support {CAPABILITY}",
