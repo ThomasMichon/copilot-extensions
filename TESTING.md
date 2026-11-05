@@ -1,5 +1,21 @@
 # Testing copilot-extensions
 
+Manager's additional opt-in `--test-file tests/native/test_companion_popup_tmux.py
+--allow-explicit-tiers` packet opens the actual unmodified Companion through a
+private `display-popup -E` binding and an attached native tmux client PTY.
+Nine cases preserve Ctrl+C's quit-hint/non-exit behavior, then exercise Escape,
+Ctrl+Q or keyboard activation of Exit against ready, blocked and failed owner
+reads. Clean app exit and held-reader retirement return input to the original
+inert CLI without changing its pane/PID or session incarnation. The fixture
+uses client terminal input, not `send-keys` to the underlying CLI pane.
+JUnit properties retain the selected path and evidence boundary. These are
+isolated POSIX source controls, not installed/native Windows, headed pixels,
+frame/input-ready performance, real Copilot sessions or manual-cutover
+acceptance. The original Companion/Relay owners and remaining gates stay
+separate; no production launch, binding, runtime or cleanup policy changes.
+Use the bounded host runner on an explicitly enrolled tmux host. Required
+unit-only CI is unchanged.
+
 Manager's opt-in `--test-file tests/native/test_companion_app_tmux.py
 --test-file tests/native/test_companion_pane_tmux.py --allow-explicit-tiers`
 packet distinguishes the original observer-stub pane test from the actual
