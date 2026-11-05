@@ -5,6 +5,10 @@ from types import SimpleNamespace
 from pathlib import Path
 from collections.abc import Callable
 from typing import Any, TYPE_CHECKING, cast
+from contextlib import closing, contextmanager
+import sqlite3
+import threading
+import time
 
 import pytest
 
@@ -44,7 +48,7 @@ def owners(config: ServiceConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     first_store.enroll("principal-worker-a", enrollment())
     incoming = local_control.LocalControl(binding(version), config, selected=lambda _: None)
     store = incoming.writer.activate()
-    queued: list[Callable[[], None]] = []
+    queued: list[Callable[[], Any]] = []
     health_calls: list[Document] = []
     outgoing.loop = cast(Any, SimpleNamespace(
         call_soon_threadsafe=lambda callback: queued.append(callback)))
@@ -85,6 +89,326 @@ def owners(config: ServiceConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     )
 
 
+async def apply_queued(owners: SimpleNamespace) -> None:
+    task = owners.queued.pop()()
+    if task is not None:
+        await task
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("consumer", ["health", "preparation", "queued-retirement"])
+async def test_control_sqlite_contention_keeps_loop_responsive_and_drains(
+    owners: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, consumer: str,
+) -> None:
+    callback: Callable[[], Any] | None = None
+    if consumer == "queued-retirement":
+        owners.outgoing._observe_supersession()
+        callback = owners.queued.pop()
+        control = owners.outgoing
+    else:
+        control = owners.incoming
+        control.initialized = asyncio.Event()
+        control.initialized.set()
+        connected = asyncio.Event()
+        connected.set()
+        control.service = cast(Any, SimpleNamespace(closed=False))
+        control.connector = cast(Any, SimpleNamespace(connected=connected))
+        control.store = owners.store
+    started, finished = threading.Event(), threading.Event()
+    observed = cast(Callable[[], str | None], control.writer.observed_owner)
+    timing: list[float] = []
+    thread_ids: list[int] = []
+    loop_thread = threading.get_ident()
+    def observe() -> str | None:
+        thread_ids.append(threading.get_ident())
+        timing.append(time.monotonic())
+        started.set()
+        try:
+            return observed()
+        finally:
+            timing.append(time.monotonic())
+            finished.set()
+    monkeypatch.setattr(control.writer, "observed_owner", observe)
+    async def operation() -> Any:
+        if consumer == "queued-retirement":
+            assert callback is not None
+            result = callback()
+            if isinstance(result, asyncio.Future):
+                return await result
+            return result
+        return await control._operate("health" if consumer == "health" else "prepare")
+    async def progress() -> None:
+        deadline = time.monotonic() + 4
+        while not started.is_set():
+            assert time.monotonic() < deadline, "actual control probe did not start"
+            await asyncio.sleep(0.005)
+        assert not finished.is_set(), "control SQLite probe blocked another coroutine"
+    with closing(sqlite3.connect(control.writer.root / "directory.sqlite3")) as blocker:
+        blocker.execute("BEGIN EXCLUSIVE")
+        monitor = asyncio.create_task(progress())
+        task = asyncio.create_task(operation())
+        outcome: object
+        try:
+            await asyncio.wait_for(monitor, 4)
+            task.cancel()
+            await asyncio.sleep(0.02)
+            assert not finished.is_set(), "caller must retain its pending real SQL worker"
+            task.cancel()
+        finally:
+            task.cancel()
+            outcome, = await asyncio.gather(task, return_exceptions=True)
+            monitor.cancel()
+            await asyncio.gather(monitor, return_exceptions=True)
+            blocker.rollback()
+    assert isinstance(outcome, asyncio.CancelledError)
+    assert finished.is_set() and len(thread_ids) == 1
+    assert thread_ids[0] != loop_thread and timing[-1] - timing[0] >= 0.9
+    assert not control.stop.is_set() and not owners.incoming.stop.is_set()
+    await control.close()
+    assert not control.operations
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["health", "prepare"])
+@pytest.mark.parametrize("changed", ["stopped", "closed", "service-closed", "foreign-fence"])
+async def test_control_probe_rechecks_authority_after_await(
+    owners: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, operation: str, changed: str,
+) -> None:
+    control = owners.incoming
+    control.initialized = asyncio.Event()
+    control.initialized.set()
+    connected = asyncio.Event()
+    connected.set()
+    control.service = cast(Any, SimpleNamespace(closed=False))
+    control.connector = cast(Any, SimpleNamespace(connected=connected))
+    control.store = owners.store
+    started = threading.Event()
+    observed = cast(Callable[[], str | None], control.writer.observed_owner)
+    def observe() -> str | None:
+        started.set()
+        return observed()
+    monkeypatch.setattr(control.writer, "observed_owner", observe)
+    with closing(sqlite3.connect(control.writer.root / "directory.sqlite3")) as blocker:
+        blocker.execute("BEGIN EXCLUSIVE")
+        task = asyncio.create_task(control._operate(operation))
+        closing_task: asyncio.Task[None] | None = None
+        try:
+            deadline = time.monotonic() + 4
+            while not started.is_set():
+                assert time.monotonic() < deadline, "actual control probe did not start"
+                await asyncio.sleep(0.005)
+            if changed == "stopped":
+                control.stop.set()
+            elif changed == "closed":
+                closing_task = asyncio.create_task(control.close())
+                await asyncio.sleep(0)
+                assert control.closed.is_set()
+            elif changed == "service-closed":
+                control.service.closed = True
+            else:
+                blocker.execute("UPDATE service_writer SET owner='foreign-control-owner'")
+            blocker.commit()
+            result: object
+            result, = await asyncio.gather(task, return_exceptions=True)
+            if changed == "closed":
+                assert isinstance(result, asyncio.CancelledError)
+            else:
+                assert isinstance(result, dict)
+                assert not result["ready" if operation == "health" else "prepared"]
+        finally:
+            blocker.rollback()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            if closing_task is not None:
+                await closing_task
+    if changed != "closed":
+        await control.close()
+    assert not control.operations
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changed", [
+    "stopped", "closed", "selection", "selection-after-observation", "foreign-fence", "cancelled",
+])
+async def test_actual_queued_retirement_has_no_effect_after_guard_changes(
+    owners: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, changed: str,
+) -> None:
+    control = owners.outgoing
+    control._observe_supersession()
+    callback = owners.queued.pop()
+    started = threading.Event()
+    observed = cast(Callable[[], str | None], control.writer.observed_owner)
+    def observe() -> str | None:
+        started.set()
+        return observed()
+    monkeypatch.setattr(control.writer, "observed_owner", observe)
+    original_set = control.stop.set
+    effects: list[bool] = []
+    def stop() -> None:
+        effects.append(True)
+        original_set()
+    monkeypatch.setattr(control.stop, "set", stop)
+    if changed == "selection-after-observation":
+        loop = asyncio.get_running_loop()
+        main_thread = threading.get_ident()
+        reader = cast(Callable[[], str | None], control.read_selection)
+        def selection() -> str | None:
+            value = reader()
+            if threading.get_ident() != main_thread:
+                loop.call_soon_threadsafe(owners.selected.__setitem__, 0, "1.0")
+            return value
+        control.read_selection = selection
+    with closing(sqlite3.connect(control.writer.root / "directory.sqlite3")) as blocker:
+        blocker.execute("BEGIN EXCLUSIVE")
+        task = callback()
+        assert isinstance(task, asyncio.Task)
+        closing_task: asyncio.Task[None] | None = None
+        try:
+            deadline = time.monotonic() + 4
+            while not started.is_set():
+                assert time.monotonic() < deadline, "actual retirement probe did not start"
+                await asyncio.sleep(0.005)
+            if changed == "stopped":
+                original_set()
+            elif changed == "closed":
+                closing_task = asyncio.create_task(control.close())
+                await asyncio.sleep(0)
+                assert control.closed.is_set()
+            elif changed == "selection":
+                owners.selected[0] = "1.0"
+            elif changed == "foreign-fence":
+                blocker.execute("UPDATE service_writer SET owner='foreign-control-owner'")
+            elif changed == "cancelled":
+                task.cancel()
+                await asyncio.sleep(0)
+            blocker.commit()
+            await asyncio.gather(task, return_exceptions=True)
+        finally:
+            blocker.rollback()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            if closing_task is not None:
+                await closing_task
+    assert not effects
+    assert not owners.incoming.stop.is_set()
+    if changed != "closed":
+        await control.close()
+    assert not control.operations
+
+
+@pytest.mark.asyncio
+async def test_retirement_keeps_original_writer_guard_until_loop_effect(
+    owners: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from single_instance_lease import AlreadyRunningError, SingleInstance
+
+    control = owners.outgoing
+    original_set = control.stop.set
+    def stop() -> None:
+        lease = SingleInstance(str(control.writer.root), service="agent-ssh-service")
+        try:
+            with pytest.raises(AlreadyRunningError):
+                lease.acquire()
+        finally:
+            lease.release()
+        original_set()
+    monkeypatch.setattr(control.stop, "set", stop)
+    control._observe_supersession()
+    await apply_queued(owners)
+    assert control.stop.is_set() and owners.incoming.writer.current()
+
+
+@pytest.mark.asyncio
+async def test_retirement_abandoned_callback_cannot_apply_after_guard_release(
+    owners: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_ssh_service.writer import FencedWriter
+
+    control = owners.outgoing
+    control._observe_supersession()
+    callback = owners.queued.pop()
+    loop = asyncio.get_running_loop()
+    enqueue = loop.call_soon_threadsafe
+    held: list[Callable[[], None]] = []
+    delivered = asyncio.Event()
+    def delay_apply(callback: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        if callback.__name__ == "apply":
+            held.append(callback)
+            return enqueue(lambda: None)
+        return enqueue(callback, *args, **kwargs)
+    monkeypatch.setattr(loop, "call_soon_threadsafe", delay_apply)
+    guard = control.writer.guard
+    @contextmanager
+    def release_before_delivery() -> Any:
+        try:
+            with guard():
+                yield
+        finally:
+            FencedWriter(control.config, "foreign-before-delayed-retirement").activate()
+            assert len(held) == 1
+            def deliver() -> None:
+                held.pop()()
+                delivered.set()
+            enqueue(deliver)
+    monkeypatch.setattr(control.writer, "guard", release_before_delivery)
+    control.writer.timeout = 0.05
+    await callback()
+    assert delivered.is_set() and not held
+    assert not control.stop.is_set()
+    assert not owners.incoming.stop.is_set()
+    assert not control.operations
+
+
+@pytest.mark.asyncio
+async def test_retirement_pending_cancel_precedes_its_drain_handler(
+    owners: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    control = owners.outgoing
+    control._observe_supersession()
+    callback = owners.queued.pop()
+    loop = asyncio.get_running_loop()
+    enqueue = loop.call_soon_threadsafe
+    delivered = asyncio.Event()
+    task: asyncio.Task[None]
+    def cancel_before_apply(callback: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        if callback.__name__ == "apply":
+            def deliver() -> None:
+                task.cancel()
+                callback()
+                delivered.set()
+            return enqueue(deliver)
+        return enqueue(callback, *args, **kwargs)
+    monkeypatch.setattr(loop, "call_soon_threadsafe", cancel_before_apply)
+    task = callback()
+    result, = await asyncio.gather(task, return_exceptions=True)
+    assert isinstance(result, asyncio.CancelledError) and delivered.is_set()
+    assert not control.stop.is_set()
+    assert not owners.incoming.stop.is_set()
+    assert not control.operations
+
+
+@pytest.mark.asyncio
+async def test_health_final_fence_read_follows_actual_snapshot(
+    owners: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_ssh_service.writer import FencedWriter
+
+    control = owners.incoming
+    connected = asyncio.Event()
+    connected.set()
+    control.service = cast(Any, SimpleNamespace(closed=False))
+    control.connector = cast(Any, SimpleNamespace(connected=connected))
+    control.store = owners.store
+    snapshot = owners.store.snapshot
+    def changed_snapshot() -> Document:
+        value: Document = snapshot()
+        FencedWriter(control.config, "foreign-after-snapshot").activate()
+        return value
+    monkeypatch.setattr(owners.store, "snapshot", changed_snapshot)
+    result = await control._attest()
+    assert not result["ready"]
+
+
 @pytest.mark.asyncio
 async def test_ready_successor_eventually_stops_only_outgoing_and_preserves_successor(
     owners: SimpleNamespace,
@@ -94,7 +418,7 @@ async def test_ready_successor_eventually_stops_only_outgoing_and_preserves_succ
     owners.outgoing._observe_supersession()
     assert not owners.outgoing.stop.is_set()
     assert len(owners.queued) == 1
-    owners.queued.pop()()
+    await apply_queued(owners)
     assert owners.outgoing.stop.is_set()
     assert owners.incoming.writer.current()
     await owners.outgoing.close()
@@ -103,17 +427,19 @@ async def test_ready_successor_eventually_stops_only_outgoing_and_preserves_succ
 
 
 @pytest.mark.parametrize("owners", ["1.0"], indirect=True)
-def test_ready_new_native_owner_in_same_selected_slot_retires_old_process(
+@pytest.mark.asyncio
+async def test_ready_new_native_owner_in_same_selected_slot_retires_old_process(
     owners: SimpleNamespace,
 ) -> None:
     owners.outgoing._observe_supersession()
-    owners.queued.pop()()
+    await apply_queued(owners)
     assert owners.outgoing.stop.is_set()
     assert owners.incoming.writer.current()
 
 
 @pytest.mark.parametrize("root_state", ["missing", "inaccessible"])
-def test_uninspectable_selected_record_does_not_hide_ready_successor(
+@pytest.mark.asyncio
+async def test_uninspectable_selected_record_does_not_hide_ready_successor(
     owners: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, root_state: str,
 ) -> None:
     retained_root = owners.root.parent / "retained-runtime"
@@ -136,7 +462,7 @@ def test_uninspectable_selected_record_does_not_hide_ready_successor(
     owners.outgoing._observe_supersession()
     assert owners.calls == [owners.candidate]
     assert len(owners.queued) == 1
-    owners.queued.pop()()
+    await apply_queued(owners)
     assert owners.outgoing.stop.is_set() and owners.incoming.writer.current()
     assert path.read_bytes() == original_bytes
     assert owners.candidate_path.read_bytes() == successor_bytes
@@ -215,7 +541,8 @@ def test_changed_fence_or_selection_during_health_cannot_queue_stale_stop(
 
 
 @pytest.mark.parametrize("race", ["own-fence-restored", "different-fence", "own-reselection"])
-def test_queued_stop_rechecks_on_existing_event_loop(owners: SimpleNamespace, race: str) -> None:
+@pytest.mark.asyncio
+async def test_queued_stop_rechecks_on_existing_event_loop(owners: SimpleNamespace, race: str) -> None:
     owners.outgoing._observe_supersession()
     assert len(owners.queued) == 1
     if race == "own-fence-restored":
@@ -225,11 +552,12 @@ def test_queued_stop_rechecks_on_existing_event_loop(owners: SimpleNamespace, ra
         FencedWriter(owners.incoming.config, "different-owner").activate()
     else:
         owners.selected[0] = "1.0"
-    owners.queued.pop()()
+    await apply_queued(owners)
     assert not owners.outgoing.stop.is_set()
 
 
-def test_readiness_unavailable_then_ready_needs_no_incoming_reply_ack(
+@pytest.mark.asyncio
+async def test_readiness_unavailable_then_ready_needs_no_incoming_reply_ack(
     owners: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ready = [False]
@@ -242,7 +570,7 @@ def test_readiness_unavailable_then_ready_needs_no_incoming_reply_ack(
     assert owners.queued == [] and not owners.outgoing.stop.is_set()
     ready[0] = True
     owners.outgoing._observe_supersession()
-    owners.queued.pop()()
+    await apply_queued(owners)
     assert owners.outgoing.stop.is_set()
 
 

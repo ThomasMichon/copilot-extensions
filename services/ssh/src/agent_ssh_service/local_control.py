@@ -224,7 +224,7 @@ class LocalControl:
         self.handled: set[str] = set()
         self.work_lock = threading.Lock()
         self.pending: Future[Document] | None = None
-        self.operations: set[asyncio.Task[Document]] = set()
+        self.operations: set[asyncio.Task[Any]] = set()
         owner = writer_identity(asdict(self.peer), self.identity)
         def selected_writer() -> None:
             check(not self.closed.is_set() and not self.stop.is_set(), "local-service-stopping")
@@ -270,15 +270,27 @@ class LocalControl:
         self.store, self.service, self.connector, self.relay = store, service, connector, relay
         self.initialized.set()
 
-    async def _attest(self) -> Document:
-        ready = (
-            self.service is not None and self.writer.current()
-            and not self.stop.is_set() and not self.service.closed
+    def _locally_prepared(self) -> bool:
+        return (
+            not self.closed.is_set() and not self.stop.is_set()
+            and (self.service is None or not self.service.closed)
+        )
+
+    def _locally_ready(self) -> bool:
+        return (
+            self.service is not None and self._locally_prepared()
             and cast("ServiceConnector", self.connector).connected.is_set()
             and (self.relay is None or (
                 self.relay.process is not None and self.relay.process.returncode is None
             ))
         )
+
+    async def _attest(self) -> Document:
+        from .hosting import _observe_writer
+
+        ready = self._locally_ready()
+        if ready:
+            ready = await _observe_writer(self.writer) == self.writer.owner and self._locally_ready()
         if ready:
             from .config import SSHServiceError
 
@@ -292,6 +304,8 @@ class LocalControl:
                     raise result[0]
             except SSHServiceError:
                 ready = False
+            if ready:
+                ready = await _observe_writer(self.writer) == self.writer.owner and self._locally_ready()
         return asdict(RuntimeAttestation(
             self.peer.pid, self.peer.start_time, self.binding.slot.name, self.identity, ready,
         ))
@@ -308,11 +322,17 @@ class LocalControl:
 
     async def _operation(self, operation: str) -> Document:
         if operation == "prepare":
+            from .hosting import _observe_writer
+
+            prepared = self._locally_prepared()
+            if prepared and self.initialized.is_set():
+                prepared = (
+                    await _observe_writer(self.writer) == self.writer.owner
+                    and self._locally_prepared()
+                )
             return asdict(RuntimePreparation(
                 self.peer.pid, self.peer.start_time, self.binding.slot.name,
-                self.identity, not self.stop.is_set() and (
-                    not self.initialized.is_set() or self.writer.current()
-                ),
+                self.identity, prepared,
             ))
         if operation == "activate":
             self.activation.set()
@@ -328,12 +348,59 @@ class LocalControl:
             and cast(Callable[[], str | None], self.read_selection)() == selection
         )
 
-    def _stop_if_superseded(self, owner: str, selection: str) -> None:
+    def _stop_if_superseded(self, owner: str, selection: str) -> asyncio.Task[None] | None:
+        if self.closed.is_set() or self.stop.is_set():
+            return None
+        task = asyncio.create_task(self._retire_if_superseded(owner, selection))
+        self.operations.add(task)
+        task.add_done_callback(self.operations.discard)
+        return task
+
+    async def _retire_if_superseded(self, owner: str, selection: str) -> None:
+        from .gateway import _drain
+
+        loop = asyncio.get_running_loop()
+        cancelled = threading.Event()
+        shielded: asyncio.Future[None]
+
+        def verify_and_schedule() -> None:
+            # Retain the existing writer guard until the loop applies the final
+            # local checks: an awaited read is not atomic retirement authority.
+            with self.writer.guard():
+                if cancelled.is_set() or not self._supersession_unchanged(owner, selection):
+                    return
+                applied: Future[bool] = Future()
+                def apply() -> None:
+                    try:
+                        valid = (
+                            not cancelled.is_set() and not shielded.cancelled()
+                            and not self.closed.is_set() and not self.stop.is_set()
+                            and owner != self.writer.owner and self.read_selection is not None
+                            and self.read_selection() == selection
+                        )
+                        if valid:
+                            self.stop.set()
+                        applied.set_result(valid)
+                    except BaseException as error:
+                        applied.set_exception(error)
+                loop.call_soon_threadsafe(apply)
+                try:
+                    applied.result(timeout=self.writer.timeout)
+                finally:
+                    cancelled.set()
+
+        worker = asyncio.create_task(asyncio.to_thread(verify_and_schedule))
+        shielded = asyncio.shield(worker)
         try:
-            if self._supersession_unchanged(owner, selection):
-                self.stop.set()
-        except (OSError, ValueError, RuntimeError):
+            await shielded
+        except asyncio.CancelledError:
+            cancelled.set()
+            await _drain(worker)
+            raise
+        except (OSError, ValueError, RuntimeError, TypeError, KeyError):
             return
+        finally:
+            cancelled.set()
 
     def _observe_supersession(self) -> None:
         """Only this outgoing owner retires, and only from current ready evidence."""

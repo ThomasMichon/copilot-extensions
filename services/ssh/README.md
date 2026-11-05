@@ -160,6 +160,12 @@ Ownership probes run off the event loop through the existing thread boundary,
 including admission, credential-access and stale-owner rechecks. Cancellation
 retains and drains the bounded read-only SQLite probe before its caller settles;
 native control and other coroutines remain responsive while it finishes.
+Health, initialized preparation and queued retirement use the same off-loop
+boundary. Health rechecks ownership after the actual store transaction;
+preparation and health recheck stopped/closed state after awaiting their work.
+Queued retirement retains the original writer guard through its final loop-side
+selection and lifecycle checks. Cancellation or failed callback delivery
+withdraws that callback before the guard is released, so it cannot apply late.
 The existing local-control worker independently observes the current database
 fence and canonical selected slot, authenticates that exact owner's existing
 ready health, and rechecks both before scheduling and applying its own stop.
