@@ -155,6 +155,13 @@ return with a complete pre-dispatch invocation log and negative control.
 The [source readback](journal/2026/11.05-companion-popup-input.md) preserves
 installed/native Windows, Relay and original manual/head acceptance.
 
+#10680 merged as `43a7a76bc0a030c499f31b7bfd784962e907c14c`, carrying
+reported tool/agent labels through the actual semantic source and virtual
+rows. The [source readback](journal/2026/11.05-sidecar-reported-work-labels.md)
+records literal-label fallback, mixed-provider absence and source-bound
+HTTP-52 qualification without turning occurrences into current concurrency
+or lifetime totals.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than
