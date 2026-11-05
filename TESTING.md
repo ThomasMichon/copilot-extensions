@@ -1,5 +1,27 @@
 # Testing copilot-extensions
 
+Manager's opt-in `--test-file tests/test_companion_timeline_scale.py
+--test-file tests/test_companion_timeline_layout.py
+--test-file tests/test_companion_timeline_widget.py --allow-explicit-tiers`
+packet generates only the selected 5,000-event window of a synthetic
+1,000,000-event logical source. It checks display/payload/strip bounds,
+viewport-only paint without I/O, retained integrity proofs, 40 live updates,
+wide-character resize and expansion, and short/scrollable wheel-up demand.
+Pure work-count controls require unchanged geometry reuse and no repeated
+immutable-ID construction, with changed clock/width/relationship invalidation.
+The scale case remains explicitly selected T3 work, not required unit-only CI.
+
+To retain raw observations, use the bounded runner with a fresh owned
+`--junit-dir "$ARTIFACTS"` and extract the `sidecar-scale-observation` property.
+It includes exact source-file hashes, workload/cache conditions, 40 individual
+monotonic wall/current-process CPU/RSS samples for each stage, expected/completed
+counts and nearest-rank p50/p95/p99/max. Uncached visible painting is measured
+separately from applying a live delta through Textual Pilot idle; the latter is
+not a native visible-frame/input-ready boundary. RSS covers the whole pytest
+process, not isolated widget allocation or child CPU/memory. These source-fixture
+observations neither enforce wall-clock thresholds nor qualify native tails,
+installed performance or the complete repaint acceptance target.
+
 Manager's opt-in `--test-file tests/test_companion_joined_lifecycle.py
 --test-file tests/test_companion_bridge_source.py
 --test-file tests/test_companion_bridge_session_source.py

@@ -494,6 +494,10 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       display and source-fixture visual comparisons. Supported local current-input
       source acceptance closes; installed/native and unsupported-source coverage
       remain separate.
+      #10595 qualifies supported private-source history/live browsing, actual
+      waiter clearing, gap/Refresh recovery and complete observer cancellation
+      on the joined app. Bounded render/performance and native acceptance remain
+      separate.
       D5 actual relocation, restoration/reclamation, archive acknowledgment and
       installed/native qualification remain open.
       Current answerability/PRE qualification, archival/rescue, native durability and
@@ -574,6 +578,7 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+- [2026-11-04 - Joined history/live and observer lifecycle source qualification](journal/2026/11.04-sidecar-joined-lifecycle.md)
 - [2026-11-04 - Live-request contract and bounded producer source](journal/2026/11.04-sidecar-live-request-contract.md)
 - [2026-11-04 - Supported local rescue qualified; live request evidence next](journal/2026/11.04-sidecar-rescue-qualification.md)
 - [2026-11-04 - Checkout preservation merged; rescue qualification continues](journal/2026/11.04-sidecar-checkout-preservation.md)
