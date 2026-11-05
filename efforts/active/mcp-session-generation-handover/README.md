@@ -84,6 +84,10 @@ The decomposition and implementation choices below are **agent-recommended**.
 
 - [ ] Resolve concrete client/upstream state ownership and reuse existing
   lifecycle/transport primitives rather than inventing a parallel supervisor.
+- [ ] Reconcile client-bound stdio conduits and shared custody against the
+  [service process-count contract](../../../visions/plugin-services/README.md#process-count-scales-with-services-not-sessions).
+  Heavy backends and custody services must be bounded by installation and
+  identity-compatible pooling, not new per-client daemons or supervisor trees.
 - [ ] Specify the versioned handover, admission and outcome contract, including
   the legacy-client adoption boundary and unsupported/rollback behavior.
 - [ ] Land this prospective effort through normal automated review before code.
@@ -131,6 +135,10 @@ The decomposition and implementation choices below are **agent-recommended**.
   remains alive, and subsequent requests are handled by the incoming runtime.
 - [ ] A simultaneous fresh literal `agent-mcp bridge` invocation reaches the
   incoming runtime, not an advertised stale host or obsolete command redirect.
+- [ ] Compare one client with multiple simultaneous clients and an update in
+  progress: heavy backend/custody process counts remain service/installation
+  bounded, client identities stay isolated, and no per-client daemon or
+  supervisor tree is introduced.
 - [ ] Session initialization, upstream identity, notifications and accepted
   calls survive handover; side-effecting calls are not duplicated on ambiguous
   responses, failed handover or transport interruption.
@@ -148,9 +156,12 @@ The decomposition and implementation choices below are **agent-recommended**.
 
 ## Proposal
 
-Prospective requirements and validation obligations only. Source analysis will
-select the smallest owner-composed mechanism before implementation. This plan
-does not assert that reattachment or legacy live migration already works.
+Prospective requirements and validation obligations only. The recommended
+owner-composed design is specified in [handover-contract.md](handover-contract.md).
+It separates stable connection custody from replaceable policy/decorator code;
+retaining an entire old pipeline behind a new relay is not accepted as new
+backend execution. This plan does not assert that reattachment or legacy live
+migration already works.
 
 ## Journal
 
@@ -160,3 +171,6 @@ does not assert that reattachment or legacy live migration already works.
   the operator's explicit reattachment selection.
 - Started bounded read-only evidence on client state, activation and reusable
   session/lifecycle primitives. No implementation or live migration performed.
+- Source evidence found no existing generic MCP-session migration broker.
+  Added a prospective quiescent-handover contract and explicit multi-client
+  process-count validation in response to review.
