@@ -631,3 +631,21 @@ implementation. The exact support closure follows the consumer trace and tests.
 - Review, fresh final-head CI and native/installed/external acceptance remain
   open. The source and parent efforts remain Active; no rollout or live
   product worker was started.
+
+### 2026-11-05 - Generated consumer and canonical-history corrections
+
+- The current-head CI guard identified two stale packaging-helper copies in
+  the newly shipped Worktrees admission toolkit. Refreshed them with the
+  canonical payload generator; all 13 manifests check clean and both changed
+  copies pass Python lint. Generator-only native newline changes were
+  formatted back without changing their canonical content.
+- A shallow fixture initially removed required historical Git ancestry.
+  The corrected canonical-history fixture excludes only the new capture
+  commit and exposed one genuine older HTTP-51 README retention gap.
+  Preserved its exact recorded Git blob and SHA-256 as an inert source
+  artifact; no historical packet, expected value or provenance was rewritten.
+  The corrected fixture must pass again on committed source before merge.
+- Copilot's comment review on the evidence head reports no actionable
+  findings and no discussion threads. It explicitly retains the unqualified
+  native/installed tiers. Updated-head review and required CI remain open;
+  this is not source-effort or parent completion.
