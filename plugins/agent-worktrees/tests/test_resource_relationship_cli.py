@@ -30,6 +30,7 @@ def test_actual_lazy_cli_capabilities_and_registered_reservation(owner, monkeypa
     assert capabilities["metadata_version"] == 2 and capabilities["handoff"] is False
     assert capabilities["inspect_absence"] is True
     assert capabilities["expected_creation_nonce"] is True
+    assert capabilities["expected_writer_identity"] is True
     assert capabilities["resident_inspect"] == 1
     assert capabilities["writer_scope"] == "executing-process"
     assert capabilities["writer_contract"] == relationship.writer_contract()
@@ -40,6 +41,25 @@ def test_actual_lazy_cli_capabilities_and_registered_reservation(owner, monkeypa
     result = json.loads(captured.getvalue())
     assert result["owner"] == "m/p/owner"
     assert tracking.load_record(path).resources[0].producer == result["producer"]
+
+
+def test_capabilities_bind_executing_build_not_mutable_payload(owner, monkeypatch, tmp_path):
+    from agent_worktrees import _build_info, runtime_identity
+
+    root = tmp_path / "selected-installation"
+    monkeypatch.setattr(cli.cfg, "install_dir", lambda: root)
+    monkeypatch.setattr(runtime_identity, "PROCESS_GENERATION", "1" * 32)
+    monkeypatch.setitem(_build_info.BUILD_INFO, "runtime_generation", "2" * 32)
+    with output.capture_json_output() as captured:
+        assert main.main(["resource-relationship", "capabilities", "--json"]) == 0
+    result = json.loads(captured.getvalue())
+    assert result["writer_identity"] == {
+        "installation_root": str(root), "runtime_generation": "1" * 32,
+    }
+    monkeypatch.setattr(runtime_identity, "PROCESS_GENERATION", None)
+    with output.capture_json_output() as captured:
+        assert main.main(["resource-relationship", "capabilities", "--json"]) == 0
+    assert json.loads(captured.getvalue())["writer_identity"]["runtime_generation"] is None
 
 
 @pytest.mark.parametrize("raw", [
@@ -85,7 +105,10 @@ def test_actual_interpreter_cli_reserve_replay_inspect_and_bind(owner):
 import sys
 from pathlib import Path
 from agent_worktrees import __main__ as main, config as cfg
+from agent_worktrees import runtime_identity
 path, root, *argv = sys.argv[1:]
+runtime_identity.PROCESS_GENERATION = "1" * 32
+cfg.install_dir = lambda: Path(root) / "installation"
 config = cfg.Config(srcroot=root, machine="m", platform="linux", repo_name="p",
  repos={"p": cfg.RepoConfig(anchor=root, worktree_root=str(Path(root) / "trees"))})
 cfg.detect_platform = lambda: "linux"
@@ -95,7 +118,7 @@ cfg.project_dir = lambda *a, **k: Path(path).parent.parent
 sys.exit(main.main(argv))
 """
 
-    def execute(operation, payload):
+    def execute(operation, payload, expected_code=0):
         result = subprocess.run(
             [sys.executable, "-c", code, str(path), config.srcroot,
              "resource-relationship", operation, "--owner-ref", "m/p/owner", "--json"],
@@ -103,7 +126,7 @@ sys.exit(main.main(argv))
             encoding="utf-8", timeout=15,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
-        assert result.returncode == 0, result.stderr + result.stdout
+        assert result.returncode == expected_code, result.stderr + result.stdout
         return json.loads(result.stdout)
 
     payload = {"kind": "bridge", "namespace": "bridge-remote", "request_id": "child-one", "recovery": {}}
@@ -122,6 +145,17 @@ sys.exit(main.main(argv))
     inspected = execute("inspect", {"token": pending["token"], "expected_creation_nonce": nonce})
     assert inspected["creation_nonce"] == nonce
     assert inspected["writer_contract"] == relationship.writer_contract()
+    guarded = {
+        "token": pending["token"], "expected_creation_nonce": nonce,
+        "expected_writer_identity": inspected["writer_identity"],
+    }
+    assert execute("inspect", guarded) == inspected
+    before = path.read_bytes()
+    changed = {**inspected["writer_identity"], "runtime_generation": "2" * 32}
+    refused = execute("bind", {
+        **guarded, "expected_writer_identity": changed, "identity": {"native_id": "other"},
+    }, expected_code=1)
+    assert "expected_writer_identity" in refused["message"] and path.read_bytes() == before
 
 
 def resident_inspect(monkeypatch, payload, *extra):
@@ -278,3 +312,32 @@ def test_resident_selector_requires_inspect_and_explicit_nonce(owner, resident, 
     assert "only for inspect" in json.loads(captured.getvalue())["message"]
     with pytest.raises(SystemExit):
         main.main(["resource-relationship", "inspect", "--resident-onyl", "--json"])
+
+
+def test_resident_guard_uses_executing_response_and_refuses_prior_handler(owner, resident, monkeypatch):
+    from agent_worktrees import runtime_identity
+
+    path, _ = owner
+    monkeypatch.setattr(runtime_identity, "PROCESS_GENERATION", "1" * 32)
+    before = path.read_bytes()
+    payload = {
+        "request_id": "missing", "allow_missing": True,
+        "expected_creation_nonce": tracking.load_record(path).creation_nonce,
+    }
+    code, observed = resident_inspect(monkeypatch, payload)
+    assert code == 0, observed
+    identity = observed["writer_identity"]
+    assert identity["runtime_generation"] == "1" * 32
+    payload["expected_writer_identity"] = identity
+    code, guarded = resident_inspect(monkeypatch, payload)
+    assert code == 0 and guarded == observed
+    monkeypatch.setattr(runtime_identity, "PROCESS_GENERATION", "2" * 32)
+    code, refused = resident_inspect(monkeypatch, payload)
+    assert code == 1 and "expected_writer_identity" in refused["message"]
+    lock, data, _ = resident
+    data["tracking_write_verb_versions"]["resource_relationship"] = 2
+    lock.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setattr(tracking_write.wcs_client, "request", lambda *a, **k: pytest.fail("prior handler dialed"))
+    code, refused = resident_inspect(monkeypatch, payload)
+    assert code == 1 and "resident lacks" in refused["message"]
+    assert path.read_bytes() == before

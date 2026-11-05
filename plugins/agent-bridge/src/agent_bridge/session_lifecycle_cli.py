@@ -10,12 +10,26 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 from agent_procutil import no_window_kwargs
 
 from . import _peer_launch
+
+_legacy_runtime_modules: dict[Path, ModuleType] = {}
+_legacy_runtime_lock = threading.Lock()
+
+
+def _reset_legacy_runtime_lock() -> None:
+    global _legacy_runtime_lock
+    _legacy_runtime_lock = threading.Lock()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_legacy_runtime_lock)
 
 
 def _core():
@@ -216,17 +230,25 @@ def _agent_bridge_installation_context() -> str:
 
 
 def _agent_worktrees_launch_prefix(*, allow_path_fallback: bool = True) -> list[str] | None:
+    selection = _agent_worktrees_selection(allow_path_fallback=allow_path_fallback)
+    return selection[0] if selection else None
+
+
+def _agent_worktrees_selection(
+    *, allow_path_fallback: bool = True,
+) -> tuple[list[str], Path | None] | None:
+    """Resolve execution and observation together; PATH has no attributable root."""
     core = _core()
     explicit_context = _agent_bridge_installation_context()
     own_root = _agent_bridge_owner_root()
     if not explicit_context:
         prefix = _legacy_worktrees_launch_prefix(own_root)
         if prefix:
-            return prefix
+            return prefix, Path.home() / ".agent-worktrees"  # marketplace-isolation: allow legacy-compatibility
         if not allow_path_fallback:
             return None
         exe = shutil.which("agent-worktrees")  # marketplace-isolation: allow legacy-compatibility
-        return [exe] if exe else None
+        return ([exe], None) if exe else None
     try:
         own = core._peer_launch.validate_owner("agent-bridge", _agent_bridge_owner_root(), explicit_context)
     except (OSError, ValueError, ImportError) as error:
@@ -235,7 +257,8 @@ def _agent_worktrees_launch_prefix(*, allow_path_fallback: bool = True) -> list[
     if not peer_root.exists() and not peer_root.is_symlink():
         return None
     try:
-        return core._peer_launch.launch_prefix("agent-bridge", Path(own["pluginRoot"]), explicit_context, "agent-worktrees")
+        prefix = core._peer_launch.launch_prefix("agent-bridge", Path(own["pluginRoot"]), explicit_context, "agent-worktrees")
+        return (prefix, peer_root) if prefix else None
     except (OSError, ValueError, ImportError) as error:
         raise core._peer_launch.ContextRefused(f"same-cell agent-worktrees resolution failed: {error}") from error
 
@@ -262,11 +285,16 @@ def _legacy_worktrees_runtime_prefix(own_root: Path) -> list[str] | None:
     resolver = own_root / "scripts" / "versioned_runtime.py"
     if not resolver.is_file():
         return None
-    spec = importlib.util.spec_from_file_location("_bridge_versioned_runtime", resolver)
-    if spec is None or spec.loader is None:
-        raise _peer_launch.ContextRefused("installed runtime resolver is unavailable")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    with _legacy_runtime_lock:
+        key = resolver.resolve()
+        module = _legacy_runtime_modules.get(key)
+        if module is None:
+            spec = importlib.util.spec_from_file_location("_bridge_versioned_runtime", key)
+            if spec is None or spec.loader is None:
+                raise _peer_launch.ContextRefused("installed runtime resolver is unavailable")
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            _legacy_runtime_modules[key] = module
     python = module.resolve_python(root)
     return [str(python), "-I", "-X", "utf8", "-m", "agent_worktrees"] if python else None
 

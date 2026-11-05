@@ -23,6 +23,28 @@ def writer_contract() -> dict:
     }
 
 
+def writer_identity() -> dict:
+    """Identify this executing installation and its cached installed build."""
+    from . import config, runtime_identity
+
+    return {
+        "installation_root": str(config.install_dir()),
+        "runtime_generation": runtime_identity.PROCESS_GENERATION,
+    }
+
+
+def valid_writer_identity(value: object) -> bool:
+    """Require attributable build evidence, not an unknown source generation."""
+    return (
+        isinstance(value, dict)
+        and set(value) == {"installation_root", "runtime_generation"}
+        and isinstance(value["installation_root"], str)
+        and bool(value["installation_root"].strip())
+        and isinstance(value["runtime_generation"], str)
+        and re.fullmatch(r"[0-9a-f]{32}", value["runtime_generation"]) is not None
+    )
+
+
 def valid_request_id(value: object) -> bool:
     return isinstance(value, str) and _REQUEST_ID.fullmatch(value) is not None
 
