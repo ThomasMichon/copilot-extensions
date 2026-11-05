@@ -19,6 +19,7 @@ from agent_procutil import no_window_kwargs
 from agent_bridge import acquisition_authority as authority
 from agent_bridge import local_cache_refresh
 from agent_bridge import session_lifecycle_cli as lifecycle
+from agent_bridge import worktree_lineage as lineage
 from agent_bridge._peer_launch import ContextRefused
 from agent_bridge.acquisition_contract import AcquisitionRefused, AcquisitionRequest
 
@@ -432,6 +433,33 @@ def test_legacy_trampoline_rechecks_retirement_before_execution(installation):
     assert result.returncode == 126
     assert "installation-cell ownership" in result.stderr
     assert not result.stdout
+
+
+def test_lineage_refuses_retired_selected_owner_without_global_fallback(installation, monkeypatch):
+    _, peer, which = installation
+    complete_slot(peer)
+    (peer / ".installation-ownership.json").write_text("{}", encoding="utf-8")
+    run = Mock(side_effect=AssertionError("refused lineage must not spawn"))
+    monkeypatch.setattr(lineage.subprocess, "run", run)
+    assert lineage.register_session("worktree-a", "native-a") is False
+    assert lineage.link_succession("worktree-a", "native-a", "native-b") is False
+    run.assert_not_called()
+    which.assert_not_called()
+
+
+def test_lineage_missing_selected_cell_peer_does_not_use_legacy_owner(installation, monkeypatch):
+    own, peer, which = installation
+    complete_slot(peer)
+    cell_own = own.parent / "marketplaces" / "test-cell" / "plugins" / "agent-bridge"
+    monkeypatch.setattr(lifecycle, "_agent_bridge_owner_root", lambda: cell_own)
+    monkeypatch.setattr(lifecycle._peer_launch, "validate_owner", Mock(return_value={
+        "cellRoot": str(cell_own.parent.parent), "pluginRoot": str(cell_own),
+    }))
+    run = Mock(side_effect=AssertionError("missing same-cell owner must not spawn"))
+    monkeypatch.setattr(lineage.subprocess, "run", run)
+    assert lineage.register_session("worktree-a", "native-a") is False
+    run.assert_not_called()
+    which.assert_not_called()
 
 
 @pytest.mark.asyncio

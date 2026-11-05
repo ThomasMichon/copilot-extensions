@@ -29,11 +29,14 @@ receipt. A newer CLI cannot qualify a resident that still runs older code.
 
 Bridge does not directly serialize the Worktrees YAML record on the traced
 local acquisition/lineage path. It delegates through Worktrees commands.
-However, `acquisition_authority.worktree_command` selects the canonical owner
-prefix, while `worktree_lineage._run` independently resolves
-`agent_registry._agent_worktrees_bin`. Qualifying only the acquisition prefix
-therefore leaves a real participating writer unqualified. Bridge's current
-health capabilities do not certify preservation or coherent selection.
+Acquisition and lineage now share the canonical owner prefix and scrubbed
+environment. Lineage no longer independently selects
+`agent_registry._agent_worktrees_bin`. Isolated source-process controls preserve
+an existing protected claim and nonce through delegated registration and
+succession, and routing controls refuse a retired legacy owner or missing
+same-cell peer without substituting a global owner. These controls do not
+qualify a running selection. Bridge's current health capabilities do not yet
+certify preservation or coherent selection.
 Session-lock files and Bridge's own database are separate storage boundaries;
 their presence is not evidence about the Worktrees record serializer.
 
@@ -75,13 +78,16 @@ mandatory. Unknown responses retain the same assignment and claim.
 
 ## Implementation and validation order
 
-- [ ] Qualify the actual resident without direct fallback, using its existing
+- [x] Qualify the actual resident without direct fallback, using its existing
       authenticated inspection. Exercise compatible, prior, missing, changed
       and unavailable providers; inspection must leave record bytes unchanged.
+      These are isolated source/transport controls, not installed cohort admission.
 - [ ] Reconcile Bridge's acquisition and lineage owner selection, preserving
       its supported legacy behavior and installation isolation. Exercise real
       delegated registration/succession against a record with an existing
       protected claim and nonce, including incompatible selected writers.
+      Source selection/preservation controls are implemented; actual
+      generation-bound selection and incompatible-writer admission remain open.
 - [ ] Expose the minimum generation-bound evidence through the participating
       owners, then construct the conditional assignment writer with real
       independent admission. A copied rendezvous, substituted direct response,

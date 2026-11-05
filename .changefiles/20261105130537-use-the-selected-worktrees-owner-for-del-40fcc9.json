@@ -1,0 +1,9 @@
+{
+  "comment": "Use the selected Worktrees owner for delegated lineage operations",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
