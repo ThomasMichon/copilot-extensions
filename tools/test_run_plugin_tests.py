@@ -900,6 +900,101 @@ def test_manager_explicit_native_selection_remains_available():
     ]
 
 
+@pytest.fixture
+def manager_acceptance(monkeypatch, tmp_path):
+    script = SCRIPT.with_name("run-manager-runtime-acceptance.py")
+    spec = importlib.util.spec_from_file_location("manager_acceptance_cleanup", script)
+    assert spec and spec.loader
+    acceptance = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(acceptance)
+    releases = []
+    monkeypatch.setattr(acceptance, "REPO", tmp_path)
+    monkeypatch.setattr(acceptance.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0))
+    monkeypatch.setattr(
+        acceptance, "acquire", lambda *a: SimpleNamespace(release=lambda: releases.append(True)),
+    )
+    monkeypatch.setattr(acceptance.sys, "argv", [str(script), "--root", str(tmp_path / "acceptance")])
+    return acceptance, releases
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.effect("filesystem")
+@pytest.mark.parametrize("contract", ["runtime", "source"])
+def test_manager_acceptance_retains_unsettled_sandbox(
+    manager_acceptance, monkeypatch, tmp_path, capsys, contract,
+):
+    acceptance, releases = manager_acceptance
+    monkeypatch.setattr(acceptance.sys, "argv", [*acceptance.sys.argv, "--contract", contract])
+    monkeypatch.setenv("TEMP", str(tmp_path))
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    observed = []
+    failure = containment.UnreapedProcessError("injected unsettled process")
+
+    def unsettled(command, **kwargs):
+        sandbox = kwargs["sandbox"]
+        observed.append(sandbox)
+        (sandbox / "still-owned.txt").write_text("retained evidence", encoding="utf-8")
+        raise failure
+
+    monkeypatch.setattr(acceptance, "run_contained", unsettled)
+    try:
+        with pytest.raises(containment.UnreapedProcessError) as raised:
+            acceptance.main()
+        assert raised.value is failure
+        assert len(observed) == 1
+        sandbox = observed[0]
+        assert (sandbox / "still-owned.txt").read_text(encoding="utf-8") == "retained evidence"
+        assert str(sandbox) in capsys.readouterr().err
+        assert releases == [True]
+    finally:
+        # The failure is injected: no process ever acquired these fixture files.
+        for sandbox in observed:
+            if sandbox.exists():
+                shutil.rmtree(sandbox)
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.effect("filesystem")
+@pytest.mark.parametrize("returncode", [0, 7])
+def test_manager_acceptance_cleans_settled_sandbox(
+    manager_acceptance, monkeypatch, returncode,
+):
+    acceptance, releases = manager_acceptance
+    observed = []
+
+    def settled(command, **kwargs):
+        sandbox = kwargs["sandbox"]
+        observed.append(sandbox)
+        (sandbox / "settled.txt").write_text("disposable evidence", encoding="utf-8")
+        return returncode
+
+    monkeypatch.setattr(acceptance, "run_contained", settled)
+    assert acceptance.main() == returncode
+    assert len(observed) == (2 if returncode == 0 else 1)
+    assert not any(sandbox.exists() for sandbox in observed)
+    assert releases == [True]
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.effect("filesystem")
+def test_manager_acceptance_cleans_sandbox_after_ordinary_exception(manager_acceptance, monkeypatch):
+    acceptance, releases = manager_acceptance
+    observed = []
+    failure = RuntimeError("injected settled failure")
+
+    def failed(command, **kwargs):
+        observed.append(kwargs["sandbox"])
+        raise failure
+
+    monkeypatch.setattr(acceptance, "run_contained", failed)
+    with pytest.raises(RuntimeError) as raised:
+        acceptance.main()
+    assert raised.value is failure
+    assert len(observed) == 1
+    assert not observed[0].exists()
+    assert releases == [True]
+
+
 def test_manager_uninstall_native_groups_preserve_existing_contracts_and_bounds():
     source = SCRIPT.with_name("run-manager-runtime-acceptance.py").read_text(encoding="utf-8")
     assignment = next(

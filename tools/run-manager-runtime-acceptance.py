@@ -10,12 +10,11 @@ import argparse
 import os
 import subprocess
 import sys
-import tempfile
 import time
 from contextlib import ExitStack
 from pathlib import Path
 
-from plugin_test_containment import Limits, isolated_environment, no_window_kwargs, run_contained
+from plugin_test_containment import Limits, TestSandbox, isolated_environment, no_window_kwargs, run_contained
 from _admission_protocol import acquire
 
 REPO = Path(__file__).resolve().parents[1]
@@ -57,7 +56,7 @@ def main() -> int:
         # Source + repair identities are longer than release-only slots. Keep
         # their default-home fixture below OS temp, not a deep source checkout.
         storage = {} if args.contract in {"source", "engine-source"} else {"dir": root}
-        raw = ownership.enter_context(tempfile.TemporaryDirectory(prefix="manager-acceptance-", **storage))
+        raw = ownership.enter_context(TestSandbox(prefix="manager-acceptance-", **storage))
         sandbox = Path(raw)
         env = isolated_environment(os.environ, sandbox)
         env["MANAGER_RUNTIME_ACCEPTANCE_DATA"] = str(sandbox / "fixtures.json")
