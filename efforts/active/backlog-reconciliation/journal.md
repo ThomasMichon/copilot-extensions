@@ -3,6 +3,12 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-04 - Two undiagnosed Windows transaction completion conditions](<journal/2026/11.04 windows-transaction-denial-contracts.md>)
+
+- [2026-11-04 - Refined instruction delivery and finite source compatibility](<journal/2026/11.04 instruction-source-delivery-contracts.md>)
+
+- [2026-11-04 - Shared machine identity and distinct Index designation contracts](<journal/2026/11.04 machine-identity-routing-contracts.md>)
+
 - [2026-11-04 - Finite deploy architecture and mixed-version launch contracts](<journal/2026/11.04 deploy-architecture-launch-compatibility-contracts.md>)
 
 - [2026-11-04 - Independent cleanup and exact terminal recovery contracts](<journal/2026/11.04 cleanup-recovery-evidence-contracts.md>)
