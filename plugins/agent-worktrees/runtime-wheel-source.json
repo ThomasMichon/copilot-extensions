@@ -1,5 +1,10 @@
 {
   "schema": "copilot-extensions.runtime-wheel-source-provider",
-  "version": 2,
-  "selection_env": "COPILOT_EXTENSIONS_NATIVE_INSTALL_SOURCE_SELECTION"
+  "version": 3,
+  "selection_env": "COPILOT_EXTENSIONS_NATIVE_INSTALL_SOURCE_SELECTION",
+  "recovery": {
+    "schema": "copilot-extensions.worktrees-recovery",
+    "version": 1,
+    "platform": "windows"
+  }
 }

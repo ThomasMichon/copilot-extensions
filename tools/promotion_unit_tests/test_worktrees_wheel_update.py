@@ -5,8 +5,9 @@ import dataclasses
 import importlib.util
 import io
 import json
+import os
 import sys
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -333,6 +334,175 @@ def test_source_governance_requires_whole_operation_custody(outcome, monkeypatch
             governance.require_owned_lifecycle()
     if outcome == "complete":
         governance.require_owned_lifecycle(require_pending=False)
+
+
+@pytest.mark.parametrize("platform", ["windows", "linux"])
+def test_guarded_wheel_route_uses_the_installed_owner(tmp_path, monkeypatch, platform):
+    owner, payload, snapshot = (tmp_path / name for name in ("owner", "payload", "snapshot"))
+    for path in (owner, payload, snapshot):
+        path.mkdir()
+    (owner / "scripts").mkdir()
+    recovery = owner / "scripts" / "runtime_install_recovery.py"
+    recovery.write_text("# owner\n")
+    identity = {"plugin": "agent-worktrees", "package_version": "1.0", "runtime_version": "source"}
+    source = source_owner.PreparedRuntimeSource(
+        payload, json.dumps({"runtime_source": identity, "runtime_version": "source"}), snapshot,
+    )
+    descriptor = {"kind": "github", "canonical": "github:example/repo", "ref": ""}
+    target = target_owner.SourceWheelTarget(
+        json.dumps({"source_descriptor": descriptor}), recovery=True,
+    )
+    monkeypatch.setattr(source_owner.shutil, "which", lambda _name: sys.executable)
+    if platform == "windows":
+        command = source.lifecycle_argv(
+            owner, "agent-worktrees", tmp_path / "runtime", tmp_path,
+            (sys.executable, "installer"), target=target, platform_name=platform, timeout=600,
+        )
+        assert Path(command[3]) == recovery
+        assert json.loads(command[command.index("--source-descriptor") + 1]) == descriptor
+        assert float(command[command.index("--lifecycle-timeout") + 1]) < 600
+    else:
+        with pytest.raises(ValueError, match="Guarded recovery"):
+            source.lifecycle_argv(
+                owner, "agent-worktrees", tmp_path / "runtime", tmp_path,
+                (sys.executable, "installer"), target=target, platform_name=platform, timeout=600,
+            )
+
+
+@pytest.mark.parametrize("case", ["v2", "v3", "bad-recovery", "missing-script"])
+def test_guarded_wheel_provider_requires_its_declared_owner(tmp_path, case):
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "runtime_install.py").write_text("# installer\n")
+    if case != "missing-script":
+        (scripts / "runtime_install_recovery.py").write_text("# recovery\n")
+    provider = {
+        "schema": target_owner.WHEEL_PROVIDER_SCHEMA,
+        "version": 2 if case == "v2" else 3,
+        "selection_env": target_owner.WHEEL_SELECTION_ENV,
+    }
+    if case != "v2":
+        provider["recovery"] = {
+            "schema": "copilot-extensions.worktrees-recovery",
+            "version": True if case == "bad-recovery" else 1, "platform": "windows",
+        }
+    (tmp_path / "runtime-wheel-source.json").write_text(json.dumps(provider))
+    if case in ("v2", "v3"):
+        assert target_owner._wheel_provider(tmp_path) == provider
+    else:
+        with pytest.raises(ValueError):
+            target_owner._wheel_provider(tmp_path)
+
+
+@pytest.mark.parametrize("outcome", ["failed", "uncertain", "fresh", "unprovable"])
+def test_guarded_recovery_only_rebinds_after_contained_exit(outcome, monkeypatch):
+    scripts = ROOT / "plugins" / "agent-worktrees" / "scripts"
+    modules = {}
+    for name in (
+        "versioned_runtime", "versioned_runtime_publication", "installer_dependency_config",
+        "installer_wheel_inputs", "installer_wheel_snapshot",
+    ):
+        modules[name] = ModuleType(name)
+        monkeypatch.setitem(sys.modules, name, modules[name])
+    modules["installer_dependency_config"].native_retained_path = str
+    modules["installer_wheel_inputs"]._ordinary = lambda *_args: None
+    modules["installer_wheel_snapshot"]._digest = lambda *_args: None
+    modules["installer_wheel_snapshot"]._open = lambda *_args: None
+    modules["installer_wheel_snapshot"]._unchanged = lambda *_args, **_kwargs: None
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    spec = importlib.util.spec_from_file_location(
+        "_guarded_recovery_unit", scripts / "runtime_install_recovery.py",
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    events = []
+    lease = SimpleNamespace(reserve=lambda: events.append("reserve"))
+
+    @contextmanager
+    def lifecycle(*_args, **_kwargs):
+        yield lease
+
+    @contextmanager
+    def retention(*_args, **_kwargs):
+        yield
+
+    def run(*_args, **options):
+        assert 0 < options["timeout"] <= 60
+        events.append("child")
+        if outcome == "uncertain":
+            raise RuntimeError("unsettled")
+        return 7
+
+    manager = SimpleNamespace(legacy_lifecycle=lifecycle, run_lifecycle=run)
+    binding = SimpleNamespace(_load_lifecycle=lambda: manager, _rules=lambda: None)
+    modules["versioned_runtime"].retention_lease = retention
+    monkeypatch.setattr(module, "_supports_job", lambda: True)
+    monkeypatch.setattr(module, "_capture", lambda *_args: (
+        None if outcome in ("fresh", "unprovable")
+        else {"manifest": {"runtime_slot": "old", "payload_hash": "a" * 64}}
+    ))
+    monkeypatch.setattr(module, "_fresh", lambda _root: outcome == "fresh")
+    monkeypatch.setattr(module, "_unchanged", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(module, "_restore", lambda *_args, **_kwargs: events.append("restore") or True)
+    if outcome == "unprovable":
+        with pytest.raises(ValueError, match="predecessor"):
+            module.run_guarded(binding, object(), [sys.executable], timeout=60, legacy_root=ROOT)
+        assert events == []
+    elif outcome == "uncertain":
+        with pytest.raises(RuntimeError, match="unsettled"):
+            module.run_guarded(binding, object(), [sys.executable], timeout=60, legacy_root=ROOT)
+        assert events == ["reserve", "child"]
+    else:
+        assert module.run_guarded(binding, object(), [sys.executable], timeout=60, legacy_root=ROOT) == 7
+        assert events == (["reserve", "child"] if outcome == "fresh" else ["reserve", "child", "restore"])
+
+
+@pytest.mark.parametrize("state", ["unchanged", "foreign"])
+def test_selector_rollback_does_not_replace_unowned_state(state, monkeypatch):
+    runtime = ModuleType("versioned_runtime")
+    runtime._publication_lease = lambda _root: nullcontext()
+    monkeypatch.setitem(sys.modules, "versioned_runtime", runtime)
+    path = ROOT / "plugins" / "agent-worktrees" / "scripts" / "runtime_install_publication.py"
+    spec = importlib.util.spec_from_file_location("_selector_rollback_unit", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    snapshot = {"current-version": b"old\n", "last-known-good": b"old\n"}
+    observed = snapshot if state == "unchanged" else {**snapshot, "current-version": b"foreign\n"}
+    if state == "unchanged":
+        module.restore_selectors(ROOT, "new", snapshot, lambda _root: observed, ValueError)
+    else:
+        with pytest.raises(ValueError, match="changed before rollback"):
+            module.restore_selectors(ROOT, "new", snapshot, lambda _root: observed, ValueError)
+
+
+@pytest.mark.parametrize("borrowed", [False, True])
+def test_only_the_lifecycle_owner_can_reserve_under_its_lock(borrowed, monkeypatch):
+    path = ROOT / "libs" / "payload-invocation" / "command_lifecycle.py"
+    spec = importlib.util.spec_from_file_location("_deferred_lifecycle_unit", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    events = []
+    lock = SimpleNamespace(
+        _owner=lambda: {}, assert_owned=lambda: events.append("lock"),
+    )
+    binding = SimpleNamespace(CommandOwnershipConflict=ValueError)
+    primitive = SimpleNamespace(_atomic_write_json=lambda *_args, **_kwargs: events.append("write"))
+    lease = module.LifecycleLease(
+        binding, primitive, {"legacy_root": ROOT}, lock, {},
+        {"pid": os.getpid() + int(borrowed)},
+    )
+    monkeypatch.setattr(lease, "assert_owned", lambda: events.append("owned"))
+    monkeypatch.setattr(module, "_reservation", lambda *_args: {"pending": True})
+    if borrowed:
+        with pytest.raises(ValueError, match="Only the lifecycle owner"):
+            lease.reserve()
+        assert not events
+    else:
+        lease.reserve()
+        assert events == ["owned", "write", "lock"]
 
 
 @pytest.mark.parametrize("fault", ["", "target", "helper", "inside-runtime", "probe"])

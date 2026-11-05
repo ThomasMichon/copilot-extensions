@@ -231,6 +231,18 @@ class LifecycleLease:
                 f"Runtime lifecycle lease does not authorize {operation}."
             )
 
+    def reserve(self) -> None:
+        """Publish the pending reservation without releasing this owner's lock."""
+        if self.ticket["pid"] != os.getpid():
+            raise self.binding.CommandOwnershipConflict("Only the lifecycle owner may reserve.")
+        self.assert_operation("publish")
+        self.assert_owned()
+        manifest = _reservation(self.binding, self.primitive, self.arguments, self.owner)
+        self.primitive._atomic_write_json(
+            Path(self.arguments["legacy_root"]) / "deploy-manifest.json", manifest, lock=self.lock,
+        )
+        self.lock.assert_owned()
+
 
 def _lock(
     primitive: Any, arguments: dict[str, Any], *, timeout_seconds: float | None = None,
@@ -330,7 +342,7 @@ def legacy_lifecycle(
         timeout_seconds=None if deadline is None else max(0, deadline - time.monotonic()),
     ) as lock:
         owner = _owner(binding, primitive, arguments, operation=purpose["operation"])
-        manifest = _reservation(binding, primitive, arguments, owner)
+        _reservation(binding, primitive, arguments, owner)
         _publication(binding, primitive, arguments, purpose)
         primitive._atomic_write_json(
             lock.owner_path, {**lock._owner(), "runtimeDeployment": purpose}, lock=lock,
@@ -344,13 +356,13 @@ def legacy_lifecycle(
                 print(message, file=sys.stderr)
             else:
                 diagnostic(message)
-        if reserve:
-            primitive._atomic_write_json(root / "deploy-manifest.json", manifest, lock=lock)
         ticket = {
             "token": lock.token, "pid": os.getpid(), "host": lock.host,
             "root": str(root), "owner": owner,
         }
         lease = LifecycleLease(binding, primitive, arguments, lock, owner, ticket)
+        if reserve:
+            lease.reserve()
         token = _CURRENT.set(lease)
         try:
             yield lease

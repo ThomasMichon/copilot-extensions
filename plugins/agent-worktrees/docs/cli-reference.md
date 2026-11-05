@@ -1598,7 +1598,10 @@ The additive `runtime_sources.wheel_contract` advertises version 2 of the same
 packet for an explicitly prepared Worktrees wheel input. Its `agent-worktrees`
 record may add an absolute `install_source` directory; other records retain
 their version 1 shape. Both the installed and prepared Worktrees payloads must
-declare matching `runtime-wheel-source.json` support. The installed owner
+declare matching `runtime-wheel-source.json` support. Provider version 2 keeps
+the original explicit route; version 3 selects the guarded Windows lifecycle
+and refuses other platforms rather than downgrading. Version 2 can leave a
+failed lifecycle pending even when its old selector survives. The installed owner
 inspects the selected source and wheel profile, computes the exact target and
 construction hash, and checks its chosen base interpreter against the profile
 before reserving the lifecycle. It rechecks and pins that interpreter at launch;
@@ -1609,12 +1612,17 @@ before helper publication and again before selector activation. The installed
 and prepared interpreter helpers must match.
 Currentness requires the source, selected slot, interpreter and completion hash
 to agree. A missing or older provider refuses rather than ignoring the wheel
-selection. This explicit packet is not source, profile or feed authorization:
-its caller must retain and recheck those existing authorities through cutover.
-An external packet alone does not transfer that policy authority to the
-candidate; a denied or interrupted managed lifecycle can leave its command
-reservation pending even if the old selector survives. No ordinary update
-selects or downloads a bundle automatically.
+selection. On Windows, the guarded owner admits a fresh empty root or retains
+an already selected, healthy, quiet predecessor with privately owned selectors
+and helpers before reserving the lifecycle.
+After a failed child and confirmed Job-tree settlement, it restores the prior
+command binding only if the selectors, owned helper bytes, monitor state,
+manifest and predecessor health still match. An unprovable or interrupted
+outcome stays pending; a live or uncertain monitor refuses before reservation.
+This explicit packet is not source, profile or feed authorization: its caller
+must retain and recheck those existing authorities through cutover. An external
+packet alone does not transfer that policy authority to the candidate. No
+ordinary update selects or downloads a bundle automatically.
 
 The internal `runtime_install_source.install_source_runtime` adapter can pass
 the source builder's nested wheel binding directly to the native constructor
@@ -1623,8 +1631,8 @@ process. It requires the selected base interpreter and a live whole-operation
 command or cell-publication lease (including the pending legacy reservation),
 and rechecks both that lease and the source owner before construction and
 both publication boundaries. It does not turn a prepared packet into
-authority, connect ordinary updates, or resolve the pending-reservation
-rollback case.
+authority, connect ordinary updates, or independently start the guarded
+lifecycle.
 
 Omitting the option retains ordinary marketplace runtime delivery.
 This suite-only input cannot combine with target/authentication/inspection or

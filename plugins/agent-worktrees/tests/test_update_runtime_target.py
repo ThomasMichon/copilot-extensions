@@ -248,9 +248,12 @@ def test_installed_planner_response_is_bound_to_root_and_full_source(selected, m
 
 @pytest.mark.parametrize("fault", [
     "", "identity", "version", "hash", "extras", "packages", "descriptor",
-    "environment", "missing-owner", "missing-source", "provider-skew",
+    "environment", "missing-owner", "missing-source", "provider-skew", "provider-version-skew",
 ])
-def test_worktrees_wheel_target_uses_installed_owner_and_exact_selection(tmp_path, monkeypatch, fault):
+@pytest.mark.parametrize("provider_version", [2, 3])
+def test_worktrees_wheel_target_uses_installed_owner_and_exact_selection(
+    tmp_path, monkeypatch, fault, provider_version,
+):
     from test_update_runtime_sources import packet
     from agent_worktrees.update_runtime_source import parse_sources
 
@@ -265,12 +268,19 @@ def test_worktrees_wheel_target_uses_installed_owner_and_exact_selection(tmp_pat
     scripts.mkdir(parents=True)
     (scripts / "install_source.py").write_text("# installed owner\n", encoding="utf-8")
     provider = {
-        "schema": "copilot-extensions.runtime-wheel-source-provider", "version": 2,
+        "schema": "copilot-extensions.runtime-wheel-source-provider", "version": provider_version,
         "selection_env": "COPILOT_EXTENSIONS_NATIVE_INSTALL_SOURCE_SELECTION",
     }
+    recovery = {
+        "schema": "copilot-extensions.worktrees-recovery", "version": 1, "platform": "windows",
+    }
+    if provider_version == 3:
+        provider["recovery"] = recovery
     for payload in (owner, source.payload):
         (payload / "scripts").mkdir(exist_ok=True)
         (payload / "scripts" / "runtime_install.py").write_text("# wheel-aware installer\n", encoding="utf-8")
+        if provider_version == 3:
+            (payload / "scripts" / "runtime_install_recovery.py").write_text("# recovery\n", encoding="utf-8")
         (payload / "runtime-wheel-source.json").write_text(json.dumps(provider), encoding="utf-8")
     if fault == "missing-owner":
         (owner / "runtime-wheel-source.json").unlink()
@@ -280,6 +290,13 @@ def test_worktrees_wheel_target_uses_installed_owner_and_exact_selection(tmp_pat
         (source.payload / "runtime-wheel-source.json").write_text(
             json.dumps(provider | {"version": 1}), encoding="utf-8",
         )
+    elif fault == "provider-version-skew":
+        other = {key: value for key, value in provider.items() if key != "recovery"}
+        other["version"] = 2 if provider_version == 3 else 3
+        if other["version"] == 3:
+            other["recovery"] = recovery
+            (source.payload / "scripts" / "runtime_install_recovery.py").write_text("# recovery\n")
+        (source.payload / "runtime-wheel-source.json").write_text(json.dumps(other))
     selection = {
         "identity": json.loads(source.identity),
         "source_descriptor": {"kind": "github", "canonical": "github:example/repo", "ref": ""},
@@ -317,12 +334,54 @@ def test_worktrees_wheel_target_uses_installed_owner_and_exact_selection(tmp_pat
         assert target.payload_hash == selection["payload_hash"]
         assert json.loads(target.document) == selection
         assert json.loads(target.environment) == environment
-    if fault in ("missing-owner", "missing-source", "provider-skew"):
+        assert target.recovery is (provider_version == 3)
+    if fault in ("missing-owner", "missing-source", "provider-skew", "provider-version-skew"):
         assert not calls
     else:
         assert len(calls) == 1
         assert Path(calls[0][3]) == scripts / "install_source.py"
         assert "--native-inputs-with-target" in calls[0] and str(snapshot) in calls[0]
+
+
+@pytest.mark.parametrize("case", ["v2", "v3", "boolean", "unknown", "missing-helper"])
+def test_wheel_provider_advertises_guarded_recovery_only_with_owned_support(tmp_path, case):
+    from agent_worktrees import update_runtime_target
+
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "runtime_install.py").write_text("# installer\n")
+    (scripts / "runtime_install_recovery.py").write_text("# recovery\n")
+    provider = {
+        "schema": update_runtime_target.WHEEL_PROVIDER_SCHEMA,
+        "version": 2 if case == "v2" else 3,
+        "selection_env": update_runtime_target.WHEEL_SELECTION_ENV,
+    }
+    if case != "v2":
+        provider["recovery"] = {
+            "schema": "copilot-extensions.worktrees-recovery",
+            "version": True if case == "boolean" else 1,
+            "platform": "linux" if case == "unknown" else "windows",
+        }
+    if case == "missing-helper":
+        (scripts / "runtime_install_recovery.py").unlink()
+    (tmp_path / "runtime-wheel-source.json").write_text(json.dumps(provider))
+    if case in ("v2", "v3"):
+        assert update_runtime_target._wheel_provider(tmp_path) == provider
+    else:
+        with pytest.raises(ValueError):
+            update_runtime_target._wheel_provider(tmp_path)
+
+
+def test_guarded_wheel_preflight_refuses_unqualified_platform_before_io(tmp_path):
+    from agent_worktrees.update_runtime_target import SourceWheelTarget, preflight_wheel_target
+
+    target = SourceWheelTarget("{}", "{}", recovery=True)
+    with pytest.raises(ValueError, match="Guarded recovery"):
+        preflight_wheel_target(
+            SimpleNamespace(payload=tmp_path / "source"), target, tmp_path / "owner",
+            tmp_path / "runtime", {}, "linux",
+        )
+    assert not (tmp_path / "runtime").exists()
 
 
 @pytest.mark.parametrize("fault", ["", "target", "helper", "inside-runtime"])

@@ -267,21 +267,7 @@ def _selector_snapshot(root: Path) -> dict[str, bytes | None]:
 
 
 def _restore_selectors(root: Path, version: str, snapshot: dict[str, bytes | None]) -> None:
-    with runtime._publication_lease(root):
-        observed = _selector_snapshot(root)
-        for name, content in observed.items():
-            if content not in (
-                snapshot[name], (version + "\n").encode("utf-8"), (version + "\r\n").encode("utf-8"),
-            ):
-                raise InstallationRefused("Runtime selection changed before rollback")
-        for name, content in snapshot.items():
-            path = root / name
-            if content is None:
-                path.unlink(missing_ok=True)
-            else:
-                temporary = path.with_name(f"{path.name}.rollback-{os.getpid()}")
-                temporary.write_bytes(content)
-                os.replace(temporary, path)
+    helper_publication.restore_selectors(root, version, snapshot, _selector_snapshot, InstallationRefused)
 
 
 def _monitor_identity(root: Path) -> tuple[int, str] | None:

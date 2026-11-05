@@ -1161,6 +1161,47 @@ def test_async_predecessor_admission_retains_slot_without_old_wire_contract(
     assert driver._monitor_slot(tmp_path, predecessor) == "legacy"
 
 
+def test_selector_rollback_preserves_unchanged_files(driver, tmp_path, monkeypatch):
+    root = tmp_path / "runtime"
+    root.mkdir()
+    for name in ("current-version", "last-known-good"):
+        (root / name).write_bytes(b"old\n")
+    snapshot = driver._selector_snapshot(root)
+    identities = {name: (root / name).stat().st_ino for name in snapshot}
+    monkeypatch.setattr(driver.runtime, "_publication_lease", lambda _root: nullcontext())
+    write = Path.write_bytes
+
+    def forbid_replacement(path, content):
+        if ".rollback-" in path.name:
+            pytest.fail("unchanged selector was replaced")
+        return write(path, content)
+
+    monkeypatch.setattr(Path, "write_bytes", forbid_replacement)
+    driver._restore_selectors(root, "new", snapshot)
+    assert {name: (root / name).stat().st_ino for name in snapshot} == identities
+
+
+def test_selector_rollback_uses_private_staging_for_changed_files(driver, tmp_path, monkeypatch):
+    root = tmp_path / "runtime"
+    root.mkdir()
+    snapshot = {name: b"old\n" for name in ("current-version", "last-known-good")}
+    for name in snapshot:
+        (root / name).write_bytes(b"new\n")
+    monkeypatch.setattr(driver.runtime, "_publication_lease", lambda _root: nullcontext())
+    publication = driver.runtime._runtime_component("versioned_runtime_publication")
+    temporary = publication._temporary_file
+    calls = []
+
+    def observe(*args, **kwargs):
+        calls.append(True)
+        return temporary(*args, **kwargs)
+
+    monkeypatch.setattr(publication, "_temporary_file", observe)
+    driver._restore_selectors(root, "new", snapshot)
+    assert len(calls) == 2 and driver._selector_snapshot(root) == snapshot
+    assert all(publication.state_path(root / name, private=True) is not None for name in snapshot)
+
+
 @pytest.mark.parametrize("failure_point", ["before", "current", "both"])
 @pytest.mark.parametrize("monitor_scope,committed", [(False, False), (True, False), (True, True)])
 def test_publication_failure_retains_custody_through_observed_outcome(

@@ -263,6 +263,40 @@ def test_command_binding_same_owner_retries_pending_and_completes(binding_fixtur
         assert _resolve(binding_fixture)["status"] == "selected"
 
 
+def test_deferred_owner_can_reserve_without_releasing_its_lifecycle_lock(binding_fixture: dict) -> None:
+    fixture = binding_fixture
+    binding, primitive = fixture["binding"], fixture["primitive"]
+    _publish(fixture)
+    lifecycle = binding._load_lifecycle()
+    with lifecycle.legacy_lifecycle(
+        binding._rules(), primitive, reserve=False, **fixture["arguments"],
+    ) as lease:
+        assert _resolve(fixture)["status"] == "selected"
+        lease.reserve()
+        assert _resolve(fixture)["reason"] == "legacy-lifecycle-incomplete"
+        binding.write_legacy_manifest(
+            primitive, {"schema_version": 3, "service": PLUGIN_ID}, **fixture["arguments"],
+        )
+    assert _resolve(fixture)["status"] == "selected"
+
+
+def test_borrower_cannot_reserve_on_behalf_of_the_lifecycle_owner(binding_fixture: dict) -> None:
+    fixture = binding_fixture
+    binding, primitive = fixture["binding"], fixture["primitive"]
+    _publish(fixture)
+    with binding._load_lifecycle().legacy_lifecycle(
+        binding._rules(), primitive, reserve=False, **fixture["arguments"],
+    ) as lease:
+        owner_pid = lease.ticket["pid"]
+        lease.ticket["pid"] = owner_pid + 1
+        try:
+            with pytest.raises(binding.CommandOwnershipConflict, match="Only the lifecycle owner"):
+                lease.reserve()
+        finally:
+            lease.ticket["pid"] = owner_pid
+        assert _resolve(fixture)["status"] == "selected"
+
+
 @pytest.mark.parametrize("old", [None, b"{", b'{"value":"\xff"}', b"[]",
                                b'{"schema_version":99}', b'{"schema_version":3}'])
 def test_unrecognized_manifest_stays_unrecognized_until_publication(

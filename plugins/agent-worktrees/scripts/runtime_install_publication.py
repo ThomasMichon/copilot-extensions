@@ -42,6 +42,38 @@ TOOLS = (
 )
 
 
+def restore_selectors(root: Path, version: str, snapshot: dict, read, refused) -> None:
+    with runtime._publication_lease(root):
+        observed = read(root)
+        for name, content in observed.items():
+            if content not in (
+                snapshot[name], (version + "\n").encode("utf-8"), (version + "\r\n").encode("utf-8"),
+            ):
+                raise refused("Runtime selection changed before rollback")
+        for name, content in snapshot.items():
+            if observed[name] == content:
+                continue
+            path = root / name
+            if read(root)[name] != observed[name]:
+                raise refused("Runtime selection changed during rollback")
+            if content is None:
+                path.unlink(missing_ok=True)
+                continue
+            publication = runtime._runtime_component("versioned_runtime_publication")
+            descriptor, staged = publication._temporary_file(root, f".{name}.rollback-")
+            temporary = Path(staged)
+            try:
+                with os.fdopen(descriptor, "wb") as stream:
+                    stream.write(content)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                if read(root)[name] != observed[name]:
+                    raise refused("Runtime selection changed during rollback")
+                os.replace(temporary, path)
+            finally:
+                temporary.unlink(missing_ok=True)
+
+
 def declared_copies(content: Path, root: Path, scope: str, shell: str, contextual: bool) -> list[dict]:
     """The owner's allowlist, not authority inferred from callback output."""
     publication = runtime._runtime_component("versioned_runtime_publication")

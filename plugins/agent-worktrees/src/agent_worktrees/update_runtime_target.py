@@ -74,6 +74,7 @@ class SourceRuntimeTarget:
 class SourceWheelTarget:
     document: str
     environment: str = "{}"
+    recovery: bool = False
 
     @property
     def source_descriptor(self) -> dict[str, str]:
@@ -110,15 +111,27 @@ def _wheel_provider(payload: Path) -> dict | None:
         raise ValueError("Wheel source support declaration must be a bounded ordinary file")
     value = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=strict_json_object)
     if (
-        not isinstance(value, dict) or set(value) != {"schema", "version", "selection_env"}
-        or value["schema"] != WHEEL_PROVIDER_SCHEMA or type(value["version"]) is not int
-        or value["version"] != 2 or value["selection_env"] != WHEEL_SELECTION_ENV
+        not isinstance(value, dict) or value.get("schema") != WHEEL_PROVIDER_SCHEMA
+        or type(value.get("version")) is not int or value["version"] not in (2, 3)
+        or value.get("selection_env") != WHEEL_SELECTION_ENV
+        or set(value) != {"schema", "version", "selection_env"} | (
+            {"recovery"} if value["version"] == 3 else set()
+        )
+        or value["version"] == 3 and (
+            not isinstance(value["recovery"], dict)
+            or type(value["recovery"].get("version")) is not int
+            or value["recovery"] != {
+                "schema": "copilot-extensions.worktrees-recovery", "version": 1, "platform": "windows",
+            }
+        )
     ):
         raise ValueError("Unsupported wheel source support declaration")
     scripts = payload / "scripts"
     installer = scripts / "runtime_install.py"
     if not _ordinary(scripts, directory=True) or not _ordinary(installer):
         raise ValueError("Wheel source support requires its owned runtime installer")
+    if value["version"] == 3 and not _ordinary(scripts / "runtime_install_recovery.py"):
+        raise ValueError("Guarded wheel source support requires its owned recovery lifecycle")
     return value
 
 
@@ -179,6 +192,7 @@ def _wheel_target(source: PreparedRuntimeSource, name: str, owner: Path, environ
     return SourceWheelTarget(
         json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False),
         json.dumps(packet["environment"], sort_keys=True, separators=(",", ":"), allow_nan=False),
+        recovery=declared["version"] == 3,
     )
 
 
@@ -187,6 +201,9 @@ def preflight_wheel_target(
     environment: Mapping[str, str], platform_name: str,
 ) -> str:
     """Select and check the native interpreter before lifecycle reservation."""
+    if target.recovery and platform_name != "windows":
+        raise ValueError("Guarded recovery is not available on this native platform")
+
     def matching_script(name: str) -> Path:
         installed, prepared = owner / "scripts" / name, source.payload / "scripts" / name
         if (

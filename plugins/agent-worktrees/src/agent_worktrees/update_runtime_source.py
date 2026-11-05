@@ -4,6 +4,7 @@ from __future__ import annotations
 import ast
 import dataclasses
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -281,12 +282,32 @@ class PreparedRuntimeSource:
     def lifecycle_argv(
         self, owner: Path, name: str, root: Path, project: Path, argv: tuple[str, ...],
         *, target: SourceRuntimeTarget | SourceWheelTarget | None = None,
+        platform_name: str | None = None, timeout: float | None = None,
     ) -> list[str]:
         from .update_runtime_target import SourceWheelTarget
 
         executable = shutil.which(argv[0])
         if executable is None:
             raise ValueError(f"Prepared runtime installer executable not found: {argv[0]}")
+        if isinstance(target, SourceWheelTarget) and target.recovery:
+            helper = owner / "scripts" / "runtime_install_recovery.py"
+            try:
+                info = helper.lstat()
+            except FileNotFoundError as error:
+                raise ValueError("Guarded recovery owner is unavailable") from error
+            if (
+                name != "agent-worktrees" or platform_name != "windows"
+                or type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout < 15
+                or not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400
+                or helper.resolve().parent != (owner / "scripts").resolve()
+            ):
+                raise ValueError("Guarded recovery requires the installed Windows lifecycle owner")
+            return [
+                sys.executable, "-I", "-B", str(helper), "--payload-root", str(owner),
+                "--legacy-root", str(root), "--project-root", str(project),
+                "--source-descriptor", json.dumps(target.source_descriptor, sort_keys=True),
+                "--lifecycle-timeout", str(timeout - 5), "--", os.path.abspath(executable), *argv[1:],
+            ]
         command = [
             sys.executable, "-I", "-B", str(owner / "scripts" / "command_binding.py"),
             "--payload-root", str(owner), "--source-payload-root", str(owner),

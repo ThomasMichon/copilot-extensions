@@ -591,9 +591,12 @@ def _execute_runtime_step(step: update_runtime_plan.RuntimeUpdateStep) -> str:
                         step.environment, step.native_platform,
                     ) != step.environment.get(update_runtime_plan.WHEEL_BASE_ENV):
                         raise ValueError("Native wheel interpreter changed after update planning")
+                lifecycle_options = {"target": step.source_target}
+                if isinstance(step.source_target, SourceWheelTarget) and step.source_target.recovery:
+                    lifecycle_options.update(platform_name=step.native_platform, timeout=step.deadline_s)
                 command = step.source.lifecycle_argv(
                     step.payload, step.name, step.runtime_root, step.project_root, argv,
-                    target=step.source_target,
+                    **lifecycle_options,
                 )
         except (OSError, ValueError, SyntaxError, subprocess.SubprocessError) as error:
             return f"prepared source execution refused: {error}"

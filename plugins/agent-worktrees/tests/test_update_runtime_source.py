@@ -152,6 +152,48 @@ def test_wheel_update_lifecycle_uses_the_selected_source_descriptor(selected, tm
     assert json.loads(argv[argv.index("--source-descriptor") + 1]) == descriptor
 
 
+@pytest.mark.parametrize("platform_name", ["windows", "linux"])
+def test_guarded_wheels_use_the_installed_recovery_owner(
+    selected, tmp_path, monkeypatch, platform_name,
+):
+    owner, _, runtime, original = selected
+    snapshot = tmp_path / "wheel-inputs"
+    snapshot.mkdir()
+    source = dataclasses.replace(original, install_source=snapshot)
+    descriptor = {"kind": "github", "canonical": "github:example/repo", "ref": ""}
+    target = update_runtime_target.SourceWheelTarget(
+        json.dumps({
+            "identity": json.loads(source.identity), "source_descriptor": descriptor,
+            "runtime_version": source.version + ".profile." + "d" * 16,
+            "payload_hash": "e" * 64, "extras": [], "local_packages": ["agent-worktrees"],
+        }, sort_keys=True, separators=(",", ":")),
+        recovery=True,
+    )
+    (owner / "scripts" / "runtime_install_recovery.py").write_text("# owner recovery fixture\n")
+    monkeypatch.setattr(update_runtime_target, "_wheel_target", lambda *args: target)
+    monkeypatch.setattr(
+        update_runtime_plan, "_shell_prefix", lambda *args: ([sys.executable, "installer"], True),
+    )
+    captured = []
+    monkeypatch.setattr(update_runtime, "_run_human_installer", lambda argv, **kwargs: (
+        captured.append(argv) or SimpleNamespace(status="OK")
+    ))
+    step = update_runtime_plan.plan_engine(owner, platform_name, force=True, source=source)
+    if step.blocked:
+        status = step.status
+    else:
+        status = update_runtime._execute_runtime_step(step)
+    if platform_name == "linux":
+        assert "guarded recovery" in status.lower() and not captured and not runtime.exists()
+    else:
+        assert status == "OK"
+        argv = captured[0]
+        assert Path(argv[3]) == owner / "scripts" / "runtime_install_recovery.py"
+        assert json.loads(argv[argv.index("--source-descriptor") + 1]) == descriptor
+        assert 10 <= float(argv[argv.index("--lifecycle-timeout") + 1]) < step.deadline_s
+        assert argv[argv.index("--") + 1] == str(Path(sys.executable).resolve())
+
+
 def test_wheel_target_mismatch_refuses_before_lifecycle_reservation(selected, tmp_path, monkeypatch):
     from agent_worktrees import update_runtime_target
 
