@@ -1,0 +1,9 @@
+{
+  "comment": "Keep Open and Resume on their existing setup; explicitly sync paired repositories before local plugin preparation",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

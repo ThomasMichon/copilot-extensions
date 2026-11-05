@@ -321,6 +321,15 @@ class TestResumeWiring:
             },
         )
 
+    def test_first_launch_cannot_apply_to_bare_resume(self, capfd):
+        from agent_worktrees import resolve_cli
+        import json
+
+        assert resolve_cli._cmd_resolve(argparse.Namespace(
+            first_launch=True, worktree_id="created-wt", bare_resume=True, json=True,
+        )) == 2
+        assert "existing local --worktree-id" in json.loads(capfd.readouterr().out)["error"]
+
     def _patched_resume(self, tmp_path: Path, monkeypatch, sample_record, *, dry_run: bool):
 
         config = self._config(tmp_path)
@@ -386,7 +395,7 @@ class TestResumeWiring:
         )
 
     @pytest.mark.parametrize("deferred", [False, True])
-    def test_resume_refreshes_the_local_cache(
+    def test_resume_preserves_existing_plugins_and_source(
         self, tmp_path: Path, monkeypatch, sample_record, deferred,
     ) -> None:
         record, config, args, worktree_path = self._patched_resume(
@@ -394,23 +403,23 @@ class TestResumeWiring:
         )
         calls = []
         args.defer_projections = deferred
+        config = replace(config, auto_fast_forward=True)
+        args.no_fast_forward = False
         from agent_worktrees import knowledge_plugins
 
-        def compose(*, cwd, config):
-            assert cwd == str(worktree_path)
-            _, settings = permissions._read_config_jsonc(permissions._config_path())
-            assert str(worktree_path.resolve()) in settings["trustedFolders"]
-            calls.append("compose")
-            return {"action": "no-op"}
-
-        monkeypatch.setattr(knowledge_plugins, "compose_from_pair", compose)
+        monkeypatch.setattr(knowledge_plugins, "compose_from_pair",
+                            lambda **kwargs: pytest.fail("Resume must not recompose plugins"))
+        monkeypatch.setattr(m.git_ops, "fast_forward_worktree",
+                            lambda *args, **kwargs: pytest.fail("Resume must not sync source"))
         monkeypatch.setattr(
             lcr, "refresh_local_cache", lambda repo_root, **k: calls.append(repo_root)
         )
-
+        plans = []
+        monkeypatch.setattr(m, "_emit_plan", plans.append)
         m._resolve_resume(record, config, args)
 
-        assert calls == ([] if deferred else ["compose", str(worktree_path)])
+        assert calls == []
+        assert plans[-1]["env"]["WORKTREE_NO_PROVISION"] == "1"
         _, settings = permissions._read_config_jsonc(permissions._config_path())
         assert str(worktree_path.resolve()) in settings["trustedFolders"]
 
@@ -429,6 +438,32 @@ class TestResumeWiring:
 
         assert calls == []
         assert not m.permissions._config_path().exists()
+
+    @pytest.mark.parametrize("surface", ["json", "interactive"])
+    @pytest.mark.parametrize("first_launch", [False, True])
+    def test_relocated_first_launch_preserves_provisioning_without_an_environment_hint(
+        self, tmp_path, monkeypatch, sample_record, surface, first_launch,
+    ):
+        from agent_worktrees import resolve_cli
+
+        record, config, args, _ = self._patched_resume(
+            tmp_path, monkeypatch, sample_record, dry_run=False,
+        )
+        args.first_launch = first_launch
+        monkeypatch.setenv("WORKTREE_NO_PROVISION", "1")
+        plans = []
+        if surface == "json":
+            monkeypatch.setattr(resolve_cli.output, "_json_output", plans.append)
+            assert resolve_cli._resolve_json_mode(
+                self._json_state(tmp_path, monkeypatch, record, config, args),
+            ) == 0
+            environment = plans[-1]["launch"]["env"]
+        else:
+            monkeypatch.setattr(m, "_emit_plan", plans.append)
+            assert m._resolve_resume(record, config, args) == 0
+            environment = plans[-1]["env"]
+        assert environment["WORKTREE_NO_PROVISION"] == ("0" if first_launch else "1")
+        assert not any("FIRST_LAUNCH" in name for name in environment)
 
     @pytest.mark.parametrize("deferred", [False, True])
     @pytest.mark.parametrize("dry_run", [False, True])
@@ -450,8 +485,11 @@ class TestResumeWiring:
             calls.append(root)
 
         monkeypatch.setattr(lcr, "refresh_local_cache", refresh)
+        plans = []
+        monkeypatch.setattr(resolve_cli.output, "_json_output", plans.append)
         assert resolve_cli._resolve_json_mode(state) == 0
-        assert calls == ([] if deferred or dry_run else [str(worktree_path)])
+        assert calls == []
+        assert plans[-1]["launch"]["env"]["WORKTREE_NO_PROVISION"] == "1"
         assert permissions._config_path().exists() is not dry_run
 
     def test_resume_trust_failure_is_explicit_and_precedes_cache(

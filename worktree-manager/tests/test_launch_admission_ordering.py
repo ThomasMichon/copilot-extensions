@@ -37,12 +37,28 @@ if argv[:1] == ["--project"]:
     argv = argv[2:]
 target = Path(os.environ["TEST_TARGET"])
 if argv[:1] == ["resolve"]:
+    if "--new" in argv and os.environ.get("AGENT_WORKTREES_DEFER_PROJECTIONS") != "1":
+        instructions = target / ".github" / "instructions" / "fixture.instructions.md"
+        instructions.parent.mkdir(parents=True, exist_ok=True)
+        instructions.write_text("prepared at creation", encoding="utf-8")
     action = os.environ.get("TEST_ACTION", "exec")
     plan = {
         "action": action, "work_dir": str(target), "status_path": str(target),
         "worktree_id": "fixture-wt", "project": "fixture",
         "cmd": ["must-not-launch-copilot"], "no_mux": True,
     }
+    if os.environ.get("TEST_EXEC_COMMAND") == "1":
+        plan["cmd"] = [
+            sys.executable, "-c",
+            "import json,os; from pathlib import Path; "
+            "Path('session-entered').write_text('yes'); "
+            "Path('launch-environment.json').write_text(json.dumps({"
+            "name:os.environ.get(name) for name in ('WORKTREE_NO_PROVISION',)}))",
+        ]
+    if os.environ.get("TEST_FIRST_LAUNCH") == "1":
+        plan["env"] = {
+            "WORKTREE_NO_PROVISION": "0" if "--first-launch" in argv else "1",
+        }
     if os.environ.get("TEST_NO_PLAN_PATH") == "1":
         plan.pop("work_dir")
         plan.pop("status_path")
@@ -60,6 +76,12 @@ elif argv[:2] == ["agent-policy", "check"]:
         print(json.dumps({**policy.to_dict(), "allowed":True}))
 elif argv[:2] == ["get", "repo-dir"]:
     print(target)
+elif argv[:2] == ["copilot-identity", "ensure"]:
+    print('{"status":"disabled"}')
+elif argv[:2] == ["execution-leg", "get"]:
+    print('{"execution_leg":null}')
+elif argv[:1] in (["register-launch"], ["activity-log"]):
+    print('{}')
 elif argv[:1] in [["status"], ["repos"], ["create"]]:
     print('{"inspection":true}')
 else:
@@ -182,6 +204,70 @@ def test_owner_fixture_preserves_python_code_stdio_arguments_and_exit(
     )
     assert result.returncode == exit_code, result.stderr
     assert json.loads(result.stdout) == {"args": arguments, "input": "fixture stdin\n"}
+
+
+@pytest.mark.parametrize("shell", ["bash", "pwsh"])
+def test_open_uses_existing_setup_without_install_or_plugin_preflight(tmp_path: Path, shell: str):
+    if (shell == "bash" and BASH is None) or (shell == "pwsh" and PWSH is None):
+        pytest.skip(f"{shell} unavailable")
+    env, target, _logs = _fixture(tmp_path)
+    (target / ".copilot-extensions/agent-worktrees/config.yaml").write_text("expose_agent: true\n")
+    env["TEST_EXEC_COMMAND"] = "1"
+    env["TEST_FIRST_LAUNCH"] = "1"
+    result = _run(shell, target, env, ["--worktree-id", "fixture-wt"])
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (target / "session-entered").read_text() == "yes"
+    unexpected = tmp_path / "unexpected-preparation"
+    assert not unexpected.exists(), unexpected.read_text() if unexpected.exists() else ""
+    assert not any(
+        any(verb in call for verb in ("knowledge", "stage-update", "launch-update", "update"))
+        for call in _calls(env)
+    )
+
+
+def test_manager_new_prepares_instructions_before_the_real_relocated_entry(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from worktree_manager import __main__ as manager, engine_client, hosting_admission, new_window_spawn
+
+    shell = "pwsh" if os.name == "nt" else "bash"
+    if (shell == "bash" and BASH is None) or (shell == "pwsh" and PWSH is None):
+        pytest.skip(f"{shell} unavailable")
+    env, target, _logs = _fixture(tmp_path)
+    (target / ".copilot-extensions/agent-worktrees/config.yaml").write_text("expose_agent: true\n")
+    env["TEST_EXEC_COMMAND"] = "1"
+    env["TEST_FIRST_LAUNCH"] = "1"
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.delenv("AGENT_WORKTREES_DEFER_PROJECTIONS", raising=False)
+    monkeypatch.setattr(hosting_admission, "require_owner_hosting", lambda *a, **k: None)
+    monkeypatch.setattr(engine_client, "engine_base_command",
+                        lambda: [sys.executable, str(tmp_path / "owner.py"), "-m", "agent_worktrees"])
+    monkeypatch.setattr(manager, "_relocated_launch_script",
+                        lambda: BIN / ("launch-session.ps1" if os.name == "nt" else "launch-session.sh"))
+    instructions = target / ".github" / "instructions" / "fixture.instructions.md"
+    handoffs = []
+
+    def handoff(argv, *, title, env=None):
+        assert instructions.read_text() == "prepared at creation"
+        assert "--new" not in argv and "--worktree-id" in argv
+        assert "--first-launch" in argv
+        process = subprocess.run(
+            argv, cwd=target, env=env, text=True, capture_output=True, timeout=30,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        assert process.returncode == 0, process.stdout + process.stderr
+        handoffs.append(argv)
+
+    monkeypatch.setattr(new_window_spawn, "spawn_detached_new_window", handoff)
+    assert manager._run_launch(SimpleNamespace(
+        project="fixture", worktree_id=None, mode="new", no_mux=True,
+        new_window=True, machine=None, ahp=False,
+    )) == 0
+    assert len(handoffs) == 1
+    assert (target / "session-entered").is_file()
+    environment = json.loads((target / "launch-environment.json").read_text())
+    assert environment["WORKTREE_NO_PROVISION"] == "0"
+    assert sum("--new" in call for call in _calls(env)) == 1
 
 
 @pytest.mark.parametrize("shell", ["bash", "pwsh"])

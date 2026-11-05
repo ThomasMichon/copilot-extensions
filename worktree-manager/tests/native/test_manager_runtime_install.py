@@ -111,9 +111,10 @@ print(json.dumps({"completed":True}))
                  str(SOURCE), str(payload), str(target), phase, outcome]
 
     def run():
-        return engine._child(
-            arguments, inputs=inputs, descriptor=-1, timeout=4, cwd=tmp_path,
-        )
+        with engine.runtime.construction_lease(tmp_path / "owner", "1.2.3") as descriptor:
+            return engine._child(
+                arguments, inputs=inputs, descriptor=descriptor, timeout=4, cwd=tmp_path,
+            )
 
     started = time.monotonic()
     if outcome == "productive":
@@ -259,7 +260,7 @@ def test_first_bootstrap_selects_only_installed_healthy_runtime(constructed):
     assert Path(prefix).resolve() == slot.resolve()
     assert Path(module).resolve().is_relative_to(slot.resolve())
     assert Path(launcher).is_file()
-    assert Path(launcher).is_relative_to(slot / "payload" / "bin")
+    assert Path(launcher).is_relative_to(Path(module).parent / "_runtime_assets" / "bin")
 
 
 def _prepare_legacy_repair(directory):

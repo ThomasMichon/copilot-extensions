@@ -327,10 +327,22 @@ def _fixture(root, layer, mode):
 
     attempt = "d" * 32
     LaunchAttempts().record_intent(
-        attempt, action="resume", project="fixture", surface="native", is_local=True,
+        attempt, action="new" if mode == "first-launch" else "resume",
+        project="fixture", surface="native", is_local=True,
     )
     literal = json.loads((root / "literal.json").read_text(encoding="utf-8"))
     selected = root / "selected \u65e5.ps1"
+    if mode == "first-launch":
+        from types import SimpleNamespace
+        from worktree_manager import relocated_launch
+
+        # This fixture's synthetic entry runs this file rather than the real CLI.
+        relocated_launch._core = lambda: SimpleNamespace(_is_windows=lambda: sys.platform == "win32")
+        return relocated_launch._run_relocated_mux_launch(
+            SimpleNamespace(project="fixture", mode="new", worktree_id=None,
+                            no_mux=False, new_window=False, attempt_id=None),
+            SimpleNamespace(worktree_id="created-wt", raw={}), selected,
+        )
     if mode == "production-refusal":
         selected = Path(__file__).resolve().parents[2] / "bin" / "launch-session.ps1"
         literal = ["--project", "fixture", "--worktree-id", "fixture-wt"]

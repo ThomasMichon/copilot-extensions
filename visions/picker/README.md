@@ -153,6 +153,18 @@ launch the next one — so recovering a whole fleet after a lost multiplexer
 server means stepping down the list and opening each into its own window,
 never closing and reopening the Picker per worktree.
 
+### launch-without-worktree-maintenance
+Open and Resume enter the worktree's existing repository and plugin setup.
+They do not submit software updates, advance repositories, or recompose the
+paired plugin settings. Initial worktree preparation remains part of creation.
+An affirmative Sync action advances both worktree members of a registered pair
+using their own safe fast-forward rules, then reconciles worktree-local plugin
+settings and instructions only after both repositories are current. If either
+member cannot sync, retain the existing plugin setup and report the blocker;
+never discard local changes, rebase implicitly, or update machine-wide software
+as a side effect of Sync. Explicit software installation and independently
+adopted maintenance remain separate operations.
+
 ### cold-start-resume-prompt
 When resuming a stopped worktree, the operator can supply the first prompt
 alongside the prior conversation's resume target, equally with or without a

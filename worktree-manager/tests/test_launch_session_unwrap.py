@@ -192,7 +192,7 @@ def test_seed_interpreter_refresh_preserves_native_hosts(tmp_path, command):
     if os.name == "nt":
         source = _LAUNCH_PS1.read_text(encoding="utf-8")
         start = source.index("if ($plan.cmd) {")
-        refresh = source[start:source.index("$knowledgeCwd =", start)]
+        refresh = source[start:source.index("# Apply environment variables from the launch plan", start)]
         code = "\n".join([
             "$ErrorActionPreference = 'Stop'",
             "$plan = '" + json.dumps({"seed_pending": True, "cmd": command}) + "' | ConvertFrom-Json",
@@ -211,7 +211,7 @@ def test_seed_interpreter_refresh_preserves_native_hosts(tmp_path, command):
     else:
         source = _LAUNCH_SCRIPT.read_text(encoding="utf-8")
         start = source.index('    if [[ "$_PENDING_NEW_SEED" == "1" &&')
-        refresh = source[start:source.index("    _KNOWLEDGE_CWD=", start)]
+        refresh = source[start:source.index("    aw_assert_cold_resume", start)]
         code = "\n".join([
             "set -euo pipefail",
             "CMD_ARRAY=(" + shlex.join(command) + ")",
@@ -416,30 +416,6 @@ def test_tmux_launcher_does_not_use_psmux_passthrough():
     assert "psmux-passthrough.conf" not in sh
 
 
-def test_launchers_fast_reattach_skips_update_on_live_session():
-    """Both launchers must skip the pre-launch update when JOINING an
-    already-live `wt-<id>` mux session -- a pure re-attach to the running
-    Copilot, for which the runtime/plugin update is irrelevant (it applies on
-    that process's next fresh start). The Windows path landed in Slice 1
-    (dev329); the bash path is Slice 5 (#4059) parity. Drift guard on both."""
-    ps = _LAUNCH_PS1.read_text()
-    sh = _LAUNCH_SCRIPT.read_text()
-    _skip_log = ("Joining an already-live mux session; skipping pre-launch "
-                 "update")
-    # Windows: the self-contained probe gates Invoke-UpdateApply.
-    assert "function Test-AwJoiningLiveSession" in ps
-    assert "$joiningLiveSession = Test-AwJoiningLiveSession" in ps
-    assert "if ($joiningLiveSession) {" in ps
-    assert _skip_log in ps
-    # bash: the mirror probe gates invoke_update_apply.
-    assert "aw_joining_live_session() {" in sh
-    assert "if aw_joining_live_session; then" in sh
-    assert _skip_log in sh
-    # The bash probe must key off the tmux session name and honor no-mux.
-    assert 'tmux has-session -t "=wt-${_wtid}"' in sh
-    assert 'WORKTREE_NO_MUX' in sh
-
-
 def test_launchers_fail_closed_without_explicit_no_mux():
     """Mux discovery/creation failures must never start a duplicate bare
     Copilot. Direct launch is reserved for the explicit no-mux contract."""
@@ -544,91 +520,6 @@ def test_launchers_propagate_attach_failures_without_killing_shared_sessions():
     assert "Failed to attach to new tmux session" in sh
     assert "reason=attach_failed" in sh
     assert sh.count('_aw_cleanup_owned_tmux_session "$TMUX_SESS"') == 1
-
-
-def test_launchers_compose_after_plan_before_copilot_handoff():
-    """Migrated from plugins/agent-worktrees/tests/test_knowledge_plugins.py."""
-    """Migrated from plugins/agent-worktrees/tests/test_knowledge_plugins.py."""
-    sh = _LAUNCH_SCRIPT.read_text(encoding="utf-8")
-    ps = _LAUNCH_PS1.read_text(encoding="utf-8")
-
-    sh_compose = sh.index("_KNOWLEDGE_ARGS+=(knowledge compose-plugins")
-    assert sh.index('cd "$WORK_DIR"') < sh_compose
-    assert sh_compose < sh.index('if [[ "$NO_MUX" == "1" ]]')
-    sh_refresh = sh.index('_REFRESHED_PYTHON="$(resolve_runtime_python)"')
-    assert sh.rfind("invoke_update_apply 1 1", 0, sh_refresh) < sh_refresh
-    assert sh_refresh < sh_compose
-    assert 'PYTHON="$_REFRESHED_PYTHON"' in sh[sh_refresh:sh_compose]
-    assert "runtime is unavailable after update apply" in sh[sh_refresh:sh_compose]
-    # The preflight itself goes through the retry-and-degrade helper
-    # (#stale-venv-preflight) rather than a raw inline invocation/exit --
-    # a transient current-version swap must not kill the whole launch.
-    assert (
-        'run_runtime_preflight "Knowledge plugin preflight" --stream-progress '
-        '"${_KNOWLEDGE_ARGS[@]}"'
-    ) in sh
-    assert 'resolve_args+=(resolve "$@")' in sh
-    assert 'AGENT_WORKTREES_DEFER_PROJECTIONS=1 "$PYTHON"' in sh
-    assert "--prepare-projections --json" in sh
-    assert sh_compose < sh.index('PANE_CMD=("${CLEAN_ENV[@]}"')
-    assert sh_compose < sh.index('"${CLEAN_ENV[@]}" "${CMD_ARRAY[@]}"')
-
-    ps_compose = ps.index("'knowledge', 'compose-plugins'")
-    assert ps.index("Set-Location $plan.work_dir") < ps_compose
-    assert ps_compose < ps.index("# Apply environment variables from the launch plan")
-    ps_refresh = ps.index("$refreshedVenvPython = Resolve-RuntimePython")
-    assert ps.rfind("Invoke-UpdateApply", 0, ps_refresh) < ps_refresh
-    assert ps_refresh < ps_compose
-    assert "$VenvPython = $refreshedVenvPython" in ps[ps_refresh:ps_compose]
-    assert "runtime is unavailable after update apply" in ps[ps_refresh:ps_compose]
-    assert (
-        "Invoke-RuntimePreflight -Label 'Knowledge plugin preflight' "
-        "-PreflightArgs $knowledgeArgs -StreamProgress"
-    ) in ps
-    assert "@('resolve') + $CopilotArgs" in ps
-    assert "$env:AGENT_WORKTREES_DEFER_PROJECTIONS = '1'" in ps
-    assert "$env:AGENT_WORKTREES_DEFER_PROJECTIONS = $savedProjectionDeferral" in ps
-    assert "'--prepare-projections', '--json'" in ps
-    assert ps_compose < ps.index("& $cmd[0] $cmd[1..($cmd.Count - 1)]")
-
-
-def test_knowledge_and_marketplace_preflights_retry_and_degrade_not_exit():
-    """#stale-venv-preflight: a background plugin update can flip
-    current-version to a brand-new runtime slot mid-launch, and the
-    still-"current"-at-the-time slot can transiently fail to import its own
-    package during that swap. The knowledge-plugin and marketplace-override
-    preflights must ride that out with a retry-and-reresolve helper and
-    degrade to a warning on persistent failure, never `exit` the whole
-    launcher (which -- with no wrapping shell -- used to kill the entire
-    terminal tab with no recovery path)."""
-    sh = _LAUNCH_SCRIPT.read_text(encoding="utf-8")
-    ps = _LAUNCH_PS1.read_text(encoding="utf-8")
-
-    # bash: shared helper retries, re-resolving the interpreter each attempt,
-    # and degrades to a warning rather than exiting.
-    assert "run_runtime_preflight() {" in sh
-    assert 'py="$(resolve_runtime_python)"' in sh
-    assert "for ((attempt = 1; attempt <= max_attempts; attempt++))" in sh
-    assert "continuing launch without it" in sh
-    assert (
-        'run_runtime_preflight "Marketplace override preflight" '
-        '"${_MARKETPLACE_ARGS[@]}"'
-    ) in sh
-    # No more fatal exits keyed to preflight-specific exit codes.
-    assert "exit $_KNOWLEDGE_RC" not in sh
-    assert "exit $_MARKETPLACE_RC" not in sh
-
-    # PowerShell: same contract.
-    assert "function Invoke-RuntimePreflight" in ps
-    assert "$py = Resolve-RuntimePython" in ps
-    assert "for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++)" in ps
-    assert "continuing launch without it" in ps
-    assert (
-        "Invoke-RuntimePreflight -Label 'Marketplace override preflight' "
-        "-PreflightArgs $marketplaceArgs"
-    ) in ps
-    assert "exit $knowledgeExit" not in ps
-    assert "exit $marketplaceExit" not in ps
 
 
 def test_launchers_prefer_resolved_plan_project_over_ambient():

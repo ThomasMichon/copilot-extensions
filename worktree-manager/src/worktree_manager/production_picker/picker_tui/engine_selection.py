@@ -37,7 +37,7 @@ class PickerScreenSelectionMixin:
         chosen = [r for r in self.maint_records() if r["id4"] in ids]
         acts = []
         if any(
-            r.get("ff_eligible") and self._record_supports(r, "sync")
+            r.get("sync_eligible", r.get("ff_eligible")) and self._record_supports(r, "sync")
             for r in chosen
         ):
             acts.append("Sync")
@@ -290,7 +290,7 @@ class PickerScreenSelectionMixin:
         ]
         acts = []
         if any(
-            r.get("ff_eligible") and self._record_supports(r, "sync")
+            r.get("sync_eligible", r.get("ff_eligible")) and self._record_supports(r, "sync")
             for r in chosen
         ):
             acts.append("Sync")
@@ -361,8 +361,8 @@ class PickerScreenSelectionMixin:
                        style=C_DIM)
             ctx.append(self._scope_label(), style=C_META)
         elif code == "SY":
-            n = sum(1 for r in self.list_records() if r.get("ff_eligible"))
-            ctx.append("    fast-forwards ", style=C_DIM)
+            n = sum(1 for r in self.list_records() if r.get("sync_eligible", r.get("ff_eligible")))
+            ctx.append("    synchronizes ", style=C_DIM)
             ctx.append(f"{n}", style=C_LABEL)
             ctx.append(f" eligible worktree{'' if n == 1 else 's'} in ",
                        style=C_DIM)

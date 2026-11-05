@@ -118,6 +118,48 @@ Owner loss, identity replacement or explicit cancellation exits through normal
 Textual teardown (including loader cancellation) and cannot publish a launch
 decision from that retired lifetime.
 
+## Explicit paired worktree Sync
+
+The original `sync --worktree-id <id> --json` contract remains a
+single-repository fast-forward. Optional `--paired` requests both registered
+worktree members followed by local plugin/instruction preparation. Picker Sync
+uses this form locally and over SSH. Its strict parser is a pre-effect version
+fence, like the launch-attempt fence below: an older selected receiver rejects
+the optional operation before checkout mutation. The caller reports that
+incompatibility and never strips the flag or replays the older operation.
+Expand receivers before migrating consumers; provider rollback makes paired
+Sync unavailable without disabling Open/Resume or the original CLI Sync.
+
+The receiving owner validates the actual registered pair and each member's
+native mutation authority, holds both existing launch-admission leases, and
+fetches/inspects both repositories before advancing either. Cached upstream
+refs do not establish freshness when a configured remote is unavailable. Raw
+Git failure states are checked before tracking-status display overrides.
+A failed fetch,
+live session, dirty/ahead checkout, unavailable pair or failed fast-forward
+withholds composition. Anchor pairs are not two writable task worktrees.
+Only after both worktree members are current does the native owner compose the
+pair and prepare local instructions in the harness project's context, restoring
+the invoking project's context afterward. No machine-wide installation runs.
+Both synchronization targets are reloaded before composition. A fetched change
+to either anchor, remote or default branch reports `pair-sync-policy-changed`
+and requires another Sync against the new policy, retaining partial Git results
+without writing plugins.
+Unpaired worktrees retain their original single-repository fast-forward.
+An incomplete binding with either pairing identifier still takes paired
+validation; it never silently downgrades to a single-repository success.
+Paired fetches explicitly refresh each configured default branch, independently
+of a remote's narrow fetch refspec. A deleted target fails the fetch rather than
+reusing a stale tracking ref.
+
+Paired results add `ok`, `pair_results` and `plugins` (`ready`, `skipped` or `failed`) to
+the existing JSON envelope. `ok: false` is a failed operation, even if a nested
+member result records earlier Git progress. The CLI returns nonzero for a
+paired failure. It neither rolls back successful Git progress nor discards
+local work. Callers must not infer complete paired preparation from an
+`updated` field alone. Picker progress retains the cause and individual member
+outcomes so a blocked sibling and partial Git progress remain visible.
+
 ## Repository hosting admission
 
 The read-only [`agent-policy check`](repository-agent-policy.md) API is

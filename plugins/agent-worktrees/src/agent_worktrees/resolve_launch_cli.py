@@ -533,27 +533,6 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
             except Exception:
                 pass
 
-    if (
-        not args.dry_run
-        and getattr(config, "auto_fast_forward", True)
-        and not getattr(args, "no_fast_forward", False)
-    ):
-        repo = config.default_repo
-        ff = git_ops.fast_forward_worktree(
-            record.worktree_path,
-            remote=repo.remote,
-            default_branch=repo.default_branch,
-            do_fetch=True,
-        )
-        if ff.updated:
-            plural = "s" if ff.behind != 1 else ""
-            print(
-                f"   ⬆ Fast-forwarded {ff.behind} commit{plural} to "
-                f"{repo.remote}/{repo.default_branch}"
-            )
-        elif ff.reason in ("ahead", "diverged"):
-            print(f"   ⚠ Local commits present -- skipping auto-update ({ff.reason})")
-
     native_resume = getattr(args, "native_resume_session", None)
     resume_target = None
     if not getattr(args, "no_resume", False):
@@ -634,6 +613,7 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
         merged_env[_session_bind_session_key()] = resume_target
 
     seed_pending = bool(staged_seed and not bare_resume)
+    merged_env["WORKTREE_NO_PROVISION"] = "0" if getattr(args, "first_launch", False) else "1"
     if native_resume and (seed_pending or not no_resume):
         return output._json_error("Native ACP resume cannot consume a launch seed or select CLI history", exit_code=3)
     if not args.dry_run:
