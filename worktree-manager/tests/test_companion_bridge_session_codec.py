@@ -33,10 +33,10 @@ def semantic(monkeypatch):
         "hosting_generation": "fixture-generation", "registry": "owned", "transport": "local",
     }
 
-    def frame(*, history=False, position=None, limit=64):
+    def frame(*, history=False, position=None, limit=64, tool_statistics=False):
         request = wire.ReadRequest(
             wire.Selection("child", native_source["project"], "child-worktree", None),
-            history, False, position, limit,
+            history, False, position, limit, tool_statistics=tool_statistics,
         )
         return owner.frame(owner.KnownSource(log, native_source, native_source["registry"]), request)
 

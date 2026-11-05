@@ -11,6 +11,9 @@ from typing import Any
 
 from .companion_bridge_session_codec import SessionCodec
 from .companion_bridge_current_requests import CAPABILITY, CurrentRequestProjection, CurrentRequestState
+from .companion_bridge_tool_statistics import (
+    CAPABILITY as STATISTICS_CAPABILITY, ToolStatisticsProjection, ToolStatisticsState,
+)
 from .companion_bridge_source import MembershipCommands
 from .companion_timeline_contract import (
     HistoryPage, LiveDelta, SourcePosition, SourceToken, TimelineContractError,
@@ -26,8 +29,9 @@ class SessionCommands(MembershipCommands):
         super().__init__(codec.owner, cwd=cwd, project_root=project_root)
         self.selection = codec.selection
         self.current_requests: bool | None = None
+        self.tool_statistics: bool | None = None
 
-    def _negotiate(self, cancelled: Event) -> bool:
+    def _negotiate(self, cancelled: Event) -> tuple[bool, bool]:
         stream = self.command(["version", "--contracts-json"], cancelled, json_document=True)
         try:
             declaration = next(stream, None)
@@ -37,17 +41,22 @@ class SessionCommands(MembershipCommands):
                 or type(declaration.get("version")) is not int or declaration["version"] != 1
                 or not isinstance(declaration.get("contracts"), dict)
             ):
-                return False
-            contract = declaration["contracts"].get(CAPABILITY)
+                return False, False
+            def supports(name: str, feature: str) -> bool:
+                contract = declaration["contracts"].get(name)
+                return (
+                    isinstance(contract, dict) and set(contract) == {"version", "capabilities"}
+                    and type(contract["version"]) is int and contract["version"] == 1
+                    and isinstance(contract["capabilities"], list)
+                    and all(isinstance(item, str) for item in contract["capabilities"])
+                    and feature in contract["capabilities"]
+                )
             return (
-                isinstance(contract, dict) and set(contract) == {"version", "capabilities"}
-                and type(contract["version"]) is int and contract["version"] == 1
-                and isinstance(contract["capabilities"], list)
-                and all(isinstance(item, str) for item in contract["capabilities"])
-                and "observe-session-current-requests" in contract["capabilities"]
+                supports(CAPABILITY, "observe-session-current-requests"),
+                supports(STATISTICS_CAPABILITY, "observe-session-tool-statistics"),
             )
         except OwnerReadError:
-            return False
+            return False, False
         finally:
             stream.close()
 
@@ -57,7 +66,7 @@ class SessionCommands(MembershipCommands):
     ) -> Generator[dict, None, None]:
         selection = self.selection
         if not history and self.current_requests is None:
-            self.current_requests = self._negotiate(cancelled)
+            self.current_requests, self.tool_statistics = self._negotiate(cancelled)
         arguments = [
             *(["--project", selection["project"]] if selection["project"] is not None else []),
             "session-observation-history" if history else "observe-session", selection["session_id"],
@@ -65,26 +74,34 @@ class SessionCommands(MembershipCommands):
             *(["--follow"] if follow else []), *(["--after", after] if after is not None else []),
             *(["--before", before] if before is not None else []),
         ]
-        optional = not history and self.current_requests is True
-        stream = self.command([*arguments, *(["--current-requests"] if optional else [])], cancelled)
-        try:
-            first = next(stream, None)
-            if optional and isinstance(first, dict) and type(first.get("version")) is int and first == {
-                "schema": "bridge-session-observations-v1", "version": 1, "kind": "error",
-                "code": "unsupported",
-                "message": f"selected daemon does not support {CAPABILITY}",
-            }:
-                # The owning CLI refused during health negotiation, before any
-                # observation query. Unknown parser/transport failures never retry.
-                stream.close()
-                self.current_requests = False
-                yield from self.command(arguments, cancelled)
+        enabled = {} if history else {
+            name: (attribute, flag) for name, attribute, flag in (
+                (CAPABILITY, "current_requests", "--current-requests"),
+                (STATISTICS_CAPABILITY, "tool_statistics", "--tool-statistics"),
+            ) if getattr(self, attribute) is True
+        }
+        # Each exact owning-CLI prequery refusal removes only its own optional
+        # flag. Parser/transport errors and post-admission failures never retry.
+        while True:
+            stream = self.command([*arguments, *(flag for _attribute, flag in enabled.values())], cancelled)
+            try:
+                first = next(stream, None)
+                refused = next((name for name in enabled if (
+                    isinstance(first, dict) and type(first.get("version")) is int and first == {
+                        "schema": "bridge-session-observations-v1", "version": 1, "kind": "error",
+                        "code": "unsupported", "message": f"selected daemon does not support {name}",
+                    }
+                )), None)
+                if refused is not None:
+                    attribute, _flag = enabled.pop(refused)
+                    setattr(self, attribute, False)
+                    continue
+                if first is not None:
+                    yield first
+                    yield from stream
                 return
-            if first is not None:
-                yield first
-                yield from stream
-        finally:
-            stream.close()
+            finally:
+                stream.close()
 
 
 class BridgeSessionSource:
@@ -98,6 +115,7 @@ class BridgeSessionSource:
         self, project: str, worktree: str, _head: str, *, owner_ref: str,
         member: dict[str, Any], hosting_generation: str, cwd: str, project_root: str,
         current: Callable[[CurrentRequestState | None], None] | None = None,
+        statistics: Callable[[ToolStatisticsState | None], None] | None = None,
     ) -> None:
         self.codec = SessionCodec(project, worktree, owner_ref, member, hosting_generation)
         self.commands = SessionCommands(self.codec, cwd=cwd, project_root=project_root)
@@ -105,21 +123,38 @@ class BridgeSessionSource:
         self._cursor: str | None = None
         self._current = current
         self.current_requests = CurrentRequestProjection()
+        self._statistics = statistics
+        self.tool_statistics = ToolStatisticsProjection()
 
     def _publish_current(self) -> None:
         state = self.codec.current_state
         if state is None:
-            self._invalidate_current()
+            self.current_requests.invalidate()
+            if self._current is not None:
+                self._current(None)
         elif self.current_requests.accept(state) and self._current is not None:
             self._current(state)
+        statistics = self.codec.statistics_state
+        if statistics is None:
+            self.tool_statistics.invalidate()
+            if self._statistics is not None:
+                self._statistics(None)
+        elif self.tool_statistics.accept(statistics) and self._statistics is not None:
+            self._statistics(statistics)
 
     def _invalidate_current(self) -> None:
         self.current_requests.invalidate()
         if self._current is not None:
             self._current(None)
+        self.tool_statistics.invalidate()
+        if self._statistics is not None:
+            self._statistics(None)
 
     def _decode(self, raw: dict[str, Any]) -> dict[str, Any]:
-        return self.codec.decode(raw, current_requests=self.commands.current_requests is True)
+        return self.codec.decode(
+            raw, current_requests=self.commands.current_requests is True,
+            tool_statistics=self.commands.tool_statistics is True,
+        )
 
     async def prepare(self, epoch: int, *, stop: asyncio.Event) -> TimelineSnapshot:
         cancelled = Event()

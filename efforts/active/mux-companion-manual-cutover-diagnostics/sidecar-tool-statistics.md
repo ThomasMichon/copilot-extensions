@@ -4,14 +4,20 @@ Parent: [complete effort](README.md), Step 7.
 Source obligation: [S2](sidecar-live-timeline.md#s2---worktree-and-agenda-owner-observations).
 Existing boundary: [observation contract](sidecar-observation-contract.md).
 
-**Status: reviewed amendment; internal owner projection merged;
-optional wire and Manager consumption pending.**
+**Status: reviewed amendment; internal owner projection and optional provider
+merged; Manager consumption pending.**
 Plan #10704 merged as `9c5a68a52abbee9fd2679fb3acab2c6af0390705`
 after current-head independent approval and green CI, before runtime code.
 The [admission readback](journal/2026/11.05-sidecar-tool-statistics-plan.md)
 retains the complete parent and original contracts.
 The [owner-projection readback](journal/2026/11.05-sidecar-tool-statistics-owner.md)
 records #10707's bounded internal source tier without closing this amendment.
+The [provider readback](journal/2026/11.05-sidecar-tool-statistics-provider.md)
+records #10712's negotiated parser/HTTP/CLI source tier; consumer acceptance
+remains separate.
+The [Manager source validation](journal/2026/11.05-sidecar-tool-statistics-manager.md)
+records the conditional consumer and sparse-label controls pending independent
+review and merge.
 
 ## Confirmed gap and selected scope
 
@@ -76,8 +82,11 @@ do not add a persistent statistics ledger, polling worker or service.
   #10707 qualifies append, hydration, captured-tail, rebuild and represented
   restoration, atomic range/page reads and ancillary failure/exhaustion.
   It adds no optional HTTP/CLI statistic or consumer behavior.
-- [ ] Expand and qualify the optional provider/parser/CLI boundary first.
+- [x] Expand and qualify the optional provider/parser/CLI boundary first.
   Preserve old/new peer behavior and source-bound protocol compatibility.
+  #10712 delivers independent optional support, exact atomic range fields,
+  unknown/zero distinction and source-bound HTTP-52 qualification. It does
+  not enable a Manager caller or complete the combined validation below.
 - [ ] Consume the negotiated projection on the existing held Manager reader,
   preserving current-state/history separation and truthful sparse labels.
 - [ ] Exercise actual append/hydration/captured-tail/rebuild/restoration,

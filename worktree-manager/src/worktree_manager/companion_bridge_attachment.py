@@ -7,17 +7,23 @@ from collections.abc import Callable
 from copy import deepcopy
 import json
 from threading import Lock
-from typing import Any
+from typing import Any, TypedDict
 
 from rich.text import Text
 from textual.widgets import Select
 
 from .companion_bridge_session_source import BridgeSessionSource
 from .companion_bridge_current_requests import CurrentRequestState
+from .companion_bridge_tool_statistics import ToolStatisticsState
 from .companion_bridge_source import BridgeMembershipSource
 from .companion_timeline_attachment import PreparedTimelineSource, TimelineAttachment
 from .companion_timeline_contract import Availability, Provider, SourceToken
 from .companion_timeline_widget import SubwayTimeline
+
+
+class _PendingState(TypedDict, total=False):
+    current_requests: CurrentRequestState | None
+    tool_statistics: ToolStatisticsState | None
 
 
 class BridgeTimelineAttachment(TimelineAttachment):
@@ -27,6 +33,7 @@ class BridgeTimelineAttachment(TimelineAttachment):
     ) -> None:
         self._current_status = current_status
         self.current_requests: CurrentRequestState | None = None
+        self.tool_statistics: ToolStatisticsState | None = None
         self._current_revision = 0
         super().__init__(*args, provider=Provider.BRIDGE, source_factory=self._source, **kwargs)
         self._owner_ref, self._project_root = owner_ref, project_root
@@ -45,27 +52,30 @@ class BridgeTimelineAttachment(TimelineAttachment):
         member, generation = self._chosen
         loop = asyncio.get_running_loop()
         revision, current_revision = self._revision, self._current_revision
-        pending: CurrentRequestState | None = None
+        pending: _PendingState = {}
         scheduled = False
         lock = Lock()
 
         def accept() -> None:
             nonlocal pending, scheduled
             with lock:
-                state, pending, scheduled = pending, None, False
+                states, pending, scheduled = pending, {}, False
             if (
                 revision == self._revision and current_revision == self._current_revision
                 and not self._stop.is_set() and self.selection == selection and self._renderable()
                 and (self._head_current is None or self._head_current(selection))
             ):
-                self.current_requests = state
+                if "current_requests" in states:
+                    self.current_requests = states["current_requests"]
+                if "tool_statistics" in states:
+                    self.tool_statistics = states["tool_statistics"]
                 if self._current_status is not None:
-                    self._current_status(state)
+                    self._current_status(self.current_requests)
 
-        def publish(state: CurrentRequestState | None) -> None:
-            nonlocal pending, scheduled
+        def publish(state: _PendingState) -> None:
+            nonlocal scheduled
             with lock:
-                pending = state
+                pending.update(state)
                 if scheduled:
                     return
                 scheduled = True
@@ -73,12 +83,14 @@ class BridgeTimelineAttachment(TimelineAttachment):
 
         return BridgeSessionSource(
             *selection, **options, member=member, hosting_generation=generation,
-            current=publish,
+            current=lambda state: publish({"current_requests": state}),
+            statistics=lambda state: publish({"tool_statistics": state}),
         )
 
     def _invalidate_current(self) -> None:
         self._current_revision += 1
         self.current_requests = None
+        self.tool_statistics = None
         if self._current_status is not None:
             self._current_status(None)
 

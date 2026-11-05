@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from .mux_companion import _CompanionData, MuxCompanionApp
 
 
-def current_input_text(state: CurrentRequestState | None) -> Text:
+def current_input_text(state: CurrentRequestState | None, *, concise: bool = False) -> Text:
     if state is None or state.availability is not Availability.OBSERVED:
         message = "Current input unknown"
     elif state.completeness.value != "complete":
@@ -26,7 +26,7 @@ def current_input_text(state: CurrentRequestState | None) -> Text:
         message = f"{len(state.requests)} pending local waiters; return to CLI"
     else:
         message = "No local waiters observed"
-    return Text(message + "; answerability unknown.")
+    return Text(message if concise else message + "; answerability unknown.")
 
 
 def render_current_input(app: MuxCompanionApp, state: CurrentRequestState | None) -> None:
@@ -39,7 +39,18 @@ def render_current_input(app: MuxCompanionApp, state: CurrentRequestState | None
         ))
         compact = app.query_one("#timeline-current-compact", Static)
         compact.display = label.display
-        compact.update(current_input_text(state))
+        statistics = app._bridge_attachment.tool_statistics
+        compact_text = current_input_text(state, concise=True)
+        compact_text.append(" | " + (
+            statistics.compact() if statistics is not None else "Tool starts unknown"
+        ))
+        compact.update(compact_text)
+        evidence = app.query_one("#timeline-tool-statistics", Static)
+        evidence.display = label.display
+        evidence.update(Text(
+            statistics.summary() if statistics is not None else
+            "Tool starts unknown; no qualified selected-session statistics.",
+        ))
 
 
 def bridge_status(window: TimelineWindow, message: str) -> Text:
