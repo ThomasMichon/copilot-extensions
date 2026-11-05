@@ -166,6 +166,11 @@ modules. Unsupported required modules remain visible and unsatisfied. Missing
 enabled payloads, indeterminate settings, refused owners or invalid declarations
 refuse this selection before any probe or installer; an incomplete inventory
 cannot establish that all requirements were selected.
+Binding-level refusals, including ambiguous legacy writers, also refuse before
+probes. Required selection and complete inventory are revalidated before each
+installer, after its readiness and before accepting the final observation.
+Changes retain completed installer outcomes but cannot satisfy requirements;
+`selectionRefusal: required-inventory-changed` identifies final census drift.
 
 ```text
 agent-machines installation-repair --project-root <project> --required

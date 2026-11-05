@@ -313,16 +313,28 @@ def _binding_inputs(
     }, owners
 
 
-def _readmit_owner(
+def _required_modules(host: HostAdmission) -> list[str]:
+    if (
+        not host.activation_complete or host.refused or host.report.findings
+        or any(owner.refusal for owner in host.bindings.values())
+    ):
+        raise RepairAdmissionError("required selection needs a complete enabled-owner inventory")
+    return [
+        module.qualified_id for module in host.report.modules
+        if module.classification is Requirement.REQUIRED
+    ]
+
+
+def _readmit(
     project_root: Path, modules: Sequence[str], platform: Platform, plan_digest: str,
-    owner_id: str, home: Path | None,
-) -> OwnerBinding:
+    home: Path | None, required: bool,
+) -> dict[str, OwnerBinding]:
     fresh = admit_host(project_root, home=home)
-    fresh_selected = _closure(fresh, modules, platform)
+    fresh_selected = _closure(fresh, _required_modules(fresh) if required else modules, platform)
     fresh_inputs, owners = _binding_inputs(fresh, fresh_selected, platform)
     if digest(fresh_inputs) != plan_digest:
         raise RepairAdmissionError("repair owner binding changed")
-    return owners[owner_id]
+    return owners
 
 
 @cancel_on_termination()
@@ -390,12 +402,7 @@ def _repair(
     platform = current_platform()
     host = admit_host(project_root, home=home)
     if required:
-        if not host.activation_complete or host.refused or host.report.findings:
-            raise RepairAdmissionError("required selection needs a complete enabled-owner inventory")
-        modules = [
-            module.qualified_id for module in host.report.modules
-            if module.classification is Requirement.REQUIRED
-        ]
+        modules = _required_modules(host)
     selected = _closure(host, modules, platform)
     bound, owners = _binding_inputs(host, selected, platform)
     plan_digest = digest(bound)
@@ -444,9 +451,9 @@ def _repair(
             continue
         refresh_readiness = any(item.attempted for item in outcomes.values())
         try:
-            fresh_owner = _readmit_owner(
-                project_root, modules, platform, plan_digest, module.owner.owner_id, home,
-            )
+            fresh_owner = _readmit(
+                project_root, modules, platform, plan_digest, home, required,
+            )[module.owner.owner_id]
             if not refresh_readiness and _satisfies(module, observation):
                 continue
             if refresh_readiness:
@@ -455,9 +462,9 @@ def _repair(
                 if observation.reason == "readiness-interrupted":
                     interrupted = True
                     continue
-                fresh_owner = _readmit_owner(
-                    project_root, modules, platform, plan_digest, module.owner.owner_id, home,
-                )
+                fresh_owner = _readmit(
+                    project_root, modules, platform, plan_digest, home, required,
+                )[module.owner.owner_id]
                 if _satisfies(module, observation):
                     continue
         except KeyboardInterrupt:
@@ -491,15 +498,24 @@ def _repair(
             interrupted = True
             continue
         try:
-            _readmit_owner(
-                project_root, modules, platform, plan_digest, module.owner.owner_id, home,
-            )
+            _readmit(project_root, modules, platform, plan_digest, home, required)
         except KeyboardInterrupt:
             outcome.after = Observation("unknown", "owner-revalidation-interrupted")
             interrupted = True
         except RepairAdmissionError:
             outcome.after = Observation("unknown", "owner-binding-changed")
             execution_halted = True
+    selection_refusal = None
+    if required and not interrupted and not execution_halted:
+        try:
+            _readmit(project_root, modules, platform, plan_digest, home, required)
+        except KeyboardInterrupt:
+            interrupted = True
+        except RepairAdmissionError:
+            selection_refusal = "required-inventory-changed"
+            execution_halted = True
+            for outcome in outcomes.values():
+                outcome.after = Observation("unknown", selection_refusal)
     required_satisfied = not interrupted and not execution_halted and all(
         _satisfies(outcome.module, outcome.observed) and not outcome.restart_required
         and not outcome.blocked_by
@@ -521,6 +537,7 @@ def _repair(
             "ready" if satisfied else "incomplete" if not required_satisfied else "optional-incomplete"
         ),
         "requiredSatisfied": required_satisfied,
+        "selectionRefusal": selection_refusal,
         "selected": [module.qualified_id for module in selected],
         "available": sorted(module.qualified_id for module in host.report.modules),
         "refusedOwners": dict(host.refused),
