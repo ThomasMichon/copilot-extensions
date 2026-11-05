@@ -252,6 +252,34 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The nine-contract transfer/observation/census delta is delivered in #10611.
+All fifteen actual merged bodies equal the validated publication; its child
+is finalized and retained, with only its parent-child claim settled.
+The [delivery journal](<journal/2026/11.04 windows-census-registration-encoding-contracts.md>)
+records two equal complete 21:48 PST metadata-only scans: 1,004 whole open,
+275 above 729. One external departure supplies no campaign credit; verified
+dispositions remain 776. Continue the five-contract Chat/SSH/copy study and
+permitted independent finite research, not a held-source or historical-cohort
+retry. Parent Plan/Validation and all existing custodians remain unchanged.
+
+The [Chat/hosted continuity](chat-graduation-hosted-continuity-cohort.md),
+[SSH root/finite forward](ssh-root-finite-forward-cohort.md) and
+[installer-copy synchronization](installer-policy-copy-sync-cohort.md) studies
+preserve five whole originals through 52 texts/85,512 characters and fifteen
+ranked relations. Actual merged descriptions credit hosted delivery/continuity
+and supersede the finite-forward leaf's historical unmerged observation.
+Its whole Active effort retains closeout duties; the root-repair operational
+hold and canonical Chat integration owners remain. All eight current installer
+copies equal canonical bytes, while exact complete publication/test proof stays
+separate. One entire paired original is protected before rendering; no source
+or subset retry follows. All five originals remain OPEN.
+
+Prospective whole-reference preflight with the confirmed inherited guards
+withholds all six originals in groups 099-101 before rendering, including
+transitive references between groups. Their metadata is unchanged, not their
+text newly admitted. No old corpus, source/subset retry or completion credit
+replaces that boundary; continuing independent research remains open.
+
 The six-contract identity/delivery/transaction delta is delivered in #10604.
 Recursive Index forwarding ends INSIDE the SSH child, which stays running to
 execute the request and return its result. All eleven actual merged bodies
@@ -1289,6 +1317,17 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [Chat/continuity](chat-graduation-hosted-continuity-cohort.md) core retains
+accepted initialization trust, worktree/anchor identity, no-noise uncertainty
+and existing shared integration custody. The
+[SSH](ssh-root-finite-forward-cohort.md) core distinguishes released exact-root
+repair from its actual operational hold and merged finite source from unfinished
+owner closeout. The [installer-copy](installer-policy-copy-sync-cohort.md) core
+credits current eight-file equality without claiming audit execution, permitted
+correction-source proof or required CI. Eleven whole-message relations, three
+whole-description relations and one protected exclusion are not fifteen fixes;
+no new native/installed gate, implementation or custody transfer is introduced.
 
 The [exit/history](exit-observation-history-work-cohort.md) core preserves
 independent watchdog-root observation before inherited captured-output EOF,
