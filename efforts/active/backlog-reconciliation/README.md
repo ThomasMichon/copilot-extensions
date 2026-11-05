@@ -252,6 +252,29 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The nine-contract checkpoint is actually delivered in #10697 after genuine
+exact-head approval, no active findings or threads and nine complete
+successful/skipped checks before normal managed merge. All eight actual
+merged/current blobs equal the approved head; only its publication child
+finalized, retained. The
+[delivery journal](<journal/2026/11.05 finite-allocation-recovery-observation-contracts.md>)
+records two equal complete 02:58 PST scans, unchanged at 1,009 whole open:
+734 creator-eligible, 275 excluded, 672 original-cohort and 337 inflow.
+There are no arrivals, departures or new credit; dispositions remain 777
+and the parent stays Active, 280 issues above 729. The following twelve
+whole originals and thirty-six ranked relationships are integrated for
+reviewed publication, preserving actual partial delivery and direct intake.
+
+The [twelve finite venue/composition/compatibility contracts](finite-venue-composition-compatibility-contracts.md)
+integrate 31 whole texts and thirty-six ranked relationships without new
+completion or receiving-transfer credit. All twelve stay OPEN. Productive
+venue preparation, driver fencing, outage-independent expiry and canonical
+contract guidance are credited; their finite legacy, native and consumer
+residuals survive. Complete launch-setting read/write intake is already
+credited, not counted again. The
+[journal](<journal/2026/11.05 finite-venue-composition-compatibility-contracts.md>)
+preserves protected whole evidence and every existing custodian.
+
 The [nine finite allocation/recovery/observation contracts](finite-allocation-recovery-observation-contracts.md)
 integrate 28 whole texts and twenty-seven ranked relationships without new
 completion or receiving-transfer credit. All nine remain OPEN. The current
@@ -1688,6 +1711,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [venue/composition/compatibility study](finite-venue-composition-compatibility-contracts.md)
+distinguishes 25 whole-message, five fresh whole-description, three reused
+whole-description and three protected relations. Original alternatives,
+native residuals, all seven compatibility boundaries and complete direct
+read/write intake remain. No ranked comparison supplies new receiving
+consent, complete acceptance, implementation or custody release.
 
 The [allocation/recovery/observation study](finite-allocation-recovery-observation-contracts.md)
 separates twenty whole-message, three fresh whole-description and four

@@ -5,6 +5,14 @@ Method: [weighted semantic consolidation](semantic-density-consolidation.md).
 
 ## Result and coverage
 
+The [twelve finite venue/composition/compatibility contracts](finite-venue-composition-compatibility-contracts.md)
+retain thirty-six ranked relationships without confusing real productive
+preparation, driver fencing, expiry or contract guidance with whole acceptance.
+Named configuration, archive filtering, legacy notification visibility,
+read/write truth and keeper custody retain distinct outcomes. All twelve stay
+OPEN; the [journal](<journal/2026/11.05 finite-venue-composition-compatibility-contracts.md>)
+separates fresh, reused and protected whole evidence.
+
 The [nine finite allocation/recovery/observation contracts](finite-allocation-recovery-observation-contracts.md)
 retain twenty-seven ranked relationships and actual partial deliveries
 without completing generic allocation, acceptance, replay or rendering.

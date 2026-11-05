@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-05 - Twelve finite venue, composition and compatibility contracts](<journal/2026/11.05 finite-venue-composition-compatibility-contracts.md>)
+
 - [2026-11-05 - Nine finite allocation, recovery and observation contracts](<journal/2026/11.05 finite-allocation-recovery-observation-contracts.md>)
 
 - [2026-11-05 - Eleven finite trigger, identity and lifecycle-anchoring contracts](<journal/2026/11.05 finite-trigger-identity-anchoring-contracts.md>)
