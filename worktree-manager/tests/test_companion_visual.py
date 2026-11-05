@@ -9,6 +9,7 @@ import re
 from collections.abc import Callable
 
 import pytest
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.widgets import Select, Static
 
@@ -18,6 +19,7 @@ from worktree_manager.companion_timeline_contract import (
 from worktree_manager.companion_timeline_model import TimelineWindow
 from worktree_manager.companion_timeline_widget import CompanionTimelinePanel, SubwayTimeline
 from worktree_manager.companion_summary import bridge_status
+from worktree_manager.companion_bridge_current_requests import CurrentRequestState, decode_current_requests
 from _companion_timeline_fixtures import event, position, snapshot, token
 
 
@@ -27,10 +29,13 @@ BASELINES = Path(__file__).with_name("visual_baselines")
 class VisualApp(App[None]):
     TITLE = "Sidecar timeline - synthetic rendered fixture"
 
-    def __init__(self, window: TimelineWindow, *, session: bool = False) -> None:
+    def __init__(
+        self, window: TimelineWindow, *, session: bool = False, current: CurrentRequestState | None = None,
+    ) -> None:
         super().__init__()
         self.window = window
         self.session = session
+        self.current = current
         self.theme = "textual-dark"
 
     def compose(self) -> ComposeResult:
@@ -42,6 +47,8 @@ class VisualApp(App[None]):
                 ("Bridge feed: membership (discover delegates)", "membership"),
                 ("Session: helper-example (owned; reported link)", "session"),
             ], value="session", allow_blank=False)
+        if self.current is not None:
+            yield Static(Text(self.current.summary()))
         yield CompanionTimelinePanel(self.window)
 
 
@@ -76,13 +83,30 @@ def offline_svg(svg: str) -> str:
     return re.sub(r"(?m)^[ \t]+$", "", svg)
 
 
-@pytest.mark.parametrize("state", ["live", "browsing", "session"])
+def current_fixture(state: str) -> CurrentRequestState:
+    body = {
+        "version": 1, "client_incarnation": "a" * 32, "revision": 1,
+        "availability": "observed", "completeness": "complete", "reason": "local-acp-waiters",
+        "observed_at": "2026-11-04T00:00:00+00:00",
+        "requests": [{"occurrence_id": "b" * 32, "kind": "input"}] if state == "current-pending" else [],
+    }
+    if state == "current-partial":
+        body.update(completeness="partial", reason="waiter-coverage")
+    elif state == "current-unknown":
+        body.update(availability="unknown", completeness="unknown", reason="client-disconnected")
+    return decode_current_requests(body)
+
+
+@pytest.mark.parametrize("state", [
+    "live", "browsing", "session", "current-pending", "current-cleared", "current-partial", "current-unknown",
+])
 def test_timeline_visual(
     state: str, record_property: Callable[[str, object], None],
 ) -> None:
     async def capture() -> str:
         window = visual_window()
-        if state == "session":
+        session = state == "session" or state.startswith("current-")
+        if session:
             membership = window.sources["bridge"].token
             assert not window.source_error(membership, "Reader paused; retained evidence only.").applied
             selected = replace(membership, identity=replace(membership.identity, source_key="bridge-session-example"))
@@ -97,7 +121,9 @@ def test_timeline_visual(
             )
             rows = tuple(replace(row, actor=replace(row.actor, kind=ActorKind.BRIDGE_SESSION)) for row in rows)
             assert window.apply_snapshot(snapshot(selected, rows)).applied
-        app = VisualApp(window, session=state == "session")
+        app = VisualApp(
+            window, session=session, current=current_fixture(state) if state.startswith("current-") else None,
+        )
         async with app.run_test(size=(100, 32)) as pilot:
             timeline = app.query_one(SubwayTimeline)
             timeline.focus()
@@ -117,7 +143,7 @@ def test_timeline_visual(
                 assert timeline.capture_anchor().event == anchor.event
             else:
                 assert window.follow_live and timeline.is_vertical_scroll_end
-                if state == "session":
+                if session:
                     await pilot.press("end", "enter")
                     await pilot.pause()
             return offline_svg(app.export_screenshot())

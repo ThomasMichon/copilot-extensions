@@ -7,12 +7,24 @@ import json
 from typing import TYPE_CHECKING
 
 from rich.text import Text
+from textual.widgets import Static
 
+from .companion_bridge_current_requests import CurrentRequestState
 from .companion_timeline_contract import Availability, Provider
 from .companion_timeline_model import TimelineWindow
 
 if TYPE_CHECKING:
-    from .mux_companion import _CompanionData
+    from .mux_companion import _CompanionData, MuxCompanionApp
+
+
+def render_current_input(app: MuxCompanionApp, state: CurrentRequestState | None) -> None:
+    if app.query("#timeline-current-input"):
+        label = app.query_one("#timeline-current-input", Static)
+        label.display = app._bridge_attachment.choice != "membership"
+        label.update(Text(
+            state.summary() if state is not None else
+            "Current input unknown; no qualified selected-session observation.",
+        ))
 
 
 def bridge_status(window: TimelineWindow, message: str) -> Text:

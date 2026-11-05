@@ -829,6 +829,24 @@ def test_actual_three_source_commit_binding_and_child_join_preserves_history(
                 app.action_refresh()
                 await until(pilot, lambda: timeline.window is not old_window, attempts=400)
                 await until(pilot, lambda: app._rich_agenda_attachment.token is not None)
+                await JoinPhase(
+                    "three-source-reconciliation",
+                    JOIN_PREPARATION_SECONDS + bridge.BRIDGE_STARTUP_TIMEOUT + JOIN_COMMAND_CLEANUP
+                    + 4 * (STARTUP_TIMEOUT + JOIN_COMMAND_CLEANUP),
+                ).wait(
+                    lambda: app._timeline_attachment.controller is not None
+                    and app._timeline_attachment.controller.reader_count == 1
+                    and app._bridge_attachment.controller is not None
+                    and app._bridge_attachment.controller.reader_count == 1,
+                    pilot.pause,
+                    lambda: peer["failures"][0] if peer["failures"] else None,
+                    lambda: {
+                        "owner": str(app.query_one(".timeline-state", Static).content),
+                        "bridge": str(app.query_one("#timeline-bridge-status", Static).content),
+                        "stages": peer["stages"],
+                        "owner_controller": repr(app._timeline_attachment.controller),
+                    },
+                )
                 assert {state.token.identity.provider for state in timeline.window.sources.values()} == set(Provider)
                 assert all(row in timeline.window.events for row in others)
                 assert all(row.ref in timeline.window._proofs for row in others)
@@ -845,9 +863,20 @@ def test_actual_three_source_commit_binding_and_child_join_preserves_history(
                     "reconciliation": timeline.window.reconciliation_required,
                 }
                 peer["publish"]("Binding after membership reconciliation", 25)
-                await until(pilot, lambda: "Binding after membership reconciliation" in str(
-                    app.query_one(".timeline-context", Static).content,
-                ))
+                try:
+                    await until(pilot, lambda: "Binding after membership reconciliation" in str(
+                        app.query_one(".timeline-context", Static).content,
+                    ))
+                except AssertionError:
+                    pytest.fail(str({
+                        "context": str(app.query_one(".timeline-context", Static).content),
+                        "state": str(app.query_one(".timeline-state", Static).content),
+                        "sources": [(state.token.identity.provider.value, state.availability.value)
+                                    for state in timeline.window.sources.values()],
+                        "owner_readers": (app._timeline_attachment.controller.reader_count
+                                          if app._timeline_attachment.controller is not None else None),
+                        "trace": peer["trace"].read_text(), "stages": peer["stages"],
+                    }))
                 assert all(row in timeline.window.events for row in others)
                 app._receive_agenda(
                     app._data, app._agenda_generation, app._agenda_cancel,
