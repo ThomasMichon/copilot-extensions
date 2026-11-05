@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-05 - Six finite consumer, index and configuration contracts](<journal/2026/11.05 finite-consumer-index-configuration-contracts.md>)
+
 - [2026-11-05 - Nine finite standalone, reservation and runtime contracts](<journal/2026/11.05 finite-standalone-reservation-runtime-contracts.md>)
 
 - [2026-11-05 - Six finite release, stamp and inventory contracts](<journal/2026/11.05 finite-release-stamp-inventory-contracts.md>)
