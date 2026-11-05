@@ -14,6 +14,28 @@ class ResidentRecoveryHeld(RuntimeError):
     """Maintenance or unreadable maintenance evidence prevents automatic wake."""
 
 
+def refuse_recovery(error: ResidentRecoveryHeld, *, json_output: bool) -> int:
+    """Use the ordinary CLI refusal envelope without reporting an ambiguous write."""
+    from . import output
+
+    if json_output:
+        return output._json_error(str(error))
+    output.err(str(error))
+    return 1
+
+
+def dispatch_claim(verb: str, verb_args: dict) -> dict:
+    """Use the existing versioned normal claim writer and resident ensure policy."""
+    from . import locks, status_monitor_runtime as monitor, tracking_write
+
+    return tracking_write.dispatch(
+        verb, verb_args,
+        read_lock_data=lambda: locks.read_lock(monitor._monitor_lock_path()),
+        ensure_monitor=monitor._ensure_status_monitor if monitor._status_monitor_enabled() else None,
+        min_version=4,
+    )
+
+
 def _user_profile() -> Path:
     from . import _installation_context as installation_context
 

@@ -88,6 +88,7 @@ from collections.abc import Callable
 from work_coalescing_singleton import CoalescingServer
 from work_coalescing_singleton import client as wcs_client
 from .resident_recovery import ResidentRecoveryHeld as ResidentRecoveryHeld
+from .resident_recovery import refuse_recovery as refuse_recovery
 
 logger = logging.getLogger(__name__)
 

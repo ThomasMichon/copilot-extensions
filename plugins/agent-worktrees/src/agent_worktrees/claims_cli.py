@@ -22,6 +22,7 @@ from . import (
     worktree_identity,
 )
 from . import config as cfg, execution_spaces, state_root as state_root_mod
+from .resident_recovery import dispatch_claim as _dispatch_claim
 
 
 def _core():
@@ -392,25 +393,6 @@ def _resolve_owner_ref_record_path(
     return resolve_owner_record_path(owner_ref, config)
 
 
-def _dispatch_claim(verb: str, verb_args: dict):
-    """Dispatch one of the resource-claim verbs (``claim_add``/``_release``/
-    ``_settle``, ``tracking_claim_write.py``) through the daemon's write path
-    when reachable, else the identical in-process code (logged). Raises
-    ``tracking_write.AmbiguousWriteOutcome`` when a sent request then failed.
-    """
-    from . import locks as _locks
-    from . import status_monitor_runtime as _smr
-    from . import tracking_write
-
-    return tracking_write.dispatch(
-        verb,
-        verb_args,
-        read_lock_data=lambda: _locks.read_lock(_smr._monitor_lock_path()),
-        ensure_monitor=_smr._ensure_status_monitor if _smr._status_monitor_enabled() else None,
-        min_version=4,
-    )
-
-
 def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
     """Journal a new outbound resource claim on a worktree."""
     valid_kinds = {"worktree", "codespace", "container", "ssh", "workdir", "pr", "task"}
@@ -476,10 +458,7 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
             },
         )
     except tracking_write.ResidentRecoveryHeld as exc:
-        if args.json:
-            return output._json_error(str(exc))
-        output.err(str(exc))
-        return 1
+        return tracking_write.refuse_recovery(exc, json_output=args.json)
     except tracking_write.AmbiguousWriteOutcome as exc:
         msg = f"claims add: write to {wt_id} is in an unknown state: {exc}"
         if args.json:
@@ -577,10 +556,7 @@ def _claims_release(args: argparse.Namespace, ref: str) -> int:
             },
         )
     except tracking_write.ResidentRecoveryHeld as exc:
-        if args.json:
-            return output._json_error(str(exc))
-        output.err(str(exc))
-        return 1
+        return tracking_write.refuse_recovery(exc, json_output=args.json)
     except tracking_write.AmbiguousWriteOutcome as exc:
         msg = f"claims release: write to {wt_id} is in an unknown state: {exc}"
         if args.json:
@@ -655,10 +631,7 @@ def _claims_settle(args: argparse.Namespace, ref: str) -> int:
             },
         )
     except tracking_write.ResidentRecoveryHeld as exc:
-        if args.json:
-            return output._json_error(str(exc))
-        output.err(str(exc))
-        return 1
+        return tracking_write.refuse_recovery(exc, json_output=args.json)
     except tracking_write.AmbiguousWriteOutcome as exc:
         msg = f"claims settle: write to {wt_id} is in an unknown state: {exc}"
         if args.json:
