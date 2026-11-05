@@ -68,7 +68,7 @@ These are data references, not proof of permission, confirmed feedback or a
 new effect ledger. There is no ingest, feedback-write, selector, automatic
 acquisition or public read operation in the A1 data-only slice.
 
-`snapshot` requires v4 and never adopts or writes. Malformed/null, duplicate,
+`snapshot` requires v4 (or its explicit v5 expansion) and never adopts or writes. Malformed/null, duplicate,
 foreign-namespace, invalid-cursor and over-capacity persisted attention refuses
 every owner entry point without reinitializing state. Existing replay/review
 operations and internal conversation transactions preserve v4 data; calling
@@ -76,7 +76,7 @@ conversation adoption again cannot downgrade it or discard its journal.
 
 Default provisioning, native read-only host configuration and v2/v3 operations
 remain unchanged. Existing strict older disk readers cannot open v4. The
-current v3 conversation-serving descriptor deliberately refuses v4 rather
+current v3 conversation-serving descriptor deliberately refuses v4/v5 rather
 than misreporting its disk layout; the authenticated reader and its negotiated
 compatibility are A3 work. Do not adopt a serving volume for this source
 foundation. No HTTP/CLI operation, automatic migration, activation, rollback
@@ -129,3 +129,8 @@ reconciliation remain required. In particular, another participant must still
 see a confirmed comment as new input. The existing v3 serving descriptor still
 refuses v4; A3 must qualify negotiated reading before a serving host can adopt
 this layout. No HTTP/CLI operation or default host enables this source seam.
+
+The separately reviewed [feedback capture data](feedback-capture.md) expands
+the same owner explicitly to v5 without changing attention-state/v1. Its B1
+data-only exit does not supply the protected capture/confirmation or
+interest-specific echo integration above.
