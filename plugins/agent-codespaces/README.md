@@ -183,6 +183,10 @@ for `Available` under that same account. A missing or failed bound lookup never
 selects another account's same-named venue. A known owner's unavailable credentials refuse rather than
 fall back to ambient authentication. This operation does not provision guest
 tools, project credentials, stage plugins or launch a worker.
+On first use without an account map or stored binding, it identifies the
+authenticated login and revalidates the exact venue with that account's explicit
+credentials before activation. This does not change global authentication and
+never follows a failed authoritative binding with ambient fallback.
 The ordinary ACP/spawn command retains its guest-owner policy guard for prior
 callers and direct launches. Bridge selects the additive declaration only for
 its host-owned portable receiver; it never strips a shell guard or treats a

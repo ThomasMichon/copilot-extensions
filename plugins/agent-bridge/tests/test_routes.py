@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from agent_bridge import __version__
 from agent_bridge.app import create_app
 from agent_bridge.agent_registry import AgentConfig, AgentResolver
+from agent_bridge.agent_registry_cache import AgentRosterCache
 from agent_bridge.events import EventLog
 from agent_bridge.models import ServiceConfig, SessionStatus
 from agent_bridge.protocol import FAILED_ACP_HANDSHAKE_FAULT
@@ -44,13 +45,25 @@ def _route_local_start_via_classic(monkeypatch):
     connect back through the module-level ``spawn`` + ``AcpClient`` -- both still
     patched per-test -- preserving each test's contract. Never invoked unless a
     test actually starts a local session, so it is inert elsewhere.
+
+    These route controls use fictional execution paths and workspace IDs.
+    Isolate their policy/planning boundaries; dedicated receiver tests cover them.
     """
+    from agent_bridge import hosting_policy, local_launch_preparation
     import agent_bridge.session_manager as sm
+
+    async def resolve(target, *, session_id=""):
+        return ["copilot", *target.copilot_args], target.cwd, dict(target.env)
+
+    monkeypatch.setattr(hosting_policy, "require_target_hosting", AsyncMock())
+    monkeypatch.setattr(hosting_policy, "require_path_hosting", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(local_launch_preparation, "resolve_local_launch", resolve)
 
     async def _fake_connect(
         self, target, *, tracker, session_id, on_acp_event,
         permission_callback=None, mcp_servers=None, spawner=None,
         remote_child_argv=None, remote_cwd=None, model=None, effort=None,
+        prepared_local_launch=None,
     ):
         proc = await sm.spawn(
             target, tracker=tracker, connect_timeout=0, session_id=session_id,
@@ -1173,9 +1186,9 @@ class TestAgentRoutes:
         resolver = AgentResolver({}, {})
         app.state.resolver = resolver
 
-        class _FakeCache:
+        class _FakeCache(AgentRosterCache):
             def __init__(self, resolver):
-                self.resolver = resolver
+                super().__init__(resolver)
                 self.calls = []
 
             async def get_snapshot(self, *, force_refresh=False):
@@ -1207,9 +1220,9 @@ class TestAgentRoutes:
         resolver = AgentResolver({}, {})
         app.state.resolver = resolver
 
-        class _FakeCache:
+        class _FakeCache(AgentRosterCache):
             def __init__(self, resolver):
-                self.resolver = resolver
+                super().__init__(resolver)
                 self.calls = []
 
             async def get_snapshot(self, *, force_refresh=False):
@@ -1234,9 +1247,9 @@ class TestAgentRoutes:
         resolver = AgentResolver({}, {})
         app.state.resolver = resolver
 
-        class _IncompleteCache:
+        class _IncompleteCache(AgentRosterCache):
             def __init__(self, resolver):
-                self.resolver = resolver
+                super().__init__(resolver)
 
             async def get_snapshot(self, *, force_refresh=False):
                 return AgentRosterSnapshot(
@@ -1266,9 +1279,9 @@ class TestAgentRoutes:
         resolver = AgentResolver({}, {})
         app.state.resolver = resolver
 
-        class _CompleteCache:
+        class _CompleteCache(AgentRosterCache):
             def __init__(self, resolver):
-                self.resolver = resolver
+                super().__init__(resolver)
 
             async def get_snapshot(self, *, force_refresh=False):
                 return AgentRosterSnapshot(rows=[], incomplete_namespaces=[], complete=True)
@@ -1334,9 +1347,9 @@ class TestAgentRoutes:
         new_resolver = AgentResolver({}, {})
         app.state.resolver = new_resolver
 
-        class _StaleCache:
+        class _StaleCache(AgentRosterCache):
             def __init__(self, resolver):
-                self.resolver = resolver
+                super().__init__(resolver)
                 self.called = False
 
             async def get_snapshot(self, *, force_refresh=False):
@@ -3090,6 +3103,7 @@ class TestBackgroundTaskTeardownGate:
         client_mock.active_background_tasks = ["pr-daemon"]
         session.client = client_mock
         mgr._sessions[sid] = session
+        mgr.db.create_session(sid, "busy-bee", "test-agent", "/wt", "local", "idle", 0)
         return session
 
     def test_stop_returns_409_when_busy(self, client, app) -> None:

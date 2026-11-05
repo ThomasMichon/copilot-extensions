@@ -262,3 +262,20 @@ implementation. The exact support closure follows the consumer trace and tests.
   process, repeated cancellation, drain-before/during activation and retained
   legacy upgrade. CodeSpace parser/lifecycle controls passed 136 cases. Final
   source evidence, review and CI remain open; no installed or external acceptance.
+
+### 2026-11-05 - HTTP admission and retained repository review corrections
+
+- The next exact-head review confirmed all four prior corrections and identified
+  the HTTP-start sibling of the drain race, missing retained repository selectors
+  during negotiation and an overly strict unmapped-account refusal.
+- HTTP start now holds manager-owned admission before provider resolution and
+  through original-operation cancellation settlement. Resume passes the retained
+  repository/remote and verifies the selected execution checkout before recovery.
+  First-use activation resolves the authenticated login and revalidates the exact
+  venue with its explicit credentials; failed authoritative bindings never fall
+  back.
+- The Bridge packet passed 152 cases, including actual HTTP route/process
+  cancellation and drain controls plus differing leading-`cd` cross-repository
+  cases. CodeSpace parser/lifecycle controls passed 141 cases, including unmapped
+  first use and identity, explicit-lookup and token failures. Updated source
+  evidence, required CI and a new passing review remain separate gates.

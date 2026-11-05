@@ -431,16 +431,8 @@ async def test_stopped_codespace_resume_activates_under_original_stop_fence(
     assert session.acp_session_id == "retained-conversation"
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("outcome", ["pre-drain", "drain", "cancel"])
-async def test_resume_activation_remains_owned_through_cancellation_and_drain(
-    tmp_path: Path, session_manager, monkeypatch: pytest.MonkeyPatch, outcome: str,
-) -> None:
-    from agent_bridge.models import SessionStatus
-    from agent_bridge.provider_hosting import CodeSpaceNotRunning
-    from agent_bridge.session_manager import DaemonDrainingError, Session
-    from agent_bridge.spawn_target import SpawnTarget
-
+@pytest.fixture
+def delayed_activation_provider(tmp_path: Path):
     started, release, completed = (tmp_path / name for name in ("started", "release", "completed"))
     program = (
         "import pathlib,time\n"
@@ -452,6 +444,20 @@ async def test_resume_activation_remains_owned_through_cancellation_and_drain(
         "completed.write_text('activated')\n"
     )
     provider = CliNamespaceResolver("codespace", "fixture", command=[sys.executable, "-c", program])
+    return provider, started, release, completed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["pre-drain", "drain", "cancel"])
+async def test_resume_activation_remains_owned_through_cancellation_and_drain(
+    delayed_activation_provider, session_manager, monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.provider_hosting import CodeSpaceNotRunning
+    from agent_bridge.session_manager import DaemonDrainingError, Session
+    from agent_bridge.spawn_target import SpawnTarget
+
+    provider, started, release, completed = delayed_activation_provider
     target = SpawnTarget(type="command", cwd="/actual", explicit_cwd=True, codespace={
         "name": "selected", "workspace_folder": "/actual",
         "portable_receiving_policy": {"version": 1, "activation": "start", "acp_command": "copilot"},
@@ -517,6 +523,171 @@ async def test_resume_activation_remains_owned_through_cancellation_and_drain(
             operation.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await operation
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["pre-drain", "drain", "cancel"])
+async def test_http_activation_remains_owned_until_original_provider_settles(
+    delayed_activation_provider, session_manager, monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
+    import httpx
+    from fastapi import FastAPI
+
+    from agent_bridge.provider_hosting import CodeSpaceNotRunning
+    from agent_bridge.routes import sessions
+    from agent_bridge.spawn_target import SpawnTarget
+
+    provider, started, release, completed = delayed_activation_provider
+    target = SpawnTarget(type="command", cwd="/actual", explicit_cwd=True, codespace={
+        "name": "selected", "workspace_folder": "/actual",
+        "portable_receiving_policy": {"version": 1, "activation": "start", "acp_command": "copilot"},
+    })
+    owner = AgentResolver({}, {})
+    owner.register_namespace_resolver(provider)
+    owner._call_resolver = AsyncMock(return_value=target)
+    monkeypatch.setattr(owner, "refresh_provider_resolvers", lambda: None)
+    monkeypatch.setattr(owner, "_related_plugins_for", AsyncMock(return_value=[]))
+    provider.ensure_ready = AsyncMock()
+
+    async def hosting(*_args, **_kwargs):
+        if not completed.exists():
+            raise CodeSpaceNotRunning("stopped")
+
+    monkeypatch.setattr(hosting_policy, "require_target_hosting", hosting)
+    monkeypatch.setattr("agent_bridge.venue_launch_policy.gate_raw_codespace_spawn", AsyncMock())
+    monkeypatch.setattr(sessions, "apply_request_preferences", lambda *_args: ({}, "caller-settings"))
+    app = FastAPI()
+    app.state.session_manager = session_manager
+    app.state.resolver = owner
+    app.state.ready = True
+    app.include_router(sessions.router)
+    session_manager.set_draining(outcome == "pre-drain")
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://fixture",
+    ) as client:
+        if outcome == "pre-drain":
+            response = await client.post("/api/v1/sessions", json={"agent": "codespace:selected"})
+            assert response.status_code == 503
+            owner._call_resolver.assert_not_awaited()
+            assert not started.exists()
+            return
+        operation = asyncio.create_task(client.post(
+            "/api/v1/sessions", json={"agent": "codespace:selected"},
+        ))
+        try:
+            deadline = asyncio.get_running_loop().time() + 10
+            while not started.exists() and asyncio.get_running_loop().time() < deadline:
+                await asyncio.sleep(.01)
+            assert started.exists() and session_manager._active_acquisitions == 1
+            assert (await session_manager.drain(timeout=0))["drained"] is False
+            if outcome == "cancel":
+                for _ in range(2):
+                    operation.cancel()
+                    await asyncio.sleep(.02)
+                    assert not operation.done() and session_manager._active_acquisitions == 1
+            release.write_text("settle original activation")
+            if outcome == "cancel":
+                with pytest.raises(asyncio.CancelledError):
+                    await asyncio.wait_for(operation, timeout=10)
+            else:
+                assert (await asyncio.wait_for(operation, timeout=10)).status_code == 503
+            assert completed.read_text() == "activated"
+            assert session_manager._active_acquisitions == 0
+            assert (await session_manager.drain(timeout=0))["drained"] is True
+            assert session_manager.list_sessions() == []
+            assert session_manager.db.execute_read("SELECT * FROM sessions") == []
+        finally:
+            release.touch()
+            if not operation.done():
+                operation.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await operation
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("moved", [False, True])
+async def test_stopped_cross_repo_resume_negotiates_retained_repo_before_policy(
+    repo: Path, session_manager, monkeypatch: pytest.MonkeyPatch, moved: bool,
+) -> None:
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.session_manager import Session
+    from agent_bridge.spawn_target import SpawnTarget
+
+    metadata = {
+        "name": "selected", "repo": "other", "requested_repo": "other",
+        "repo_remote": "https://example.com/owner/other.git",
+        "workspace_folder": "/workspaces/other",
+        "acp_command": "cd /workspaces/other && legacy-guard && copilot",
+    }
+    session = Session("existing", "existing", SpawnTarget(
+        type="command", codespace=metadata, cwd="/workspaces/other",
+    ), "other@codespace:selected")
+    session.status = SessionStatus.STOPPED
+    session.acp_session_id = "retained-conversation"
+    session_manager._sessions["existing"] = session
+    session_manager.db.create_session(
+        "existing", "existing", session.agent_name, session.target.cwd, "command", "stopped", 0,
+    )
+    owner = AgentResolver({}, {})
+    provider = CliNamespaceResolver("codespace", "fixture")
+    owner.register_namespace_resolver(provider)
+    session_manager._resolver = owner
+    running = False
+    policy_reads = []
+
+    async def provider_call(arguments, **_kwargs):
+        nonlocal running
+        if arguments == ["start", "selected"]:
+            running = True
+            return 0, "", ""
+        assert arguments == [
+            "namespace-resolve", "selected", "--repo", "other",
+            "--repo-remote", "https://example.com/owner/other.git",
+        ]
+        workspace = "/workspaces/home" if moved else "/workspaces/other"
+        return 0, json.dumps({
+            "type": "command", "spawn_command": ["fixture"], "codespace": {
+                **metadata, "workspace_folder": workspace,
+                "portable_receiving_policy": {
+                    "version": 1, "activation": "start",
+                    "acp_command": f"cd {workspace} && copilot --acp --stdio",
+                },
+            },
+        }), ""
+
+    async def read(command, **kwargs):
+        from repository_policy import require_agent_hosting
+
+        if "input_bytes" not in kwargs:
+            assert "/workspaces/home" in command
+            return 0, "/workspaces/home\n", ""
+        policy_reads.append(command)
+        assert "/workspaces/other" in command and "/workspaces/home" not in command
+        assert kwargs["input_bytes"]
+        answer = require_agent_hosting(repo, marketplace_id="selected-source")
+        return 0, json.dumps({**answer.to_dict(), "allowed": True}), ""
+
+    guest = SimpleNamespace(
+        is_running=AsyncMock(side_effect=lambda: running), run=read, close=AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.CodeSpaceTransport", lambda *_a, **_k: guest,
+    )
+    monkeypatch.setattr("agent_bridge.venue_launch_policy.gate_raw_codespace_spawn", AsyncMock())
+    provider._run = AsyncMock(side_effect=provider_call)
+    admitted = AsyncMock(return_value=session)
+    monkeypatch.setattr(session_manager, "_resume_session_admitted", admitted)
+    if moved:
+        with pytest.raises(AgentHostingError, match="changed the retained execution checkout"):
+            await session_manager.resume_session("existing")
+        admitted.assert_not_awaited()
+        assert policy_reads == [] and session.target.codespace is metadata
+    else:
+        assert await session_manager.resume_session("existing") is session
+        assert len(policy_reads) == 1
+        assert session.target.cwd == "/workspaces/other" and not session.target.explicit_cwd
+        assert session.target.codespace["requested_repo"] == "other"
+    assert session.acp_session_id == "retained-conversation"
 
 
 @pytest.mark.asyncio

@@ -157,6 +157,11 @@ Cancellation settles the original bounded provider invocation before releasing
 that admission; it never replays activation. A retained legacy session may
 adopt the current provider's receiving contract without replacing its venue,
 execution checkout or conversation.
+HTTP start likewise holds manager-owned admission before resolving a provider;
+drain cannot report completion while that request can still activate a venue.
+Cross-repository resume supplies the retained repository and remote to that
+provider. Adopting a different leading `cd` cannot silently retarget the retained
+checkout; a changed execution path refuses before recovery.
 Opaque commands and unknown resolver protocols still refuse before effects;
 invalid cross-repo requests are rejected before admission work.
 

@@ -64,6 +64,12 @@ bound lookups. A real delayed activation provider proves repeated cancellation
 retains recovery admission until the original process settles, an existing
 drain refuses before activation and a later drain waits. Retained legacy-session
 controls adopt the current receiving contract while pinning the actual checkout.
+The same real provider process crosses the HTTP start route to prove its own
+drain/cancellation admission. Cross-repository resume supplies the retained
+repository/remote and tests real leading `cd` selection, including refusal of a
+changed checkout. Unmapped first-use activation identifies the authenticated
+login, revalidates its exact venue and keeps identity/lookup/token failures
+pre-effect.
 Containers' `tests/test_runtime_drivers.py` sends the
 base64 archive through the real runtime-proxy, external-driver process and
 isolated canonical reader, proving both allow and deny without Docker.

@@ -27,10 +27,24 @@ def cmd_start(args: argparse.Namespace) -> int:
         raise RuntimeError("The exact CodeSpace is not present in the owning account inventory")
     if state == "Available":
         return 0
+    if account is None:
+        try:
+            identity = subprocess.run(
+                ["gh", "api", "user", "--jq", ".login"], capture_output=True,
+                text=True, timeout=30, creationflags=no_window_flags(),
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            raise RuntimeError("Cannot resolve the authenticated CodeSpace owner") from error
+        account = identity.stdout.strip()
+        if identity.returncode or not account or any(char.isspace() for char in account):
+            raise RuntimeError("Cannot resolve the authenticated CodeSpace owner")
+        exists, state, _ = lifecycle.get_codespace_status_with_account(args.name, account=account)
+        if not exists:
+            raise RuntimeError("The exact CodeSpace is absent under its authenticated owner")
+        if state == "Available":
+            return 0
     if lifecycle.classify_state(state or "") == "failed":
         raise RuntimeError(f"CodeSpace cannot activate from state {state}")
-    if not account:
-        raise RuntimeError("Cannot establish the CodeSpace owner; refusing unpinned activation")
     if state == "Shutdown":
         token = gh_account.token_for_account(account)
         if not token:

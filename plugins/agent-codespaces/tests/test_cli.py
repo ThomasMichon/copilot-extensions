@@ -120,6 +120,59 @@ class TestCLI:
             if lookup == "collision" else [("status", "exact-owner")]
         )
 
+    @pytest.mark.parametrize("outcome", ["started", "identity-failed", "lookup-failed", "missing", "token-failed"])
+    def test_start_revalidates_unmapped_venue_under_authenticated_login(
+        self, monkeypatch, outcome,
+    ):
+        from agent_codespaces import __main__ as cli, account_binding, activation_cli, lifecycle
+
+        calls = []
+        commands = []
+        monkeypatch.setattr(cli, "validate_context", lambda: None)
+        monkeypatch.setattr(lifecycle, "validate_context", lambda: None)
+        monkeypatch.setattr(cli, "_gh_binary_available", lambda: True)
+        monkeypatch.setattr(activation_cli.launch_policy, "refused_exit_code", lambda name: None)
+        monkeypatch.setattr(account_binding, "bound_account_or_raise", lambda name: None)
+        monkeypatch.setattr(account_binding, "bound_accounts_or_raise", lambda: ())
+        monkeypatch.setattr(activation_cli.gh_account, "mapped_accounts", lambda: ())
+        monkeypatch.setattr(
+            activation_cli.gh_account, "token_for_account",
+            lambda account: None if outcome == "token-failed" else "fixture-token",
+        )
+
+        def status(name, account, **kwargs):
+            assert name == "selected"
+            calls.append(account)
+            if account is None:
+                return True, "Shutdown"
+            assert account == "authenticated-owner"
+            if outcome == "lookup-failed":
+                raise RuntimeError("explicit owner lookup failed")
+            return (False, None) if outcome == "missing" else (
+                True, "Shutdown" if len(calls) == 2 else "Available",
+            )
+
+        def run(argv, **kwargs):
+            commands.append(argv)
+            if argv == ["gh", "api", "user", "--jq", ".login"]:
+                return types.SimpleNamespace(
+                    returncode=1 if outcome == "identity-failed" else 0,
+                    stdout="authenticated-owner\n", stderr="",
+                )
+            assert argv == ["gh", "api", "--method", "POST", "/user/codespaces/selected/start"]
+            assert kwargs["env"]["GH_TOKEN"] == "fixture-token"
+            return types.SimpleNamespace(returncode=0, stderr="")
+
+        monkeypatch.setattr(lifecycle, "_get_codespace_status_under", status)
+        monkeypatch.setattr(activation_cli.subprocess, "run", run)
+        assert main(["start", "selected"]) == (0 if outcome == "started" else 1)
+        if outcome == "started":
+            assert calls == [None, "authenticated-owner", "authenticated-owner"]
+            assert len(commands) == 2
+        else:
+            assert calls == ([None] if outcome == "identity-failed" else [None, "authenticated-owner"])
+            assert commands == [["gh", "api", "user", "--jq", ".login"]]
+
     def test_no_args_shows_help(self, capsys):
         rc = main([])
         assert rc == 1

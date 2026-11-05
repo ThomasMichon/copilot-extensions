@@ -104,7 +104,15 @@ async def _activate_resume_codespace(
     ):
         raise AgentHostingError("Stopped CodeSpace resume requires its exact namespace owner")
     fence.require_current(manager)
-    candidate = await owner._call_resolver(provider, name, extra_plugins=[], repo=None)
+    requested_repo = metadata.get("requested_repo") or metadata.get("repo")
+    repo_remote = metadata.get("repo_remote")
+    if any(value is not None and (
+        not isinstance(value, str) or not value.strip() or "\0" in value
+    ) for value in (requested_repo, repo_remote)):
+        raise AgentHostingError("Retained CodeSpace repository selection is invalid")
+    candidate = await owner._call_resolver(
+        provider, name, extra_plugins=[], repo=requested_repo, repo_remote=repo_remote,
+    )
     if (candidate.codespace or {}).get("name") != name:
         raise AgentHostingError("CodeSpace resume provider selected another receiving venue")
     await _activate_provider_target(
@@ -115,6 +123,16 @@ async def _activate_resume_codespace(
     negotiated.pop("portable_receiving_policy", None)
     if "portable_receiving_policy" in (candidate.codespace or {}):
         negotiated["portable_receiving_policy"] = candidate.codespace["portable_receiving_policy"]
+    if not retained.explicit_cwd and not retained.worktree_id:
+        from .session_host.codespace_transport import CodeSpaceTransport, resolve_execution_workspace
+
+        transport = CodeSpaceTransport(name, metadata.get("repo") or "")
+        try:
+            workspace = await resolve_execution_workspace(dict(negotiated), transport)
+        finally:
+            await transport.close()
+        if workspace != (retained.cwd or metadata.get("workspace_folder")):
+            raise AgentHostingError("CodeSpace resume provider changed the retained execution checkout")
     return replace(retained, codespace=negotiated)
 
 
