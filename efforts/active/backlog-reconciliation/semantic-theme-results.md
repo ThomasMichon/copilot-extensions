@@ -5,6 +5,15 @@ Method: [weighted semantic consolidation](semantic-density-consolidation.md).
 
 ## Result and coverage
 
+The [eleven finite trigger/identity/anchoring contracts](finite-trigger-identity-anchoring-contracts.md)
+retain thirty-three ranked relationships without activating dormant
+performance work, erasing delivered native/health/transport progress or
+declaring whole lifecycle acceptance. The complete taxonomy and resident
+transfers, operation credential consistency and lease identity survive.
+All eleven stay OPEN; the
+[journal](<journal/2026/11.05 finite-trigger-identity-anchoring-contracts.md>)
+separates fresh, reused and protected whole evidence.
+
 The [eleven finite consumer/upgrade/policy contracts](finite-consumer-upgrade-policy-contracts.md)
 retain thirty-three ranked relationships without replacing exact native,
 configuration, producer, header, exit or server-policy outcomes with
