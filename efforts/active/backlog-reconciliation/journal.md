@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-04 - Eleven ungrouped outcomes retain five independent relationships](<journal/2026/11.04 independent-ungrouped-contracts.md>)
+
 - [2026-11-04 - Snapshot maintenance and recovery retain separate authority](<journal/2026/11.04 publication-snapshot-recovery-contracts.md>)
 
 - [2026-11-04 - Guard maps retain independent native qualification](<journal/2026/11.04 guard-map-native-qualification-contracts.md>)

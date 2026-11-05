@@ -252,6 +252,33 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The eleven admitted ungrouped outcomes are integrated as five research
+relationships: [transport/materialization](local-transport-materialization-cohort.md),
+[finite prose/state](finite-prose-state-cohort.md),
+[qualification/registry](qualification-registry-cohort.md),
+[diagnostics/pipe/Host](diagnostic-pipe-host-cohort.md) and
+[roster/retirement](roster-retirement-cohort.md).
+Their [shared journal](<journal/2026/11.04 independent-ungrouped-contracts.md>)
+retains 68 whole original texts and all 33 ranked relations with exact
+evidence/protection limits. All eleven stay OPEN, with no new closure credit,
+accepted receiving transfer, product/native action or custody release.
+Canonical transport/registry keepers, finite contribution exits and actual
+held owner boundaries remain independent; reviewed publication is still due.
+
+The five-contract snapshot/map/feed checkpoint is delivered in #10643.
+All eleven actual merged bodies equal the genuinely approved current head,
+with zero review threads and ten complete successful/skipped checks.
+Only its publication child finalized, retained; all five original outcomes
+remain OPEN. The [delivery journal](<journal/2026/11.04 publication-snapshot-recovery-contracts.md>)
+records two equal complete 23:20 PST scans: 1,009 whole open, 280 above
+729. Two eligible arrivals and one external departure are metadata-only
+and add no campaign credit; verified dispositions remain 777.
+The final graph pair is wholly protected before rendering. Eleven ungrouped
+contracts and their ranked comparisons are now wholly researched; next
+integrate their complete retained requirements. The whole current #1012
+receiver is protected before rendering, so no partial read, accepted-home
+judgment or tracking fold follows. Parent gates and source/resource duties remain.
+
 The six-contract native/Bridge/selector checkpoint is delivered in #10634.
 All eleven actual merged bodies equal the reviewed head after genuine
 exact-head approval with no findings, zero threads and ten complete
