@@ -274,7 +274,7 @@ def test_cli_local_saved_prelude_accepts_early_resident_cutover(tmp_path, monkey
     store.publish("project", [{"id": "saved"}], observed_at=1)
     notice = {"type": "going-away", "generation": "f" * 32, "cursor": None, "reason": "update"}
     monkeypatch.setattr(client, "_client", lambda payload: object())
-    monkeypatch.setattr(client, "transport", lambda *args: iter((notice,)))
+    monkeypatch.setattr(client, "transport", lambda *args: (frame for frame in (notice,)))
     assert client.relay(request(), bootstrap=True) == 0
     frames = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     receiver = client.FeedReceiver(request(bootstrap=True))
