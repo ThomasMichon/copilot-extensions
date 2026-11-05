@@ -31,6 +31,17 @@ def _verified_process(pid: int, birth: str, label: str):
     return process
 
 
+def caller_scope_names(environment, outer_job, observed):
+    from agent_procutil import _job_scopes
+
+    inherited = _job_scopes.scope_names(_job_scopes.child_environment(environment))
+    scopes = _job_scopes.scope_names({_job_scopes.ENVIRONMENT_KEY: observed})
+    expected = (*inherited, outer_job.name)
+    if len(scopes) != len(expected) + 1 or scopes[:-1] != expected:
+        raise RuntimeError("native fixture did not retain its exact inherited and two caller Jobs")
+    return scopes
+
+
 def _observe(predicate, process, timeout=15):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -68,7 +79,7 @@ def _worker(root: Path) -> None:
         "'pid':os.getpid()}));t.replace(p);time.sleep(120)"
     )
     outcome = {"ordinary": ordinary.pid, "ordinary_birth": _windows_birth(ordinary._handle),
-               "scope_count": len(_job_scopes.scope_names(os.environ))}
+               "scopes": os.environ.get(_job_scopes.ENVIRONMENT_KEY)}
     try:
         daemon = pu.spawn_daemon(
             [python, "-c", code, str(ready)], env_overrides=python_env,
@@ -90,22 +101,21 @@ def _worker(root: Path) -> None:
 def _launcher(root: Path, environment) -> None:
     admit(root.parent, True)
     import agent_procutil as pu
-    from agent_procutil import _job_scopes
 
     python, python_env = pu.direct_python(sys.executable)
     replacement = {**environment, **python_env}
-    replacement.pop(_job_scopes.ENVIRONMENT_KEY, None)
-    process = pu.spawn_daemon(
-        [python, str(Path(__file__).resolve()), "--intermediate", str(root)],
-        env=replacement, cwd=root, log_path=root / "intermediate.log",
-        breakaway=False, console_children=True,
-    )
-    try:
-        process.wait(timeout=120)
-    finally:
-        if process.poll() is None:
-            process.kill()
-        process.wait(timeout=5)
+    with (root / "intermediate.log").open("wb") as log:
+        process = subprocess.Popen(
+            [python, str(Path(__file__).resolve()), "--intermediate", str(root)],
+            env=replacement, cwd=root, stdin=subprocess.DEVNULL,
+            stdout=log, stderr=subprocess.STDOUT, **pu.no_window_kwargs(),
+        )
+        try:
+            process.wait(timeout=120)
+        finally:
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=5)
 
 
 def _intermediate(root: Path, environment) -> None:
@@ -113,9 +123,13 @@ def _intermediate(root: Path, environment) -> None:
     import agent_procutil as pu
 
     python, python_env = pu.direct_python(sys.executable)
+    declared = root / "worker-command.json"
+    command = json.loads(declared.read_text(encoding="utf-8")) if declared.is_file() else [
+        python, str(Path(__file__).resolve()), "--worker", str(root),
+    ]
     with (root / "worker.log").open("wb") as log:
         process, job = pu.spawn_sync_in_kill_on_close_job(
-            [python, str(Path(__file__).resolve()), "--worker", str(root)],
+            command,
             env={**environment, **python_env}, cwd=root, require_job=True, allow_breakaway=True,
             stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
             **pu.no_window_kwargs(),
@@ -124,6 +138,23 @@ def _intermediate(root: Path, environment) -> None:
         process.wait(timeout=120)
     finally:
         job.terminate_and_wait(5)
+
+
+def start_caller_hierarchy(command, root: Path, environment, *, restrictive=False):
+    """Start an admitted consumer under both existing fixture-owned Jobs."""
+    admit(root.parent, True)
+    import agent_procutil as pu
+
+    root.mkdir(exist_ok=True)
+    (root / "worker-command.json").write_text(json.dumps(command), encoding="utf-8")
+    python, python_env = pu.direct_python(sys.executable)
+    with (root / "launcher.log").open("wb") as log:
+        return pu.spawn_sync_in_kill_on_close_job(
+            [python, str(Path(__file__).resolve()), "--launcher", str(root)],
+            env={**environment, **python_env}, cwd=root, require_job=True,
+            allow_breakaway=not restrictive, stdin=subprocess.DEVNULL,
+            stdout=log, stderr=subprocess.STDOUT, **pu.no_window_kwargs(),
+        )
 
 
 def _qualify_native_shell(root: Path, environment, pu) -> list[dict]:
@@ -221,6 +252,7 @@ def qualify(root: Path, environment: dict[str, str]) -> dict:
     admit(root, True)
     sys.path.insert(0, str(SOURCE))
     import agent_procutil as pu
+    from agent_procutil import _job_scopes
     cycles = []
     python, python_env = pu.direct_python(sys.executable)
     for cycle, restrictive in enumerate((False, False, True), 1):
@@ -241,8 +273,7 @@ def qualify(root: Path, environment: dict[str, str]) -> dict:
                 lambda: json.loads((directory / "outcome.json").read_text())
                 if (directory / "outcome.json").is_file() else None, process,
             )
-            if outcome["scope_count"] != 2:
-                raise RuntimeError("native fixture omitted a caller cleanup ancestor")
+            scopes = caller_scope_names(environment, job, outcome["scopes"])
             ordinary = _verified_process(outcome["ordinary"], outcome["ordinary_birth"], "bounded control")
             if restrictive:
                 if (
@@ -259,8 +290,13 @@ def qualify(root: Path, environment: dict[str, str]) -> dict:
                     lambda: json.loads((directory / "daemon-ready.json").read_text())
                     if (directory / "daemon-ready.json").is_file() else None, process,
                 )
-                if ready != {"scopes": None, "pid": daemon.pid}:
+                daemon_scopes = _job_scopes.scope_names({_job_scopes.ENVIRONMENT_KEY: ready["scopes"]})
+                if ready["pid"] != daemon.pid or set(scopes).intersection(daemon_scopes):
                     raise RuntimeError("admitted daemon retained escaped scope metadata")
+                with _job_scopes.query_scopes({
+                    _job_scopes.ENVIRONMENT_KEY: ";".join(scopes),
+                }) as outside_callers:
+                    outside_callers(daemon._handle)
             job.close()
             process.wait(timeout=5)
             ordinary.wait(timeout=5)
@@ -271,6 +307,7 @@ def qualify(root: Path, environment: dict[str, str]) -> dict:
                     time.sleep(1)
             cycles.append({
                 "two_owned_cleanup_ancestors": True, "all_caller_jobs_closed": True,
+                "tracked_cleanup_scopes": len(scopes), "inherited_cleanup_scopes": len(scopes) - 2,
                 "bounded_control_exited": True, "durable_survived": not restrictive,
                 "shared_outer_refused": restrictive,
             })

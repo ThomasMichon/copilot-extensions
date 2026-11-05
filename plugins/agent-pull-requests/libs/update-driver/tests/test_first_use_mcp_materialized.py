@@ -46,7 +46,7 @@ def materialized_mcp(owning_mcp, area):
         result = release["materialize"](candidate.parents[1], canonical_root=REPOSITORY)
     finally:
         sys.path[:] = previous
-    assert not any(line.startswith("SKIP ") for line in result), result
+    assert not any(line.startswith("SKIP ") for line in result), "\n".join(result)
     build_native_test_assets(candidate, candidate / "libs/agent-procutil")
     shutil.rmtree(payload)
     shutil.copytree(candidate, payload)

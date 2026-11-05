@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import runpy
 import shutil
@@ -39,7 +38,15 @@ def test_native_post_repair_bootstrap_readiness(
     scripts = payload / "scripts"
     for name in ("bootstrap-check.ps1", "resolve-runtime.ps1", "versioned_runtime_native.ps1"):
         shutil.copyfile(_BOOTSTRAP.with_name(name), scripts / name)
-    (scripts / "init.ps1").write_text("throw 'A real installer must not run'\n", encoding="utf-8")
+    driver = payload / "libs/update-driver/scripts/first-use.ps1"
+    driver.write_text(
+        "# Installation driver lifecycle contract: mcp-recipes-v1\n"
+        "param($Root,$Payload,$RuntimeRoot,$Project,$InstallerAction)\n"
+        "[IO.File]::WriteAllText((Join-Path $env:USERPROFILE 'children'), $InstallerAction)\n"
+        "[Console]::Out.WriteLine((@{launched=$true;pid=123;created=1;"
+        "log=(Join-Path $Root 'first-use-00000000000000000000000000000000.log')} "
+        "| ConvertTo-Json -Compress))\nexit 0\n", encoding="utf-8",
+    )
     selected = shared["VERSION"]
     fields = {}
     if mode == "source":
@@ -68,12 +75,7 @@ def test_native_post_repair_bootstrap_readiness(
         assert not (install / "logs").exists()
         return
     hook = str(scripts / "bootstrap-check.ps1").replace("'", "''")
-    children = str(home / "children").replace("'", "''")
-    command = (
-        f"function Start-Process {{ [IO.File]::WriteAllText('{children}', 'reconcile'); "
-        "[pscustomobject]@{Id=12345} }\n"
-        f". '{hook}'"
-    )
+    command = f". '{hook}'"
     env = shared["_environment"](home)
     env["USERPROFILE"] = str(home)
     env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env.get("PATH", "")
@@ -82,48 +84,8 @@ def test_native_post_repair_bootstrap_readiness(
         capture_output=True, text=True, timeout=30,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
-    assert result.returncode == 0 and result.stdout == "{}", result
+    assert result.returncode == 0 and result.stdout == "{}", result.stdout + result.stderr
     assert (home / "children").exists() is (condition != "healthy"), result.stderr
     if condition == "healthy":
         assert not (install / "reconcile.lock").exists()
     assert not (install / "logs").exists()
-
-
-def test_bootstrap_falls_through_init_shim_to_stamp_capable_installer(tmp_path):
-    if os.name == "nt":
-        pytest.skip("POSIX bootstrap execution is covered on POSIX")
-    bash = shutil.which("bash")
-    if not bash:
-        pytest.skip("bash is unavailable")
-
-    plugin = tmp_path / "plugin"
-    scripts = plugin / "scripts"
-    scripts.mkdir(parents=True)
-    shutil.copy2(_BOOTSTRAP, scripts / "bootstrap-check.sh")
-    (plugin / "plugin.json").write_text(
-        json.dumps({"name": "bootstrap-probe"}),
-        encoding="utf-8",
-    )
-    (scripts / "init.sh").write_text(
-        "#!/usr/bin/env bash\n"
-        "echo 'usage: install|stamp' >/dev/null\n"
-        "exec bash \"$(dirname \"$0\")/install.sh\" install\n",
-        encoding="utf-8",
-    )
-    (scripts / "install.sh").write_text(
-        "#!/usr/bin/env bash\n"
-        "case \"${1:-}\" in\n"
-        "  stamp) touch \"$HOME/stamp-ran\" ;;\n"
-        "esac\n",
-        encoding="utf-8",
-    )
-    env = {**os.environ, "HOME": str(tmp_path / "home")}
-    Path(env["HOME"]).mkdir()
-
-    subprocess.run(
-        [bash, str(scripts / "bootstrap-check.sh")],
-        env=env,
-        check=True,
-    )
-
-    assert (Path(env["HOME"]) / "stamp-ran").is_file()

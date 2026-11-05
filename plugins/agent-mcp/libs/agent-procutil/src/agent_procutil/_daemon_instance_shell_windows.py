@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from ctypes import wintypes
 from typing import Iterator
 
-from . import JobHandle, _build_job_extended_limit_info, _is_windows, _job_scopes
+from . import JobHandle, _build_job_extended_limit_info, _is_windows, _job_scopes, contained_test_mode
 from ._daemon_instance_identity import _windows_birth
 from ._daemon_instance_records import ProcessIdentity
 from ._windows_parent_job import _api, _check, _parent_live
@@ -105,6 +105,8 @@ class ShellProcessOwner:
                 raise OSError("disposable shell Job identity already exists")
             limits = _build_job_extended_limit_info()()
             limits.BasicLimitInformation.LimitFlags = 0x2000
+            if not contained_test_mode():
+                limits.BasicLimitInformation.LimitFlags |= 0x800
             _check(self.kernel.SetInformationJobObject(
                 handle, 9, ctypes.byref(limits), ctypes.sizeof(limits),
             ))
