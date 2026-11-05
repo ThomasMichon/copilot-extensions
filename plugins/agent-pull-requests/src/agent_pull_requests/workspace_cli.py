@@ -39,7 +39,7 @@ def run(args, host=None):
         host = WorkspaceTools() if host is None else host
         if not isinstance(host, WorkspaceTools):
             raise WorkspaceToolUnavailable("workspace_owner_unavailable")
-        result = asyncio.run(host.invoke(args.workspace_command, request))
+        result = asyncio.run(host.for_one_shot().invoke(args.workspace_command, request))
         print(json.dumps(result, sort_keys=True, separators=(",", ":"), allow_nan=False))
         return 0
     except PermissionError:

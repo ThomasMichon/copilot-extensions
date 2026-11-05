@@ -21,10 +21,11 @@ is happening now, deliver an attributed message to an existing session, and keep
 that session alive across the churn of clients, UI/fronts, transports, and
 deployments.
 
-Its central promise is **ownership clarity**. The bridge owns the lifetime and
-event stream of sessions it hosts; clients attach and detach. A target-local
-bridge owns the processes that must live on a target machine; the caller owns
-only the relationship. Interactive sessions that the bridge does not own are
+Its central promise is **ownership clarity**. The bridge owns coordination
+relationships and their event view; clients attach and detach. The target's
+[Copilot Driver](../agent-remote-driver/README.md) owns Session Host, mux
+wrapping and direct-Copilot process lifetime; Bridge is a client of that
+independently distributed app. Interactive sessions outside that provider are
 represented honestly rather than forged into a false replica. Remote links may
 blink, fronts may restart, and callers may disappear without making the target
 session collateral damage.
@@ -56,7 +57,7 @@ recoverable, or rollback reference still depends on it.
 ### bridge daemon
 
 The **bridge daemon** is the per-machine runtime that exposes the local control
-plane, hosts or represents sessions, streams session events, and participates in
+plane, coordinates or represents sessions, streams session events, and participates in
 the wider mesh. Each machine may run its own bridge; together they make local
 and remote sessions visible through one coordination surface. Exactly **one**
 bridge daemon owns this per-machine role regardless of how many Copilot
@@ -77,7 +78,9 @@ sequenced is the **session-host handoff**: every hosted session-host process is
 durably recorded — its location, port, and the daemon generation that currently
 owns it — so a *specific*, narrow ownership claim (not "the daemon is up") is
 what the new generation actually waits to acquire, and what the prior generation
-actually releases, one host at a time, before it retires. A generation that
+actually releases, one broker relationship at a time, before it retires. The
+Driver retains the host and execution lifetime independently of this Bridge
+frontend handoff. A generation that
 terminates abruptly rather than releasing cleanly leaves a claim a **future**
 generation can recognize as stale and recover — the durable record, not a live
 handshake with the dead process, is what makes recovery possible. Upstream
@@ -139,11 +142,14 @@ Ordinary driving does not depend on a full or current coordination suite being
 installed in the receiving location. Standalone guest installation remains an
 independent use case, not an admission workaround.
 
-ACP hosting composes its Session Host; muxed CLI hosting composes the standalone
-remote-driver and canonical mux launch support. Packaging may consolidate these
-pieces where useful without creating a competing launcher, changing their
-ownership or silently promoting a different default mode. The receiving rig
-retains native process lifetime and existing session/driver custody.
+Both ACP and muxed CLI hosting consume the independently distributed
+[Copilot Driver](../agent-remote-driver/README.md). Bridge can hoist its selected
+quickly installable receiving package through the existing venue transport,
+without requiring guest Bridge, Worktrees or Manager installation. Session
+Host and mux wrapping belong to that core app; both modes return the same
+ACP-compatible broker endpoint and attributable reservation/process/session
+information. This factoring does not silently promote a different default mode.
+The receiving rig retains native process lifetime and existing session/driver custody.
 
 Delivered code is not delivered permission. The actual receiving checkout and
 selected marketplace context still enforce fresh repository policy at creation,
@@ -195,13 +201,13 @@ identical identity, lifecycle, replay semantics, or ownership.
 
 ### session host provider
 
-The bridge's **Session Host** is one provider of the fabric's
-[session-hosting](../../session-hosting/README.md) capability. It owns a hosted
-Copilot child and its protocol pipes; fronts may update or disconnect while the
-host keeps the child alive until deliberate drain, handoff, stop, or end. It is
-not the universal implementation for interactive Copilot: CLI/mux, graphical,
-SDK, and third-party hosts may own peer execution providers while the bridge
-coordinates with or represents them honestly.
+The independent **Copilot Driver** is one provider of the fabric's
+[session-hosting](../../session-hosting/README.md) capability. Its Session Host
+directly owns a headless Copilot child or brokers the launch-injected extension
+of a Driver-owned interactive mux session. Bridge fronts may update or
+disconnect while that target execution stays alive until authorized drain,
+handoff, stop or end. Graphical, SDK, native and third-party hosts remain peer
+providers that Bridge coordinates with or represents honestly.
 
 ### cold-store providers
 
@@ -263,10 +269,10 @@ inspect the target.
 
 ### peer bridges
 
-Bridge instances can cooperate as peers. A local bridge may delegate ownership of
-a remote session to the bridge on the target machine, or deliver a message
-through that peer, so the environment that can keep the target alive owns the
-target's process.
+Bridge instances can cooperate as peers. A local bridge may delegate the
+coordination relationship to a target-local bridge or directly consume the
+target's Driver broker without installing another Bridge. The target Driver
+owns its execution in either case.
 
 ### shared remote-control transport
 
@@ -301,17 +307,16 @@ pretending every node is equally open.
 ### durable-reattachable-session-hosting
 
 A hosted session can outlive the bridge frontend, any watching client, and a
-transport reconnect. The Session Host keeps the child and its pipes alive while
+transport reconnect. The Driver's Session Host keeps target execution alive while
 the bridge reconciles back to durable session state and consumers reattach by
 cursor.
 
 ### session-host-provider-participation
 
-The bridge can act as a full execution-host provider for sessions it owns and as
-a coordination client or fidelity-declared projection for sessions owned by
-another provider. Durable worktree identity and responsibility remain in
-agent-worktrees; bridge hosting contributes execution lifecycle and observations
-without taking over that ledger.
+The bridge composes the Driver's execution-host capability as its coordination
+client and can project sessions from other providers at declared fidelity.
+Durable worktree identity and responsibility remain in agent-worktrees;
+neither Bridge coordination nor Driver execution takes over that ledger.
 
 ### cli-and-api-control-plane
 
@@ -458,9 +463,10 @@ event ledger, and resolver layer rather than inventing a second protocol.
 
 ### peer-bridge-session-ownership
 
-Remote sessions are owned by the bridge closest to the environment where they
-run. The host bridge becomes a peer client; target processes and state survive
-host-link churn because the target-local bridge owns their lifetime.
+A target-local bridge may own a remote coordination relationship, while the
+target Driver owns the processes and broker. The host bridge can be a peer
+client or reach the Driver directly; target execution survives host-link churn
+without requiring a target-local coordination suite.
 
 ### multiplexed-remote-control-and-observation
 
@@ -656,17 +662,18 @@ limited to a tunnel-only client.
 A hosted session can roll itself to a successor in the same worktree when asked
 or when context pressure requires it under policy. The retiring session's
 continuation seeds the successor, the head moves deliberately, and watchers are
-told that the work continues under the successor identity. The bridge performs
-this changeover as the owning session-host provider; generic handoff policy and
+told that the work continues under the successor identity. The bridge requests
+this changeover from the owning execution provider; generic handoff policy and
 durable worktree succession remain outside its process mechanics.
 
 ## Behaviors
 
 ### own-the-lifetime
 
-If the bridge starts or adopts a hosted session, the bridge owns that session's
-lifetime. Clients, UI/fronts, and other agents attach as consumers or callers;
-watching a session does not make the watcher its process owner.
+If the bridge creates or adopts a coordinated session, it owns the coordination
+relationship, while the selected Driver or other provider owns execution.
+Clients, UI/fronts and other agents attach as consumers or callers; watching
+a session does not make the watcher its process owner.
 
 ### reattach-never-kill
 
@@ -947,7 +954,7 @@ retained input against corruption and accidental identity reuse.
 ### connection-loss-never-destroys-the-target
 
 Losing the relationship between a caller and a target never destroys the target.
-The target's owning bridge keeps the session alive until the connection can be
+The target's execution provider keeps the session alive until the connection can be
 re-established, the session reaches a safe stop, or an explicit policy action
 retires it.
 
@@ -987,8 +994,10 @@ machine may deliberately gate outbound reach until policy allows it.
   worktree creation, finalization, relationships, claims, disposition, and
   durable execution lineage. The bridge hosts or coordinates execution against
   that state.
-- **Not the universal interactive Copilot host.** The bridge is a full provider
-  for sessions it owns and an honest coordinator for other hosts. It does not
+- **Not the Copilot execution core.** Session Host and direct-Copilot mux
+  wrapping belong to the independent Copilot Driver, not to Bridge.
+- **Not the universal interactive Copilot host.** The bridge is an honest
+  coordination client of the Driver and other hosts. It does not
   require every CLI, SDK, App, multiplexer, or third-party rig to surrender its
   native process and interaction ownership.
 - **Not the connectivity provisioner.** SSH keys, host adoption, tunnel setup,
@@ -1027,7 +1036,9 @@ machine may deliberately gate outbound reach until policy allows it.
   *agent-bridge — the coordination layer*.
 - Cross-cutting hosting vision:
   [session-hosting](../../session-hosting/README.md) — the provider boundary
-  agent-bridge implements for sessions it owns.
+  agent-bridge consumes for its coordinated sessions.
+- Execution app: [Copilot Driver](../agent-remote-driver/README.md) — owns
+  Session Host, mux wrapping and the minimal hoistable receiving package.
 - Cross-cutting service vision:
   [plugin-services](../../plugin-services/README.md) — the installation,
   lifecycle, composition, and version-skew contracts inherited by this runtime.

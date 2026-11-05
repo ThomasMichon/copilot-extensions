@@ -100,15 +100,15 @@ requires its own applicable authority and is recorded separately.
 - [x] Prove the complete ACP consumer flow, publish it through required gates and steward its PR to merge before extending it.
 
 ### Phase 3 - Complete the existing muxed flow
-- [ ] Stage the same standalone remote-driver plugin at session creation and compose canonical mux/pane launch assets with only their required support closure.
+- [x] Stage the same standalone remote-driver plugin at session creation and compose canonical mux/pane launch assets with only their required support closure. _(source composition merged in #10748; native scoped loading remains in Validation Plan)_
 - [ ] Supply required TMux/native-mux setup through its existing owner, scoped to the selected launch. Preserve installed guest state and unrelated sessions; unavailable genuine prerequisites remain explicit, not a request for the full suite.
 - [ ] Preserve Worktrees/Manager launch ownership, literal arguments, seed delivery, native process/terminal lifetime, exit handling and driver generation/exclusive mutation semantics.
-- [ ] Consolidate packaging only where it removes duplication. Preserve independent remote-driver use, ACP behavior and explicit mode selection.
-- [ ] Prove the complete muxed consumer flow, publish it and steward its PR through merge.
+- [x] Consolidate packaging only where it removes duplication. Preserve independent remote-driver use, ACP behavior and explicit mode selection. _(source composition and compatibility controls merged in #10748)_
+- [ ] Prove the complete muxed consumer flow, publish it and steward its PR through merge. _(joined source flow and publication complete in #10748; native/installed consumer acceptance remains open)_
 
 ### Phase 4 - Compatibility and closeout
-- [ ] Document supported caller/receiver combinations, retained-host recovery and rollback using actual selected capabilities rather than package-version equality.
-- [ ] Update reality docs, focused tests and changefiles; retain historical protocol evidence and the required unit-only portfolio.
+- [x] Document supported caller/receiver combinations, retained-host recovery and rollback using actual selected capabilities rather than package-version equality. _(source contracts and controlled combinations documented in #10748; native/installed tiers remain unqualified)_
+- [x] Update reality docs, focused tests and changefiles; retain historical protocol evidence and the required unit-only portfolio. _(#10748; source tiers only)_
 - [ ] Record source, release and installed/native/external results separately; resolve every Plan and Validation Plan item before Done.
 
 ## Validation Plan
@@ -666,3 +666,24 @@ implementation. The exact support closure follows the consumer trace and tests.
   HTTP-52 and original HTTP-51 capture commits explicitly absent.
   Fresh published-head CI and review remain required; no native or installed
   acceptance is inferred from this repository evidence.
+
+### 2026-11-05 - Mux source slice merged; native acceptance next
+
+- #10748 is verified merged as `3e859abf8b43ffd303a36ee367f1d93488a8ee0f`
+  at 20:37:32 UTC. Its exact final head passed required CI and received a
+  current Copilot comment review with no actionable findings or unresolved
+  threads. The repository-authorized self-merge exception omitted only the
+  additional code-owner vote; no failed check or change request was bypassed.
+- #10636 remains open. Re-read the Plan/Validation Plan and resolved only the
+  source staging, packaging, documentation and evidence items this merge
+  completed. Native mux/setup/lifetime, actual scoped extension loading,
+  old-guest coexistence, installed and external acceptance remain open.
+- Pulled the source worktree forward after verifying all 223 owned changed
+  paths were byte-identical in the squash merge. Unrelated upstream Index
+  and writer changes were retained. Existing capture source, metadata and
+  recovery refs remain available; no unmerged work was discarded.
+- The next slice is release/installed readiness inspection, followed by
+  authorized native/external consumer validation. A merge is not rollout.
+  Existing source approval does not authorize shared updates, restart,
+  guest-suite installation or interference with retained sessions. Preserve
+  the Active effort and obtain only missing effect scope before live work.

@@ -24,7 +24,8 @@ import pytest
 
 from worktree_manager import companion_pane, mux_mapping_registry
 from _manager_process_fixture import synthetic_runtime
-from _worktree_timeline_fixtures import delta, peer
+from _worktree_timeline_fixtures import delta
+from _companion_client_fixture import fixture_engine
 
 
 pytestmark = pytest.mark.skipif(
@@ -134,38 +135,6 @@ def retire_fixture(mux, client, server, session, observer) -> None:
                     if observer not in mux("list-panes", "-t", session, "-F", "#{pane_id}", check=False).stdout.splitlines():
                         break
                     time.sleep(.025)
-
-
-def fixture_engine(root: Path, checkout: Path) -> tuple[Path, Path]:
-    """Reuse the wire-valid owner fixture without replacing the Companion module."""
-    interpreter, calls = peer(root)
-    module = root / "modules/agent_worktrees/__main__.py"
-    original = module.read_text(encoding="utf-8")
-    status = {
-        "repo": "example", "id": "selected", "path": str(checkout),
-        "branch": "worktree/selected", "state": "active",
-        "summary": "Native client source fixture",
-    }
-    dispatch = f'''
-    with (ROOT/"invocations.jsonl").open("a") as out:
-        out.write(json.dumps(sys.argv[1:])+"\\n")
-    args=sys.argv[1:]
-    responses={{
-        "status-segment":{status!r},
-        "list-sessions":{{"sessions":[{{"id":"head-a","is_head":True}}]}},
-        "worktree-status-bundle":{{"worktree_id":"selected","facts":{{}}}},
-        "head-session":{{"worktree_id":"selected","tracked":True,"active":True,"head_session":"head-a"}},
-    }}
-    for command,value in responses.items():
-        if command in args:
-            emit(value)
-            return
-    if not any(command in args for command in ("worktree-observations","worktree-observation-history")):
-        print("unsupported isolated fixture command",file=sys.stderr)
-        raise SystemExit(2)
-'''
-    module.write_text(original.replace("def main():\n", "def main():\n" + dispatch), encoding="utf-8")
-    return interpreter, calls
 
 
 @pytest.mark.timeout(120)

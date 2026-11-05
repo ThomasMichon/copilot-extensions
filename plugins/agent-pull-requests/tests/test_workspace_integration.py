@@ -78,7 +78,25 @@ def integration(environment):
         pause_capability = None
         calls = []
 
+        def _native_request_context(self, submit):
+            from fleet_manager._service_caller_native import native_admission
+            return native_admission(submit)
+
         async def request(self, method, target, *, request_headers, body, response_limit):
+            from fleet_manager._service_caller_native import RequestNativeScope
+            scope = RequestNativeScope()
+            scope.enter()
+            try:
+                return await self._request(
+                    method, target, request_headers=request_headers, body=body, response_limit=response_limit,
+                )
+            finally:
+                try:
+                    await scope.join()
+                finally:
+                    scope.exit()
+
+        async def _request(self, method, target, *, request_headers, body, response_limit):
             if self.transport_error is not None:
                 raise self.transport_error
             if self.before_request is not None:

@@ -1,6 +1,6 @@
 # Participating-writer qualification before assignment admission
 
-Status: **proposed implementation refinement; ordinary activation remains disabled**.
+Status: **reviewed implementation refinement; ordinary activation remains disabled**.
 Parent: [monitor and confirmed-state effort](README.md).
 Requirement: [submission responsibility](submission-closeout-amendment.md).
 Coordination: [#9709](https://github.com/ThomasMichon/copilot-extensions/issues/9709).
@@ -11,6 +11,8 @@ It closes the existing
 [worktree-responsibility intent](../../../visions/plugins/agent-dispatch/task-outputs-and-review/README.md#submission-retains-worktree-responsibility)
 using [provider-first contract evolution](../../../docs/patterns/service-contract-evolution.md).
 The original Plan and Validation Plan remain binding.
+See the [qualification refinement](https://github.com/ThomasMichon/copilot-extensions/pull/10762)
+and [dated journal](journal/2026/11.05-submission-resubmission.md#resident-only-observation-source).
 
 ## Established boundaries
 

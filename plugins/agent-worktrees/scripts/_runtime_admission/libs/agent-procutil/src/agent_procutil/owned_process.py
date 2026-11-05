@@ -247,14 +247,14 @@ def _posix_cleanup_error(
 
 
 def _communicate_unreaped(
-    process: subprocess.Popen, *, input_text: str | None, deadline: float,
+    process: subprocess.Popen, *, input_text: str | bytes | None, deadline: float,
     argv: list[str], timeout: float, capture_limits: tuple[int, int] | None = None,
     binary: bool = False,
     capture_timeout: bool = False,
 ) -> tuple[str | None, str | None]:
     streams = (process.stdout, process.stderr)
     output = (bytearray(), bytearray())
-    data = memoryview(input_text.encode("utf-8")) if input_text is not None else None
+    data = memoryview(input_text.encode("utf-8") if isinstance(input_text, str) else input_text) if input_text is not None else None
     offset = 0
     def remaining():
         try:
@@ -378,7 +378,7 @@ def _communicate_windows(
 
 
 def _communicate_windows_bounded(
-    process: subprocess.Popen, job, *, input_text: str | None, deadline: float,
+    process: subprocess.Popen, job, *, input_text: str | bytes | None, deadline: float,
     argv: list[str], timeout: float, capture_limits: tuple[int, int],
     binary: bool = False,
     budget: OwnedExecutionBudget | None = None,
@@ -455,7 +455,7 @@ def _communicate_windows_bounded(
 
     def write() -> None:
         try:
-            data = memoryview(input_text.encode("utf-8"))
+            data = memoryview(input_text.encode("utf-8") if isinstance(input_text, str) else input_text)
             offset = 0
             while offset < len(data):
                 written = process.stdin.write(data[offset:offset + 65536])
@@ -594,7 +594,7 @@ def _communicate_windows_bounded(
 
 
 def _run_owned(
-    argv: list[str], *, timeout: float | None, input_text: str | None = None,
+    argv: list[str], *, timeout: float | None, input_text: str | bytes | None = None,
     capture: bool = True, inherit_process_group: bool = False,
     capture_limits: tuple[int, int] | None = None, pass_fds: tuple[int, ...] = (),
     confirm_posix_group: bool = False,
@@ -627,6 +627,8 @@ def _run_owned(
         raise ValueError("inherit_process_group must be a boolean")
     if type(binary) is not bool or binary and capture_limits is None:
         raise ValueError("binary capture requires explicit stream limits")
+    if isinstance(input_text, bytes) and not binary:
+        raise ValueError("byte stdin requires binary capture")
     if type(allow_daemon_breakaway) is not bool:
         raise ValueError("allow_daemon_breakaway must be a boolean")
     if inherit_process_group:
@@ -872,6 +874,7 @@ def require_caller_owned_support() -> None:
 def run_caller_owned(
     argv: list[str], *, timeout: float, max_stdout_bytes: int, max_stderr_bytes: int,
     input_text: str | None = None, capture: bool = True,
+    input_bytes: bytes | None = None,
     on_settled: Callable[[], None] | None = None,
     cwd: str | os.PathLike | None = None,
     env: dict[str, str] | None = None,
@@ -879,12 +882,13 @@ def run_caller_owned(
     budget: OwnedExecutionBudget | None = None,
     borrow_parent_scope: bool = False,
 ) -> subprocess.CompletedProcess:
-    """Execute with caller lifetime/stream budgets; binary capture preserves exact bytes."""
+    """Execute with caller lifetime/stream budgets; optional binary stdin is byte-exact."""
     from agent_procutil._caller_owned import run
 
     return run(
         argv, timeout=timeout, max_stdout_bytes=max_stdout_bytes,
         max_stderr_bytes=max_stderr_bytes, input_text=input_text, capture=capture,
+        **({"input_bytes": input_bytes} if input_bytes is not None else {}),
         on_settled=on_settled,
         **({"cwd": cwd} if cwd is not None else {}),
         **({"env": env} if env is not None else {}),

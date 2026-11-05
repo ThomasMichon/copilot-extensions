@@ -58,6 +58,44 @@ def test_binary_capture_still_enforces_raw_byte_limits_and_settles():
     assert _run("import sys;sys.stdout.buffer.write(b'settled\\n')", binary=True).stdout == b"settled\n"
 
 
+@native_execution
+@pytest.mark.parametrize("data", [b"", b"\0\xff\r\n\x80\rsuffix"])
+def test_binary_stdin_preserves_exact_bytes_through_real_owned_child(data):
+    result = _run(
+        "import sys;sys.stdout.buffer.write(sys.stdin.buffer.read());sys.exit(7)",
+        binary=True, input_bytes=data,
+    )
+    assert result.returncode == 7 and result.stdout == data and result.stderr == b""
+
+
+@native_execution
+def test_binary_stdin_retains_output_limit_and_terminal_settlement():
+    with pytest.raises(OutputLimitExceeded):
+        _run("import sys;sys.stdout.buffer.write(sys.stdin.buffer.read())",
+             input_bytes=b"\xff" * 33, binary=True, stdout=32)
+    assert _run("import sys;sys.stdout.buffer.write(sys.stdin.buffer.read())",
+                input_bytes=b"settled\r\n", binary=True).stdout == b"settled\r\n"
+
+
+@pytest.mark.parametrize("options", [
+    {"input_bytes": b"data", "input_text": "text", "binary": True},
+    {"input_bytes": b"data"},
+    {"input_bytes": "not bytes", "binary": True},
+])
+def test_invalid_byte_stdin_selection_refuses_before_native_launch(monkeypatch, options):
+    monkeypatch.setattr(protocol, "_run_owned", lambda *a, **k: pytest.fail("native launch attempted"))
+    with pytest.raises((TypeError, ValueError)):
+        _run("pass", **options)
+
+
+def test_oversized_byte_stdin_refuses_before_base64_or_native_launch(monkeypatch):
+    body = b"x" * (3 * (protocol._MAX_REQUEST // 4) + 3)
+    monkeypatch.setattr(protocol.base64, "b64encode", lambda value: pytest.fail("oversized input was encoded"))
+    monkeypatch.setattr(protocol, "_run_owned", lambda *a, **k: pytest.fail("native launch attempted"))
+    with pytest.raises(ValueError, match="frame limit"):
+        _run("pass", input_bytes=body, binary=True)
+
+
 @pytest.mark.parametrize("contained", [False, True])
 def test_installation_exception_preserves_contained_tests_and_strict_tools(monkeypatch, contained):
     observed = []

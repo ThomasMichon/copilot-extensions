@@ -1,130 +1,210 @@
-# Ordinary-hook endpoint recovery - proposed source slice
+# Ordinary-hook shell facts and asynchronous recovery - proposed source slice
 
 Back to the [Active parent](README.md). Coordination is the finite P8388 case
 retained at #3761, including the
 [bounded source claim](https://github.com/ThomasMichon/copilot-extensions/issues/3761#issuecomment-6649260548).
 This proposal is not the whole authoritative-daemon migration, a receiving
 receipt for other trackers, or permission to activate an installed service.
-Review and merge the proposal before implementation.
+The original synchronous proposal cleared review in #10585. This amendment
+changes that design and must clear review before replacement implementation.
+
+## Amended direction
+
+Ordinary hooks execute in their shell. Live computation and bounded local reads
+are permitted; blocking heavy Python/CLI discovery and policy workers are not
+the replacement design. The existing daemon/lifecycle producers prepare
+hook-readable facts for running worktrees. A boot nudge is optional and
+asynchronous: the current event does not wait for startup, readiness or a
+publication, and is not sent again when the daemon becomes available.
+
+The unpublished synchronous prototype is retained as historical work, not the
+shell solution. Its fixed-budget native cold-start controls failed before the
+required launch/descendant observations. Import reduction and unit controls do
+not qualify that flow. This amendment does not widen those failed test limits,
+discard source, claim deployment or acquire another contributor's work.
 
 ## Context and observed gap
 
-The current hook client returns to local advisory evaluation when the resident
-rendezvous is absent. Continued pre/post hooks do not ask the existing lifecycle
-owner to recover that endpoint. SessionStart registration is a different
-consumer and is not recovery proof.
+The current Worktrees pre/post entries still depend on Python for policy,
+admission or fallback. Windows' post-tool entry has a shell IPC fast path, but
+its local fallback invokes Python. POSIX enters the Python client directly.
+Recovering a missing endpoint synchronously adds process preparation before
+ordinary evaluation; its result is startup status, not data needed to evaluate
+the current event.
 
-Healthy resident calls, intentional strict-local policy evaluation and the
-exclusive implementation selector already have useful behavior. Preserve them.
-In particular, Windows' existing post-tool fallback must not resend a packet
-whose delivery is uncertain. An absent endpoint is not proof that its owner
-died, and a process that started is not necessarily ready to serve.
+The current source already has two relevant owners:
 
-This closes part of the parent
+- Managed-session admission from #10589: automatic behavior applies only to
+  adopted harness anchors and owned Git-linked worktrees, not every repository
+  near a global installation.
+- The [precomputed guard map](../precomputed-hook-guard-map/README.md):
+  `guarded_anchors.py` publishes caller-scoped managed observations and
+  `guarded_anchor_map.py` reads them without hook-triggered topology acquisition.
+  Managed mutations withdraw old views; out-of-band edits use explicit
+  preparation/refresh, not watchers or TTL recomputation.
+
+Compose those owners rather than recreating their caches or weakening their
+admission. Preserve event-time guards, advisory behavior, the exclusive active
+implementation selector and Windows' no-resend behavior after uncertain IPC.
+An absent endpoint is not proof its owner died; a started process is not ready.
+
+This realizes part of the parent
 [resident availability intent](../../../visions/plugins/agent-worktrees/README.md)
 and follows
-[singleton correctness](../../../visions/plugins/agent-worktrees/status-monitor-singleton/README.md).
-The existing lifecycle, singleton/cutover, source/installation identity and
-process-custody owners remain authoritative. No new daemon, polling loop,
-installation authority, process reaper or generic discovery cache is proposed.
+[singleton correctness](../../../visions/plugins/agent-worktrees/status-monitor-singleton/README.md),
+[circumstantial hook contracts](../../../docs/patterns/circumstantial-hook-contracts.md)
+and [version-skew-safe contracts](../../../docs/patterns/service-contract-evolution.md).
+The existing lifecycle, singleton/cutover, source/installation, current-row and
+process-custody owners remain authoritative. No new daemon, generic cache,
+poller, installation authority or process reaper is proposed.
+
+## Required state and original publishers
+
+Paths are under `plugins/agent-worktrees`. This map distinguishes present
+interfaces from proposed shell exposure; it is not proof of a complete input
+witness or installed invocation.
+
+| Hook need | Original owner / existing exposure | Shell consumer responsibility |
+|---|---|---|
+| Applicable managed workspace/session | `scripts/managed_session.py`, project identity and selected project registry; current positive cache with source/platform/input invalidation | Consume owner-prepared membership facts and retain current event/cwd/input checks; unadmitted sessions are inert. Never replace unknown ownership with automatic enforcement |
+| Selected installation/source/contract | Installation-context, runtime-selection and command-binding owners | Use their passive selected-generation locator; no per-event full runtime import, tree hashing or provisioning |
+| Current tool, arguments, targets and rule occurrence | Host event and original guard parsers | Bounded shell decoding and target extraction; preserve aliases, quoting, Git options, multiple targets and unsupported-shape semantics |
+| Related guarded roots/delegation | `guarded_anchors.py`; `registry_root/guarded-anchors/<caller-key>.json` | Port the existing bounded schema1 reader and metadata-only Git identity lookup; retain complete-empty/unavailable and managed withdrawal semantics |
+| Anchor/base and stateless root/project facts | Original anchor/stateless guard and registry/config producers | Extend their purpose-specific original publication; delegation rows do not prove anchor/base classification |
+| Guard modes, kill switches, grants and expiry | Live environment and original switch/allow-edits files | Read/revalidate live applicable controls and current clock; never cache a permission or expiry result |
+| Disposition, last note, exact worktree and current head | Tracking/status/binding owners and existing bounded current-row/session projections | Read a small original-owner file view, not tracking YAML/history, home-wide discovery or a SQLite/Python reader |
+| Reminder count/window/cooldown | Existing nudge accounting and status-write/finalize reset boundaries | Keep one advisory owner/reset path; no canonical tracking writes or cached acknowledgement/permission |
+| Late guidance result/revision | Existing correlated watch/request/publication owners | Read/publish their bounded derived observation; retain partial/failure/possible-change and model-admission uncertainty |
+| Mutation invalidation | Original status segment/current-row producer | Notify the original owner without waiting for recomputation; a missed notification does not establish fresh status |
+| PR-close author/state/current identity | Original PR/provider execution owner | Requires event-bound observation/recheck, not background PR-state/login caching; preserve the existing guard until a reviewed equivalent consumer is qualified |
+
+The guard map is a managed observation, not a finite dependency fingerprint
+for arbitrary unmanaged edits. Do not claim the canonical acquisition frontier
+closed merely because the published JSON is complete and bounded.
+
+Startup/catalog writers and source-bound SessionEnd need their own existing
+registration, guidance and closure owners. This finite slice inventories those
+dependencies but does not transfer their implementation or remove lifecycle
+work. Other plugins' bootstrap/provider/retirement entries remain independently
+owned; ordinary-hook changes do not silently replace their installers.
 
 ## Proposed functional flow
 
-1. **Expand the existing receiver first.** Add a small internal entrypoint in
-   the installed Worktrees package, invoked as
-   `python -I -m agent_worktrees.hook_monitor_recovery`. It receives a supported
-   pre/post event kind and a finite absolute monotonic deadline. It is not a
-   new provisioning, update or operator cutover step.
-2. **Qualify the selected provider.** Advertise optional
-   `hook-monitor-recovery-v1` in the provider's packaged
-   `hook-runtime-contract.json`. The payload reads the declaration beside the
-   actually selected runtime, not its own current files or a package-version
-   guess. Missing/old/invalid declarations retain local fallback without invoking
-   unsupported syntax or provisioning anything.
-3. **Ask only the original owner.** Resolve the same selected installation/state
-   root and enter its existing nonblocking cutover admission. Re-observe current
-   rendezvous/identity there. A live, foreign, malformed, incompatible, fenced or
-   uncertain owner is not a cold-start invitation. Do not remove its metadata,
-   replace it, release its fence, scan the worktree fleet or invoke stale-reap.
-   Only a qualified cold absence may use the existing monitor ensure/spawn path.
-4. **Bound repeated attempts.** Keep one small owner-written attempt observation
-   under that installation root, separate from the resident rendezvous. It is
-   cooldown/coalescing data, not a resident identity, authority, completion ACK
-   or proof that an earlier effect failed. Serialize observation and admission
-   with the existing owner guard. Healthy calls do not read/write this file;
-   retries must re-observe actual ownership rather than treating expiry as
-   takeover permission.
-5. **Connect the actual eligible consumers.** On a currently absent rendezvous,
-   the existing advisory fallback may request bounded owner recovery, then finish
-   the current event through its original fallback. Never replay that event,
-   including after an ambiguous send, timeout, interruption or delayed reply.
-   Keep strict-local policy, irrelevant/no-op bypasses, implementation exclusivity
-   and native/ACP compatibility. Both Python/Bash and Windows' actual fallback
-   entry must be covered, not an unused helper alone.
-6. **Let later events observe readiness.** The next ordinary event uses normal
-   rendezvous/IPC selection. A recovery spawn only reports starting; it is not
-   successful hook execution, a healthy endpoint or whole-case acceptance.
+These are agent-recommended implementation choices, not new effect grants.
 
-These are proposed implementation choices, not additional operator grants.
-Start with a maximum 0.5-second recovery-helper contribution and a five-second
-attempt cooldown. Measure cold process/cleanup overhead against that bound;
-do not widen caller, test-item or parent budgets to obtain a pass. Existing
-whole-hook/throughput requirements remain separate and unqualified.
+1. **Prepare facts through existing owners.** Compose original managed admission,
+   guard-map and bounded current-row publishers. Use their resolved state homes
+   and mutation/preparation boundaries. Publish only the fields the current hook
+   needs, with exact caller/worktree incarnation, selected source/installation,
+   producer generation/revision and completeness. No raw tool payloads.
+2. **Read and evaluate in shell.** Process the current bounded event once.
+   Select one coherent fact view and perform event-local checks plus live
+   controls. The real entry must not block on Python policy, CLI discovery,
+   synchronous daemon response or a fallback interpreter. Missing advisory
+   data remains a truthful no-op/degraded observation.
+3. **Notify without a data dependency.** Where an existing owner accepts a
+   supported bounded notification, send mutation/demand information without
+   awaiting recomputation. Any operation with uncertain acceptance retains
+   its original correlation and is not blindly replayed.
+4. **Optionally nudge the original boot owner.** Qualify its selected-generation
+   launch/notification contract before using it. The owner coalesces demand,
+   applies original cutover/identity/ownership admission and uses its existing
+   launcher. Do not create a detached helper per event. If no supported nudge
+   exists, skip it; missing optional recovery cannot become a tool-call gate.
+5. **Let later events see a publication.** Current evaluation never waits for
+   startup or facts and is never replayed. Later events read whichever coherent
+   eligible view the owner actually published. Starting, present, unavailable
+   and unknown remain different; none establishes this event's success.
 
-## Receiver and compatibility contract
+Read bytes, object depth, target/path counts, notifications and response time
+must have explicit finite bounds before implementation. Preserve response and
+owned-resource cleanup margin below actual host deadlines. The failed
+0.5-second synchronous-helper measurements remain historical failed evidence;
+they are not a selected async lifecycle budget or permission to widen any
+caller/test/parent bound. Whole-event and composed throughput gates remain.
 
-The internal receiver emits exactly one bounded JSON object:
-`schema: "agent-worktrees.hook-monitor-recovery"`, `version: 1`,
-`status` and a fixed, content-free `reason`. Status is one of `present`,
-`starting`, `deferred`, `disabled` or `unavailable`.
+## Publication, failure and compatibility
 
-`present` means an existing owner was observed, not that this hook decision ran.
-`starting` means the owning lifecycle admitted a start, not readiness.
-Busy admission, deadline exhaustion and cooldown are explicit deferred outcomes.
-Missing installation, unsupported context and failed launch remain unavailable.
-Preserve the original hook's stdout, stderr, exit, fallback and policy semantics.
-Recovery bookkeeping contains no hook payload, raw tool text, credential or
-session inventory.
+Use the existing producer's file home and atomic replacement/withdrawal
+primitives, including Windows sharing and safe regular-file/path handling.
+Do not add a coequal tracking store, copy a growing record, mix independent
+generations or make publication/readers enumerate the fleet on every event.
+Refresh only through existing managed changes/preparation and explicit
+out-of-band refresh; no TTL-based topology polling.
 
-The provider-first sequence is expand, migrate, then retain compatibility:
-new payload/old provider does not send the new invocation; old payload/new
-provider retains its original behavior; new/new uses the bounded owner; rollback
-returns to explicitly unqualified local fallback. No lockstep deployment or
-automatic installed rollout is assumed. The selected provider's ordinary source,
-governance and contained-test suppression still apply.
+Available applicable facts can establish a confirmed violation. Missing,
+malformed, wrong-scope, stale or partial data is not complete-empty or permission.
+Retain the established unavailable-evaluation fail-open behavior and reachable
+inspection/recovery. Any installation-required exception remains positively
+scoped and actionable, not all tool calls. A description of a head/PID does not
+prove process liveness or authorize takeover.
+
+Publish optional support from the selected producer generation before new
+consumers emit new notification/launch syntax. New/new uses the qualified file
+contract; old/new retains supported prior semantics; new/old or supported
+rollback uses a documented shell-safe baseline or reports the actual unavailable
+boundary. Do not silently fall back to blocking Python or claim that a legacy
+provider supplies missing mandatory facts. Keep one active event implementation,
+original command output composition and no uncertain effect replay.
+
+The POSIX entry needs a proven bounded decoder for actual nested/escaped event
+JSON. PowerShell's in-process JSON/.NET path is not POSIX qualification. Do not
+replace a real parser with regex/`eval`, assume an installed `jq`, provision a
+decoder in a hook, or retain Python as an undocumented cold path.
+
+PR-close checks need an original-owner operation-bound observation and retry
+contract. A generic cached PR author/open-state or login is insufficient.
+Resolve this boundary before replacing its existing guard; a scoped first-call
+intervention, if proposed, must be reviewed and preserve independent permission
+and event-time rechecks. No broad acknowledgement grants permission.
 
 ## Implementation plan
 
-- [ ] Implement the internal receiver using the original lifecycle/cutover and
-  singleton/custody paths; retain uncertain identity and interrupted effects.
-- [ ] Package the optional runtime capability and connect the actual eligible
-  fallback consumers without resending the current hook event.
-- [ ] Keep healthy/strict-local/no-op paths unchanged and make recovery
-  starting/deferred/unavailable states truthful and cheap.
+- [ ] Review this shell-facts/async amendment, preserving the original reviewed
+  proposal and failed prototype as history, not implementation acceptance.
+- [ ] Finalize bounded per-fact producer/reader interfaces and actual shell
+  decoder/owner-notification capabilities before emitting new syntax.
+- [ ] Extend original admission/current-row publications; reuse the existing
+  guard map and retain its original managed freshness/withdrawal contract.
+- [ ] Implement and prove the complete post-tool shell flow first: no-op,
+  missing daemon, reminders/binding/late guidance and nonblocking invalidation.
+- [ ] Implement pre-tool shell lookup/guards only after current control,
+  target/parser, managed-admission and PR-observation parity is qualified.
+- [ ] Add the optional coalesced boot nudge only through the original selected
+  lifecycle owner, with actual caller-exit/custody and no-event-replay proof.
 - [ ] Publish the implementation with exact-source review, required CI and
   applicable contract/documentation checks. Record source, release and installed
   acceptance separately; do not close #3761 or the full P8388 case.
 
 ## Paired validation
 
-- [ ] Reproduce absent-endpoint continued-hook fallback before the change, then
-  exercise the complete production caller -> selected receiver -> lifecycle
-  owner -> later ordinary hook selection in an isolated synthetic installation.
-- [ ] Cover old/new provider combinations, missing/invalid declarations, foreign
-  source/installation roots, disabled   contexts and strict argument rejection.
-- [ ] Prove no recovery work on healthy resident, strict-local and existing
-  irrelevant/no-op paths; no duplicate command-policy evaluation.
-- [ ] Cover missing versus malformed rendezvous, live/unknown/reused identity,
-  fenced/cutover-busy ownership and refusal without metadata deletion or reaping.
-- [ ] Exercise simultaneous attempts and later cooldown/expiry against the
-  actual admission seam, including a start not yet advertised and interruption
-  before/after effect admission. Retain unknown outcomes without packet replay.
-- [ ] Verify fixed deadline and original fallback/output/exit behavior, including
-  a hanging helper and caller-owned descendant cleanup. A cleanup timeout is not
-  a successful hook.
-- [ ] Run focused unit and real consumer contracts, appropriate fresh first-touch
-  and Windows/Linux controls, then exact-source required CI. Synthetic/source
-  evidence is not installed ordinary-session/model/ACP or whole-throughput proof.
+- [ ] Exercise the real registered shell entry with Python/CLI execution traps.
+  Cold/no-op/missing-provider paths must not hide an interpreter fallback,
+  readiness wait, request-time discovery or duplicate event evaluation.
+- [ ] Prove producer -> atomic bounded file -> actual shell consumer, including
+  complete-empty, unavailable, wrong source/caller/incarnation, partial,
+  malformed, concurrent replace/withdraw and managed mutation/preparation.
+- [ ] Preserve managed-session admission and ordinary unadmitted/recovery access.
+  Prove live mode/switch/grant-expiry changes, multiple/literal targets, relevant
+  first-call/retry cases and every confirmed guard outcome.
+- [ ] Qualify post-tool count/reset/cooldown, current head, late publication,
+  targeted invalidation and terminal no-op without history/fleet scans.
+- [ ] Qualify the PR event-bound owner/retry and POSIX decoder contracts; report
+  unqualified boundaries rather than weakening or silently dropping them.
+- [ ] Cover old/new providers, supported rollback, missing declarations and
+  unknown arguments before effects; no blocking Python compatibility fallback.
+- [ ] Exercise original boot-owner coalescing, live/foreign/unknown/reused
+  identity, cutover/fences, start pending publication and interrupted admission.
+  No metadata deletion/reaping, cooldown-based takeover or uncertain replay.
+- [ ] A delayed/hanging boot owner must not extend the current shell response.
+  Prove actual resource custody and survival after caller-owned cleanup where
+  intended, plus exact contained-test suppression/settlement.
+- [ ] Run focused units, real shell/file consumers, fresh first-touch and native
+  Windows/POSIX qualification, then exact-source review/required CI. Record
+  skipped tiers with reasons and no installed/live/model/ACP inference.
+- [ ] Measure matched individual/composed first-attempt/retry latency, process
+  work, error/tails and throughput at exact source/serving identities. Timeout
+  settings, import timings and fewer processes are not whole-flow acceptance.
 
 ## Completion and retained ownership
 

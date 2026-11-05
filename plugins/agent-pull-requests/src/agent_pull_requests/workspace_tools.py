@@ -6,8 +6,9 @@ import copy
 import inspect
 from collections import OrderedDict
 import hashlib
+import sys
 
-from .source_attachment import attach_source
+from .source_attachment import EXECUTION_CONTRACT, attach_source, attach_source_async
 from .workspace_operations import PROTOCOL, encoded
 from .review_workspace import MAX_GENERATION_BYTES, _generation, _scope
 from .review_intent import identifier
@@ -46,6 +47,31 @@ async def _call(function, *args, **kwargs):
     return await result if inspect.isawaitable(result) else result
 
 
+def _snapshot_generation(generation, number, identity):
+    generation = copy.deepcopy(generation)
+    scope = _scope(generation.get("scope"))
+    _generation(generation, scope)
+    if scope["number"] != number or generation["id"] != identity:
+        raise ValueError("materialized selection differs")
+    data = encoded(generation)
+    return generation, {"id": identity, "scope": scope, "bytes": len(data),
+                        "sha256": hashlib.sha256(data).hexdigest()}, data
+
+
+def _read_identity(source):
+    if type(source) is not dict:
+        raise ValueError("invalid retained source selection")
+    identifier(source.get("id"))
+    scope, revision = source.get("scope"), source.get("revision")
+    if (
+        type(scope) is not dict or len(scope) != 6
+        or type(revision) is not dict or len(revision) not in (5, 6)
+        or any(type(value) not in (str, int, type(None)) for value in (*scope.values(), *revision.values()))
+    ):
+        raise ValueError("invalid retained source selection")
+    return source["id"], tuple(sorted(scope.items())), tuple(sorted(revision.items()))
+
+
 class WorkspaceTools:
     """Supply only inside the normal authenticated owner's current input pipeline.
 
@@ -61,12 +87,54 @@ class WorkspaceTools:
         self._generations = OrderedDict()
         self._native_execution = client is not None and not inspect.iscoroutinefunction(client.exchange)
 
-    async def capabilities(self):
+    def _async_source(self):
+        declaration = getattr(self.source_owner, "execution_contract", None)
+        value = declaration() if callable(declaration) else None
+        return (
+            isinstance(value, dict) and type(value.get("version")) is int and value == EXECUTION_CONTRACT
+            and inspect.iscoroutinefunction(getattr(self.source_owner, "execute", None))
+            and inspect.iscoroutinefunction(getattr(self.source_owner, "attach", None))
+            and callable(getattr(self.source_owner, "drain", None))
+            and callable(getattr(self.source_owner, "operation", None))
+        )
+
+    def for_one_shot(self):
+        """One-shot CLI cannot adopt or drain another loop's source lifetime."""
+        if not self._async_source():
+            return self
+        view = copy.copy(self)
+        view.source_owner = None
+        return view
+
+    def _preparation_mode(self):
+        from .workspace_operations import NativeWorkspaceClient, _native_source_supported
+        if type(self.client) is NativeWorkspaceClient:
+            return "worker" if _native_source_supported(self.client) else None
+        module = sys.modules.get(__package__ + ".workspace_client")
+        client_type = getattr(module, "WorkspaceClient", None) if module is not None else None
+        if client_type is not None and type(self.client) is client_type:
+            return "loop-with-prepare" if client_type._source_supported(self.client) else None
+        return None
+
+    async def _client_call(self, function, *args, operation=None, **kwargs):
+        if operation is None:
+            return await _call(function, *args, **kwargs)
+        mode = self._preparation_mode()
+        if mode is None:
+            raise WorkspaceToolUnavailable("workspace_preparation_binding_unsupported")
+        if mode == "loop-with-prepare" or inspect.iscoroutinefunction(function):
+            return await operation.call(function, *args, checkpoint=operation.remaining, **kwargs)
+        def invoke_native(*selected_args, **selected_kwargs):
+            return function(*selected_args, checkpoint=operation.remaining, **selected_kwargs)
+        return await operation.call(operation.prepare, invoke_native, *args, **kwargs)
+
+    async def capabilities(self, *, operation=None):
         operations = ["capabilities"]
         backend = None
         if self.client is not None:
             ensure = getattr(self.client, "ensure_capabilities", None)
-            backend = await _call(ensure) if callable(ensure) else await _call(self.client.exchange, "capabilities", {})
+            backend = await self._client_call(ensure, operation=operation) if callable(ensure) else await self._client_call(
+                self.client.exchange, "capabilities", {}, operation=operation)
             if not isinstance(backend, dict) or backend.get("protocol") != PROTOCOL:
                 raise WorkspaceToolUnavailable("workspace_contract_unsupported")
             available = backend.get("operations", [])
@@ -76,7 +144,9 @@ class WorkspaceTools:
                 source_contract = getattr(self.source_owner, "contract", None)
                 declared = source_contract() if callable(source_contract) else None
                 if (
-                    self._native_execution and isinstance(declared, dict)
+                    ((self._native_execution and not self._async_source())
+                     or (self._async_source() and self._preparation_mode() is not None))
+                    and isinstance(declared, dict)
                     and type(declared.get("version")) is int and declared == SOURCE_CONTRACT
                 ):
                     operations.append("source")
@@ -84,7 +154,7 @@ class WorkspaceTools:
                     read = reader() if callable(reader) else None
                     if (
                         isinstance(read, dict) and type(read.get("version")) is int and read == READ_CONTRACT
-                        and callable(getattr(self.source_owner, "read_retained", None))
+                        and (self._async_source() or callable(getattr(self.source_owner, "read_retained", None)))
                     ):
                         operations.append("source-read")
         return {
@@ -92,7 +162,10 @@ class WorkspaceTools:
             "owner_binding": "supplied" if self.client is not None else "unavailable",
             "backend_contract": backend, "installed_tool_adoption": False,
             "source_acquisition": False, "source_preparation": "existing_owner_not_adopted",
-            "source_execution": "native_synchronous" if self._native_execution else "async_owner_unavailable",
+            **({"source_input": "immutable_generation_bytes"} if self._async_source() else {}),
+            "source_execution": ("owned_async" if self._preparation_mode() is not None
+                                 else "async_owner_unavailable") if self._async_source() else (
+                "native_synchronous" if self._native_execution else "async_owner_unavailable"),
         }
 
     async def definitions(self):
@@ -137,6 +210,18 @@ class WorkspaceTools:
             raise WorkspaceToolUnavailable("workspace_owner_unavailable")
         if set(request) != set(FIELDS[command]):
             raise ValueError("invalid workspace tool request fields")
+        request = dict(request)
+        if command in ("source", "source-read") and self._async_source():
+            if command == "source-read" and type(request["source_attachment"]) is not dict:
+                raise ValueError("invalid source attachment")
+            read_identity = _read_identity(request["source_attachment"].get("source")) if command == "source-read" else None
+            if self._preparation_mode() is None:
+                raise WorkspaceToolUnavailable("workspace_preparation_binding_unsupported")
+            async with self.source_owner.operation(request["budget_seconds"]) as operation:
+                capabilities = await self.capabilities(operation=operation)
+                if command not in capabilities["operations"]:
+                    raise WorkspaceToolUnavailable("workspace_operation_unsupported")
+                return await self._source_command(command, request, operation=operation, read_identity=read_identity)
         capabilities = await self.capabilities()
         if command not in capabilities["operations"]:
             raise WorkspaceToolUnavailable("workspace_operation_unsupported")
@@ -149,12 +234,22 @@ class WorkspaceTools:
             required.update(("source_attachment", "path", "side"))
         if set(request) != required:
             raise ValueError("invalid workspace tool request fields")
-        generation = await self._materialize(request["number"], request["generation_id"])
-        _generation(generation, _scope(generation.get("scope")))
+        return await self._source_command(command, request)
+
+    async def _source_command(self, command, request, *, operation=None, read_identity=None):
+        immutable = operation is not None and command == "source"
+        materialized = await self._materialize(
+            request["number"], request["generation_id"], operation=operation, immutable=immutable,
+        )
+        generation, data = materialized if immutable else (materialized, None)
         if command == "materialize":
             return generation
         if command == "source":
-            return attach_source(generation, self.source_owner, budget=request["budget_seconds"])
+            attachment = attach_source_async if self._async_source() else attach_source
+            return await _call(attachment, data if immutable else generation, self.source_owner,
+                               **({"selection": generation} if immutable else {}),
+                               **({"operation": operation} if operation is not None else {}),
+                               budget=operation.remaining() if operation is not None else request["budget_seconds"])
         attachment = request["source_attachment"]
         if (
             not isinstance(attachment, dict) or attachment.get("schema") != "agent-pull-requests.source-attachment"
@@ -167,15 +262,24 @@ class WorkspaceTools:
             or attachment["source"].get("revision") != generation["revision"]
         ):
             raise ValueError("source attachment differs from selected generation")
+        if operation is not None:
+            if _read_identity(attachment["source"]) != read_identity:
+                raise ValueError("source_selection_changed")
+            return await operation.execute(
+                "read_retained", attachment["source"], request["path"], request["side"],
+                budget=operation.remaining(),
+            )
         return self.source_owner.read_retained(
             attachment["source"], request["path"], request["side"], budget=request["budget_seconds"],
         )
 
-    async def _materialize(self, number, identity):
+    async def _materialize(self, number, identity, *, operation=None, immutable=False):
         identifier(identity)
         cached = self._generations.get(identity)
         if cached is not None:
-            observed = await _call(self.client.exchange, "lookup", {"number": number, "generation_id": identity})
+            observed = await self._client_call(self.client.exchange, "lookup",
+                                               {"number": number, "generation_id": identity},
+                                               operation=operation)
             if (
                 observed.get("scope") != cached[0]["scope"]
                 or observed.get("result", {}).get("descriptor") != cached[1]
@@ -184,18 +288,22 @@ class WorkspaceTools:
                 raise WorkspaceToolUnavailable("immutable_generation_changed")
             if self._generations.get(identity) is cached:
                 self._generations.move_to_end(identity)
-            return copy.deepcopy(cached[0])
-        generation = await _call(self.client.materialize, number, identity)
-        scope = _scope(generation.get("scope"))
-        _generation(generation, scope)
-        if scope["number"] != number or generation["id"] != identity:
-            raise ValueError("materialized selection differs")
-        data = encoded(generation)
-        descriptor = {"id": identity, "scope": scope, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
-        while self._generations and sum(item[1]["bytes"] for item in self._generations.values()) + len(data) > MAX_GENERATION_BYTES:
+            value = await operation.prepare(copy.deepcopy, cached[0]) if operation else copy.deepcopy(cached[0])
+            return (value, cached[2]) if immutable else value
+        options = {}
+        materializer = self.client.materialize
+        if operation is not None and self._preparation_mode() == "loop-with-prepare":
+            options["prepare"] = operation.prepare
+        generation = await self._client_call(materializer, number, identity,
+                                             operation=operation, **options)
+        snapshot, descriptor, data = await operation.prepare(
+            _snapshot_generation, generation, number, identity,
+        ) if operation else _snapshot_generation(generation, number, identity)
+        while self._generations and sum(item[1]["bytes"] for item in self._generations.values()) + descriptor["bytes"] > MAX_GENERATION_BYTES:
             self._generations.popitem(last=False)
-        self._generations[identity] = (copy.deepcopy(generation), descriptor)
-        return generation
+        self._generations[identity] = (snapshot, descriptor, data)
+        value = await operation.prepare(copy.deepcopy, snapshot) if operation else copy.deepcopy(snapshot)
+        return (value, data) if immutable else value
 
 
 async def dispatch_tool(host, name, arguments):

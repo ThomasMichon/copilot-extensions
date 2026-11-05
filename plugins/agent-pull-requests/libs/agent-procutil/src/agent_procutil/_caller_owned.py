@@ -151,7 +151,7 @@ def _confirm_group(process: UnreapedChild, *, budget: OwnedExecutionBudget | Non
 
 
 def _validate(request: object) -> dict:
-    if not isinstance(request, dict) or set(request) - {"binary", "budget"} != {
+    if not isinstance(request, dict) or set(request) - {"binary", "budget", "input_bytes"} != {
         "argv", "timeout", "input_text", "capture", "limits",
     }:
         raise ValueError("invalid caller-owned request")
@@ -171,6 +171,12 @@ def _validate(request: object) -> dict:
         raise ValueError("native child capture must be a boolean")
     if type(request.get("binary", False)) is not bool:
         raise ValueError("native child binary capture must be a boolean")
+    if "input_bytes" in request:
+        if request["input_text"] is not None or request.get("binary") is not True:
+            raise ValueError("byte stdin requires binary capture and no text stdin")
+        if not isinstance(request["input_bytes"], str):
+            raise ValueError("invalid native byte stdin")
+        base64.b64decode(request["input_bytes"], validate=True)
     if "budget" in request:
         value = request["budget"]
         if not isinstance(value, dict) or set(value) != {"deadline", "cleanup_reserve"}:
@@ -246,6 +252,7 @@ def _decode(reply: object, request: dict, returncode: int) -> subprocess.Complet
 def run(
     argv: list[str], *, timeout: float, max_stdout_bytes: int, max_stderr_bytes: int,
     input_text: str | None, capture: bool,
+    input_bytes: bytes | None = None,
     on_settled: Callable[[], None] | None = None,
     cwd: str | os.PathLike | None = None,
     env: dict[str, str] | None = None,
@@ -258,6 +265,10 @@ def run(
         raise TypeError("settlement notification must be callable")
     execution_budget = budget
     try:
+        if input_bytes is not None and not isinstance(input_bytes, bytes):
+            raise TypeError("native byte stdin must be bytes")
+        if input_bytes is not None and 4 * ((len(input_bytes) + 2) // 3) > _MAX_REQUEST:
+            raise ValueError("caller-owned request exceeds its frame limit")
         if type(borrow_parent_scope) is not bool:
             raise TypeError("borrow_parent_scope must be a boolean")
         if borrow_parent_scope and budget is None:
@@ -271,6 +282,8 @@ def run(
         request = _validate({
             "argv": argv, "timeout": timeout, "input_text": input_text, "capture": capture,
             "limits": [max_stdout_bytes, max_stderr_bytes],
+            **({"input_bytes": base64.b64encode(input_bytes).decode("ascii")}
+               if input_bytes is not None else {}),
             **({"binary": binary} if binary is not False else {}),
             **({"budget": {"deadline": budget.deadline, "cleanup_reserve": budget.cleanup_reserve}}
                if budget is not None else {}),
@@ -294,7 +307,7 @@ def run(
     if os.name == "nt":
         try:
             return _run_owned(
-                argv, timeout=timeout, input_text=input_text, capture=capture,
+                argv, timeout=timeout, input_text=input_bytes if input_bytes is not None else input_text, capture=capture,
                 capture_limits=(max_stdout_bytes, max_stderr_bytes),
                 on_settled=on_settled,
                 allow_daemon_breakaway=allow_daemon_breakaway,
@@ -309,7 +322,7 @@ def run(
             raise subprocess.TimeoutExpired(argv, timeout) from error
     if borrow_parent_scope:
         return _run_owned(
-            argv, timeout=timeout, input_text=input_text, capture=capture,
+            argv, timeout=timeout, input_text=input_bytes if input_bytes is not None else input_text, capture=capture,
             capture_limits=(max_stdout_bytes, max_stderr_bytes),
             inherit_process_group=True, borrow_parent_scope=True, budget=budget,
             binary=binary, cwd=cwd, env=env,
@@ -441,7 +454,8 @@ def _main() -> None:
         try:
             result = _run_owned(
                 request["argv"], timeout=request["timeout"],
-                input_text=request["input_text"], capture=request["capture"],
+                input_text=base64.b64decode(request["input_bytes"], validate=True)
+                if "input_bytes" in request else request["input_text"], capture=request["capture"],
                 inherit_process_group=True, capture_limits=tuple(request["limits"]),
                 binary=request.get("binary", False),
                 **({"budget": budget} if budget is not None else {}),

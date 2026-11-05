@@ -612,7 +612,7 @@ def test_metadata_error_never_creates_venv(tmp_path, monkeypatch, isolated):
 def test_default_never_uses_public_metadata(tmp_path, monkeypatch):
     monkeypatch.setattr(btl, "_validated_trusted_index_url", lambda env: None)
     monkeypatch.setattr(btl, "resolve_public_source", lambda *args: pytest.fail("implicit public fallback"))
-    with pytest.raises(btl.ArtifactBuildError, match="no affirmatively trusted"):
+    with pytest.raises(btl.ArtifactBuildError, match="no non-public HTTPS default"):
         btl.resolve_toolchain_lock(tmp_path / "venv")
 
 

@@ -5,7 +5,7 @@
   obligations, disposition, and source-control completion.
 - **Scope:** branch (worktree-lifetime authority; child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-11-02
+- **Last revised:** 2026-11-05
 - **Reality docs:** the agent-worktrees plugin `docs/`
 - **Supersedes / superseded by:** none
 
@@ -908,16 +908,18 @@ manager, or session-host implementation.
 
 ## Non-Goals / Boundaries
 
-- **Not a Copilot process manager.** agent-worktrees does not launch, wrap,
-  reattach, prompt, interrupt, or terminate Copilot processes.
+- **Not a Copilot process manager.** agent-worktrees may directly request or
+  hoist the [Copilot Driver](../agent-remote-driver/README.md) for a selected
+  workspace, but does not implement Copilot spawning, mux wrapping, protocol
+  brokering or process retirement itself.
 - **Not a terminal or multiplexer owner.** TMux, PSMux, terminal windows, panes,
   and console choreography belong to an execution-host provider.
 - **Not a Terminal Fragment owner.** Which launch targets a machine's terminal
   application (Windows Terminal, Tabby, ...) carries a profile for — the
   selection model, its persistence, and mirroring it into real terminal-app
   fragments — is being phased out of agent-worktrees into the Worktree Manager
-  control-plane, the same relocation already applied to Mux presentation and
-  the AHP session backend (#2062). Terminal-app *profile*/fragment handling of
+  control-plane. Mux execution belongs to the Copilot Driver, while native AHP
+  backend selection remains a hosting-client concern. Terminal-app *profile*/fragment handling of
   every kind is leaving this plugin; agent-worktrees ends up knowing nothing
   about how, or whether, a session is ever attached to a terminal-app profile
   at all. **This does not extend to per-project binstubs** (the PATH launcher
@@ -933,7 +935,7 @@ manager, or session-host implementation.
   technology (e.g. Mux fields beside AHP fields in the same record or config
   schema). Each execution leg it records is a provider id plus an opaque,
   provider-owned blob; the mechanics that establish and present a session —
-  currently Mux and AHP, both driven by the Worktree Manager control-plane —
+  including the Copilot Driver's Session Host and mux wrapping —
   live outside agent-worktrees entirely.
 - **Not the handoff transport.** It records lineage, head transitions, and
   durable responsibility; context transfer and live cutover are orchestrated
@@ -961,6 +963,7 @@ manager, or session-host implementation.
   [session-hosting](../../session-hosting/README.md) — pluggable ownership of
   user-interactive and headless Copilot execution.
 - Presentation sibling: [picker](../../picker/README.md)
+- Execution provider: [Copilot Driver](../agent-remote-driver/README.md)
 - Coordination sibling:
   [plugins/agent-bridge](../agent-bridge/README.md)
 - Reality docs: the agent-worktrees plugin `docs/`,

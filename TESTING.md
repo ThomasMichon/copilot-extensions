@@ -2392,6 +2392,18 @@ single-flight, stale-result rejection and actual process exit while an
 attention child stays blocked. Native pane fixtures verify the observer's
 own pane environment and that detached sessions are not considered visible;
 these are not proof of rendered or real-client input/click acceptance.
+The Windows packet separately runs `test_companion_app_psmux.py`: the actual
+PSMux client starts inside the existing strict caller-owned ConPTY Job and
+launches the unmodified Companion from a private constructed prefix. An inert
+CLI and wire-valid synthetic owner isolate actual client keyboard dispatch,
+older-page browsing, live/unread behavior, resize, Follow-live and Escape.
+The fixture retains native process handles and CLI pane/PID/session birth,
+requires reader/observer exit and closes its strict Job even on failure. Its
+private profile and disabled warm server prevent discovery of existing sessions;
+it never relaxes Job breakaway restrictions to make a run pass.
+Linux skips do not qualify this Windows boundary. Source/commit-stamped Windows
+execution is required; server captures and ConPTY bytes are not headed pixels,
+window/focus-stealing observations, real owner composition or frame latency.
 The older PSMux 3.3.5 baseline has exhibited immediate session exits and later
 CLI/directory loss in this fixture. Those observations remain an unqualified
 stability gap under #8811, not a reason to skip a failed test or claim that

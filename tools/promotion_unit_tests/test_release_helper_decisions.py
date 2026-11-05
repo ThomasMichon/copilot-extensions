@@ -478,16 +478,16 @@ def test_public_toolchain_requires_canonical_hash_and_pin_provenance(tmp_path, c
             public.validate_lock_provenance(provenance, {"wheel": "1.0"})
 
 
-@pytest.mark.parametrize("case", ["trusted", "plaintext", "public", "untrusted", "no-allowlist"])
-def test_governed_feed_requires_explicit_https_nonpublic_allowlist(case):
+@pytest.mark.parametrize("case", ["configured", "plaintext", "public", "other-host"])
+def test_governed_feed_requires_configured_https_nonpublic_index(case):
     url = {
         "plaintext": "http://feed.example/simple", "public": "https://pypi.org/simple",
-        "untrusted": "https://other.example/simple",
+        "other-host": "https://other.example/simple",
     }.get(case, "https://feed.example/simple")
     env = {"UV_DEFAULT_INDEX": url, "UV_INDEX_URL": "https://lower.example/simple"}
-    if case != "no-allowlist":
-        env["BUILD_PYTHON_ARTIFACTS_TRUSTED_INDEX_HOSTS"] = "FEED.EXAMPLE, pypi.org"
-    assert trust._validated_trusted_index_url(env) == ((url, None) if case == "trusted" else None)
+    assert trust._validated_trusted_index_url(env) == (
+        (url, None) if case in {"configured", "other-host"} else None
+    )
 
 
 @pytest.mark.parametrize("case", ["valid", "unpaired", "invalid-type", "empty"])

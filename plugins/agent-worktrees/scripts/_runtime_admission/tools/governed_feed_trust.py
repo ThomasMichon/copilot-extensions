@@ -11,9 +11,9 @@ which remains importable exactly as before for every existing caller.
 Owns "what index does this machine trust" -- discovering `uv`'s own
 effective default index across project/user/system config and environment
 variables (mirroring `uv`'s own precedence), and validating that index
-against an affirmative, machine-local trust policy
-(`BUILD_PYTHON_ARTIFACTS_TRUSTED_INDEX_HOSTS`) before anything is allowed to
-call it "governed". `build_toolchain_lock.py` owns a DIFFERENT, downstream
+as an explicitly configured, non-public HTTPS feed before anything is allowed
+to call it "governed". No second per-host environment allowance is required.
+`build_toolchain_lock.py` owns a DIFFERENT, downstream
 concern: resolving one locked venv from whatever index this module
 validates.
 """
@@ -392,12 +392,7 @@ _BROAD_WINDOWS_PRINCIPAL_SIDS = (
 )
 
 _GOVERNED_FEED_DEFAULT_INDEX_ENV_VARS = ("UV_DEFAULT_INDEX", "UV_INDEX_URL")
-#: Affirmative trust policy for `resolve_toolchain_lock`'s governed-feed
-#: gate (see `_governed_feed_configured`'s own docstring): a comma-
-#: separated allowlist of hostnames the MACHINE explicitly asserts are its
-#: own governed feed. Never committed/hardcoded here -- this repo stays
-#: feed-neutral (`tools/check-feed-neutrality.py`); only a machine's own
-#: local environment ever populates this.
+# Legacy import compatibility only; feed selection ignores this allowance.
 _TRUSTED_INDEX_HOSTS_ENV_VAR = "BUILD_PYTHON_ARTIFACTS_TRUSTED_INDEX_HOSTS"
 #: Every ambient uv variable that could supply packages from somewhere
 #: other than one explicitly validated index -- shared by
@@ -918,9 +913,8 @@ def _effective_default_index_url(env: dict) -> tuple[str, str | None] | None:
 
 def _validated_trusted_index_url(env: dict) -> tuple[str, str | None] | None:
     """The effective default index's ``(url, name)``, but ONLY if the URL
-    is HTTPS, both non-public AND affirmatively trusted (see
-    `_governed_feed_configured`'s own docstring for the allowlist
-    rationale) -- returns the concrete ``(url, name)`` pair (rather than
+    is explicitly configured, HTTPS and non-public -- returns the concrete
+    ``(url, name)`` pair (rather than
     just a bool) so a caller can pin `uv` to EXACTLY this one index at
     install time -- INCLUDING its name, when it has one, so a
     `UV_INDEX_<NAME>_USERNAME`/``PASSWORD``-authenticated named index can
@@ -928,48 +922,29 @@ def _validated_trusted_index_url(env: dict) -> tuple[str, str | None] | None:
     fine" and then trusting `uv`'s own ambient config to pick the real one
     used -- which could still consult an untrusted SUPPLEMENTAL index
     (`UV_INDEX`, or a plain `[[index]]` entry with no `default = true`)
-    that this check never validated. The HTTPS requirement means an
-    allowlisted hostname alone is never sufficient: a plaintext
-    `http://<trusted-host>/...` URL is rejected even though its hostname
-    passes the allowlist, since a network attacker could otherwise
-    impersonate that host without ever needing to be trusted themselves."""
-    trusted_hosts = _trusted_index_hosts(env)
-    if not trusted_hosts:
-        return None
+    that this check never validated. HTTPS remains mandatory; selecting a
+    hostname does not authorize plaintext or disabled TLS verification."""
     effective = _effective_default_index_url(env)
     if effective is None:
         return None
     url, name = effective
     if not url or _is_public_pypi_url(url):
         return None
-    # Require HTTPS: an allowlisted HOSTNAME is not itself proof of
-    # identity over a plaintext (or TLS-downgraded) connection -- a
-    # network attacker able to intercept `http://<trusted-host>/...`, or
-    # exploit an ambient TLS-disable setting, could impersonate the real
-    # governed feed while this still reports it as validated/trusted.
     if urllib.parse.urlsplit(url).scheme != "https":
         return None
     host = _url_host(url)
-    if host is None or host not in trusted_hosts:
+    if host is None:
         return None
     return (url, name)
 
 
 def _governed_feed_configured(*, env: dict | None = None) -> bool:
-    """Whether `uv`'s EFFECTIVE DEFAULT index in this environment is both
-    (a) not a public PyPI-family host, AND (b) affirmatively trusted by
-    this machine's own explicit policy (`_TRUSTED_INDEX_HOSTS_ENV_VAR`).
+    """Whether UV has an explicitly configured non-public HTTPS default feed.
 
-    This is an ALLOWLIST, deliberately -- NOT inferring governance from
-    "not one of a few known public hostnames", which would silently
-    accept an arbitrary untrusted index (e.g. a public mirror under a
-    different hostname) as "governed" just because it isn't named
-    `pypi.org`. Nothing is trusted unless this machine's own environment
-    affirmatively lists it: with no trust policy configured at all, this
-    always fails closed, even if SOME non-public-looking index happens to
-    be configured as the default. Deliberately reads configuration, never
-    a hardcoded URL or hostname -- this repository stays feed-neutral (see
-    `tools/check-feed-neutrality.py`); only each machine's own local
-    configuration ever names its real, trusted feed."""
+    The effective UV configuration owns selection across networks and containers;
+    the legacy per-host allowance is ignored. Supplemental indexes alone and
+    public PyPI never satisfy this gate. Source pinning, TLS, integrity and
+    package-age validation remain separate mandatory acquisition checks.
+    """
     env = dict(os.environ) if env is None else env
     return _validated_trusted_index_url(env) is not None
