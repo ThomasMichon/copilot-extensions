@@ -6,7 +6,7 @@
   machines, and venue providers.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-26
+- **Last revised:** 2026-11-05
 - **Reality docs:** [`plugins/agent-bridge/README.md`](../../../plugins/agent-bridge/README.md) ·
   [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md)
 
@@ -130,6 +130,25 @@ permission, and a caller-supplied purpose cannot turn an authoring launch into
 an exempt review. Existing live sessions and durable custody are not destroyed
 by a policy change. Inspection, saved handoffs and deliberate state-preserving
 migration remain available without silently creating a replacement agent.
+
+### host-selected receiving support
+
+Bridge supplies the minimal compatible receiving support for its selected
+managed session mode through the existing venue transport and lifecycle.
+Ordinary driving does not depend on a full or current coordination suite being
+installed in the receiving location. Standalone guest installation remains an
+independent use case, not an admission workaround.
+
+ACP hosting composes its Session Host; muxed CLI hosting composes the standalone
+remote-driver and canonical mux launch support. Packaging may consolidate these
+pieces where useful without creating a competing launcher, changing their
+ownership or silently promoting a different default mode. The receiving rig
+retains native process lifetime and existing session/driver custody.
+
+Delivered code is not delivered permission. The actual receiving checkout and
+selected marketplace context still enforce fresh repository policy at creation,
+resume and successor boundaries. Existing allocations, installed guest state,
+unrelated sessions and supported recovery/rollback remain intact.
 
 ### delegation control and attention boundary
 
