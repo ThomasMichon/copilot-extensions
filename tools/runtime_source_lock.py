@@ -8,6 +8,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -270,6 +271,30 @@ def _build_roots(payload: Path, deadline: float) -> list[str]:
     return sorted(roots)
 
 
+def _configured_resolution_inputs(arguments, environment, payload: Path, deadline: float) -> tuple:
+    roots = (payload,)
+    arguments = dependencies._compile_arguments(
+        arguments, environment, payload, roots, "source-compile",
+    )
+    base, _projects, files, _editables = dependencies._source_inputs(
+        arguments, environment, payload, roots, operation="source-compile",
+    )
+    configurations = dependencies._config_inputs(arguments, environment, base)
+    paths = {Path(path).absolute() for path in files}
+    paths.update(Path(path).absolute() for path, _project in configurations)
+    result = []
+    for path in sorted(paths):
+        _check_deadline(deadline)
+        resolved = path.resolve(strict=True)
+        digest = runtime.fingerprint_source(
+            (resolved,), on_progress=lambda: _check_deadline(deadline),
+        )
+        if path.resolve(strict=True) != resolved:
+            raise ProfileError("source configuration changed during consumption")
+        result.append((str(path), str(resolved), digest))
+    return tuple((str(path.absolute()), project) for path, project in configurations), tuple(result)
+
+
 @contextmanager
 def retain_source_configuration(
     plan: InstallationProfilePlan, *, payload: Path, expected_source: SourceIdentity,
@@ -343,21 +368,64 @@ def retain_source_configuration(
         output = temporary / (
             "pylock.toml" if wheel_witness else "source-lock.txt"
         )
+        compile_arguments = [
+            *arguments, "--output-file", str(output),
+            *(["--format", "pylock.toml"] if wheel_witness else []),
+        ]
+        captured_at = datetime.now(timezone.utc)
+        configured_inputs = (
+            _configured_resolution_inputs(compile_arguments, environment, payload, deadline)
+            if installation is not None else None
+        )
         projection = []
         with dependencies.retain_uv_source_compile(
-            uv, [*arguments, "--output-file", str(output),
-                 *(["--format", "pylock.toml"] if wheel_witness else [])],
+            uv, compile_arguments,
             cwd=payload, env=environment, trusted_source_roots=(payload,),
             deadline=deadline, native_target=True, _projection=projection,
+            **({"now": captured_at} if installation is not None else {}),
         ) as transaction:
             _source(payload, expected_source)
             _retained_source(transaction, payload, deadline)
             retained_roots = tuple(transaction.sources.values())
             retained_hash = runtime.fingerprint_source(_source_files(retained_roots))
             configuration_policy = None
+            expected_settings = None
+            expected_network = None
             if installation is not None:
+                from installer_native_feed import _projection
                 from runtime_feed_configuration import validate_source_resolution_inputs
 
+                def verify_live_files():
+                    try:
+                        if _configured_resolution_inputs(
+                            compile_arguments, environment, payload, deadline,
+                        ) != configured_inputs:
+                            raise ProfileError("source configuration changed during consumption")
+                    except (OSError, KeyError, ValueError, RuntimeError) as error:
+                        raise ProfileError("source configuration changed during consumption") from error
+
+                expected_settings = dependencies._resolver_configuration(
+                    projection[0], now=captured_at, freeze_package_cutoffs=True,
+                )
+                expected_network = _projection(projection[0], "GlobalSettings")["network_settings"]
+                verify_live_files()
+                current_projection = []
+                dependencies.prepare_uv_install(
+                    uv, compile_arguments, cwd=payload, env=environment,
+                    trusted_source_roots=(payload,), now=captured_at,
+                    deadline=deadline, native_target=True,
+                    _projection=current_projection, _operation="source-compile",
+                )
+                if (
+                    len(current_projection) != 1
+                    or dependencies._resolver_configuration(
+                        current_projection[0], now=captured_at, freeze_package_cutoffs=True,
+                    ) != expected_settings
+                    or _projection(current_projection[0], "GlobalSettings")["network_settings"]
+                    != expected_network
+                ):
+                    raise ProfileError("source configuration changed during consumption")
+                verify_live_files()
                 configuration_policy = validate_source_resolution_inputs(
                     plan, installation=installation, transaction=transaction,
                     projections=projection, deadline=deadline,
@@ -382,12 +450,14 @@ def retain_source_configuration(
                 if runtime.fingerprint_source(_source_files(retained_roots)) != retained_hash:
                     raise ProfileError("retained source changed during candidate consumption")
                 if installation is not None:
+                    verify_live_files()
                     observed = validate_source_resolution_inputs(
                         plan, installation=installation, transaction=transaction,
                         projections=projection, deadline=deadline,
                     )
                     if observed != configuration_policy:
                         raise ProfileError("source configuration changed during consumption")
+                    verify_live_files()
                 _check_deadline(deadline)
 
             verify()

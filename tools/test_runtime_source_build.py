@@ -113,8 +113,9 @@ def test_current_build_input_revocation_refuses_before_tools_installation_or_bac
             pytest.fail("revoked inputs became a runtime")
 
 
-def test_source_verification_rechecks_retained_native_feed_before_publication(
-    adopter, configured_source, target, feeds, tmp_path, monkeypatch,
+@pytest.mark.parametrize("scope", ["retained", "configured"])
+def test_source_verification_rechecks_native_feed_before_publication(
+    adopter, configured_source, target, feeds, tmp_path, monkeypatch, scope,
 ):
     source_with_process_owner(configured_source)
     state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
@@ -132,14 +133,44 @@ def test_source_verification_rechecks_retained_native_feed_before_publication(
 
     monkeypatch.setattr(builds, "retain_source_wheel_lock", observe)
     with builds.retain_source_runtime_inputs(plan(adopter), **options(adopter, target, env)) as source:
-        retained = captured[0]
-        original = retained.read_bytes()
+        configuration_path = captured[0] if scope == "retained" else Path(env["UV_CONFIG_FILE"])
+        original = configuration_path.read_bytes()
         try:
-            retained.write_text("system-certs=true\n", encoding="utf-8")
-            with pytest.raises(ValueError, match="native index lacks"):
+            configuration_path.write_text("system-certs=true\n", encoding="utf-8")
+            with pytest.raises(ValueError, match="native index lacks|source configuration changed"):
                 source.verify()
         finally:
-            retained.write_bytes(original)
+            configuration_path.write_bytes(original)
+
+
+def test_transient_feed_change_cannot_be_bound_to_restored_configuration(
+    adopter, configured_source, target, feeds, tmp_path, monkeypatch,
+):
+    import runtime_source_lock as locks
+
+    source_with_process_owner(configured_source)
+    state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
+    env = environment(adopter, state, tmp_path)
+    monkeypatch.setattr(configuration, "_opaque_index_identity", lambda value: hashlib.sha256(value.encode()).hexdigest())
+    config = Path(env["UV_CONFIG_FILE"])
+    original = config.read_bytes()
+    actual = locks.dependencies.retain_uv_source_compile
+
+    @contextmanager
+    def transient(*args, **kwargs):
+        config.write_bytes(original.replace(b"/simple", b"/transient"))
+        try:
+            with actual(*args, **kwargs) as transaction:
+                config.write_bytes(original)
+                yield transaction
+        finally:
+            config.write_bytes(original)
+
+    monkeypatch.setattr(locks.dependencies, "retain_uv_source_compile", transient)
+    with pytest.raises(ValueError, match="source configuration changed"):
+        with builds.retain_source_runtime_inputs(plan(adopter), **options(adopter, target, env)):
+            pytest.fail("transient feed configuration reached acquisition")
+    assert state["requests"] == []
 
 
 @pytest.mark.parametrize("hint,accepted", [(">= 3.9", True), (">=3.8", False)])

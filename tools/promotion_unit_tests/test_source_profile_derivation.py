@@ -316,6 +316,30 @@ def test_source_closure_propagates_transitive_extras_and_marker_cycles():
     }
 
 
+@pytest.mark.parametrize("change", ["contents", "missing"])
+def test_source_configuration_witness_changes_with_live_input(tmp_path, monkeypatch, change):
+    import runtime_source_lock as locks
+
+    configuration = tmp_path / "uv.toml"
+    configuration.write_text('index-url="https://example.invalid/simple"\n', encoding="utf-8")
+    monkeypatch.setattr(locks.dependencies, "_compile_arguments", lambda arguments, *_args: arguments)
+    monkeypatch.setattr(
+        locks.dependencies, "_source_inputs",
+        lambda *_args, **_kwargs: (tmp_path, set(), set(), set()),
+    )
+    monkeypatch.setattr(
+        locks.dependencies, "_config_inputs",
+        lambda *_args: [(configuration, False)] if configuration.exists() else [],
+    )
+    deadline = time.monotonic() + 10
+    before = locks._configured_resolution_inputs([], {}, tmp_path, deadline)
+    if change == "contents":
+        configuration.write_text('index-url="https://example.invalid/other"\n', encoding="utf-8")
+    else:
+        configuration.unlink()
+    assert locks._configured_resolution_inputs([], {}, tmp_path, deadline) != before
+
+
 @pytest.mark.parametrize("requirement", ["missing", "other @ https://example.invalid/package.whl"])
 def test_source_closure_never_resolves_missing_or_direct_dependencies(requirement):
     with pytest.raises(source.ProfileError):
