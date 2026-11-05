@@ -55,13 +55,14 @@ def feedback_environment(environment: tuple) -> tuple:
     return store, selected, generation, attachment, backend, now, expires, interests
 
 
-def run(value: tuple, *, interests: tuple[Interest, ...] | None = None) -> dict:
+def run(value: tuple, *, interests: tuple[Interest, ...] | None = None, current=None) -> dict:
     store, selected, generation, attachment, backend, _, expires, admitted = value
     return execute_review(
         store, selected, generation, attachment, context_factory=backend.context,
         checkpoint=backend.checkpoint, expires_at=expires, budget_seconds=10,
         feedback=FeedbackInputs(generation["id"], interests or admitted[:1], 60),
         feedback_position=backend.positions.get(generation["id"]),
+        feedback_current=current,
     )
 
 
@@ -389,9 +390,14 @@ def test_original_reply_and_owned_edit_use_exact_native_object_readback(
     assert result["status"] == "complete" and result["feedback"]["status"] == "handled"
     assert result["feedback"]["cursor"] == {"epoch": 1, "sequence": 2}
     assert run(value)["entered_writes"] == 0 and len(writes(backend)) == 1
+    later = observe(value, change="echo", second=12)
+    retry = run(value, current=lambda: (later, backend.positions[later["id"]]))
+    assert retry["feedback"]["echo"] == {
+        "status": "unavailable", "reason": "action_response_version_unavailable",
+    }
 
 
-@pytest.mark.parametrize("mode", ["normal", "reopen", "unbound"])
+@pytest.mark.parametrize("mode", ["normal", "reopen", "unbound", "echo"])
 def test_workspace_selects_feedback_from_embedding_not_request_json(
     feedback_environment: tuple, mode: str,
 ) -> None:
@@ -436,6 +442,9 @@ def test_workspace_selects_feedback_from_embedding_not_request_json(
         )
 
     operations = make_operations()
+    if mode == "echo":
+        backend.versioned_reply = True
+        backend.pr["reviewers"] = copy.deepcopy(generation["sections"]["reviewers"]["data"])
     payload = {
         "number": selected["scope"]["number"], "intent": selected,
         "source_attachment": attachment, "budget_seconds": 10,
@@ -487,6 +496,19 @@ def test_workspace_selects_feedback_from_embedding_not_request_json(
     assert result["result"]["feedback"]["status"] == "handled", result
     assert called[-1] == generation["id"]
     assert result["result"]["feedback"]["cursor"]["epoch"] == (2 if mode == "reopen" else 1)
+    if mode == "echo":
+        evidence["sections"]["discussions"]["data"] = copy.deepcopy(backend.threads)
+        for section in evidence["sections"].values():
+            section.update(observed_from="2026-10-30T00:00:10Z", observed_to="2026-10-30T00:00:11Z")
+        value[5][0] = observation_interval(evidence["sections"])[1] + 1
+        operations.execute(
+            "load", {"number": 42, "expected_current": generation["id"], "budget_seconds": 10},
+            expires_at=expires, checkpoint=backend.checkpoint,
+        )
+        covered = operations.execute("submit", payload, expires_at=expires, checkpoint=backend.checkpoint)
+        assert covered["result"]["feedback"]["echo"]["status"] == "covered", covered
+        assert covered["result"]["entered_writes"] == 0
+        assert document(value)["attention"]["records"][1]["handled"] is None
     operations = make_operations()
     retry = operations.execute("submit", payload, expires_at=expires, checkpoint=backend.checkpoint)
     assert retry["result"]["entered_writes"] == 0 and retry["result"]["feedback"]["status"] == "handled"

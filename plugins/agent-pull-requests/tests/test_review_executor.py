@@ -76,6 +76,8 @@ def environment(tmp_path, monkeypatch, request):
         response_ids = None
         read_late = False
         empty_read = False
+        versioned_reply = False
+        readback_policies = None
 
         def __init__(self):
             self.pr = copy.deepcopy(evidence["sections"]["pull_request"]["data"])
@@ -117,10 +119,14 @@ def environment(tmp_path, monkeypatch, request):
                                                 "unexpected" if self.singleton_continuation == "identity" else "")
                 if "/iterations?" in url:
                     return NativeReviewResponse(200, {"value": copy.deepcopy(self.iterations)})
+                if "/changes?" in url:
+                    return NativeReviewResponse(200, {"changeEntries": [], "nextSkip": 0, "nextTop": 0})
                 if "/threads?" in url:
                     return NativeReviewResponse(200, {"value": copy.deepcopy(self.threads)})
                 if "/statuses?" in url or "/policy/evaluations?" in url:
                     values = [{"id": "synthetic-evaluation", "status": "failed"}] if self.policy_failed else []
+                    if self.readback_policies is not None:
+                        values = self.readback_policies
                     return NativeReviewResponse(200, {"value": values})
                 return NativeReviewResponse(200, {} if self.empty_read else copy.deepcopy(self.pr),
                                             "unexpected" if self.singleton_continuation == "pr" else "",
@@ -162,6 +168,13 @@ def environment(tmp_path, monkeypatch, request):
                                         "content": body["comments"][0]["content"],
                                         "author": {"id": scope["principal_id"]}}]}
                 self.threads.append(thread)
+                if self.versioned_reply:
+                    thread.update(publishedDate="2026-10-30T00:00:06Z", lastUpdatedDate="2026-10-30T00:00:06Z")
+                    thread["comments"][0].update(
+                        publishedDate="2026-10-30T00:00:06Z", lastUpdatedDate="2026-10-30T00:00:06Z",
+                        lastContentUpdatedDate="2026-10-30T00:00:06Z",
+                    )
+                original_reply = copy.deepcopy(thread)
                 if self.drift_after_comment:
                     self.threads.append({"id": 999, "status": 1, "comments": [
                         {"id": 1, "content": "Unrelated author reply", "author": {"id": "other-author"}}]})
@@ -183,7 +196,7 @@ def environment(tmp_path, monkeypatch, request):
                     malformed = copy.deepcopy(thread)
                     malformed["comments"][0]["author"] = "not-an-author-object"
                     return NativeReviewResponse(201, malformed)
-                return NativeReviewResponse(201, copy.deepcopy(thread))
+                return NativeReviewResponse(201, original_reply if self.versioned_reply else copy.deepcopy(thread))
             thread_id = int(re.search(r"/threads/(\d+)/", url)[1])
             thread = next(row for row in self.threads if row["id"] == thread_id)
             if method == "PATCH":

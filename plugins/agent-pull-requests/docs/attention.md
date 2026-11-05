@@ -134,6 +134,9 @@ The [feedback capture owner](feedback-capture.md) expands the same owner
 explicitly to v5 without changing attention-state/v1. Its optional protected
 submit composition reserves immutable pre-effect context and reconciles exact
 confirmed comment/reply/edit readback to only the originally captured interests
-and position. Tracking does not resend confirmed effects or consume later
-dialogue. Verdict attribution and later interest-specific echo coverage remain
-unavailable until separately qualified; B1 storage alone provides neither.
+and position. Tracking does not resend confirmed effects or consume independent
+later dialogue. Its first bounded B3 leaf can additionally cover one proven
+comment-only position for the captured interests; see the linked owner doc for
+original-response evidence, mixed-version behavior and explicit unavailable
+cases. Verdict attribution and full B3/A2 acceptance remain open; B1 storage
+alone provides neither.

@@ -153,7 +153,7 @@ def _check_selected_ownership(action, actual, principal):
 def execute_review(
     store, selected, generation, source_attachment, *, context_factory, checkpoint,
     expires_at: int, budget_seconds: float, clock=time.monotonic, feedback=None,
-    feedback_position=None,
+    feedback_position=None, feedback_current=None,
 ):
     """Existing owner factory supplies actual pinned auth/input/transport, not caller labels."""
     from agent_worktrees.providers.azure_owned_review import (
@@ -217,6 +217,7 @@ def execute_review(
         tracking = ReviewFeedback(
             store, generation, feedback, expires_at=expires_at, checkpoint=checkpoint,
             position=feedback_position,
+            current_acquisition=feedback_current,
         )
         result["stage"] = "feedback_capture"
         try:
@@ -296,8 +297,9 @@ def execute_review(
                 result["entered_writes"] += 1
                 native = context.perform(copy.deepcopy(operation), copy.deepcopy(action))
                 result["stage"] = "receipt"
+                receipt = tracking.response_receipt(native, action) if tracking is not None else native.receipt
                 recorded = store.record_review_receipt(
-                    operation_id, scope, action["id"], begun["action"]["attempt_id"], native.receipt,
+                    operation_id, scope, action["id"], begun["action"]["attempt_id"], receipt,
                     expires_at=expires_at, checkpoint=checkpoint, confirm=native.confirmed,
                 )
                 if recorded["state"] != "confirmed":

@@ -85,6 +85,12 @@ a complete matching action reply: partial or contradictory responses retain IDs
 as unknown, not a fabricated confirmation.
 The store's conservative `confirm=False` disposition keeps all known native IDs
 without upgrading an unverified response into a confirmed effect.
+`NativeActionOutcome` also offers an optional, representation-hidden `response`
+copy only for a confirmed non-late reply. Existing callers can ignore it.
+The optional [feedback composition](feedback-capture.md#bounded-comment-echo-reconciliation)
+uses it for body-free original-version evidence; the raw body is not a receipt
+field or returned execution result. Missing evidence never changes native
+confirmation or permits replay.
 
 Confirmed own receipts may advance only their exactly selected semantic thread/
 comment changes. Unrelated replies, edits, deletion, ownership or status changes

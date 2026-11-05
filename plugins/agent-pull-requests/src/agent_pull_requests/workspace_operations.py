@@ -244,6 +244,7 @@ class WorkspaceOperations:
                 raise WorkspaceUnavailable("reviewed generation unavailable")
             feedback = None
             feedback_position = None
+            feedback_current = None
             if self.feedback_owner is not None:
                 feedback = self.feedback_owner(copy.deepcopy(generation))
                 if type(feedback) is not FeedbackInputs:
@@ -252,11 +253,20 @@ class WorkspaceOperations:
                     acquired = self._generation_positions.get(generation["id"])
                     if acquired is not None:
                         feedback_position = Cursor(**acquired)
+
+                def feedback_current():
+                    latest = cache.lookup(scope)["generation"]
+                    if latest is None:
+                        return None
+                    with self._materialization_lock:
+                        position = self._generation_positions.get(latest["id"])
+                        return (latest, Cursor(**position)) if position is not None else None
             result = execute_review(
                 self.store, intent, generation, payload["source_attachment"],
                 context_factory=lambda: self.write_context(number), checkpoint=check,
                 expires_at=expires_at, budget_seconds=seconds, feedback=feedback,
                 feedback_position=feedback_position,
+                feedback_current=feedback_current,
             )
         check()
         return {"protocol": PROTOCOL, "scope": scope, "result": copy.deepcopy(result)}

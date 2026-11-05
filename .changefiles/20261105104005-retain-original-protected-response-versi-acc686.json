@@ -1,0 +1,13 @@
+{
+  "comment": "Retain original protected response versions and conservatively cover exact comment-only feedback echoes",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
