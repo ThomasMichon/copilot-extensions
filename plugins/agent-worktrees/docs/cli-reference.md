@@ -503,6 +503,18 @@ continue to work unchanged.
 
 ### Cold embodiment startup prompts
 
+Windows PSMux new-session creation removes inherited mux-nesting selectors from
+the creation client's environment, matching an independent Manager launch.
+The caller's environment and existing-session/new-window routing are unchanged.
+
+`embody --verify-timeout <seconds>` checks mux presence, not native startup or
+prompt acceptance. Expired verification returns `ok: false`, `mux_verified: false`
+and exit 3; an unavailable probe instead keeps `mux_verified: null` with an
+actionable error. Each query is bounded by the remaining verification time.
+Creation may already have occurred in either case. Inspect the existing launch
+and prompt state before retrying; failure is not permission to resend.
+Without requested verification, `mux_verified` remains `null`.
+
 Ordinary cold `embody --seed` launches prefer the existing native startup
 boundary for direct Copilot and marked normalized setup commands. The prompt
 is staged privately; the final invocation owner claims it and supplies

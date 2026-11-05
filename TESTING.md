@@ -2023,6 +2023,16 @@ retains its explicit unsupported-readiness outcome.
 
 ## Optional native pane argument delivery
 
+The separate Worktrees opt-in
+`--test-file tests/native/test_generic_mux_startup.py --allow-explicit-tiers`
+packet, with `PSMUX_FILE_LAUNCH_E2E=1`, exercises the generic creation owner
+against the installed PSMux. Fresh private profiles cover clean and inherited
+nesting environments, with and without pane-print formatting. The actual
+file-based consumer must run, consume its manifest and retain its literal argv;
+the caller environment must remain unchanged, with no owned visible windows
+or foreground focus. These contained source controls do not certify a real
+Copilot prompt, productive runtime deployment or escape from caller cleanup.
+
 The manual `installation-context-full.yml` portfolio `pane-argv` runs the real
 PSMux direct-child control and both file-based pane producers twice on a fresh
 `windows-latest` runner. It downloads PSMux 3.3.6 into disposable job storage
