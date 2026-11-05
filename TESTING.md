@@ -2439,6 +2439,9 @@ its published value; other permission failures remain visible errors.
 Its private Bridge prerequisite also requires an actual owning membership-route
 heartbeat after the snapshot, so a one-frame carrier that starves healthy
 readers cannot masquerade as native integration failure.
+Pre-app startup failures additionally record a bounded read-only thread-state
+query for the already-pinned inert CLI. That diagnostic never resumes, stops or
+repairs the process and does not change the original startup deadline.
 The older PSMux 3.3.5 baseline has exhibited immediate session exits and later
 CLI/directory loss in this fixture. Those observations remain an unqualified
 stability gap under #8811, not a reason to skip a failed test or claim that

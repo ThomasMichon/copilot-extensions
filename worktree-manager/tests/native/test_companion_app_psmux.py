@@ -140,6 +140,7 @@ def test_actual_companion_psmux_client_history_resize_and_same_cli(
                         for child in process.children(recursive=True)
                     ],
                     "started": cli_receipt.read_text() if cli_receipt.exists() else None,
+                    "native_process": client.process_state(int(pid)),
                 })
 
             wait_for(lambda: "INERT SOURCE CLI" in mux("capture-pane", "-p", "-t", cli), cli_diagnostic)

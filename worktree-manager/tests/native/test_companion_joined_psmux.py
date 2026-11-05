@@ -109,6 +109,7 @@ def test_native_windows_three_owner_history_live_and_same_cli(
         ]
         pinned: dict[int, Any] = {}
         observer = None
+        cli_pid = None
         with Console(argv, env=environment, cwd=peer["checkout"]) as client:
             def screen() -> str:
                 return mux("capture-pane", "-p", "-t", observer or session)
@@ -134,6 +135,7 @@ def test_native_windows_three_owner_history_live_and_same_cli(
                         semantic_peer["diagnostic"].read_text(encoding="utf-8")
                         if semantic_peer["diagnostic"].exists() else None
                     ),
+                    "native_process": client.process_state(cli_pid) if cli_pid is not None else None,
                 }))
 
             def pin_owned(pid: int) -> Any:
@@ -160,6 +162,7 @@ def test_native_windows_three_owner_history_live_and_same_cli(
                     "display-message", "-p", "-t", session,
                     "#{pane_id}\t#{session_id}:#{session_created}\t#{pane_pid}\t#{window_id}",
                 ).split("\t")
+                cli_pid = int(pid)
                 cli_handle = pin_owned(int(pid))
                 birth = client.birth(cli_handle)
                 wait_for(lambda: "INERT SOURCE CLI" in mux("capture-pane", "-p", "-t", cli))
