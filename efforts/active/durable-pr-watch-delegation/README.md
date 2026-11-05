@@ -282,10 +282,12 @@ _Operator-required outcome; agent-recommended slices and validation._
   Existing normalized ADO load/sync acquisition feeds the explicitly enabled
   journal after confirmed cache publication (#10405); native observation and
   standalone-host adoption remain distinct prerequisites.
-  Exact native target-tip metadata merged in #10599. Review the bounded
+  Exact native target-tip metadata merged in #10599. The bounded
   [existing-owner native workspace host](native-workspace-host-slice.md)
-  before its runtime realization; thin watch metadata is not full workspace
-  acquisition or serving adoption.
+  contract merged in #10602. Its optional source adapter composes the existing
+  finite exporter, cache and journal; thin watch metadata alone is not full
+  workspace acquisition. Operational configuration, installed/provider/shadow
+  qualification and the remaining P1/P2 acceptance remain separate gates.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -923,6 +925,51 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-04 - Realize the opt-in native read-only host slice
+
+- The native-host contract merged in #10602 before implementation. Its finite
+  source adapter retains the exact exporter's capabilities and native profile,
+  actual canonical scope/principal checks, partial sections, shared deadline,
+  complete cleanup custody, existing generation CAS and journal transaction.
+- Standalone configuration binds only existing admitted caller/target routes
+  and their typed observation credential owner. Default watch-only hosting is
+  unchanged. Fresh explicit provisioning selects the existing v3/cache layout;
+  serving validates retained state under the writer and never migrates it.
+- The affected source packet passed 21 native-adapter/exporter, 143
+  workspace/journal/replay/lifecycle and 63 standalone cases, with bounded
+  cleanup verified. Strict service typing passes Linux and Windows analysis.
+  Actual process boundaries and the default installed TLS/PoP fixture retain
+  synthetic provider inputs; they do not qualify a live native/provider host.
+- Review of #10609 identified nested credential-scope and POSIX cleanup-retry
+  gaps. The repair stays at the canonical owners: exporter capability-negotiated
+  enclosing-scope credential execution, and complete retained process/stream
+  retries with the original caller's settlement callback. Actual credential
+  timeout controls pin all descendants and require exit before the native
+  operation returns; no writer release is inferred from a killed exporter.
+- After that repair, 166 native/workspace/journal/lifecycle, 118 canonical
+  process-owner (five platform skips), 76 exporter/credential and 63 standalone
+  cases pass. Bounded cleanup is verified; strict Python 3.10 service analysis
+  passes Linux and Windows. This is not a Windows native execution or deployed
+  provider qualification.
+- The next review found an interruption window after a retry's confirmed reap.
+  Retry now reuses the retained `Popen.returncode` rather than signalling an
+  already-reaped PID. Its actual-process regression passes; the canonical
+  packet is now 119 passed/five platform skips. Required unit CI separately
+  refused the two changed, previously admitted source digests. Refresh only
+  those source entries; the exact unit nodes, effect restrictions and execution
+  budget remain unchanged.
+- The repaired head received exact-head Copilot approval with no open issues;
+  its eligible-unit CI job also passed. The remaining required gate exposed
+  stale generated caller-lifetime archives. Regenerate the canonical source
+  archive and its installation-context/installer copies with the existing
+  synchronizers, retaining all consumer changefiles and fresh-head review/CI.
+  No installer policy, activation or production authority changes.
+- These controls close a source prerequisite, not the full P1/P2/P3 gate.
+  Shared selection/IO, durable attention/handled semantics, coordinated
+  retention, three-provider qualification, installed adoption, container and
+  separately authorized shadow acceptance remain open. No production service,
+  credential, backend mutation or Dispatch authority changes.
 
 ### 2026-11-04 - Recover publication and continue existing-host integration
 

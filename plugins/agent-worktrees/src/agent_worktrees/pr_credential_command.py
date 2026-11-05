@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 import math
 import subprocess
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
+from agent_procutil.owned_budget import OwnedExecutionBudget
 
 from .providers.observation_credentials import CredentialSource, ObservationCredentialError
 
@@ -43,6 +45,7 @@ def _unique(pairs):
 
 def command_source(
     serialized: str, *, remaining: Callable[[], float] | None = None,
+    enclosing_budget: OwnedExecutionBudget | None = None,
 ) -> CredentialSource:
     """Validate trusted non-secret argv once; acquire new typed material on every call."""
     try:
@@ -67,8 +70,14 @@ def command_source(
                 if type(budget) not in (int, float) or not math.isfinite(budget) or budget <= 0:
                     raise ValueError("credential command operation budget exhausted")
                 timeout = min(timeout, budget)
+            if enclosing_budget is not None:
+                timeout = min(timeout, enclosing_budget.execution_deadline - time.monotonic())
+                if timeout <= 0:
+                    raise ValueError("enclosing credential command budget exhausted")
             result = run_caller_owned(
                 list(argv), timeout=timeout, max_stdout_bytes=_MAX_BYTES, max_stderr_bytes=8192,
+                **({"budget": enclosing_budget, "borrow_parent_scope": True}
+                   if enclosing_budget is not None else {}),
             )
             if result.returncode or len(result.stdout.encode("utf-8")) > _MAX_BYTES:
                 raise ValueError

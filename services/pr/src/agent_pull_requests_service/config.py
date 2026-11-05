@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import AbstractSet, Any
 
 from agent_pull_requests.watch_gateway import WatchScopeBinding
+from agent_pull_requests.generation_cache import GenerationCache
+from agent_pull_requests.native_read import NativeReadHandler
+from agent_pull_requests.review_workspace import _scope
 from agent_pull_requests.watch_observer import NativeObservationBinding
 from agent_pull_requests.watch_replay import ConsumerScope
 from agent_pull_requests.watch_replay_store import ReplayServiceIdentity, ReplayStore, json_object
+from agent_pull_requests.workspace_operations import WorkspaceOperations
 from fleet_manager.gateway_service_channel import origin
 from fleet_manager.gateway_service_context import identifier
 
@@ -56,6 +61,32 @@ def _seconds(value: object) -> int:
 
 
 @dataclass(frozen=True)
+class WorkspaceConfig:
+    readers: tuple[tuple[str, str, NativeReadHandler], ...]
+    cache_bytes: int
+    cache_generations: int
+
+    def cache(self, store: ReplayStore) -> GenerationCache:
+        return GenerationCache(
+            store.root, store.namespace, max_bytes=self.cache_bytes,
+            max_generations=self.cache_generations, service_identity=store.service_identity,
+        )
+
+    def operations(
+        self, store: ReplayStore, checkpoint: Callable[[], None], seconds: int,
+    ) -> dict[tuple[str, str], WorkspaceOperations]:
+        cache = self.cache(store)
+        return {
+            (principal, target): WorkspaceOperations(
+                store, cache, scope=dict(reader.scope), read_owner=reader,
+                binding_ref=reader.binding_ref, checkpoint=checkpoint,
+                max_work_seconds=seconds, conversations=True,
+            )
+            for principal, target, reader in self.readers
+        }
+
+
+@dataclass(frozen=True)
 class HostConfig:
     root: Path
     namespace: str
@@ -71,6 +102,7 @@ class HostConfig:
     interval: int = 5
     operation_seconds: int = 60
     drain_timeout: int = 60
+    workspaces: WorkspaceConfig | None = None
 
     @property
     def status_path(self) -> Path:
@@ -82,6 +114,49 @@ class HostConfig:
             service_identity=ReplayServiceIdentity(self.fleet, self.gateway, self.slot),
         )
 
+    def provision(self) -> None:
+        store = self.store()
+        if self.workspaces is not None and (
+            self.root.is_symlink() or self.root.exists() and any(self.root.iterdir())
+        ):
+            raise ValueError("workspace provisioning requires a fresh dedicated root")
+        store.provision(conversations=self.workspaces is not None)
+        if self.workspaces is not None:
+            self.workspaces.cache(store).provision()
+
+
+def _workspaces(value: object, bindings: list[WatchScopeBinding],
+                observations: list[NativeObservationBinding], seconds: int) -> WorkspaceConfig:
+    selected = _fields(value, {"bindings", "cache_bytes", "cache_generations"})
+    cache_bytes, cache_generations = selected["cache_bytes"], selected["cache_generations"]
+    if (
+        type(cache_bytes) is not int or not 65536 <= cache_bytes <= 1024 * 1024 * 1024
+        or type(cache_generations) is not int or not 1 <= cache_generations <= 10000
+    ):
+        raise ValueError("workspace cache requires explicit bounded capacities")
+    scopes = {(b.principal, b.target): b.scope for b in bindings}
+    native = {(b.account, b.repo): b for b in observations}
+    readers: list[tuple[str, str, NativeReadHandler]] = []
+    for raw in _collection(selected["bindings"]):
+        entry = _fields(raw, {"principal", "target", "command", "scope"})
+        key = (entry["principal"], entry["target"])
+        if key not in scopes or any((p, t) == key for p, t, _ in readers):
+            raise ValueError("workspace requires one existing admitted caller/target")
+        scope = _scope({**_fields(entry["scope"], {
+            "provider", "endpoint", "project_id", "repository_id", "principal_id",
+        }), "number": 1})
+        scope.pop("number")
+        admitted = scopes[key]
+        observation = native[(admitted.account, admitted.repo)]
+        if observation.credential_command is None:
+            raise ValueError("workspace requires the existing typed credential owner")
+        readers.append((*key, NativeReadHandler(
+            command=_argv(entry["command"]), credential_command=observation.credential_command,
+            repo=admitted.repo, scope=scope, binding_ref=entry["target"],
+            max_work_seconds=seconds,
+        )))
+    return WorkspaceConfig(tuple(readers), cache_bytes, cache_generations)
+
 
 def load_config(path: Path) -> HostConfig:
     path = _path(str(path))
@@ -92,7 +167,7 @@ def load_config(path: Path) -> HostConfig:
     value = _fields(json_object(raw), {
         "schema", "version", "root", "namespace", "fleet", "gateway", "slot",
         "gateway_origin", "proof_key_file", "access_token_file", "bindings", "observations",
-    }, {"gateway_ca", "interval", "operation_seconds", "drain_timeout"})
+    }, {"gateway_ca", "interval", "operation_seconds", "drain_timeout", "workspaces"})
     if value["schema"] != "agent-pull-requests.service" or (
         type(value["version"]) is not int or value["version"] != 1
     ):
@@ -123,6 +198,7 @@ def load_config(path: Path) -> HostConfig:
         (o.account, o.repo) for o in observations
     } for b in bindings):
         raise ValueError("ambiguous or missing native observation scope")
+    seconds = _seconds(value.get("operation_seconds", 60))
     config = HostConfig(
         root=_path(value["root"]), namespace=value["namespace"],
         fleet=value["fleet"], gateway=value["gateway"], slot=value["slot"],
@@ -132,8 +208,10 @@ def load_config(path: Path) -> HostConfig:
         bindings=tuple(bindings), observations=tuple(observations),
         gateway_ca=_path(value["gateway_ca"]) if "gateway_ca" in value else None,
         interval=_seconds(value.get("interval", 5)),
-        operation_seconds=_seconds(value.get("operation_seconds", 60)),
+        operation_seconds=seconds,
         drain_timeout=_seconds(value.get("drain_timeout", 60)),
+        workspaces=_workspaces(value["workspaces"], bindings, observations, seconds)
+        if "workspaces" in value else None,
     )
     config.store()
     return config

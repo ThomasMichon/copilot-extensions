@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import base64
 from collections import OrderedDict
+from collections.abc import Callable
 import copy
 import hashlib
 import json
 import math
 import threading
+import time
 
 from .generation_cache import GenerationCache
+from .native_read import NativeReadHandler
 from .workspace_conversation import conversation_key as conversation_key
-from .owner_read import OwnerReadHandler, REQUEST_SCHEMA
+from .owner_read import OwnerReadBudgetExceeded, OwnerReadHandler, REQUEST_SCHEMA
 from .review_executor import execute_review
 from .review_intent import identifier
 from .review_workspace import MAX_GENERATION_BYTES, _generation, _scope, compare_generations
@@ -38,10 +41,10 @@ class WorkspaceOperations:
     """
 
     def __init__(self, store, cache, *, scope, read_owner, binding_ref,
-                 write_context=None, checkpoint, max_work_seconds, conversations=False):
+                 write_context=None, checkpoint, max_work_seconds, conversations=False) -> None:
         if (
             not isinstance(cache, GenerationCache)
-            or not isinstance(read_owner, OwnerReadHandler)
+            or not isinstance(read_owner, (OwnerReadHandler, NativeReadHandler))
             or not callable(checkpoint)
             or write_context is not None and not callable(write_context)
             or type(max_work_seconds) not in (int, float)
@@ -67,6 +70,12 @@ class WorkspaceOperations:
         self._materializations = OrderedDict()
         self._materialization_lock = threading.Lock()
 
+    def validate_storage(self, *, expires_at: int, checkpoint: Callable[[], None]) -> None:
+        """Check already-adopted state under the existing service writer."""
+        self.execute("capabilities", {}, expires_at=expires_at, checkpoint=checkpoint)
+        with self.cache._transaction() as lock:
+            self.cache._check(lock)
+
     def execute(self, operation, payload, *, expires_at, checkpoint):
         if operation not in OPERATIONS or not isinstance(payload, dict):
             raise ValueError("unsupported workspace operation")
@@ -83,6 +92,13 @@ class WorkspaceOperations:
         required, optional = fields[operation]
         if not required <= payload.keys() or payload.keys() - required - optional:
             raise ValueError("invalid workspace fields")
+        deadline = None
+        if "budget_seconds" in payload:
+            seconds = payload["budget_seconds"]
+            if type(seconds) not in (int, float) or not math.isfinite(seconds) or seconds <= 0:
+                raise ValueError("finite workspace operation budget required")
+            seconds = min(seconds, self.max_work_seconds)
+            deadline = time.monotonic() + seconds
 
         def check():
             checkpoint()
@@ -90,6 +106,8 @@ class WorkspaceOperations:
             if self.cache.checkpoint is not None:
                 self.cache.checkpoint()
             self.store.check_current(expires_at, checkpoint)
+            if deadline is not None and time.monotonic() >= deadline:
+                raise OwnerReadBudgetExceeded("workspace operation budget exhausted")
 
         check()
         if operation == "capabilities":
@@ -111,6 +129,8 @@ class WorkspaceOperations:
                 **({"conversation_acquisition": "workspace-projection/v1"} if self.conversations else {}),
                 "max_generation_bytes": MAX_GENERATION_BYTES, "chunk_bytes": CHUNK_BYTES,
                 "refresh": "full_sections", "source": "existing_client_local_owner",
+                **({"read_acquisition": self.read_owner.profile}
+                   if isinstance(self.read_owner, NativeReadHandler) else {}),
                 "provision_or_adopt": False,
             }
         number = payload["number"]
@@ -143,11 +163,6 @@ class WorkspaceOperations:
             max_bytes=self.cache.max_bytes, max_generations=self.cache.max_generations,
             service_identity=self.store.service_identity, checkpoint=check,
         )
-        if "budget_seconds" in payload:
-            seconds = payload["budget_seconds"]
-            if type(seconds) not in (int, float) or not math.isfinite(seconds) or seconds <= 0:
-                raise ValueError("finite workspace operation budget required")
-            seconds = min(seconds, self.max_work_seconds)
         if operation in ("load", "sync"):
             previous = None
             if operation == "sync":
@@ -156,7 +171,7 @@ class WorkspaceOperations:
                     raise WorkspaceUnavailable("selected comparison generation unavailable")
             observed = self.read_owner.read({
                 "schema": REQUEST_SCHEMA, "version": 1, "binding_ref": self.binding_ref,
-                "number": number, "budget_seconds": seconds,
+                "number": number, "budget_seconds": deadline - time.monotonic(),
                 "expected_principal": scope["principal_id"],
             }, request_checkpoint=check)
             generation = observed["generation"]
