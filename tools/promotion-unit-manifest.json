@@ -4458,7 +4458,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/repos_registry_reader.py": "5264a28fbe56b7aa3a134409a481f8f9e29f6d94fa391b05a7f28d4afb8970df",
         "plugins/agent-worktrees/src/agent_worktrees/repos_registry_transaction.py": "5c761e347aa55d8345902679929761696bae29aa6eb5411ac5f13af3c3f6adf5",
         "plugins/agent-worktrees/src/agent_worktrees/resource_producer.py": "2f8572a53490b75c5e36b1afcb79305a441aad8c017c1d399caf6a23646ce55e",
-        "plugins/agent-worktrees/src/agent_worktrees/resource_relationship.py": "32d6f1d80d797426aed88069dc2406b658d9cec893416a4ce602141657d57b9b",
+        "plugins/agent-worktrees/src/agent_worktrees/resource_relationship.py": "f9d4c95416d98d4ece5f56f0e578ff90a3bcc509e0f66cb940685287a9c5754b",
         "plugins/agent-worktrees/src/agent_worktrees/source_probes.py": "6d3a171db77782d50137e61ede48df22bab040eb0f5c3c18391675a11306a9a8",
         "plugins/agent-worktrees/src/agent_worktrees/state_root.py": "c885e37c248086b63ba2822453c11c45be758437e71682f57e11d2c017ccf215",
         "plugins/agent-worktrees/src/agent_worktrees/strict_yaml.py": "98c2abc729a4544129c8fc60d723aa45fb4b49142c7194b21f41e0e84ef018d3",

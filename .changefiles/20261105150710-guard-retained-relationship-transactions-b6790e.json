@@ -1,0 +1,9 @@
+{
+  "comment": "Guard retained relationship transactions with the observed executing installation and build identity",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
