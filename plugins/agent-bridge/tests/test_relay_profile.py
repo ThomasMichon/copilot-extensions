@@ -100,6 +100,53 @@ def test_file_token_validator_missing_and_malformed_store(tmp_path):
     assert FileTokenValidator(bad)("x") is False
 
 
+@pytest.mark.parametrize("transient", [False, True])
+def test_file_token_read_contention_preserves_scope_gate(tmp_path, monkeypatch, transient):
+    store = tmp_path / "relay-tokens.json"
+    _write_store(store, {"cs": {"token": "synthetic", "allowed_resources": ["https://example.com"]}})
+    read_text = Path.read_text
+    failures = []
+
+    def contended(path, *args, **kwargs):
+        if path == store and (not transient or not failures):
+            error = PermissionError("synthetic sharing violation")
+            error.winerror = 32
+            failures.append(True)
+            raise error
+        return read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", contended)
+    authorizer = FileTokenAuthorizer(store)
+    assert FileTokenValidator(store)("synthetic") is transient
+    if transient:
+        failures.clear()
+        assert authorizer("synthetic", "get-azure-token", {"resource": "https://example.com"})
+        with pytest.raises(ScopeDenied):
+            authorizer("synthetic", "get-azure-token", {"resource": "https://denied.example"})
+    else:
+        assert not authorizer("synthetic", "get-azure-token", {"resource": "https://example.com"})
+    assert store.read_bytes()
+
+
+def test_codespaces_issuer_store_is_consumed_and_revoked_by_bridge(tmp_path, monkeypatch):
+    source = Path(__file__).resolve().parents[2] / "agent-codespaces" / "src"
+    monkeypatch.syspath_prepend(str(source))
+    from agent_codespaces import relay_token
+
+    store = tmp_path / "relay-tokens.json"
+    monkeypatch.setattr(relay_token, "_TOKENS_FILE", store)
+    token = relay_token.token_for("cs", allowed_resources=["https://example.com"])
+    validator = FileTokenValidator(store)
+    authorizer = FileTokenAuthorizer(store)
+    assert validator(token)
+    assert authorizer(token, "get-azure-token", {"resource": "https://example.com"})
+    with pytest.raises(ScopeDenied):
+        authorizer(token, "get-azure-token", {"resource": "https://denied.example"})
+    relay_token.revoke("cs")
+    assert not validator(token)
+    assert not authorizer(token, "get-azure-token", {"resource": "https://example.com"})
+
+
 def test_file_token_validator_defensive_on_non_str_values(tmp_path):
     # A malformed store with non-string values must not raise -- return False
     # (a hardening over the providers, never a weakening: no real token matches).

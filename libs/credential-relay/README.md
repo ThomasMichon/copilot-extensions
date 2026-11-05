@@ -26,6 +26,12 @@ from every venv — hence a lib installed into each, vendored the same way as
 ## Contents
 
 - `credential_relay.server` — `CredentialRelayServer`, `RelayPolicy`, `RelayStats`.
+- `credential_relay.token_store` - strict token-map reads shared by providers
+  and Bridge. Only file absence means an empty map; malformed JSON or a
+  non-object root refuses. Windows access/sharing failures receive at most
+  five bounded delays (0.62 seconds total); other I/O errors fail immediately.
+  Authorization readers fail closed after that budget without rewriting state.
+  This helper does not acquire credentials, cache secrets or own writer locks.
 - `credential_relay.sources` — `CredentialSource` protocol.
 - `credential_relay.sources.{git_credential,gh_auth,az_login}` — generic
   host-credential sources (shell out to host `git` / `gh` / `az`).
@@ -57,7 +63,7 @@ Response is git-credential-protocol `key=value` text terminated by a blank line.
 
 ## Type checking and compatibility
 
-All 22 canonical Python source/test files are checked strictly on the Linux
+Canonical Python source/test files are checked strictly on the Linux
 and Windows analysis targets:
 
 ```text

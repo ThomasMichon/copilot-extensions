@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** per-phase managed pull requests
 - **Created:** 2026-11-04
-- **Status:** Draft
+- **Status:** Active - implementation validated; review and merge pending
 - **Vision:** [agent-codespaces](../../../visions/plugins/agent-codespaces/README.md) - reliable authenticated venue access
 - **Umbrella issue:** #10591
 
@@ -50,26 +50,26 @@ installed rollout is part of this effort.
 ## Plan
 
 ### Phase 1 - Reproduction and compatibility
-- [ ] Reproduce lost updates, temporary-file collision or Windows replacement failure with synthetic state; distinguish the actual failures observed.
-- [ ] Trace issuer, revocation and Bridge readers; retain scope-denial behavior and legacy entry compatibility.
+- [x] Reproduce lost updates, temporary-file collision or Windows replacement failure with synthetic state; distinguish the actual failures observed.
+- [x] Trace issuer, revocation and Bridge readers; retain scope-denial behavior and legacy entry compatibility.
 
 ### Phase 2 - Implementation
-- [ ] Use existing OS-held cross-process locking and unique atomic publication primitives for the complete mutation transaction.
-- [ ] Retry transient sharing/access failures within a bounded budget; preserve old bytes on persistent read/parse/write failure and clean only attempt-owned temporary files.
-- [ ] Keep normal readers lock-free where atomic publication permits; fail authorization closed on persistent unreadability without rewriting state.
-- [ ] Document compatibility, error behavior and the mixed-version limitation: old writers do not participate in the new lock.
+- [x] Use existing OS-held cross-process locking and unique atomic publication primitives for the complete mutation transaction.
+- [x] Retry transient sharing/access failures within a bounded budget; preserve old bytes on persistent read/parse/write failure and clean only attempt-owned temporary files.
+- [x] Keep normal readers lock-free where atomic publication permits; fail authorization closed on persistent unreadability without rewriting state.
+- [x] Document compatibility, error behavior and the mixed-version limitation: old writers do not participate in the new lock.
 
 ### Phase 3 - Delivery
-- [ ] Add changefiles for affected plugins/shared-library consumers and pass focused tests, lint and required contract checks.
+- [x] Add changefiles for affected plugins/shared-library consumers and pass focused tests, lint and required contract checks.
 - [ ] Steward the implementation PR through review, required CI and merge; record release status without implying deployment.
 
 ## Validation Plan
 
-- [ ] Focused unit tests for transient/persistent access errors, malformed state, stable token reuse, revocation and allowed/denied scope.
-- [ ] Real independent-process first-touch and concurrent update/revoke tests on synthetic stores; no global/runtime paths.
-- [ ] Native Windows held-open-reader replacement failure/recovery and bounded timeout test with unchanged old bytes.
-- [ ] Issuer-to-Bridge validator/authorizer consumption of the actual written store.
-- [ ] Record all exercised tiers and explicitly explain external-venue exclusions: this slice changes only host file transactions; no live store or service is authorized.
+- [x] Focused unit tests for transient/persistent access errors, malformed state, stable token reuse, revocation and allowed/denied scope.
+- [x] Real independent-process first-touch and concurrent update/revoke tests on synthetic stores; no global/runtime paths.
+- [x] Native Windows held-open-reader replacement failure/recovery and bounded timeout test with unchanged old bytes.
+- [x] Issuer-to-Bridge validator/authorizer consumption of the actual written store.
+- [x] Record all exercised tiers and explicitly explain external-venue exclusions: this slice changes only host file transactions; no live store or service is authorized.
 - [ ] Resolve every Plan/Validation item before marking this finite effort Done; deployment remains outside its completion claim.
 
 ## Proposal
@@ -89,3 +89,29 @@ substitute for repairing the store. Review this plan before implementation.
   any particular field incident.
 - Request, intent and plan compared against the bounded source scope; private
   motivation is intentionally absent.
+
+### 2026-11-04 - Reviewed implementation and source validation
+
+- Planning #10593 approved and merged before implementation.
+- Seven new regression cases failed against the original code: malformed
+  stores and persistent read errors did not refuse mutation, and a synthetic
+  Windows replacement error was not retried. These reproduce specific file
+  failure modes, not an entire field incident.
+- Implemented the existing `OperationLock`/`atomic_write_text` transaction,
+  unique temporary publication, strict shared reads and bounded Windows
+  retries. No dependency, CLI, wire or JSON schema changes.
+- Codespaces packet: 62 passed, including five native/independent-process
+  cases. Bridge packet: 46 passed, including actual issuer-store consumption,
+  scope denial and revocation. Test children and their containment Jobs settled.
+- Ruff F/E9, install contract (13 plugins), documentation consistency and strict
+  shared-library analysis (23 files, Linux and Windows targets) passed.
+  Whole-portfolio `--enforced` analysis stopped at an unprepared unrelated
+  project; only the changed admitted library is claimed checked.
+- Validation tiers: focused contract/unit tests; real local issuer/reader and
+  process integration; first-touch synthetic-store clean-room checks; native
+  Windows held-open-file proof. External venue/live store/installed rollout
+  intentionally excluded: this slice changes host file transactions only and
+  grants no live credential/service effects. Linux native process execution
+  was not available on this Windows worker; analysis is not native execution.
+- Remaining gate: implementation review, required CI and merge, then close
+  this source-only effort without implying release or installed acceptance.
