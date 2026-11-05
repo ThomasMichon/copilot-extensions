@@ -1,0 +1,9 @@
+{
+  "comment": "Join actual request-native producers through existing caller-owned admission and preserve cancellation custody",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

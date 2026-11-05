@@ -322,6 +322,20 @@ Revocation is handled like a disconnect, not a distributed commit barrier.
 The SDK neither grants authority nor turns a completed HTTP response into an
 application acknowledgment.
 
+The finite caller also has an internal request-native completion scope.
+Cooperating producers register the actual concurrent future before awaiting a
+cancellable loop wrapper; request cancellation joins that native completion
+before releasing the caller slot. A source embedding may supply its existing
+native admission internally, without another executor or lifecycle. The
+credential-reference reader uses this admission in source scope; its ordinary
+non-source invocation remains compatible. Opaque native producers must
+cooperate with the existing owner rather than asserting a completion flag.
+Settlement reconciles every registered producer before choosing an exception.
+An original `OwnedCleanupError` takes precedence over permission denial or
+cancellation; additional original cleanup errors remain retained in its
+`cleanup_resources` as `("request-native-cleanup", error)` entries. Existing
+process, Job and capture handles are preserved for the current custodian.
+
 ## Routes, streams and explicit limits
 
 The Gateway matches only configured namespace prefixes and declared methods,

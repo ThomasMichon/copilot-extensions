@@ -145,6 +145,9 @@ The source implementation continuation is admitted; operational effects are not.
 - [x] Implement the admitted exact local source inspector, native mapping/blob
   verification, immutable ref retention and separate generation-bound attachment
   envelope (#9708); fetching, owner adoption and live qualification stay open.
+- [ ] Complete source acceptance of prepared-only async execution/drain, actual
+  request-native custody and immutable inspection admission (#9928). Acquisition,
+  actual tool-host adoption and live qualification are separate open gates.
 - [ ] Preserve existing GitHub behavior and use a provider-neutral contract.
 
 ### Phase 3 - Build explicit submission and reconciliation after admission
@@ -214,6 +217,457 @@ submission recovery and remaining decisions. It is not a shipped CLI or wire
 contract.
 
 ## Journal
+
+### 2026-11-05 - Local native discovery qualification candidate
+
+The prepared-source candidate reconstructs public #9928 head
+`be3b6b18ce29054d26e36c521273fe9bb34eafc0` on development base
+`e5e13462fbd13f9635b369028686120e64e08bf7`. Three-way integration preserves
+later development behavior, including the expanded metadata operations and
+bytecode-suppressed process controller. Canonical source archive generation
+and the unchanged footprint revision reconcile generated artifacts. The current
+unit admission retains every development node, coverage target and budget;
+only the two merged Procutil source digests change, and all 588 sources verify.
+
+Native discovery callbacks can hide unregistered offload work. The new async
+source lane now refuses a custom callable `ensure_capabilities` before reserving
+source work or executing discovery, while ordinary metadata still invokes it.
+Regression controls cover coroutine and coroutine-returning wrapper shapes,
+zero reservation/callback/offload on refusal, and ordinary metadata completion.
+The initial red packet had three expected failures and five passes.
+
+The first corrected combined packet passed 25 native-custody controls and one
+native-only control, then failed containment with exit 125 because persistent
+user PATH changed during execution. Writer attribution is unknown; no rollback
+or guard bypass was performed, and the unexecuted compatibility group was not
+credited. An unchanged retry passed all 65 controls across the three complete
+native-custody, native-only and workspace-tool modules: 206.60 seconds of tests,
+218.05 seconds including preparation and cleanup, with no skips or reported
+cleanup uncertainty. The original 180-second subsuite and 600-second aggregate
+bounds remain unchanged.
+
+This is a local source candidate, not publication, review acceptance, custody
+transfer, installed adoption or rollout. All nine outstanding Plan items and
+eleven outstanding Validation items remain open. Fresh source-unit coverage,
+current-head review/CI, managed publication and the existing operational gates
+remain separate requirements.
+
+### 2026-11-04 - Preserve all native cleanup handles before owner denial
+
+Review 5762468852 confirms the six preceding source findings resolved and finds
+one further concrete request-settlement issue: set iteration could report a
+permission denial before observing another producer's cleanup failure. Reconcile
+all terminal errors first, preserve an original cleanup exception as primary and
+retain every additional original cleanup exception through its existing resource
+field. Ordinary cooperating callers without a separate source owner must retain
+those handles too. The complete native/checkpoint packet passes 25 controls in
+65.87 seconds, 105.67 seconds including preparation and cleanup, under unchanged
+180/600 bounds. Current source review and CI remain acceptance gates; no original
+operational item is closed by this change.
+
+### 2026-11-04 - Correctly scoped review retains six source gates
+
+Normal reconciliation refreshed #9928 to its actual current-`dev` diff.
+Review 5762243538 now identifies six tightly coupled source findings rather
+than the unrelated inherited paths: custom read-admission producers, overridden
+client preparation methods, suspended rejected coroutines, reentrant native
+completion, blocked source DNS cancellation and source-owner denial during
+credential reading. These findings block acceptance despite green earlier CI.
+
+The source correction retains stock method identities and excludes custom
+admission callbacks from only the new source lane, preserving ordinary metadata.
+Suspended rejected coroutines keep unconfirmed custody without driving cleanup;
+native reconciliation uses idempotent removal. Native credential settlement
+preserves source permission denial. New actual-consumer controls exercise these
+boundaries, including a blocked resolver under the existing source executor.
+Focused suspended/reentrant controls pass three cases. The first native packet
+passed ten controls and failed its synthetic DNS hostname assumption; that
+fixture is corrected, not credited as passing evidence. Complete current-source
+owner/custody validation now passes 68 cases and the native qualification,
+DNS and credential-denial packet passes 24, including denial before native
+submission. Compatibility observation fixtures now instrument the existing
+operations owner instead of replacing the preparation methods being qualified.
+The complete compatibility run passed 69 controls and failed its remaining
+outdated observation fixture; both corrected busy/withdrawal controls then pass
+in the focused rerun. An earlier packet timeout remains failed evidence.
+All runs retain the original 180/600 bounds. Fresh exact-head review/CI and
+managed merge remain required. No operational
+adoption, acquisition, installation or rollout is admitted by these corrections.
+
+### 2026-11-04 - Fresh prepared-source acceptance continuation
+
+A fresh ordinary reservation under #9535 continues the same PR #9928 and
+PR-domain implementation slice after the prior reservation's release. The
+preserved corrections were reconciled with current `dev`, retaining their
+original history. The only merge conflict concerned generated uninstall
+producer hashes; the existing source generator refreshed those hashes without
+changing the current footprint contract or revision.
+
+The focused contained owner/header/cancellation packet passes nine cases, and
+the request-override, older-caller, early-manifest and optional-Fleet packet
+passes seven. The first owner packet failed one assertion left over from the
+old mutable-input test: successful immutable inspection correctly retains refs.
+The regression now verifies both refs resolve to the original admitted range.
+This correction was rerun, not credited from the earlier published candidate.
+Both packets retain the original 180-second subsuite and 600-second aggregate
+bounds. Touched F/E9 lint, fourteen source-module ceilings, generated mirrors,
+whitespace and the thirteen-plugin install contract pass.
+
+Complete affected-module validation now passes 65 owner/result-custody cases,
+15 request-native/checkpoint cases and 70 native/client tool compatibility
+cases. The first complete owner packet failed a readiness check that waited for
+an obsolete pending-work count; it now waits for actual client callback entry.
+The complete packet was rerun without increasing any timer. Preparation and
+cleanup are included in the recorded aggregate durations, not test counts.
+
+Fresh current-head review, required CI, managed merge and actual release
+observation remain pending. These are source
+acceptance steps only: acquisition, actual host adoption, live ADO review,
+concurrency, serving and separately authorized rollout remain open. No original
+Plan or Validation item is marked complete by this continuation.
+
+The next review, 5762139762, acknowledges all seven original findings resolved.
+Its seven new findings reference unrelated changes included by the provider's
+older PR base snapshot, not by the actual current-`dev` comparison. At inspection,
+the PR reported base `9d5a27f0062b` and 489 changed files, while `dev` was
+`dcb8603d01a6`; the provider's explicit comparison against that current tip
+contained 50 files and none of the newly reviewed runtime paths. The original
+added shared-process changefile already names both plugins reported missing.
+Reconcile the newer `dev` normally without rewriting published history, then
+recheck the provider snapshot before treating any verdict as source acceptance.
+Do not absorb unrelated runtime repairs into this prepared-source slice.
+
+### 2026-11-03 - Qualified new async source subset implemented
+
+Released main retains native/synchronous raw-dictionary inspection and loop
+metadata; the owned-async source lane is new in #9928. Its qualification now
+selects actual stock metadata preparation and the existing ServiceCaller
+credential producer, not method presence, version markers or arbitrary
+callbacks. Unknown new source bindings refuse before resource work admission;
+their ordinary metadata/callback APIs remain compatible.
+
+The existing verified-generation read cache retains canonical immutable bytes.
+Async inspection receives those bytes, validates the requested generation and
+selected scope in the worker, and only then invokes the prepared source owner.
+The unsafe mutable-list sealing path is removed. No new quota, issuer, executor
+or acquisition path is introduced. Initial actual consumers pass: seven
+immutable-input/native compatibility/cleanup cases and two real TLS source
+qualification cases, including opaque-callback refusal with ordinary metadata
+preserved and a qualified credential/cache/source-read round trip.
+Review, remaining source validation, current install-contract and required CI
+still gate source acceptance. Acquisition and every Phase4 operational gate
+remain open; the effort is Active.
+
+### 2026-11-03 - Exact-head review holds native binding and raw snapshot admission
+
+The current independent review of #9928 found additional actual boundaries.
+Four custody corrections are implemented: started coroutines are retained
+without closing/driving their cleanup, nested traversal retains the visited
+objects, completed-future cycles are classified without callback recursion,
+and active waiters claim returned native results before those results are
+reclaimed. All 30 contained source-owner consumers pass under the unchanged
+180/600 limits. No caller/API narrowing or acquisition was introduced.
+
+Two admission decisions remain open, not satisfied by green CI. The presence
+of ServiceCaller's request-native context does not bind an arbitrary configured
+credential callback to actual registered native producers. Also, yielding
+while traversing an original mutable inspection request lets an unvisited
+record change before hashing. There is no existing caller-input mutation fence.
+The source selection needs actual immutable-owner snapshot custody or an
+explicitly admitted atomic-copy bound/latency; a guessed metadata quota,
+unbounded on-loop copy, marker or silently removed raw caller is not a fix.
+The PR remains draft pending resolution of those exact owner boundaries.
+Source acceptance, acquisition and every operational validation gate stay open.
+
+### 2026-11-03 - Review follow-through preserves prepared-source callers
+
+The existing source owners now retain completed native results for active
+waiters, close never-started withdrawn coroutines idempotently and require the
+actual terminal drain fence before reporting drained. Returned coroutines check
+the original deadline when execution starts. Older ServiceCaller peers retain
+metadata but do not claim native-completion support for owned async source.
+The clean-room source owner's closed-world package list includes the internal
+native-request module.
+
+Inspection identity is streamed in resumable quanta under the same admission
+deadline, before native queueing. It does not reinterpret Git output/path limits
+as native metadata bytes or record counts. Full validation/copies stay off-loop;
+there is no new issuer, capacity setting, executor or acquisition API.
+Current contained proof: 25 source-custody controls and eight native/TLS,
+mixed-version and loop/delegate consumers passed. The existing actual-Git
+package-completeness check passed. Bounds remain 180 seconds per suite and
+600 aggregate; prior failed assertions and preparation/control timeouts remain
+failures, not passing proof. Current source review/required CI/merge and the
+original operational validation plan still gate acceptance.
+
+### 2026-11-03 - Backward-compatible existing-owner implementation selected
+- Selected the internal existing-owner extension, not removal of supported
+  loop-source or raw-inspection callers. ServiceCaller requests now register
+  actual native futures and join their terminal settlement on cancellation.
+  WorkspaceClient supplies the current source admission; the existing
+  credential-reference reader uses that already owned executor in source scope.
+- Active nested client results are tracked before parent settlement; withdrawn
+  producers remain retained. Raw inspection change evidence is sealed before
+  queueing with existing path/output bounds and compared in the worker.
+  There is no acquisition, new executor/service/issuer or quota configuration.
+- The first focused actual consumers pass three handoff/sealing cases and three
+  real TLS caller/native-registration cases on Python 3.10.20. Required
+  compatibility, current installation-contract and current-head review/CI/
+  merge follow-through remain in progress; original operational gates stay open.
+
+### 2026-11-03 - Existing-owner client custody boundary requires resolution
+- The exact-head review of `eb3f6742c3` adds five genuine source findings.
+  Independent terminal-late native registration and retry-bridge retention are
+  corrected; sixteen contained owner/result-custody cases pass.
+- The remaining client-native boundary cannot be inferred from a cancelled
+  asyncio task. The existing `ServiceCaller` offers only construction and finite
+  `request`, with no operation-native completion/join interface. A new claimed
+  capability flag would not provide actual producer custody. Keep this overlap
+  held pending a scoped existing-owner binding decision rather than inventing
+  another lifecycle owner or weakening terminal drain.
+- Complete inspection change evidence also needs an immutable admission
+  boundary, without moving unbounded copying/validation back onto the loop.
+  Active nested-result handoff remains part of the pending correction.
+- #9928 is held as draft, not merged. Continue with an admitted existing-owner
+  native-join/registration and immutable-selection seam, or explicitly narrow
+  unsupported loop-client/raw-inspection bindings before publication.
+  Acquisition/capacity and every operational acceptance item remain open.
+
+### 2026-11-03 - Nested cleanup observation and internal cache checkpoints
+- The next four source findings are addressed by forwarding native lookup/chunk
+  checkpoints into the existing operations/cache checks, observing nested
+  unconfirmed producers with identity-cycle protection, and directly reconciling
+  completed producers when loop callback registration cannot run.
+- Current contained validation passes fourteen owner/result-custody cases and
+  two actual blocked-read/checkpoint consumers on Python 3.10.20. Unknown
+  custody remains unknown; observing cleanup failure is not permission to
+  release its resource. Original source review/CI/merge gates remain open.
+
+### 2026-11-03 - Cooperative client IO and callback-independent worker settlement
+- Address the latest five source findings: source checkpoints now reach
+  capability/cache reads and async materialization after pacing; version-1
+  library preparation peers remain metadata-only for async source discovery.
+  Transport frames and existing IO limits remain unchanged.
+- Custom awaitables fail closed with retained unconfirmed producer custody.
+  Worker settlement no longer depends on an owning-loop callback: unstarted
+  coroutine results close, and unsupported loop-awaitable results remain
+  explicitly unconfirmed. Rejected tasks have strong custody until settlement.
+  Observable native futures keep their existing tracking during handoff.
+- Current contained validation passes ten owner-boundary cases, six coupled
+  native controls, the actual scheduled-client checkpoint consumer, six
+  source/delegate/legacy consumers and five native/wire compatibility controls.
+  Python 3.10.20 and unchanged 180/600 bounds were exercised. A mistaken
+  nonexistent test selector was refused; only the corrected actual packet
+  counts as validation.
+- Current-head review, required CI, managed merge and all operational
+  qualification remain open; acquisition stays deferred under #9535.
+
+### 2026-11-03 - Portable owned-task cancellation and completion DTO boundaries
+- The latest review distinguishes operation-created task cancellation from
+  already-cancelling external tasks. Operation-created tasks now track accepted
+  cancellation on every supported runtime while preserving native inspection
+  where available; unknown external task cleanup is not cancelled again.
+- Client completion values remain DTOs. Unsupported producer-bearing completion
+  values fail closed with retained unconfirmed settlement before their client,
+  rejected-client or native parents settle. Original late cleanup failures and
+  producer handles remain available; no completion DTO proves source release.
+- Four new actual Python 3.10 consumers, nine coupled ownership controls and
+  three actual Python 3.11 facade/native consumers pass under unchanged bounds.
+  The current full installation contract passes all thirteen plugins. An earlier
+  concurrent installation audit encountered a disappearing generated test input;
+  that failure is not counted as proof. Serial validation after preparation
+  passes without changing the audit, deleting retained inputs or repairing runtime.
+- Fresh current-head source review, required CI, actual merge and all original
+  operational acceptance remain open.
+
+### 2026-11-03 - Cross-runtime cancellation and late producer results
+- The current-head review found four more bounded source issues: cancellation
+  state unavailable on Python 3.10, native futures returned as ordinary values,
+  awaitables returned after caller withdrawal, and unbounded on-loop header
+  copies. Keep the actual review gate open until their corrected source clears it.
+- Withdrawal now conservatively retains tasks when cancellation state cannot be
+  established. Actual native futures remain tracked to producer settlement,
+  including original cleanup failures. Late worker awaitables are classified
+  on the original loop before worker settlement; withdrawn unstarted coroutines
+  close without starting IO. Scope/revision pins use bounded schema fields.
+- Seven focused controls passed on Python 3.11.15 and five passed on the actual
+  installed Python 3.10.20 through the contained runner. The latter interpreter
+  lacked pytest; its existing managed test environment was prepared through the
+  normal runner, without downloading Python or updating an installed runtime.
+  Final current-head review/CI/merge and operational qualification remain open.
+- Final follow-through also passes seven current actual Python 3.10 controls,
+  including native futures returned by both worker and client, plus seven
+  actual Python 3.11 facade/native consumers. The current literal installation
+  contract passes all thirteen plugins; no runtime installation is inferred.
+
+### 2026-11-02 - Nested clients and terminal drain retain actual custody
+- The next #9928 review found nested scheduled-task cancellation forwarding,
+  opaque executor wrappers misrepresenting native completion, and new cleanup
+  work registered after drain's initial snapshot. These are concrete remaining
+  source gates, not a reason to waive the review.
+- Nested client results now use the same tracked wait path. Unsupported opaque
+  asyncio futures stop admission and retain explicit unconfirmed settlement;
+  cancelling their wrapper cannot prove native drain. Supported blocking work
+  continues through the supplied executor and actual native completion.
+- Drain rechecks work registered during cleanup under its original absolute
+  deadline and coordinates late registration with terminal settlement.
+  Three new focused consumers, ten coupled owner controls and seven actual
+  client/native facade cases pass. A preceding aggregate preparation timeout
+  is retained as a failure, followed by separate preparation and actual tests;
+  the 180/600 bounds are unchanged.
+- Acquisition/resource-owner capacity and operational acceptance remain open.
+
+### 2026-11-02 - Current-head cancellation and selection follow-through
+- The exact-head review of `0dd1a69c8e` found four additional concrete races:
+  repeated client cancellation interrupting cleanup, successful results accepted
+  after expiry/withdrawal, already-started rejected client work escaping drain,
+  and direct inspection requests mutating before queued snapshotting.
+- Client invocation now registers custody before starting work. Withdrawal is
+  idempotent and preserves client cleanup; rejected started futures remain in
+  the same owner accounting until terminal settlement. Both result paths
+  recheck admission, and direct inspection pins selected scope/revision.
+- Six new focused owner regressions and eighteen retained owner controls pass
+  in bounded packets. Six actual facade/client consumers pass, including
+  synchronous wrappers returning scheduled tasks on their original loop.
+  One combined control packet hit its 180-second limit; it is not passing proof.
+  The three six-case control packets subsequently pass without raising limits.
+- Fresh current-head review, required CI and managed merge still gate this
+  source candidate. Acquisition and all actual operational acceptance remain open.
+
+### 2026-11-02 - Prepared admission spans materialization and source execution
+- Address the remaining #9928 findings within the existing source lifetime:
+  pin validated manifest ID/scope/revision before queued copying, fence public
+  synchronous access after async binding, and reject binding during active sync
+  work. Internal worker entry remains explicit, not a caller permission flag.
+- The same admitted operation now begins before capabilities/materialization.
+  Actual client IO stays on its original loop, with assembly/validation/copying
+  in the caller's existing executor. Actual client tasks and native preparation
+  remain retained through cancellation and terminal drain; no new lifecycle,
+  queue, posting ledger, service or default producer is created.
+- The complete source-owner packet passes 13 cases and focused actual
+  facade/client consumers pass nine, including coherent queued-manifest mutation,
+  busy-before-client-IO, paced reads bounded by source admission and cancellation
+  during retained CPU preparation. Bounds remain 180/600; one cleanup-precedence
+  regression was fixed and its failed packet is not counted as passing proof.
+- Acquisition and operational Plan/Validation gates remain open. Independent
+  current-head review, required CI and real merge still govern this source slice.
+- Subsequent source review caught four lifecycle/API edges: work registered
+  after operation exit, native metadata chunks missing withdrawal checkpoints,
+  keyword-form retained selections and withdrawal during argument copying.
+  Atomic registration fences, per-chunk checkpoints and post-copy validation
+  address those paths without changing acquisition or execution ownership.
+  Three focused owner cases and three actual native/tool/CLI consumers pass.
+  A preceding aggregate preparation timeout is retained as a failure, not
+  counted as test proof; the supported separate preparation pass succeeded.
+
+### 2026-11-02 - Current prepared-source candidate green; review still blocks completion
+- Current source head `f8662a63422a3c97089a9807864720afb77a547b`
+  is published on #9928 and all required CI is green (run 41485244670).
+  Generated archive conflicts were reconciled by regeneration from combined
+  source, preserving upstream footprint semantics and owned source history.
+- The latest independent review identifies three remaining issues: pin the
+  validated retained-manifest identity before queued snapshotting; prevent
+  synchronous access from bypassing the selected async lifetime; and reserve
+  source admission/deadline before metadata materialization while keeping client
+  IO on its existing loop and costly preparation in retained workers.
+- These are actual review gates, not advisories to waive. #9928 is OPEN and
+  unmerged; the prepared-only slice and original effort are not Done. Continue
+  their source fixes, targeted consumers and fresh current-head review/CI before
+  managed completion. Acquisition and all operational Validation items stay open.
+
+### 2026-11-02 - Final prepared-source lifecycle and source packaging follow-through
+- The next #9928 review confirms seven prior findings resolved, then identifies
+  additional source-lifetime and preparation edges. Enforce one async binding
+  per selected source lifetime, pass absolute cleanup-inclusive native budgets
+  before launch, and perform snapshot/selection/response work inside admission.
+- Queued withdrawal skips the owner checkpoint and attempts actual native
+  cancellation; successful request withdrawal is distinct from executor shutdown.
+  Async attachment timeout returns incomplete/local-refs-possible/unconfirmed,
+  retaining actual work for drain rather than manufacturing settlement.
+- Required CI exposed stale caller-lifetime packaging. Regenerate its canonical
+  source archive and 13 adopter copies through the existing installation-context
+  tool, then refresh only the MCP scripts producer digest with the owner tool.
+  Footprint semantics and contract revision remain unchanged; no installer,
+  updater or running service was invoked.
+
+### 2026-11-02 - Prepared-source review corrections and existing executor binding
+- The fresh #9928 review confirms the original ten findings resolved, then
+  identifies further lifecycle, cache, byte-input and source-admission issues.
+  Correct these in the same source candidate; acquisition remains deferred.
+- The normal host now supplies its existing owned thread executor. Only that
+  executor's native future can prove cancellation before launch; loop bridge
+  cancellation cannot release native custody. Caller waits honor the original
+  admission deadline while the actual worker remains retained for drain.
+  Blocking owner checkpoints execute in the worker, not on the event loop.
+- One-shot metadata views preserve the verified generation cache while omitting
+  async source. Oversized byte inputs refuse before base64 allocation. The unused
+  generic Git capture extension is removed, leaving the full upstream Git wrapper
+  unchanged, including its newer observation-deadline behavior.
+- Focused contained controls pass 12 byte/default-text cases, 10 prepared-source
+  ownership cases and three actual native/async/CLI consumers. Source admission
+  refreshes only the two changed shared-process hashes, preserving unit nodes,
+  coverage targets and budgets. Independent current-head review/CI/merge remain.
+
+### 2026-11-02 - Prepared-only implementation scope; acquisition remains open
+- #9928 is narrowed to prepared source and owned async execution. Acquisition
+  is deferred pending resource-owner capacity admission under #9535. Remove the
+  experimental fetch API, constructor binding and tool shape rather than hiding
+  an unbounded implementation; the original general Git fetch path is unchanged.
+- Independent review fixes retain a single physical source execution without an
+  internal request queue, admission-bound absolute child deadlines and native
+  completion/cleanup handles outside cancellable async wrappers. The one-shot
+  CLI refuses async source lifetime adoption; the actual async tool host keeps
+  its original loop and terminal-drain obligations. Bounded process input gains
+  byte-preserving stdin without changing its default text or cleanup contracts.
+- Prepared/async source acceptance still requires the final narrowed consumer
+  controls, independent current-head review, required CI and actual merge.
+  Acquisition and original Phase 4/live Validation Plan remain OPEN; no actual
+  owner/tool-host/v2-reader adoption, live ADO review, serving or rollout is implied.
+- The narrowed prepared/async owner packet passes eight contained cases; the
+  final cancellation/error-observation control passes two focused cases without
+  orphaned future warnings. Byte-exact/default-text controls pass 11 cases and
+  actual native/async/one-shot CLI consumers pass three. Setup was prepared
+  separately using the supported runner; all actual suites retain 180/600
+  bounds. Earlier aggregate setup interruption is not passing proof.
+- Source comparison confirms the original general Git fetch and four credential
+  helpers are unchanged. Acquisition-only review paths are removed, not silently
+  excused or retained behind capability flags. Current-candidate source gates
+  and independent review remain required before #9928 can land.
+
+### 2026-11-02 - Source-owner candidate held at actual capacity boundary
+- Draft #9928 implements the admitted APIs as a source candidate, not an
+  accepted or merged slice. Initial synthetic packets pass 12 source-owner
+  cases and all 26 tool/client cases in bounded packets. Those results do not
+  discharge the ten current-head review findings or required CI.
+- Review identifies a real boundary gap: depth-one fetch includes unchanged
+  trees/blobs before inspection bounds apply. Stream capture limits and the
+  existing execution deadline do not bound Git's on-disk input. The existing
+  resource owner must supply actual pre-write transfer/storage capacity custody;
+  this candidate must not fabricate a quota issuer or another transfer client.
+- Two bounded continuations remain: bind a real capacity-protected acquisition
+  seam through that resource owner, with reviewed contract detail before
+  realization; or retain prepared-only source while a named owner handles
+  acquisition separately. Neither silently closes the original acquisition
+  objective or permits use of the current draft.
+- Other active review work includes admission deadlines, independently retained
+  worker results/cleanup handles, bounded/headless credential discovery, CLI loop
+  lifetime, byte-input compatibility, configured remote names and error mapping.
+  The required guard also found one line beyond the Git module ceiling.
+- Generated dependency-input cleanup reported a Windows file lock during local
+  validation. Its input artifact remains retained and excluded as generated
+  source by the canonical staging-name pattern; nothing was deleted, repaired
+  or declared cleaned. Interrupted preparation/full packets are not passes.
+  The static install contract passed against an exact clean tracked archive.
+- Keep #9535 and this effort Active. No current resource/credential/tool-host
+  adoption, live source fetch, backend effect, installation or rollout occurred.
+
+### 2026-11-02 - Source-owner API admission merged; realization in progress
+- #9907 merged as `f6858bdffe06c724d193ef15caace59c889d3775` from head
+  `7f7a057817f0435d813c9d6a4ed56bc9836ae9a7` after exact-head approval and
+  required CI success. The prior tool acceptance journal is now upstream.
+- Realize only the admitted existing Git/source/lifetime APIs with synthetic
+  selected repositories and actual client/store/tool consumers. This is not
+  a resource selector, live fetch, installed-host adoption or rollout.
 
 ### 2026-11-01 - Exact acquisition and async source owner API proposed
 - Continue #9535 through the bounded

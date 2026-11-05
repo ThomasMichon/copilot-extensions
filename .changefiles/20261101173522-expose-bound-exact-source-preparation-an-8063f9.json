@@ -1,0 +1,9 @@
+{
+  "comment": "Expose owned asynchronous prepared-source tools with honest one-shot CLI refusal",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

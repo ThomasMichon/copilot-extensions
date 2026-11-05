@@ -13,6 +13,7 @@ from .watch_replay_client import ReplayClient, ReplayClientError
 from .watch_replay_store import json_object
 from .workspace_operations import (
     CHUNK_BYTES, MAX_GENERATION_BYTES, PROTOCOL, NativeWorkspaceClient, encoded, materialize,
+    _stock_preparation,
 )
 
 
@@ -30,6 +31,9 @@ class WorkspaceClient:
             repo=binding.repo, binding=binding,
         )
         self._caller, self._binding = caller, binding
+        from fleet_manager.gateway_service_caller import ServiceCaller
+        binder = getattr(ServiceCaller, "_bind_source_request", None)
+        self._source_request = binder(caller) if callable(binder) and type(caller) is ServiceCaller else None
         from .review_workspace import _scope
         self._scope = _scope({**scope, "number": 1})
         self._scope.pop("number")
@@ -41,13 +45,20 @@ class WorkspaceClient:
             raise ValueError("invalid existing transport read-admission callback")
         self._read_admission = read_admission
 
-    async def _exchange(self, operation, payload):
+    async def _exchange(self, operation, payload, *, checkpoint=None):
         data = encoded({"binding": self._binding.document(), "request": payload})
         if len(data) > BODY_BYTES:
             raise WorkspaceClientError("workspace_request_limit", outcome_unknown=False)
         try:
-            response = await self._caller.request(
-                "POST", self._path + "/" + operation,
+            if checkpoint is not None:
+                checkpoint()
+            submit = getattr(getattr(checkpoint, "__self__", None), "_submit_native", None)
+            if callable(submit) and not WorkspaceClient._source_supported(self):
+                raise WorkspaceClientError("workspace_native_completion_unavailable", outcome_unknown=False)
+            request = self._source_request[1] if callable(submit) else self._caller.request
+            args = (submit,) if callable(submit) else ()
+            response = await request(
+                *args, "POST", self._path + "/" + operation,
                 request_headers=(("Content-Type", "application/json"),),
                 body=data, response_limit=BODY_BYTES,
             )
@@ -73,11 +84,12 @@ class WorkspaceClient:
         except (ValueError, UnicodeError, RecursionError):
             raise WorkspaceClientError("invalid_workspace_response", outcome_unknown=operation == "submit") from None
 
-    async def capabilities(self):
+    async def capabilities(self, *, checkpoint=None):
         self._discovery_epoch += 1
         epoch = self._discovery_epoch
         self._capabilities = None
-        value = await self._exchange("capabilities", {})
+        value = await self._exchange("capabilities", {}, **(
+            {"checkpoint": checkpoint} if checkpoint is not None else {}))
         if (
             value.get("generation_versions") != [1] or value.get("owner_store_versions") != [2]
             or value.get("chunk_bytes") != CHUNK_BYTES
@@ -99,21 +111,24 @@ class WorkspaceClient:
         self._capabilities = copy.deepcopy(value)
         return value
 
-    async def ensure_capabilities(self):
+    async def ensure_capabilities(self, *, checkpoint=None):
         """Share negotiation for overlapping tool calls; explicit refresh stays separate."""
         async with self._ensure_lock:
+            if checkpoint is not None:
+                checkpoint()
             if self._capabilities is None:
-                return await self.capabilities()
+                return await self.capabilities(**({"checkpoint": checkpoint} if checkpoint is not None else {}))
             return copy.deepcopy(self._capabilities)
 
-    async def exchange(self, operation, payload):
+    async def exchange(self, operation, payload, *, checkpoint=None):
         if operation == "capabilities":
             if payload != {}:
                 raise WorkspaceClientError("invalid_workspace_capability_request")
-            return await self.capabilities()
+            return await self.capabilities(**({"checkpoint": checkpoint} if checkpoint is not None else {}))
         if self._capabilities is None or operation not in self._capabilities["operations"]:
             raise WorkspaceClientError("workspace_capability_required", outcome_unknown=False)
-        value = await self._exchange(operation, payload)
+        value = await self._exchange(operation, payload, **(
+            {"checkpoint": checkpoint} if checkpoint is not None else {}))
         if (
             value.get("scope") != {**self._scope, "number": payload.get("number")}
             or not isinstance(value.get("result"), dict)
@@ -121,8 +136,30 @@ class WorkspaceClient:
             raise WorkspaceClientError("workspace_scope_changed", outcome_unknown=operation == "submit")
         return value
 
-    async def materialize(self, number, generation_id):
-        lookup = await self.exchange("lookup", {"number": number, "generation_id": generation_id})
+    def preparation_contract(self):
+        version = 2 if self._source_supported() else 1
+        return {"schema": "agent-pull-requests.client-preparation", "version": version, "io": "loop-with-prepare"}
+
+    def _source_supported(self):
+        from types import MethodType
+        if (
+            self._source_request is None or self._caller._access is not self._source_request[0]
+            or self._read_admission is not None or not _stock_preparation(self, _SOURCE_PREPARATION_METHODS)
+        ):
+            return False
+        current = self._caller.request
+        selected = self._source_request[2]
+        return type(current) is MethodType and current.__func__ is selected.__func__ and current.__self__ is self._caller
+
+    async def materialize(self, number, generation_id, *, prepare=None, checkpoint=None):
+        def source_binding():
+            submit = getattr(getattr(checkpoint, "__self__", None), "_submit_native", None)
+            if callable(submit) and not WorkspaceClient._source_supported(self):
+                raise WorkspaceClientError("workspace_native_completion_unavailable", outcome_unknown=False)
+        source_binding()
+        options = {"checkpoint": checkpoint} if checkpoint is not None else {}
+        lookup = await self.exchange("lookup", {"number": number, "generation_id": generation_id}, **options)
+        source_binding()
         descriptor = lookup["result"].get("descriptor")
         # The same validator assembles both native and remote generations. Network
         # IO stays asynchronous, with no implicit retry after a lost chunk.
@@ -140,15 +177,19 @@ class WorkspaceClient:
             raise WorkspaceClientError("invalid_workspace_descriptor") from None
         chunks = {}
         for offset in range(0, descriptor["bytes"], CHUNK_BYTES):
+            source_binding()
+            if checkpoint is not None:
+                checkpoint()
             if self._read_admission is None:
                 # Each SDK request takes a fresh shared Gateway challenge. Do not
                 # spend its burst on one large immutable read; leave headroom.
                 await asyncio.sleep(2 / CONTROL_RATE)
             else:
                 await self._read_admission()
+            source_binding()
             value = await self.exchange("chunk", {
                 "number": number, "generation_id": generation_id, "offset": offset,
-            })
+            }, **options)
             chunks[offset] = value["result"]
             # Reject corruption immediately rather than retain another full
             # invalid generation while waiting for later pages.
@@ -164,9 +205,19 @@ class WorkspaceClient:
                 raise WorkspaceClientError("workspace_chunk_invalid") from None
             if len(block) != min(CHUNK_BYTES, descriptor["bytes"] - offset):
                 raise WorkspaceClientError("workspace_chunk_incomplete")
-        try:
-            return materialize(descriptor, chunks.__getitem__)
-        except (ValueError, KeyError):
-            raise WorkspaceClientError("invalid_workspace_materialization") from None
+        def assemble():
+            try:
+                return materialize(descriptor, chunks.__getitem__)
+            except (ValueError, KeyError):
+                raise WorkspaceClientError("invalid_workspace_materialization") from None
+        if prepare is not None:
+            return await prepare(assemble)
+        return assemble()
 
     attach_source = staticmethod(NativeWorkspaceClient.attach_source)
+
+
+_SOURCE_PREPARATION_METHODS = tuple(
+    (name, getattr(WorkspaceClient, name))
+    for name in ("_exchange", "exchange", "capabilities", "ensure_capabilities", "materialize")
+)

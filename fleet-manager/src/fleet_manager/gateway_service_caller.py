@@ -19,6 +19,9 @@ from .gateway_service_channel import (
 from .gateway_service_connector import verified_tls
 from .gateway_service_context import METHODS
 from .machine_identity import PROFILE as MACHINE_PROFILE, machine_headers, make_machine_proof
+from ._service_caller_native import (
+    RequestNativeScope, native_admission, source_credential, source_access, source_resolver,
+)
 
 
 @dataclass(frozen=True)
@@ -71,6 +74,36 @@ class ServiceCaller:
         self._timeout = timeout
         self._active = 0
 
+    @staticmethod
+    def _native_request_context(submit):
+        return native_admission(submit)
+
+    def _bind_source_request(self):
+        from .credential_references import ServiceCredentials
+        from types import MethodType
+        callback = self._access
+        if type(self) is not ServiceCaller or "request" in self.__dict__:
+            return None
+        request_method = self.request
+        if type(request_method) is not MethodType or request_method.__func__ is not _SOURCE_REQUEST_IMPLEMENTATION:
+            return None
+        credentials = callback.__self__ if type(callback) is MethodType else None
+        if not self._machine and not (
+            type(credentials) is ServiceCredentials
+            and callback.__func__ is ServiceCredentials.access_token
+        ):
+            return None
+
+        async def request(submit, *args, **kwargs):
+            check(self._access is callback, "source-credential-binding-changed", 409)
+            current = self.request
+            check(type(current) is MethodType and current.__func__ is request_method.__func__
+                  and current.__self__ is self, "source-request-binding-changed", 409)
+            reader = None if self._machine else callback
+            with native_admission(submit), source_credential(self, reader):
+                return await request_method(*args, **kwargs)
+        return callback, request, request_method
+
     async def request(self, method: str, request_target: str, *,
                       request_headers: Iterable[tuple[str, str]] = (),
                       body: bytes = b"", response_limit: int = RESPONSE_BYTES,
@@ -83,12 +116,14 @@ class ServiceCaller:
               "invalid-response-limit")
         check(self._active < CHANNEL_REQUESTS, "request-limit", 429)
         self._active += 1
+        native = RequestNativeScope()
+        native.enter()
         attempted = False
 
         async def exchange() -> ServiceResponse:
             nonlocal attempted
             async with aiohttp.ClientSession(
-                connector=aiohttp.TCPConnector(ssl=self._tls),
+                connector=aiohttp.TCPConnector(ssl=self._tls, resolver=source_resolver()),
                 trust_env=False, cookie_jar=aiohttp.DummyCookieJar(),
                 auto_decompress=False, timeout=aiohttp.ClientTimeout(total=self._timeout),
                 skip_auto_headers={"User-Agent", "Accept", "Accept-Encoding", "Content-Type"},
@@ -122,14 +157,16 @@ class ServiceCaller:
                         authenticated = selected | machine_headers(self._principal, proof)
                     else:
                         assert self._access is not None
-                        access = await asyncio.wait_for(self._access(), 5)
+                        access = await asyncio.wait_for(source_access(self, self._access)(), 5)
                         check(isinstance(access, str) and 0 < len(access) <= 8192
                               and all(32 < ord(c) < 127 for c in access), "invalid-token-source")
                         proof = make_proof(self._key, access, nonce=nonce,
                                            target_uri=self.gateway + path, method=method)
                         scheme = "DP" + "oP "
                         authenticated = selected | {"Authorization": scheme + access, "DPoP": proof}
-                except Exception:
+                except Exception as error:
+                    if native.submit is not None and isinstance(error, PermissionError):
+                        raise
                     raise TransportError("caller-credentials-unavailable", 401) from None
                 attempted = True
                 async with session.request(
@@ -144,6 +181,8 @@ class ServiceCaller:
         try:
             return await asyncio.wait_for(exchange(), self._timeout)
         except (aiohttp.ClientError, OSError, asyncio.TimeoutError, TransportError) as exc:
+            if native.submit is not None and isinstance(exc, PermissionError):
+                raise
             if attempted and method not in ("GET", "HEAD", "OPTIONS"):
                 raise TransportError("outcome-unknown", 502) from None
             if isinstance(exc, TransportError):
@@ -151,4 +190,11 @@ class ServiceCaller:
             code = "gateway-timeout" if isinstance(exc, asyncio.TimeoutError) else "gateway-unavailable"
             raise TransportError(code, 502) from None
         finally:
-            self._active -= 1
+            try:
+                await native.join()
+            finally:
+                native.exit()
+                self._active -= 1
+
+
+_SOURCE_REQUEST_IMPLEMENTATION = ServiceCaller.request
