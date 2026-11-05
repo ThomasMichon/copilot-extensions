@@ -48,6 +48,7 @@ async def observations(request: Request, read: ReadRequest) -> AsyncIterator[byt
     cursor = read.position
     prior_source = None
     prior_requests = None
+    prior_statistics = None
     producer = None
     unsubscribe = None
     last_sent = time.monotonic()
@@ -100,6 +101,7 @@ async def observations(request: Request, read: ReadRequest) -> AsyncIterator[byt
                 wake_revision = known.log.observation_revision
                 body = frame(known, read, after=cursor)
                 requests_key = content_key(body.get("current_request_state"))
+                statistics_key = body.get("tool_statistics")
                 if prior_source is not None and body["source"] != prior_source:
                     if prior_source["journal_incarnation"] is not None:
                         raise ObservationError(
@@ -108,6 +110,7 @@ async def observations(request: Request, read: ReadRequest) -> AsyncIterator[byt
                 send = (
                     prior_source is None or prior_source != body["source"] or bool(body["entries"])
                     or requests_key != prior_requests
+                    or statistics_key != prior_statistics
                 )
                 if send:
                     yield sse(body)
@@ -125,6 +128,7 @@ async def observations(request: Request, read: ReadRequest) -> AsyncIterator[byt
                     last_sent = time.monotonic()
                 prior_source = body["source"]
                 prior_requests = requests_key
+                prior_statistics = statistics_key
                 cursor = body["position"]
                 if not read.follow:
                     return

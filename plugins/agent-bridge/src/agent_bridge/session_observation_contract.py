@@ -12,6 +12,7 @@ from typing import Any
 OBSERVATIONS = "bridge-session-observations-v1"
 HISTORY = "bridge-session-observation-history-v1"
 CURRENT_REQUESTS = "bridge-session-current-requests-v1"
+TOOL_STATISTICS = "bridge-session-tool-statistics-v1"
 VERSION = 1
 MAX_BODY = 32 * 1024
 MAX_FRAME = 35 * 1024
@@ -108,13 +109,16 @@ class ReadRequest:
     position: str | None
     limit: int
     current_requests: bool = False
+    tool_statistics: bool = False
 
     @classmethod
     def parse(cls, session_id: str, pairs: list[tuple[str, str]], *, history: bool) -> ReadRequest:
         """Validate the actual HTTP query, including repeated/foreign fields."""
         query = _unique(pairs)
         allowed = {"contract_version", "project", "worktree_id", "head_session_id", "limit"}
-        allowed |= {"before"} if history else {"after", "follow", "current_requests"}
+        allowed |= {"before"} if history else {
+            "after", "follow", "current_requests", "tool_statistics",
+        }
         if set(query) - allowed or "contract_version" not in query or "worktree_id" not in query:
             raise ObservationError("invalid-request", "unknown or missing observation fields")
         if query["contract_version"] != "1":
@@ -136,6 +140,9 @@ class ReadRequest:
         current_requests = query.get("current_requests", "false")
         if current_requests not in {"true", "false"}:
             raise ObservationError("invalid-request", "current_requests must be true or false")
+        tool_statistics = query.get("tool_statistics", "false")
+        if tool_statistics not in {"true", "false"}:
+            raise ObservationError("invalid-request", "tool_statistics must be true or false")
         position = query.get("before" if history else "after")
         if position is not None:
             text(position, "position", maximum=4096)
@@ -153,6 +160,7 @@ class ReadRequest:
             position,
             limit,
             current_requests == "true",
+            tool_statistics == "true",
         )
 
 
@@ -260,4 +268,10 @@ def validate_frame(body: dict[str, Any], request: ReadRequest) -> None:
         validate(body.get("current_request_state"))
     elif "current_request_state" in body:
         raise ObservationError("invalid-frame", "unexpected live current request state")
+    if request.tool_statistics and body["kind"] != "heartbeat":
+        from .session_tool_statistics import validate as validate_statistics
+
+        validate_statistics(body.get("tool_statistics"), source, body.get("retained"))
+    elif "tool_statistics" in body:
+        raise ObservationError("invalid-frame", "unexpected live tool statistics")
     encode(body)

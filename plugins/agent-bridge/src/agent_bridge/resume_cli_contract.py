@@ -58,5 +58,8 @@ def cli_contracts() -> dict[str, Any]:
             "bridge-session-current-requests-v1": {
                 "version": 1, "capabilities": ["observe-session-current-requests"],
             },
+            "bridge-session-tool-statistics-v1": {
+                "version": 1, "capabilities": ["observe-session-tool-statistics"],
+            },
         },
     }
