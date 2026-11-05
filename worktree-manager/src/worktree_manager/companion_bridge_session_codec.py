@@ -13,7 +13,7 @@ from .companion_timeline_contract import (
     ActorKind, Availability, Completeness, EvidenceKind, HistoryPage, Provider, Qualification,
     RelationKind, SourceIdentity, SourcePosition, SourceToken, TimelineActor, TimelineContractError,
     TimelineEvent, TimelineKind, TimelineRelation, TimelineSnapshot, check_wire_body,
-    decode_wire_frame, identifier,
+    decode_wire_frame, identifier, text,
 )
 from .companion_worktree_codec import OwnerReadError, encoded, object_fields, stamp
 
@@ -39,6 +39,57 @@ KINDS = {
     "policy-request": TimelineKind.SOURCE_EVENT, "reported-lifecycle": TimelineKind.SOURCE_EVENT,
     "source-event": TimelineKind.SOURCE_EVENT,
 }
+EVENT_LABELS = {
+    "tool_call_start": "Tool started",
+    "tool_call_update": "Tool update",
+    "subagent_started": "Reported agent start",
+    "subagent_completed": "Reported agent completion",
+    "subagent_failed": "Reported agent failure",
+    "ask_user_request": "Input requested",
+    "ask_user_resolved": "Input request resolved",
+    "ask_user_withdrawn": "Input request withdrawn",
+    "permission_request": "Permission requested",
+    "permission_resolved": "Permission request resolved",
+    "policy_required": "Policy input required",
+    "compaction_start": "Compaction started",
+    "compaction_complete": "Compaction completed",
+    "context_pressure": "Context pressure reported",
+    "session_handoff": "Session handoff reported",
+    "turn_complete": "Turn completed",
+    "session_state_changed": "Session state reported",
+}
+
+
+def _event_summary(item: dict[str, Any]) -> str:
+    native = item["native_kind"]
+    label = EVENT_LABELS.get(native)
+    if label is None:
+        return "Bridge session: " + native
+    details = item["details"]
+    if native == "tool_call_update":
+        status = details.get("status")
+        if isinstance(status, str):
+            label = {
+                "pending": "Tool pending", "in_progress": "Tool in progress",
+                "completed": "Tool completed", "failed": "Tool failed",
+                "cancelled": "Tool cancelled", "canceled": "Tool cancelled",
+            }.get(status, label)
+    if native in {"subagent_started", "subagent_completed", "subagent_failed"}:
+        fields = ("agent_display_name", "agent_name")
+    elif native in {"tool_call_start", "tool_call_update"}:
+        fields = ("title",)
+    else:
+        fields = ()
+    for field in fields:
+        value = details.get(field)
+        if isinstance(value, str) and len(value) <= 512 and value.strip():
+            try:
+                text(value, "Bridge reported label")
+            except TimelineContractError:
+                continue
+            value = value.strip()
+            return label + ": " + value[:160] + ("..." if len(value) > 160 else "")
+    return label
 
 
 class SessionCodec:
@@ -245,7 +296,7 @@ class SessionCodec:
                 TimelineActor(self.member["bridge_session_id"], ActorKind.BRIDGE_SESSION,
                               Qualification.REPORTED, self.member["bridge_session_id"]),
                 KINDS[item["kind"]], EvidenceKind(item["evidence_kind"]), occurred,
-                "Bridge session: " + item["native_kind"], details=detail,
+                _event_summary(item), details=detail,
                 relations=(TimelineRelation(RelationKind.PARENT, Qualification.REPORTED, reference=self.owner),),
                 payload_ref=item["payload_ref"] if len(item["payload_ref"].encode()) <= 1024 else None,
                 data_json=payload,

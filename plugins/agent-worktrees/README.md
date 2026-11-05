@@ -876,11 +876,58 @@ standalone-behavior changes.
 
 ## Hooks
 
+Global plugin availability is not project adoption. Automatic hooks and the
+live-pulse/resident extension first establish that the event's session and
+working directory belong to an anchor or Git-linked worktree of a harness in
+the selected installation's `projects.yaml`. A `repos.yaml` entry or management
+class alone never activates them. Unknown/unmanaged sessions remain inert,
+including native and compatibility paths; explicit management CLI operations
+and on-demand skills remain available.
+
+The passive `scripts/managed_session.py` owner reads the project/repository
+registries, adopted-project ownership configuration and bounded Git metadata,
+without invoking Git, a service or an installer. Positively established session/workspace associations are
+cached under the selected registry's `cache/managed-sessions/`. Registry and
+Git-ownership inputs invalidate reuse; the extension also checks these inputs
+before pulse, nudge or resident-policy effects. Membership is a reusable fact,
+not a cached tool permission: admitted events still evaluate current policy.
+The inputs include failed Git probes, the adopted anchor's shared metadata and
+explicit-cell namespace/payload ownership, so reuse notices repairs and
+revocation. The stdlib-only registry reader ignores optional metadata, including
+inline and block-style tag lists. It follows mapping indentation and preserves
+quoted ownership paths, including trailing comments and literal hash characters.
+Platform selection shares the runtime's
+kernel/container-aware classifier rather than inherited WSL environment labels.
+Persistent reuse is also scoped to that execution platform. Explicit per-project
+machine anchor configuration precedes the registry fallback; namespaced project
+state uses the runtime's canonical identity and receipt validation. Conditional
+fragment locations that cannot be established before activation remain unknown
+and inert rather than being guessed. Configuration and fragment-directory
+changes invalidate reuse.
+Registry fallback selects only that platform's path, and unquoted YAML null
+anchors clear to the fallback just like JSON null. Deprecated `projects.yaml`
+anchor values never supply ownership when the canonical registry path is absent.
+The standalone readers are generated with `python tools/sync-execution-platform.py`;
+`--check` audits their canonical source delivery.
+Read-only native runtime discovery works without PATH Python. Candidate
+interpreters run admission with isolated, no-site imports; the owning payload's
+canonical validator accepts explicit-cell ownership before policy or lifecycle
+effects. SDK cold discovery shares those native owners, while warm callbacks
+reuse current dependencies without another child.
+Native dictionary JSON decoding keeps empty or case-distinct keys in unrelated
+event data from suppressing membership extraction.
+Missing admission helpers cannot activate a legacy bootstrap fallback.
+SessionStart also establishes admission before selecting an older runtime client
+when the selected payload client is unavailable.
+Fresh payload/runtime installation and a new session are needed to adopt this
+behavior; an already-loaded older extension is not retroactively changed.
+
 | Hook | Trigger | What it does |
 |------|---------|--------------|
-| `preToolUse` | Tool calls | Runs statelessness, cross-repo, and anchor-write guards from `~/.agent-worktrees/bin/` when deployed |
-| `sessionStart` | Every session | Emits worktree/account/machine context, reload guidance, runtime bootstrap hints, repo-plugin provisioning, project hooks, session registration, anchor hygiene, and provision checks. When cwd/env identity is absent, registration recovers the exact binding from the session lock PID -> process ancestry -> owning `wt-<id>` mux pane/session |
-| `sessionEnd` | Session end | Uses original source evidence to close the matching activation, not a replacement; legacy unqualified records retain their prior behavior. Ending an interval does not conclude the resumable session |
+| `preToolUse` | Managed-session tool calls | Runs statelessness, cross-repo, and anchor-write guards from the selected payload/runtime |
+| `postToolUse` | Managed-session tool results | Delivers disposition/binding advisories and invalidates affected resident observations |
+| `sessionStart` | Managed-session start | Emits worktree/account/machine context, reload guidance, runtime bootstrap hints, repo-plugin provisioning, project hooks, session registration, anchor hygiene, and provision checks |
+| `sessionEnd` | Managed-session end | Uses original source evidence to close the matching activation, not a replacement; legacy unqualified records retain their prior behavior. Ending an interval does not conclude the resumable session |
 
 The cross-repo guard reuses complete topology discovery for up to five minutes,
 scoped to the source checkout and home directory, including when discovery has a

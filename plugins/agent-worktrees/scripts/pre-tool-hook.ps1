@@ -123,10 +123,14 @@ function Invoke-PreToolPolicy([string]$Python, [string]$Payload, [ref]$Diagnosti
 }
 
 try {
-    $stop = Get-NativePreToolStop
-    if ($stop -eq $true) { exit 0 }
     $reader = [IO.StreamReader]::new([Console]::OpenStandardInput(), $utf8, $false)
     try { $raw = $reader.ReadToEnd() } finally { $reader.Dispose() }
+    $admission = Join-Path $PSScriptRoot 'managed-session.ps1'
+    if (-not [IO.File]::Exists($admission)) { exit 0 }
+    . $admission
+    if (-not (Test-ManagedWorktreesSession -Raw $raw)) { exit 0 }
+    $stop = Get-NativePreToolStop
+    if ($stop -eq $true) { exit 0 }
     $script:preToolBoundary = 'event JSON'
     $payload = ConvertFrom-PreToolJson $raw
     if ($payload -isnot [Collections.IDictionary]) { throw 'Expected an event object' }

@@ -27,6 +27,7 @@ def test_cached_command_entry_selects_only_command_policy(mode, monkeypatch, cap
     else:
         monkeypatch.setenv("AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION", mode)
     calls = []
+    monkeypatch.setattr(client, "_managed_session_admitted", lambda payload: True)
     monkeypatch.setattr(client, "_load_sibling", lambda name: SimpleNamespace(is_active=lambda: False))
     monkeypatch.setattr(client, "decide", lambda *a, **k: calls.append((a, k)) or {})
     monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
@@ -47,7 +48,7 @@ def test_extension_registers_only_selected_policy(mode, tmp_path):
     plugin = tmp_path / "plugin"
     extension = plugin / "extensions" / "agent-worktrees"
     extension.mkdir(parents=True)
-    for name in ("extension.mjs", "resident-pre-tool.mjs"):
+    for name in ("extension.mjs", "resident-pre-tool.mjs", "managed-session.mjs"):
         shutil.copyfile(PLUGIN / "extensions" / "agent-worktrees" / name, extension / name)
     sdk = plugin / "node_modules" / "@github" / "copilot-sdk"
     sdk.mkdir(parents=True)
@@ -73,13 +74,9 @@ assert.equal(calls.length, 1);
 assert.equal(typeof calls[0].onPermissionRequest, "function");
 const resident = process.env.AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION === "resident";
 assert.equal(Boolean(calls[0].hooks?.onPreToolUse), resident);
-if (resident) {
-  // Missing infrastructure reports through the sole selected callback.
-  const result = await calls[0].hooks.onPreToolUse({ toolName: "edit" });
-  assert.equal(result.permissionDecision, undefined);
-  assert.match(result.additionalContext, /policy activation unavailable/);
-  assert.match(result.additionalContext, /not authorization/);
-}
+if (resident) assert.deepEqual(await calls[0].hooks.onPreToolUse({
+  sessionId: "fixture-session", workingDirectory: process.cwd(), toolName: "edit",
+}), {}, "unadmitted sessions never activate policy");
 """
     env = os.environ.copy()
     env.pop("AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION", None)

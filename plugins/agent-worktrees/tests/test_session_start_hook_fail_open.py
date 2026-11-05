@@ -177,6 +177,8 @@ def _stage_stub(command: str, home: Path, cwd: Path, body: str) -> None:
 
 def _powershell_wrapper(command: str, script: Path) -> str:
     wrapper_start = command.rfind("if (Test-Path $s)")
+    if wrapper_start < 0:
+        wrapper_start = command.rfind("if ($s -and (Test-Path -LiteralPath $s))")
     assert wrapper_start >= 0
     escaped = str(script).replace("'", "''")
     return f"$s = '{escaped}'; {command[wrapper_start:]}"
@@ -205,7 +207,7 @@ def test_bash_session_end_hook_succeeds_when_runtime_script_is_absent(tmp_path: 
     assert result.stdout == ""
 
 
-def test_bash_hooks_do_not_mask_runtime_script_failures(tmp_path: Path):
+def test_bash_session_end_transport_remains_best_effort(tmp_path: Path):
     for index, hook in enumerate(_hooks("sessionStart") + _hooks("sessionEnd")):
         home = tmp_path / str(index) / "home"
         cwd = tmp_path / str(index) / "cwd"
@@ -217,7 +219,7 @@ def test_bash_hooks_do_not_mask_runtime_script_failures(tmp_path: Path):
         _stage_stub(command, home, cwd, "exit 23")
 
         result = _run(command, _bash(), home, cwd)
-        assert result.returncode == 23
+        assert result.returncode == 0
 
 
 def test_bash_lifecycle_hook_is_one_bounded_client():

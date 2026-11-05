@@ -7,7 +7,7 @@ import json
 import os
 from pathlib import Path
 import stat
-from typing import NamedTuple
+from typing import Callable, NamedTuple
 
 SCHEMA = "agent-worktrees.guarded-anchors"
 VERSION = 1
@@ -89,21 +89,35 @@ def _path_mode(path: Path) -> int:
     return info.st_mode
 
 
-def repository_identity(start: str | Path) -> dict | None:
+def repository_identity(
+    start: str | Path, *, observe: Callable[[Path], None] | None = None,
+) -> dict | None:
     """Nearest checkout/common directory, including new targets and bare roots.
 
     Only Git's filesystem markers are inspected; no config, index, object
     enumeration, Git invocation or environment-directed Git overrides.
     """
+    def mode(path: Path) -> int:
+        if observe is not None:
+            observe(path)
+        return _path_mode(path)
+
+    def text_at(path: Path) -> str:
+        if observe is not None:
+            observe(path)
+        return _text(path)
+
     try:
+        if observe is not None:
+            observe(Path(os.path.abspath(start)))
         here = Path(canonical(start))
         for root in (here, *here.parents):
             marker = root / ".git"
-            marker_mode = _path_mode(marker)
+            marker_mode = mode(marker)
             if stat.S_ISDIR(marker_mode):
                 git_dir = marker
             elif stat.S_ISREG(marker_mode):
-                text = _text(marker)
+                text = text_at(marker)
                 if not text.lower().startswith("gitdir:"):
                     return None
                 pointer = text[7:].removeprefix(" ")
@@ -115,31 +129,31 @@ def repository_identity(start: str | Path) -> dict | None:
             elif marker_mode:
                 return None
             elif (
-                stat.S_ISREG(_path_mode(root / "HEAD"))
-                and stat.S_ISDIR(_path_mode(root / "objects"))
-                and stat.S_ISDIR(_path_mode(root / "refs"))
+                stat.S_ISREG(mode(root / "HEAD"))
+                and stat.S_ISDIR(mode(root / "objects"))
+                and stat.S_ISDIR(mode(root / "refs"))
             ):
                 git_dir = root
             else:
                 continue
-            if not stat.S_ISREG(_path_mode(git_dir / "HEAD")):
+            if not stat.S_ISREG(mode(git_dir / "HEAD")):
                 return None
             common = git_dir
-            common_mode = _path_mode(git_dir / "commondir")
+            common_mode = mode(git_dir / "commondir")
             if common_mode:
                 if not stat.S_ISREG(common_mode):
                     return None
-                pointer = _text(git_dir / "commondir")
+                pointer = text_at(git_dir / "commondir")
                 if not pointer:
                     return None
                 common = Path(pointer)
                 if not common.is_absolute():
                     common = git_dir / common
-            if not stat.S_ISDIR(_path_mode(common)):
+            if not stat.S_ISDIR(mode(common)):
                 return None
             if not (
-                stat.S_ISDIR(_path_mode(common / "objects"))
-                and stat.S_ISDIR(_path_mode(common / "refs"))
+                stat.S_ISDIR(mode(common / "objects"))
+                and stat.S_ISDIR(mode(common / "refs"))
             ):
                 return None
             return {

@@ -104,6 +104,10 @@ function Invoke-ResidentPostTool {
 
 function Invoke-PostToolHook {
     param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Raw)
+    $admission = Join-Path $PSScriptRoot 'managed-session.ps1'
+    if (-not [IO.File]::Exists($admission)) { return }
+    . $admission
+    if (-not (Test-ManagedWorktreesSession -Raw $Raw)) { return }
     $utf8 = [Text.UTF8Encoding]::new($false, $true)
     $OutputEncoding = $utf8
     [Console]::OutputEncoding = $utf8

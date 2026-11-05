@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from worktree_manager.companion_bridge_session_codec import SessionCodec
-from worktree_manager.companion_timeline_contract import TimelineContractError
+from worktree_manager.companion_timeline_contract import LiveDelta, TimelineContractError
 from worktree_manager.companion_timeline_layout import TimelineLayout
 from worktree_manager.companion_timeline_model import TimelineWindow
 from worktree_manager.companion_worktree_codec import OwnerReadError
@@ -210,3 +210,121 @@ def test_represented_project_is_not_borrowed_and_federated_relationship_is_not_a
                     relationship_qualification="unknown", incarnation={"relationship_id": "relation"})
     with pytest.raises(OwnerReadError, match="locally admitted"):
         SessionCodec("example", "selected", OWNER, selected, "fixture-generation")
+
+
+@pytest.mark.parametrize("lifecycle,label", [
+    ("started", "Reported agent start"),
+    ("completed", "Reported agent completion"),
+    ("failed", "Reported agent failure"),
+])
+def test_actual_acp_contribution_labels_reach_readable_literal_rows(
+    semantic, lifecycle: str, label: str,
+) -> None:
+    from agent_bridge.acp_subagents import SubagentAttribution
+
+    attribution = SubagentAttribution(
+        semantic.log.append, lambda: True, lambda: "native-session",
+    )
+    attribution.handle_raw_event({
+        "sessionId": "native-session", "type": "subagent." + lifecycle,
+        "agentId": "helper", "data": {
+            "agentName": "search", "agentDisplayName": "[bold]Compare options[/bold]",
+            "agentDescription": "private task description must not be projected",
+            "toolCallId": "launch-call",
+        },
+    })
+    codec = semantic.codec()
+    frame = codec.decode(semantic.frame())
+    event = codec.events(frame, codec.token(frame, 1))[0]
+    assert event.summary == label + ": [bold]Compare options[/bold]"
+    assert event.kind.value == "contribution-reported"
+    assert event.actor.qualification.value == "reported"
+    assert "Reported linkage is not custody" in event.details
+    raw = json.loads(event.data_json)
+    assert raw["native_kind"] == "subagent_" + lifecycle
+    assert raw["details"]["agent_name"] == "search"
+    assert raw["details"]["parent_tool_call_id"] == "launch-call"
+    assert "private task description" not in event.data_json
+    assert raw["answerability"] == "unknown" and frame["coverage"] == "partial"
+    window = TimelineWindow()
+    token = codec.token(frame, 1)
+    assert window.bind(token).applied and window.apply_snapshot(codec.snapshot(frame, token)).applied
+    layout = TimelineLayout()
+    layout.rebuild(window, 120)
+    assert event.summary in layout.blocks[0].heading_text
+    assert raw["native_kind"] not in layout.blocks[0].heading_text
+
+
+@pytest.mark.parametrize("kind,details,expected", [
+    ("tool_call_start", {"title": "Inspect [literal] changes"}, "Tool started: Inspect [literal] changes"),
+    ("tool_call_update", {"status": "completed"}, "Tool completed"),
+    ("tool_call_update", {"status": "unfamiliar"}, "Tool update"),
+    ("subagent_started", {}, "Reported agent start"),
+    ("subagent_started", {"agent_name": "search", "agent_display_name": "  "},
+     "Reported agent start: search"),
+    ("subagent_started", {"agent_display_name": ["invalid"]}, "Reported agent start"),
+    ("unfamiliar_awaiting_operator", {"title": "Permission requested"},
+     "Bridge session: unfamiliar_awaiting_operator"),
+])
+def test_missing_old_or_malformed_labels_do_not_infer_work_or_current_state(
+    semantic, kind: str, details: dict, expected: str,
+) -> None:
+    semantic.log.append(kind, details)
+    codec = semantic.codec()
+    frame = codec.decode(semantic.frame())
+    event = codec.events(frame, codec.token(frame, 1))[0]
+    assert event.summary == expected
+    assert frame["current_requests"] == "unknown" and frame["coverage"] == "partial"
+    assert json.loads(event.data_json)["native_kind"] == kind
+
+
+def test_bounded_work_label_preserves_full_reported_title_in_evidence(semantic) -> None:
+    title = "Inspect " + "\u754c" * 300
+    semantic.log.append("tool_call_start", {"title": title})
+    codec = semantic.codec()
+    frame = codec.decode(semantic.frame())
+    event = codec.events(frame, codec.token(frame, 1))[0]
+    assert event.summary == "Tool started: " + title[:160] + "..."
+    assert json.loads(event.data_json)["details"]["title"] == title
+
+
+@pytest.mark.parametrize("live", [False, True])
+@pytest.mark.parametrize("kind,details,expected", [
+    ("tool_call_start", {"title": "Inspect\x00changes"}, "Tool started"),
+    ("subagent_started", {"agent_display_name": "Compare\x00options", "agent_name": "search"},
+     "Reported agent start: search"),
+    ("subagent_started", {"agent_name": "search\x00"}, "Reported agent start"),
+])
+def test_invalid_prose_labels_fall_back_in_snapshot_and_live_without_losing_evidence(
+    semantic, live: bool, kind: str, details: dict, expected: str,
+) -> None:
+    codec, window = semantic.codec(), TimelineWindow()
+    initial = None
+    if live:
+        semantic.log.append("turn_complete", {})
+        initial = codec.decode(semantic.frame())
+        token = codec.token(initial, 1)
+        assert window.bind(token).applied
+        assert window.apply_snapshot(codec.snapshot(initial, token)).applied
+    semantic.log.append(kind, details)
+    frame = codec.decode(semantic.frame(position=initial["position"] if live else None))
+    token = codec.token(frame, 1)
+    if live:
+        assert frame["kind"] == "delta"
+        result = window.apply_delta(LiveDelta(
+            token, codec.position(token, frame["base_position"]),
+            codec.position(token, frame["position"]), codec.events(frame, token),
+        ))
+    else:
+        assert window.bind(token).applied
+        result = window.apply_snapshot(codec.snapshot(frame, token))
+    assert result.applied
+    event = window.events[-1]
+    assert event.summary == expected
+    assert json.loads(event.data_json)["details"] == details
+
+
+def test_invalid_utf8_reported_name_remains_an_explicit_wire_source_error(semantic) -> None:
+    semantic.log.append("subagent_started", {"agent_display_name": "Compare\ud800options"})
+    with pytest.raises(TimelineContractError, match="invalid UTF-8 text"):
+        semantic.codec().decode(semantic.frame())

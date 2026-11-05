@@ -8,6 +8,7 @@ import time
 from collections import Counter
 
 from . import review_intent
+from .review_feedback import FeedbackUnavailable, ReviewFeedback
 from .review_workspace import _digest, _generation, _record, _revision, _scope
 
 
@@ -151,7 +152,8 @@ def _check_selected_ownership(action, actual, principal):
 
 def execute_review(
     store, selected, generation, source_attachment, *, context_factory, checkpoint,
-    expires_at: int, budget_seconds: float, clock=time.monotonic,
+    expires_at: int, budget_seconds: float, clock=time.monotonic, feedback=None,
+    feedback_position=None,
 ):
     """Existing owner factory supplies actual pinned auth/input/transport, not caller labels."""
     from agent_worktrees.providers.azure_owned_review import (
@@ -210,15 +212,47 @@ def execute_review(
         "entered_writes": 0, "errors": [],
     }
     operation = admitted["operation"]
+    tracking = None
+    if feedback is not None:
+        tracking = ReviewFeedback(
+            store, generation, feedback, expires_at=expires_at, checkpoint=checkpoint,
+            position=feedback_position,
+        )
+        result["stage"] = "feedback_capture"
+        try:
+            tracking.prepare(operation)
+        except PermissionError:
+            raise
+        except (FeedbackUnavailable, OSError, ValueError) as error:
+            result.update(
+                status=(
+                    "complete" if all(row["state"] == "confirmed" for row in operation["actions"])
+                    else "unknown" if any(row["state"] == "unknown" for row in operation["actions"])
+                    else "retained"
+                ),
+                errors=["feedback_capture_unavailable"],
+                feedback={
+                    "status": "unavailable",
+                    "reason": str(error) if isinstance(error, FeedbackUnavailable) else "capture_storage_unavailable",
+                },
+                actions=operation["actions"], elapsed_seconds=clock() - start,
+            )
+            if all(row["state"] == "unattempted" for row in operation["actions"]):
+                return result
     try:
         for index, action in enumerate(selected["actions"]):
             operation = store.inspect_review(operation_id, scope, expires_at=expires_at, checkpoint=checkpoint)
             state = operation["actions"][index]
             if state["state"] == "confirmed":
                 continue
+            if tracking is not None and tracking.capture is None and state["state"] == "unattempted":
+                result["status"] = "retained"
+                break
             with protected_review_context(context_factory, scope, remaining) as context:
                 result["stage"] = "preflight"
                 current = context.read_state()
+                if tracking is not None and tracking.capture is not None and state["state"] != "unknown":
+                    tracking.check_target(current)
                 if state["state"] == "unknown":
                     result["stage"] = "reconciliation"
                     proof = context.reconcile(copy.deepcopy(operation), copy.deepcopy(action))
@@ -234,6 +268,8 @@ def execute_review(
                         result["status"] = "unknown"
                         break
                     current = context.read_state()
+                    if tracking is not None and tracking.capture is not None:
+                        tracking.check_target(current)
                     _check_candidate(current, operation, baseline)
                     continue
                 actual = _check_candidate(current, operation, baseline)
@@ -250,6 +286,8 @@ def execute_review(
                 operation = store.inspect_review(operation_id, scope, expires_at=expires_at, checkpoint=checkpoint)
                 # Persistence and credential renewal may change eligibility.
                 current = context.read_state()
+                if tracking is not None:
+                    tracking.check_target(current)
                 actual = _check_candidate(current, operation, baseline)
                 _check_selected_ownership(action, actual, scope["principal_id"])
                 context.review_check(copy.deepcopy(operation), copy.deepcopy(action), copy.deepcopy(current), context=context)
@@ -268,6 +306,8 @@ def execute_review(
                 result["stage"] = "readback"
                 operation = store.inspect_review(operation_id, scope, expires_at=expires_at, checkpoint=checkpoint)
                 current = context.read_state()
+                if tracking is not None:
+                    tracking.check_target(current)
                 _check_candidate(current, operation, baseline)
         else:
             result["status"] = "complete"
@@ -279,5 +319,18 @@ def execute_review(
         result["status"], result["errors"] = "unknown", ["selected_owner_or_result_unavailable"]
     operation = store.inspect_review(operation_id, scope, expires_at=expires_at, checkpoint=checkpoint)
     result["actions"] = operation["actions"]
+    if tracking is not None and "feedback" not in result:
+        try:
+            result["feedback"] = tracking.reconcile(
+                operation, context_factory=context_factory, remaining=remaining,
+            )
+        except PermissionError:
+            raise
+        except (FeedbackUnavailable, ReviewCandidateChanged, ReviewContextUnavailable,
+                TimeoutError, OSError, ValueError) as error:
+            result["feedback"] = {
+                "status": "unavailable",
+                "reason": str(error) if isinstance(error, FeedbackUnavailable) else "protected_readback_or_tracking_unavailable",
+            }
     result["elapsed_seconds"] = clock() - start
     return result

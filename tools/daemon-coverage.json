@@ -369,6 +369,7 @@
       "t:windows_normal_process_lifetime.py::_launcher::spawn_daemon": 1,
       "t:windows_normal_process_lifetime.py::_worker::Popen": 1,
       "r:plugins/agent-worktrees/scripts/pre-tool-hook.ps1::<script>::Process.Start": 1,
+      "r:plugins/agent-worktrees/scripts/managed-session.ps1::<script>::Process.Start": 1,
       "t:windows_broker_protocol_acceptance.py::negative_topology::Popen": 1,
       "t:windows_launch_broker_probe.ps1::<script>::Process.Start": 1,
       "r:plugins/agent-bridge/scripts/installation-context/shell-caller-owned.ps1::<script>::Process.Start": 1,

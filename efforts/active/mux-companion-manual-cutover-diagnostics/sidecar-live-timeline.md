@@ -149,6 +149,12 @@ handling fixes. The [source readback](journal/2026/11.05-sidecar-sparse-presenta
 records healthy ordinary/narrow demonstrations, twelve rendered comparisons
 and exact evidence limits without closing S2-S5 or original parent acceptance.
 
+#10670 merged as `19b14d213389ed519ac1881487bb17471d254073`, qualifying
+actual private tmux popup input, owned-read cancellation and original CLI
+return with a complete pre-dispatch invocation log and negative control.
+The [source readback](journal/2026/11.05-companion-popup-input.md) preserves
+installed/native Windows, Relay and original manual/head acceptance.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than
@@ -526,6 +532,8 @@ publication and installed support retain their separate qualification.
   not synthetic observer modules or server-side `send-keys` as client proof.
   #10612 delivers the private POSIX tmux/client app portion, not PSMux or the
   original popup/Relay qualification.
+  #10670 adds the private POSIX popup/app-input controls; installed/native
+  Windows and complementary Relay qualification remain separate.
 - [ ] Qualify current pane/PID preservation, focus, resize, observer exit,
   mode guides and the separately owned permanent Claims chrome.
 - [ ] Record performance/retention/coverage and source versus installed/native

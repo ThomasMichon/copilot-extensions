@@ -841,6 +841,14 @@ def _fallback_post(payload: dict, home: Path) -> dict:
     )
 
 
+def _managed_session_admitted(payload: dict, home: Path | None = None) -> bool:
+    helper = _load_sibling("managed_session.py")
+    try:
+        return helper is not None and helper.admitted(payload, home=home)
+    except Exception:
+        return False
+
+
 def decide(
     kind: str, payload: dict, *, home: Path | None = None, require_policy: bool = False,
 ) -> dict:
@@ -890,14 +898,6 @@ def main(argv: list[str] | None = None) -> int:
     if (kind == "preToolUse" and not strict_policy
             and os.environ.get("AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION") == "resident"):
         return 0
-    if kind == "preToolUse":
-        switch = _load_sibling("pretool_killswitch.py")
-        if switch is None:
-            print("[pretool-killswitch] helper unavailable; guards remain enabled", file=sys.stderr)
-        elif switch.is_active():
-            if strict_policy:
-                sys.stdout.write("{}")
-            return 0
     try:
         raw = sys.stdin.read()
         try:
@@ -905,13 +905,30 @@ def main(argv: list[str] | None = None) -> int:
         except ValueError:
             if kind != "preToolUse":
                 raise
-            sys.stdout.write(json.dumps(_pre_unavailable("event JSON invalid")))
+            if strict_policy:
+                sys.stdout.write("{}")
             return 0
         if not isinstance(payload, dict):
             if kind == "preToolUse":
-                sys.stdout.write(json.dumps(_pre_unavailable("event payload is not an object")))
+                if strict_policy:
+                    sys.stdout.write("{}")
                 return 0
             payload = {}
+        admission_payload = (
+            payload.get("event") if strict_policy and "--only-pr-observations" in argv else payload
+        )
+        if not _managed_session_admitted(admission_payload):
+            if kind == "sessionStart" or strict_policy:
+                sys.stdout.write("{}")
+            return 0
+        if kind == "preToolUse":
+            switch = _load_sibling("pretool_killswitch.py")
+            if switch is None:
+                print("[pretool-killswitch] helper unavailable; guards remain enabled", file=sys.stderr)
+            elif switch.is_active():
+                if strict_policy:
+                    sys.stdout.write("{}")
+                return 0
         initial = None
         if strict_policy and "--only-pr-observations" in argv:
             payload, initial = _load_sibling("hook_pre_policy.py").deferred_frame(payload)

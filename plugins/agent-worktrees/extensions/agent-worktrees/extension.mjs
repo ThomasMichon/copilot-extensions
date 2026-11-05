@@ -29,6 +29,7 @@ import { approveAll } from "@github/copilot-sdk";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { fileURLToPath } from "node:url";
 import { createPythonPolicy, createResidentPreToolHook, selectResidentPreToolHooks } from "./resident-pre-tool.mjs";
+import { createManagedSessionAdmission } from "./managed-session.mjs";
 
 // Coalesce bursts of intent updates: flush at most once per this interval.
 // A long turn re-reports intent repeatedly; the trailing-edge flush keeps the
@@ -126,6 +127,7 @@ function setRest(rest) {
 // dir means there's nothing meaningful to associate the pulse with, so skip.
 function persistSubStatus() {
   try {
+    if (!admitSession.current(sessionInput())) return;
     const sid = state.sessionId;
     if (!sid || !state.lastIntent) return;
     const dir = join(homedir(), ".copilot", "session-state", sid);
@@ -187,6 +189,7 @@ function renderDispositionNudge() {
 //     current turn has itself run long (`longTurn`).
 // Best-effort; never throws into the event loop.
 function maybeNudgeDisposition(longTurn = false) {
+  if (!admitSession.current(sessionInput())) return;
   if (!NUDGE_ON || !NUDGE_OPERATOR_ONLY) return;
   if (state.nudgedThisTurn || !state.turnRunning) return;
   if (state.workSinceNudge < NUDGE_MIN_WORK) return;   // no meaningful work -> no nudge
@@ -208,12 +211,23 @@ function maybeNudgeDisposition(longTurn = false) {
 
 // The same launch-time mode gates command entries before any policy work.
 const scriptsRoot = fileURLToPath(new URL("../../scripts/", import.meta.url));
+const admitSession = createManagedSessionAdmission({
+  scriptsRoot, python: process.env.AGENT_WORKTREES_RESIDENT_PRE_TOOL_PYTHON,
+});
+const sessionInput = () => ({
+  sessionId: state.sessionId,
+  workingDirectory: process.env.COPILOT_PROJECT_DIR || process.cwd(),
+});
+let pythonPolicy;
 const residentHooks = selectResidentPreToolHooks({
   createHook: () => createResidentPreToolHook({
-    scriptsRoot,
-    invokePolicy: createPythonPolicy({
-      scriptsRoot, python: process.env.AGENT_WORKTREES_RESIDENT_PRE_TOOL_PYTHON,
-    }),
+    scriptsRoot, admit: admitSession,
+    invokePolicy: payload => {
+      pythonPolicy ??= createPythonPolicy({
+        scriptsRoot, python: process.env.AGENT_WORKTREES_RESIDENT_PRE_TOOL_PYTHON,
+      });
+      return pythonPolicy(payload);
+    },
   }),
 });
 
@@ -224,10 +238,16 @@ const session = await joinSession({
 
 state.sessionId = session.sessionId ?? null;
 
+function on(name, callback) {
+  session.on(name, async event => {
+    if (await admitSession(sessionInput())) callback(event);
+  });
+}
+
 // The live pulse: capture the root agent's current intent. Sub-agent intents
 // (event.agentId set) are ignored -- the worktree pulse reflects its own
 // driver, not a delegated sub-agent's inner monologue.
-session.on("assistant.intent", (event) => {
+on("assistant.intent", (event) => {
   if (event.agentId) return;              // sub-agent -- not the worktree driver
   const intent = event.data?.intent;
   if (typeof intent !== "string" || !intent.trim()) return;
@@ -242,7 +262,7 @@ session.on("assistant.intent", (event) => {
 // Turn lifecycle drives the nudge cadence. On each root-agent turn start, count
 // it, arm a long-turn timer, and check the every-N-turns cadence (the work guard
 // inside decides whether to actually inject). On turn end, stand the timer down.
-session.on("assistant.turn_start", (event) => {
+on("assistant.turn_start", (event) => {
   if (event.agentId) return;              // sub-agent turn -- not the driver
   state.turnCount++;
   state.turnRunning = true;
@@ -259,7 +279,7 @@ session.on("assistant.turn_start", (event) => {
   maybeNudgeDisposition(false);
 });
 
-session.on("assistant.turn_end", (event) => {
+on("assistant.turn_end", (event) => {
   if (event.agentId) return;
   state.turnRunning = false;
   if (state.longTurnTimer) {
@@ -272,7 +292,7 @@ session.on("assistant.turn_end", (event) => {
 // tool run counts as work; the agent running `agent-worktrees status` (write
 // mode) instead RESETS the guard -- a fresh status update quiets the nudge until
 // real work accrues again, so we never nag without work in between.
-session.on("tool.execution_start", (event) => {
+on("tool.execution_start", (event) => {
   if (event.agentId) return;
   try {
     const args = JSON.stringify(event.data?.arguments ?? "");
@@ -286,7 +306,7 @@ session.on("tool.execution_start", (event) => {
   }
 });
 
-session.on("tool.execution_complete", (event) => {
+on("tool.execution_complete", (event) => {
   if (event.agentId) return;
   state.workSinceNudge++;
 });
@@ -294,7 +314,7 @@ session.on("tool.execution_complete", (event) => {
 // On idle, mark the graded rest 'idle' (done-rest: the whole session is
 // quiescent, nothing in flight). setRest persists the sidecar on the transition
 // and keeps the legacy `idle` boolean in sync, so no extra write is needed.
-session.on("session.idle", () => {
+on("session.idle", () => {
   setRest("idle");
 });
 
@@ -304,14 +324,14 @@ session.on("session.idle", () => {
 // re-marks idle if the agent then went quiescent). Root agent only; best-effort.
 for (const evt of ["user_input.requested", "elicitation.requested",
                    "permission.requested"]) {
-  session.on(evt, (event) => {
+  on(evt, (event) => {
     if (event.agentId) return;            // sub-agent request -- not the driver
     setRest("awaiting-operator");
   });
 }
 for (const evt of ["user_input.completed", "elicitation.completed",
                    "permission.completed"]) {
-  session.on(evt, (event) => {
+  on(evt, (event) => {
     if (event.agentId) return;
     // The block cleared; the agent resumes. If it immediately goes quiescent,
     // session.idle re-marks "idle" out-of-band.
