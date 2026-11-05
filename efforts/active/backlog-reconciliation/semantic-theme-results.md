@@ -5,6 +5,15 @@ Method: [weighted semantic consolidation](semantic-density-consolidation.md).
 
 ## Result and coverage
 
+The [eleven finite hosted/reader/lifecycle contracts](finite-hosted-reader-lifecycle-contracts.md)
+retain thirty-three ranked relationships and actual credited partials.
+Finite reader acceptance or an accepted residual, correct source-head
+convergence, relative execution origins, ordinary cleanup diagnostics,
+one supported Windows-hosted backend route and actual fleet migration remain
+independent. All eleven stay OPEN; the
+[journal](<journal/2026/11.05 finite-hosted-reader-lifecycle-contracts.md>)
+distinguishes fresh, reused and protected whole evidence.
+
 The [ten finite acceptance/closeout contracts](finite-acceptance-closeout-contracts.md)
 retain thirty ranked relationships without denying actual delivered partials
 or weakening original finite outcomes. Existing reservations, both setup/eval

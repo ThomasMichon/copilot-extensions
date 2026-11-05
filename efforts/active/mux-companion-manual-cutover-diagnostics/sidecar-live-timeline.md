@@ -162,6 +162,12 @@ records literal-label fallback, mixed-provider absence and source-bound
 HTTP-52 qualification without turning occurrences into current concurrency
 or lifetime totals.
 
+#10686 merged as `aef3a5940200739d096dbb293a9241bee4d37768`, preserving
+valid reported subagent identities in distinct source-scoped lanes without
+inventing current state or hierarchy. The
+[source readback](journal/2026/11.05-sidecar-reported-actors.md) retains
+authoritative totals, full coverage, native and original parent gates.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than
@@ -562,6 +568,14 @@ Source receipt: #10642. The actual private three-owner app, deterministic
 production-chrome comparisons and separately selected native-client controls
 retain their distinct tiers. No installed/native-performance or popup acceptance
 is inferred from these presentation checks.
+
+### Output-noise follow-up - actual source workloads
+
+- [ ] Review and deliver the [bounded output-presentation amendment](sidecar-output-presentation.md).
+  Known message/thought chunks must not overwhelm the agenda overview as
+  individual normal work rows. Preserve raw history/identity/proofs, explicit
+  Evidence, visible work/diagnostics and bounded history/anchor behavior.
+  This adds source qualification, not installed/native or parent completion.
 
 ## Validation Plan
 

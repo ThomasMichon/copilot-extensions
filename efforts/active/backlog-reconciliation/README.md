@@ -252,6 +252,22 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The ten-contract checkpoint is actually delivered in #10683 after genuine
+exact-head approval, both review threads resolved and ten complete successful/
+skipped checks before normal managed merge. All seven merged/current blobs
+equal the approved head; only its publication child finalized, retained.
+Two equal complete 01:56 PST scans remain at 1,010 whole open, 281 above
+729: 735 creator-eligible, 275 excluded, 672 original-cohort and 338 inflow.
+There are no arrivals, departures or new credit; dispositions remain 777.
+The [delivery journal](<journal/2026/11.05 finite-acceptance-closeout-contracts.md>)
+retains the evidence. The parent remains Active. The following
+[eleven finite hosted/reader/lifecycle contracts](finite-hosted-reader-lifecycle-contracts.md)
+integrate 29 whole texts and thirty-three ranked relationships without new
+completion credit. Credited source progress, actual consumer acceptance,
+OR alternatives and independent ownership remain separate. All eleven stay
+OPEN; the [journal](<journal/2026/11.05 finite-hosted-reader-lifecycle-contracts.md>)
+retains protected whole evidence and no-effect boundaries.
+
 The twelve-contract checkpoint is actually delivered in #10681 after genuine
 exact-head approval, no review issues/threads and nine complete successful/
 skipped checks before merge; a tenth successful attribution refresh followed.
