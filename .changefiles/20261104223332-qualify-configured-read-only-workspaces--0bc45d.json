@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify configured read-only workspaces through the foreground host, authenticated Gateway, CLI facade and retained-volume restart.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

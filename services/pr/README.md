@@ -234,6 +234,13 @@ Focused source tests exercise real native/exporter/credential processes and
 the existing Gateway/disk boundary using synthetic provider inputs. Those are
 not installed/live-provider, retained-container or shadow acceptance. Source
 availability does not authorize configuration, provisioning or service rollout.
+The standalone foreground-process fixture also opts into the actual strict
+workspace configuration and fresh provisioning. Its CLI facade and supplied
+client cross real Gateway TLS/PoP to the foreground entry and a synthetic
+exporter subprocess, exercising load/sync, metadata materialization, same-head
+events, nonevent polls and retained-volume restart without another export.
+The fixture verifies forwarding of the credential-command reference, not a
+live exchange, and does not qualify executable client binding discovery.
 
 An ambiguous durable request reconciles its original request/registration/event
 identity; disconnect or revocation is not proof that an in-flight commit failed.
