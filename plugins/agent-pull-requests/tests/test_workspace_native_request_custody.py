@@ -221,7 +221,7 @@ def test_older_caller_retains_metadata_but_cannot_advertise_owned_async(
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("qualified", [False, True, "admission"])
+@pytest.mark.parametrize("qualified", [False, True, "admission", "class-reader"])
 def test_actual_credential_owner_qualification_and_immutable_source_frontdoor(
     environment, integration, tools, execution_pool, tmp_path, monkeypatch, qualified,
 ):
@@ -254,6 +254,10 @@ def test_actual_credential_owner_qualification_and_immutable_source_frontdoor(
                 return path.read_text()
             async def opaque():
                 return await asyncio.to_thread(token)
+            if qualified == "class-reader":
+                async def replaced(self):
+                    return await opaque()
+                monkeypatch.setattr(ServiceCredentials, "access_token", replaced)
             caller = ServiceCaller(
                 gateway_origin=rig.origin, gateway_ca=rig.ca, proof_key=credentials.proof_key,
                 access_token_callback=credentials.access_token if qualified else opaque,

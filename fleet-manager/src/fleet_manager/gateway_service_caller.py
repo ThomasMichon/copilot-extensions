@@ -79,7 +79,7 @@ class ServiceCaller:
         return native_admission(submit)
 
     def _bind_source_request(self):
-        from .credential_references import ServiceCredentials
+        from .credential_references import ServiceCredentials, _SOURCE_ACCESS_TOKEN_IMPLEMENTATION
         from inspect import getattr_static
         from types import MethodType
         callback = self._access
@@ -96,7 +96,7 @@ class ServiceCaller:
         credentials = callback.__self__ if type(callback) is MethodType else None
         if not self._machine and not (
             type(credentials) is ServiceCredentials
-            and callback.__func__ is ServiceCredentials.access_token
+            and callback.__func__ is _SOURCE_ACCESS_TOKEN_IMPLEMENTATION
         ):
             return None
 

@@ -43,6 +43,9 @@ class ServiceCredentials:
             raise GatewayError("credential-reference-unavailable") from None
 
 
+_SOURCE_ACCESS_TOKEN_IMPLEMENTATION = ServiceCredentials.access_token
+
+
 def load_service_credentials(
     *, proof_key_file: Path, access_token_file: Path,
 ) -> ServiceCredentials:
