@@ -114,6 +114,16 @@ omitted callbacks settle. Completion invalidations do not append history. It sta
 no SDK/model actor and does not qualify optional wire, Manager, installed or
 native-client behavior; required unit-only CI is unchanged.
 
+The optional `installation-context-acceptance.yml` selector `pr_artifacts=true`
+also runs Fleet's `test_gateway_host_distribution.py` packet on native Linux
+and Windows. It builds a noneditable selected-Gateway application from actual
+first-party wheels and an offline fixture of installed dependency bytes, then
+exercises stage, known no-child and post-creation listener refusals with retry, first install,
+source-independent repeat, failed candidate
+preflight, a distinct generation update and confirmed native stop. The fixture
+does not qualify release-feed acquisition, provider authentication, reboot
+startup or fleet adoption. Required unit-only CI is unchanged.
+
 Efforts' optional `--test-file tests/test_agenda_export_contributors.py
 --test-file tests/test_agenda_export.py --test-file tests/test_agenda_export_cli.py
 --allow-explicit-tiers` packet checks complete verified contributor provenance,
@@ -2030,6 +2040,28 @@ runtime construction, host rollout or performance; cold scoped provisioning
 retains its explicit unsupported-readiness outcome.
 
 ## Optional native pane argument delivery
+
+The separate Worktrees opt-in
+`--test-file tests/native/test_generic_mux_startup.py --allow-explicit-tiers`
+packet, with `PSMUX_FILE_LAUNCH_E2E=1`, exercises the generic creation owner
+against `PSMUX_TEST_BIN` or the explicitly opted-in installed PSMux.
+Fresh private profiles cover clean and inherited
+nesting environments, with and without pane-print formatting. The actual
+file-based consumer must run, consume its manifest and retain its literal argv;
+the caller environment must remain unchanged, with no owned visible windows
+or foreground focus. A positive control pauses sampling until a creation
+client exits, then requires its detached child to be observed from retained
+launch roots. Payloads wait for fixture release within a finite lifetime; the
+45-second readiness allowance matches the existing native pane packet.
+The fixture removes the suite-wide headless initializer so only production
+and explicit fixture launch flags govern the observed native processes.
+The manual `installation-context-full.yml` portfolio `generic-mux` selects
+only this Windows packet and its verification/classification controls, using
+a digest-pinned disposable PSMux 3.3.8. The 3.3.5 ambient-tool baseline remains
+partial after intermittent creation failures; this does not change production
+compatibility admission or the installed mux. These contained source controls
+do not certify a real
+Copilot prompt, productive runtime deployment or escape from caller cleanup.
 
 The manual `installation-context-full.yml` portfolio `pane-argv` runs the real
 PSMux direct-child control and both file-based pane producers twice on a fresh

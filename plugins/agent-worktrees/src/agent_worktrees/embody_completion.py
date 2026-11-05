@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 from pathlib import Path
+import subprocess
 
 from . import launch_seed_exec, launch_seed_state
 
@@ -92,18 +93,26 @@ def complete_launch(
         cfg.tracking_dir() / f"{wt_id}.yaml", creation_receipt, seed_result)
 
     verified = None
+    verification_error = None
     verify_timeout = getattr(args, "verify_timeout", 0.0) or 0.0
     if verify_timeout > 0:
         deadline = clock.monotonic() + verify_timeout
         verified = False
-        while clock.monotonic() < deadline:
-            if sessions.has_mux_session(wt_id):
-                verified = True
+        while (remaining := deadline - clock.monotonic()) > 0:
+            try:
+                if sessions.has_mux_session(wt_id, strict=True, timeout=min(5, remaining)):
+                    verified = True
+                    break
+            except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+                verified = None
+                verification_error = f"Mux verification is unavailable: {exc}"
                 break
-            clock.sleep(0.3)
+            clock.sleep(min(0.3, max(0, deadline - clock.monotonic())))
+        if verified is False:
+            verification_error = "Mux session was not confirmed before the verification deadline"
 
     response = {
-        "ok": True,
+        "ok": verification_error is None,
         **deferred,
         **({"prepared_context": prepared_context} if prepared_context is not None else {}),
         "worktree_id": wt_id,
@@ -126,6 +135,12 @@ def complete_launch(
         } if native_seed_id else {}),
         **settled,  # a claimed pending seed kept for later, or a possible draft
         "mux_verified": verified,
+        **({
+            "error": (
+                f"{verification_error}; creation may have occurred. Inspect the existing "
+                "launch and prompt state before any retry; do not resend an unconfirmed prompt."
+            ),
+        } if verification_error else {}),
         "verify_hint": (
             f"agent-bridge live-sessions | grep {wt_id}  "
             "(the embodied Copilot auto-registers with the local bridge)"
@@ -134,4 +149,4 @@ def complete_launch(
     if selection.assignment is not None:
         response["profile_assignment"] = profile_assignment.metadata(selection.assignment)
     output._json_output(response)
-    return 0
+    return 3 if verification_error else 0

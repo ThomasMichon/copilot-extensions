@@ -17,6 +17,18 @@ if TYPE_CHECKING:
     from .mux_companion import _CompanionData, MuxCompanionApp
 
 
+def current_input_text(state: CurrentRequestState | None) -> Text:
+    if state is None or state.availability is not Availability.OBSERVED:
+        message = "Current input unknown"
+    elif state.completeness.value != "complete":
+        message = f"{len(state.requests)} listed waiters; partial coverage, absence unknown"
+    elif state.requests:
+        message = f"{len(state.requests)} pending local waiters; return to CLI"
+    else:
+        message = "No local waiters observed"
+    return Text(message + "; answerability unknown.")
+
+
 def render_current_input(app: MuxCompanionApp, state: CurrentRequestState | None) -> None:
     if app.query("#timeline-current-input"):
         label = app.query_one("#timeline-current-input", Static)
@@ -25,6 +37,9 @@ def render_current_input(app: MuxCompanionApp, state: CurrentRequestState | None
             state.summary() if state is not None else
             "Current input unknown; no qualified selected-session observation.",
         ))
+        compact = app.query_one("#timeline-current-compact", Static)
+        compact.display = label.display
+        compact.update(current_input_text(state))
 
 
 def bridge_status(window: TimelineWindow, message: str) -> Text:

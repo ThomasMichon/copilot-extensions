@@ -179,7 +179,7 @@ def test_real_process_current_facts_live_push_and_page_prepend_keep_independent_
             timeline = app.query_one(SubwayTimeline)
             await until(pilot, lambda: len(timeline.window.events) == 20 and (root / "feed-pid").exists())
             assert "Current accepted purpose." in str(app.query_one(".timeline-context", Static).content)
-            assert "efforts/active/example/README.md" in str(app.query_one(".timeline-context", Static).content)
+            assert "efforts/active/example/README.md" in str(app.query_one(".timeline-effort", Static).content)
             assert "partial" in status(app)
             assert {event.kind.value for event in timeline.window.events} == {"observed-change"}
             timeline.focus()
@@ -480,7 +480,15 @@ def test_owned_transport_failure_can_recover_after_reader_retirement(configured,
             assert not_alive(int((root / "feed-pid").read_text()))
             (root / "feed-behavior").write_text("normal", encoding="utf-8")
             if recovery == "refresh":
-                assert await pilot.click("#refresh-btn")
+                button = app.query_one("#refresh-btn")
+                assert button.content_region.bottom <= app.size.height - 1, {
+                    "button": button.region, "content": button.content_region,
+                    "footer": app.query_one("#footer-row").region,
+                    "screen": app.screen.size, "scroll": app.screen.scroll_offset,
+                }
+                # Pilot clips absolute mouse targets to the bordered Screen's content size.
+                button.focus()
+                await pilot.press("enter")
             else:
                 views.active = "summary-tab"
                 await until(pilot, lambda: app._timeline_attachment.controller is None

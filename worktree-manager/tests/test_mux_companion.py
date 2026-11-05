@@ -19,7 +19,7 @@ from worktree_manager import companion_client as cc
 from worktree_manager import handoff_client as hc
 from worktree_manager import mux_companion as companion
 from worktree_manager.companion_timeline_widget import SubwayTimeline
-from textual.widgets import Button, TabbedContent
+from textual.widgets import Button, Collapsible, Static, TabbedContent
 
 
 def test_timeline_alternate_view_keeps_initial_summary_and_unknown_history(monkeypatch) -> None:
@@ -53,6 +53,37 @@ def test_timeline_alternate_view_keeps_initial_summary_and_unknown_history(monke
             assert not timeline.demand_visible
             await pilot.press("escape")
         assert not app.is_running
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("field", ["error", "sessions_error"])
+def test_timeline_preserves_actual_selection_read_diagnostic_in_evidence(monkeypatch, tmp_path, field) -> None:
+    diagnostic = "Selected owner read failed: [red] literal diagnostic"
+    data = companion._CompanionData(
+        worktree={"id": "selected", "repo": "example", "path": str(tmp_path)},
+        **{field: diagnostic},
+    )
+    monkeypatch.setattr(companion, "_load_current_worktree", lambda *args, **kwargs: data)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("unresolved selection attempted a provider command")
+
+    monkeypatch.setattr(ec, "run_json", forbidden)
+
+    async def check() -> None:
+        app = companion.MuxCompanionApp(cwd=str(tmp_path))
+        async with app.run_test(size=(80, 30)) as pilot:
+            await pilot.pause()
+            app.query_one("#views", TabbedContent).active = "timeline-tab"
+            for _ in range(40):
+                if diagnostic in str(app.query_one(".timeline-state", Static).content):
+                    break
+                await pilot.pause(0.025)
+            assert not app.query_one("#status").display
+            assert app.query_one(Collapsible).collapsed
+            assert "Worktrees: error" in str(app.query_one(".timeline-health", Static).content)
+            assert diagnostic in str(app.query_one(".timeline-state", Static).content)
 
     asyncio.run(check())
 

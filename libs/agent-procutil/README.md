@@ -16,6 +16,15 @@ Host-visible cgroup ancestors of the current PID namespace's PID 1 are not
 caller-local units; units nested below that boundary still require admission.
 This changes future launches, not existing residents' native ownership.
 
+Daemon-launch exceptions keep their original types. Definitely-before-creation
+failures, including validation and log acquisition, carry `process_created=False`,
+`cleanup_confirmed=True` and `admission_sent=False`. Positively refused native
+creation receives the same attribution. Once creation may have happened,
+absence of these fields is unknown, never proof that no child exists; existing
+`DaemonSpawnError` custody and cleanup evidence still apply. A caller may settle
+its own launch intent from explicit producer evidence, not from an exception's
+class or message.
+
 The explicit Linux user-systemd fixture is
 `tests/systemd_daemon_fixture.py qualify <fresh-private-directory>`.
 It uses finite caller units and a renewable test-instance lease to prove

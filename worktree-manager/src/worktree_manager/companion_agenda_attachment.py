@@ -163,19 +163,24 @@ class AgendaTimelineAttachment:
         if self.selection is None or not self._renderable():
             return
         if error or frame is None:
-            self._failure(error or "awaiting provider snapshot")
+            self._failure(error or "awaiting provider snapshot", failed=error is not None)
         elif frame.get("availability") != "observed":
-            self._failure("selected head has no current publication")
+            self._failure("selected head has no current publication", failed=False)
 
     def _renderable(self) -> bool:
         return not self._closed and self.panel.is_attached and bool(self.panel.query(SubwayTimeline))
 
-    def _failure(self, message: str) -> None:
+    def _failure(self, message: str, *, failed: bool = True) -> None:
         if self._renderable() and (self.selection is None or self._head_current()):
             self._history_epoch += 1
+            if failed:
+                self.panel.provider_notice(Provider.AGENDA, message, failed=True)
             self.status("Rich Agenda: " + message)
             for token in self._tokens():
-                self.panel.source_error(token, message)
+                if failed:
+                    self.panel.source_error(token, message)
+                else:
+                    self.panel.pause_source(token)
 
     def head_current(self, selection: Selection) -> bool:
         """Share selected-head invalidation with other provider admissions."""
@@ -302,7 +307,7 @@ class AgendaTimelineAttachment:
                 if not self._head_current():
                     return
                 if error or frame is None:
-                    self._failure(error or "awaiting provider snapshot")
+                    self._failure(error or "awaiting provider snapshot", failed=error is not None)
                     continue
                 if self.selection is None or (
                     frame["project"], frame["worktree_id"], frame["session_id"],
@@ -314,7 +319,7 @@ class AgendaTimelineAttachment:
                             self.token, None, Availability.HEAD_CHANGED, Completeness.PARTIAL,
                         ))
                     else:
-                        self._failure("selected head has no current publication")
+                        self._failure("selected head has no current publication", failed=False)
                     continue
                 publication = frame["observation"]
                 store = publication["source"]["store_id"]
@@ -368,7 +373,7 @@ class AgendaTimelineAttachment:
                             continue
                         replay.append(LiveDelta(token, base, newer[-1].position, newer))
                         base = newer[-1].position
-                if replay and state.availability is Availability.UNAVAILABLE:
+                if replay and state.availability in {Availability.UNAVAILABLE, Availability.UNKNOWN}:
                     result = self.panel.recover_snapshot(snapshot, tuple(replay))
                 else:
                     for delta in replay:
@@ -378,6 +383,7 @@ class AgendaTimelineAttachment:
                     result = self.panel.apply_snapshot(snapshot)
                 if not result.applied:
                     raise TimelineSourceError(result.reason)
+                self.panel.provider_notice(Provider.AGENDA, None)
                 self.status(
                     f"Rich Agenda: accepted operations through revision {reader.codec.revision(pages[-1]['cursor'])}; "
                     "partial history, caller-reported actors; not execution authority"

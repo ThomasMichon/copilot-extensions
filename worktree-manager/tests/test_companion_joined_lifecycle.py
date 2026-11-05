@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 import importlib
+import time
 from pathlib import Path
 from typing import Any
 
 import pytest
 from textual.pilot import Pilot
-from textual.widgets import Select, Static, TabbedContent
+from textual.widgets import Collapsible, Select, Static, TabbedContent
 
 from worktree_manager import companion_bridge_source as bridge
 from worktree_manager import mux_companion as companion
@@ -50,6 +51,69 @@ async def ready(
             "bridge_requests": peer.get("bridge", {}).get("requests", []),
         },
     )
+
+
+@pytest.mark.timeout(180)
+def test_joined_sparse_healthy_demo(
+    semantic_peer: dict[str, Any], actual_waiters: Callable[[str], Awaitable[dict[str, Any]]],
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    record_property: Callable[[str, object], None],
+) -> None:
+    semantic_peer["log"].append("subagent_started", {"agent_id": "comparison"})
+    semantic_peer["log"].append("turn_complete", {})
+    with managed_join(tmp_path / "healthy-owners", monkeypatch, clock_origin=time.time() - 60) as peer:
+        peer["bridge"] = semantic_peer
+
+        async def check() -> None:
+            await actual_waiters("clear")
+            app = companion.MuxCompanionApp(cwd=str(peer["checkout"]))
+            async with app.run_test(size=(110, 40)) as pilot:
+                await ready(app, pilot, peer, lambda: app._data.agenda is not None, "healthy-coarse-agenda")
+                await publish_agenda(peer)
+                app.query_one("#views", TabbedContent).active = "timeline-tab"
+                timeline = app.query_one(SubwayTimeline)
+                await ready(
+                    app, pilot, peer,
+                    lambda: {state.token.identity.provider for state in timeline.window.sources.values()} == set(Provider)
+                    and all(state.availability is Availability.OBSERVED for state in timeline.window.sources.values())
+                    and "owned:child" in app._bridge_attachment._members
+                    and app._rich_agenda_attachment.token is not None,
+                    "healthy-three-owner-admission",
+                )
+                assert await pilot.click("CollapsibleTitle")
+                app.query_one("#bridge-feed", Select).focus()
+                await pilot.press("enter", "down", "enter")
+                await ready(
+                    app, pilot, peer,
+                    lambda: app._bridge_attachment.current_requests is not None
+                    and app._bridge_attachment.current_requests.availability is Availability.OBSERVED
+                    and any(row.event_id == "event:2" for row in timeline.window.events),
+                    "healthy-selected-session",
+                )
+                assert app._bridge_attachment.choice == "owned:child"
+                assert await pilot.click("CollapsibleTitle")
+                timeline.focus()
+                for name, size in (("healthy-full", (110, 40)), ("healthy-narrow", (60, 24))):
+                    await pilot.resize_terminal(*size)
+                    await pilot.pause()
+                    assert app.query_one(Collapsible).collapsed
+                    assert timeline.size.height >= size[1] // 2
+                    assert app._timeline_panel.window.last_result.applied
+                    assert all(state.availability in {Availability.OBSERVED, Availability.UNKNOWN}
+                               for state in timeline.window.sources.values())
+                    assert not app._timeline_panel._provider_notices
+                    assert "source-error" not in str(app.query_one(".timeline-health", Static).content)
+                    record_property("sidecar-state", name)
+                    record_property("sidecar-svg", offline_svg(app.export_screenshot()))
+                app.query_one("#views", TabbedContent).active = "summary-tab"
+                await ready(
+                    app, pilot, peer,
+                    lambda: app._bridge_attachment.controller is None
+                    and semantic_peer["session"].subscriber_count == 0,
+                    "healthy-owner-retirement",
+                )
+        asyncio.run(check())
+    assert not peer["failures"] and not semantic_peer["failures"]
 
 
 @pytest.mark.timeout(180)

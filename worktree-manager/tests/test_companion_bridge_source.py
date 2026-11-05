@@ -747,8 +747,9 @@ def test_actual_three_source_commit_binding_and_child_join_preserves_history(
                 await until(pilot, lambda: "Retained joined history 24" in str(
                     app.query_one(".timeline-context", Static).content,
                 ))
+                await pilot.resize_terminal(80, 24)
                 timeline.focus()
-                await pilot.press("pageup")
+                await pilot.press("home", "enter")
                 await until(pilot, lambda: app._timeline_attachment.controller.page_count == 0 and all(
                     state.requested_before is None for state in timeline.window.sources.values()
                 ))

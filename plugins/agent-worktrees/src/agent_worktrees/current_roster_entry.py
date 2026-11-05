@@ -1,8 +1,9 @@
-"""Effect-free selection of the canonical explicit-project held feed."""
+"""Effect-free selection of bounded early CLI entries."""
 
 from __future__ import annotations
 
 from .list_arguments import ARGUMENTS
+from .pr_read_entry import select_read
 
 
 def select_current_feed(argv):
@@ -79,7 +80,7 @@ def _run_current_feed(argv):
 def run_module_if_selected() -> None:
     import sys
 
-    selected = select_current_feed(sys.argv[1:])
+    selected = select_current_feed(sys.argv[1:]) or select_read(sys.argv[1:])
     if selected is not None:
         from ._shutdown_exit import run_and_exit
 
@@ -101,7 +102,7 @@ def run_legacy_console(main) -> None:
 def console_entry():
     import sys
 
-    selected = select_current_feed(sys.argv[1:])
+    selected = select_current_feed(sys.argv[1:]) or select_read(sys.argv[1:])
     if selected is None:
         from .__main__ import console_entry as legacy_entry
 

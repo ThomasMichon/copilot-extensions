@@ -118,6 +118,39 @@ def spawn_daemon(
     lifetime after a settled refusal. POSIX uses a new session; durable Linux
     launches also leave a systemd caller's cleanup unit through a user scope.
     """
+    creation = [False]
+    try:
+        return _spawn_daemon(
+            argv, cwd=cwd, log_path=log_path, env=env, env_overrides=env_overrides,
+            console_children=console_children, breakaway=breakaway,
+            contained_fallback=contained_fallback, extra_creationflags=extra_creationflags,
+            display=display, stderr_log_path=stderr_log_path, instance=instance,
+            _creation=creation,
+        )
+    except BaseException as error:
+        if not creation[0]:
+            error.process_created = False
+            error.cleanup_confirmed = True
+            error.admission_sent = False
+        raise
+
+
+def _spawn_daemon(
+    argv: Sequence[str | os.PathLike[str]],
+    *,
+    cwd: str | os.PathLike[str],
+    log_path: str | os.PathLike[str],
+    env: Mapping[str, str] | None,
+    env_overrides: Mapping[str, str] | None,
+    console_children: bool,
+    breakaway: bool,
+    contained_fallback: bool,
+    extra_creationflags: int,
+    display: str | None,
+    stderr_log_path: str | os.PathLike[str] | None,
+    instance,
+    _creation: list[bool],
+) -> subprocess.Popen | WindowsDaemonProcess:
     import agent_procutil as pu
 
     command = _validated_daemon_argv(argv)
@@ -267,10 +300,14 @@ def spawn_daemon(
 
                 launch_command = scope_command(command, receipt.instance_id, child_env, cwd=cwd_path)
             creation_attempted, creation_refused = True, False
+            _creation[0] = True
             try:
                 return subprocess.Popen(launch_command, **popen_kwargs, **kwargs)  # noqa: S603
-            except (OSError, ValueError, TypeError):
+            except (OSError, ValueError, TypeError) as error:
                 creation_refused = True
+                error.process_created = False
+                error.cleanup_confirmed = True
+                error.admission_sent = False
                 raise
 
         try:

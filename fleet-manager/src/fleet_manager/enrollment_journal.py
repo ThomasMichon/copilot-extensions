@@ -39,7 +39,7 @@ def verify_schema(connection: sqlite3.Connection) -> None:
             raise PlanError("unrecognized enrollment journal constraints")
 
 
-def _floor(connection: sqlite3.Connection, gateway: str, revision: int, fingerprint: str) -> None:
+def _check_floor(connection: sqlite3.Connection, gateway: str, revision: int, fingerprint: str):
     prior = connection.execute(
         "SELECT revision,digest FROM enrollment_floors WHERE gateway=?", (gateway,)).fetchone()
     if prior is not None:
@@ -47,8 +47,21 @@ def _floor(connection: sqlite3.Connection, gateway: str, revision: int, fingerpr
             raise PlanError("stale enrollment policy")
         if revision == prior[0] and fingerprint != prior[1]:
             raise PlanError("conflicting enrollment policy")
-        if revision == prior[0]:
-            return
+    return prior
+
+
+def check_floor(ledger: OperationLedger, *, gateway: str, revision: int, fingerprint: str) -> None:
+    """Qualify a candidate without advancing the accepted publication."""
+    if ledger._version != 5:
+        raise PlanError("enrollment journal migration is required")
+    with ledger._transaction() as connection:
+        _check_floor(connection, gateway, revision, fingerprint)
+
+
+def _floor(connection: sqlite3.Connection, gateway: str, revision: int, fingerprint: str) -> None:
+    prior = _check_floor(connection, gateway, revision, fingerprint)
+    if prior is not None and revision == prior[0]:
+        return
     connection.execute(
         "INSERT INTO enrollment_floors VALUES(?,?,?) ON CONFLICT(gateway) "
         "DO UPDATE SET revision=excluded.revision,digest=excluded.digest",

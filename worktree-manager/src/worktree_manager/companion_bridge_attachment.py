@@ -175,5 +175,5 @@ class BridgeTimelineAttachment(TimelineAttachment):
         if self._renderable():
             for state in tuple(self.panel.window.sources.values()):
                 if state.token.identity.provider is Provider.BRIDGE:
-                    self.panel.source_error(state.token, "Bridge reader paused; retained evidence only.")
+                    self.panel.pause_source(state.token)
         await super().set_selection(selection, reconcile=reconcile)
