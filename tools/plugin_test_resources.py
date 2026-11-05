@@ -8,15 +8,15 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-if __package__:
+if TYPE_CHECKING or __package__:
     from .cache_directory_paths import ordinary_cache_root
 else:
     from cache_directory_paths import ordinary_cache_root
 
 
-def resource_root(repo: Path) -> Path:
-    """Keep retained environments separate for every canonical source checkout."""
+def scratch_root(repo: Path) -> Path:
     source = repo.resolve(strict=True)
     configured = os.environ.get("AGENT_SCRATCH_ROOT")
     owner = (
@@ -25,15 +25,22 @@ def resource_root(repo: Path) -> Path:
     )
     scratch = (
         Path(configured).expanduser() if configured is not None
-        else Path(tempfile.gettempdir()) / f"copilot-extensions-tests-{owner}"
+        else Path(tempfile.gettempdir()).resolve() / f"ce-{owner}"
     )
     if not scratch.is_absolute():
         raise ValueError("AGENT_SCRATCH_ROOT must name an absolute directory")
     scratch = ordinary_cache_root(scratch)
     if scratch.is_relative_to(source):
         raise ValueError("test scratch must be outside the source checkout")
-    identity = hashlib.sha256(os.path.normcase(str(source)).encode("utf-8")).hexdigest()[:20]
     scratch.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return scratch
+
+
+def resource_root(repo: Path) -> Path:
+    """Keep retained environments separate for every canonical source checkout."""
+    source = repo.resolve(strict=True)
+    scratch = scratch_root(repo)
+    identity = hashlib.sha256(os.path.normcase(str(source)).encode("utf-8")).hexdigest()[:20]
     root = ordinary_cache_root(scratch / f"ce-tests-{identity}")
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     record_owner(root, source, retention="retained source-bound test cache; no automatic sweep")
@@ -60,10 +67,9 @@ def venv_root(repo: Path) -> Path:
 
 
 def runs_root(repo: Path) -> Path:
-    root = ordinary_cache_root(resource_root(repo) / "runs")
-    root.mkdir(mode=0o700, parents=True, exist_ok=True)
-    return root
+    return scratch_root(repo)
 
 
-def run_prefix(target: str) -> str:
-    return f"ce-{target[:4]}-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}-"
+def run_prefix(_target: str) -> str:
+    # Unix socket addresses need short paths; timestamps live in the breadcrumb.
+    return "c-"

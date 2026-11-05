@@ -311,7 +311,7 @@ def test_reaped_group_cleanup_overlaps_the_next_group(
     assert len(calls) == 2
     assert [path.name for path in removed[:2]] == ["g1", "g2"]
     assert len(workers) == 1
-    assert not list(tmp_path.glob("ce-alph-*"))
+    assert removed and not any(path.exists() for path in removed)
     assert "including preparation and cleanup" in capsys.readouterr().out
 
 
@@ -450,9 +450,11 @@ def test_final_sandbox_cleanup_failure_cannot_mask_cancellation_or_report_pass(
     monkeypatch, tmp_path, capsys, cleanup_runner, cancellation,
 ):
     original_remove = runner.tempfile.TemporaryDirectory._rmtree
+    roots = set()
 
     def remove(name, *args, **kwargs):
-        if Path(name).name.startswith("ce-alph-"):
+        if Path(name).name.startswith(runner.run_prefix("alpha")):
+            roots.add(Path(name))
             assert not kwargs.get("ignore_errors", False)
             raise OSError("final sandbox removal refused")
         return original_remove(name, *args, **kwargs)
@@ -471,8 +473,9 @@ def test_final_sandbox_cleanup_failure_cannot_mask_cancellation_or_report_pass(
         if cancellation is not None:
             assert "Sandbox cleanup failed: final sandbox removal refused" in output.err
     finally:
-        for root in tmp_path.glob("ce-alph-*"):
-            shutil.rmtree(root)
+        for root in roots:
+            if root.exists():
+                shutil.rmtree(root)
 
 
 @pytest.mark.parametrize("seam", ["wait", "shutdown"])
@@ -961,21 +964,29 @@ def test_manager_acceptance_retains_unsettled_sandbox(
 @pytest.mark.portfolio_tier("T1")
 @pytest.mark.effect("filesystem")
 @pytest.mark.parametrize("returncode", [0, 7])
+@pytest.mark.parametrize("contract", ["runtime", "callbacks", "updater", "uninstall", "source", "engine-source"])
 def test_manager_acceptance_cleans_settled_sandbox(
-    manager_acceptance, monkeypatch, returncode,
+    manager_acceptance, monkeypatch, returncode, contract,
 ):
     acceptance, releases = manager_acceptance
+    monkeypatch.setattr(acceptance.sys, "argv", [*acceptance.sys.argv, "--contract", contract])
     observed = []
 
     def settled(command, **kwargs):
         sandbox = kwargs["sandbox"]
+        assert not sandbox.is_relative_to(acceptance.REPO)
+        with monkeypatch.context() as nested:
+            nested.setenv("AGENT_SCRATCH_ROOT", kwargs["env"]["AGENT_SCRATCH_ROOT"])
+            nested.setattr(runner, "REPO", acceptance.REPO)
+            assert runner._venv_python("worktree-manager").is_relative_to(sandbox)
         observed.append(sandbox)
         (sandbox / "settled.txt").write_text("disposable evidence", encoding="utf-8")
         return returncode
 
     monkeypatch.setattr(acceptance, "run_contained", settled)
     assert acceptance.main() == returncode
-    assert len(observed) == (2 if returncode == 0 else 1)
+    expected = {"updater": 4, "uninstall": 3}.get(contract, 2) if returncode == 0 else 1
+    assert len(observed) == expected
     assert not any(sandbox.exists() for sandbox in observed)
     assert releases == [True]
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -48,10 +49,15 @@ def launch_options():
 
 
 @pytest.fixture(autouse=True)
-def runner_scratch(tmp_path, monkeypatch):
+def runner_scratch(tmp_path, monkeypatch, inherited_scratch):
     scratch = tmp_path.parent / "runner-scratch"
     monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(scratch))
     return scratch
+
+
+@pytest.fixture
+def inherited_scratch():
+    return os.environ.get("AGENT_SCRATCH_ROOT")
 
 
 @pytest.fixture
@@ -239,10 +245,61 @@ def test_scratch_os_temp_fallback_and_canonical_checkout_alias(cache, monkeypatc
     monkeypatch.setattr(runner, "REPO", source)
     python = runner._venv_python("alpha")
     assert python.is_relative_to(cache / "os-temp")
-    assert python.relative_to(cache / "os-temp").parts[0].startswith("copilot-extensions-tests-")
+    assert python.relative_to(cache / "os-temp").parts[0].startswith("ce-")
     monkeypatch.setattr(runner, "REPO", source / ".." / source.name)
     assert runner._venv_python("alpha") == python
     assert runner._venv_python("beta") != python
+
+
+def test_os_temporary_alias_is_canonical_but_explicit_alias_is_refused(cache, monkeypatch):
+    runner = load_runner("run-plugin-tests.py")
+    import plugin_test_resources as resources
+
+    parent = cache / "actual-temp"
+    parent.mkdir()
+    alias = cache / "os-temp-alias"
+    if os.name == "nt":
+        subprocess.run(
+            [os.environ["COMSPEC"], "/c", "mklink", "/J", str(alias), str(parent)],
+            check=True, capture_output=True, timeout=10, **launch_options(),
+        )
+    else:
+        alias.symlink_to(parent, target_is_directory=True)
+    monkeypatch.setattr(resources.tempfile, "gettempdir", lambda: str(alias))
+    monkeypatch.delenv("AGENT_SCRATCH_ROOT")
+    source = cache / "source"
+    source.mkdir()
+    monkeypatch.setattr(runner, "REPO", source)
+    assert runner._venv_python("alpha").is_relative_to(parent)
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(alias))
+    with pytest.raises(ValueError, match="not ordinary"):
+        runner._venv_python("alpha")
+
+
+@pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="native Unix sockets unavailable")
+def test_disposable_pytest_layout_can_bind_unix_socket(cache, monkeypatch, inherited_scratch):
+    runner = load_runner("run-plugin-tests.py")
+    if inherited_scratch is None:
+        monkeypatch.delenv("AGENT_SCRATCH_ROOT")
+    else:
+        monkeypatch.setenv("AGENT_SCRATCH_ROOT", inherited_scratch)
+    import tempfile
+    base = (
+        Path(inherited_scratch).expanduser().resolve()
+        if inherited_scratch else Path(tempfile.gettempdir()).resolve()
+    )
+    if len(os.fsencode(str(base))) > 50:
+        pytest.skip("caller temporary parent already exceeds this short-path socket lane")
+    parent = runner.runs_root(cache)
+    with runner._TestSandbox(prefix=runner.run_prefix("alpha"), dir=parent) as raw:
+        sandbox = Path(raw)
+        runner.record_owner(sandbox, cache, retention="disposable native socket regression")
+        temporary = sandbox / "t" / "g1" / "test_socket_address0"
+        temporary.mkdir(parents=True)
+        address = temporary / "rpc.sock"
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+            server.bind(str(address))
+        assert address.exists()
 
 
 def test_standalone_preparation_refuses_other_managed_target_and_legacy_cache(

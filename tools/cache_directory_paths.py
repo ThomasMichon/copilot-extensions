@@ -4,8 +4,9 @@ from __future__ import annotations
 from pathlib import Path
 import os
 import stat
+from typing import TYPE_CHECKING
 
-if __package__:
+if TYPE_CHECKING or __package__:
     from .native_test_paths import native_test_path
 else:
     from native_test_paths import native_test_path

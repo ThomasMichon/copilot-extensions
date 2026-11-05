@@ -6425,8 +6425,10 @@ python tools/run-plugin-tests.py agent-bridge -k picker # pass-through pytest -k
 ```
 
 Both shared runners resolve `AGENT_SCRATCH_ROOT` as an absolute directory,
-or use a per-user `copilot-extensions-tests-<user-key>` directory under the
-OS temporary directory when it is unset. Relative, file, linked/reparse,
+or use a per-user `ce-<user-key>` directory under the
+canonical OS temporary directory when it is unset. OS-provided temporary-parent
+aliases are resolved first (including macOS `/var`); explicit linked roots
+remain invalid. Relative, file, linked/reparse,
 or checkout-internal scratch roots fail explicitly, without falling back or
 touching existing checkout-local environments.
 
@@ -6434,8 +6436,10 @@ A retained `ce-tests-<canonical-checkout-key>/venvs/<platform>/<target>` cache
 keeps different checkouts and targets independent; canonical spellings of the
 same checkout reuse it. Its `scratch-owner.json` records source ownership and
 creation time, not cleanup permission. Disposable runs and dependency overrides
-use exclusively allocated, timestamped directories below that cache's `runs/`,
-with their own ownership breadcrumbs and the existing process-aware cleanup.
+use exclusively allocated short `c-<random>` directories directly under scratch,
+with ownership and timestamps in their breadcrumbs and the existing process-aware
+cleanup. The shallow paths preserve Unix socket address budgets; choose a short
+explicit scratch root when the OS temporary parent itself is too long.
 Nested test tools receive a sandbox-local `AGENT_SCRATCH_ROOT`, never the host's
 retained scratch root. Pytest's cache and interpreter bytecode caches also
 stay in the disposable sandbox. Environment leases, source fingerprints and unreaped-tree

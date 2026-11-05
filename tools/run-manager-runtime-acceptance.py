@@ -16,6 +16,7 @@ from pathlib import Path
 
 from plugin_test_containment import Limits, TestSandbox, isolated_environment, no_window_kwargs, run_contained
 from _admission_protocol import acquire
+from plugin_test_resources import record_owner, run_prefix, runs_root, venv_root
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -38,8 +39,6 @@ def main() -> int:
     )
     if prepared.returncode:
         return prepared.returncode
-    from plugin_test_resources import venv_root
-
     python = venv_root(REPO) / "worktree-manager" / (
         "Scripts/python.exe" if os.name == "nt" else "bin/python"
     )
@@ -55,11 +54,11 @@ def main() -> int:
     with ExitStack() as ownership:
         lease = acquire(0, python.parent.parent)
         ownership.callback(lease.release)
-        # Source + repair identities are longer than release-only slots. Keep
-        # their default-home fixture below OS temp, not a deep source checkout.
-        storage = {} if args.contract in {"source", "engine-source"} else {"dir": root}
-        raw = ownership.enter_context(TestSandbox(prefix="manager-acceptance-", **storage))
+        raw = ownership.enter_context(TestSandbox(
+            prefix=run_prefix("manager"), dir=runs_root(REPO),
+        ))
         sandbox = Path(raw)
+        record_owner(sandbox, REPO, retention="disposable after verified process cleanup")
         env = isolated_environment(os.environ, sandbox)
         env["MANAGER_RUNTIME_ACCEPTANCE_DATA"] = str(sandbox / "fixtures.json")
         prepare_command = [str(python), "-I", "-B", str(native), "--prepare", str(sandbox)]
