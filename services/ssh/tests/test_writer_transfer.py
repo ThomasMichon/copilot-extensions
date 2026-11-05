@@ -1,5 +1,6 @@
 """Serialized activation, preserved state, and stale-generation write fencing."""
 import asyncio
+from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor
 import threading
 from pathlib import Path
@@ -41,6 +42,37 @@ def test_activation_fences_previous_writer_and_preserves_directory(
     assert second.current() and not first.current()
     with pytest.raises(ValueError, match="managed-writer-requires-transfer-owner"):
         DirectoryStore(config)
+
+
+@pytest.mark.parametrize("case", ["matching", "foreign", "query-failure"])
+def test_ownership_probe_closes_real_retained_connections(
+    config: ServiceConfig, writer: type[FencedWriter], monkeypatch: pytest.MonkeyPatch, case: str,
+) -> None:
+    active = writer(config, "active-owner")
+    active.activate()
+    path = Path(config.to_dict()["data_dir"]) / "directory.sqlite3"
+    if case == "query-failure":
+        with closing(sqlite3.connect(path)) as db:
+            db.execute("ALTER TABLE service_writer RENAME COLUMN owner TO unavailable_owner")
+            db.commit()
+    connect = sqlite3.connect
+    retained: list[sqlite3.Connection] = []
+    def capture(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+        db = cast(sqlite3.Connection, connect(*args, **kwargs))
+        retained.append(db)
+        return db
+    monkeypatch.setattr(sqlite3, "connect", capture)
+    probe = writer(config, "foreign-owner" if case == "foreign" else "active-owner")
+    for _ in range(3):
+        assert probe.current() is (case == "matching")
+    assert len(retained) == 3
+    try:
+        for db in retained:
+            with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+                db.execute("SELECT 1")
+    finally:
+        for db in retained:
+            db.close()
 
 
 def test_invalid_configuration_activation_keeps_original_authority(

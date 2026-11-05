@@ -2,7 +2,6 @@
 
 import importlib.util
 import itertools
-from contextlib import contextmanager
 import os
 from pathlib import Path
 import stat
@@ -94,6 +93,12 @@ def test_candidate_requests_private_root_before_source_phase(tmp_path, monkeypat
     engine = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, engine)
     spec.loader.exec_module(engine)
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    (plugin / "pyproject.toml").write_text(
+        '[project]\nname="private-root-fixture"\nversion="1.0"\n'
+        '[tool.uv]\nexclude-newer="7 days"\n', encoding="utf-8",
+    )
     root = tmp_path / "fresh"
     if existing:
         root.mkdir()
@@ -106,14 +111,12 @@ def test_candidate_requests_private_root_before_source_phase(tmp_path, monkeypat
             requested.append(mode)
         return original(path, mode=mode, parents=parents, exist_ok=exist_ok)
     monkeypatch.setattr(Path, "mkdir", mkdir)
-    monkeypatch.setattr(engine, "_assert_source_pin", lambda *args: None)
-    monkeypatch.setattr(engine, "_selected_extras", lambda *args: ())
-    monkeypatch.setattr(engine, "_package_roots", lambda path: (path,))
-    monkeypatch.setattr(engine, "_selected_local_packages", lambda *args: ())
+    original_hash = engine._construction_hash
     class SourceReached(Exception):
         pass
-    @contextmanager
-    def phase(*args):
+    def fingerprinted(*args, **kwargs):
+        digest = original_hash(*args, **kwargs)
+        assert len(digest) == 64
         assert requested == [0o700]
         assert (root / ".installer-inputs").is_dir()
         if os.name != "nt":
@@ -128,11 +131,10 @@ def test_candidate_requests_private_root_before_source_phase(tmp_path, monkeypat
                 assert mode == 0o700
                 private_directory(root)
         raise SourceReached()
-        yield
-    monkeypatch.setattr(engine, "_source_phase", phase)
+    monkeypatch.setattr(engine, "_construction_hash", fingerprinted)
     with pytest.raises(SourceReached):
         with engine.numbered_candidate(
-            root, "1.0", plugin=tmp_path, uv=Path(sys.executable),
+            root, "1.0", plugin=plugin, uv=Path(sys.executable),
             base_python=Path(sys.executable), health_module="fixture",
         ):
             pytest.fail("probe reached construction")

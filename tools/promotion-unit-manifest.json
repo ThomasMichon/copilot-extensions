@@ -4616,7 +4616,7 @@
         "tools/promotion_unit_tests/test_state_root_read.py": "53bf31651afa639058e1a16115da39b32f3f99ece4bc42d8c6be918984dd6a43",
         "tools/promotion_unit_tests/test_trusted_harness_base.py": "956b4bd9276b8df946511772d3fe83ca5df6bc08d4606f731e8ac7307611b7d0",
         "tools/promotion_unit_tests/test_wheel_inputs.py": "1668723fecac311b9be3f4f2e387b664df6e5067e24843e0c782562d8386c35b",
-        "tools/promotion_unit_tests/test_windows_lease_acl.py": "1de70afe0d9c37d4de3f37165ee6db5df29ec30acacc7d3a3641b5f0ee73f558",
+        "tools/promotion_unit_tests/test_windows_lease_acl.py": "fe835a33942b655b151863eea389f706f4b671fa96291dd039f94d8b8a95026b",
         "tools/promotion_unit_tests/test_worktree_identity.py": "667c4cb239d7254cb4af7fa77faf4d1a711e1b01441bac48c3a01edcf279cecf",
         "tools/promotion_unit_tests/test_test_environment.py": "03e9b44952472c30b993b02fd193d8343f435a194dc8b97b6b71f5dc975b73dd",
         "tools/public_toolchain_source.py": "a381855e01131577662f7ece2c80ab6942da3a90f3ced242ffc80cc95e14a62f",

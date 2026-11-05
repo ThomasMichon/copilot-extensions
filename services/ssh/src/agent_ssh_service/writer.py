@@ -83,8 +83,11 @@ class FencedWriter:
     def observed_owner(self) -> str | None:
         path = self.root / "directory.sqlite3"
         try:
-            with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=1) as db:
+            db = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=1)
+            try:
                 return managed_owner(db)
+            finally:
+                db.close()
         except (OSError, sqlite3.Error):
             return None
 
