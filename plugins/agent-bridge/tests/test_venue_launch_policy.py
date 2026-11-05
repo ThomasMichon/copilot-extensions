@@ -248,13 +248,16 @@ async def test_a_refusal_at_the_final_recreate_still_records_the_typed_event(ses
 
 
 @pytest.mark.asyncio
-async def test_a_refused_start_fails_the_session_with_a_typed_event(tmp_db, monkeypatch):
+async def test_a_refused_start_fails_the_session_with_a_typed_event(
+    tmp_db, monkeypatch, permitted_provider_hosting,
+):
     monkeypatch.setattr("agent_bridge.session_host.codespace_transport.build_codespace_spawner",
                         lambda *a, **k: SimpleNamespace(transport=SimpleNamespace(
                             run=AsyncMock(return_value=(0, "/workspaces/example\n", "")),
                         )))
     monkeypatch.setattr("agent_bridge.venue_plugins.prepare_venue_plugins", AsyncMock(return_value=[]))
     monkeypatch.setattr("agent_bridge.session_manager._claim_codespace", lambda *a, **k: ("ok", ""))
+    monkeypatch.setattr("agent_bridge.session_manager._resolve_relay_launch_env", lambda *a: ("", None))
     release = Mock(return_value=True)
     monkeypatch.setattr("agent_bridge.session_manager._release_codespace_claim", release)
 
@@ -301,7 +304,7 @@ def test_a_check_timeout_kills_its_whole_tree():
     assert time.monotonic() - started < 15
 
 @pytest.mark.asyncio
-async def test_a_raw_codespace_spawn_asks_the_policy_too(monkeypatch):
+async def test_a_raw_codespace_spawn_asks_the_policy_too(monkeypatch, permitted_provider_hosting):
     """A resync (or a resume without a Session Host) spawns through the raw
     transport: it must not launch a worker the host policy refuses."""
     from agent_bridge import transport
@@ -316,7 +319,7 @@ async def test_a_raw_codespace_spawn_asks_the_policy_too(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_legacy_codespace_target_is_gated_by_its_command(monkeypatch):
+async def test_a_legacy_codespace_target_is_gated_by_its_command(monkeypatch, permitted_provider_hosting):
     """A target persisted before the codespace block existed names its CodeSpace
     only in its ``agent-codespaces ... --stdio`` command; a resync of it is
     gated like any other."""

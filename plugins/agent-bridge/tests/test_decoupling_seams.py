@@ -5,10 +5,9 @@ command* and the *relay launch env* by shelling out to the ``agent-codespaces``
 binstub (so an agent-codespaces fix reaches the dispatch path from its OWN venv
 with no agent-bridge redeploy). As of #1643 there is **no** in-process
 ``agent_codespaces`` import fallback -- the daemon runs from its own isolated
-venv where a provider package is neither importable nor on ``PATH`` -- so when
-the binstub is absent or the CLI misfires the seam degrades auth-light (``None``
-/ ``("", None)``) rather than importing the provider. These tests exercise both
-the CLI-hit and the degrade paths by mocking ``shutil.which`` and
+venv where a provider package is neither importable nor on ``PATH``. Relay
+preparation fails explicitly when its provider is unavailable; optional provision
+discovery still returns ``None``. These tests exercise the success and failure paths by mocking ``shutil.which`` and
 ``subprocess.run`` (the helpers do local ``import shutil``/``subprocess``, which
 bind the shared module objects, so patching their attributes works).
 """
@@ -17,6 +16,9 @@ from __future__ import annotations
 
 import subprocess
 from unittest.mock import patch
+from types import SimpleNamespace
+
+import pytest
 
 from agent_bridge.session_host import spawner
 from agent_bridge import session_manager
@@ -132,7 +134,7 @@ def test_relay_launch_env_prefers_cli_and_parses_json():
         return ok
 
     with patch("shutil.which", return_value="/bin/agent-codespaces"), \
-         patch("subprocess.run", side_effect=_run):
+         patch("agent_bridge.session_manager.run_captured", side_effect=_run):
         prelude, port = session_manager._resolve_relay_launch_env("my-cs", 50123)
     assert (prelude, port) == ("export T=x", 50123)
     assert seen["argv"] == [
@@ -149,23 +151,69 @@ def test_relay_launch_env_omits_relay_port_when_none():
         return ok
 
     with patch("shutil.which", return_value="/bin/agent-codespaces"), \
-         patch("subprocess.run", side_effect=_run):
+         patch("agent_bridge.session_manager.run_captured", side_effect=_run):
         session_manager._resolve_relay_launch_env("my-cs", None)
     assert "--relay-port" not in seen["argv"]
 
 
-def test_relay_launch_env_none_on_cli_failure():
-    # No in-process import fallback (#1643): a CLI failure degrades auth-light
-    # (("", None)) rather than importing agent_codespaces.
+def test_relay_launch_env_rejects_cli_failure():
     bad = subprocess.CompletedProcess([], 2, "", "nope")
     with patch("shutil.which", return_value="/bin/agent-codespaces"), \
-         patch("subprocess.run", return_value=bad):
-        assert session_manager._resolve_relay_launch_env("cs", 1) == ("", None)
+         patch("agent_bridge.session_manager.run_captured", return_value=bad):
+        with pytest.raises(RuntimeError, match="preparation exited 2"):
+            session_manager._resolve_relay_launch_env("cs", 1)
 
 
-def test_relay_launch_env_auth_light_when_no_binstub():
+def test_relay_launch_env_requires_provider():
     with patch("shutil.which", return_value=None):
-        assert session_manager._resolve_relay_launch_env("cs", None) == ("", None)
+        with pytest.raises(RuntimeError, match="provider is unavailable"):
+            session_manager._resolve_relay_launch_env("cs", None)
+
+
+@pytest.mark.parametrize("output", [
+    "", "not-json", "[]", "{}", '{"prelude": 1, "port": 5000}',
+    '{"prelude": "", "port": true}', '{"prelude": "", "port": 0}',
+])
+def test_relay_launch_env_rejects_invalid_provider_output(output):
+    with patch("shutil.which", return_value="/bin/agent-codespaces"), \
+         patch("agent_bridge.session_manager.run_captured", return_value=subprocess.CompletedProcess([], 0, output, "")):
+        with pytest.raises(RuntimeError, match="invalid output"):
+            session_manager._resolve_relay_launch_env("synthetic", None)
+
+
+def test_relay_launch_env_preserves_explicit_provider_opt_out():
+    with patch("shutil.which", return_value="/bin/agent-codespaces"), \
+         patch("agent_bridge.session_manager.run_captured", return_value=subprocess.CompletedProcess(
+             [], 0, '{"prelude": "", "port": null, "future": true}', "",
+         )):
+        assert session_manager._resolve_relay_launch_env("synthetic", None) == ("", None)
+
+
+def test_relay_launch_env_reports_provider_timeout():
+    with patch("shutil.which", return_value="/bin/agent-codespaces"), \
+         patch("agent_bridge.session_manager.run_captured", side_effect=subprocess.TimeoutExpired([], 15)):
+        with pytest.raises(RuntimeError, match="preparation failed \\(TimeoutExpired\\)"):
+            session_manager._resolve_relay_launch_env("synthetic", None)
+
+
+@pytest.mark.parametrize("operation", ["claim", "release-claim", "relay-launch-env"])
+def test_codespace_operations_use_registered_provider_context_without_path(operation):
+    with patch("shutil.which", return_value=None), \
+         patch("agent_bridge.provider_sources.discover_provider_manifests", return_value={
+             "codespace": SimpleNamespace(command=("provider-launcher", "--installation-context")),
+         }), \
+         patch("agent_bridge.session_manager.run_captured", return_value=subprocess.CompletedProcess(
+             [], 0, '{"prelude": "", "port": null}', "",
+         )) as run:
+        if operation == "claim":
+            assert session_manager._claim_codespace("synthetic", "/task/owner") == ("ok", "")
+        elif operation == "release-claim":
+            assert session_manager._release_codespace_claim("synthetic", "/task/owner") is True
+        else:
+            assert session_manager._resolve_relay_launch_env("synthetic", None) == ("", None)
+        assert run.call_args.args[0][:4] == [
+            "provider-launcher", "--installation-context", operation, "synthetic",
+        ]
 
 
 # --- _resolve_codespace_ai_plugin_dirs (session_manager, PR2) -------------

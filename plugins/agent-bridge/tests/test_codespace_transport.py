@@ -389,6 +389,7 @@ async def test_dynamic_workspace_overrides_populated_conventional_metadata(tmp_p
 
 @pytest.mark.asyncio
 async def test_replacement_resolves_dynamic_metadata_and_persists_concrete_child_cwd(monkeypatch):
+    import asyncio
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
     from agent_bridge.transport import SpawnTarget
@@ -427,7 +428,10 @@ async def test_replacement_resolves_dynamic_metadata_and_persists_concrete_child
     session = SimpleNamespace(
         session_id="synthetic", target=target, event_log=SimpleNamespace(append=lambda *a: None),
         mcp_servers=[], acp_session_id="old-acp", model_override=None, effort_override=None,
+        _codespace_ownership_lock=asyncio.Lock(),
     )
+    manager._sessions = {session.session_id: session}
+    manager._is_codespace_target = lambda target: True
     assert await _SessionHostRecoveryMixin._resume_via_new_remote_host(
         manager, session, on_acp_event=lambda *a: None, permission_callback=None,
     ) == ("client", "acp-session")
@@ -469,6 +473,41 @@ async def test_genuinely_live_recovery_keeps_persisted_workspace_without_dynamic
     assert target.codespace["acp_command"].startswith('cd "${')
     probe.assert_not_awaited()
     assert manager._reattach_one.await_args.args[0] is rec
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("has_claim", [False, True])
+async def test_failed_host_replacement_keeps_lock_for_retained_claim(
+    session_manager, monkeypatch, tmp_path, has_claim,
+):
+    from unittest.mock import AsyncMock, Mock
+    from agent_bridge.session_manager import Session, _REQUEST_OVERRIDES_KEY
+    from agent_bridge.transport import SpawnTarget
+
+    locks = tmp_path / "replacement-locks"
+    locks.mkdir()
+    monkeypatch.setattr("ssh_manager.locks.locks_dir", lambda: locks)
+    target = SpawnTarget(
+        type="command", codespace={"name": "synthetic"},
+        venue={_REQUEST_OVERRIDES_KEY: {"codespace_claim": (
+            {"name": "synthetic", "owner": "example-owner"} if has_claim else None
+        )}},
+    )
+    session = Session("replacement", "example-agent", target)
+    session_manager._sessions[session.session_id] = session
+    monkeypatch.setattr("agent_bridge.venue_plugins.resolve_controller_cwd", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        "agent_bridge.session_manager._resolve_relay_launch_env",
+        Mock(side_effect=RuntimeError("synthetic relay refusal")),
+    )
+    try:
+        with pytest.raises(RuntimeError, match="synthetic relay refusal"):
+            await session_manager._resume_via_new_remote_host(
+                session, on_acp_event=lambda *a: None, permission_callback=None,
+            )
+        assert (session.session_id in session_manager._codespace_lock_sessions) is has_claim
+    finally:
+        session_manager._release_codespace_lock(session.session_id)
 
 
 @pytest.mark.asyncio
@@ -551,7 +590,8 @@ async def test_failed_workspace_preflight_releases_real_ownership_before_next_la
         claims.clear()
 
 
-def test_ownership_scope_never_releases_a_live_incumbent(session_manager, monkeypatch, tmp_path):
+@pytest.mark.asyncio
+async def test_ownership_scope_never_releases_a_live_incumbent(session_manager, monkeypatch, tmp_path):
     from types import SimpleNamespace
     from unittest.mock import Mock
     from ssh_manager import TargetLock
@@ -564,7 +604,7 @@ def test_ownership_scope_never_releases_a_live_incumbent(session_manager, monkey
     core = SimpleNamespace(_claim_codespace=Mock(), _release_codespace_claim=Mock())
     try:
         with pytest.raises(RuntimeError, match="already owned"):
-            with codespace_launch_ownership(
+            async with codespace_launch_ownership(
                 session_manager, "new", {"name": "synthetic"}, "/new", core,
             ):
                 pytest.fail("must not pass incumbent ownership")
@@ -578,7 +618,8 @@ def test_ownership_scope_never_releases_a_live_incumbent(session_manager, monkey
 
 @pytest.mark.parametrize("status", ["conflict", "coordination-rejected"])
 @pytest.mark.parametrize("retain_on_error", [False, True])
-def test_rejected_claim_releases_only_new_local_lock(
+@pytest.mark.asyncio
+async def test_rejected_claim_releases_only_new_local_lock(
     session_manager, monkeypatch, tmp_path, status, retain_on_error,
 ):
     from types import SimpleNamespace
@@ -594,7 +635,7 @@ def test_rejected_claim_releases_only_new_local_lock(
                            _release_codespace_claim=Mock())
     error = CodespaceClaimConflictError if status == "conflict" else CodespaceCoordinationRejectedError
     with pytest.raises(error):
-        with codespace_launch_ownership(
+        async with codespace_launch_ownership(
             session_manager, "new", {"name": "synthetic"}, "/new", core,
             retain_on_error=retain_on_error,
         ):
@@ -605,7 +646,8 @@ def test_rejected_claim_releases_only_new_local_lock(
 
 
 @pytest.mark.parametrize("failure", ["preflight", "cancel", "pending"])
-def test_ownership_scope_restores_transfer_or_preserves_pending_authority(
+@pytest.mark.asyncio
+async def test_ownership_scope_restores_transfer_or_preserves_pending_authority(
     session_manager, monkeypatch, tmp_path, failure,
 ):
     import asyncio
@@ -627,7 +669,7 @@ def test_ownership_scope_restores_transfer_or_preserves_pending_authority(
     }[failure]
     try:
         with pytest.raises(type(error)):
-            with codespace_launch_ownership(
+            async with codespace_launch_ownership(
                 session_manager, "new", {"name": "synthetic"}, "/same-owner", core,
                 replace_session_id="old",
             ):
@@ -642,7 +684,8 @@ def test_ownership_scope_restores_transfer_or_preserves_pending_authority(
 
 @pytest.mark.parametrize("release_result", [False, RuntimeError("release command failed")])
 @pytest.mark.parametrize("retain_on_error", [False, True])
-def test_unconfirmed_claim_release_retains_ownership_and_original_preflight_cause(
+@pytest.mark.asyncio
+async def test_unconfirmed_claim_release_retains_ownership_and_original_preflight_cause(
     session_manager, monkeypatch, tmp_path, release_result, retain_on_error,
 ):
     from types import SimpleNamespace
@@ -662,7 +705,7 @@ def test_unconfirmed_claim_release_retains_ownership_and_original_preflight_caus
     original = RuntimeError("workspace probe failed")
     try:
         with pytest.raises(RuntimeError, match="claim cleanup is unconfirmed") as captured:
-            with codespace_launch_ownership(
+            async with codespace_launch_ownership(
                 session_manager, "failed-preflight", {"name": "synthetic"}, "/task/owner", core,
                 retain_on_error=retain_on_error,
             ):
@@ -673,7 +716,7 @@ def test_unconfirmed_claim_release_retains_ownership_and_original_preflight_caus
         assert TargetLock("synthetic", directory=locks).read_holder() is not None
         release.assert_called_once_with("synthetic", "/task/owner")
         with pytest.raises(RuntimeError, match="already owned"):
-            with codespace_launch_ownership(
+            async with codespace_launch_ownership(
                 session_manager, "another", {"name": "synthetic"}, "/different", core,
             ):
                 pytest.fail("unsettled ownership must not be replaced")
@@ -683,7 +726,8 @@ def test_unconfirmed_claim_release_retains_ownership_and_original_preflight_caus
 
 
 @pytest.mark.parametrize("stage", ["preflight", "connect"])
-def test_parity_retention_only_applies_after_entering_connect(
+@pytest.mark.asyncio
+async def test_parity_retention_only_applies_after_entering_connect(
     session_manager, monkeypatch, tmp_path, stage,
 ):
     from types import SimpleNamespace
@@ -699,7 +743,7 @@ def test_parity_retention_only_applies_after_entering_connect(
     original = RuntimeError(f"{stage} failed")
     try:
         with pytest.raises(RuntimeError) as captured:
-            with codespace_launch_ownership(
+            async with codespace_launch_ownership(
                 session_manager, "parity", {"name": "synthetic"}, "/task/owner", core,
                 retain_on_error=True,
             ) as enter_connect:
@@ -720,7 +764,8 @@ def test_parity_retention_only_applies_after_entering_connect(
 
 
 @pytest.mark.parametrize("admission", ["no-owner", "disabled", "missing-binstub"])
-def test_skipped_claim_admission_releases_new_lock_despite_cleanup_path_changes(
+@pytest.mark.asyncio
+async def test_skipped_claim_admission_releases_new_lock_despite_cleanup_path_changes(
     session_manager, monkeypatch, tmp_path, admission,
 ):
     from unittest.mock import Mock
@@ -748,7 +793,7 @@ def test_skipped_claim_admission_releases_new_lock_despite_cleanup_path_changes(
     configure_admission()
     try:
         with pytest.raises(RuntimeError) as captured:
-            with codespace_launch_ownership(
+            async with codespace_launch_ownership(
                 session_manager, "skipped", {"name": "synthetic"}, owner, core,
             ):
                 monkeypatch.delenv("AGENT_CODESPACES_DISABLE_CLAIM", raising=False)
@@ -761,7 +806,7 @@ def test_skipped_claim_admission_releases_new_lock_despite_cleanup_path_changes(
         assert not session_manager._codespace_lock_sessions
         assert TargetLock("synthetic", directory=locks).read_holder() is None
         configure_admission()
-        with codespace_launch_ownership(
+        async with codespace_launch_ownership(
             session_manager, "next", {"name": "synthetic"}, owner, core,
         ):
             assert session_manager._codespace_lock_sessions == {"next": "synthetic"}
@@ -772,7 +817,8 @@ def test_skipped_claim_admission_releases_new_lock_despite_cleanup_path_changes(
 
 
 @pytest.mark.parametrize("release_result", [False, RuntimeError("release failed")])
-def test_actual_acquired_claim_keeps_required_cleanup_when_provider_disappears(
+@pytest.mark.asyncio
+async def test_actual_acquired_claim_keeps_required_cleanup_when_provider_disappears(
     session_manager, monkeypatch, tmp_path, release_result,
 ):
     from types import SimpleNamespace
@@ -790,7 +836,7 @@ def test_actual_acquired_claim_keeps_required_cleanup_when_provider_disappears(
         "/provider/present" if name == "agent-codespaces" else real_which(name, *a, **kw)
     ))
     acquire = Mock(return_value=SimpleNamespace(returncode=0, stdout="", stderr=""))
-    monkeypatch.setattr(core.subprocess, "run", acquire)
+    monkeypatch.setattr(core, "run_captured", acquire)
     release = Mock(side_effect=release_result) if isinstance(release_result, Exception) else Mock(
         return_value=release_result,
     )
@@ -798,7 +844,7 @@ def test_actual_acquired_claim_keeps_required_cleanup_when_provider_disappears(
     original = RuntimeError("workspace preflight failed")
     try:
         with pytest.raises(RuntimeError, match="claim cleanup is unconfirmed") as captured:
-            with codespace_launch_ownership(
+            async with codespace_launch_ownership(
                 session_manager, "acquired", {"name": "synthetic"}, "/task/owner", core,
             ):
                 monkeypatch.setattr(core.shutil, "which", lambda name, *a, **kw: (
@@ -817,7 +863,8 @@ def test_actual_acquired_claim_keeps_required_cleanup_when_provider_disappears(
     "confirmed", "release-false", "release-error", "remote-pending",
     "transferred", "already-held", "transferred-skipped", "already-held-skipped",
 ])
-def test_claim_receipt_clears_only_after_confirmed_new_claim_rollback(
+@pytest.mark.asyncio
+async def test_claim_receipt_clears_only_after_confirmed_new_claim_rollback(
     session_manager, monkeypatch, tmp_path, outcome,
 ):
     from types import SimpleNamespace
@@ -863,7 +910,7 @@ def test_claim_receipt_clears_only_after_confirmed_new_claim_rollback(
     )
     try:
         with pytest.raises(RuntimeError):
-            with codespace_launch_ownership(
+            async with codespace_launch_ownership(
                 session_manager, "current", {"name": "synthetic"}, "/task/owner", core,
                 replace_session_id="old" if transferred else None,
                 claim_metadata=metadata, persist_claim_metadata=persist,

@@ -25,7 +25,6 @@ from .session_manager import (
     _append_plugin_dirs,
     _container_claim_key,
     _container_remote_child_argv,
-    _codespace_claim_key,
     _default_cwd,
     _failed_acp_handshake_command,
     _generate_name,
@@ -322,6 +321,9 @@ class _SessionStartMixin:
         )
 
         session.status = SessionStatus.STARTING
+        codespace_start = self._is_codespace_target(target)
+        if codespace_start:
+            await session._codespace_ownership_lock.acquire()
         self._sessions[session_id] = session
 
         tracker = ConnectTracker(session.event_log.append, session_id=session_id)
@@ -362,8 +364,9 @@ class _SessionStartMixin:
                 agent_proc.alive,
             )
 
-        owned_start = await acquire_start(session)
+        owned_start = None
         try:
+            owned_start = await acquire_start(session)
             cs_target = None
             # Prefer the structured provider metadata (#177); fall back to
             # shape-detecting the spawn_command for agents registered before
@@ -598,10 +601,10 @@ class _SessionStartMixin:
                 # dispatching to an already-claimed CodeSpace is bounced instead
                 # of clobbering the incumbent. Degrade-safe: no owner / disabled
                 # / binstub absent -> proceed unclaimed, today's behavior.
-                from .session_host.codespace_transport import codespace_launch_ownership
+                from .session_host.codespace_transport import codespace_launch_ownership, codespace_provider_call
                 claim_owner = getattr(target, "caller_worktree", None) or caller_id or controller_cwd
                 core = _core()
-                with codespace_launch_ownership(
+                async with codespace_launch_ownership(
                     self, session_id, cs_target, claim_owner or "", core,
                     holder_ref=getattr(target, "caller_owner_ref", None),
                     replace_session_id=replace_session_id, retain_on_error=parity_fault,
@@ -611,9 +614,10 @@ class _SessionStartMixin:
                     ),
                 ) as enter_connect:
                     from .relay_state import get_live_relay_port
-                    relay_prelude, relay_port = core._resolve_relay_launch_env(
-                        cs_target["name"], get_live_relay_port(),
-                    )
+                    async with codespace_provider_call(
+                        core._resolve_relay_launch_env, cs_target["name"], get_live_relay_port(),
+                    ) as (relay_prelude, relay_port):
+                        pass
                     cs_spawner = build_codespace_spawner(
                         cs_target["name"], cs_target["repo"], relay_port=relay_port,
                         ready_timeout=self._timeouts.session_host_ready,
@@ -810,6 +814,10 @@ class _SessionStartMixin:
                         target.worktree_id, acp_sid, pid=session.pid,
                         worktree_dir=target.cwd,
                     )
+        except asyncio.CancelledError:
+            self._mark_session_failed(session, trigger="start_cancelled")
+            await _cleanup_failed_process_launch()
+            raise
         except AgentHostingError as exc:
             session.status = SessionStatus.STOPPED
             self._db.update_session_status(session_id, SessionStatus.STOPPED.value, time.time())
@@ -893,106 +901,8 @@ class _SessionStartMixin:
         finally:
             if owned_start is not None:
                 owned_start.release()
+            if codespace_start:
+                session._codespace_ownership_lock.release()
 
         session.touch()
         return session
-
-    async def finalize_parity_fault_start(
-        self,
-        session: Session,
-        fault: str,
-    ) -> dict[str, Any]:
-        """Remove a confirmed failed-start transaction and report booleans."""
-        result = dict(session.parity_fault_result or {})
-        result["fault"] = fault
-        if session.status != SessionStatus.FAILED:
-            with contextlib.suppress(Exception):
-                await self.end_session(session.session_id, force=True)
-            raise RuntimeError(
-                "failed ACP handshake parity injection unexpectedly started "
-                "a usable session"
-            )
-        cleanup_confirmed = all(
-            result.get(name) is True
-            for name in (
-                "host_process_removed",
-                "child_process_removed",
-                "remote_authority_removed",
-                "forward_removed",
-                "relay_removed",
-                "provider_cleanup",
-            )
-        )
-        if not cleanup_confirmed:
-            claim_key = _codespace_claim_key(
-                session.target
-            ) or _container_claim_key(session.target)
-            ownership_retained = (
-                session.session_id in self._container_lock_sessions
-                or session.session_id in self._codespace_lock_sessions
-                or claim_key is not None
-            )
-            result.update({
-                "cleanup_confirmed": False,
-                "ownership_retained": ownership_retained,
-                "durable_session_retained": (
-                    self._db.get_session(session.session_id) is not None
-                ),
-            })
-            return result
-
-        session_id = session.session_id
-        claim_key = _codespace_claim_key(session.target)
-        core = _core()
-        claim_removed = (
-            True
-            if claim_key is None
-            else core._release_codespace_claim(*claim_key)
-        )
-        result["codespace_claim_removed"] = claim_removed
-        if not claim_removed:
-            result.update({
-                "cleanup_confirmed": False,
-                "ownership_retained": True,
-                "durable_session_retained": (
-                    self._db.get_session(session_id) is not None
-                ),
-            })
-            return result
-        self._release_container_lock(session_id)
-        self._release_codespace_lock(session_id)
-        await self.end_session(session_id, force=True)
-        host_index_removed = (
-            self._host_index is None
-            or self._host_index.get(session_id) is None
-        )
-        target_lock_removed = (
-            session_id not in self._container_lock_sessions
-            and session_id not in self._codespace_lock_sessions
-        )
-        result.update({
-            "session_row_removed": self._db.get_session(session_id) is None,
-            "session_memory_removed": session_id not in self._sessions,
-            "host_index_removed": host_index_removed,
-            "forward_removed": session_id not in self._forwards,
-            "relay_removed": session_id not in self._relays,
-            "target_lock_removed": target_lock_removed,
-            "ownership_retained": False,
-        })
-        result["cleanup_confirmed"] = all(
-            result.get(name) is True
-            for name in (
-                "host_process_removed",
-                "child_process_removed",
-                "remote_authority_removed",
-                "provider_cleanup",
-                "session_row_removed",
-                "session_memory_removed",
-                "host_index_removed",
-                "forward_removed",
-                "relay_removed",
-                "target_lock_removed",
-                "codespace_claim_removed",
-            )
-        )
-        return result

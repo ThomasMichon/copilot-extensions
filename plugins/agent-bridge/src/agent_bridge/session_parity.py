@@ -8,11 +8,75 @@ import time
 from typing import Any
 
 from .models import SessionStatus
+from .session_host.codespace_transport import codespace_session_operation
 from .transport import SpawnTarget
 
 
 class _SessionParityMixin:
     """Parity-only relay interruption and container replacement helpers."""
+
+    @codespace_session_operation
+    async def finalize_parity_fault_start(self, session, fault: str) -> dict[str, Any]:
+        """Remove a confirmed failed-start transaction and report booleans."""
+        from .session_manager import (
+            RemoteHostRecoveryPendingError, _codespace_claim_key, _container_claim_key,
+        )
+
+        result = dict(session.parity_fault_result or {})
+        result["fault"] = fault
+        if session.status != SessionStatus.FAILED:
+            with contextlib.suppress(Exception):
+                await self._end_session_owned(session.session_id, force=True)
+            raise RuntimeError(
+                "failed ACP handshake parity injection unexpectedly started a usable session"
+            )
+        cleanup_confirmed = all(result.get(name) is True for name in (
+            "host_process_removed", "child_process_removed", "remote_authority_removed",
+            "forward_removed", "relay_removed", "provider_cleanup",
+        ))
+        if not cleanup_confirmed:
+            claim_key = _codespace_claim_key(session.target) or _container_claim_key(session.target)
+            result.update({
+                "cleanup_confirmed": False,
+                "ownership_retained": (
+                    session.session_id in self._container_lock_sessions
+                    or session.session_id in self._codespace_lock_sessions
+                    or claim_key is not None
+                ),
+                "durable_session_retained": self._db.get_session(session.session_id) is not None,
+            })
+            return result
+        session_id = session.session_id
+        self._release_container_lock(session_id)
+        try:
+            await self._end_session_owned(session_id, force=True)
+        except RemoteHostRecoveryPendingError:
+            result.update({
+                "codespace_claim_removed": False,
+                "cleanup_confirmed": False, "ownership_retained": True,
+                "durable_session_retained": self._db.get_session(session_id) is not None,
+            })
+            return result
+        result["codespace_claim_removed"] = True
+        result.update({
+            "session_row_removed": self._db.get_session(session_id) is None,
+            "session_memory_removed": session_id not in self._sessions,
+            "host_index_removed": self._host_index is None or self._host_index.get(session_id) is None,
+            "forward_removed": session_id not in self._forwards,
+            "relay_removed": session_id not in self._relays,
+            "target_lock_removed": (
+                session_id not in self._container_lock_sessions
+                and session_id not in self._codespace_lock_sessions
+            ),
+            "ownership_retained": False,
+        })
+        result["cleanup_confirmed"] = all(result.get(name) is True for name in (
+            "host_process_removed", "child_process_removed", "remote_authority_removed",
+            "provider_cleanup", "session_row_removed", "session_memory_removed",
+            "host_index_removed", "forward_removed", "relay_removed", "target_lock_removed",
+            "codespace_claim_removed",
+        ))
+        return result
 
     async def interrupt_relays_for_parity(
         self,

@@ -1,0 +1,9 @@
+{
+  "comment": "Keep Codespace admission and release responsive while reconciling cancellation and required relay preparation.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
