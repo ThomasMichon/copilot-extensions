@@ -4,8 +4,8 @@ Parent: [complete effort](README.md).
 Existing intent: [sparse correction](sidecar-live-timeline.md#operator-correction-after-viewing-progress-captures-2026-11-04).
 Source boundary: [observation contract](sidecar-observation-contract.md).
 
-**Status: reviewed source-presentation amendment; source implementation
-validated locally, delivery pending.**
+**Status: reviewed amendment and bounded source implementation merged;
+installed/native and parent acceptance remain separate.**
 Plan #10689 merged as `e608ec4ba8163eab26f5db56b4b753a200c4cae9` after
 actual current-head independent approval and required green CI.
 This realizes the existing agenda-level/sparse intent without changing source
@@ -70,9 +70,12 @@ installed result. Frame byte bounds still govern actual page size.
 - [x] Retain deterministic visual comparisons and bounded work/resource
   controls. Preserve raw-history integrity and disclose any budget exhaustion;
   required unit-only CI is not expanded into an effectful matrix.
-- [ ] Drive source delivery through independent current-head review, required
+- [x] Drive source delivery through independent current-head review, required
   green CI and actual merge, followed immediately by the full parent and
   original-contract readback. Journal the exact earned source tier.
+  #10698 merged as `0f6de221b4658c2db1408fa0216e35d1d93db5df` after
+  current-head approval and green CI, followed immediately by the full parent,
+  all three original contracts and this amendment.
 
 Owner-qualified accumulated tool statistics remain a separate S2 obligation.
 Telemetry's inferred/bounded tool-state map and ACP's per-turn buffers are not
