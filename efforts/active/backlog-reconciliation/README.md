@@ -330,6 +330,22 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+Twelve further child trackers are administratively subsumed under ten OPEN
+parents after complete original, Plan/Validation and discussion-constraint
+intake. The [journal](<journal/2026/11.05 cohort-parent-luna-reconciliation.md>)
+preserves the direct resume/preference/version-skew chain, finality/CWD,
+transport-policy choice, rendezvous uncertainty, assigned configuration,
+hosted guidance, child diagnostics, required-MCP update, separately deferred
+native Picker and Worktrees Phase2 lanes. Actual independent-open conditions
+are retained; changed parent discussion prevents stale-snapshot intake.
+Two equal complete ten-page metadata scans at 14:37 PST observe 930 whole
+OPEN: 656 creator-eligible, 274 excluded, 624 original-cohort and 306 inflow.
+Sixteen audited departures since the prior census include the four earlier
+post-publication intakes; two eligible arrivals remain metadata-only and
+there are no external departures. Verified campaign dispositions are 866.
+The fixed whole-queue checkpoint remains 729, leaving 201 above target.
+The campaign stays Active with every Plan/Validation state unchanged.
+
 The next fifteen child trackers are administratively subsumed after direct
 Plan/Validation intake and OPEN parent readback across module discipline,
 critical-connectivity retention, delegated operation lifetime, peer-message
