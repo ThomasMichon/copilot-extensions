@@ -4,8 +4,8 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent vision-revision PR
 - **Created:** 2026-11-05
-- **Status:** Active
-- **Vision:** [Copilot Driver](../../../visions/plugins/agent-remote-driver/README.md)
+- **Status:** Done
+- **Vision:** [Copilot Driver](../../../../visions/plugins/agent-remote-driver/README.md)
 - **Umbrella issue:** #10765
 - **Sub-issues:** Existing #10636, #5930 and #5898 retain their owners.
 
@@ -34,16 +34,16 @@ existing component owners.
 
 ## Context
 
-[Session Hosting](../../../visions/session-hosting/README.md) defines provider
+[Session Hosting](../../../../visions/session-hosting/README.md) defines provider
 mechanics separately from durable agency. Its Driver provider now has an
 independently installable app boundary. Bridge remains coordination, Worktrees
 remains agency, and Manager remains a presentation/installation client.
 
-The [portable receiving effort](../portable-bridge-receiving-support/README.md)
+The [portable receiving effort](../../../active/portable-bridge-receiving-support/README.md)
 already owns compact receiving composition; #5930 owns driver mutation custody.
 This revision preserves both and records the app factoring rather than opening
 a competing launcher. The default-mode experiment remains independently gated.
-The app follows [authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
+The app follows [authoritative runtime replacement](../../../../visions/installer/README.md#authoritative-runtime-replacement)
 and the existing distribution, service-lifecycle and supported-skew patterns.
 
 ## Request
@@ -100,13 +100,13 @@ Review of the plan is not rollout permission.
 - [x] Identify existing receiving, control, hosting and mux owners.
 - [x] Add the canonical Driver app vision and reconcile hosting/client maps.
 - [x] Validate request capture, stable links, structure and public-safe scope.
-- [ ] Land the vision revision after review and required CI.
+- [x] Land the vision revision after review and required CI.
 
 ### Phase 2 - Source closeout
 
-- [ ] Confirm #10765 and existing runtime owners remain open and unchanged.
-- [ ] Record the merged revision, mark this finite effort Done and archive it
-  through the source PR flow.
+- [x] Confirm #10765 remains open and existing runtime responsibility is retained.
+- [x] Record the merged revision, mark this finite effort Done and move it to
+  the dated archive for normal source publication.
 
 ## Validation Plan
 
@@ -116,7 +116,7 @@ Review of the plan is not rollout permission.
 - [x] Check that no active sibling requires Manager-owned mux mechanics,
   Bridge-owned Session Host or a hostless headed Driver session.
 - [x] Run changed effort/vision structure and existing documentation checks.
-- [ ] Obtain final-head review and required CI without claiming runtime proof.
+- [x] Obtain final-head review and required CI without claiming runtime proof.
 
 ## Proposal
 
@@ -163,3 +163,17 @@ The parent fabric's idle reclamation rule follows the same mode-specific
 contract: CLI detach/disconnect is not expiry, and ACP disconnect does not
 bypass configured idle grace or pending work. Orphan collection remains
 separate from authorized provider lifecycle retirement and claim settlement.
+
+### 2026-11-05 - Vision merged and finite effort complete
+
+The coherent vision revision merged to Dev in #10768 at 2026-11-05 21:07 UTC,
+merge commit `67356be04ab6efc0229f479ae940ecf3e0fbf460`. Its final source head
+`301b7e8d3d158d3204c20c09469beed23676791a` had a passing Copilot approval,
+resolved feedback and green required CI. The parent lifetime rule was
+reconciled to CLI persistence and pending-work-aware ACP idle expiration.
+
+All work in this vision-only effort is complete. #10765 remains open for the
+separate implementation effort and its caller-convergence/lifetime acceptance;
+existing receiving, control, startup, retention and permission owners remain
+intact. No runtime extraction, package rename, installation, session effect or
+rollout occurred. Source review and merge establish intent, not running support.
