@@ -5,6 +5,13 @@ Method: [weighted semantic consolidation](semantic-density-consolidation.md).
 
 ## Result and coverage
 
+The [eight conditional native/read contracts](conditional-native-read-authority-contracts.md)
+integrate twenty-four ranked relationships while retaining literal native
+specimens, direct inherited intake, tri-state/trust reads and a conditional
+second-consumer gate. All eight stay OPEN; the
+[journal](<journal/2026/11.05 conditional-native-read-authority-contracts.md>)
+keeps source, native, receiving and completion evidence distinct.
+
 The [eleven owner/policy contracts](independent-owner-policy-contracts.md)
 integrate the next thirty-three ranked relationships without conflating
 similar implementation vocabulary with complete acceptance. All eleven stay
