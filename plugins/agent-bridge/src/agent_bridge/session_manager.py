@@ -438,6 +438,8 @@ def _release_codespace_claim(codespace_name: str, owner: str) -> bool:
     try:
         result = run_captured(
             [*command, "release-claim", codespace_name, "--owner", owner], timeout=30,
+            env={key: value for key, value in os.environ.items()
+                 if key.upper() != "AGENT_CODESPACES_DISABLE_CLAIM"},
         )
     except Exception as exc:
         log.warning("CodeSpace claim release failed (%s)", type(exc).__name__)
@@ -847,6 +849,7 @@ class Session:
         self.progress: dict[str, str] = {}
         self._prompt_task: asyncio.Task | None = None
         self._lifecycle_lock = asyncio.Lock()
+        self._codespace_ownership_lock = asyncio.Lock()
         self._turn_start_lock = asyncio.Lock()
         # Set when a context-pressure handoff is owed but the session is not yet
         # idle (usage crosses critical mid-turn). The turn-settle path fires the

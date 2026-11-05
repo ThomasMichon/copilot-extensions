@@ -1019,7 +1019,12 @@ cancellation during rollback. The owning loop persists the exact claim receipt
 before unwinding, and clears it before releasing the local TargetLock only after
 confirmed provider release. Unconfirmed release retains the session, receipt and
 lock for reconciliation instead of deleting the session. No create or prompt is
-replayed by this boundary. Relay-provider absence, timeout, failure or malformed
+replayed by this boundary. A per-session ownership guard serializes fresh
+admission, cold recovery, teardown and failed-start finalization. Remote process
+reaping does not release a guarded Codespace's TargetLock ahead of claim
+settlement, and concurrent end requests cannot issue delayed duplicate releases.
+Release removes the admission-only disable flag from its copied child environment.
+Relay-provider absence, timeout, failure or malformed
 output stops authenticated preparation explicitly; successful existing
 `{"prelude": "", "port": null}` output still represents relay opt-out. The
 provider CLI syntax, JSON fields and watchdog grace are unchanged.

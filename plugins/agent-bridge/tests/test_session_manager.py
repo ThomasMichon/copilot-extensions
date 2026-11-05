@@ -795,6 +795,7 @@ async def test_codespace_replacement_factory_receives_configured_readiness(
     )
     monkeypatch.setattr(manager, "_acquire_codespace_lock", Mock())
     monkeypatch.setattr(manager, "_release_codespace_lock", Mock())
+    manager._sessions[session.session_id] = session
     with pytest.raises(
         RuntimeError, match="relay provider failed" if relay_fails else "factory boundary reached",
     ):
@@ -1428,11 +1429,12 @@ async def test_failed_handshake_provider_cleanup_retains_container_lock(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("released", [False, True])
+@pytest.mark.parametrize("released, concurrent_end", [(False, False), (True, False), (True, True)])
 async def test_failed_handshake_claim_release_settles_receipt_before_session_removal(
     tmp_db,
     monkeypatch,
     released,
+    concurrent_end,
 ) -> None:
     release = Mock(return_value=released)
     monkeypatch.setattr(
@@ -1479,10 +1481,13 @@ async def test_failed_handshake_claim_release_settles_receipt_before_session_rem
         target_json=target.to_json(),
     )
 
-    result = await manager.finalize_parity_fault_start(
-        session,
-        FAILED_ACP_HANDSHAKE_FAULT,
-    )
+    finalization = manager.finalize_parity_fault_start(session, FAILED_ACP_HANDSHAKE_FAULT)
+    if concurrent_end:
+        result, _ended = await asyncio.gather(
+            finalization, manager.end_session(session.session_id, force=True),
+        )
+    else:
+        result = await finalization
 
     release.assert_called_once_with("example-codespace", "venue-parity:test")
     assert result["cleanup_confirmed"] is released
@@ -5267,6 +5272,7 @@ class TestCodespaceExclusiveClaim:
         caller_owner_ref=None,
         acp_command=None,
         relay_fails=False,
+        manager=None,
     ):
         if caller_owner_ref is not None:
             machine, project, worktree = caller_owner_ref.partition("#")[0].split("/")
@@ -5304,12 +5310,13 @@ class TestCodespaceExclusiveClaim:
             client = MagicMock()
             client.is_running = True
             client.pid = 12345
+            client.shutdown = AsyncMock()
             return client, "acp-test-123"
 
         monkeypatch.setattr(
             SessionManager, "_connect_via_session_host", fake_connect,
         )
-        manager = SessionManager(tmp_db)
+        manager = manager or SessionManager(tmp_db)
         target = self._cs_target(caller_worktree, caller_owner_ref)
         if acp_command is not None:
             target.codespace["acp_command"] = acp_command
@@ -5461,8 +5468,9 @@ class TestCodespaceExclusiveClaim:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("release_ok", [False, True])
     @pytest.mark.parametrize("legacy_target", [False, True])
+    @pytest.mark.parametrize("with_host_record", [False, True])
     async def test_cancelled_teardown_settles_release_before_receipt_or_lock_removal(
-        self, tmp_db, monkeypatch, release_ok, legacy_target,
+        self, tmp_db, monkeypatch, release_ok, legacy_target, with_host_record,
     ) -> None:
         import threading
         from agent_bridge.session_manager import (
@@ -5478,6 +5486,20 @@ class TestCodespaceExclusiveClaim:
             session.target.venue = None
             tmp_db.update_session_target(
                 session.session_id, session.target.to_json(), session.target.cwd,
+            )
+        if with_host_record:
+            from agent_bridge.session_host.host_index import HostRecord
+            manager._host_index.register(HostRecord(
+                session_id=session.session_id, port=12345, host_pid=101, child_pid=102,
+                boundary="codespace", endpoint={"codespace": "example-codespace"},
+            ))
+            monkeypatch.setattr("ssh_manager.ConnectionManager", lambda: SimpleNamespace(
+                ensure_connected=AsyncMock(), disconnect=AsyncMock(),
+                exec_command=AsyncMock(return_value=SimpleNamespace(exit_code=0, stdout="__REAPED__")),
+            ))
+            monkeypatch.setattr(
+                "agent_bridge.session_host.endpoints.ssh_config_from_endpoint",
+                lambda endpoint: SimpleNamespace(host_alias="synthetic"),
             )
         entered = threading.Event()
         finish = threading.Event()
@@ -5495,6 +5517,10 @@ class TestCodespaceExclusiveClaim:
             async with asyncio.timeout(5):
                 while not entered.is_set():
                     await asyncio.sleep(0.01)
+            if with_host_record:
+                await manager._drop_forward(session.session_id)
+                manager._kill_forward_sync(session.session_id)
+                assert session.session_id in manager._codespace_lock_sessions
             operation.cancel()
             await asyncio.sleep(0)
             operation.cancel()
@@ -5527,6 +5553,93 @@ class TestCodespaceExclusiveClaim:
             with contextlib.suppress(BaseException):
                 await operation
             manager._release_codespace_lock(session.session_id)
+
+    @pytest.mark.asyncio
+    async def test_end_during_claim_waits_for_original_start_and_receipt(
+        self, tmp_db, monkeypatch,
+    ) -> None:
+        import threading
+
+        entered, finish = threading.Event(), threading.Event()
+        releases = Mock(return_value=True)
+        monkeypatch.setattr("agent_bridge.session_manager._release_codespace_claim", releases)
+        manager = SessionManager(tmp_db)
+
+        def claim(name, owner):
+            entered.set()
+            assert finish.wait(5)
+            return "ok", ""
+
+        start = asyncio.create_task(self._start(
+            tmp_db, monkeypatch, manager=manager, claim_result=claim,
+            caller_worktree=str(tmp_db.db_path.parent),
+        ))
+        end = None
+        try:
+            async with asyncio.timeout(5):
+                while not entered.is_set():
+                    await asyncio.sleep(0.01)
+            session = next(iter(manager._sessions.values()))
+            end = asyncio.create_task(manager.end_session(session.session_id, force=True))
+            await asyncio.sleep(0.02)
+            assert not end.done()
+            assert tmp_db.get_session(session.session_id) is not None
+            assert session.session_id in manager._codespace_lock_sessions
+            finish.set()
+            await start
+            await end
+            releases.assert_called_once()
+            assert not manager._sessions and not manager._codespace_lock_sessions
+            assert tmp_db.get_session(session.session_id) is None
+        finally:
+            finish.set()
+            with contextlib.suppress(BaseException):
+                await start
+            if end is not None:
+                with contextlib.suppress(BaseException):
+                    await end
+
+    @pytest.mark.asyncio
+    async def test_concurrent_end_requests_release_claim_once(
+        self, tmp_db, monkeypatch,
+    ) -> None:
+        import threading
+
+        manager, session, _calls = await self._start(
+            tmp_db, monkeypatch, claim_result=("ok", ""),
+            caller_worktree=str(tmp_db.db_path.parent),
+        )
+        entered, finish = threading.Event(), threading.Event()
+        calls = []
+
+        def release(*identity):
+            calls.append(identity)
+            entered.set()
+            assert finish.wait(5)
+            return True
+
+        monkeypatch.setattr("agent_bridge.session_manager._release_codespace_claim", release)
+        first = asyncio.create_task(manager.end_session(session.session_id, force=True))
+        second = None
+        try:
+            async with asyncio.timeout(5):
+                while not entered.is_set():
+                    await asyncio.sleep(0.01)
+            second = asyncio.create_task(manager.end_session(session.session_id, force=True))
+            await asyncio.sleep(0.02)
+            assert len(calls) == 1
+            finish.set()
+            await asyncio.gather(first, second)
+            assert len(calls) == 1
+            assert not manager._codespace_lock_sessions
+            assert tmp_db.get_session(session.session_id) is None
+        finally:
+            finish.set()
+            with contextlib.suppress(BaseException):
+                await first
+            if second is not None:
+                with contextlib.suppress(BaseException):
+                    await second
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("restart", [False, True])
@@ -5824,9 +5937,11 @@ class TestReleaseCodespaceClaimHelper:
         monkeypatch.setattr(sm, "run_captured", run)
 
         assert sm._release_codespace_claim("cs", "/wt/a") is True
-        run.assert_called_once_with(
-            ["/provider/present", "release-claim", "cs", "--owner", "/wt/a"], timeout=30,
-        )
+        assert run.call_args.args[0] == [
+            "/provider/present", "release-claim", "cs", "--owner", "/wt/a",
+        ]
+        assert run.call_args.kwargs["timeout"] == 30
+        assert "AGENT_CODESPACES_DISABLE_CLAIM" not in run.call_args.kwargs["env"]
 
 
 class TestCodespaceClaimKey:

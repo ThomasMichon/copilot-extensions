@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from .connect import ConnectTracker
 from .models import SessionStatus
+from .session_host.codespace_transport import codespace_session_operation
 from .session_manager import (
     _append_plugin_dirs,
     _container_remote_child_argv,
@@ -703,6 +704,7 @@ class _SessionHostRecoveryMixin:
             )
         return attached
 
+    @codespace_session_operation
     async def _resume_via_new_remote_host(
         self,
         session: Session,

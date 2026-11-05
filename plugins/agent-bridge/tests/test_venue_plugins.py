@@ -874,6 +874,7 @@ async def test_provider_refresh_preserves_controller_provenance(
 async def test_native_venue_controller_context_start_and_recovery(
     monkeypatch, session_manager, controller, hosting_allowed, kind, recovery, context,
 ):
+    import asyncio
     import os
     from types import SimpleNamespace
     from unittest.mock import MagicMock
@@ -963,7 +964,9 @@ async def test_native_venue_controller_context_start_and_recovery(
             session_id="recovery", target=target, caller_id=caller_id, caller_session_id=session_id,
             event_log=SimpleNamespace(append=lambda *a: None), mcp_servers=[],
             acp_session_id=None, model_override=None, effort_override=None,
+            _codespace_ownership_lock=asyncio.Lock(),
         )
+        session_manager._sessions[session.session_id] = session
         if refused:
             with pytest.raises(RuntimeError, match="controller context"):
                 await session_manager._resume_via_new_remote_host(
@@ -1120,6 +1123,7 @@ async def test_cold_remote_spawn_authenticates_before_preparation_and_child(monk
 
 @pytest.mark.asyncio
 async def test_legacy_dynamic_workspace_recovery_resolves_persists_then_prepares(monkeypatch, controller):
+    import asyncio
     from types import SimpleNamespace
     from agent_bridge.models import PhasedTimeouts
     from agent_bridge.transport import SpawnTarget
@@ -1161,7 +1165,10 @@ async def test_legacy_dynamic_workspace_recovery_resolves_persists_then_prepares
     session = SimpleNamespace(
         session_id="synthetic", target=target, event_log=SimpleNamespace(append=lambda *a: None),
         mcp_servers=[], acp_session_id=None, model_override=None, effort_override=None,
+        _codespace_ownership_lock=asyncio.Lock(),
     )
+    manager._sessions = {session.session_id: session}
+    manager._is_codespace_target = lambda target: True
     result = await _SessionHostRecoveryMixin._resume_via_new_remote_host(
         manager, session, on_acp_event=lambda *a: None, permission_callback=None,
     )

@@ -326,6 +326,20 @@ class _SessionLifecycleMixin:
             await self.end_session(session_id, force=force)
 
     async def end_session(self, session_id: str, *, force: bool = False) -> None:
+        """Serialize Codespace deletion with the original admission/release."""
+        session_id = self._resolve_ref(session_id) or session_id
+        session = self._sessions.get(session_id)
+        if session is None:
+            raise KeyError(f"Session {session_id} not found")
+        if self._is_codespace_target(session.target):
+            async with session._codespace_ownership_lock:
+                if self._sessions.get(session_id) is not session:
+                    return
+                await self._end_session_owned(session_id, force=force)
+        else:
+            await self._end_session_owned(session_id, force=force)
+
+    async def _end_session_owned(self, session_id: str, *, force: bool = False) -> None:
         """End a session -- shut down client and clean up all state.
 
         Removes the session for a **local**-boundary session unconditionally

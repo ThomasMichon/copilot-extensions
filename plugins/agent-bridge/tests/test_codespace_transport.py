@@ -389,6 +389,7 @@ async def test_dynamic_workspace_overrides_populated_conventional_metadata(tmp_p
 
 @pytest.mark.asyncio
 async def test_replacement_resolves_dynamic_metadata_and_persists_concrete_child_cwd(monkeypatch):
+    import asyncio
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
     from agent_bridge.transport import SpawnTarget
@@ -427,7 +428,10 @@ async def test_replacement_resolves_dynamic_metadata_and_persists_concrete_child
     session = SimpleNamespace(
         session_id="synthetic", target=target, event_log=SimpleNamespace(append=lambda *a: None),
         mcp_servers=[], acp_session_id="old-acp", model_override=None, effort_override=None,
+        _codespace_ownership_lock=asyncio.Lock(),
     )
+    manager._sessions = {session.session_id: session}
+    manager._is_codespace_target = lambda target: True
     assert await _SessionHostRecoveryMixin._resume_via_new_remote_host(
         manager, session, on_acp_event=lambda *a: None, permission_callback=None,
     ) == ("client", "acp-session")

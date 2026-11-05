@@ -356,10 +356,13 @@ async def test_dynamic_hook_created_checkout_full_start_sequence(
             session = await session_manager.start_session(target)
             assert session.status == (SessionStatus.IDLE if hook_creates_checkout else SessionStatus.FAILED)
         else:
+            import asyncio
             session = SimpleNamespace(
                 session_id="replacement", target=target, event_log=SimpleNamespace(append=lambda *a: None),
                 mcp_servers=[], acp_session_id="old-acp", model_override=None, effort_override=None,
+                _codespace_ownership_lock=asyncio.Lock(),
             )
+            session_manager._sessions[session.session_id] = session
             operation = session_manager._resume_via_new_remote_host(
                 session, on_acp_event=lambda *a: None, permission_callback=None,
             )

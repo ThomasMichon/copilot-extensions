@@ -143,3 +143,26 @@ daemon. Review the plan before implementation.
   not qualified; the effort authorizes no live provisioning or credential effects.
 - Review/CI/merge and final validation reconciliation remain open.
   No live service, credential, SSO, claim or external-venue effects were taken.
+
+### 2026-11-04 - Review corrections
+
+- #10622's first review identified ownership gaps around the newly asynchronous
+  boundary: end during admission, HostRecord reap unlocking before release,
+  concurrent releases, and the provider inheriting an admission-disable flag.
+  Corrected the class with one per-session guard across admission, recovery,
+  end and parity finalization; receipt rechecks prevent a delayed second release.
+- Retained the local Codespace lock while guarded remote reaping completes.
+  Release filters the admission-only flag from a copied child environment,
+  rather than trusting a provider's successful no-op exit.
+- Moved parity finalization to its existing parity mixin; the startup module
+  is below the size cap without raising a baseline. No new coordinator,
+  launcher or service was introduced.
+- Added overlap regressions for end-during-claim, simultaneous end,
+  end/finalization, HostRecord-backed pending/failed release and a real synthetic
+  provider's disabled-admission no-op. The first run passed 247 controls and
+  skipped one platform case; 12 recovery fixtures lacked the new session lock.
+  Correcting that shared fixture passed its full 48-case controller packet.
+  Final combined revalidation passed 273 tests with one platform skip. A
+  follow-up nine-case packet also passed implicit forward cleanup while a
+  guarded release is pending. Ruff, install, docs and current-source contract
+  gates passed. Required CI, renewed review and merge remain open.

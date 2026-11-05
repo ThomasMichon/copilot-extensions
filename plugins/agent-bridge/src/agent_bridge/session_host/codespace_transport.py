@@ -27,6 +27,7 @@ import shlex
 import subprocess
 import time
 from contextlib import asynccontextmanager
+from functools import wraps
 from urllib.parse import quote
 
 from agent_procutil import no_window_flags
@@ -443,6 +444,19 @@ def codespace_child_preparer(target, transport, *, prelude, controller_cwd,
         )
         return ["bash", "-lc", prelude + append_plugin_dirs(target["acp_command"], directories)]
     return prepare_codespace_child
+
+
+def codespace_session_operation(function):
+    """Serialize recovery/finalization with admission and explicit teardown."""
+    @wraps(function)
+    async def serialized(manager, session, *args, **kwargs):
+        if not manager._is_codespace_target(session.target):
+            return await function(manager, session, *args, **kwargs)
+        async with session._codespace_ownership_lock:
+            if manager._sessions.get(session.session_id) is not session:
+                raise KeyError(session.session_id)
+            return await function(manager, session, *args, **kwargs)
+    return serialized
 
 
 @asynccontextmanager

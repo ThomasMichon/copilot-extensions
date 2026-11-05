@@ -29,6 +29,23 @@ async def _until(predicate):
             await asyncio.sleep(0.01)
 
 
+def test_release_does_not_inherit_the_providers_noop_admission_flag(tmp_path, monkeypatch):
+    claim = tmp_path / "synthetic-claim"
+    claim.touch()
+    script = (
+        "import os, pathlib, sys\n"
+        "if os.environ.get('AGENT_CODESPACES_DISABLE_CLAIM'): sys.exit(0)\n"
+        "pathlib.Path(sys.argv[1]).unlink()\n"
+    )
+    monkeypatch.setenv("AGENT_CODESPACES_DISABLE_CLAIM", "1")
+    monkeypatch.setattr(
+        core, "_codespace_provider_command",
+        lambda: [sys.executable, "-c", script, str(claim)],
+    )
+    assert core._release_codespace_claim("synthetic", "/task/owner") is True
+    assert not claim.exists(), "provider reported success without removing its claim"
+
+
 @pytest.fixture
 def provider(tmp_path, monkeypatch):
     locks = tmp_path / "locks"
