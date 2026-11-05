@@ -661,3 +661,8 @@ implementation. The exact support closure follows the consumer trace and tests.
   when that older capture was interpreted through today's registry.
   Original capture-time semantic decisions are now retained independently;
   neither the validator nor historical operation packets were changed.
+- Complete canonical-history validation now passes both contracts and 1,018
+  fixtures on `846569699e6a38bcf9201958eb950fa750470fc6`, with both the new
+  HTTP-52 and original HTTP-51 capture commits explicitly absent.
+  Fresh published-head CI and review remain required; no native or installed
+  acceptance is inferred from this repository evidence.
