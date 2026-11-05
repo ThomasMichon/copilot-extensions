@@ -902,6 +902,8 @@ state uses the runtime's canonical identity and receipt validation. Conditional
 fragment locations that cannot be established before activation remain unknown
 and inert rather than being guessed. Configuration and fragment-directory
 changes invalidate reuse.
+Registry fallback selects only that platform's path, and unquoted YAML null
+anchors clear to the fallback just like JSON null.
 The standalone readers are generated with `python tools/sync-execution-platform.py`;
 `--check` audits their canonical source delivery.
 Read-only native runtime discovery works without PATH Python. Candidate

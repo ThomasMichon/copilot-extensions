@@ -181,3 +181,9 @@ failure behavior, cache invalidation and mixed payload/runtime paths.
 - Lower-level policy cleanup fixtures now explicitly admit their events, retaining the separate real admission controls. Timeout and caller-exit cases reach actual workers and verify birth-qualified descendant retirement rather than succeeding through the new early no-op.
 - The complete six-file packet passed 294 tests with 22 platform skips in 579.58 seconds including preparation and cleanup, at the original budgets. A final five-case packet passed after extending dependency-free JSON/YAML override and clearing coverage. All eight real native policy-lifetime/redirector cases are included.
 - Source guards, generation/installation contracts, version/docs consistency and lint pass. The positively admitted unit-source inputs remain unchanged. No installed update, service action or rollout was performed; fresh review, required CI, merge and canonical archival remain open.
+
+### 2026-11-05 - Null clearing and platform-exact registration
+
+- The no-PyYAML scalar reader now maps unquoted YAML null forms, including empty values, to `None` while preserving quoted strings. Per-anchor clearing therefore follows the same registry fallback as canonical configuration and JSON null.
+- Registry location selection uses only the requested platform, matching `RepoEntry.local_path()`. WSL does not inherit a Linux-only checkout; an explicit machine anchor remains authoritative.
+- Thirteen targeted and adjacent cases passed, covering null spellings, JSON equivalence, clearing, strict WSL association, explicit override and persistent platform isolation. Lint passes; admitted-unit inputs are unchanged. Fresh review and exact-head CI still gate merge.

@@ -351,6 +351,37 @@ def test_machine_anchor_override_precedes_registered_anchor_and_invalidates_reus
     assert module.admitted(payload, home=tmp_path)
 
 
+@pytest.mark.parametrize("scalar", ["null", "~", "Null", "NULL", "", "json"])
+def test_per_anchor_null_clears_to_registry_without_yaml(tmp_path, monkeypatch, scalar):
+    module = load("managed_session")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setitem(sys.modules, "yaml", None)
+    anchor, _ = fixture_project(tmp_path)
+    config = tmp_path / ".example" / "config.yaml"
+    config.parent.mkdir()
+    config.write_text(
+        json.dumps({"repos": {"example": {"anchor": None}}}) if scalar == "json" else
+        f"repos:\n  example:\n    anchor: {scalar}\n"
+    )
+    assert module.admitted({"sessionId": "cleared", "cwd": str(anchor)}, home=tmp_path)
+
+
+def test_wsl_does_not_inherit_linux_only_registration(tmp_path, monkeypatch):
+    module = load("managed_session")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(module, "detect_platform", lambda: "wsl")
+    anchor, registry = fixture_project(tmp_path)
+    (registry / "repos.yaml").write_text(json.dumps({
+        "repos": {"example": {"linux": str(anchor)}},
+    }))
+    payload = {"sessionId": "wsl-only", "cwd": str(anchor)}
+    assert not module.admitted(payload, home=tmp_path)
+    config = tmp_path / ".example" / "config.yaml"
+    config.parent.mkdir()
+    config.write_text(json.dumps({"repos": {"example": {"anchor": str(anchor)}}}))
+    assert module.admitted(payload, home=tmp_path)
+
+
 def test_namespaced_anchor_override_uses_canonical_repository_identity(tmp_path, monkeypatch):
     from types import SimpleNamespace
     import test_registry_paths as fixtures

@@ -41,7 +41,9 @@ def _scalar(value: str):
     if value.startswith("'") and value.endswith("'"):
         return value[1:-1].replace("''", "'")
     value = value.split(" #", 1)[0].strip()
-    if not value or value == "{}":
+    if not value or value in {"null", "Null", "NULL", "~"}:
+        return None
+    if value == "{}":
         return {}
     if value in {"true", "false"}:
         return value == "true"
@@ -234,7 +236,7 @@ def _anchor_candidates(
     for selected_platform in platforms:
         if selected_platform not in {"windows", "wsl", "linux"}:
             raise ValueError("project platform is unavailable")
-        keys = ("wsl", "linux") if selected_platform == "wsl" else (selected_platform,)
+        keys = (selected_platform,)
         registered = next(
             (repo[key] for key in keys if isinstance(repo.get(key), str) and repo[key]),
             project.get("anchor"),
