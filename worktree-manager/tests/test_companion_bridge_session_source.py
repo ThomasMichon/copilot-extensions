@@ -216,7 +216,7 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         encoding="utf-8",
     )
     script.chmod(0o700)
-    monkeypatch.setattr(bridge, "bridge_command", lambda root: [str(script)])
+    monkeypatch.setattr(bridge, "bridge_command", lambda root: [sys.executable, "-I", str(script)])
     result = {
         "log": log, "session": session, "requests": requests, "following": following,
         "counts": counts, "unsupported": unsupported,

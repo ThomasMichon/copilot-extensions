@@ -2420,6 +2420,19 @@ it never relaxes Job breakaway restrictions to make a run pass.
 Linux skips do not qualify this Windows boundary. Source/commit-stamped Windows
 execution is required; server captures and ConPTY bytes are not headed pixels,
 window/focus-stealing observations, real owner composition or frame latency.
+The same Windows packet separately selects `test_companion_joined_psmux.py`
+over the actual private Worktrees resident, managed Agenda, Bridge semantic
+route/EventLog and callback-derived current-input projection. It uses the
+shared source selection/bootstrap and loopback carrier substitutions, not a
+production service or SDK actor. Actual ConPTY keyboard input selects a known
+session, browses independent history, retains sparse full/narrow views and
+observes live purpose/count updates without leaving older work. Escape requires
+all three birth-qualified reader processes and the observer to exit while the
+original CLI pane/PID/session remains live and accepts further input. The strict
+caller-owned Job and retained handles govern failure cleanup. Linux skips are
+not Windows qualification; exact source-stamped native execution is required.
+Its change-only geometry/focus snapshots are fixture observations, not headed
+pixels, native-frame or input-ready performance measurements.
 The older PSMux 3.3.5 baseline has exhibited immediate session exits and later
 CLI/directory loss in this fixture. Those observations remain an unqualified
 stability gap under #8811, not a reason to skip a failed test or claim that

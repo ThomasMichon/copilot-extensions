@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from collections.abc import Awaitable, Callable
 import json
 import os
@@ -95,6 +96,15 @@ raise SystemExit(mux_companion.run(
 
     def command(arguments: list[str]) -> str:
         assert arguments[:2] == ["-m", "worktree_manager.mux_companion"]
+        if os.name == "nt":
+            entry = peer["checkout"].parent / "native-app.py"
+            entry.write_text(bootstrap, encoding="utf-8")
+            argv = [sys.executable, "-I", "-B", str(entry), *arguments[2:]]
+            script = "& " + " ".join("'" + part.replace("'", "''") + "'" for part in argv)
+            script += "; exit $LASTEXITCODE"
+            return "pwsh -NoLogo -NoProfile -EncodedCommand " + base64.b64encode(
+                script.encode("utf-16-le"),
+            ).decode("ascii")
         return shlex.join([sys.executable, "-I", "-B", "-c", bootstrap, *arguments[2:]])
 
     monkeypatch.setattr(companion_runtime, "companion_shell_command", command)

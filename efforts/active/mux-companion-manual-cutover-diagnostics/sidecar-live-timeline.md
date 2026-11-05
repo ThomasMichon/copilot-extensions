@@ -526,8 +526,10 @@ publication and installed support retain their separate qualification.
   [linked worktree-state design](worktree-state-lifetime.md). Existing source
   approvals do not authorize actual data relocation, collection or deletion.
   #10224 delivers D1's allocator/discovery source and #10238 D2's explicit
-  initialization/export, and #10251 D3's Manager consumer. D4-D5 and native durability
-  remain open rather than completing this combined acceptance.
+  initialization/export, and #10251 D3's Manager consumer. #10777 qualifies
+  the private native Windows allocation/retry and complete-export filesystem
+  controls. Combined native integration, archival acknowledgment and D5 remain
+  open rather than completing this combined acceptance.
 - [x] Attach the selected worktree provider to the actual Manager Timeline
   through the owning process boundary, with independent page/live cursors and
   request/source/head fences. #10131 includes the resident-to-CLI-to-Textual
@@ -617,6 +619,9 @@ publication and installed support retain their separate qualification.
   actual input/history/resize/return and strict owned cleanup. The initial
   startup-banner failure remains unexplained; this is not startup-stability,
   installed, popup/Relay, headed-pixel or native-performance acceptance.
+  The manual Windows packet also selects the private actual-owner composition
+  in `test_companion_joined_psmux.py`; source or Linux-skipped delivery alone
+  does not qualify that still-pending native join.
 - [ ] Qualify current pane/PID preservation, focus, resize, observer exit,
   mode guides and the separately owned permanent Claims chrome.
 - [ ] Record performance/retention/coverage and source versus installed/native

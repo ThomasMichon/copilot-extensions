@@ -572,6 +572,11 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       Its 84-case native packet has zero skips. The first missing-banner
       startup failure remains unexplained; this is not startup-stability,
       installed, popup/Relay, headed-pixel or native-performance acceptance.
+      #10777 qualifies private native Windows new-home allocation/exact retry,
+      failed final-barrier acknowledgment/retry and complete agenda export with
+      copied readback. Its three native controls have zero skips. Combined
+      native owner composition, installed operation, archive acknowledgment
+      and D5 operational acceptance remain open.
       The [known-output presentation follow-up](sidecar-output-presentation.md)
       addresses actual message/thought bursts that still overwhelm normal
       work rows. Plan #10689 and implementation #10698 are merged.
@@ -582,7 +587,7 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       authority or closure of the retained source/native/manual gates.
       D5 actual relocation, restoration/reclamation, archive acknowledgment and
       installed/native qualification remain open.
-      Current answerability/PRE qualification, archival/rescue, native durability and
+      Current answerability/PRE qualification, archival/rescue, combined native integration and
       whole S2-S5 and original root gates remain open.
 
 ## Validation Plan
@@ -666,6 +671,7 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+- [2026-11-05 - Native Windows allocation/export qualification and remaining owner composition](journal/2026/11.05-sidecar-windows-durability.md)
 - [2026-11-05 - Actual Windows client qualification and retained startup uncertainty](journal/2026/11.05-sidecar-windows-client.md)
 - [2026-11-05 - Maintenance-aware resident recovery and retained child custody](journal/2026/11.05-sidecar-resident-recovery.md)
 - [2026-11-05 - Native three-owner composition and retained PRE boundary](journal/2026/11.05-sidecar-native-owner-composition.md)
