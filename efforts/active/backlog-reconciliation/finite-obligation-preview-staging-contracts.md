@@ -129,8 +129,9 @@ deferred assignment is disclosed, not fabricated.
 The original explicit installed no-write acceptance remains after qualified
 containing release and an authorized update.
 Historical release containment is not asserted as a current all-work hold.
-Previously whole-read #10098's phase/unknown/dead-writer boundary, #9731's
-replay intent/receipt storage and #9813's checkpoint documentation do not
+Previously whole-read #10098's registered Picker reload/footer status and
+deferred provider-read repair, #9731's replay intent/receipt storage and
+#9813's checkpoint documentation do not
 establish that installed preview witness.
 No production preview, record reset, update or cleanup probe runs.
 
