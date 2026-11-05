@@ -466,6 +466,11 @@ def cleanup_disposition(
     if info.state == S.DIRTY or info.dirty > 0:
         return CleanupDisposition(False, "dirty", v.reason)
 
+    from .checkout_data import preservation_reason
+    if rec.checkout_managed and rec.worktree_path:
+        if reason := preservation_reason(rec.worktree_path):
+            return CleanupDisposition(False, "retained-data", reason)
+
     if rec.status == "finalized" or info.state == S.COMPLETED:
         return CleanupDisposition(True, "clean", v.reason)
 

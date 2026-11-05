@@ -61,6 +61,7 @@ from . import (
     tracking,
 )
 from .config import Config
+from .checkout_data import preservation_reason
 from .finalize_lock import FinalizeLock
 from .finalize_support import authority_fenced_write as _authority_fenced_write
 from .finalize_support import dry_run_finalize_preview as _dry_run_finalize_preview
@@ -1570,11 +1571,14 @@ def validate_and_finalize(
         _reconcile_merged_pointers(repo, worktree_path, anchor, branch)
         from .finalized_checkout import optional_snapshot
         finalized_identity = optional_snapshot(worktree_path) if Path(worktree_path).exists() else None
+        removal_candidate = (
+            checkout_managed and not inside_worktree and not has_live_session
+            and not paired_pending and Path(worktree_path).exists()
+        )
+        data_blocker = preservation_reason(worktree_path) if removal_candidate else None
         process_blocker = (
             procs.checkout_retirement_blocker(worktree_path)
-            if checkout_managed and not inside_worktree and not has_live_session
-            and not paired_pending and Path(worktree_path).exists()
-            else None
+            if removal_candidate and not data_blocker else None
         )
         # Recheck after inspection for both retained finalization and removal.
         # External writers can still race this check without a filesystem fence.
@@ -1586,7 +1590,7 @@ def validate_and_finalize(
                 output.err(err)
                 _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id, config)
                 return False
-        if not checkout_managed or inside_worktree or has_live_session or paired_pending or process_blocker:
+        if not checkout_managed or inside_worktree or has_live_session or paired_pending or data_blocker or process_blocker:
             reason = (
                 "the checkout is owned by an external session host"
                 if not checkout_managed
@@ -1596,7 +1600,7 @@ def validate_and_finalize(
                     else (
                         "a live session or guidance worker is still using the worktree"
                         if has_live_session
-                        else ("its paired sibling is not confirmed finalized" if paired_pending else process_blocker)
+                        else ("its paired sibling is not confirmed finalized" if paired_pending else data_blocker or process_blocker)
                     )
                 )
             )
@@ -1636,7 +1640,8 @@ def validate_and_finalize(
                     else (
                         "inside_worktree" if inside_worktree
                         else ("live_session" if has_live_session else (
-                            "paired_pending" if paired_pending else "process_blocker"))
+                            "paired_pending" if paired_pending else (
+                                "retained_data" if data_blocker else "process_blocker")))
                     )
                 ),
             )
@@ -1644,6 +1649,8 @@ def validate_and_finalize(
             print("Removing worktree...")
             if not git_ops.remove_worktree(anchor, worktree_path):
                 output.warn("Could not remove worktree via git -- forcing directory removal.")
+            if reason := preservation_reason(worktree_path):
+                raise ValueError(reason)
 
             print(f"Removing branch {branch}...")
             if preserve_tracked_branch:
@@ -1686,6 +1693,8 @@ def validate_and_finalize(
             wt_dir = Path(worktree_path)
             if wt_dir.exists():
                 for attempt in range(4):
+                    if reason := preservation_reason(wt_dir):
+                        raise ValueError(reason)
                     shutil.rmtree(wt_dir, ignore_errors=True)
                     if not wt_dir.exists():
                         break
@@ -1764,7 +1773,7 @@ def validate_and_finalize(
             "worktree_finalized",
             worktree_id=worktree_id,
             branch=branch,
-            removed=not (inside_worktree or has_live_session or paired_pending or process_blocker or not checkout_managed),
+            removed=not (inside_worktree or has_live_session or paired_pending or data_blocker or process_blocker or not checkout_managed),
         )
 
         output.ok(f"Worktree {worktree_id} finalized.")

@@ -117,7 +117,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         READ_ACTION as OBSERVATION_READ_ACTION,
     )
     from . import worktree_status_daemon
-    from .status_monitor_drain import DrainTrace, drain_with_diagnostics
+    from .status_monitor_drain import DrainTrace, MonitorExitTrace, drain_with_diagnostics
     from .status_monitor_retirement import drain_observations, prune_retired_surfaces, surface_busy
     from .worktrees_runtime import READ_ACTION, WorktreesRuntime
     from .worktrees_projection_index import ProjectionError, ProjectionUnavailable
@@ -602,11 +602,12 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     empty_strikes = 0
     idle_guard = None
     max_empty_strikes = 3
+    exit_reason = "loop-error"
 
     from . import status_monitor_recovery_contract as guarded_recovery
 
     def _handle_control(action: str, payload: dict, *, routing_held: bool = False) -> dict:
-        nonlocal admission_closed, published_lock
+        nonlocal admission_closed, published_lock, exit_reason
         if action == preparation.ACTION:
             with state_lock:
                 if published_lock or not preparation.cancel(
@@ -681,6 +682,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         if not _publish_lock():
                             _enter_drain_only_state()
                             return {"adopted": False, "error": "monitor discovery publication refused"}
+                    exit_reason = "loop-error"
             from . import runtime_monitor_grace
 
             runtime_monitor_grace.arm(
@@ -735,6 +737,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         if not _publish_lock(routing_held=routing_held):
                             _enter_drain_only_state()
                             return {"draining": True, "error": "monitor discovery publication refused"}
+                    exit_reason = "loop-error"
             trace.emit("complete", "ok")
             wake_event.set()
             return {"draining": False}
@@ -764,24 +767,26 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     published_lock = _start_request_surfaces()
     if published_lock:
         _publish_lock()
+    exit_trace = MonitorExitTrace(status_monitor_cutover.routing_dir(), control_server.port)
 
     def _idle_candidate_still_empty() -> bool:
         retirements.refresh(cleanup=False)
         return (
-            status_monitor_cutover.active_generation_for_pid(os.getpid()) is not None
-            and published_lock and not admission_closed and not shutdown_requested.is_set()
-            and not monitor_roots.live_picker_projects()
-            and not core.list_cache.recent_demand_projects()
-            and not reconciler.has_live_worktree_mux
-            and not worktree_status_runtime.has_active_demand()
-            and not managed_mux_runtime.has_active_demand()
-            and not worktrees_runtime.demand_projects()
-            and not repositories_runtime.has_active_demand()
-            and not _drain_busy_reasons()
-            and not allocation_linker.has_demand()
-            and not retirements.pending
+            exit_trace.begin_idle()
+            and exit_trace.check("active-route", status_monitor_cutover.active_generation_for_pid(os.getpid()) is not None)
+            and exit_trace.check("admission", published_lock and not admission_closed and not shutdown_requested.is_set())
+            and exit_trace.check("picker", not monitor_roots.live_picker_projects())
+            and exit_trace.check("list", not core.list_cache.recent_demand_projects())
+            and exit_trace.check("worktree-mux", not reconciler.has_live_worktree_mux)
+            and exit_trace.check("worktree-status", not worktree_status_runtime.has_active_demand())
+            and exit_trace.check("managed-mux", not managed_mux_runtime.has_active_demand())
+            and exit_trace.check("worktrees-roster", not worktrees_runtime.demand_projects())
+            and exit_trace.check("repositories", not repositories_runtime.has_active_demand())
+            and exit_trace.check("in-flight", not _drain_busy_reasons())
+            and exit_trace.check("allocation", not allocation_linker.has_demand())
+            and exit_trace.check("retirement", not retirements.pending)
             # A completed handler publishes demand before its busy count drops.
-            and (hook_server is None or not hook_server.has_recent_hook_demand())
+            and exit_trace.check("recent-tool-hook", hook_server is None or not hook_server.has_recent_hook_demand())
         )
 
     try:
@@ -815,10 +820,12 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 handover.generation = active_generation if handover.promotion_requested else None
                 if handover.promotion_requested and handover.generation is None and runtime_superseded():
                     if not core.git_ops._windows_observation():
+                        exit_reason = "superseded-runtime"
                         break
                     with state_lock:
                         _enter_drain_only_state()
                     if not any(segment_cache.observation_counts()):
+                        exit_reason = "superseded-runtime"
                         break
             if shutdown_requested.is_set():
                 if shutdown_requested_since is None:
@@ -831,6 +838,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     )
                 ):
                     # The bounded request may report blocked; native custody stays owned.
+                    exit_reason = "shutdown-requested"
                     break
             if handover.generation is not None:
                 try:
@@ -846,6 +854,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 if superseded and not _drain_busy_reasons():
                     self_retire_confirms += 1
                     if self_retire_confirms >= self_retire_confirmations:
+                        if exit_reason != "idle-no-demand":
+                            exit_reason = "superseded-route"
                         break
                 else:
                     self_retire_confirms = 0
@@ -945,6 +955,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                                 if _idle_candidate_still_empty():
                                     _enter_drain_only_state()
                                     handover.retiring = True
+                                    exit_reason = "idle-no-demand"
                                 else:
                                     idle_guard.release()
                                     idle_guard = None
@@ -971,16 +982,17 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 worktrees_runtime.close_admission("shutdown")
                 repositories_runtime.close_admission("shutdown")
 
-        retire_monitor(
-            close_admission=_close_monitor_admission, repositories_runtime=repositories_runtime,
-            worktrees_runtime=worktrees_runtime, close_request_surfaces=_close_request_surfaces,
-            control_server=control_server, receipts=receipts,
-            worktree_status_runtime=worktree_status_runtime, managed_mux_runtime=managed_mux_runtime,
-            lock=lock, original_error=sys.exc_info()[1],
-            allocation_linker=allocation_linker,
-            retirement_guard=idle_guard,
-            finish_observation_custody=lambda: segment_cache.finish_custody(
-                worktree_status_runtime, lambda: _wake_interruptible_wait(wake_event, interval),
-            ),
-        )
+        with exit_trace.retiring(exit_reason, sys.exc_info()[1]):
+            retire_monitor(
+                close_admission=_close_monitor_admission, repositories_runtime=repositories_runtime,
+                worktrees_runtime=worktrees_runtime, close_request_surfaces=_close_request_surfaces,
+                control_server=control_server, receipts=receipts,
+                worktree_status_runtime=worktree_status_runtime, managed_mux_runtime=managed_mux_runtime,
+                lock=lock, original_error=sys.exc_info()[1],
+                allocation_linker=allocation_linker,
+                retirement_guard=idle_guard,
+                finish_observation_custody=lambda: segment_cache.finish_custody(
+                    worktree_status_runtime, lambda: _wake_interruptible_wait(wake_event, interval),
+                ),
+            )
     return 0

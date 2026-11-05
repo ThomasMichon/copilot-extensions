@@ -128,7 +128,49 @@ introduced.
 This boundary does not relocate an active lane, create a second writer, export
 data, start logging, collect an archive or delete retained data. Checkout
 retirement and persistent-data reclamation remain separate operations. Existing
-cleanup, resource and effort gates are unchanged.
+resource and effort gates remain in force.
+
+### Checkout-local agenda preservation
+
+The documented standalone fallback `.effort-agenda/<lane>/` lives inside the
+disposable checkout. Git cleanliness, an ignored file, a merged PR or finalized
+tracking status cannot establish that its contents are disposable.
+
+Finalize may complete the source objective while retaining a checkout and branch
+that contain `.effort-agenda`. Cleanup reports `retained-data`; ordinary and forced
+managed removal, the owner's Git-removal helper and directory-removal fallbacks refuse
+before their destructive steps. Presence is conservative, including an empty,
+partial, malformed or linked home. An inspection error is unknown, not absence.
+Batch reports and orphan/managed dry runs name the hold instead of claiming the
+checkout would be removed. A validated finalized display remains distinct from
+blocked deletion eligibility; its descriptor round trip does not turn the hold
+into an unsafe `FINAL` action or an unsupported-looking result.
+The guard probes only this documented fallback with `lstat`; it opens no database,
+follows no agenda link and performs no recursive search for arbitrary custom homes.
+Boundary rechecks cover late state before fallback/retry removal, but do not claim
+a filesystem transaction against an independently running external writer.
+
+Managed data and descriptors already outside the checkout survive ordinary
+checkout retirement. Their preservation does not require an archive destination
+to be online, nor does checkout completion authorize persistent-data reclamation.
+No archive receipt, age, force option or successful copy bypasses the legacy hold.
+
+For an existing checkout-local lane, retain the checkout and identify its actual
+state home, format and writer first. With separately applicable effect authority,
+use that owner's quiescence and
+[complete consistent export/readback](../../efforts/skills/driving-effort-agendas/references/agenda-export.md)
+procedure to an admitted destination outside the checkout. Preserve the original
+identity, accepted records and uncertainty; a new initialized store is not rescue.
+The current exporter supports context-qualified store format 2, not legacy manual
+JSON or older store formats. Unsupported or incomplete rescue leaves the source
+and containing checkout retained.
+
+This slice provides no automatic relocation, descriptor rebinding, writer switch,
+source deletion or restore command. Only the data owner may reconcile a supported
+rescue and explicitly retire its original source under the applicable permission
+and retention gates. Arbitrary custom checkout-local homes remain the adopter's
+explicit preservation responsibility; their absence from this bounded convention
+check is not a safety guarantee.
 
 The [reviewed lifetime and archival design](../../../efforts/active/mux-companion-manual-cutover-diagnostics/worktree-state-lifetime.md)
 retains the independent efforts, Manager, logger, rescue and operational

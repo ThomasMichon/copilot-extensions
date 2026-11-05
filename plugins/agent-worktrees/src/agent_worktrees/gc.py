@@ -31,6 +31,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from .checkout_data import preservation_reason
+
 # Directory names whose contents are disposable build/test caches -- a leftover
 # containing only these is still "effectively empty" for GC purposes.
 CACHE_DIRNAMES = frozenset(
@@ -127,6 +129,8 @@ class OrphanVerdict:
 
 def classify_orphan(d: Path, *, min_settle_secs: float = _MIN_SETTLE_SECS) -> OrphanVerdict:
     """Decide what to do with one orphan directory, without touching it."""
+    if reason := preservation_reason(d):
+        return OrphanVerdict(str(d), "skip", reason)
     if _age_secs(d) < min_settle_secs:
         return OrphanVerdict(str(d), "skip", "too recent (may be mid-creation)")
     if _has_real_files(d):
@@ -241,6 +245,8 @@ def _on_rm_error(func, path, _exc):
 def remove_tree(d: Path) -> tuple[bool, str]:
     """Remove *d*, retrying once on a lock (the Windows transient-handle case)."""
     for attempt in range(2):
+        if reason := preservation_reason(d):
+            return False, reason
         try:
             shutil.rmtree(d, onerror=_on_rm_error)
             return True, "removed"

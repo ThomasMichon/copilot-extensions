@@ -18,6 +18,62 @@ BUSY_REASONS = (
 )
 COUNT_FIELDS = (*BUSY_REASONS, "tracking-write-compute", "lifecycle")
 _PROGRESS_INTERVAL_S = 5.0
+IDLE_CHECKS = (
+    "active-route", "admission", "picker", "list", "worktree-mux",
+    "worktree-status", "managed-mux", "worktrees-roster", "repositories",
+    "in-flight", "allocation", "retirement", "recent-tool-hook",
+)
+EXIT_REASONS = (
+    "idle-no-demand", "shutdown-requested", "superseded-runtime",
+    "superseded-route", "interrupted", "loop-error",
+)
+
+
+class MonitorExitTrace:
+    """Observe existing predicates without probing again or logging each sweep."""
+
+    def __init__(self, directory: Path, port: int) -> None:
+        self.directory = directory
+        self.port = port
+        self.last_idle_eligibility: dict[str, bool] = {}
+
+    def begin_idle(self) -> bool:
+        self.last_idle_eligibility = {}
+        return True
+
+    def check(self, name: str, eligible: object) -> bool:
+        result = bool(eligible)
+        if name in IDLE_CHECKS:
+            self.last_idle_eligibility[name] = result
+        return result
+
+    @contextmanager
+    def retiring(self, reason: str, original_error: BaseException | None) -> Iterator[None]:
+        def emit(phase: str, outcome: str) -> None:
+            try:
+                cause = reason
+                if original_error is not None:
+                    cause = "interrupted" if isinstance(original_error, KeyboardInterrupt) else "loop-error"
+                lifecycle.record(
+                    self.directory, "monitor-exit", service="agent-worktrees",
+                    port=self.port, outcome=outcome,
+                    detail={
+                        "phase": phase, "reason": cause if cause in EXIT_REASONS else "loop-error",
+                        "last_idle_eligibility": dict(self.last_idle_eligibility),
+                    },
+                )
+            except BaseException:
+                # Diagnostics cannot bypass retirement or replace its original error.
+                pass
+
+        emit("cleanup-begin", lifecycle.BEGIN)
+        try:
+            yield
+        except BaseException:
+            emit("cleanup-failed", lifecycle.FAIL)
+            raise
+        else:
+            emit("cleanup-complete", lifecycle.OK)
 
 
 def _finite(value: float | None) -> float | None:

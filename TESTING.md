@@ -24,6 +24,16 @@ plus two descriptor-membership scans per worktree, without traversing domain
 contents. These isolated source controls do not qualify installed collection,
 native Windows inventory, remote latency or durable archive acknowledgment.
 
+Worktrees' optional `--test-file tests/test_retirement_obligations.py
+--test-file tests/test_resource_producer_finalize.py --allow-explicit-tiers`
+packet covers checkout-local agenda preservation across ordinary/forced cleanup,
+raw removal fallbacks, partial/linked/unreadable homes and state appearing during
+a failed Git removal. Its actual isolated Git finalization controls distinguish
+completed source work with a retained legacy checkout from removed checkouts whose
+managed data/descriptors remain discoverable outside them. No archive provider is
+required for that separation. This is source/private-fixture qualification, not
+real-data rescue, native Windows durability or persistent-data deletion authority.
+
 The manual `windows-coverage-rotation.yml` selector `related_resolution=true`
 runs Worktrees' configuration-graft and execution-context consumers through the
 canonical hardened Linux container. Supply `ref` for the published candidate;
@@ -35,7 +45,8 @@ qualifies installed runtime, native Windows, ACP or whole-hook throughput.
 
 The manual `windows-coverage-rotation.yml` selector `post_tool_fallback=true`
 runs only Worktrees' post-tool shell, status/bind reminder, late-guidance and
-guard-publication consumers plus ordinary pre/post-hook idle-retention controls
+guard-publication consumers plus ordinary pre/post-hook idle-retention and
+late-demand/idle-drain and interruption-safe retirement controls
 through the canonical hardened Linux container. Supply `ref`
 to select a published candidate; execution records its immutable checkout,
 selector, container profile and actual result. It cannot be combined with

@@ -166,6 +166,31 @@ when an earlier surface fails; this intrinsic custody does not execute skipped c
 
 ## Reading the logs
 
+Ordinary monitor exit also appends `monitor-exit` records to the same
+`lifecycle.log`: `cleanup-begin`, then `cleanup-complete` or `cleanup-failed`.
+The fixed `reason` distinguishes `idle-no-demand`, `shutdown-requested`,
+`superseded-runtime`, `superseded-route`, `interrupted` and `loop-error`.
+Completion means the existing teardown returned, not that a replacement is
+ready or that the process has been independently observed to exit.
+Committed idle retirement retains its idle reason while accepted work drains;
+the shared retiring latch alone does not establish a superseding route.
+A successful `undrain` or `promote` clears that pending idle cause after
+discovery publication succeeds, so a later retirement records its own cause.
+
+`last_idle_eligibility` contains only the checks actually evaluated by the
+most recent idle predicate, in their original order. `true` means that check
+allowed idle retirement; `false` stopped evaluation. Omitted checks were not
+evaluated, and an empty object means no idle evaluation was recorded. This is
+a last observation, not a simultaneous demand snapshot or proof of the cause
+of a separately requested shutdown. It includes recent completed tool-hook
+demand after in-flight work, without changing its grace interval or admission.
+The monitor records no raw request, project, session or exception data, performs
+no extra demand probes, and does not write these diagnostics during ordinary
+sweeps. Log failure remains best-effort and does not change teardown.
+Diagnostic interruptions cannot bypass mandatory cleanup or replace its original
+error, including when a log append raises `KeyboardInterrupt`.
+These records do not start a missing monitor or qualify live hook recovery.
+
 The existing `<runtime-root>/status-monitor-routing/lifecycle.log` gains
 `monitor-drain` JSON records alongside the orchestrator's lifecycle records.
 Each trace has a generated `trace_id`, process PID, control port, `role`
