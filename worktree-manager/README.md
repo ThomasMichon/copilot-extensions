@@ -860,6 +860,10 @@ pane directory and positive attachment count in one bounded pane inventory
 before atomically creating an absent mapping. Other panes may have different
 directories, but conflicting session identities or attachment counts remain
 unconfirmed. Reattachment and daemon reconstruction retain its revision.
+Checkout-path evidence is required for admission or replacement, not repeated
+for an already-admitted incarnation's status and attachment refresh. Changing
+directories within a pane does not revoke that mapping. Empty paths from
+retained panes are not attribution evidence and do not invalidate other panes.
 Same-incarnation tombstones cannot be resurrected. A confirmed distinct native
 incarnation for the same canonical worktree can replace an old mapping at a
 higher revision, but only if the registry identity and revision still match the

@@ -107,7 +107,9 @@ def status_fence_failure(entry: dict, payload: dict, *, registry=None) -> dict |
     ):
         return {"applied": False, "reason": "stale-mapping"}
     if entry.get("native_session_incarnation"):
-        confirmed = confirm_native_session(entry, connected_only=False)
+        confirmed = confirm_native_session(
+            entry, connected_only=False, require_worktree_path=False,
+        )
         if not confirmed.get("applied"):
             if confirmed.get("reason") == "session-absent" and registry is not None:
                 return retire_missing_mapping(registry, entry)
@@ -180,6 +182,7 @@ def _is_empty_tmux_listing(binary: str, result: subprocess.CompletedProcess[str]
 
 def confirm_native_session(
     payload: dict, *, connected_only: bool, timeout_s: float = 2.0,
+    require_worktree_path: bool = True,
 ) -> dict:
     """A failed enumeration remains unknown and cannot mutate a stored fence."""
     name = payload["mux_session"]
@@ -207,7 +210,7 @@ def confirm_native_session(
         return {"applied": False, "reason": "session-unconfirmed"}
     rows = [line.split("\t", 3) for line in probe.stdout.splitlines() if line.strip()]
     if any(
-        len(row) != 4 or not row[0] or not row[1].isdecimal() or not row[3]
+        len(row) != 4 or not row[0] or not row[1].isdecimal()
         or not _valid_native_incarnation(row[2])
         for row in rows
     ):
@@ -221,8 +224,9 @@ def confirm_native_session(
     if incarnation != payload["session_incarnation"]:
         return {"applied": False, "reason": "stale-incarnation"}
     expected_path = os.path.normcase(os.path.realpath(payload["worktree_path"]))
-    if not any(
-        os.path.normcase(os.path.realpath(row[3])) == expected_path for row in matches
+    if require_worktree_path and not any(
+        row[3] and os.path.normcase(os.path.realpath(row[3])) == expected_path
+        for row in matches
     ):
         return {"applied": False, "reason": "unattributed-path"}
     if not count.isdecimal() or (connected_only and int(count) <= 0):
