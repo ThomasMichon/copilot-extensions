@@ -30,8 +30,12 @@ packet covers checkout-local agenda preservation across ordinary/forced cleanup,
 raw removal fallbacks, partial/linked/unreadable homes and state appearing during
 a failed Git removal. Its actual isolated Git finalization controls distinguish
 completed source work with a retained legacy checkout from removed checkouts whose
-managed data/descriptors remain discoverable outside them. No archive provider is
-required for that separation. This is source/private-fixture qualification, not
+managed data/descriptors remain discoverable outside them. The supported
+checkout-local format-2 control invokes the actual Efforts initialization,
+complete export, verification and readback commands before finalization.
+Original identity, records, metadata and source bytes survive, and a verified
+rescue copy does not release the checkout hold or create a managed locator.
+No archive provider is required for that separation. This is source/private-fixture qualification, not
 real-data rescue, native Windows durability or persistent-data deletion authority.
 
 The manual `windows-coverage-rotation.yml` selector `related_resolution=true`
