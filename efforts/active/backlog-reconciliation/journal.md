@@ -3,6 +3,12 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-04 - Cold fixture prerequisites retain separate test-control-plane custody](<journal/2026/11.04 cold-fixture-control-plane-contracts.md>)
+
+- [2026-11-04 - Named provider failures and current check-series evidence](<journal/2026/11.04 provider-check-evidence-contracts.md>)
+
+- [2026-11-04 - Optional bootstrap tuple retains its installed comparison](<journal/2026/11.04 bootstrap-configuration-tuple-contracts.md>)
+
 - [2026-11-04 - Current eight-copy equality and separate finite publication proof](<journal/2026/11.04 installer-policy-copy-sync-contracts.md>)
 
 - [2026-11-04 - Released root repair and actually merged finite-forward leaf](<journal/2026/11.04 ssh-root-finite-forward-contracts.md>)

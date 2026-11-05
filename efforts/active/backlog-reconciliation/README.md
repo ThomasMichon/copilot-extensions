@@ -252,6 +252,38 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The five-contract Chat/SSH/copy checkpoint is delivered in #10621.
+All eleven actual merged bodies equal the corrected reviewed head; the
+publication child is finalized and retained, with only its parent-child claim
+settled. The [delivery journal](<journal/2026/11.04 chat-graduation-hosted-continuity-contracts.md>)
+records the corrected 52-text aggregate, final approval and successful required
+checks. Two equal complete 22:21 PST metadata-only scans show 1,006 whole open,
+277 above 729: two eligible arrivals remain metadata-only, with no departure
+or new campaign credit. Verified dispositions remain 776. Continue the next
+five-contract bootstrap/provider/fixture study and independent bounded research;
+parent Plan/Validation and all existing custodians remain unchanged.
+
+The [provider-check](provider-check-evidence-cohort.md) and
+[cold-fixture](cold-fixture-control-plane-cohort.md) studies preserve four
+originals through six whole texts/7,206 characters and twelve ranked relations.
+Named Gitea failures and identified-series supersession retain distinct
+observed/required-check authority. Sparse product PATH, the separate trusted
+test-lease interpreter and the exact bounded native lookup retain their
+original owners and acceptance. Reported fixture progress is credited, not
+promoted to whole completion. Protected originals/descriptions stay excluded;
+a later description-admission failure is recorded and excluded without retry.
+All four admitted originals remain OPEN.
+
+The [optional bootstrap tuple study](bootstrap-configuration-tuple-cohort.md)
+preserves #8404's three whole texts/6,436 characters and three noncompletion
+comparisons. Optional tuple implementation and containing-release credit do
+not settle its original installed one-bootstrap/zero-scalar comparison or
+release the owner's reservation. Four whole protected originals in adjacent
+pairs stay withheld before rendering, including a changed current contract
+requalified without stale-text reuse. #10079's prior verified campaign
+completion stays CLOSED, metadata-only here without repeated credit;
+no held-source or native retry follows.
+
 The nine-contract transfer/observation/census delta is delivered in #10611.
 All fifteen actual merged bodies equal the validated publication; its child
 is finalized and retained, with only its parent-child claim settled.
@@ -1317,6 +1349,25 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [provider-check](provider-check-evidence-cohort.md) study preserves named
+diagnostic/completeness and identified-series supersession separately from
+authoritative required checks. The
+[cold-fixture](cold-fixture-control-plane-cohort.md) study preserves product
+PATH versus trusted test-control-plane interpreter, shared fixture follow-through,
+the original lookup deadline and unchanged real consumer assertions.
+Eight whole message relations, two unchanged whole-description relations and
+two protected exclusions do not establish twelve fixes. A separate failed
+description admission supplies no evidence, source retry or completion credit.
+
+The [bootstrap tuple](bootstrap-configuration-tuple-cohort.md) study retains
+the producer/consumer/parser boundary, exact unsupported-option-only fallback,
+default fast path and existing source, identity, timing/cache and reservation
+owners. The original installed comparison remains; broader load/paint budgets
+are not added as completion gates. Two whole messages and a whole merged
+description do not prove installed acceptance. Four whole protected contracts
+and one metadata-only historical completion supply no pairwise judgment or new
+closure credit.
 
 The [Chat/continuity](chat-graduation-hosted-continuity-cohort.md) core retains
 accepted initialization trust, worktree/anchor identity, no-noise uncertainty
