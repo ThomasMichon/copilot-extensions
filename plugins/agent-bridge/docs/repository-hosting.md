@@ -135,7 +135,7 @@ or otherwise uninspectable guest refuses instead of being woken speculatively.
 
 Known CLI namespace providers first resolve an unprepared target. Ordinary
 resolution performs guest admission before `ensure_ready` and cannot wake an
-uninspectable target. The HTTP start entry and a stopped-session launch refresh
+uninspectable target. The HTTP start entry and initial stopped-session admission
 explicitly admit activation through the existing venue owner. They retain the
 CodeSpace launch-policy gate, then check fresh guest policy after readiness,
 before plugin staging and again at the final target. An operation's descriptive
@@ -166,6 +166,18 @@ Explicit checkout selections receive that same check. Remote-host preparation
 also verifies every known retained checkout before updating its target or
 preparing a replacement child, so a later provider-default change cannot
 replace the directory that admission validated.
+Legacy retained CodeSpace metadata negotiates an advertising current provider's
+receiving declaration before choosing the first policy consumer, including when
+the venue is already Available. This is not fallback after a guest-owner failure.
+A provider without the declaration retains the prior enforcing adapter; an
+unsupported or denying guest owner still refuses. A failed current-provider
+negotiation cannot select another adapter. With no current namespace owner,
+retained portable inspection or reattachment does not acquire a new provider
+prerequisite.
+Later full-target refresh is non-activating and preserves the retained explicit
+checkout flag. If the venue stops after initial admission, that refresh refuses
+rather than issuing another unfenced activation. A newer durable stop therefore
+cannot be bypassed while resolution waits.
 Opaque commands and unknown resolver protocols still refuse before effects;
 invalid cross-repo requests are rejected before admission work.
 

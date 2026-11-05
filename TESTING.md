@@ -75,6 +75,13 @@ Separate controls enter the real remote-host preparation method for explicit,
 ordinary provider and managed bindings, proving a late checkout change cannot
 update the retained target/database or reach child preparation. Matching paths
 retain the original ACP identity; the final ACP connection is substituted.
+Available-venue legacy controls negotiate current receiving support before the
+first policy read, retain an unsupported prior adapter's refusal and preserve
+the original stop fence. Another case keeps retained portable inspection
+available without a current namespace owner. A real admitted-resume control
+pauses provider refresh, records an actual durable stop while lifecycle custody
+is held, then makes the venue Shutdown: refresh cannot activate it, prepare a
+new Host or clear that newer stop.
 Containers' `tests/test_runtime_drivers.py` sends the
 base64 archive through the real runtime-proxy, external-driver process and
 isolated canonical reader, proving both allow and deny without Docker.

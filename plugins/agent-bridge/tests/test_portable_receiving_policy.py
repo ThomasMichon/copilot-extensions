@@ -333,6 +333,7 @@ async def test_available_policy_denial_is_not_a_stopped_venue_activation(monkeyp
 @pytest.mark.asyncio
 @pytest.mark.parametrize("outcome", [
     "allow", "deny", "stop-before", "stop-during", "retarget", "legacy", "upgrade",
+    "available-upgrade", "available-upgrade-stop", "available-legacy", "available-portable-owner-absent",
 ])
 async def test_stopped_codespace_resume_activates_under_original_stop_fence(
     repo: Path, session_manager, monkeypatch: pytest.MonkeyPatch, outcome: str,
@@ -347,7 +348,7 @@ async def test_stopped_codespace_resume_activates_under_original_stop_fence(
         "portable_receiving_policy": {"version": 1, "activation": "start", "acp_command": "copilot"},
     }
     retained_metadata = dict(metadata)
-    if outcome == "upgrade":
+    if "upgrade" in outcome or outcome == "available-legacy":
         retained_metadata.pop("portable_receiving_policy")
     session = Session(
         "existing", "existing", SpawnTarget(
@@ -364,9 +365,9 @@ async def test_stopped_codespace_resume_activates_under_original_stop_fence(
     owner = AgentResolver({}, {})
     provider = CliNamespaceResolver("codespace", "agent-codespaces")
     owner.register_namespace_resolver(provider)
-    session_manager._resolver = owner
+    session_manager._resolver = None if outcome == "available-portable-owner-absent" else owner
     events = []
-    running = False
+    running = outcome.startswith("available-")
 
     async def provider_call(arguments, **kwargs):
         nonlocal running
@@ -380,11 +381,13 @@ async def test_stopped_codespace_resume_activates_under_original_stop_fence(
                 session._stop_notices += 1
             return 0, "", ""
         assert arguments[:2] == ["namespace-resolve", "selected"]
+        if outcome == "available-upgrade-stop":
+            session._stop_notices += 1
         current = {
             **metadata, "name": "another" if outcome == "retarget" else "selected",
             "workspace_folder": "/provider-default",
         }
-        if outcome == "legacy":
+        if outcome in ("legacy", "available-legacy"):
             current.pop("portable_receiving_policy")
         return 0, json.dumps({
             "type": "command", "spawn_command": ["provider"], "codespace": current,
@@ -398,6 +401,9 @@ async def test_stopped_codespace_resume_activates_under_original_stop_fence(
     async def read(command, **kwargs):
         from repository_policy import require_agent_hosting
 
+        if "input_bytes" not in kwargs:
+            events.append("legacy-policy")
+            return 127, "", "guest owner unsupported"
         assert "/actual" in command and "/provider-default" not in command
         assert kwargs["input_bytes"]
         events.append("policy")
@@ -414,21 +420,123 @@ async def test_stopped_codespace_resume_activates_under_original_stop_fence(
     provider._run = AsyncMock(side_effect=provider_call)
     admitted = AsyncMock(return_value=session)
     monkeypatch.setattr(session_manager, "_resume_session_admitted", admitted)
-    if outcome in ("allow", "upgrade"):
+    if outcome in ("allow", "upgrade", "available-upgrade", "available-portable-owner-absent"):
         assert await session_manager.resume_session("existing") is session
-        assert events == ["launch-policy", "activate", "policy"]
+        assert events == (["policy"] if running and outcome.startswith("available-") else [
+            "launch-policy", "activate", "policy",
+        ])
         fence = admitted.await_args.kwargs["hosting_fence"]
         assert fence.session is session and fence.stop_notices == 0
         assert session.target.cwd == "/actual" and session.target.explicit_cwd
         assert session.target.codespace == metadata
     else:
-        expected = ColdRecoveryStoppedError if outcome.startswith("stop-") else AgentHostingError
+        expected = ColdRecoveryStoppedError if (
+            outcome.startswith("stop-") or outcome == "available-upgrade-stop"
+        ) else AgentHostingError
         with pytest.raises(expected):
             await session_manager.resume_session("existing")
         admitted.assert_not_awaited()
         assert ("activate" in events) is (outcome in ("deny", "stop-during"))
     assert session.status is SessionStatus.STOPPED
     assert session.acp_session_id == "retained-conversation"
+
+
+@pytest.mark.asyncio
+async def test_real_resume_refresh_cannot_reactivate_after_new_durable_stop(
+    repo: Path, session_manager, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.session_manager import ProviderTargetRefreshError, Session
+    from agent_bridge.spawn_target import SpawnTarget
+
+    metadata = {
+        "name": "selected", "workspace_folder": "/actual",
+        "portable_receiving_policy": {
+            "version": 1, "activation": "start", "acp_command": "cd /actual && copilot",
+        },
+    }
+    session = Session("existing", "existing", SpawnTarget(
+        type="command", codespace=metadata, cwd="/actual", explicit_cwd=True,
+        venue={"_agent_bridge_request_overrides": {"env": {}, "copilot_args": []}},
+    ), "codespace:selected")
+    session.status = SessionStatus.STOPPED
+    session.acp_session_id = "retained-conversation"
+    session_manager._sessions["existing"] = session
+    session_manager.db.create_session(
+        "existing", "existing", session.agent_name, "/actual", "command", "stopped", 0,
+        target_json=session.target.to_json(), acp_session_id=session.acp_session_id,
+    )
+    owner = AgentResolver({}, {})
+    provider = CliNamespaceResolver("codespace", "fixture")
+    owner.register_namespace_resolver(provider)
+    session_manager._resolver = owner
+    monkeypatch.setattr(owner, "refresh_provider_resolvers", lambda: None)
+    monkeypatch.setattr(owner, "_related_plugins_for", AsyncMock(return_value=[]))
+    provider.ensure_ready = AsyncMock()
+    entered, finish = asyncio.Event(), asyncio.Event()
+    running = True
+    starts = []
+
+    async def provider_call(arguments, **_kwargs):
+        nonlocal running
+        if arguments == ["start", "selected"]:
+            starts.append(arguments)
+            running = True
+            return 0, "", ""
+        assert arguments[:2] == ["namespace-resolve", "selected"]
+        entered.set()
+        await finish.wait()
+        return 0, json.dumps({
+            "type": "command", "spawn_command": ["fixture"], "codespace": metadata,
+        }), ""
+
+    async def read(_command, **kwargs):
+        from repository_policy import require_agent_hosting
+
+        assert kwargs["input_bytes"]
+        answer = require_agent_hosting(repo, marketplace_id="selected-source")
+        return 0, json.dumps({**answer.to_dict(), "allowed": True}), ""
+
+    guest = SimpleNamespace(
+        is_running=AsyncMock(side_effect=lambda: running), run=read, close=AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.CodeSpaceTransport", lambda *_a, **_k: guest,
+    )
+    monkeypatch.setattr("agent_bridge.venue_launch_policy.gate_raw_codespace_spawn", AsyncMock())
+    provider._run = AsyncMock(side_effect=provider_call)
+    monkeypatch.setattr(session_manager, "_try_reattach_live_host", AsyncMock(return_value=False))
+    new_host = AsyncMock()
+    monkeypatch.setattr(session_manager, "_resume_via_new_remote_host", new_host)
+    resume = asyncio.create_task(session_manager.resume_session("existing"))
+    stop = None
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=10)
+        running = False
+        stop = asyncio.create_task(session_manager.stop_session("existing", force=True))
+        token = None
+        deadline = asyncio.get_running_loop().time() + 10
+        while token is None and asyncio.get_running_loop().time() < deadline:
+            token = session_manager.db.get_session("existing")["cold_recovery_stop_token"]
+            await asyncio.sleep(.01)
+        assert token and not stop.done()
+        finish.set()
+        with pytest.raises(ProviderTargetRefreshError):
+            await asyncio.wait_for(resume, timeout=10)
+        await asyncio.wait_for(stop, timeout=10)
+        assert starts == []
+        provider.ensure_ready.assert_not_awaited()
+        new_host.assert_not_awaited()
+        assert session_manager.db.get_session("existing")["cold_recovery_stop_token"] == token
+        assert session.status is SessionStatus.STOPPED and not session.background_recovery_enabled
+        assert session.target.cwd == "/actual" and session.acp_session_id == "retained-conversation"
+    finally:
+        finish.set()
+        pending = [task for task in (resume, stop) if task is not None and not task.done()]
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
 
 
 @pytest.fixture
@@ -473,11 +581,19 @@ async def test_resume_activation_remains_owned_through_cancellation_and_drain(
     owner.register_namespace_resolver(provider)
     owner._call_resolver = AsyncMock(return_value=target)
     session_manager._resolver = owner
+
     async def hosting(*_args, **_kwargs):
         if not completed.exists():
             raise CodeSpaceNotRunning("stopped")
 
     monkeypatch.setattr(hosting_policy, "require_target_hosting", hosting)
+    guest = SimpleNamespace(
+        is_running=AsyncMock(side_effect=completed.exists),
+        run=AsyncMock(side_effect=AssertionError("unexpected workspace probe")), close=AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.CodeSpaceTransport", lambda *_a, **_k: guest,
+    )
     monkeypatch.setattr(
         "agent_bridge.venue_launch_policy.gate_raw_codespace_spawn", AsyncMock(),
     )
@@ -494,6 +610,8 @@ async def test_resume_activation_remains_owned_through_cancellation_and_drain(
     try:
         deadline = asyncio.get_running_loop().time() + 10
         while not started.exists() and asyncio.get_running_loop().time() < deadline:
+            if operation.done():
+                await operation
             await asyncio.sleep(.01)
         assert started.exists()
         assert session_manager._active_acquisitions == 1
@@ -605,10 +723,11 @@ async def test_http_activation_remains_owned_until_original_provider_settles(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("moved", [False, True])
+@pytest.mark.parametrize("moved,became_available", [(False, False), (True, False), (True, True)])
 @pytest.mark.parametrize("explicit_cwd", [False, True])
 async def test_stopped_cross_repo_resume_negotiates_retained_repo_before_policy(
-    repo: Path, session_manager, monkeypatch: pytest.MonkeyPatch, moved: bool, explicit_cwd: bool,
+    repo: Path, session_manager, monkeypatch: pytest.MonkeyPatch,
+    moved: bool, became_available: bool, explicit_cwd: bool,
 ) -> None:
     from agent_bridge.models import SessionStatus
     from agent_bridge.session_manager import Session
@@ -634,6 +753,7 @@ async def test_stopped_cross_repo_resume_negotiates_retained_repo_before_policy(
     owner.register_namespace_resolver(provider)
     session_manager._resolver = owner
     running = False
+    status_reads = 0
     policy_reads = []
 
     async def provider_call(arguments, **_kwargs):
@@ -668,9 +788,14 @@ async def test_stopped_cross_repo_resume_negotiates_retained_repo_before_policy(
         answer = require_agent_hosting(repo, marketplace_id="selected-source")
         return 0, json.dumps({**answer.to_dict(), "allowed": True}), ""
 
-    guest = SimpleNamespace(
-        is_running=AsyncMock(side_effect=lambda: running), run=read, close=AsyncMock(),
-    )
+    async def is_running():
+        nonlocal running, status_reads
+        status_reads += 1
+        if became_available and status_reads >= 2:
+            running = True
+        return running
+
+    guest = SimpleNamespace(is_running=is_running, run=read, close=AsyncMock())
     monkeypatch.setattr(
         "agent_bridge.session_host.codespace_transport.CodeSpaceTransport", lambda *_a, **_k: guest,
     )

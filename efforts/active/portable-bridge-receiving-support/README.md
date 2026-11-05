@@ -295,3 +295,29 @@ implementation. The exact support closure follows the consumer trace and tests.
 - Reconciled independent contract-registry edits with incoming Dev history.
   The prior rebased head passed all 4,146 admitted units and 15 start consumers;
   final source admission and renewed review/CI remain open after this backstop.
+
+### 2026-11-05 - Available legacy negotiation and read-only refresh
+
+- The reconciled head received approval and passed required CI, but two earlier
+  reviewed gaps remained valid. Kept it unmerged while addressing them rather
+  than treating approval as permission to ignore known activation/compatibility
+  defects.
+- Legacy receiving metadata now negotiates an available current provider before
+  the first policy consumer is selected. Stopped activation reuses that read-only
+  selection under the original fence; guest-owner failure never triggers
+  negotiation as fallback. Retained portable inspection remains independent of
+  an unavailable current namespace owner.
+- Later full-target refresh is non-activating and preserves explicit checkout
+  intent. A real admitted-resume test pauses resolution, records a durable stop
+  behind the held lifecycle lock and makes the venue Shutdown. No second
+  activation, new Host or clearing of the newer stop is permitted.
+- The focused packet passed 13 cases, including Available/Shutdown upgrade,
+  unsupported prior adapter, missing current owner, stop-during-negotiation,
+  the actual resume/stop race and existing placement/argument preservation.
+  Broader recovery validation and renewed exact-source gates remain open.
+- The complete selected recovery packet now passes 195 cases. It caught an
+  ordering regression during the refactor: checkout validation now precedes
+  policy consumption, including when a venue becomes Available between reads.
+  Stopped fixtures retain their typed no-wake refusal. The delayed-provider
+  fixture explicitly models this availability read while keeping its real
+  subprocess and repeated-cancellation settlement controls.

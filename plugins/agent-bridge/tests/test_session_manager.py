@@ -4123,6 +4123,7 @@ class TestResumeSession:
         session.target = SpawnTarget(
             type="command",
             cwd="/workspaces/example",
+            explicit_cwd=True,
             project="example",
             worktree_id="wt-1",
             caller_worktree="caller-wt",
@@ -4178,7 +4179,7 @@ class TestResumeSession:
         ):
             resumed = await session_manager.resume_session(session.session_id)
 
-        resolver.resolve_async.assert_awaited_once_with("codespace:example", activate=True)
+        resolver.resolve_async.assert_awaited_once_with("codespace:example")
         assert resumed.target.type == "ssh"
         assert resumed.target.host == "new-host"
         assert resumed.target.venue == {
@@ -4193,6 +4194,7 @@ class TestResumeSession:
             },
         }
         assert resumed.target.cwd == "/workspaces/example"
+        assert resumed.target.explicit_cwd is True
         assert resumed.target.project == "example"
         assert resumed.target.worktree_id == "wt-1"
         assert resumed.target.caller_worktree == "caller-wt"
