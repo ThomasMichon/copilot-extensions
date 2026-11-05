@@ -77,6 +77,7 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     old_statistics_provider = tmp_path / "old-statistics-provider"
     reject_statistics = tmp_path / "reject-statistics-flag"
     invocations = tmp_path / "invocations.jsonl"
+    diagnostic = tmp_path / "bridge-failure.json"
     owner_loop = asyncio.new_event_loop()
     owner_thread = Thread(target=owner_loop.run_forever)
     owner_thread.start()
@@ -212,7 +213,13 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         f"'version':json.load(open({str(refusal_version)!r})),'kind':'error','code':'unsupported',"
         "'message':'selected daemon does not support bridge-session-current-requests-v1'}),flush=True)\n"
         "    raise SystemExit(3)\n"
-        "args.func(args)\n",
+        "try:\n"
+        "    args.func(args)\n"
+        "except BaseException:\n"
+        "    import traceback\n"
+        "    from pathlib import Path\n"
+        f"    Path({str(diagnostic)!r}).write_text(traceback.format_exc(),encoding='utf-8')\n"
+        "    raise\n",
         encoding="utf-8",
     )
     script.chmod(0o700)
@@ -228,6 +235,7 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "old_statistics_cli": old_statistics_cli, "old_statistics_provider": old_statistics_provider,
         "reject_statistics": reject_statistics, "invocations": invocations,
         "failures": failures,
+        "diagnostic": diagnostic,
     }
     try:
         yield result

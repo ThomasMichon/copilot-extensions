@@ -130,6 +130,10 @@ def test_native_windows_three_owner_history_live_and_same_cli(
                     "screen": screen(), "state": app_state(),
                     "client": client.output.decode("utf-8", "replace"),
                     "cli_started": started.read_text() if started.exists() else None,
+                    "bridge_failure": (
+                        semantic_peer["diagnostic"].read_text(encoding="utf-8")
+                        if semantic_peer["diagnostic"].exists() else None
+                    ),
                 }))
 
             def pin_owned(pid: int) -> Any:
