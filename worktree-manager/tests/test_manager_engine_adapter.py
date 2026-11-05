@@ -60,7 +60,10 @@ def test_adapter_delegates_construction_health_and_retention_without_selecting(t
         assert options["expected_source_identity"] == {}
 
 
-def test_prepare_runtime_candidate_reports_real_copy_and_inventory_progress(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("qualified", [False, True])
+def test_prepare_runtime_candidate_reports_real_copy_and_inventory_progress(
+    tmp_path, monkeypatch, capsys, qualified,
+):
     import worktree_manager
     from worktree_manager import runtime_candidate
 
@@ -70,6 +73,27 @@ def test_prepare_runtime_candidate_reports_real_copy_and_inventory_progress(tmp_
     (payload / "references").mkdir()
     for name in ("uninstall-contract.json", "control-plane-provider.json"):
         shutil.copyfile(manager / "references" / name, payload / "references" / name)
+    data = {"frozen_plugin": str(payload)}
+    if qualified:
+        nested = payload / "libs" / "example" / "pyproject.toml"
+        nested.parent.mkdir(parents=True)
+        nested.write_text(
+            '[project]\nname="example"\nversion="1.0"\n'
+            '[tool.uv.sources]\nhelper={path="../helper",editable=true}\n',
+            encoding="utf-8",
+        )
+        _attribute_source(adapter, payload)
+        retained = tmp_path / "retained"
+        shutil.copytree(payload, retained)
+        from installer_dependency_config import freeze_source_editables
+        from installer_dependency_policy import _write_toml
+
+        manifest = retained / nested.relative_to(payload)
+        project = tomllib.loads(manifest.read_text(encoding="utf-8"))
+        freeze_source_editables(project)
+        _write_toml(manifest, project)
+        assert adapter.runtime_source.assembly_hash(retained) != adapter.runtime_source.assembly_hash(payload)
+        data = {"frozen_plugin": str(retained), "source_payload": str(payload)}
     slot = root / "versions" / "1.2.3-dev1"
     slot.mkdir(parents=True)
     monkeypatch.setattr(runtime_candidate.sys, "prefix", str(slot))
@@ -77,12 +101,16 @@ def test_prepare_runtime_candidate_reports_real_copy_and_inventory_progress(tmp_
         worktree_manager, "__file__", str(slot / "Lib" / "site-packages" / "worktree_manager" / "__init__.py"),
     )
     monkeypatch.setattr(si, "_runtime_installer", lambda: adapter)
-    runtime_candidate.prepare_runtime_candidate({"frozen_plugin": str(payload)})
+    runtime_candidate.prepare_runtime_candidate(data)
     output = capsys.readouterr()
     assert not output.out
     assert "phase=payload-copy completed-units=1" in output.err
     assert "phase=inventory completed-units=1" in output.err
-    assert (slot / "payload" / ".install-complete").is_file()
+    assert (slot / "payload" / ".install-complete").is_file() is not qualified
+    if qualified:
+        assert adapter.runtime_source.read_source_identity(
+            slot / "payload", "1.2.3-dev1", plugin="worktree-manager",
+        ) == adapter.runtime_source.read_source_identity(payload, "1.2.3-dev1", plugin="worktree-manager")
     assert (slot / ".manager-artifacts.json").is_file()
     assert not (root / "current-version").exists()
     assert not (slot / adapter.runtime.COMPLETE_MARKER).exists()
@@ -373,6 +401,7 @@ def test_source_identity_survives_payload_assembly(tmp_path, monkeypatch):
         assert calls[0][1] == generation
         assert calls[0][2]["expected_source_identity"]["runtime_version"] == generation
         prepared = calls[0][2]["plugin"]
+        assert calls[0][2]["construction_data"] == {"source_payload": str(prepared)}
         assert adapter.runtime_source.read_source_identity(
             prepared, "1.2.3-dev1", plugin="worktree-manager",
         ).runtime_version == generation

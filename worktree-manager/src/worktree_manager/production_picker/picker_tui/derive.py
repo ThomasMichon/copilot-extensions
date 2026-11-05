@@ -788,6 +788,11 @@ def norm(
         "last_resumed_at": w.get("last_resumed_at"),
         "cleanup_bucket": _bucket_from_raw(w),
         "ff_eligible": _ff_from_raw(w),
+        "sync_eligible": _ff_from_raw(w) or (
+            bool(pair_id) and w.get("state") in {"unused", "convo", "completed"}
+            and _state(w, relation_label) != "ACTIVE"
+            and w.get("dirty") == 0 and w.get("ahead") == 0
+        ),
         "attached": bool(w.get("mux_attached")),
         "mux_live": bool(w.get("mux_session") or w.get("mux_attached")),
         "active": w.get("status") == "active",

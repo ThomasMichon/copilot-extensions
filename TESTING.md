@@ -18,11 +18,33 @@ the shared test home also isolates the canonical passwd lookup. These are isolat
 not an installed daemon wake, rollout or complete history guarantee; required
 unit-only CI admission remains separate.
 
+The opt-in `--test-file tests/native/test_resident_recovery_process.py
+--allow-explicit-tiers` packet exercises actual normal ensure/spawn and an
+owned leased POSIX resident, PID/birth/route/health, captured canonical mutation,
+warm reuse, maintenance/no-spawn and exact process/instance cleanup. It waits
+only for declared initial roster admission; direct fallback is forbidden.
+This is private source-process qualification, not installed or Windows proof.
+
 The additional `--test-file tests/test_launch_execution.py --test-file
 tests/test_launch_seed_state.py --test-file tests/test_launch_attempt.py` packet
 checks maintenance refusal before effects and during post-spawn observations
 or seed cleanup: the launcher still owns exactly one child wait, preserves its
 actual result, retains unconfirmed receipts, and never repeats the launch.
+
+Worktrees' `--test-file tests/test_embody_receipt.py --test-file
+tests/test_embody.py --test-file tests/test_embody_resume_seed.py --test-file
+tests/test_copilot.py
+--allow-explicit-tiers` packet covers additive ordinary state receipts, fresh,
+resume and reuse semantics, incompatible/stale heads, native uncertainty,
+bounded late registration/timeouts, one census per compatible live candidate,
+strict parser handling and a frozen prior no-wait syntax subset.
+The attended attachment consumer also captures the real additive receipt.
+`tests/native/test_embody_receipt_native.py` adds opt-in finite Python CLI
+process/stdout controls, with synthetic launch/session evidence. These prove
+the real parser/stdio seam, not a real mux, Copilot/model startup, cold-machine
+installation, installed runtime, other-platform qualification or completed
+recovery. No native/model lane is implied by unit fixtures; required unit-only
+CI is unchanged.
 
 Manager's opt-in `--test-file tests/test_companion_tool_statistics.py
 --test-file tests/test_companion_current_requests.py --test-file
@@ -8771,3 +8793,42 @@ The same packet also selects
 peer stays serving and receives no drain/shutdown mutation when the incoming
 peer refuses promotion or remains unready. Pure controls pair refused/timed-out
 drain with failed publication/promotion and require zero native retirement.
+
+## Explicit paired Sync and first launch
+
+Worktrees' optional `--test-file tests/test_worktree_sync.py
+--test-file tests/test_local_cache_lifecycle.py --allow-explicit-tiers` packet
+checks explicit paired Sync using real isolated Git repositories, preservation
+on dirty/ahead/active/fetch/late-merge failures, launch-admission contention,
+legacy single-repository effects and both Resume environment protocols.
+Knowledge-side Sync also reloads fetched harness policy through the active
+command cache and revalidates the pair before any plugin write.
+Changed synchronization targets require a retry, and incomplete saved bindings
+cannot downgrade to single-repository success.
+Narrow remote refspecs still refresh the selected default branch; a deleted
+target blocks preparation without reusing its stale tracking ref.
+Manager's `--test-file tests/test_launch_admission_ordering.py --test-file
+tests/production_picker/test_worktree_sync_actions.py --allow-explicit-tiers`
+packet exercises actual native entry without installation or plugin
+recomposition, the affirmative Sync dialog, partial-result failure and an
+older receiver's pre-effect parser refusal without replay.
+The Manager New control joins its real resolution and relocated native entry,
+requiring instruction preparation before handoff and exactly one creation.
+It also checks the final provisioning environment. Both receiving resolver
+surfaces retain provisioning for the typed `--first-launch` handoff with an
+already-created local ID; ordinary Resume stays fenced. A private ConPTY case
+drives the actual Windows shell-owned, mux-enabled handoff and checks that this
+intent survives in literal arguments without requiring extra environment fields.
+Completed Sync results support Up/Down, PgUp/PgDn and Home/End navigation;
+the render/key regression reaches a fourth failed pair and its partial progress.
+The existing standalone-instructions packet retains native explicit composition.
+Platform skips are not passes; these source controls neither deploy the change
+nor qualify installed stability or the complete fresh Manager installer.
+The manual `installation-context-acceptance.yml` input `native_launch`
+executes these packets and the existing fresh Manager runtime acceptance on
+hosted Linux and Windows at the dispatch's immutable source. It changes no
+required PR/promotion packet and performs no operator-host rollout.
+Manager's existing `tests/test_manager_engine_adapter.py` packet checks that
+source-qualified preparation copies the original pinned payload, not the
+dependency resolver's rewritten build manifests. Fresh runtime acceptance
+continues to verify the installed payload's original source identity.

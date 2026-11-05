@@ -64,6 +64,8 @@ def _run_relocated_mux_launch(req, plan, script) -> int:
             print("error: could not resolve a worktree id for this launch.")
             return 1
         args += ["--worktree-id", worktree_id]
+        if req.mode == "new":
+            args.append("--first-launch")
         staged = getattr(plan, "raw", None) or {}
         seed_id = staged.get("seed_id")
         if getattr(req, "seed_prompt", None) and not staged.get("seed_pending"):
@@ -98,9 +100,7 @@ def _run_relocated_mux_launch(req, plan, script) -> int:
         # to the spawned child rather than mutated onto `os.environ` -- that
         # global mutation would never be undone and would leak into every
         # later or concurrent spawn in this (long-lived Picker) process.
-        env = None
-        if no_mux:
-            env = {**os.environ, "WORKTREE_NO_MUX": "1"}
+        env = {**os.environ, "WORKTREE_NO_MUX": "1"} if no_mux else None
         title = str(getattr(plan, "worktree_id", None) or req.worktree_id or req.project)
         try:
             new_window_spawn.spawn_detached_new_window(argv, title=title, env=env)

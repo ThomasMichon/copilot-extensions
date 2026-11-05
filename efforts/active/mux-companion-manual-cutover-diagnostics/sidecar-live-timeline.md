@@ -494,6 +494,11 @@ publication and installed support retain their separate qualification.
   records the operator's selected next approach: check maintenance, briefly
   retry and use ordinary CLI wake behavior rather than adding offline capture
   storage. Passive Sidecar reads remain no-wake.
+  #10744 delivers that normal-write source behavior and actual private
+  canonical-transaction/intake proof. Its [source readback](journal/2026/11.05-sidecar-resident-recovery.md)
+  distinguishes the injected startup callback from the additional actual
+  private normal-ensure process controls, and retains unsupported/direct-fallback
+  observation qualification.
 - [x] Deliver bounded immutable process-local committed-save evidence and
   lock-safe optional notification delivery. #10131 supplies this primitive;
   resident/native index intake and cross-process delivery remain in the

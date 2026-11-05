@@ -557,6 +557,13 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       history, live purpose/count updates and exact reader/pane retirement.
       Its current-context RPC research establishes no qualified PRE relationship;
       original source/native/manual/Relay and installed gates remain open.
+      #10744 delivers the
+      [maintenance-aware ordinary-write recovery](resident-recovery.md):
+      maintenance admission, brief discovery retry, normal ensure, explicit
+      refusal envelopes and preserved post-effect child/retirement custody.
+      Its private canonical transaction reaches resident mutation intake;
+      the additional private normal-ensure process packet now passes and awaits
+      reviewed publication, not an installed daemon wake or lossless legacy history.
       The [known-output presentation follow-up](sidecar-output-presentation.md)
       addresses actual message/thought bursts that still overwhelm normal
       work rows. Plan #10689 and implementation #10698 are merged.
@@ -651,6 +658,7 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+- [2026-11-05 - Maintenance-aware resident recovery and retained child custody](journal/2026/11.05-sidecar-resident-recovery.md)
 - [2026-11-05 - Native three-owner composition and retained PRE boundary](journal/2026/11.05-sidecar-native-owner-composition.md)
 - [2026-11-05 - Current-context RPC is not pre-compaction evidence](journal/2026/11.05-sidecar-context-metadata-boundary.md)
 - [2026-11-05 - Manager owner-qualified statistics and sparse labels](journal/2026/11.05-sidecar-tool-statistics-manager.md)

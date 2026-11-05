@@ -34,7 +34,7 @@ from pathlib import Path
 import pytest
 
 from agent_worktrees import copilot_cli as m
-from agent_worktrees import output
+from agent_worktrees import embody_receipt, output
 
 
 @pytest.mark.parametrize("verb", ["copilot", "embody"])
@@ -82,12 +82,16 @@ class TestCmdCopilot:
         assert rc == 2
         assert "controlling terminal" in capfd.readouterr().out
 
-    def test_execs_attach_on_success(self, monkeypatch, capfd):
+    def test_execs_attach_on_success(self, monkeypatch, capfd, tmp_path):
         monkeypatch.setattr(m.sys.stdin, "isatty", lambda: True)
+        monkeypatch.setattr(embody_receipt.cfg, "tracking_dir", lambda: tmp_path)
 
         def fake_embody(args):
-            output._json_output({"ok": True, "session": "wt-abc", "worktree_id": "abc"})
-            return 0
+            def launch(target):
+                output._json_output({"ok": True, "created": False,
+                                     "session": "wt-abc", "worktree_id": "abc"})
+                return 0
+            return embody_receipt.run(args, launch)
 
         monkeypatch.setattr(m.handoff_cli, "cmd_embody", fake_embody)
         monkeypatch.setattr(m.sessions, "_mux_bin", lambda mux=None: "tmux")

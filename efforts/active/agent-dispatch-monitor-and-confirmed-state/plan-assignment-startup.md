@@ -174,6 +174,10 @@ Canonical component of [this same Active effort](README.md). This is not a child
       respective source and installed/native boundaries.
       The [actual-assignment source packet](journal/2026/11.04-assignment-relationships.md)
       merged in #10413; ordinary writer/cohort activation remains disabled.
+      The [participating-writer refinement](participating-writer-qualification.md)
+      specifies actual resident observation without direct fallback and Bridge's
+      independently selected lineage writer; its implementation and qualification
+      remain open.
 - [x] Land actual direct-worker and allocator-workspace assignment claims in
       [#10413](https://github.com/ThomasMichon/copilot-extensions/pull/10413),
       merged as `6626b8426e` after current-head clean Copilot review and required

@@ -1039,7 +1039,7 @@ bounded native supervisor before running its isolated-import, rollback,
 retained-launch and target-interpreter mux assertions through the standard
 test runner. It does not install on the host.
 
-Normal shell launch maintenance reports each synchronous marketplace installer,
+Explicit shell maintenance reports each synchronous marketplace installer,
 bootstrap update and reconciliation action's start, process exit code and
 completed duration. Failures (including commands that
 cannot start) are explicitly reported as continuing: maintenance remains
@@ -1090,43 +1090,33 @@ even when creation fails. This avoids lending a retired checkout to an idle
 PSMux standby without changing global warm settings or non-mux launches.
 See [mux launch directory](../plugins/agent-worktrees/docs/mux.md#two-backends-one-model).
 
-Healthy native wrappers submit `launch-update automatic --detach` and hand off
-after acceptance, before optional acquisition or installation completes. The
-existing execution driver owns that entire finite operation: no shell-owned
-stage, background-job join, inline-download retry or separate maintenance queue.
-`WORKTREE_NO_UPDATE` and `WORKTREE_NO_RECONCILE` remain independent. A failed
-submission warns without starting an inline installer; a failed accepted
-operation remains inspectable in its durable request/log.
-The owner continues independently eligible maintenance after a handled phase
-failure and preserves the failed aggregate outcome; one plugin's failure does
-not suppress an otherwise permitted staged Worktrees update.
+Ordinary Open and Resume use the worktree's existing setup. Native wrappers do
+not submit installation requests, recompose paired plugin settings or run
+marketplace preflights before entering it. The receiving engine also preserves
+repository HEADs and the overlay across Resume and SessionStart, retaining
+folder trust and tool-roster admission. Resume does not start background
+runtime provisioning.
+New retains its first-launch provisioning intent across relocation without
+creating the worktree twice. The handoff uses `--worktree-id <id> --first-launch`
+through the existing literal argument transport, including shell-owned Windows
+terminal handoff with mux enabled. No first-launch environment hint leaks into
+later sessions.
 
-Blocking native wrappers submit fixed `launch-update bootstrap`, `launch-update reconcile`
-and `launch-update staged` requests instead of executing JSON plan
-arguments. The execution owner re-derives the bootstrap/reconcile plans and
-revalidates each runtime's selected installation and publication permission.
-Staged requests bind both the acquisition result and discovered payload
-fingerprint, then reconstruct installer arguments and environment canonically.
-A replaced status, payload or installation fails visibly rather than mixing
-two acquisitions. No arbitrary command-execution protocol is exposed.
+Picker **Sync** is the affirmative repository/local-plugin operation: safely
+fast-forward both registered members of a worktree pair, then compose plugin
+settings and prepare instructions only if both are current. A failed fetch,
+dirty/ahead/active member or failed fast-forward leaves the existing plugin
+setup unchanged and reports the blocker. Any Git progress before a later
+failure remains visible in the result. Sync never discards local work or runs
+a machine-wide software installation; use the separate explicit **Update**
+flow for that. Initial creation still prepares a new worktree. Independently
+adopted maintenance and explicit refresh/update retain their existing owners,
+policy and exclusive installation authority.
 
-In explicit blocking mode, bootstrap and reconciliation finish before staged self-installation
-is submitted, so their waiters do not accidentally join that detached install.
-When a staged self-install is pending, bootstrap leaves Worktrees to that
-request but still updates independent repository bootstrap services.
-The staged default is `--detach`: its acceptance receipt links the durable
-request/log, and the installed version applies on the next launch.
-`WORKTREE_BLOCKING_INSTALL` waits on that same owner; it never executes an
-installer inline. Reconciliation remains independent of `--no-update`.
-An older engine without these request surfaces warns through the normal
-failed-command outcome and does not fall back to raw installation.
-Installer staging, watchdogs and per-generation safeguards remain nested
-beneath the shared transaction authority.
-Native phase installers stream both output channels into the durable request
-log while running; completed JSON is published separately. Waiting launchers
-observe those live lines rather than receiving all diagnostics after installer
-exit. Optional project discovery still selects an adopted CWD when no explicit
-project is supplied; neutral-directory maintenance does not require one.
+The existing `launch-update` compatibility commands remain available for
+explicit maintenance. They retain canonical request identities, source and
+runtime checks, durable logs and honest outcomes; ordinary session entry no
+longer invokes them.
 
 The native maintenance sinks share one physical-line envelope with the
 Python updater: `[HH:mm:ss.fffZ] scope state message [elapsed Ns]` or a
@@ -1159,9 +1149,9 @@ this launcher renderer. Structured-context installers retain their own native
 validation and staging owner, including its existing internal output buffering;
 the detached Windows observer does not replace that owner with legacy admission.
 
-New and Resume wait for the engine to finish repository synchronization,
-prompt staging and instruction projection rather than imposing a fixed
-aggregate plan timeout. Preparation stages and elapsed-time heartbeats stream
+New waits for initial source and plugin preparation; Resume retains existing
+source and plugin setup while resolving trust, session and prompt handoff.
+Neither imposes a fixed aggregate plan timeout. Preparation stages and elapsed-time heartbeats stream
 to the launch terminal; the final plan remains JSON on stdout. Individual
 engine operations keep their own failure bounds, and automation can explicitly
 request a bounded plan call.

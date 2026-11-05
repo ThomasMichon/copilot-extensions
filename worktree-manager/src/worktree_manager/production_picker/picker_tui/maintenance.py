@@ -82,7 +82,39 @@ def _result_ok(op, res):
         # no-commit conversation/unused worktrees, so it succeeds).
         return bool(res.get("success"))
     # sync: a no-op that was already current is success; a real skip is not.
+    if "ok" in res:
+        return res["ok"] is True
     return bool(res.get("updated")) or res.get("reason") == "up-to-date"
+
+
+def sync_diagnostics(result):
+    """Keep the cause and any earlier paired progress visible in the dialog."""
+    if not isinstance(result, dict):
+        return []
+
+    def compact(value, limit=160):
+        text = " ".join(str(value or "").split())
+        return text if len(text) <= limit else "..." + text[-(limit - 3):]
+
+    lines = []
+    reason = compact(result.get("reason") or result.get("error"))
+    detail = compact(result.get("detail"))
+    if reason not in ("", "updated", "up-to-date"):
+        lines.append(compact(f"{reason}: {detail}" if detail else reason))
+    elif detail:
+        lines.append(detail)
+    members = result.get("pair_results")
+    if isinstance(members, list):
+        progress = []
+        for member in members[:2]:
+            if not isinstance(member, dict):
+                continue
+            label = member.get("role") or str(member.get("worktree_id") or "member").rsplit("-", 1)[-1]
+            outcome = member.get("reason") or ("updated" if member.get("updated") else "unchanged")
+            progress.append(f"{compact(label, 12)}: {compact(outcome, 24)}")
+        if progress:
+            lines.append("; ".join(progress))
+    return lines
 
 
 def build_tasks(op, items, src, *, project=None, include_unused=False,
@@ -145,7 +177,7 @@ def _make_task(op, wt_id, machine, env, is_local, *, project, source_id=None,
             elif op == "finalize":
                 args = ["finalize", wt_id, "--json"]
             else:
-                args = ["sync", "--worktree-id", wt_id, "--json"]
+                args = ["sync", "--paired", "--worktree-id", wt_id, "--json"]
             return engine_client.run_json(
                 project, args, timeout=120, allow_nonzero=True
             )
