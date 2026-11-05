@@ -7051,16 +7051,29 @@ Prepared-source Manager selection/recovery has its own bounded native contract:
 python tools/run-manager-runtime-acceptance.py --root .validation --contract source
 ```
 
-It retains the 300-second group and 30-second item budgets without adding cold
-builds to the original runtime lane or required PR CI. The source lane uses
+Its four existing constructions run as separately process-contained commands
+sharing one 1,200-second aggregate deadline with the final assertions. Every
+command receives only the remaining aggregate allowance, not a fresh timeout;
+an individual stage may use more than 300 seconds. Assertions retain their
+30-second item limits. This intentionally replaces the former single
+300-second source group;
+production constructor/inactivity limits and all other native contracts remain
+unchanged. No cold builds are added to the original runtime lane or required
+PR CI. One borrowed test-environment lease and retention-aware sandbox span
+every group; a failed step stops later work and unsettled processes retain the
+sandbox. Fixture receipts carry the original bytes/file-identity witnesses
+between steps. The source lane uses
 an automatically cleaned OS-temporary sandbox, avoiding Windows path-length
 failures from source-plus-repair identities below a deep checkout. It constructs
-real non-editable same-package source generations. Manager's explicit Dev
+real non-editable same-package source generations. Source fixtures use the
+canonical source materializer before identity stamping, including nested
+first-party references; the legacy bootstrap copy is not a prepared-source
+assembly. Manager's explicit Dev
 self-update acquires a clean standalone fixture's merged `dev` tip using its
 own trusted preparer, independently of a different service-source policy.
 The first apply runs the actual standalone Python bootstrap adapter under an
 isolated base interpreter without site packages. Its cold construction uses the
-same four-build group rather than an additional fixture or timeout allowance.
+same four constructions rather than an additional fixture or deadline.
 The lane refuses a subsequently dirtied acquisition checkout without changing
 the installed selection through both self-update and bootstrap, while an already
 qualified exact payload remains reusable without resolving that dirty checkout.

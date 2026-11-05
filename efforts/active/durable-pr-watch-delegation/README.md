@@ -1171,6 +1171,33 @@ callback an implicit credential store.
   full CLI/Dispatch, installed and shadow/pane acceptance remain open. No
   production state, credential, service or action policy changed.
 
+### 2026-11-05 - Preserve bounded source qualification and its runtime dependency
+
+- The test-only source acceptance correction is tracked in #10632. Its four
+  real constructions and final assertions now use separate containment with
+  one approved 1,200-second aggregate deadline; every command receives only
+  the remaining time. Production deadlines, assertion item limits and all
+  other native contracts remain unchanged.
+- Source fixtures now use the canonical source materializer before identity
+  stamping. The legacy bootstrap copy retained a nested editable declaration,
+  which the noneditable constructor correctly projected and then refused as
+  a different assembly. Canonical materialization preserves the complete
+  assembly through retention without relaxing identity validation.
+- Sixteen focused scheduling, exhaustion, failure, retention and unchanged
+  contract-budget controls pass. Fatal Python lint and the installation
+  contract guard pass. Real upstream Git acquisition, source preparation and
+  retained identity also pass without installing a runtime.
+- The full native run passed release and source-qualified construction, then
+  refused acquisition of the caller-relative configured repository after the
+  explicit bootstrap changed its worker directory. Source acquisition,
+  repair and final continuity assertions are not claimed qualified.
+- The existing bootstrap/source-anchor owner in #10559 received the exact
+  non-update bootstrap reproduction. Preserve that runtime ownership rather
+  than opening a competing repair. The source-test patch remains draft until
+  the dependency and full native qualification clear; the parent Plan and
+  installed-adoption exit remain open. No live update or resource disposition
+  is authorized by this source work.
+
 ### 2026-11-04 - Qualify the composed native workspace foreground path
 
 - #10609 merged as `9e1c3e20622e41669c1baa1ede9028182129575c`

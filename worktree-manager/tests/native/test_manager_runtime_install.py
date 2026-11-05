@@ -169,7 +169,15 @@ def _update_from_payload(payload, root, env, *, activation=None):
         return si.self_update(root=root, dry_run=False), cutovers
 
 
-def _prepare_constructed(directory, *, default_data_root=False):
+def _prepare_materialized_source(payload):
+    with pytest.MonkeyPatch.context() as patch:
+        patch.syspath_prepend(str(SOURCE.parent / "tools"))
+        import prepare_runtime_source
+
+        prepare_runtime_source._materialize(SOURCE.parent, "worktree-manager", payload)
+
+
+def _prepare_initial_construction(directory, *, default_data_root=False):
     directory.mkdir()
     env = _environment(directory)
     root = Path(env["USERPROFILE"]) / ".worktree-manager" if default_data_root else directory / "root"
@@ -184,8 +192,17 @@ def _prepare_constructed(directory, *, default_data_root=False):
     ], env, directory)
     assert process.returncode == 0, process.stdout + process.stderr
     slot = si.version_slot(si.current_version(root), root)
+    return {
+        "directory": str(directory), "root": str(root), "slot": str(slot),
+        "stdout": process.stdout, "returncode": process.returncode,
+    }
+
+
+def _prepare_qualified_construction(constructed):
+    directory, root, slot = (Path(constructed[key]) for key in ("directory", "root", "slot"))
+    env = _environment(directory)
     qualified = directory / "qualified"
-    si._copy_payload(SOURCE, qualified, mark_complete=False)
+    _prepare_materialized_source(qualified)
     source = si._runtime_installer().runtime_source
     package_version = si.payload_version(qualified)
     (qualified / "plugin.json").write_text(json.dumps({
@@ -224,11 +241,13 @@ def _prepare_constructed(directory, *, default_data_root=False):
     target = si.version_slot(si.current_version(root), root)
     assert target != slot and target.name == generation
     si._runtime_installer().activate(root, slot.name, expected=target.name)
-    return {
-        "directory": str(directory), "root": str(root), "slot": str(slot),
-        "stdout": process.stdout, "returncode": process.returncode,
-        "target": str(target), "qualified": str(qualified),
-    }
+    return {**constructed, "target": str(target), "qualified": str(qualified)}
+
+
+def _prepare_constructed(directory, *, default_data_root=False):
+    return _prepare_qualified_construction(
+        _prepare_initial_construction(directory, default_data_root=default_data_root),
+    )
 
 
 @pytest.fixture(scope="module")
