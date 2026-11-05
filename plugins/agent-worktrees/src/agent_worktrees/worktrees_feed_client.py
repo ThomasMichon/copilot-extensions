@@ -156,7 +156,7 @@ class FeedReceiver:
                     raise ProjectionUnavailable("resident feed update is stale or out of order")
                 self._rows = {row["id"]: row for row in self.current["worktrees"]}
             self._begin = frame
-            self._observations = {} if self.current is None else {
+            self._observations = {} if kind == "begin" else {
                 item["id"]: item for item in self.current.get("observations", [])
             }
             self._observed = set()
@@ -166,7 +166,11 @@ class FeedReceiver:
             self._ordered = set()
             return None
         if kind in {"heartbeat", "availability", "going-away"}:
-            if kind == "going-away" and self._begin is None and self.current is None:
+            if (
+                kind == "going-away" and self._begin is None
+                and (self.current is None or self.current["projection"]["quality"] == "advisory")
+                and frame.get("cursor") is None
+            ):
                 generation = frame.get("generation")
                 if (
                     not isinstance(generation, str) or len(generation) != 32

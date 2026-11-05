@@ -632,6 +632,12 @@ not the generic failed-load screen. Missing direct local transport falls back
 only to the existing CLI recovery owner; live-peer or authentication failures
 never authorize a replacement daemon.
 
+Before a current publication, cutover notices carry the resident generation and
+null cursor, even when advisory rows have already been displayed by the CLI or
+resident. Receivers retain those rows and reconnect; saved revision numbers are
+never incremental-update bases. Every new full snapshot resets its observation
+set, including v2 rows removed or revised in the new generation.
+
 The path-gated/manual `Cold roster native acceptance` workflow runs the focused
 client/feed/runtime/recovery and Manager consumer packets on disposable Windows
 and Linux workers. It preserves ordinary test deadlines and is separate from

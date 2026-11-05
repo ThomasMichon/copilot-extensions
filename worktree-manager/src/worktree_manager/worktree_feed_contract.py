@@ -71,13 +71,16 @@ class CurrentFeed:
             )
         if kind == "going-away":
             generation, cursor = frame.get("generation"), frame.get("cursor")
+            early = self.head is None or (
+                self.head["quality"] == "advisory" and cursor is None
+            )
             if (
                 self._begin is not None
                 or not isinstance(generation, str) or len(generation) != 32
                 or any(c not in "0123456789abcdef" for c in generation)
                 or not isinstance(frame.get("reason"), str) or not frame["reason"]
-                or (self.head is None and cursor is not None)
-                or (self.head is not None and (
+                or (early and cursor is not None)
+                or (not early and (
                     generation != self.head["generation"] or cursor != self.head["revision"]
                 ))
             ):

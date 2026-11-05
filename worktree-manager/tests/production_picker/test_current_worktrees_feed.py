@@ -183,6 +183,13 @@ def test_saved_bootstrap_is_visible_but_not_current_and_live_replacement_is_atom
     })
     with pytest.raises(ValueError, match="after its cutover"):
         retiring.receive({"type": "pending", "reason": "late startup"})
+    before_current = CurrentFeed()
+    receive(before_current, cached)
+    before_current.receive({
+        "type": "going-away", "generation": "b" * 32, "cursor": None, "reason": "update",
+    })
+    assert before_current.notice == "update"
+    assert before_current.rows[0]["id"] == "saved"
 
 
 def test_retryable_cold_resident_is_loading_not_a_failed_source(monkeypatch):
