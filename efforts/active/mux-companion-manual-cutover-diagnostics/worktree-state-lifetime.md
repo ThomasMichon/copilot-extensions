@@ -12,7 +12,8 @@ Efforts export-contributor provenance merged in #10495; Logger's optional
 provenance collection/readback consumer merged in #10500; explicit passive
 exact-repository provider discovery merged in #10503; explicit policy-first
 managed export/collection composition merged in #10512; D4's default-off
-existing-tick source integration merged in #10520.**
+existing-tick source integration merged in #10520; D5 checkout-preservation
+source controls merged in #10528.**
 Native durability, actual archive acknowledgment and D5 remain open.
 No source merge performs a live data move,
 export, collection, cleanup or rollout. The
@@ -65,6 +66,8 @@ complete contributor retention and fresh local readback with finite owner comman
 #10520 connects this boundary to the existing sync tick through strict
 machine-local opt-in, preserving default behavior and accounting custody.
 Collection-context cursors retain independent repository/store progress.
+#10528 supplies conservative known-fallback preservation and actual isolated
+checkout retirement with independent managed data and retained discovery.
 Legacy rescue, installed collection and actual archive acknowledgment remain open.
 
 Existing cleanup can remove a checkout while retaining a lifecycle tombstone.
@@ -207,6 +210,9 @@ not consequences of a reviewed design.
 - [ ] D5. Qualify legacy rescue and the separation of checkout removal from data
   reclamation. Actual relocation, collection, deletion and rollout need their
   own concrete authorization and evidence.
+  #10528 delivers the source preservation and independent checkout-retirement
+  controls; supported rescue, restoration/reclamation and operational acceptance
+  remain open. See the [preservation readback](journal/2026/11.04-sidecar-checkout-preservation.md).
 
 ## Validation Plan
 
@@ -283,9 +289,13 @@ not consequences of a reviewed design.
   canonical reference calls. #10520 integrates actual owner discovery, export
   and complete provenance collection into the default-off existing tick.
   Qualification is isolated/local source evidence, not actual remote archival.
-- [ ] Checkout retirement retains managed data and its discoverable descriptor;
+- [x] Checkout retirement retains managed data and its discoverable descriptor;
   legacy or unverified rescue prevents data-destroying removal. Archive outage
   alone neither erases data nor fabricates an unfinished source objective.
+  #10528 qualifies actual isolated source finalization, unchanged managed
+  descriptor/member bytes and fresh discovery, plus legacy/partial/unsafe holds
+  at reporting and mutation boundaries. This is not installed/native acceptance,
+  actual legacy relocation or remote archive acknowledgment.
 - [ ] State reclamation refuses absent/stale archive receipts, changed revisions,
   missing retention decisions and absent deletion approval. Restoration never
   reacquires a claim, lease or head from archived bytes.

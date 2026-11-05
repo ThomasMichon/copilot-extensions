@@ -33,7 +33,9 @@ explicit policy-first managed export, revision-pinned provenance and fresh local
 collection readback through those selected owners. #10520 integrates this
 boundary into the existing tick with strict machine-local opt-in, bounded shared
 execution and independent destination/source/lock/machine scheduling contexts.
-Legacy rescue, actual archive acknowledgment, complete source
+#10528 adds conservative checkout-local preservation and independent managed-data
+retirement controls at the existing lifecycle owner. Legacy rescue,
+restoration/reclamation, actual archive acknowledgment, complete source
 coverage, qualified current answerability/PRE, installed and native acceptance
 remain open.
 Providers advertise actual running support before independently installed

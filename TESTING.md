@@ -30,8 +30,12 @@ packet covers checkout-local agenda preservation across ordinary/forced cleanup,
 raw removal fallbacks, partial/linked/unreadable homes and state appearing during
 a failed Git removal. Its actual isolated Git finalization controls distinguish
 completed source work with a retained legacy checkout from removed checkouts whose
-managed data/descriptors remain discoverable outside them. No archive provider is
-required for that separation. This is source/private-fixture qualification, not
+managed data/descriptors remain discoverable outside them. The supported
+checkout-local format-2 control invokes the actual Efforts initialization,
+complete export, verification and readback commands before finalization.
+Original identity, records, metadata and source bytes survive, and a verified
+rescue copy does not release the checkout hold or create a managed locator.
+No archive provider is required for that separation. This is source/private-fixture qualification, not
 real-data rescue, native Windows durability or persistent-data deletion authority.
 
 The manual `windows-coverage-rotation.yml` selector `related_resolution=true`
@@ -42,6 +46,33 @@ outcome. Focused selectors are mutually exclusive. This packet checks targeted
 source/topology work counts, configuration forwarding, precedence, failure and
 separate-invocation freshness. It neither expands required unit-only CI nor
 qualifies installed runtime, native Windows, ACP or whole-hook throughput.
+
+The focused Worktrees `tests/test_reconcile_deployment.py` launch-freshness
+packet exercises real planning, staging, native execution-admission and the
+durable launch consumer with isolated metadata. It preserves newer installed
+and serving versions, independent same-version sources, payload refresh and
+forward standalone updates, and refuses changed cached actions without runtime
+writes. Its existing policy matrices may be selected separately with
+`-k 'stage_refreshes or prelaunch_retains'` to retain the ordinary group deadline.
+The actor-free `tools/promotion_unit_tests/test_launch_freshness.py` cases
+substitute only file/source observations and belong to the unit-only promotion
+packet. Neither lane qualifies an installed service, external rollout or every
+first-use adapter; #7030 retains those acceptance boundaries.
+
+The same focused packet separately exercises preexisting selector/manifest
+disagreement, actual canonical last-known-good/newest-complete recovery, named
+and packaged helper layouts, unchanged valid-current selection despite a newer
+unselected slot, constructor/helper-only changes, external transitive local
+dependency changes or loss (including cyclic declarations), and same-package
+repair serving. Generated dependency environments do not invalidate cached work.
+External dependency controls exercise both the stdlib TOML parser and the real
+backport with `tomllib` unavailable, preserving the declared Python 3.10 floor.
+Completion/interpreter records in these lookup fixtures are synthetic observations;
+the real canonical resolver is executed, not the selected fixture interpreter.
+They do not certify package health or installed serving. Own successful acquisition
+is replanned through the ordinary next pass; genuinely stale external actions
+still refuse. Runtime package normalization is checked against the canonical
+source/repair identity function, preserving profile and other package qualifiers.
 
 The manual `windows-coverage-rotation.yml` selector `post_tool_fallback=true`
 runs only Worktrees' post-tool shell, status/bind reminder, late-guidance and
