@@ -1,0 +1,9 @@
+{
+  "comment": "Avoid loading unrelated lifecycle commands for explicit one-shot PR snapshot, status and thread reads.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
