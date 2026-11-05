@@ -2150,6 +2150,12 @@ are not needed for Manager self-update.
 The standalone bootstrap expands retained sparse staging before construction:
 fresh engine repair also needs the owning `agent-worktrees` installer and SDK.
 
+The finite explicit-bootstrap installer retains the submitting caller's working
+directory, so relative filesystem repositories resolve where they were
+configured. Its installer, payload and root arguments remain absolute. This
+does not add a request-context field, override the configured repository/ref or
+change the separately captured absolute KillSwitch path.
+
 If acquired Manager content differs from an already published slot with the
 same package version, installation uses a distinct immutable repair generation
 instead of rewriting or rejecting the predecessor. Matching healthy generations
