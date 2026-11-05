@@ -210,11 +210,13 @@ It never dispatches candidate CI.
 every composed promotion candidate, not an impact-selected PR test or part of
 unit coverage. It imports the same frozen candidate and uses the existing
 hash-pinned PSMux 3.3.8 dependency. The contained native packet starts four
-concurrent admitted Resume plans with both cold and warm PSMux startup. It
+concurrent admitted cold Resume plans with PSMux prewarming enabled and disabled. It
 requires the production launcher, copied pane/startup readers, exact child
 arguments, acknowledged consumption, terminal attachment, detach without
 termination and owned child retirement. Engine plan resolution and the final
-Copilot setup/model process are finite private fixtures; this does not qualify
+Copilot setup/model process are finite private fixtures. Initial commands,
+directories and environment overrides prevent PSMux warm-server reuse, so these
+cases do not claim warm adoption. This does not qualify
 authentication, inference or an operator's existing sessions.
 Failure, cancellation or skipping prevents artifact attestation and promotion;
 JUnit evidence is retained separately. The source-unit receipt remains
@@ -222,6 +224,9 @@ JUnit evidence is retained separately. The source-unit receipt remains
 As with other controller changes, this gate becomes live only after its
 independently reviewed Main workflow transaction; merging the source proposal
 into Dev alone does not activate it.
+Before activation, `installation-context-full.yml`'s explicit `resume-pane`
+portfolio runs the same native packet at an exact source ref, independently of
+the existing `generic-mux` portfolio.
 
 Raw candidate line coverage remains in the three-file packet. Its separate
 development projection is bound to Dev bytes, candidate bytes, tree and copy

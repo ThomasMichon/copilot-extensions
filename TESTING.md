@@ -40,11 +40,11 @@ The Windows Resume consumer packet is
 It requires PowerShell 7 and real PSMux, without fallback or prerequisite skips
 on Windows. Four concurrent admitted Resume plans traverse the unchanged
 production launcher, copied pane assets, argument receipt and startup reader,
-real ConPTY attachment, detach and owned child retirement. Both cold and warm
-PSMux starts carry a realistic JSON configuration environment and literal
+real ConPTY attachment, detach and owned child retirement. Cold Resume starts
+with PSMux prewarming enabled and disabled carry a realistic JSON environment and literal
 33-argument commands. Private engine resolution and finite Copilot setup
 substitutions isolate user worktrees, credentials and model sessions. This is
-native consumer qualification, not a reproduction of every field failure,
+native consumer qualification, not warm-server adoption, a reproduction of every field failure,
 installed-runtime or authentication/inference acceptance. The source release
 controller requires it for every frozen candidate, separately from unit coverage;
 live enforcement depends on the independently governed Main controller.

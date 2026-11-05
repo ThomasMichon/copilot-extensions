@@ -106,7 +106,7 @@ def _resume_fixture(root, shared_env, manager_bin, index):
     shell.joinpath("default-setup.ps1").write_text(
         "# agent-worktrees:native-setup-owner-v1\n"
         "[IO.File]::WriteAllText($env:TEST_CAPTURE, "
-        "(ConvertTo-Json -InputObject @($args) -Compress))\n"
+        "(ConvertTo-Json -InputObject @{pid=$PID;argv=@($args)} -Compress))\n"
         "[Console]::WriteLine('RESUME-FIXTURE-READY')\n"
         "while(-not(Test-Path -LiteralPath $env:TEST_RELEASE)){Start-Sleep -Milliseconds 50}\n"
         "exit 0\n", encoding="utf-8",
@@ -148,15 +148,15 @@ def _resume_fixture(root, shared_env, manager_bin, index):
     }
 
 
-@pytest.mark.parametrize("warm", [False, True])
-def test_four_simultaneous_resume_plans_acknowledge_and_reach_copied_setup(tmp_path, warm):
+@pytest.mark.parametrize("prewarm", [False, True])
+def test_four_simultaneous_resume_plans_acknowledge_and_reach_copied_setup(tmp_path, prewarm):
     from _terminal_console_fixture import Console
 
     psmux = os.environ.get("PSMUX_TEST_BIN") or shutil.which("psmux")
     assert PWSH and psmux, "PowerShell 7 and PSMux are required for this native packet"
     env = _test_env(tmp_path)
     env.update(UV_OFFLINE="1", UV_PYTHON_DOWNLOADS="never")
-    if warm:
+    if prewarm:
         env.pop("PSMUX_NO_WARM")
     manager = tmp_path / "manager"
     slot = boundary_runtime(manager, "fixture")
@@ -181,27 +181,32 @@ def test_four_simultaneous_resume_plans_acknowledge_and_reach_copied_setup(tmp_p
                     Console(launch["argv"], env=launch["env"], cwd=launch["target"]),
                 ))
             _wait_for(
-                lambda: all(launch["capture"].exists() for launch in launches),
-                "The real copied startup reader did not reach every child", consoles,
-            )
-            for launch in launches:
-                assert json.loads(launch["capture"].read_text("utf-8-sig")) == launch["expected"]
-                assert not list(launch["state"].glob("launch-attempts/*/*.shell/pane-args/*.json"))
-            _wait_for(
                 lambda: all(b"RESUME-FIXTURE-READY" in console.output for console in consoles),
                 "Launcher did not complete its pane acknowledgment", consoles,
             )
+            owners = []
+            for console, launch in zip(consoles, launches, strict=True):
+                captured = json.loads(launch["capture"].read_text("utf-8-sig"))
+                assert captured["argv"] == launch["expected"]
+                assert not list(launch["state"].glob("launch-attempts/*/*.shell/pane-args/*.json"))
+                pane = mux("display-message", "-t", launch["name"], "-p", "#{pane_pid}")
+                assert pane.returncode == 0, pane.stderr
+                owners.append((console, console.pin(captured["pid"]),
+                               console.pin(int(pane.stdout.strip()))))
             for console in consoles:
                 console.send(b"\x02d")
             for console in consoles:
                 assert console.wait() == 0, console.output.decode("utf-8", "replace")
             for launch in launches:
                 assert mux("has-session", "-t", launch["name"]).returncode == 0
+            assert all(not console.exited(handle) for console, *handles in owners for handle in handles)
+            for launch in launches:
                 (launch["root"] / "release").touch()
             _wait_for(
                 lambda: all(mux("has-session", "-t", launch["name"]).returncode == 1
-                            for launch in launches),
-                "Owned fixture panes did not retire after child release", consoles,
+                            for launch in launches)
+                and all(console.exited(handle) for console, *handles in owners for handle in handles),
+                "Owned pane/child processes did not retire after release", consoles,
             )
         finally:
             for launch in launches:

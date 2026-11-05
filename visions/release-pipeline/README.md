@@ -25,7 +25,7 @@ package-feed restrictions before publication. This is an explicit exception to
 unit-only release execution, not permission to reclassify integration as unit
 evidence or restore the general integration portfolio. Every promotion must also
 qualify the real Windows Resume pane-startup consumer against the frozen release
-candidate, including concurrent cold and warm starts, argument acknowledgment,
+candidate, including concurrent cold starts with prewarming enabled and disabled, argument acknowledgment,
 terminal attachment and owned retirement. This bounded native exception remains
 separate from unit coverage and does not require a model session or operator state.
 Repeated bookkeeping,

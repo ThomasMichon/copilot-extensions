@@ -406,17 +406,16 @@ jobs:
           name: frozen-promotion-candidate
           path: ${{ runner.temp }}/frozen-candidate
       - name: Import the frozen candidate without recomposition
-        shell: pwsh
+        shell: bash
         env:
           DEV_SHA: ${{ needs.gate.outputs.sha }}
           MAIN_BEFORE: ${{ needs.gate.outputs.main_before }}
           CANDIDATE_SHA: ${{ needs.compose-candidate.outputs.candidate_sha }}
         run: |
-          python tools/promotion_frozen_candidate.py `
-            --repo "$env:GITHUB_WORKSPACE" --directory "$env:RUNNER_TEMP\frozen-candidate" `
-            --dev-sha "$env:DEV_SHA" --main-before "$env:MAIN_BEFORE" `
-            --candidate-sha "$env:CANDIDATE_SHA" --checkout "$env:RUNNER_TEMP\candidate"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/promotion_frozen_candidate.py \
+            --repo "$GITHUB_WORKSPACE" --directory "$RUNNER_TEMP/frozen-candidate" \
+            --dev-sha "$DEV_SHA" --main-before "$MAIN_BEFORE" \
+            --candidate-sha "$CANDIDATE_SHA" --checkout "$RUNNER_TEMP/candidate"
       - name: Prepare pinned disposable PSMux
         shell: pwsh
         run: |
@@ -434,14 +433,11 @@ jobs:
           if ($binaries.Count -ne 1) { throw 'Expected exactly one pinned PSMux binary' }
           "PSMUX_TEST_BIN=$($binaries[0].FullName)" >> $env:GITHUB_ENV
           $binaries[0].DirectoryName >> $env:GITHUB_PATH
-      - name: Require four concurrent Resume consumers, cold and warm
+      - name: Require four concurrent cold Resume consumers, prewarming on and off
         shell: pwsh
         run: |
           Set-Location "$env:RUNNER_TEMP\candidate"
-          python tools/run-plugin-tests.py worktree-manager `
-            --test-file tests/native/test_resume_pane_startup.py --allow-explicit-tiers `
-            --junit-dir "$env:RUNNER_TEMP\resume-evidence" `
-            --timeout 360 --plugin-timeout 600 --test-timeout 180
+          python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_resume_pane_startup.py --allow-explicit-tiers --junit-dir "$env:RUNNER_TEMP\resume-evidence" --timeout 360 --plugin-timeout 600 --test-timeout 180
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Retain native consumer evidence
         if: always()
