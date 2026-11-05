@@ -276,6 +276,23 @@ and install-contract guards passed again. Current-head review and CI remain
 publication gates; these source tests do not establish a live SSH or installed
 desktop qualification.
 
+The second review found a final-preflight registration race, post-pointer
+cleanup exceptions without a committed receipt, and stale saved Worktrees
+button focus. It also identified a console descendant in the existing plugin
+composer. Capability version 2 now routes public apply through the native
+registration transaction and retains its lock through commit. The preserving
+writer reports pointer completion before cleanup; failures after that boundary
+return an incomplete receipt. Readiness reconciles current/saved button focus,
+and composition uses a windowless Windows delegate. The updated Windows packet
+passed 104 binding/composition controls, five native binding controls and 82
+production Manager controls. This includes late registration drift refusal,
+writer serialization, an actual invalid-UTF-8 post-write cleanup failure,
+two actual composer descendants from a windowless parent, and confirmed binding
+with return-to-Worktrees focus in empty and populated projects. Strict
+Python 3.10 checks passed for Linux and Windows targets; F/E9, module,
+documentation and install-contract guards passed. Fresh review and CI remain
+required before source merge.
+
 Fresh-store configuration uses actual Git roots and native APIs but pre-provided
 native packages. Cold installer/Python-3.9/fresh-terminal, installed desktop,
 live-provider and rollout lanes were not exercised: this source slice has no

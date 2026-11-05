@@ -169,6 +169,7 @@ def _delegate(arguments: list[str], agent_worktrees_command: str | None = None) 
             capture_output=True,
             text=True,
             check=False,
+            creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if sys.platform == "win32" else 0,
         )
     except OSError as exc:
         raise KnowledgePluginError(

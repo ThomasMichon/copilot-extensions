@@ -339,7 +339,8 @@ def test_worktrees_readiness_is_async_visible_and_never_runs_a_binding(monkeypat
 
 
 @pytest.mark.timeout(120)
-def test_missing_knowledge_to_confirmed_native_binding_and_new(tmp_path, monkeypatch):
+@pytest.mark.parametrize("empty", [False, True])
+def test_missing_knowledge_to_confirmed_native_binding_and_new(tmp_path, monkeypatch, empty):
     owner_python = os.environ.get("REPOSITORIES_CONFIG_TEST_PYTHON")
     if not owner_python:
         pytest.skip("set REPOSITORIES_CONFIG_TEST_PYTHON to the isolated native engine interpreter")
@@ -430,6 +431,8 @@ def test_missing_knowledge_to_confirmed_native_binding_and_new(tmp_path, monkeyp
                 {"label": "Repositories", "kind": "registered", "pivot": reg}], [], [],
     )))
     source = _fixture_source()
+    if empty:
+        source.load = lambda: []
     source.knowledge_readiness = data_local.knowledge_readiness
 
     async def run():
@@ -485,6 +488,13 @@ def test_missing_knowledge_to_confirmed_native_binding_and_new(tmp_path, monkeyp
             app.screen.action_close()
             await _wait(pilot, lambda: engine._knowledge_readiness.get("ready") is True)
             assert "KB" not in engine.button_set()
+            assert engine._config_return[3] == 0
+            engine._leave_configuration()
+            await pilot.pause()
+            assert engine._kind() == "worktrees" and engine.sel == ("BTN", 0)
+            assert engine.btn_idx == 0 and engine.active_button() == "N"
+            if empty:
+                assert engine.button_set() == ["N"]
             assert yaml.safe_load(config.read_text("utf-8"))["knowledge_repo"] == "knowledge"
             assert snapshot(paths["knowledge"]) == before[2]
             # Binding cannot commit or alter either repository's source history.

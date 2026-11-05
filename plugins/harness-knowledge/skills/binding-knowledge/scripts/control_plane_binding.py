@@ -218,6 +218,8 @@ def resolve_registered_binding(
         )
         if readiness["status"] != "ready":
             raise RuntimeError(f"{role} registration is not ready: {readiness['reason']}")
+    if registry != _json_result(owner, command, ["repos", "list", "--json"]):
+        raise RuntimeError("canonical registration changed during binding preflight")
     return {
         "harness": harness,
         "knowledge": knowledge,

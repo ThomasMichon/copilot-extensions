@@ -133,6 +133,6 @@ def test_capability_probe_is_available_before_repository_selection_without_effec
     assert json.loads(result.stdout) == {
         "version": 1, "registration_classes": ["knowledge", "worktree"],
         "preserves_registration_class": True, "control_plane_pair": True,
-        "existing_binding_configuration": 1,
+        "existing_binding_configuration": 2,
     }
     assert list(tmp_path.iterdir()) == []

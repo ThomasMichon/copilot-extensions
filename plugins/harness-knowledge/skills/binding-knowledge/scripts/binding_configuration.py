@@ -72,17 +72,33 @@ def apply(owner: Any, command: str, harness: str, knowledge: str, token: str) ->
     selected = _selection(owner, command, harness, knowledge)
     if not hmac.compare_digest(token, _digest(selected)):
         raise RuntimeError("binding preview changed; refresh and preview again")
-    summary = owner.bind(
-        harness, knowledge, selected["knowledge_path"], home=Path.home(),
-        harness_path=selected["harness_path"], agent_worktrees_path=command,
-        preserve_binding=True, config_root=Path(selected["config_root"]),
-        platform_key=selected["platform_key"], precondition=revalidate,
-    )
-    complete = (
-        summary["registration"]["status"] == "ready"
-        and summary["state_root"]["status"] == "ready"
-        and not summary.get("plugins_error")
-    )
+    pointer_committed = False
+
+    def committed() -> None:
+        nonlocal pointer_committed
+        pointer_committed = True
+
+    try:
+        summary = owner.bind(
+            harness, knowledge, selected["knowledge_path"], home=Path.home(),
+            harness_path=selected["harness_path"], agent_worktrees_path=command,
+            preserve_binding=True, config_root=Path(selected["config_root"]),
+            platform_key=selected["platform_key"], precondition=revalidate,
+            pointer_committed=committed,
+        )
+        complete = (
+            summary["registration"]["status"] == "ready"
+            and summary["state_root"]["status"] == "ready"
+            and not summary.get("plugins_error")
+        )
+    except Exception:
+        if not pointer_committed:
+            raise
+        return {
+            "status": "incomplete", "pointer_committed": True,
+            "operation": "set", "binding_operation": "bind-existing", "knowledge_repo": knowledge,
+            "message": "The binding pointer committed but follow-up failed. Refresh readiness before retrying.",
+        }
     return {
         "status": "persisted" if complete else "incomplete", "pointer_committed": True,
         "operation": "set", "binding_operation": "bind-existing", "knowledge_repo": knowledge,
@@ -101,6 +117,17 @@ def command(owner: Any, args: argparse.Namespace) -> int:
         raise RuntimeError("Configuration only supports an existing registered pair")
     if args.configuration == "preview" and args.preview_token:
         raise RuntimeError("A preview token is supplied only with confirmed apply")
+    if args.configuration == "apply":
+        result = owner._run_agent_worktrees(
+            args.agent_worktrees_path,
+            ["repos", "configuration", "knowledge-apply", "--context-project", args.harness,
+             "--repository", args.knowledge, "--preview-token", args.preview_token],
+            noninteractive=True,
+        )
+        if result is None:
+            raise RuntimeError("The native binding transaction is unavailable")
+        print(result.stdout.strip())
+        return int(result.returncode)
     result = (
         preview(owner, args.agent_worktrees_path, args.harness, args.knowledge)
         if args.configuration == "preview" else

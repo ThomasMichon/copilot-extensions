@@ -1524,8 +1524,10 @@ in both local and live modes.
 Missing required knowledge shows **Configure knowledge**, which navigates to
 the native Repositories section and its confirmed existing-repository binding
 action. An unavailable binding payload shows preparation guidance in the
-Repositories banner. Unavailable/failed reads remain explicit; a banner is not proof of
-readiness. Completion refreshes the owner observation. The native New gate
+Repositories banner. Unavailable/failed reads remain explicit; a banner is not
+proof of readiness. Completion refreshes the owner observation and reconciles
+current and saved Worktrees button focus before returning from Configuration.
+The native New gate
 still decides admission, while source-only Bare allocation and existing-session
 recovery retain their separate behavior. This flow does not create a repository,
 authenticate a provider, retrofit a pair or install a missing binding owner.

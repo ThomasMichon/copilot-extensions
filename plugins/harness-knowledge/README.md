@@ -62,9 +62,14 @@ confirmed **existing** canonical knowledge/worktree repository. Its
 `bind_knowledge.py --configuration preview|apply`, with exact selected
 harness/knowledge names and the native engine entry. Preview is read-only;
 apply requires the returned token and rechecks the canonical registration and
-configuration baseline inside the existing pointer lock. It never registers,
+configuration baseline inside the existing pointer lock. Capability version 2
+routes apply through the native registration transaction, which remains locked
+through pointer commit; the internal `apply-locked` delegate is not a standalone
+apply API. It never registers,
 clones, creates a repository or silently replaces a conflicting binding.
-An incomplete post-write result reports the committed pointer explicitly.
+An incomplete post-write result reports the committed pointer explicitly,
+including failures during legacy cleanup after the write. Plugin composition
+keeps its native delegate windowless on Windows.
 See [Repositories Configuration](../agent-worktrees/docs/repositories-configuration.md#confirmed-existing-knowledge-binding).
 
 `bind_knowledge.py` writes or refreshes these local artifacts:

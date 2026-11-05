@@ -118,6 +118,16 @@ New task; a timeout does not prove that a prior write did not happen. Binding
 does not retrofit an existing tracked pair or establish server landing policy.
 The native New-admission gate remains authoritative.
 
+The native apply transaction holds the existing registration-writer lock
+through the pointer commit. Binding Configuration capability version 2 is
+required; older binding payloads refuse rather than use an unlocked apply.
+Direct binding-script Configuration apply routes through this same native
+transaction. The owner's internal `apply-locked` delegate is not a standalone
+apply API. Final preflight confirms registration again after its Git/account
+probes. Pointer completion is captured at the preserving writer boundary, so
+a later cleanup or observation failure still returns a nonzero incomplete
+receipt with `pointer_committed: true`.
+
 ## Validation
 
 Native coverage runs through `tools/run-plugin-tests.py agent-worktrees -k

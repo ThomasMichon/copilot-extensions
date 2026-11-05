@@ -11,6 +11,7 @@ class PickerConfigurationMixin:
         if not callable(reader):
             return
         generation = self._knowledge_read_generation = object()
+        was_ready = getattr(self, "_knowledge_readiness", {}).get("ready") is True
         self._knowledge_readiness = {"ready": None, "code": "loading"}
 
         def done(result):
@@ -24,6 +25,12 @@ class PickerConfigurationMixin:
                 and result["ready"] == (result["code"] == "ready")
             )
             self._knowledge_readiness = result if valid else {"ready": None, "code": "unavailable"}
+            if was_ready != (self._knowledge_readiness.get("ready") is True):
+                if self._kind() == "worktrees":
+                    self.btn_idx = 0
+                saved = getattr(self, "_config_return", None)
+                if saved and saved[0] < len(self.pivots) and self.pivots[saved[0]]["kind"] == "worktrees":
+                    self._config_return = (*saved[:3], 0)
             if self.sel not in self.stops():
                 self.sel = self.default_sel()
             self.refresh()
@@ -165,6 +172,7 @@ class PickerConfigurationMixin:
                 self.htab = self._left_pivots()[0]
                 self.sel = self.default_sel()
         self._config_return = None
+        self.btn_idx = min(self.btn_idx, max(0, len(self.button_set()) - 1))
         self.refresh()
 
     def _load_current_config_section(self, *, force=False):

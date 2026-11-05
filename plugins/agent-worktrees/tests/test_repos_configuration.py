@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 from types import SimpleNamespace
+import threading
 
 from agent_procutil import no_window_kwargs
 import pytest
@@ -213,6 +214,34 @@ def test_old_binding_owner_is_not_invoked_for_apply(native, monkeypatch):
     assert caught.value.code == "binding-owner-unsupported"
     assert len(calls) == 1 and "--capabilities" in calls[0]
     assert "--configuration" not in calls[0]
+
+
+def test_binding_apply_keeps_registration_writer_out_until_pointer_commit(native, monkeypatch):
+    from agent_worktrees import repos_knowledge_configuration as binding
+
+    started, completed = threading.Event(), threading.Event()
+
+    def write():
+        started.set()
+        try:
+            return repos.set_copilot_account("sample", "after")
+        finally:
+            completed.set()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        futures = []
+
+        def delegated(*_args):
+            futures.append(pool.submit(write))
+            assert started.wait(2)
+            assert not completed.wait(0.1)
+            return {"status": "persisted", "pointer_committed": True}
+
+        monkeypatch.setattr(binding, "_invoke", delegated)
+        result = binding.invoke("sample", "sample", "apply", "a" * 64)
+        assert result["pointer_committed"] is True
+        assert futures[0].result(timeout=5)
+    assert repos.read_registry(strict=True).repos["sample"].copilot_account == "after"
 
 
 def test_incomplete_binding_keeps_committed_receipt_and_reports_failure(native, monkeypatch, capsys):

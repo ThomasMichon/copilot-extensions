@@ -43,6 +43,16 @@ def owner_status(project: str) -> str:
 
 
 def invoke(project: str, name: str, operation: str, token: str = "") -> dict:
+    if operation == "apply":
+        from . import repos
+        from .repos_registry_transaction import registry_lock
+
+        with registry_lock(repos._repos_yaml_path()):
+            return _invoke(project, name, operation, token)
+    return _invoke(project, name, operation, token)
+
+
+def _invoke(project: str, name: str, operation: str, token: str = "") -> dict:
     from agent_procutil.owned_budget import OwnedExecutionBudget
     from agent_procutil.owned_process import OwnedCleanupError, run_owned
 
@@ -54,7 +64,8 @@ def invoke(project: str, name: str, operation: str, token: str = "") -> dict:
         raise ConfigurationError("binding-native-owner-unavailable", "The selected native engine entry is unavailable.")
     args = [
         sys.executable, "-B", str(script), "--harness", project, "--knowledge", name,
-        "--agent-worktrees-path", str(entry), "--configuration", operation, "--json",
+        "--agent-worktrees-path", str(entry), "--configuration",
+        "apply-locked" if operation == "apply" else operation, "--json",
     ]
     if operation == "apply":
         args += ["--preview-token", token]
@@ -74,7 +85,7 @@ def invoke(project: str, name: str, operation: str, token: str = "") -> dict:
             support.returncode or not isinstance(capabilities, dict)
             or type(capabilities.get("version")) is not int or capabilities["version"] != 1
             or type(capabilities.get("existing_binding_configuration")) is not int
-            or capabilities["existing_binding_configuration"] != 1
+            or capabilities["existing_binding_configuration"] != 2
         ):
             raise ConfigurationError(
                 "binding-owner-unsupported", "The selected binding owner needs its Configuration capability update.",
