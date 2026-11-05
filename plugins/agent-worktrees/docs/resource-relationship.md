@@ -91,6 +91,24 @@ the operation's response independently confirms the checked incarnation and
 actual executing writer. Direct CLI execution uses the same registered handler.
 No monitor bootstrap or additional preflight process is required.
 
+The executing CLI additionally advertises `resident_inspect: 1`. Only after
+negotiating that declaration, callers may use `inspect --resident-only` with
+an explicit `expected_creation_nonce`. This selector uses the selected
+installation's existing authenticated resident transport and version-2 handler.
+It never boots a monitor or substitutes the calling CLI's direct writer.
+The live response must confirm the owner, handle, checked nonce and executing
+writer contract. Success adds `resident`, containing the observed transport
+`generation` and `runtime_generation`; discovery is re-read after the response,
+and a changed endpoint, token, generation or selected installation refuses.
+Missing, older, unavailable or incompatible residents remain unknown support.
+The read leaves record bytes unchanged, including when inspecting an absent
+request with `allow_missing`. It does not reserve a claim or grant assignment
+readiness. The observation applies only to that selection; an assembling owner
+must invalidate it when participants change and retain effect-side nonce checks.
+Baseline syntax still uses the registered direct handler unchanged. A CLI
+without this optional declaration must not receive the new selector; rollback
+leaves baseline operations available but cannot qualify the resident.
+
 This is provider-first expansion, not ordinary assignment activation or
 whole-writer-cohort qualification. Older handlers reject the extra input field;
 missing declarations or responses without checked-incarnation support are
