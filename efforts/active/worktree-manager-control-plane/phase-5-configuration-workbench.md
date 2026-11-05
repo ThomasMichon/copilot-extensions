@@ -332,6 +332,15 @@ the lock is released. Ten native binding controls and all 85 Manager controls
 passed on Windows, with F/E9 and module-size checks. No remote authentication,
 installed acceptance or broader deadline guarantee is inferred.
 
+The following overview identified an unsupported resource-name row that could
+still advertise a binding form even though preview necessarily refused it.
+Eligibility now includes the catalog's already-computed resource-name finding,
+without widening the shared validator. Eleven native controls passed, including
+an inspectable overlong row with no binding action beside an eligible valid
+knowledge row, with the full fixture tree unchanged. The affected complete
+native UI flow passed again; the earlier 85-control Manager qualification was
+not repeated for this one-condition native catalog fix.
+
 Fresh-store configuration uses actual Git roots and native APIs but pre-provided
 native packages. Cold installer/Python-3.9/fresh-terminal, installed desktop,
 live-provider and rollout lanes were not exercised: this source slice has no

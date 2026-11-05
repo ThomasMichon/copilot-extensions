@@ -98,6 +98,8 @@ payload. An unavailable payload or unresolved native composition leaves the
 action unavailable; browsing never installs it or starts authentication.
 Payload activation uses the native selected home, including `AGENT_HOME`, and
 prefers the current project's selected root before the global fallback.
+Rows outside the shared Configuration resource-name constraints remain
+inspectable but do not offer a binding action.
 When binding is required but its payload is unavailable, the section's visible
 banner directs the user to enable and prepare its qualified owner.
 

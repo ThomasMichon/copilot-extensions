@@ -459,7 +459,7 @@ def test_secret_shaped_repository_name_remains_browsable_and_editable(native):
     assert repos.copilot_account_for("sk-ui") == "chosen"
 
 
-def test_overlong_registered_name_is_an_unsupported_row_not_a_catalog_abort(native):
+def test_overlong_registered_name_is_an_unsupported_row_not_a_catalog_abort(native, monkeypatch):
     """A registered name longer than the shared character-length cap (native
     `add_repo()` imposes none) must only mark that one row unsupported, never
     abort the whole catalog for the properly named selected project."""
@@ -469,13 +469,27 @@ def test_overlong_registered_name_is_an_unsupported_row_not_a_catalog_abort(nati
     raw["repos"][overlong] = {
         "class": "worktree", repos._current_platform(): str(native / "repository"),
     }
+    raw["repos"]["knowledge"] = {
+        "class": "knowledge", repos._current_platform(): str(native / "knowledge"),
+    }
     registry.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    before = tree(native)
     result = request("catalog")
     assert result.returncode == 0, result.stderr
     rows = {row["id"]: row for row in json.loads(result.stdout)["entries"]}
     assert rows["sample"]["effective"] == "inherited" and rows["sample"]["editable"] == "true"
     assert rows[overlong]["effective"] == "unknown" and rows[overlong]["editable"] == "false"
     assert rows[overlong]["configuration"]["findings"]
+    from agent_worktrees import repos_configuration_catalog as catalog, repos_knowledge_configuration as binding
+
+    monkeypatch.setattr(catalog, "inspect_project", lambda *_args: catalog.Inspection(
+        binding={"identity": ""}, readiness={"ready": False},
+    ))
+    monkeypatch.setattr(binding, "owner_status", lambda _project: "available")
+    rows = {row["id"]: row for row in catalog.catalog("sample")["entries"]}
+    assert rows["knowledge"]["knowledge_bindable"] == "true"
+    assert rows[overlong]["knowledge_bindable"] == "false"
+    assert tree(native) == before
 
 
 @pytest.mark.parametrize("change", ["registry", "global", "machine", "drop-in", "target", "login"])

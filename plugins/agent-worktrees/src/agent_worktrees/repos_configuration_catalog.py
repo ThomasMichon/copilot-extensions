@@ -248,7 +248,7 @@ def catalog(project: str, *, workspace: str = "") -> dict:
             }] if editable else [],
             "reset_fields": [],
             "knowledge_bindable": str(
-                not inspection.findings
+                name_error is None and not inspection.findings
                 and inspection.readiness.get("ready") is False
                 and inspection.binding.get("identity") in ("", name)
                 and entry is not None and entry.repo_class in {"knowledge", "worktree"}
