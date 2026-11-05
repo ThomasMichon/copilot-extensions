@@ -1,0 +1,13 @@
+{
+  "comment": "Allow a project-owned update controller under the existing update driver",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

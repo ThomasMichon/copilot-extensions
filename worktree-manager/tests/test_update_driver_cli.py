@@ -41,6 +41,12 @@ def test_default_wait_preserves_canonical_update_arguments():
     assert options.request_status is None
 
 
+def test_standalone_controller_override_is_forwarded():
+    flags = ["--no-project-controller", "--force"]
+    _options, forwarded = driver.parse_options(flags)
+    assert forwarded == flags
+
+
 @pytest.mark.parametrize("observer", [[], ["--detach"], ["--supervised-debug"]])
 def test_bootstrap_repair_prefix_survives_durable_observer_normalization(observer):
     arguments = ["--repair-engine", "/fresh/source with spaces", "--project", "example"]

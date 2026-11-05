@@ -92,7 +92,10 @@ def parse_options(rest: list[str]) -> tuple[argparse.Namespace, list[str]]:
     if options.json and not (options.detach or options.request_status or recovery or "--auth-report" in forwarded):
         parser.error("--json requires request inspection, recovery, --detach or --auth-report")
     canonical = argparse.ArgumentParser(prog="worktree-manager update", add_help=False, allow_abbrev=False)
-    for name in ("auto", "force", "no-anchor-sync", "no-prune-pivots", "recreate-venv", "no-manager"):
+    for name in (
+        "auto", "force", "no-anchor-sync", "no-prune-pivots", "recreate-venv",
+        "no-manager", "no-project-controller",
+    ):
         canonical.add_argument("--" + name, action="store_true")
     canonical.add_argument("--project")
     canonical.add_argument("--target")
