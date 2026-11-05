@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve long-path marketplace evidence and logical references",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}

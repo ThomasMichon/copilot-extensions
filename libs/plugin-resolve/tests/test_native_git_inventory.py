@@ -94,6 +94,71 @@ def test_registered_inventory_can_request_consistency_without_replacing_authorit
     assert (home / "settings.json").read_bytes() == before
 
 
+@pytest.mark.skipif(os.name != "nt", reason="native Windows long paths")
+@pytest.mark.parametrize("value", [r"C:\market\member", r"\\server\share\market\member"])
+def test_native_path_retains_drive_and_unc_logical_identity(value: str) -> None:
+    from plugin_resolve._paths import logical_path, native_path
+
+    assert logical_path(native_path(Path(value))) == Path(value)
+    with pytest.raises(ValueError, match="Device paths"):
+        native_path(Path(r"\\.\C:\member"))
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows long paths")
+def test_subset_retains_long_members_and_returns_logical_reference_paths(tmp_path: Path) -> None:
+    import gzip
+    import io
+    import tarfile
+
+    from plugin_resolve.preparation import _unpack
+    from plugin_resolve.reflection import subset
+
+    root = tmp_path / "market"
+    payload = root / "plugin"
+    (payload / "scripts").mkdir(parents=True)
+    (root / "shared").mkdir()
+    name = "long-" + "x" * 230 + ".txt"
+    member = root / "shared" / name
+    raw = str(member.absolute())
+    native = Path("\\\\?\\UNC\\" + raw[2:] if raw.startswith("\\\\") else "\\\\?\\" + raw)
+    native.write_bytes(b"selected")
+    (payload / "scripts" / "entry.py").write_text(f"path = '../../shared/{name}'\n", encoding="utf-8")
+    references: set[Path] = set()
+    result = subset(root, payload, referenced_paths=references)
+    assert references == {member}
+    with tarfile.open(fileobj=io.BytesIO(gzip.decompress(result))) as archive:
+        retained = archive.extractfile("shared/" + name)
+        assert retained is not None and retained.read() == b"selected"
+    destination = tmp_path / "destination" / ("d" * 40)
+    _unpack(result, destination)
+    extracted = destination / "shared" / name
+    raw_extracted = str(extracted.absolute())
+    native_extracted = Path(
+        "\\\\?\\UNC\\" + raw_extracted[2:] if raw_extracted.startswith("\\\\")
+        else "\\\\?\\" + raw_extracted
+    )
+    assert native_extracted.read_bytes() == b"selected"
+
+
+def test_unpack_never_removes_an_existing_temporary_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from plugin_resolve.preparation import _unpack
+    from plugin_resolve.reflection import subset
+
+    root = tmp_path / "source"
+    payload = root / "plugin"
+    payload.mkdir(parents=True)
+    (payload / "member.txt").write_bytes(b"selected")
+    destination = tmp_path / "destination"
+    target = destination / "plugin"
+    target.mkdir(parents=True)
+    pending = target / (".unpack-" + "a" * 32 + ".pending")
+    pending.write_bytes(b"other owner")
+    monkeypatch.setattr("plugin_resolve.preparation.uuid.uuid4", lambda: SimpleNamespace(hex="a" * 32))
+    with pytest.raises(FileExistsError):
+        _unpack(subset(root, payload), destination)
+    assert pending.read_bytes() == b"other owner"
+
+
 def directory_link(link: Path, target: Path) -> None:
     if os.name == "nt":
         import _winapi

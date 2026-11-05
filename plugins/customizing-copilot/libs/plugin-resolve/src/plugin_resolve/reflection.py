@@ -14,6 +14,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
+from ._paths import logical_path, native_path
 from .execution import execution_environment
 from .marketplace import Marketplace, load_marketplace, plugin_dir
 from .payload import dependencies, plugin_manifest, publication_metadata, report_diagnostic
@@ -119,7 +120,8 @@ def subset(
     documentation is copied as payload, never crawled for contribution links.
     References never authorize leaving the declaring marketplace.
     """
-    root = root.resolve(strict=True)
+    root = native_path(root).resolve(strict=True)
+    payload = native_path(payload)
     pending = [payload]
     files: dict[str, Path] = {}
     visited: set[Path] = set()
@@ -161,10 +163,10 @@ def subset(
                         continue
                     resolved.relative_to(root)
                     if referenced_paths is not None:
-                        referenced_paths.add(candidate)
+                        referenced_paths.add(logical_path(candidate))
                     pending.append(candidate)
                 elif referenced_paths is not None and candidate.is_relative_to(root):
-                    referenced_paths.add(candidate)
+                    referenced_paths.add(logical_path(candidate))
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w") as archive:
         for name, path in sorted(files.items()):

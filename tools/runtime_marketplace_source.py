@@ -80,6 +80,7 @@ def retain_authenticated_marketplace_source(
     if configured.channel != "marketplace":
         raise ProfileUnavailable("independent configured runtime source is selected")
     origin = _registered(installation, policy)
+    installed_payload = Path(authentication.dependencies._native_retained_path(origin.payload))
     # Reject unsupported definitions before probing or acquiring another source.
     repo = _repository(origin)
     declared_environment = installation.get("environment")
@@ -134,8 +135,8 @@ def retain_authenticated_marketplace_source(
                 prepared.identity.source_commit != acquired.commit
                 or prepared.identity.source_tree != acquired.tree
                 or ledger.get("version") != prepared.identity.package_version
-                or payload_package_version(origin.payload, plugin) != prepared.identity.package_version
-                or assembly_hash(origin.payload) != prepared.identity.assembly_hash
+                or payload_package_version(installed_payload, plugin) != prepared.identity.package_version
+                or assembly_hash(installed_payload) != prepared.identity.assembly_hash
             ):
                 raise ProfileError("installed marketplace payload differs from authenticated preparation")
             canonical = json.dumps({
@@ -158,8 +159,8 @@ def retain_authenticated_marketplace_source(
                     or _registered(installation, policy) != origin
                     or engine_origin._ledger(home, origin.source, origin.payload) != ledger
                     or inventory() != proof
-                    or payload_package_version(origin.payload, plugin) != prepared.identity.package_version
-                    or assembly_hash(origin.payload) != prepared.identity.assembly_hash
+                    or payload_package_version(installed_payload, plugin) != prepared.identity.package_version
+                    or assembly_hash(installed_payload) != prepared.identity.assembly_hash
                     or read_source_identity(
                         prepared.payload, prepared.identity.package_version, plugin=plugin,
                     ) != prepared.identity

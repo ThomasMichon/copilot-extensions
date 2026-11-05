@@ -244,11 +244,13 @@ def test_none_environment_keeps_normal_ambient_selection(registered_source, monk
         assert selected.identity.source_commit == fixture["commit"]
 
 
-def test_preparation_preserves_acquisitions_long_path_support(registered_source):
+def test_preparation_preserves_acquisitions_long_path_support(registered_source, monkeypatch):
     fixture = registered_source
     name = "long-" + "x" * 230 + ".py"
     member = fixture["upstream"] / "plugins" / "agent-example" / name
-    member.write_text("value = 1\n")
+    native = authentication.dependencies._native_retained_path
+    with open(native(member), "w", encoding="utf-8") as stream:
+        stream.write("value = 1\n")
     if os.name == "nt":
         assert len(str(member)) > 260
     git(fixture["upstream"], "add", ".")
@@ -257,10 +259,18 @@ def test_preparation_preserves_acquisitions_long_path_support(registered_source)
     commit = git(fixture["upstream"], "rev-parse", "HEAD")
     git(fixture["clone"], "fetch", "-q", str(fixture["upstream"]), "main")
     git(fixture["clone"], "merge", "--ff-only", "FETCH_HEAD")
-    shutil.copy2(member, fixture["payload"] / name)
+    shutil.copy2(native(member), native(fixture["payload"] / name))
     with retain(fixture) as selected:
         assert selected.identity.source_commit == commit
-        assert (selected.payload / name).read_bytes() == member.read_bytes()
+        with open(native(selected.payload / name), "rb") as actual, open(native(member), "rb") as expected:
+            assert actual.read() == expected.read()
+    cached = fixture["clone"] / "plugins" / "agent-example" / name
+    with open(native(cached), "w", encoding="utf-8") as stream:
+        stream.write("changed\n")
+    monkeypatch.setattr(runtime_source, "acquire", lambda *args, **kwargs: pytest.fail("changed cache acquired"))
+    with pytest.raises(ValueError, match="Native Git marketplace evidence"):
+        with retain(fixture):
+            pytest.fail("changed long-path member was authenticated")
 
 
 @pytest.mark.parametrize("changed", [

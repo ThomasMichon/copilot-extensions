@@ -16,6 +16,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
 
+from ._paths import native_path
 from .conventions import (
     LOCAL_MARKETPLACE_SOURCE_KINDS, MARKETPLACE_MANIFEST_RELS, REMOTE_MARKETPLACE_SOURCE_KINDS,
 )
@@ -35,7 +36,7 @@ def _require_unlinked_path(root: Path, path: Path, *, allow_missing: bool = Fals
     for part in ("", *relative.parts):
         member = member / part
         try:
-            info = member.lstat()
+            info = native_path(member).lstat()
         except FileNotFoundError:
             if allow_missing:
                 break
@@ -400,7 +401,7 @@ def native_git_inventory_item(
                     member.stat().st_mode & stat.S_IXUSR,
                 ) != (mode == "100755"):
                     raise ValueError("Native cache executable mode differs from the selected commit")
-                data = member.read_bytes()
+                data = native_path(member).read_bytes()
                 algorithm = {40: "sha1", 64: "sha256"}.get(len(object_id))
                 if algorithm is None or hashlib.new(
                     algorithm, b"blob " + str(len(data)).encode("ascii") + b"\0" + data,

@@ -275,7 +275,8 @@ from the proof. Payload roots excluded by reflection cannot qualify through
 an empty archive.
 On POSIX, the owner executable bit must also match the committed Git mode even
 when `core.filemode` suppresses status reporting. Windows retains its native
-non-POSIX mode semantics.
+non-POSIX mode semantics and reads long payload members through native paths;
+ordinary drive/UNC inputs retain ordinary logical reference paths.
 Checkout transformations that change those bytes retain ordinary acquisition.
 The selected catalog and all higher-priority catalog locations participate in
 the proof even when currently missing; deleted native catalogs cannot silently

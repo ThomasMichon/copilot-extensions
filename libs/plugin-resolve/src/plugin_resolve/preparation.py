@@ -16,6 +16,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO, cast
 
+from ._paths import native_path
 from .conventions import REMOTE_MARKETPLACE_SOURCE_KINDS, LOCAL_MARKETPLACE_SOURCE_KINDS
 from .marketplace import marketplace_manifest_path
 from .payload import (
@@ -65,6 +66,7 @@ def _git(repo: Path, *args: str, environment: Mapping[str, str] | None = None) -
 
 
 def _unpack(content: bytes, destination: Path) -> None:
+    destination = native_path(destination)
     destination.mkdir(parents=True, exist_ok=True)
     with tarfile.open(fileobj=io.BytesIO(content), mode="r:gz") as archive:
         for member in archive.getmembers():
@@ -77,13 +79,18 @@ def _unpack(content: bytes, destination: Path) -> None:
             if path.exists() and path.read_bytes() == content:
                 continue
             path.parent.mkdir(parents=True, exist_ok=True)
-            pending = path.with_name(f".{path.name}.{uuid.uuid4().hex}.pending")
+            pending = path.with_name(f".unpack-{uuid.uuid4().hex}.pending")
+            created = False
             try:
-                pending.write_bytes(content)
+                with pending.open("xb") as stream:
+                    created = True
+                    stream.write(content)
                 pending.chmod(member.mode & 0o777)
                 os.replace(pending, path)
+                created = False
             finally:
-                pending.unlink(missing_ok=True)
+                if created:
+                    pending.unlink(missing_ok=True)
 
 
 def _installed_metadata(
