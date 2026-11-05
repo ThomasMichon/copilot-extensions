@@ -5,6 +5,14 @@ Method: [weighted semantic consolidation](semantic-density-consolidation.md).
 
 ## Result and coverage
 
+The [eight obligation/preview/staging contracts](finite-obligation-preview-staging-contracts.md)
+retain twenty-four ranked relationships without confusing local lease cleanup
+with originating obligation settlement, payload entrypoint attribution with
+prose-bearing PR attribution, or historical OPEN staging metadata with current
+merged source. All eight stay OPEN; the
+[journal](<journal/2026/11.05 finite-obligation-preview-staging-contracts.md>)
+separates actual source/review/CI credit from invalid native-artifact evidence.
+
 The [eleven recovery/reclamation/callback contracts](finite-recovery-reclamation-callback-contracts.md)
 retain thirty-three ranked relationships without confusing planning release
 with implementation authority, SUBMITTED with COMPLETED, a repaired fixture
