@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -112,12 +114,65 @@ def test_closed_wheel_receipt_qualifies_retained_control(tmp_path, monkeypatch, 
     installed = [distribution]
     if fault == "extra":
         installed.append(SimpleNamespace(metadata={"Name": "Unexpected"}, read_text=lambda _path: None))
-    monkeypatch.setattr(runtime_candidate, "distributions", lambda: installed)
+    monkeypatch.setattr(runtime_candidate, "distributions", lambda **_kwargs: installed)
     if fault == "none":
         runtime_candidate.verify_installed_origins()
     else:
         with pytest.raises((RuntimeError, ValueError)):
             runtime_candidate.verify_installed_origins()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows long-path metadata")
+def test_closed_wheel_origin_health_reads_long_windows_metadata(tmp_path, monkeypatch):
+    root = tmp_path / "runtime"
+    suffix = Path(r"versions\1.0.0+\Lib\site-packages\example_app-1.0.dist-info\direct_url.json")
+    padding = 262 - len(str(root / suffix))
+    assert 1 <= padding <= 200
+    slot = root / "versions" / ("1.0.0+" + "a" * padding)
+    site = slot / "Lib" / "site-packages"
+    metadata = site / "example_app-1.0.dist-info"
+    native = runtime_candidate._native
+    native(metadata).mkdir(parents=True)
+    native(metadata / "METADATA").write_text(
+        "Metadata-Version: 2.4\nName: example-app\nVersion: 1.0\n\n", encoding="utf-8",
+    )
+    digest = "a" * 64
+    url = "file:///gone/example.whl#sha256=" + digest
+    origin = metadata / "direct_url.json"
+    assert len(str(origin)) >= 260
+    native(origin).write_text(json.dumps({
+        "url": url, "archive_info": {"hashes": {"sha256": digest}},
+    }), encoding="utf-8")
+    binding = {"fixture": "selected"}
+    receipt = {
+        "construction": "closed-wheels",
+        "lock_id": "sha256:" + hashlib.sha256(json.dumps(
+            binding, sort_keys=True, separators=(",", ":"),
+        ).encode()).hexdigest(),
+        "binding": binding,
+        "distributions": {"example-app": {
+            "version": "1.0", "filename": "example_app-1.0-py3-none-any.whl",
+            "sha256": "sha256:" + digest,
+        }},
+    }
+    native(slot / ".runtime-input-origins.json").write_text(json.dumps({
+        "schema": "installer-engine.frozen-input-origins", "version": 2,
+        "packages": {"example-app": url}, "wheel_inputs": receipt,
+    }), encoding="utf-8")
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+    bootstrap = slot / ".runtime-bootstrap"
+    native(bootstrap).mkdir()
+    for name in ("installer_wheel_snapshot.py", "installer_wheel_inputs.py"):
+        shutil.copyfile(scripts / name, native(bootstrap / name))
+    base = Path(sys.base_prefix).resolve()
+    stdlib = [
+        path for path in sys.path
+        if path and Path(path).resolve().is_relative_to(base) and "site-packages" not in path.lower()
+    ]
+    with monkeypatch.context() as patch:
+        patch.setattr(sys, "prefix", str(slot))
+        patch.setattr(sys, "path", [str(site), *stdlib])
+        runtime_candidate.verify_installed_origins()
 
 
 @pytest.mark.parametrize("source_wheel", [False, True])

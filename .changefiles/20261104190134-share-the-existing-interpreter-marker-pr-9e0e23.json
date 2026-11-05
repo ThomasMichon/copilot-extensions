@@ -1,5 +1,5 @@
 {
-  "comment": "Share the existing interpreter marker probe with independently shipped installers",
+  "comment": "Share interpreter targeting and long-path wheel health across installers",
   "changes": [
     {
       "plugin": "agent-bridge",

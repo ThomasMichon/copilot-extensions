@@ -671,6 +671,85 @@ def test_source_health_failure_routes_to_canonical_distinct_repair_after_custody
             driver.install(root, plugin, **arguments)
 
 
+@pytest.mark.parametrize("denied", [None, "helpers", "selector"])
+def test_candidate_rechecks_held_inputs_before_each_publication(
+    driver, tmp_path, monkeypatch, denied,
+):
+    from agent_worktrees import config as cfg
+
+    root = tmp_path / "runtime"
+    _slot(driver, root, "1.0.0")
+    _slot(driver, root, "2.0.0")
+    driver.runtime.activate(root, "1.0.0", link_free=True)
+    manifest = root / "deploy-manifest.json"
+    manifest.write_bytes(b"previous manifest")
+    helper = root / "helper"
+    helper.write_bytes(b"previous helper")
+    events = []
+
+    class Governance:
+        def __init__(self):
+            self.root = root
+            self.payload = tmp_path
+
+        def signature(self):
+            return {}
+
+        def recheck(self):
+            pass
+
+        def held(self, *, timeout=180):
+            return nullcontext()
+
+        def manifest_publication(self, content):
+            return nullcontext(content)
+
+    class Helpers:
+        def verify(self):
+            assert helper.read_bytes() == b"candidate helper"
+
+        def rollback(self):
+            helper.write_bytes(b"previous helper")
+
+        def keep(self):
+            pass
+
+    def publish(*_args, **_kwargs):
+        helper.write_bytes(b"candidate helper")
+        return Helpers()
+
+    def verify(phase):
+        events.append(phase)
+        assert driver.runtime.current_version(root) == "1.0.0"
+        assert helper.read_bytes() == (
+            b"previous helper" if phase == "helpers" else b"candidate helper"
+        )
+        if phase == denied:
+            raise ValueError("source policy changed")
+
+    monkeypatch.setattr(driver, "_load_installed", lambda _slot: None)
+    monkeypatch.setattr(driver, "_publish_helpers", publish)
+    monkeypatch.setattr(cfg, "install_dir", lambda: tmp_path / "other-runtime")
+    options = dict(
+        payload=tmp_path, payload_hash="previous", expected_governance={},
+        previous="1.0.0", cutover_guard=object(), governance=Governance(),
+        frontend={"fixture": True}, publication_source_root=tmp_path,
+        base_python=Path(sys.executable), _before_publish=verify,
+    )
+    if denied is None:
+        result = driver.settle_candidate(root, "2.0.0", **options)
+        assert result["runtime_version"] == "2.0.0"
+        assert driver.runtime.current_version(root) == "2.0.0"
+        assert helper.read_bytes() == b"candidate helper"
+    else:
+        with pytest.raises(ValueError, match="source policy changed"):
+            driver.settle_candidate(root, "2.0.0", **options)
+        assert driver.runtime.current_version(root) == "1.0.0"
+        assert helper.read_bytes() == b"previous helper"
+        assert manifest.read_bytes() == b"previous manifest"
+    assert events == (["helpers"] if denied == "helpers" else ["helpers", "selector"])
+
+
 @pytest.mark.parametrize("rollback,interrupted,activation_failed,special", [
     (False, False, False, None), (True, False, False, None), (False, True, False, None),
     (True, True, False, None), (False, False, True, None),
@@ -679,7 +758,7 @@ def test_source_health_failure_routes_to_canonical_distinct_repair_after_custody
 def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
     driver, tmp_path, monkeypatch, rollback, interrupted, activation_failed, special,
 ):
-    from agent_worktrees import config as cfg, status_monitor_cutover as cutover
+    from agent_worktrees import config as cfg, runtime_deployment, status_monitor_cutover as cutover
 
     root = tmp_path / "runtime"
     previous = _slot(driver, root, "1.0.0")
@@ -761,6 +840,9 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
             def argument(name):
                 return argv[argv.index(name) + 1]
 
+            assert argv[3] == driver.engine._native_retained_path(
+                root / "versions" / "2.0.0" / ".runtime-bootstrap" / "runtime_install.py"
+            )
             try:
                 result = driver.settle_candidate(
                     root, argument("--settle-slot"), payload=plugin,
@@ -794,6 +876,8 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
     monkeypatch.setattr(driver, "_monitor_identity", lambda _root: None)
     monkeypatch.setattr(driver, "_candidate_serving", lambda *_args: False)
     monkeypatch.setattr(cfg, "install_dir", lambda: root)
+    monkeypatch.setattr(runtime_deployment.platform, "node", lambda: "fixture")
+    monkeypatch.setattr(runtime_deployment.platform, "system", lambda: "Windows" if os.name == "nt" else "Linux")
     monkeypatch.setattr(cutover, "_acquire_cutover_lock", lambda _root: guard)
     monkeypatch.setattr(cutover, "activate_after_update", actual_transition)
     if special == "deferred":

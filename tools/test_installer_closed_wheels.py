@@ -351,6 +351,25 @@ def test_native_existing_constructor_builds_and_reuses_exact_closed_wheels(
     assert leases[1][1] < leases[0][1]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows long-path metadata")
+def test_closed_wheel_health_reads_long_windows_origin_metadata(tmp_path, engine, plugin):
+    root = tmp_path / "runtime"
+    suffix = Path(r"versions\1.0.0+\Lib\site-packages\demo_pkg-1.0.dist-info\direct_url.json")
+    padding = 262 - len(str(root / suffix))
+    assert 1 <= padding <= 200
+    version = "1.0.0+" + "a" * padding
+    origin = root / "versions" / version / "Lib" / "site-packages" / "demo_pkg-1.0.dist-info" / "direct_url.json"
+    assert len(str(origin)) >= 260
+    with snapshot(tmp_path) as retained:
+        wheels = inspected(retained)
+        with engine.numbered_candidate(
+            root, version, plugin=plugin, uv=Path(shutil.which("uv")),
+            base_python=Path(sys.executable), health_module="demo_pkg",
+            local_packages=("demo-pkg",), wheel_inputs=wheels,
+        ) as built:
+            assert engine.runtime.is_complete(root, version, expect_hash=built.payload_hash)
+
+
 def test_closed_lease_timeout_preserves_wait_limit_and_rejects_expiry(
     tmp_path, engine, plugin, monkeypatch,
 ):

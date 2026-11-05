@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import dataclasses
 import importlib.util
+import io
 import json
 import sys
 from contextlib import contextmanager
@@ -98,6 +99,53 @@ def test_wheel_update_hands_the_same_source_to_shell_and_lifecycle(
     assert json.loads(step.argv[step.argv.index(descriptor_option) + 1]) == descriptor
     command = source.lifecycle_argv(owner, "agent-worktrees", runtime, tmp_path, step.argv, target=target)
     assert json.loads(command[command.index("--source-descriptor") + 1]) == descriptor
+
+
+@pytest.mark.parametrize("denied", [None, "helpers", "selector", "invalid"])
+def test_parent_publication_recheck_is_ordered_and_fail_closed(denied):
+    path = ROOT / "plugins" / "agent-worktrees" / "scripts" / "runtime_install_recheck.py"
+    spec = importlib.util.spec_from_file_location("_wheel_publication_recheck_unit", path)
+    assert spec and spec.loader
+    recheck = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(recheck)
+    calls = []
+
+    class Input:
+        def __init__(self):
+            self.writes = []
+
+        def write(self, value):
+            self.writes.append(value)
+
+        def flush(self):
+            pass
+
+        def close(self):
+            pass
+
+    frames = (
+        b"invalid\n" if denied == "invalid" else b"helpers\n"
+        if denied == "helpers" else b"helpers\nselector\n"
+    )
+    process = SimpleNamespace(
+        stdin=Input(), stdout=io.BytesIO(frames), args=["fixture"], wait=lambda: 0,
+    )
+
+    def verify(phase):
+        calls.append(phase)
+        if phase == denied:
+            raise ValueError("revoked")
+
+    if denied is None:
+        recheck.supervise(process, verify)
+        assert calls == ["helpers", "selector"] and process.stdin.writes == [b"ok\n", b"ok\n"]
+    else:
+        with pytest.raises(recheck.HandoverError):
+            recheck.supervise(process, verify)
+        assert calls == {
+            "helpers": ["helpers"], "selector": ["helpers", "selector"], "invalid": [],
+        }[denied]
+        assert process.stdin.writes[-1] == b"deny\n"
 
 
 @pytest.mark.parametrize("fault", ["", "target", "helper", "inside-runtime", "probe"])

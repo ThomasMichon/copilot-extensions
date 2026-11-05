@@ -4,10 +4,11 @@ from __future__ import annotations
 from collections.abc import Callable
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 
-from installer_dependency_policy import DependencyPolicyError
+from installer_dependency_policy import DependencyPolicyError, _native_retained_path
 from installer_engine_process import ChildLaunchError, ChildTimeoutExpired
 from installer_source_build import SourceWheelInputs
 from installer_wheel_inputs import _ordinary
@@ -23,8 +24,8 @@ for name, wheel in (source_wheels or {}).items():
         relative = pathlib.PurePosixPath(member)
         assert not relative.is_absolute() and ".." not in relative.parts and \
             chr(92) not in member, "unsafe source wheel member"
-        installed_file = pathlib.Path(distribution.locate_file(member)).resolve()
-        assert installed_file.is_relative_to(slot) and installed_file.stat().st_size <= 64 << 20 and \
+        installed_file = resolved(distribution.locate_file(member))
+        assert installed_file.is_relative_to(native_slot) and installed_file.stat().st_size <= 64 << 20 and \
             hashlib.sha256(installed_file.read_bytes()).hexdigest() == digest, \
             f"{name} installed content differs from its source wheel: {member}"
 """
@@ -64,23 +65,30 @@ def verify_installed_inputs(
         wheel_argument = hashlib.sha256(json.dumps(
             wheel_receipt, sort_keys=True, separators=(",", ":"),
         ).encode("utf-8")).hexdigest()
+    native_site = (
+        _native_retained_path(python.parent.parent / "Lib" / "site-packages")
+        if os.name == "nt" else ""
+    )
+    native_slot = _native_retained_path(slot) if os.name == "nt" else ""
     probe = """
 import hashlib, importlib, importlib.metadata, importlib.util, json, pathlib, re, sys
 from urllib.parse import unquote, urlsplit
 slot = pathlib.Path(sys.argv[1]).resolve()
-nested = (slot / ".venv").is_dir() and pathlib.Path(sys.prefix).samefile(slot / ".venv")
+native_slot = pathlib.Path(sys.argv[12]).resolve() if sys.argv[12] else slot
+def resolved(path):
+    value = pathlib.Path(path).resolve()
+    return native_slot / value.relative_to(slot) if value.is_relative_to(slot) else value
+if sys.argv[11]:
+    site = (pathlib.Path(sys.prefix) / "Lib" / "site-packages").resolve()
+    sys.path[:] = [sys.argv[11] if pathlib.Path(path).resolve() == site else path for path in sys.path]
+nested = (native_slot / ".venv").is_dir() and resolved(sys.prefix).samefile(native_slot / ".venv")
 if nested:
     spec = importlib.util.spec_from_file_location(
-        "_installed_runtime_paths", slot / "runtime" / "versioned_runtime.py",
+        "_installed_runtime_paths", native_slot / "runtime" / "versioned_runtime.py",
     )
     paths = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(paths)
     native_path = paths._runtime_component("installer_dependency_config").native_retained_path
-    def resolved(path):
-        return pathlib.Path(paths._normalize_windows_extended_path(str(pathlib.Path(path).resolve())))
-    slot = resolved(slot)
-else:
-    resolved = lambda path: pathlib.Path(path).resolve()
 assert sys.version_info >= (3, 11), "installer runtime requires Python 3.11+"
 wheel_binding = sys.argv[9]
 expected_origins = None if wheel_binding else json.loads(sys.argv[3])
@@ -89,7 +97,7 @@ expected_selection = json.loads(sys.argv[7])
 excluded_packages = json.loads(sys.argv[8])
 expected_wheels = None
 source_wheels = None
-proof = slot / ".runtime-input-origins.json"
+proof = native_slot / ".runtime-input-origins.json"
 assert not proof.is_symlink(), "frozen origin evidence is a symlink"
 if sys.argv[5] == "fresh" or expected_extras or expected_selection is not None or wheel_binding:
     assert proof.is_file(), "fresh runtime has no frozen origin evidence"
@@ -143,7 +151,7 @@ if expected_wheels is not None:
         "installed distribution set differs from the complete wheel closure"
 for name, expected in expected_origins.items():
     distribution = importlib.metadata.distribution(name)
-    assert resolved(distribution.locate_file("")).is_relative_to(slot), \
+    assert resolved(distribution.locate_file("")).is_relative_to(native_slot), \
         f"{name} metadata is outside the candidate runtime"
     origin = json.loads(distribution.read_text("direct_url.json") or "{}")
     if expected_wheels is not None or source_wheels is not None:
@@ -181,7 +189,7 @@ for name, expected in expected_origins.items():
                         continue
                     path = resolved(distribution.locate_file(member))
                     native = pathlib.Path(native_path(path))
-                    assert path.is_relative_to(slot) and native.stat().st_size == int(recorded_size), \
+                    assert path.is_relative_to(native_slot) and native.stat().st_size == int(recorded_size), \
                         f"{name} installed member differs from its wheel: {member}"
                     algorithm, encoded = recorded_hash.split("=", 1)
                     digest = hashlib.new(algorithm)
@@ -216,7 +224,7 @@ for name in excluded_packages:
         raise SystemExit(74)
     raise
 module = importlib.import_module(sys.argv[2])
-assert module.__file__ and resolved(module.__file__).is_relative_to(slot), \
+assert module.__file__ and resolved(module.__file__).is_relative_to(native_slot), \
     "health module is outside the candidate runtime"
 if sys.argv[4]:
     getattr(module, sys.argv[4])()
@@ -228,7 +236,7 @@ if sys.argv[4]:
                  "receipt-reuse" if isinstance(wheel_inputs, WheelReuseInputs) else "reuse"
              ),
              json.dumps(extras), json.dumps(local_packages), json.dumps(excluded_packages),
-             wheel_argument, source_argument],
+             wheel_argument, source_argument, native_site, native_slot],
         )
         if nested and wheel_inputs is not None:
             verify_application_wheels(wheel_inputs, slot)

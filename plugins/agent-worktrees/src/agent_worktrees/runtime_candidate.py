@@ -25,7 +25,7 @@ MODE_OWNER_ABI = 1
 _LIFECYCLE_FILES = (
     "runtime_install.py", "runtime_install_governance.py", "runtime_install_modes.py",
     "runtime_install_publication.py", "installer_engine.py", "installer_engine_health.py",
-    "runtime_install_driver.py",
+    "runtime_install_driver.py", "runtime_install_recheck.py",
     "installer_engine_process.py", "installer_dependency_policy.py",
     "installer_marker_environment.py",
     "installer_wheel_snapshot.py", "installer_wheel_inputs.py",
@@ -257,7 +257,16 @@ def verify_installed_origins() -> None:
     ):
         raise RuntimeError("Source wheel evidence differs from its frozen origins")
     observed = {}
-    for distribution in distributions():
+    if closed_wheels and os.name == "nt":
+        site = (environment / "Lib" / "site-packages").resolve()
+        search = [
+            str(_native(site)) if Path(path).resolve() == site else path
+            for path in sys.path
+        ]
+        installed = distributions(path=search)
+    else:
+        installed = distributions()
+    for distribution in installed:
         direct_url = distribution.read_text("direct_url.json")
         if direct_url is None:
             if closed_wheels:
@@ -298,7 +307,7 @@ def verify_installed_origins() -> None:
                 )
             )
         if (
-            not Path(distribution.locate_file("")).resolve().is_relative_to(slot)
+            not _native(distribution.locate_file("")).resolve().is_relative_to(_native(slot).resolve())
             or not valid_origin or name in observed
         ):
             raise RuntimeError(f"{name} is not an attributable non-editable installation")

@@ -1603,12 +1603,18 @@ inspects the selected source and wheel profile, computes the exact target and
 construction hash, and checks its chosen base interpreter against the profile
 before reserving the lifecycle. It rechecks and pins that interpreter at launch;
 the native installer checks the candidate interpreter and construction hash
-before publication. The installed and prepared interpreter helpers must match.
+before publication. The constructor keeps its retained source and wheel inputs
+until the candidate exits and rechecks them over private parent-child pipes
+before helper publication and again before selector activation. The installed
+and prepared interpreter helpers must match.
 Currentness requires the source, selected slot, interpreter and completion hash
 to agree. A missing or older provider refuses rather than ignoring the wheel
 selection. This explicit packet is not source, profile or feed authorization:
 its caller must retain and recheck those existing authorities through cutover.
-No ordinary update selects or downloads a bundle automatically.
+An external packet alone does not transfer that policy authority to the
+candidate; a denied or interrupted managed lifecycle can leave its command
+reservation pending even if the old selector survives. No ordinary update
+selects or downloads a bundle automatically.
 
 Omitting the option retains ordinary marketplace runtime delivery.
 This suite-only input cannot combine with target/authentication/inspection or

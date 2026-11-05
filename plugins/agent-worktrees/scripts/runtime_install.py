@@ -26,6 +26,7 @@ import installer_engine as engine
 import versioned_runtime as runtime
 import versioned_runtime_source as runtime_source
 import runtime_install_publication as helper_publication
+import runtime_install_recheck as publication_recheck
 import runtime_install_driver as install_driver
 from runtime_install_governance import Governance, InstallationRefused
 
@@ -400,25 +401,7 @@ def _installed_identity(slot: Path) -> dict:
 
 
 def _wheel_marker_environment(python: Path) -> dict:
-    from installer_marker_environment import MARKER_ENVIRONMENT_QUERY
-
-    try:
-        environment = {key: value for key, value in os.environ.items()
-                       if key.upper() not in {"PYTHONPATH", "PYTHONHOME"}}
-        result = subprocess.run(
-            [str(python), "-I", "-S", "-B", "-c", MARKER_ENVIRONMENT_QUERY],
-            stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8",
-            timeout=30, check=False, env=environment,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-        )
-        if result.returncode or len(result.stdout) > 16384:
-            raise ValueError("invalid interpreter response")
-        observed = json.loads(result.stdout)
-        if not isinstance(observed, dict):
-            raise ValueError("invalid interpreter response")
-        return observed
-    except (OSError, ValueError, subprocess.SubprocessError) as error:
-        raise InstallationRefused("Wheel target interpreter probe failed") from error
+    return publication_recheck.wheel_marker_environment(python, InstallationRefused)
 
 
 @install_driver.owned
@@ -432,6 +415,7 @@ def install(
     repair: bool = False,
     source_descriptor: dict | None = None,
     expected_wheel_selection: dict | None = None,
+    _before_publish=None,
 ) -> dict:
     if base_python.resolve(strict=True) != Path(sys.executable).resolve():
         raise InstallationRefused("The lifecycle driver must run under the selected base interpreter")
@@ -457,6 +441,8 @@ def install(
         not isinstance(expected_wheel_selection, dict) or wheel_inputs is None
     ):
         raise InstallationRefused("Expected wheel selection requires retained wheel inputs")
+    if _before_publish is not None and (wheel_inputs is None or not callable(_before_publish)):
+        raise InstallationRefused("Publication recheck requires retained wheel inputs")
     if wheel_inputs is not None:
         if source_identity is None or not isinstance(wheel_inputs, engine.WheelInstallInputs):
             raise InstallationRefused("Closed source wheels require an attributed retained source selection")
@@ -555,6 +541,7 @@ def install(
                     frontend=frontend, recover_adopted_manager=recover_adopted_manager,
                     wheel_inputs=wheel_inputs, repair=True, source_descriptor=source_descriptor,
                     expected_wheel_selection=expected_wheel_selection,
+                    _before_publish=_before_publish,
                 )
             import runtime_install_modes as modes
 
@@ -573,7 +560,7 @@ def install(
             result_path = Path(temporary) / "result.json"
             argv = [
                 str(runtime.slot_python(root, version)), "-I", "-B",
-                str(candidate.slot / ".runtime-bootstrap" / "runtime_install.py"),
+                engine._native_retained_path(candidate.slot / ".runtime-bootstrap" / "runtime_install.py"),
                 "--root", str(root), "--plugin", str(plugin), "--payload", str(payload),
                 "--uv", str(uv), "--base-python", str(base_python), "--result", str(result_path),
                 "--settle-slot", version, "--payload-hash", candidate.payload_hash,
@@ -589,6 +576,8 @@ def install(
                 argv.extend(["--previous-version", previous])
             if recover_adopted_manager:
                 argv.append("--recover-adopted-manager")
+            if wheel_inputs is not None:
+                argv.append("--wheel-publication-check")
             environment = install_driver.child_environment()
             for name in (
                 "PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV",
@@ -596,26 +585,27 @@ def install(
             ):
                 environment.pop(name, None)
             environment["PYTHONDONTWRITEBYTECODE"] = "1"
-            process = subprocess.Popen(
-                argv, env=environment, stdin=subprocess.DEVNULL,
-                executable=argv[0] if os.name == "nt" else None,
-                text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-            )
-            try:
-                stdout, stderr = process.communicate()
-            except BaseException:
-                # This child owns both retained generations and cutover authority.
-                # A caller interruption must not turn its unfinished transition
-                # into permission for cleanup.
-                process.communicate()
-                raise
-            if stdout:
-                print(stdout, end="", flush=True)
-            if stderr:
-                print(stderr, end="", file=sys.stderr, flush=True)
-            if process.returncode != 0:
-                raise subprocess.CalledProcessError(process.returncode, argv, stdout, stderr)
+            verify_retained = None
+            if wheel_inputs is not None:
+                def verify_retained(_phase):
+                    governance.recheck()
+                    wheel_inputs.verify()
+                    if runtime_source.read_source_identity(
+                        plugin, package_version, plugin="agent-worktrees",
+                    ) != source_identity:
+                        raise InstallationRefused("Retained source changed before publication")
+                    if wheel_environment is not None:
+                        candidate_python = runtime.slot_python(root, version)
+                        if (
+                            candidate_python is None
+                            or _wheel_marker_environment(base_python) != wheel_environment
+                            or _wheel_marker_environment(candidate_python) != wheel_environment
+                        ):
+                            raise InstallationRefused("Wheel target changed before publication")
+                    if _before_publish is not None:
+                        _before_publish()
+
+            publication_recheck.run(argv, environment, verify_retained)
             result = json.loads(result_path.read_text(encoding="utf-8"))
             result["reused"] = candidate.reused
             return result
@@ -635,6 +625,7 @@ def settle_candidate(
     governance: Governance | None = None,
     recover_adopted_manager: bool = False,
     release_dev_claim: dict | None = None,
+    _before_publish=None,
 ) -> dict:
     governance = governance if governance is not None else Governance(
         root, payload,
@@ -718,6 +709,8 @@ def settle_candidate(
                 f"predecessor={predecessor} already-serving={already_serving}", flush=True,
             )
             governance.recheck()
+            if _before_publish is not None:
+                _before_publish("helpers")
             helpers = None
             if frontend is not None:
                 if publication_source_root is None:
@@ -748,6 +741,8 @@ def settle_candidate(
                 if helpers is not None:
                     helpers.verify()
                 governance.recheck()
+                if _before_publish is not None:
+                    _before_publish("selector")
                 runtime.activate(root, version, link_free=True, dev_owner=dev_owner)
                 print(f"Runtime {version}: selection published", flush=True)
                 committed = True
@@ -869,7 +864,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--mode-owner", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--install-source", type=Path)
     parser.add_argument("--construction-provenance", type=json.loads, help=argparse.SUPPRESS)
+    parser.add_argument("--wheel-publication-check", action="store_true", help=argparse.SUPPRESS)
     arguments = parser.parse_args(argv)
+    if arguments.wheel_publication_check and not arguments.settle_slot:
+        parser.error("--wheel-publication-check requires candidate settlement")
     required = ("root", "plugin") if (
         arguments.inspect_helper_publication or arguments.complete_helper_publication
     ) else ("root", "plugin", "payload", "uv", "base_python", "result")
@@ -896,6 +894,7 @@ def main(argv: list[str] | None = None) -> int:
                 wheel_selection = native_selection(selected, wheels)
                 if json.dumps(wheel_selection, sort_keys=True, separators=(",", ":")) != expected_selection:
                     raise InstallationRefused("Installation wheel selection changed after update planning")
+
             result = install(
                 arguments.root, selected.payload, payload=arguments.payload,
                 uv=arguments.uv, base_python=arguments.base_python,
@@ -904,6 +903,9 @@ def main(argv: list[str] | None = None) -> int:
                 frontend=arguments.frontend,
                 recover_adopted_manager=arguments.recover_adopted_manager,
                 wheel_inputs=wheels, repair=arguments.mode == "repair",
+                _before_publish=lambda: publication_recheck.verify_selected(
+                    arguments.install_source, selected, wheels, wheel_selection,
+                ),
                 **({"expected_wheel_selection": wheel_selection} if wheel_selection is not None else {}),
                 **({"source_descriptor": selected.source_descriptor}
                    if getattr(selected, "source_descriptor", None) is not None else {}),
@@ -930,16 +932,21 @@ def main(argv: list[str] | None = None) -> int:
     elif arguments.settle_slot:
         if arguments.payload_hash is None or arguments.governance_generation is None:
             parser.error("candidate handover requires its content and governance generations")
-        result = settle_candidate(
-            arguments.root, arguments.settle_slot, payload=arguments.payload,
-            payload_hash=arguments.payload_hash, expected_governance=arguments.governance_generation,
-            previous=arguments.previous_version, wait_timeout=arguments.wait_timeout,
-            package_version=arguments.package_version,
-            frontend=arguments.frontend, publication_source_root=arguments.publication_source_root,
-            child_timeout=arguments.child_timeout,
-            base_python=arguments.base_python,
-            recover_adopted_manager=arguments.recover_adopted_manager,
-        )
+        with (
+            publication_recheck.candidate_channel()
+            if arguments.wheel_publication_check else nullcontext(None)
+        ) as check:
+            result = settle_candidate(
+                arguments.root, arguments.settle_slot, payload=arguments.payload,
+                payload_hash=arguments.payload_hash, expected_governance=arguments.governance_generation,
+                previous=arguments.previous_version, wait_timeout=arguments.wait_timeout,
+                package_version=arguments.package_version,
+                frontend=arguments.frontend, publication_source_root=arguments.publication_source_root,
+                child_timeout=arguments.child_timeout,
+                base_python=arguments.base_python,
+                recover_adopted_manager=arguments.recover_adopted_manager,
+                **({"_before_publish": check} if check is not None else {}),
+            )
     elif arguments.mode != "ordinary":
         import runtime_install_modes as modes
 
