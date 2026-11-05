@@ -2527,7 +2527,7 @@ packet; a healthy fallback cannot substitute for the selected source.
 `test_first_use_mcp_bootstrap.py` separately exercises the real packaged
 receiver's refusal paths and complete canonical materialization. Its cold
 functional packet measures the actual 15-second hook and exact `{}` output,
-ordinary receipt/result, concurrent equivalent provision coalescing, installed
+ordinary receipt/result, equivalent provision admissions, installed
 command/module/configuration consumers, healthy repeat, incoming-health failure
 preservation and source independence. Windows missing setup Python refuses
 before supervisor launch. No MCP server, backend, credentials, host service or
@@ -2536,6 +2536,10 @@ existing queue is exercised.
 The functional packet preserves the canonical runner's containment, lifecycle
 lease and native owner settlement. It proves caller-process exit, **not**
 production caller-Job/group destruction.
+Equivalent requests whose durable acceptance/execution intervals overlap must
+share one identity. Distinct identities are accepted only when durable timestamps
+prove the first request completed before the next was accepted; sequential
+non-overlapping calls are not credited as positive pending-coalescing evidence.
 
 The same manual portfolio selects `tools/mcp_bootstrap_lifetime.py
 --ephemeral-ci-consent` on disposable GitHub-hosted Windows/Linux runners,
@@ -2543,15 +2547,23 @@ outside the ordinary contained runner. The entry refuses inherited containment,
 self-hosted execution and absent consent before creating a fixture; it never
 strips a contained-test marker. Its fixed `test_first_use_mcp_lifetime.py` packet
 reuses the real materialized hook and existing native lifetime owner. A held
-ordinary execution lock keeps accepted work pending while both tracked Windows
+ordinary execution lock keeps acknowledged supervisors pending while both tracked Windows
 caller Jobs close, or an alive pidfd-pinned Linux caller group is killed.
 Bounded controls must die and the same acknowledged owners must survive before
 the lock releases, without another submission. Two stamp/provision cycles
-retain coalescing, a separate ordinary request, installed consumers, a renewed
+retain the same acceptance-time coalescing checks, installed consumers, a renewed
 instance lease, exact cleanup receipts and empty final inventory. Windows also
 retains the existing restrictive shared-outer negative and qualified desktop
 witness. Those generic owner controls are recorded separately from actual MCP
 hook outcomes.
+The cold hook establishes its own foundation and queue. A separate ordinary
+request is added only in the later provision cycle, after that foundation is
+ready; pre-creating a queue without a foundation would exercise the separate
+existing-queue recovery boundary. Failed foundation state or an acknowledged
+owner exiting without an ordinary receipt fails promptly. Bounded owner-log
+tails are retained before completion waits and at teardown; Linux's signal
+timeout permits normal finally/cleanup diagnostics within the unchanged item
+deadline.
 
 Native qualification is credited only from the exact candidate's successful
 platform results, not from local refusal tests or this lane's presence. The

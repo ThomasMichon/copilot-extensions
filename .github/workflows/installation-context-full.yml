@@ -1220,6 +1220,7 @@ jobs:
           path: |
             ${{ runner.temp }}/mcp-bootstrap-functional/**/*.xml
             ${{ runner.temp }}/ce-broker-probe-mcp-*/lifetime.xml
+            ${{ runner.temp }}/ce-broker-probe-mcp-*/owner-diagnostics.log
             ${{ runner.temp }}/ce-broker-probe-mcp-*/caller-*/*.json
             ${{ runner.temp }}/ce-broker-probe-mcp-*/caller-*/*.log
             ${{ runner.temp }}/ce-broker-probe-mcp-*/caller-*/hook.*

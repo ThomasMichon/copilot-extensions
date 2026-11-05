@@ -55,15 +55,29 @@ def test_actual_hook_finishes_after_all_native_callers_are_lost(
     preserved = sentinel.read_bytes()
 
     def diagnostic():
-        return "\n".join(
+        text = "\n".join(
             f"{path.name}:\n{path.read_text(errors='replace')[-16000:]}"
-            for path in (*area.rglob("*.log"), *native_root.glob("caller-*/*.log"),
-                         *native_root.glob("caller-*/hook.stderr")) if path.is_file()
+            for path in sorted({
+                *area.rglob("*.log"), *native_root.glob("caller-*/*.log"),
+                *native_root.glob("caller-*/hook.stderr"),
+            })[:64] if path.is_file()
         )
+        (native_root / "owner-diagnostics.log").write_text(text, encoding="utf-8")
+        return text
 
-    def completed(log):
+    def completed(log, owner):
+        progress = foundation_status(root=root)
+        if progress is not None:
+            assert progress.state not in {"failed", "interrupted"}, diagnostic()
         receipt = ordinary_receipt(log)
         if receipt is None:
+            if os.name == "nt":
+                alive = owner.poll() is None
+            else:
+                from agent_procutil._caller_owned import _pidfd_exited
+
+                alive = not _pidfd_exited(owner)
+            assert alive, "Acknowledged owner exited without an ordinary receipt\n" + diagnostic()
             return False
         result = status(receipt, root=root)
         assert result.state not in {"failed", "interrupted"}, diagnostic()
@@ -101,6 +115,7 @@ def test_actual_hook_finishes_after_all_native_callers_are_lost(
                 record_property("native-owner-controls", json.dumps(qualify(native_root, environment)))
 
             for cycle, action in enumerate(("stamp", "provision")):
+                print(f"MCP native qualification: {action} caller admission", flush=True)
                 if cycle:
                     (installation / "deploy-manifest.json").write_text(json.dumps({
                         "source": {"version": "0.0.0", "path": str(payload)},
@@ -111,7 +126,7 @@ def test_actual_hook_finishes_after_all_native_callers_are_lost(
                 with ExitStack() as actors:
                     actors.callback(lock.release)
                     requests = []
-                    if not cycle:
+                    if cycle:
                         ordinary = enqueue(
                             RequestSpec("mcp-native-ordinary"),
                             runner=TrustedRunner(
@@ -207,9 +222,11 @@ def test_actual_hook_finishes_after_all_native_callers_are_lost(
                             assert alive, diagnostic()
                             time.sleep(.1)
                     lock.release()
+                    print(f"MCP native qualification: {action} caller boundaries destroyed", flush=True)
+                    diagnostic()
                     results = []
                     for _, _, owner, _, _, receipt_log, _ in requests:
-                        observe(lambda: completed(receipt_log), 900, diagnostic)
+                        observe(lambda: completed(receipt_log, owner), 900, diagnostic)
                         result = status(ordinary_receipt(receipt_log), root=root)
                         assert result.exit_code == 0, diagnostic()
                         admission = json.loads(result.spec.source)
@@ -218,26 +235,39 @@ def test_actual_hook_finishes_after_all_native_callers_are_lost(
                         assert Path(admission["payload"]) == payload
                         assert Path(admission["runtime_root"]) == installation
                         assert Path(admission["project"]) == project
-                        results.append(result.id)
+                        results.append(result)
                         if os.name == "nt":
                             assert owner.wait(timeout=900) == 0, diagnostic()
                         else:
                             observe(lambda: _pidfd_exited(owner), 900, diagnostic)
-                    assert len(set(results)) == 1
-                    if not cycle:
+                    assert all(
+                        item.spec == results[0].spec and item.runner == results[0].runner
+                        for item in results
+                    ), diagnostic()
+                    ordered = sorted(
+                        {item.id: item for item in results}.values(), key=lambda item: item.created_at,
+                    )
+                    for earlier, later in zip(ordered, ordered[1:]):
+                        assert (
+                            earlier.finished_at is not None and earlier.finished_at <= later.created_at
+                        ), diagnostic()
+                    if cycle:
                         assert status(ordinary.id, root=root).exit_code == 7, diagnostic()
                     cycles.append({
-                        "action": action, "callers": len(requests), "same_request": True,
+                        "action": action, "callers": len(requests), "same_request": len(ordered) == 1,
+                        "coalescing_checked_against_acceptance_times": True,
                         "all_caller_boundaries_destroyed": True,
                         "same_acknowledged_owners_survived": True,
                         "bounded_controls_exited": True, "ordinary_completed": True,
                         "hook_seconds": [item[-1]["seconds"] for item in requests],
                     })
+                    print(f"MCP native qualification: {action} ordinary work completed", flush=True)
             assert_installed_mcp(installation, environment, project)
             assert sentinel.read_bytes() == preserved
             observe(lambda: foundation_status(root=root).state != "running", 900, diagnostic)
             observe(lambda: _unlocked(root), 900, diagnostic)
     finally:
+        diagnostic()
         record_property("mcp-native-caller-loss", json.dumps(cycles))
         record_property("mcp-native-cleanup", json.dumps([vars(item) for item in outcomes]))
     assert outcomes and all(item.status == "settled" for item in outcomes), outcomes

@@ -124,7 +124,7 @@ def main(argv=None) -> int:
     return pytest.main([
         str(REPOSITORY / "libs/update-driver/tests/test_first_use_mcp_lifetime.py"),
         "-q", "-s", "--basetemp", str(root / "pytest"),
-        "--timeout=900", "--timeout-method=thread",
+        "--timeout=900", "--timeout-method=" + ("signal" if sys.platform == "linux" else "thread"),
         "--junitxml", str(root / "lifetime.xml"), "-o", "junit_family=legacy",
     ])
 

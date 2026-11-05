@@ -1271,3 +1271,44 @@ dependence. Both fixture Job closures, bounded-control death, pinned-daemon
 survival and restrictive-outer refusal remain mandatory. Neither failed run
 is native acceptance; the revised exact-head lane still owes actual MCP work
 completion and exact cleanup on both platforms.
+
+Run `42024316058` at `b15bf45f37d9` fails Windows' functional coalescing
+assertion, with all nine lifecycle records settled, and Linux's native item
+deadline while waiting for its first ordinary receipt. Windows' two sequential
+hook calls did not guarantee pending overlap. An attempted execution-lock
+barrier also blocks the native foundation producer, so that local validation
+times out and is not acceptance. It is removed rather than extending a deadline.
+The functional and native assertions now require identical identities for
+equivalent overlapping requests; distinct identities require durable proof
+that the earlier request finished before the next was accepted. Actual
+coalescing is recorded, not assumed for sequential non-overlap.
+
+The Linux fixture pre-created its ordinary queue before cold foundation
+admission. Both native producers require an existing queue to have its existing
+foundation, so that setup entered the separately owned existing-queue recovery
+boundary instead of genuine first touch. The unrelated ordinary request now
+joins only the later provision cycle after the real cold hook establishes the
+foundation. The actual caller-boundary destruction and post-loss completion
+requirements are unchanged.
+
+Failed/interrupted foundation state and an acknowledged owner exiting without
+an ordinary receipt now fail promptly. Bounded owner-log tails are retained
+before waits and on teardown; Linux uses the existing signal timeout so finally
+and exact cleanup diagnostics can run. Item/step/portfolio deadlines are not
+increased. Neither failed validation is credited as a source or native pass.
+
+The corrected local Windows actual functional packet passes in 631.51 seconds
+(660.66 seconds including preparation and cleanup). Hook times are
+8.328/6.609/5.594/6.813 seconds against the unchanged 15-second deadline.
+Installed consumers, healthy repeats, incoming-failure preservation,
+source-independent consumers, all original lifecycle settlements and empty
+final inventory pass. This remains contained functional evidence, not native
+caller-Job/group proof. Ten lane guards, focused Ruff and whitespace pass.
+
+A bounded npm-only metadata retry still fails all four public TLS handshakes
+with certificate validation enabled. Normal PR CI skipped declaration age
+because this diff changes no dependency declaration, so its green result is
+not substituted for that audit. The existing CI workflow's explicit manual
+dispatch audits all declarations and can qualify the hosted metadata lane
+without changing a manifest or trust setting. Exact-head native results,
+required CI/review, merge and release remain open.

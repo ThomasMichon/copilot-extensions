@@ -308,10 +308,21 @@ def test_actual_hook_cold_drift_repeat_failure_and_installed_consumers(
     (installation / "deploy-manifest.json").write_text(json.dumps({
         "source": {"version": "0.0.0", "path": str(payload)},
     }), encoding="utf-8")
-    stage("concurrent drift provision")
+    stage("drift provision admissions")
     first, second = submit(), submit()
     first_result, second_result = result(first, "provision"), result(second, "provision")
-    assert first_result.id == second_result.id, diagnostic()
+    assert first_result.spec == second_result.spec and first_result.runner == second_result.runner, diagnostic()
+    if first_result.id != second_result.id:
+        earlier, later = sorted((first_result, second_result), key=lambda item: item.created_at)
+        assert earlier.finished_at is not None and earlier.finished_at <= later.created_at, diagnostic()
+    record_property("mcp-hook-coalescing", json.dumps({
+        "same_request": first_result.id == second_result.id,
+        "contract": "equivalent overlapping requests must share an identity",
+        "requests": [
+            {"id": item.id, "created_at": item.created_at, "finished_at": item.finished_at}
+            for item in (first_result, second_result)
+        ],
+    }))
     stage("installed consumers and healthy repeat")
     slot = assert_installed_mcp(installation, environment, project)
     selection = (installation / "current-version").read_bytes()
