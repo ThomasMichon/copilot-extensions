@@ -8,6 +8,21 @@ requirements remain in their issues and actual receiving objectives.
 
 ## Snapshot and boundaries
 
+The [twelve finite venue/composition/compatibility contracts](finite-venue-composition-compatibility-contracts.md)
+annotate thirty-six existing ranked relationships without closure credit.
+All twelve originals stay OPEN, retaining actual delivered partials and
+their distinct finite residuals. The
+[journal](<journal/2026/11.05 finite-venue-composition-compatibility-contracts.md>)
+separates five fresh, three reused and three protected description relations.
+
+The [nine finite allocation/recovery/observation contracts](finite-allocation-recovery-observation-contracts.md)
+annotate twenty-seven existing ranked relationships without closure credit.
+Current allocation-owner continuation and credited native idempotency remain
+distinct from complete generic acceptance; all nine originals stay OPEN.
+Four whole-description relations and three other whole originals remain
+protected without retry. The [journal](<journal/2026/11.05 finite-allocation-recovery-observation-contracts.md>)
+preserves direct intake, finite residuals and unchanged custody.
+
 The initial inventory contained 942 open issues: 695 eligible research identities
 and 247 excluded-author issues. The same four researchers received disjoint
 primary scopes of 170, 187, 169 and 169.

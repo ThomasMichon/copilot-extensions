@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent reviewed plan and source PRs against `dev`
 - **Created:** 2026-11-05
-- **Status:** Active
+- **Status:** Done
 - **Vision:** `agent-fabric` / `discover-before-duplicate`, `recover-not-lose`,
   `single-current-session-per-worktree`; `installer` / authoritative runtime replacement
 - **Umbrella issue:** #10657
@@ -34,11 +34,11 @@ connection select conversations consistently but have different attachment effec
 
 ## Context
 
-Package resources currently support an exact version or unspecified presence,
-but cannot express a minimum plus known-bad exclusions. Worktrees already accepts
+At inception, package resources supported an exact version or unspecified presence,
+but could not express a minimum plus known-bad exclusions. Worktrees already accepts
 PSMux >=3.3.5 except 3.3.6, while some consumers independently enforce exact pins.
-Seeded embodiment currently interprets a prompt as a new task unless
-`--resume-head` is supplied. That can discard expected conversational continuity.
+Seeded embodiment interpreted a prompt as a new task unless
+`--resume-head` was supplied. That could discard expected conversational continuity.
 
 This closes the existing session-reuse vision rather than introducing another
 session authority. Package admission remains with `agent-machines`; conversation
@@ -83,7 +83,7 @@ window, shutdown policy and recovery custody.
   and never bypasses process guards.
 - [x] Keep old engines from silently ignoring a new compatibility declaration;
   document manifest compatibility and contributor merge behavior.
-- [ ] Publish focused validation and land the package source change.
+- [x] Publish focused validation and land the package source change.
 
 ### Phase 3 - Resume-by-default launches
 
@@ -98,7 +98,7 @@ window, shutdown policy and recovery custody.
   creating a duplicate or injecting another prompt.
 - [x] Update callers that intentionally require fresh conversations and document
   detached programmatic creation versus current-terminal attachment.
-- [ ] Publish focused validation and land the launch source change.
+- [x] Publish focused validation and land the launch source change.
 
 ### Phase 4 - Maintenance recovery contract and closeout
 
@@ -107,7 +107,7 @@ window, shutdown policy and recovery custody.
   Keep operation scope separate from package admission and ordinary launch.
 - [x] Define the configurable default recovery prompt and distinguish launch,
   prompt delivery and completed reconciliation. Reuse existing primitives.
-- [ ] Record release versus rollout state, resolve all validation items and
+- [x] Record release versus rollout state, resolve all validation items and
   close the finite source effort without implying a host upgrade occurred.
 
 ## Validation Plan
@@ -123,8 +123,8 @@ window, shutdown policy and recovery custody.
   explicit-intent callers with the supported prior provider and provider
   rollback. Record the intentional behavior change for unmigrated implicit
   `--seed` callers rather than claiming backward-compatible defaults.
-- [ ] Run focused runtime tests, required unit/contract checks and touched-source lint.
-- [ ] Record native/clean-room evidence and explicit skipped-lane reasons;
+- [x] Run focused runtime tests, required unit/contract checks and touched-source lint.
+- [x] Record native/clean-room evidence and explicit skipped-lane reasons;
   source fixtures do not qualify installed rollout or disruptive maintenance.
 - [x] Re-read the operator capture against the original request before publication.
 
@@ -157,11 +157,10 @@ policy. Retain legacy exact-pin declarations and their prior interpretation.
 
 ### Documentation impact
 
-This proposal changes no runtime behavior, so current runtime references remain
-accurate until implementation. The implementation updates package resource
-schema/merge/application references, Worktrees CLI/mux guidance and affected
-caller documentation. It also records the recovery design as prospective,
-not an assertion that disruptive maintenance is already implemented.
+The reviewed proposal initially changed no runtime behavior. The delivered
+implementation updates package schema/merge/application references, Worktrees
+CLI/mux guidance and affected caller documentation. Recovery design remains
+prospective rather than asserting a disruptive executor exists.
 
 ### Contract impact
 
@@ -248,3 +247,26 @@ claims, and recover partial/unknown results without blindly replaying actions.
   admitted-type-contract step after successful target output, without type
   diagnostics. The corrected head must pass fresh required CI; no bypass or
   untracked flake exemption is assumed.
+
+### 2026-11-05 - Source completion
+
+- Implementation #10673 merged at `2d913c1364f5b85afb896c43f8059f78cbf6aee3`.
+  The exact published head received an approving Copilot review, all required
+  CI passed, and all five substantive review findings were fixed and resolved.
+  The earlier typecheck timeout was superseded by a real passing gate; no
+  CI bypass or flake exception was used.
+- Final focused evidence: 349 package tests, 255 Worktrees/profile tests,
+  67 Dispatch tests and 87 Manager tests passed. Real isolated package-manager
+  processes and non-reentrant native leases exercised the consumer boundaries.
+  The separate Linux/WSL restart packet skipped 105 cases on Windows; four
+  Manager native POSIX/Bash cases were unavailable on Windows. Those are not
+  native-platform passes.
+- Full fresh-machine provisioning, actual package replacement, headed model
+  startup, machine reboot and installed rollout were not performed. They are
+  outside this finite source scope and require their own admitted operational
+  venue and authority. The maintenance-window executor remains future work,
+  not an unacknowledged feature delivered by this effort.
+- Source is merged to `dev`, pending normal release under #3336 at this
+  closeout; merged source is not installed behavior. No local or fleet update
+  was authorized. The finite source objective is Done, with release and any
+  later authorized adoption retaining their existing owners.
