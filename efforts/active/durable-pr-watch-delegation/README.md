@@ -952,6 +952,13 @@ callback an implicit credential store.
   cases pass. Bounded cleanup is verified; strict Python 3.10 service analysis
   passes Linux and Windows. This is not a Windows native execution or deployed
   provider qualification.
+- The next review found an interruption window after a retry's confirmed reap.
+  Retry now reuses the retained `Popen.returncode` rather than signalling an
+  already-reaped PID. Its actual-process regression passes; the canonical
+  packet is now 119 passed/five platform skips. Required unit CI separately
+  refused the two changed, previously admitted source digests. Refresh only
+  those source entries; the exact unit nodes, effect restrictions and execution
+  budget remain unchanged.
 - These controls close a source prerequisite, not the full P1/P2/P3 gate.
   Shared selection/IO, durable attention/handled semantics, coordinated
   retention, three-provider qualification, installed adoption, container and

@@ -681,7 +681,10 @@ def test_all_caller_owned_cleanup_failures_retain_process(monkeypatch, boundary)
 
 
 @pytest.mark.skipif(sys.platform not in ("linux", "darwin"), reason="POSIX unreaped retry")
-def test_real_posix_confirmation_failure_retains_complete_retry_and_notification(monkeypatch):
+@pytest.mark.parametrize("interrupt_reap", [False, True])
+def test_real_posix_confirmation_failure_retains_complete_retry_and_notification(
+    monkeypatch, interrupt_reap,
+):
     original = protocol._confirm_group
     attempts, notifications = [], []
 
@@ -695,6 +698,21 @@ def test_real_posix_confirmation_failure_retains_complete_retry_and_notification
     with pytest.raises(OwnedCleanupError) as caught:
         _run("print('completed')", on_settled=lambda: notifications.append(True))
     assert caught.value.process.returncode is None and notifications == []
+    if interrupt_reap:
+        original_wait = caught.value.process.wait
+
+        def reaped(**kwargs):
+            original_wait(**kwargs)
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(caught.value.process, "wait", reaped)
+        with pytest.raises(KeyboardInterrupt):
+            caught.value.retry_cleanup(deadline=time.monotonic() + 3)
+        assert caught.value.process.returncode == -signal.SIGKILL and notifications == []
+        monkeypatch.setattr(
+            ownership, "_retire_posix_group",
+            lambda *a, **k: pytest.fail("retry signalled a reaped PID"),
+        )
     caught.value.retry_cleanup(deadline=time.monotonic() + 3)
     assert caught.value.process.returncode == -signal.SIGKILL
     assert len(attempts) == 2 and notifications == [True]

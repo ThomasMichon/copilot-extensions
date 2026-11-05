@@ -223,12 +223,15 @@ def _posix_cleanup_error(
             return seconds
 
         if not native_settled:
-            remaining()
-            _retire_posix_group(process, inherit_process_group=inherit_process_group)
-            if confirm_group:
-                from agent_procutil._caller_owned import _confirm_group
-                _confirm_group(process, budget=OwnedExecutionBudget(deadline, .01))
-            process.wait(timeout=remaining())
+            # Popen retains a completed reap even if interruption prevented this
+            # closure from recording its own stage before the previous unwind.
+            if process.returncode is None:
+                remaining()
+                _retire_posix_group(process, inherit_process_group=inherit_process_group)
+                if confirm_group:
+                    from agent_procutil._caller_owned import _confirm_group
+                    _confirm_group(process, budget=OwnedExecutionBudget(deadline, .01))
+                process.wait(timeout=remaining())
             native_settled = True
         if output is not None:
             output.finish(remaining(), deadline=deadline)

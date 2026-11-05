@@ -539,6 +539,8 @@ it never signals a reused numeric PID. A caller-owned guardian failure retains
 the public caller's settlement callback through that retry, after its lifetime
 descriptors have closed. Unknown descriptor-close custody still refuses rather
 than treating a later process exit as proof that every resource settled.
+The retained `Popen.returncode` also preserves that completed reap if an
+interruption unwinds the retry before its closure records the same stage.
 
 For an explicitly enclosing finite POSIX owner, opt-in
 `borrow_parent_scope=True` keeps observations in that owner's native group
