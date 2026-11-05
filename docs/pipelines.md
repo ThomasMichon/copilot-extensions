@@ -1287,7 +1287,7 @@ already-merged PRs' branches):
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
 | `module-health-watchdog.yml` | `schedule` (daily), `workflow_dispatch` | Proactively finds the single worst module-size-ceiling offender (organic drift no PR-time gate catches) and files/updates one tracking issue for it. |
-| `stale-branch-sweep.yml` | `schedule` (weekly), `workflow_dispatch` | Deletes merged-PR branches still lingering on `origin` — the automated form of the one-time 3000+-branch cleanup. |
+| `stale-branch-sweep.yml` | Weekly branch sweep, hourly label backstop, `label: [created, edited]`, `workflow_dispatch` | Deletes lingering merged-PR branches and independently removes exact label names configured through private policy. Label events and hourly runs never sweep branches. |
 | `installation-context-full.yml` | `schedule` (daily), `workflow_dispatch` | Full-sweep variant of the installation-context contract smoke check `ci.yml` runs per-PR. |
 | `installation-context-acceptance.yml` | `workflow_dispatch` | Explicit all-copy native diagnostic acceptance on fixed GitHub-hosted POSIX and Windows PowerShell 5.1 routes, partitioned by mode and pointer evidence. [Portfolio and exact-ref gate](../TESTING.md#derived-native-installation-diagnostics). |
 | `context-handoff-exhaustive.yml` | `schedule` (weekly), `workflow_dispatch` | The real-git/child-process/lock-race exhaustive suite for `context-handoff`'s exhaustive test tree — deliberately its own workflow so its `schedule` trigger doesn't apply to the rest of `ci.yml`'s matrix. |
@@ -1296,6 +1296,23 @@ already-merged PRs' branches):
 | `payload-cwd-contract.yml` | `schedule` (weekly), `workflow_dispatch` | Routing inventory only until hardened root-tools/native containers are enrolled. Native commands are preserved but explicitly disabled; no PR tests or passing native-evidence claim. |
 | `windows-coverage-rotation.yml` | Existing daily `schedule`, `workflow_dispatch` | Immutable-source hardened Linux full-plugin containers, with logs and portfolio-owned failure tracking, including selection/preparation failure before outputs exist. Only scheduled or manual Dev runs update the shared tracker; other manual refs remain inspection-only. Windows execution is explicitly unavailable pending container capacity; Linux success does not qualify other platforms or unenrolled tiers. |
 | `ci-failure-fix-attempt.lock.yml` | `issues: [labeled]`, `workflow_dispatch` | Generated agentic-workflow (`gh-aw` compiled) that reacts to a labeled CI-failure tracking issue; also manually dispatchable with inputs. |
+
+The maintenance flow's label job uses the `FORBIDDEN_LABELS` repository secret:
+a JSON array of exact, case-insensitive label names. Values belong only in private
+configuration, never public source, fixtures or logs. Missing configuration makes
+no label requests; malformed configuration fails before any requests. The helper
+validates the complete paginated label inventory before deleting only matches.
+Deleting a repository label also removes its issue/PR assignments. API failures
+fail the run without logging policy values; a later pass observes fresh metadata.
+
+Label cleanup is eventual, not a GitHub per-name creation prohibition. Creation
+and rename events use trusted default-branch code; the hourly backstop also covers
+events suppressed by `GITHUB_TOKEN`. Schedules may be delayed by GitHub.
+Manual `labels_only=true` runs label cleanup without branch deletion. The original
+weekly/manual branch sweep keeps its existing safeguards and concurrency group;
+the label job has separate least-privilege permissions and concurrency.
+Both jobs refuse non-`main` manual refs. Activate this flow only after normal
+review and promotion have delivered its source to `main`.
 
 The release reporter checks the optional fixer's workflow state once before
 dispatching newly filed signatures. An operator-disabled workflow is a visible,
