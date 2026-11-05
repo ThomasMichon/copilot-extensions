@@ -562,8 +562,10 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       maintenance admission, brief discovery retry, normal ensure, explicit
       refusal envelopes and preserved post-effect child/retirement custody.
       Its private canonical transaction reaches resident mutation intake;
-      the additional private normal-ensure process packet now passes and awaits
-      reviewed publication, not an installed daemon wake or lossless legacy history.
+      #10758 adds the actual private normal-ensure process packet and its
+      maintenance/no-spawn, warm reuse and exact cleanup controls. This closes
+      the finite recovery amendment, not an installed daemon wake, lossless
+      legacy history or the whole S2 row.
       The [known-output presentation follow-up](sidecar-output-presentation.md)
       addresses actual message/thought bursts that still overwhelm normal
       work rows. Plan #10689 and implementation #10698 are merged.

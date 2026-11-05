@@ -3,12 +3,13 @@
 Parent: [complete effort](README.md), Step 7.
 Source obligation: [S2](sidecar-live-timeline.md#s2---worktree-and-agenda-owner-observations).
 
-**Status:** maintenance-aware source behavior merged in #10744. The
+**Status:** maintenance-aware source behavior merged in #10744 and actual
+private normal-ensure process qualification merged in #10758. The
 [source readback](journal/2026/11.05-sidecar-resident-recovery.md) records the
 qualified transaction, refusal, readiness and child-custody controls. The
 additional actual private normal-ensure process packet passes its positive and
-maintenance-negative controls; its reviewed publication remains the next gate.
-Installed operation and the complete parent are not accepted by this receipt.
+maintenance-negative controls. This finite source amendment is qualified;
+installed operation and the complete parent are not accepted by this receipt.
 
 ## Operator direction
 
@@ -64,15 +65,17 @@ Native/manual/Relay, qualified PRE and whole-parent acceptance remain separate.
   pre-start retry and a maintenance recheck at wake.
 - [x] Align effort-binding's normal CLI wake policy without changing passive
   readers or deliberately no-wake native paths.
-- [ ] Test absent/active/invalid/unreadable maintenance, a resident appearing
+- [x] Test absent/active/invalid/unreadable maintenance, a resident appearing
   during backoff, maintenance appearing during backoff, successful bounded
   normal startup, persistent absence, live incompatible owners and no-wake
   callers. Prove a post-send failure never replays canonical work.
   #10744 qualifies the isolated discovery/readiness/refusal state machine and
   canonical intake. The additional private process packet passes actual normal
   ensure/spawn, PID/birth/health, native mutation history and warm reuse, plus
-  maintenance/no-spawn and exact leased cleanup controls. Keep this item open
-  until those controls complete their independent reviewed publication.
+  maintenance/no-spawn and exact leased cleanup controls. #10758 merged as
+  `9eedc950ead88d1d80e2ffdada7dc80a7f6d3982` after current-head independent
+  approval and all required CI, followed immediately by complete parent,
+  original-contract and recovery-amendment readback.
 - [x] Exercise the actual canonical transaction and resident observation intake
   through isolated owned fixtures. A mocked getter or a wake return value alone
   does not establish a captured mutation.

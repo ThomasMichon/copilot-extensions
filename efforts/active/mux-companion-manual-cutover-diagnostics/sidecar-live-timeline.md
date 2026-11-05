@@ -499,6 +499,9 @@ publication and installed support retain their separate qualification.
   distinguishes the injected startup callback from the additional actual
   private normal-ensure process controls, and retains unsupported/direct-fallback
   observation qualification.
+  #10758 merges those actual-process controls after independent approval,
+  required CI and whole-parent readback. The finite recovery amendment closes;
+  broader source coverage is not silently declared complete.
 - [x] Deliver bounded immutable process-local committed-save evidence and
   lock-safe optional notification delivery. #10131 supplies this primitive;
   resident/native index intake and cross-process delivery remain in the
@@ -608,6 +611,9 @@ publication and installed support retain their separate qualification.
   [source readback](journal/2026/11.05-sidecar-native-owner-composition.md)
   retains fixture discovery, carrier and geometry-observation boundaries rather
   than qualifying installed behavior, pixels or frame performance.
+  The separate [Windows client packet](journal/2026/11.05-sidecar-windows-client.md)
+  uses the actual PSMux/ConPTY client and unmodified app with a synthetic owner.
+  Source controls pass; native Windows execution remains an explicit gate.
 - [ ] Qualify current pane/PID preservation, focus, resize, observer exit,
   mode guides and the separately owned permanent Claims chrome.
 - [ ] Record performance/retention/coverage and source versus installed/native
