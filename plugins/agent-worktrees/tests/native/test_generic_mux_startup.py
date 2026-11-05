@@ -42,6 +42,9 @@ def no_visible_launches(monkeypatch):
     initial = descendants(os.getpid(), processes()) - {os.getpid()}
     roots = {os.getpid()}
     original = subprocess.Popen
+    initializer = getattr(original.__init__, "_aw_orig", None)
+    if initializer is not None:
+        monkeypatch.setattr(original, "__init__", initializer)
 
     def capture(*args, **kwargs):
         child = original(*args, **kwargs)

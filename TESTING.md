@@ -2035,6 +2035,8 @@ or foreground focus. A positive control pauses sampling until a creation
 client exits, then requires its detached child to be observed from retained
 launch roots. Payloads wait for fixture release within a finite lifetime; the
 45-second readiness allowance matches the existing native pane packet.
+The fixture removes the suite-wide headless initializer so only production
+and explicit fixture launch flags govern the observed native processes.
 The manual `installation-context-full.yml` portfolio `generic-mux` selects
 only this Windows packet and its verification/classification controls, using
 a digest-pinned disposable PSMux 3.3.8. The 3.3.5 ambient-tool baseline remains
