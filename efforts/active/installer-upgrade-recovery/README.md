@@ -1572,3 +1572,26 @@ The combined packet passes 41 controls with eight platform skips and 30
 deselections in 7.50 seconds, including stderr and the real attached-session
 exchange. Fatal lint, all thirteen install contracts and whitespace pass;
 canonical MCP source-digest refresh retains footprint revision 36.
+
+### 2026-11-05 - U15 source merged after recovered CI and stderr correction
+
+Actual Copilot approval `5793708760` on `eb0775e3f8` reports no open issues;
+both review threads are resolved. Latest source CI `42131212594` passes
+units, guards and the required PR gate at 23:53:09 UTC. Managed merge confirms
+#10736 merged at 23:55:11 UTC as
+`3389a4e16fd053c26dba6c1d13f0cd26ad2d9d05`. No required CI gate is bypassed.
+The repository-authorized missing CODEOWNER review exception remains distinct
+from the actual passing Copilot review.
+
+The ordinary squash pull-forward auto-aborts safely. All nine published paths
+are then verified identical to the merged snapshot, with no later local commit
+or uncommitted work. An empty-commit-range rebase advances the same worktree
+without reset, stash or discarded work; backup and framework recovery refs
+remain. This source unit is delivered, not a released or installed claim.
+
+The parent's own Plan and Validation Plan remain Active on re-read. The
+acceptance matrix records only U15's bounded source/consumer outcome. Next
+observe the normal promotion that actually contains this merged snapshot and
+verify the shipped implementation bytes; no forced release or updater is
+authorized. U13/#10652 fresh settlement, broader #10653 installer/reaping and
+#10486 reattachment acceptance retain their separate owners and gates.
