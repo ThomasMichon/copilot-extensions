@@ -31,3 +31,4 @@ plugins/*/scripts/launch-session.sh text eol=lf
 tools/hooks/* text eol=lf
 
 .github/workflows/*.lock.yml linguist-generated=true
+plugins/*/scripts/_runtime_admission/** linguist-generated=true
