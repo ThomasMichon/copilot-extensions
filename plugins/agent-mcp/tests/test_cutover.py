@@ -568,6 +568,59 @@ def test_forced_busy_mcp_drain_rolls_back_without_shutdown(tmp_path, monkeypatch
 
 
 @pytest.mark.parametrize("force", [False, True])
+def test_busy_cutover_stderr_does_not_recommend_force(
+    tmp_path, monkeypatch, capsys, force,
+):
+    import logging
+    from types import SimpleNamespace
+    from agent_mcp import ipc
+
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path))
+    root = ipc.default_socket_path().parent
+    root.mkdir(parents=True, exist_ok=True)
+    server = Server(str(root / "serve.sock"), enable_lease=False,
+                    control_token="tok")
+    server._attached = 2
+    _control_token_path(root, os.getpid()).write_text("tok")
+    monkeypatch.setattr(routing, "_listening", lambda *args, **kwargs: True)
+    routing.publish_active(root, bind="127.0.0.1", port=9281,
+                           pid=os.getpid(), version="prior")
+    operations = []
+
+    def request(host, port, token, payload, **kwargs):
+        operations.append(payload["op"])
+        return server._control_dispatch({**payload, "token": token})
+
+    retired = []
+    passive = SimpleNamespace(pid=None, poll=lambda: None,
+                              terminate=lambda: retired.append("passive"))
+
+    def spawn(ctx, port):
+        ctx.token_by_port[port] = "tok"
+        return passive
+
+    monkeypatch.setattr(_cutover, "control_request", request)
+    monkeypatch.setattr(_cutover, "spawn_passive_daemon", spawn)
+    monkeypatch.setattr(_cutover, "health_check", lambda *args: True)
+    monkeypatch.setattr(_cutover, "pick_free_port", lambda: 9290)
+    logger = logging.getLogger("zdd")
+    handler = logging.StreamHandler(sys.stderr)
+    logger.addHandler(handler)
+    try:
+        result = _cutover.run_cutover(drain_timeout=0, force=force)
+    finally:
+        logger.removeHandler(handler)
+    stderr = capsys.readouterr().err
+    assert not result["ok"] and result["rolled_back"] and not result["committed"]
+    assert result["drain"]["busy_sessions"] == 2
+    assert "attached sessions cannot be forcibly retired" in result["error"]
+    assert "attached sessions cannot be forcibly retired" in stderr
+    assert "rerun with force" not in stderr
+    assert "shutdown" not in operations and "undrain" in operations
+    assert retired == ["passive"] and server.attached == 2
+
+
+@pytest.mark.parametrize("force", [False, True])
 @pytest.mark.parametrize("prior_error,control_error", [
     ("old daemon did not drain; rerun with force to proceed", None),
     ("replacement readiness failed", None),

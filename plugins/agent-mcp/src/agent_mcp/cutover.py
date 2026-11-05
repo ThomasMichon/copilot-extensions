@@ -775,6 +775,17 @@ def _run_slot_startup(layout: tuple, physical_version: str, *, health_timeout: f
             raise
 
 
+def _protect_drain_diagnostic(result: Any) -> None:
+    if (
+        not result.ok and result.error and result.drain and result.drain.get("busy_sessions")
+        and not result.drain.get("drained") and not result.drain.get("error")
+    ):
+        result.error = result.error.replace(
+            "; rerun with force to proceed",
+            "; attached sessions cannot be forcibly retired",
+        )
+
+
 def run_cutover(*, health_timeout: float = 60.0, drain_timeout: float = 300.0,
                force: bool = False, require_live_daemon: bool = False) -> dict:
     """Drive one cutover of the resident ``serve`` daemon. Returns a result
@@ -797,6 +808,13 @@ def run_cutover(*, health_timeout: float = 60.0, drain_timeout: float = 300.0,
 
     from . import __version__, ipc
     from . import serve as _serve
+
+    class _McpCutoverOrchestrator(CutoverOrchestrator):
+        def _rollback(
+            self, old: Any, handle: Any, new_port: int, result: Any, **kwargs: Any,
+        ) -> None:
+            _protect_drain_diagnostic(result)
+            super()._rollback(old, handle, new_port, result, **kwargs)
 
     data_root = ipc.default_socket_path().parent
     data_root.mkdir(parents=True, exist_ok=True)
@@ -880,7 +898,7 @@ def run_cutover(*, health_timeout: float = 60.0, drain_timeout: float = 300.0,
                      "normally, or restart it manually",
         }
 
-    orch = CutoverOrchestrator(
+    orch = _McpCutoverOrchestrator(
         data_root, bind="127.0.0.1", version=__version__,
         spawn_passive=lambda port: spawn_passive_daemon(ctx, port),
         health_check=lambda host, port: health_check(ctx, host, port),
@@ -912,15 +930,8 @@ def run_cutover(*, health_timeout: float = 60.0, drain_timeout: float = 300.0,
                      f"old daemon shutdown REJECTED: {exc}"],
             "drain": None,
         }
+    _protect_drain_diagnostic(res)
     result = res.to_dict()
-    if (
-        not res.ok and res.error and res.drain and res.drain.get("busy_sessions")
-        and not res.drain.get("drained") and not res.drain.get("error")
-    ):
-        result["error"] = res.error.replace(
-            "; rerun with force to proceed",
-            "; attached sessions cannot be forcibly retired",
-        )
     if res.ok:
         result["data_socket"] = str(ctx.new_socket_path)
         if current is None:

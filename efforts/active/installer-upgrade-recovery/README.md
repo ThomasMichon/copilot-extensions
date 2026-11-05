@@ -1557,3 +1557,18 @@ eight platform skips in 5.72 seconds, including the actual attached-session
 exchange; fatal lint and all thirteen install contracts pass. The rebased head
 still needs its own source CI and review before merge. Broader #10653 acceptance
 and all parent completion gates remain open.
+
+The rebased source CI `42129460056` passes all three jobs at 23:35:28 UTC.
+Current-head review `5793610263` identifies a Medium diagnostic gap: the
+shared rollback logger emits the old force-retry advice before MCP corrects
+the returned result. Both actual-orchestrator stderr regression cases fail
+on that revision, with force false and true.
+
+The MCP-local orchestrator normalizes only the known busy-session retry
+advice before calling the unchanged shared rollback implementation; result
+serialization uses the same correction. Control and unrelated errors remain
+intact. No shared ZDD code, shutdown ordering or retirement authority changes.
+The combined packet passes 41 controls with eight platform skips and 30
+deselections in 7.50 seconds, including stderr and the real attached-session
+exchange. Fatal lint, all thirteen install contracts and whitespace pass;
+canonical MCP source-digest refresh retains footprint revision 36.
