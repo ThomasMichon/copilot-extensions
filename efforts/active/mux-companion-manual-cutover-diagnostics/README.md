@@ -528,6 +528,10 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       blocked/failed-read dismissal and original CLI return. Its complete
       invocation log includes a rejected-attempt negative control. Native
       Windows/PSMux, installed, Relay and original manual/head gates stay open.
+      #10680 carries reported work labels through the actual Bridge semantic
+      source and Manager codec, including invalid-display-text fallback and
+      refreshed source-bound HTTP-52 evidence. It does not qualify current
+      concurrency, allocated custody, lifetime totals or whole-source coverage.
       D5 actual relocation, restoration/reclamation, archive acknowledgment and
       installed/native qualification remain open.
       Current answerability/PRE qualification, archival/rescue, native durability and
@@ -614,6 +618,7 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+- [2026-11-05 - Reported actor attribution without runtime inference](journal/2026/11.05-sidecar-reported-actors.md)
 - [2026-11-05 - Reported work labels on the actual Bridge source path](journal/2026/11.05-sidecar-reported-work-labels.md)
 - [2026-11-05 - Actual private popup input and clean exit](journal/2026/11.05-companion-popup-input.md)
 - [2026-11-05 - Sparse presentation correction and truthful source diagnostics](journal/2026/11.05-sidecar-sparse-presentation.md)

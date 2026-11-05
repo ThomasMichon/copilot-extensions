@@ -151,6 +151,13 @@ An optional label that cannot be used as literal display text falls back to
 the next reported name or generic occurrence label while its source value stays
 in Evidence. Invalid wire text remains a source error, not a hidden fallback.
 
+Known lifecycle/tool occurrences with a valid owner-reported subagent ID use
+that reported actor's own source-scoped lane. Equal display names do not merge
+distinct IDs, and reporter/subagent identities occupy separate namespaces.
+Missing, invalid or unknown-event attribution stays with the Bridge reporter.
+An observed start/completion is not current running state or allocated custody;
+parent tool-call metadata remains in Evidence, not an inferred hierarchy link.
+
 Timeline keeps the purpose, compact source/input qualification and bottom-anchored
 work canvas visible. Expand **Evidence** for exact source IDs, qualifications,
 effort reference, diagnostics and the Bridge feed selector; **Creation** expands
