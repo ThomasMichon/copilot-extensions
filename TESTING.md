@@ -95,6 +95,14 @@ owner separately includes those source controls without changing the generation,
 historical HTTP-51 evidence or required unit-only CI. Manager and installed/native
 acceptance remain separate.
 
+The manual `installation-context-acceptance.yml` selector `wheel_inputs`
+includes copied-application bootstrap acceptance in the existing Linux,
+Windows and macOS source-profile jobs. The bounded canonical contained packet
+runs the absent-legacy-helper normal/repeat/repair case and the source-unavailable
+copied application case with real UV, offline wheel inputs and isolated roots.
+These fixture controls do not establish portfolio adoption, service survival or
+host rollout; each platform's actual result remains separate.
+
 Bridge's opt-in `--test-file tests/test_acp_current_requests.py
 --test-file tests/test_acp_client.py --test-file tests/test_attention_current.py
 --test-file tests/test_attention_wait.py --allow-explicit-tiers` packet checks

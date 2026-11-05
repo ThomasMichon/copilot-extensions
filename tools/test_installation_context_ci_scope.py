@@ -577,10 +577,29 @@ def test_source_profile_acceptance_uses_existing_opt_in_and_unchanged_native_bud
         assert job["runs-on"] == runner
         assert job["timeout-minutes"] == 6
         commands = [step["run"] for step in job["steps"] if "run" in step]
-        assert commands == [
+        assert commands[:2] == [
             "python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest packaging pyyaml",
             "python -m pytest -q tools/test_runtime_source_wheels.py",
         ]
+        assert len(commands) == 3
+        execution = job["steps"][-1]
+        assert execution["shell"] == "python"
+        packet = execution["run"]
+        ast.parse(packet)
+        assert (
+            "tools/test_local_install_source.py::"
+            "test_application_adapter_runs_real_install_repeat_and_retains_failed_start[no-legacy-bootstrap]"
+        ) in packet
+        assert (
+            "tools/test_local_install_source.py::"
+            "test_copied_application_qualifies_after_the_prepared_source_is_removed"
+        ) in packet
+        assert 'shutil.which("uv") is None' in packet
+        assert "isolated_environment(os.environ, temporary)" in packet
+        assert "code = run_contained(" in packet
+        assert "limits=Limits(wall_seconds=300)" in packet
+        assert "owner.retained or temporary.exists()" in packet
+        assert "raise SystemExit(code)" in packet
 
 
 def test_path_capture_diagnostics_leave_full_portfolio_unchanged() -> None:

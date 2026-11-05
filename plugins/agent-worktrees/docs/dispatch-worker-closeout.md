@@ -15,7 +15,10 @@ The caller's actual cwd alone selects the existing managed project.
 `agent-worktrees.dispatch-worker-closeout`, version `1`, with operation
 `finalize-own`, native proof `inuse-hold-v1` and qualified platforms
 `linux`/`wsl`. The descriptor explicitly excludes paired closeout, task release
-and process retirement. Unsupported platforms, containers, missing canonical
+and process retirement. Linux containers require the native source owner's
+[namespace-scoped execution epoch](engine-picker-contract.md#original-native-session-observations)
+and the same actual open native hold; a container marker alone is not proof.
+Unsupported platforms, inaccessible native namespaces, missing canonical
 native registration and older runtimes have no equivalent legacy fallback.
 Consumers must establish support from the exact executing runtime before
 requesting closeout; a package version or a payload declaration is insufficient.

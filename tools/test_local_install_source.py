@@ -839,7 +839,11 @@ def native_source(tmp_path, request):
         "versioned_runtime_construction.py", "versioned_runtime_publication.py",
     ):
         shutil.copyfile(root / "libs" / "versioned-runtime" / name, scripts / name)
-    shutil.copyfile(root / "libs" / "installer-engine" / "runtime_launcher.py", scripts / "runtime_launcher.py")
+    if not isinstance(options, dict) or options.get("legacy_bootstrap", True):
+        shutil.copyfile(
+            root / "libs" / "installer-engine" / "runtime_launcher.py",
+            scripts / "runtime_launcher.py",
+        )
     sources = native.source_inputs.sources
     digest = sources.assembly_hash(payload)
     identity = sources.SourceIdentity(
@@ -1159,10 +1163,13 @@ def test_application_adapter_refuses_incomplete_or_changed_inputs_before_constru
 
 
 @pytest.mark.parametrize(
-    "native_source", [{"entry": True}, {"entry": True, "standalone": True}], indirect=True,
+    "native_source", [
+        {"entry": True}, {"entry": True, "standalone": True},
+        pytest.param({"entry": True, "legacy_bootstrap": False}, id="no-legacy-bootstrap"),
+    ], indirect=True,
 )
 def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
-    native_source, tmp_path, monkeypatch,
+    native_source, tmp_path, tmp_path_factory, monkeypatch,
 ):
     source, snapshot = native_source
     with source.project_inputs(snapshot, "demo-app") as (selected, inputs):
@@ -1183,7 +1190,7 @@ def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
     if os.name == "nt":
         monkeypatch.setenv("HOMEDRIVE", home.drive)
         monkeypatch.setenv("HOMEPATH", str(home)[len(home.drive):])
-    root = tmp_path / "runtime"
+    root = tmp_path_factory.mktemp("app")
     options = dict(
         uv=Path(shutil.which("uv")), base_python=Path(sys.executable),
         health_module="demo_app", expected_version=selection["runtime_version"],
@@ -1192,6 +1199,8 @@ def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
     result = source.install_application(snapshot, "demo-app", selected.payload, root, **options)
     slot = root / "versions" / selection["runtime_version"]
     assert result == {"state": "installed", "slot": str(slot)}
+    for helper in (slot / ".runtime-bootstrap").iterdir():
+        assert helper.read_bytes() == (slot / "runtime" / helper.name).read_bytes()
     before = {name: (root / name).read_bytes() for name in ("current-version", "last-known-good")}
     assert json.loads((root / "setup.json").read_text()) == ["--setup"]
     assert json.loads((root / "started.json").read_text()) == ["--start"]
@@ -1225,6 +1234,7 @@ def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
     assert json.loads((root / "setup.json").read_text()) == ["--setup", "--new-setup"]
     assert json.loads((root / "started.json").read_text()) == ["--start", "--new-start"]
     assert (slot / "application.json").read_bytes() == installed_declaration
+    shutil.rmtree(snapshot)
     launcher = home / ".local" / "bin" / ("demo-app.ps1" if os.name == "nt" else "demo-app")
     command = (
         [shutil.which("powershell.exe"), "-NoProfile", "-NonInteractive", "-File", str(launcher)]
