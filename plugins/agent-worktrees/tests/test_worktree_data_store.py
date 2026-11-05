@@ -714,9 +714,11 @@ def test_windows_publication_adapter_preserves_durability_and_retry_fences(
 @pytest.mark.skipif(os.name != "nt", reason="requires actual native Windows directory flush")
 def test_native_windows_allocation_and_retry_use_real_durability_barriers(owner: Path) -> None:
     first = _allocate()
+    before = _snapshot(owner)
     assert _allocate() == first
     selected = store.read_worktree_data(PROJECT, WORKTREE, store_id=STORE)
     assert selected is not None and selected.placements == (first,)
+    assert _snapshot(owner) == before
 
 
 def test_final_project_root_barrier_failure_never_acknowledges_publication(

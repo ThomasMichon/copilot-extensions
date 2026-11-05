@@ -491,11 +491,24 @@ def test_interruption_never_publishes_success_or_changes_source(
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows directory/publication acceptance")
 def test_native_windows_complete_export_and_readback(lane: Path) -> None:
+    outcome(lane)
+    revisit(lane, {"content": "native changed input"})
+    STORE.record_delivery(lane, 3, {
+        "state": "delivered", "error": None, "reply": {"ok": True, "detail": "native fixture"},
+    })
     target = destination(lane)
-    before = source_bytes(lane)
-    manifest = EXPORT.export_store(lane, target, **selection(lane))
-    assert EXPORT.verify_export(target, **selection(lane)) == manifest
+    before, original_rows = source_bytes(lane), rows(lane)
+    selected = selection(lane)
+    manifest = EXPORT.export_store(lane, target, **selected, expected_revision=3)
+    assert manifest["completeness"] == "complete" and manifest["revision"] == 3
+    assert manifest["tables"]["operations"]["rows"] == 3
+    assert EXPORT.verify_export(target, **selected, expected_revision=3) == manifest
+    assert rows(target) == original_rows
     assert source_bytes(lane) == before and not (target / EXPORT.PENDING).exists()
+    transported = lane.parent / f"{lane.name}-transported"
+    shutil.copytree(target, transported)
+    assert EXPORT.verify_export(transported, **selected, expected_revision=3) == manifest
+    assert rows(transported) == original_rows
 
 
 class NativeCall:
