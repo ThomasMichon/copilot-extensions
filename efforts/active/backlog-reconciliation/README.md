@@ -231,6 +231,22 @@ checkpoint nor author eligibility, holds, requirements or source/resource custod
 
 ### Phase 2 - Continuing reconciliation
 
+The [componentization/workbench](componentization-workbench-cohort.md),
+[Dispatch observability](dispatch-observability-cohort.md) and
+[knowledge-onboarding](knowledge-onboarding-cohort.md) studies preserve nine
+whole originals and all twenty-five texts, with twenty-seven bounded
+noncompletion comparisons. Subject-matter discipline, autonomous campaign
+judgment, installed worker UI, measurement, waiter display, capacity ownership
+and three onboarding boundaries remain separate. A finite #5452 source read
+confirms a relay residual; no original or receiving gate closes.
+
+The preceding eleven-document research delta merged in #10547; its
+[delivery journal](<journal/2026/11.04 timeout-causality-contracts.md>)
+records the genuine reviewed outcome and preserved original gates. Two
+complete 17:06 PST scans remain 1,007 whole open, 278 above 729, with no
+arrivals, departures or campaign credit. Continue weighted-graph research
+and independently supported consolidation, not held-lane resumption.
+
 The [timeout-causality](timeout-causality-cohort.md),
 [knowledge-pair](knowledge-pair-cohort.md) and
 [hosted-custody](hosted-custody-cohort.md) studies preserve ten whole
@@ -966,6 +982,15 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The three [componentization](componentization-workbench-cohort.md),
+[Dispatch](dispatch-observability-cohort.md) and
+[onboarding](knowledge-onboarding-cohort.md) cores retain all original
+alternatives and current custodians. Preserve complete installer/module/
+recurrence obligations, actual campaign judgments, unread #6379 inheritance,
+SUBMITTED-versus-COMPLETED, report-OR-telemetry, both nonlocal waiter paths,
+non-expiring capacity custody, actual model admission and provider-policy
+uncertainty. Finite setup wording is not an invented whole-harness gate.
 
 The three [timeout](timeout-causality-cohort.md),
 [knowledge](knowledge-pair-cohort.md) and
