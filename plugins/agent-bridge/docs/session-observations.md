@@ -193,8 +193,10 @@ qualification changes without appending events or advancing its cursor;
 heartbeats contain no statistics. No history scan, additional actor, permanent
 worker or persistence owner is added.
 
-Manager consumption and joined presentation validation remain pending in the
-[statistics implementation contract](../../../efforts/active/mux-companion-manual-cutover-diagnostics/sidecar-tool-statistics.md).
+Manager's existing-reader consumption and bounded joined presentation validation
+are source-qualified in #10718; the
+[statistics implementation contract](../../../efforts/active/mux-companion-manual-cutover-diagnostics/sidecar-tool-statistics.md)
+retains the separate installed/native and whole-parent gates.
 
 ## Optional current input and permissions
 

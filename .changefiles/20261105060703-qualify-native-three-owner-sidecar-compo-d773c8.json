@@ -1,0 +1,13 @@
+{
+  "comment": "Qualify native three-owner Sidecar composition and reconcile statistics source documentation",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
