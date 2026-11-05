@@ -68,6 +68,11 @@ callback object and owned process, then separately admits the ACP session.
 Replacing that connection creates a new observation incarnation. Pending or late
 callbacks from the former producer, or waiters from a prior session-admission
 epoch, cannot become current merely because the same client object reconnects.
+The existing permission answer slot can be overwritten or reset while an earlier
+callback still awaits. If weak producer admissions exceed the bounded candidates
+actually found in the owner maps, coverage is partial (`waiter-coverage`), never
+complete absence. The helper does not create another answer inventory or settle
+those callbacks; their actual completion removes that coverage limitation.
 
 Each waiter occurrence has a producer-owned opaque identity scoped to that
 client incarnation. A repeated tool-call ID must produce a different occurrence;

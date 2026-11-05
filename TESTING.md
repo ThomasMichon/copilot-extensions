@@ -6,7 +6,8 @@ Bridge's opt-in `--test-file tests/test_acp_current_requests.py
 actual local callback/Future lifetime, bounded candidate/output counts, privacy,
 manual-versus-forwarded/automatic permission, connection/process/session
 replacement and failed initialization. Delayed old callbacks never qualify as
-the new producer, and completion invalidations do not append history. It starts
+the new producer; overlapping/reset permission slots remain partial until their
+omitted callbacks settle. Completion invalidations do not append history. It starts
 no SDK/model actor and does not qualify optional wire, Manager, installed or
 native-client behavior; required unit-only CI is unchanged.
 

@@ -127,6 +127,7 @@ class CurrentRequests:
         """Read at most 64 candidate slots synchronously on the producer loop."""
         availability, completeness, reason = "unknown", "unknown", "client-disconnected"
         pending: list[PendingOccurrence] = []
+        seen: set[asyncio.Future[Any]] = set()
         if client._remote_transport is not None or client._host_mode:
             reason = "unsupported-transport"
         elif (
@@ -149,11 +150,11 @@ class CurrentRequests:
             remaining = MAX_CANDIDATES
             failure = None
             if permission is not None:
-                failure = self._append(permission, "permission", pending)
+                failure = self._append(permission, "permission", pending, seen)
                 remaining -= 1
             if failure is None:
                 for future in islice(client._pending_elicitations.values(), remaining):
-                    failure = self._append(future, "input", pending)
+                    failure = self._append(future, "input", pending, seen)
                     if failure is not None:
                         break
             if failure == "producer-replaced":
@@ -161,6 +162,10 @@ class CurrentRequests:
                 reason, pending = failure, []
             elif failure is not None or slots > MAX_CANDIDATES:
                 completeness, reason = "partial", "waiter-budget"
+            elif len(self._occurrences) > sum(future in self._occurrences for future in seen):
+                # The answer slot can be overwritten/reset while its callback
+                # still awaits. Weak admissions detect lost coverage, not answers.
+                completeness, reason = "partial", "waiter-coverage"
         signature = (availability, completeness, reason, tuple(pending))
         if signature != self._signature:
             self._signature = signature
@@ -176,10 +181,14 @@ class CurrentRequests:
         )
 
     def _append(
-        self, future: asyncio.Future[Any], kind: str, pending: list[PendingOccurrence]
+        self, future: asyncio.Future[Any], kind: str, pending: list[PendingOccurrence],
+        seen: set[asyncio.Future[Any]],
     ) -> str | None:
         if not isinstance(future, asyncio.Future):
             raise ObservationError("invalid-source", "invalid producer waiter")
+        if future in seen:
+            raise ObservationError("invalid-source", "duplicate producer waiter")
+        seen.add(future)
         if future.done():
             return None
         admitted = self._occurrences.get(future)

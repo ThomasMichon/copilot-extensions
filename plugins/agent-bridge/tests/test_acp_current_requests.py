@@ -198,6 +198,7 @@ async def test_shutdown_and_buffer_reset_cannot_leave_observed_pending_permissio
     assert state(owner)["requests"]
     owner._reset_buffers()
     assert state(owner)["requests"] == []
+    assert state(owner)["completeness"] == "partial"
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)
     question = await ask(owner)
@@ -206,6 +207,36 @@ async def test_shutdown_and_buffer_reset_cannot_leave_observed_pending_permissio
     await owner.shutdown()
     await question
     assert state(owner)["availability"] == "unknown"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("loss", ["overlap", "reset"])
+async def test_permission_slot_loss_never_proves_complete_absence(loss: str) -> None:
+    owner = client()
+    first = await permission(owner)
+    if loss == "overlap":
+        second = await permission(owner)
+    else:
+        owner._reset_buffers()
+        second = None
+    missing = state(owner)
+    assert not first.done()
+    assert missing["availability"] == "observed"
+    assert missing["completeness"] == "partial" and missing["reason"] == "waiter-coverage"
+    assert len(missing["requests"]) == (1 if second is not None else 0)
+    if second is not None:
+        owner.resolve_permission(owner._pending_permission_id, "allow")
+        assert state(owner)["completeness"] == "partial"
+        await second
+        assert not first.done()
+        assert state(owner)["requests"] == []
+        assert state(owner)["completeness"] == "partial"
+    first.cancel()
+    await asyncio.gather(first, return_exceptions=True)
+    await asyncio.sleep(0)
+    settled = state(owner)
+    assert settled["availability"] == "observed"
+    assert settled["completeness"] == "complete" and settled["requests"] == []
 
 
 @pytest.mark.asyncio
