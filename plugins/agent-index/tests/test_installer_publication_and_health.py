@@ -19,7 +19,8 @@ from test_install_engine_adoption import environment, function, run_ps
 
 @pytest.mark.parametrize("host", ["pwsh", "powershell", "bash"])
 @pytest.mark.parametrize("outcome", [
-    "native-failure", "stale", "health-stale", "wrong-owner", "ready",
+    "native-failure", "stale", "health-stale", "wrong-owner", "ready", "dev-ready",
+    "source-mismatch",
     "client", "unconfigured", "no-service",
     "existing-host-failure",
 ])
@@ -43,9 +44,23 @@ def test_native_installer_service_result_and_selected_identity(tmp_path, host, o
     engine = root / "engine"
     engine.mkdir()
     (engine / "current-version").write_text("independent-engine", encoding="utf-8")
-    (root / "current-version").write_text("2.0.0", encoding="utf-8")
+    expected = "2.0.0-dev1" if outcome == "dev-ready" else "2.0.0"
+    if outcome == "source-mismatch":
+        expected = "2.0.0+source." + "a" * 64
+    (root / "current-version").write_text(expected, encoding="utf-8")
     before = {path: path.read_bytes() for path in (preserved, engine / "current-version")}
     version = "2.0.0" if outcome in {"ready", "health-stale", "wrong-owner"} else "1.0.0"
+    if outcome == "dev-ready":
+        version = "2.0.0.dev1"
+    elif outcome == "source-mismatch":
+        version = "2.0.0+source." + "b" * 64
+    data = root / "service-data"
+    env_file = root / "service.env"
+    env_file.write_text(
+        "AGENT_INDEX_HOST=127.0.0.2\nAGENT_INDEX_DATA_DIR="
+        + (str(data) if os.name == "nt" else shlex.quote(str(data))) + "\n",
+        encoding="utf-8",
+    )
 
     class Health(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -75,6 +90,9 @@ def test_native_installer_service_result_and_selected_identity(tmp_path, host, o
         native.write_text(
             "import os, pathlib, subprocess, sys\n"
             "args = sys.argv[1:]\n"
+            "if '-m' in args or '-c' in args:\n"
+            " assert os.environ['AGENT_INDEX_HOST'] == '127.0.0.2'\n"
+            " assert os.environ['AGENT_INDEX_DATA_DIR'] == os.environ['INDEX_FIXTURE_DATA']\n"
             "if '-m' in args and args[args.index('-m') + 1:] == ['agent_index', 'deploy']:\n"
             " pathlib.Path(os.environ['INDEX_FIXTURE_CALLS']).write_text('deploy')\n"
             " print('native deployment diagnostic', file=sys.stderr)\n"
@@ -93,7 +111,8 @@ def test_native_installer_service_result_and_selected_identity(tmp_path, host, o
         env = environment(tmp_path)
         env.update({
             "AGENT_INDEX_HOME": str(root), "AGENT_INDEX_ROUTING_DIR": str(root),
-            "INDEX_FIXTURE_CALLS": str(log),
+            "INDEX_FIXTURE_CALLS": str(log), "INDEX_FIXTURE_DATA": str(data),
+            "AGENT_INDEX_HOST": "127.0.0.3", "AGENT_INDEX_DATA_DIR": "unchanged-data",
         })
         role = outcome if outcome in {"client", "unconfigured"} else "host"
         if outcome == "existing-host-failure":
@@ -107,15 +126,18 @@ def test_native_installer_service_result_and_selected_identity(tmp_path, host, o
 set -euo pipefail
 INSTALL_DIR={shlex.quote(str(root))}
 LINK_PYTHON={shlex.quote(str(runtime))}
-SRC_VERSION=2.0.0
+SRC_VERSION={shlex.quote(expected)}
+ENV_FILE={shlex.quote(str(env_file))}
 NO_SERVICE={int(outcome == "no-service")}
 _ok() {{ echo "$*"; }}; _skip() {{ echo "$*"; }}; _step() {{ :; }}
 _fail() {{ echo "$*" >&2; }}
 _activation_role() {{ echo {role}; }}
 _machine_role() {{ echo {machine_role}; }}
+_write_service_files() {{ :; }}
 {function("_service_healthy", "sh")}
 {function("_service_cutover", "sh")}
 _service_cutover
+[[ "$AGENT_INDEX_HOST" == 127.0.0.3 && "$AGENT_INDEX_DATA_DIR" == unchanged-data ]]
 """
             command = [executable]
             harness = tmp_path / "consumer.sh"
@@ -126,7 +148,8 @@ $ErrorActionPreference = 'Stop'
 . '{engine_helpers}'
 $InstallDir = '{root}'
 $LinkPython = '{runtime}'
-$SrcVersion = '2.0.0'
+$SrcVersion = '{expected}'
+$EnvFile = '{env_file}'
 $NoService = ${str(outcome == "no-service").lower()}
 function Write-Ok {{ param($m) Write-Host $m }}
 function Write-Skip {{ param($m) Write-Host $m }}
@@ -135,10 +158,14 @@ function Write-Step {{ param($m) }}
 function Get-ActivationRole {{ return '{role}' }}
 function Get-MachineRole {{ return '{machine_role}' }}
 function Write-ServiceFiles {{ }}
+{function("Invoke-WithEnvFile", "ps1")}
 {function("Get-ActiveServicePort", "ps1")}
 {function("Test-ServiceHealthy", "ps1")}
 {function("Invoke-ServiceCutover", "ps1")}
 Invoke-ServiceCutover
+if ($env:AGENT_INDEX_HOST -ne '127.0.0.3' -or $env:AGENT_INDEX_DATA_DIR -ne 'unchanged-data') {{
+    throw 'Service environment leaked into the installer'
+}}
 """
             command = [executable, "-NoProfile", "-NonInteractive", "-File"]
             harness = tmp_path / "consumer.ps1"
@@ -149,11 +176,11 @@ Invoke-ServiceCutover
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         skipped = outcome in {"client", "unconfigured", "no-service"}
-        success = skipped or outcome == "ready"
+        success = skipped or outcome in {"ready", "dev-ready"}
         assert (result.returncode == 0) is success, result.stdout + result.stderr
         assert log.exists() is not skipped
-        if outcome == "ready":
-            assert "2.0.0 is ready" in result.stdout
+        if outcome in {"ready", "dev-ready"}:
+            assert f"{expected} is ready" in result.stdout
         if not success:
             assert "is ready" not in result.stdout
         assert {path: path.read_bytes() for path in before} == before
@@ -256,10 +283,10 @@ while (-not (Test-Path '{checked}')) {{
 try {{
     $probe = Enter-IndexStampLock -Scope Publish -TimeoutSeconds 0
     [void]$probe.ReleaseMutex(); $probe.Dispose()
-    [IO.File]::WriteAllText('{outcome}', 'unserialized')
+    Publish-FileAtomically -Path '{outcome}' -Content 'unserialized'
 }} catch {{
     if ($_.Exception.Message -notlike '*Timed out waiting*') {{ throw }}
-    [IO.File]::WriteAllText('{outcome}', 'blocked')
+    Publish-FileAtomically -Path '{outcome}' -Content 'blocked'
 }}
 if (-not (Publish-IndexRuntime)) {{ throw 'new activation failed' }}
 """, encoding="utf-8")

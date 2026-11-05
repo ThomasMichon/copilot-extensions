@@ -2517,14 +2517,18 @@ function Test-ServiceHealthy {
     param([string]$ExpectedVersion = '')
     if ($ExpectedVersion) {
         $probe = @'
-import sys
+import re, sys
 from agent_index.__main__ import _owned_service_status, _routing_endpoint
 endpoint = _routing_endpoint()
-if (endpoint is None or endpoint.version != sys.argv[1]
-        or type(endpoint.pid) is not int or endpoint.pid <= 0):
+if endpoint is None or type(endpoint.pid) is not int or endpoint.pid <= 0:
+    raise SystemExit(1)
+actual, expected = endpoint.version, sys.argv[1]
+if not any(marker in value for marker in ('+source.', '.source.') for value in (actual, expected)):
+    actual, expected = (re.sub(r'-dev(\d+)$', r'.dev\1', value) for value in (actual, expected))
+if actual != expected:
     raise SystemExit(1)
 health = _owned_service_status(
-    endpoint.base_url, expected_version=sys.argv[1], expected_pid=endpoint.pid, timeout=3.0,
+    endpoint.base_url, expected_version=endpoint.version, expected_pid=endpoint.pid, timeout=3.0,
 )
 raise SystemExit(0 if health.get('status') == 'ok' else 1)
 '@
@@ -2632,20 +2636,22 @@ function Invoke-ServiceCutover {
     }
     if (-not (Test-Path $LinkPython)) { throw 'Required service runtime is unavailable; service was not updated' }
     Write-ServiceFiles
-    Write-Step 'Deploying the selected service runtime through its native owner...'
-    $previousPreference = $ErrorActionPreference
-    try {
-        $ErrorActionPreference = 'Continue'
-        & $LinkPython -I -X utf8 -m agent_index deploy 2>&1 | Out-Host
-        $deployExit = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $previousPreference
+    Invoke-WithEnvFile -Path $EnvFile -Body {
+        Write-Step 'Deploying the selected service runtime through its native owner...'
+        $previousPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            & $LinkPython -I -X utf8 -m agent_index deploy 2>&1 | Out-Host
+            $deployExit = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousPreference
+        }
+        if ($deployExit -ne 0) { throw "Service deployment failed (exit $deployExit); a healthy predecessor is not update success" }
+        if (-not (Test-ServiceHealthy -ExpectedVersion $SrcVersion)) {
+            throw "Selected service runtime $SrcVersion is not serving with its expected ownership"
+        }
+        Write-Ok "Selected service runtime $SrcVersion is ready"
     }
-    if ($deployExit -ne 0) { throw "Service deployment failed (exit $deployExit); a healthy predecessor is not update success" }
-    if (-not (Test-ServiceHealthy -ExpectedVersion $SrcVersion)) {
-        throw "Selected service runtime $SrcVersion is not serving with its expected ownership"
-    }
-    Write-Ok "Selected service runtime $SrcVersion is ready"
 }
 
 function Publish-FileAtomically {

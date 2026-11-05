@@ -2183,14 +2183,18 @@ _uninstall() {
 _service_healthy() {
     if [[ -n "${1:-}" ]]; then
         "$LINK_PYTHON" -I -B -X utf8 -c '
-import sys
+import re, sys
 from agent_index.__main__ import _owned_service_status, _routing_endpoint
 endpoint = _routing_endpoint()
-if (endpoint is None or endpoint.version != sys.argv[1]
-        or type(endpoint.pid) is not int or endpoint.pid <= 0):
+if endpoint is None or type(endpoint.pid) is not int or endpoint.pid <= 0:
+    raise SystemExit(1)
+actual, expected = endpoint.version, sys.argv[1]
+if not any(marker in value for marker in ("+source.", ".source.") for value in (actual, expected)):
+    actual, expected = (re.sub(r"-dev(\d+)$", r".dev\1", value) for value in (actual, expected))
+if actual != expected:
     raise SystemExit(1)
 health = _owned_service_status(
-    endpoint.base_url, expected_version=sys.argv[1], expected_pid=endpoint.pid, timeout=3.0,
+    endpoint.base_url, expected_version=endpoint.version, expected_pid=endpoint.pid, timeout=3.0,
 )
 raise SystemExit(0 if health.get("status") == "ok" else 1)
 ' "$1"
@@ -2279,7 +2283,7 @@ _ensure_running() {
 # Use the native deployment owner with or without a service manager. A failed
 # deployment cannot fall back to an ensure path that accepts the old service.
 # The warm embedding engine is a SEPARATE unit on a fixed port -- left untouched.
-_service_cutover() {
+_service_cutover() (
     if [[ "$NO_SERVICE" -eq 1 ]]; then _skip 'Service cutover skipped (--no-service)'; return 0; fi
     # A configured host may start/cut over. An unrelated repository may only
     # cut over an already-running service owned by an explicit machine host.
@@ -2292,6 +2296,13 @@ _service_cutover() {
         fi
     fi
     [[ -x "$LINK_PYTHON" ]] || { _fail 'Required service runtime is unavailable'; return 1; }
+    _write_service_files
+    if [[ -f "$ENV_FILE" ]]; then
+        set -a
+        # shellcheck disable=SC1090
+        . "$ENV_FILE"
+        set +a
+    fi
     _step 'Deploying the selected service runtime through its native owner...'
     local deploy_exit=0
     "$LINK_PYTHON" -I -X utf8 -m agent_index deploy || deploy_exit=$?
@@ -2301,7 +2312,7 @@ _service_cutover() {
     fi
     _service_healthy "$SRC_VERSION" || { _fail "Selected service runtime $SRC_VERSION is not serving with its expected ownership"; return 1; }
     _ok "Selected service runtime $SRC_VERSION is ready (warm engine untouched)"
-}
+)
 
 _run_index_action() {
 source "$SCRIPT_DIR/source-runtime.sh"

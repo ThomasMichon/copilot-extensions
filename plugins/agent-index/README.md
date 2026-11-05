@@ -205,6 +205,9 @@ update successful. POSIX installation uses the same native deployment owner
 without requiring systemd; a deployment failure is not retried through a
 healthy-service shortcut. A completed runtime slot remains immutable and can be
 reused when retrying the service phase.
+Deployment and verification share the scoped `service.env` settings. Ordinary
+`-devN`/`.devN` spellings compare equivalently; source-qualified generation
+identities remain exact.
 During suite updates, activation uses the selected consuming repository rather
 than the physical build artifact. The updater carries that repository through
 the existing `AGENT_INDEX_REPO` binding while preserving an explicit override.
