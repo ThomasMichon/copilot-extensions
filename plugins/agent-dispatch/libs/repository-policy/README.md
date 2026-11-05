@@ -56,6 +56,20 @@ downgrade to legacy policy. Callers must still retain the fresh installed-owner
 check before actual managed launch. An installed but incompatible or failing
 receiver is not permission to substitute this reader.
 
+Bridge separately defines an explicitly selected portable receiving contract
+in its [repository-hosting reference](../../plugins/agent-bridge/docs/repository-hosting.md#host-selected-portable-policy-contract).
+It reuses the archive's canonical source closure with its own context-bearing
+entry and launch enforcement. That deliberate receiver does not change this
+legacy probe's meaning or turn its preflight answer into launch permission.
+
+`repository_policy.receiving` owns that explicit adapter:
+`require_receiving_policy(path, context)` checks fresh canonical policy, while
+`build_receiving_policy_check(workspace, context, text_transport=False)` returns
+the isolated command and stdin archive for an existing transport. Text-only
+adapters select bounded base64 rather than reinterpret ZIP bytes as text.
+The context is the selected execution owner's validated scope carried across
+its admitted transport, not ambient guest JSON or proof of permission.
+
 The fresh-reader subprocess controls are explicit T3 tests, not automatic
 unit-only CI. Run them from the repository root with
 `python tools/run-plugin-tests.py repository-policy --test-file tests/test_repository_policy.py --allow-explicit-tiers`.

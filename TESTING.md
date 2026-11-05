@@ -82,6 +82,64 @@ qualifies shallow Git transport independently. It disables client updates and
 uses no provider credentials or model session; trust establishment, cold-machine
 construction and live credential/relay acceptance remain separate.
 
+Bridge's opt-in `--test-file tests/test_portable_receiving_policy.py
+--test-file tests/test_repository_hosting_receivers.py
+--test-file tests/test_codespace_spawner.py
+--test-file tests/test_container_session_host.py --allow-explicit-tiers` packet
+checks the selected portable policy receiver through isolated Python, existing
+provider stdin transports and the actual shipped Session Host bundle. It
+covers sparse/incompatible guest-suite fixtures, selected overlay denial,
+malformed/unreadable policy, late denial and no-wake versus launch activation.
+Resume-level Shutdown controls retain the original stop fence across provider
+activation, including a newer stop, changed venue, provider rollback and a
+fresh denial after activation. CodeSpaces' `tests/test_cli.py` exercises the
+actual `start` parser/dispatch with owner-authentication, launch-policy and API
+boundaries substituted, including exact account-binding collisions and failed
+bound lookups. A real delayed activation provider proves repeated cancellation
+retains recovery admission until the original process settles, an existing
+drain refuses before activation and a later drain waits. Retained legacy-session
+controls adopt the current receiving contract while pinning the actual checkout.
+The same real provider process crosses the HTTP start route to prove its own
+drain/cancellation admission. Cross-repository resume supplies the retained
+repository/remote and tests real leading `cd` selection, including refusal of a
+changed checkout. Unmapped first-use activation identifies the authenticated
+login, revalidates its exact venue and keeps identity/lookup/token failures
+pre-effect.
+Explicit cross-repository selections exercise the same leading-`cd` guard.
+Separate controls enter the real remote-host preparation method for explicit,
+ordinary provider and managed bindings, proving a late checkout change cannot
+update the retained target/database or reach child preparation. Matching paths
+retain the original ACP identity; the final ACP connection is substituted.
+Available-venue legacy controls negotiate current receiving support before the
+first policy read, retain an unsupported prior adapter's refusal and preserve
+the original stop fence. Another case keeps retained portable inspection
+available without a current namespace owner. A real admitted-resume control
+pauses provider refresh, records an actual durable stop while lifecycle custody
+is held, then makes the venue Shutdown: refresh cannot activate it, prepare a
+new Host or clear that newer stop.
+HTTP container controls use the real namespace/parser and hosting pipeline with
+substituted inspect/exec results. Both a stopped member and a running member
+with a repository denial refuse before `ensure_ready`, plugin staging or session
+creation; the CodeSpace activation shortcut cannot admit container readiness.
+CodeSpaces' opt-in Windows desktop check sets
+`CODESPACES_ACTIVATION_WINDOWS_E2E=1` and selects
+`agent-codespaces --test-file tests/native/test_activation_windowless.py
+--allow-explicit-tiers` with the bounded runner. It uses the canonical Manager
+Win32 observer from the full source snapshot and a shared contained Job. Two
+cycles invoke the actual activation helper from base `pythonw.exe`, with four
+real native `gh --version` children replacing identity/start backend requests
+without changing the production capture/headless kwargs. It checks observed
+visible windows, terminal acquisitions, child focus and descendant cleanup.
+Account/state/activation responses are synthetic; no credentials, live venue
+activation, installed service or native Copilot is qualified.
+Containers' `tests/test_runtime_drivers.py` sends the
+base64 archive through the real runtime-proxy, external-driver process and
+isolated canonical reader, proving both allow and deny without Docker.
+A real bundled Host drives a mock ACP peer through one prompt and reconnects
+to the same child/conversation. These are source/private-process controls,
+not native Copilot, installed services, live remote transports or muxed-mode
+acceptance. Required unit-only CI is unchanged.
+
 Manager's opt-in `--test-file tests/native/test_companion_app_tmux.py
 --test-file tests/native/test_companion_pane_tmux.py --allow-explicit-tiers`
 packet distinguishes the original observer-stub pane test from the actual

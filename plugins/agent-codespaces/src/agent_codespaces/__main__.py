@@ -35,7 +35,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from . import capture_cli, dial_log_cli, launch_policy
+from . import activation_cli, capture_cli, dial_log_cli, launch_policy
 from . import claim_provider_cli
 from .leases_cli import _hold_is_self, _self_claim_identity, _short_owner
 from .live_users import busy_report as _busy_report
@@ -122,7 +122,7 @@ _ADO_AUTH_EXIT = 77
 # deliberately excluded -- they must keep working without gh. `doctor` in
 # particular self-reports a missing/mis-authed gh, so it never balks.
 _GH_REQUIRED_COMMANDS = frozenset({
-    "ssh", "list", "delete", "finalize", "stop", "verify",
+    "ssh", "list", "delete", "finalize", "start", "stop", "verify",
     "create", "prune", "wait", "pool", "allocate", "copilot",
     "sync-sessions",
 })
@@ -380,7 +380,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Skip the pre-delete Copilot session recovery",
     )
 
-    for add in (claim_provider_cli.add_claim_provider_parsers, capture_cli.add_capture_parser,
+    for add in (activation_cli.add_start_parser, claim_provider_cli.add_claim_provider_parsers, capture_cli.add_capture_parser,
                 dial_log_cli.add_dial_log_parser, launch_policy.add_launch_policy_parsers):
         add(sub)
     # --- finalize ---

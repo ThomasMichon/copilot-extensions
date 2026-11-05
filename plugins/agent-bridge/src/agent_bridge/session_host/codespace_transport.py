@@ -325,6 +325,9 @@ def _workspace_environment_probe(argument: str) -> str:
 
 async def resolve_execution_workspace(target: dict, transport) -> str:
     """Resolve a fresh/replacement child's leading `cd` without launching it."""
+    from ..portable_policy import codespace_receiving_command
+
+    target["acp_command"] = codespace_receiving_command(target)
     leading_cd = re.match(r"^\s*cd\s", str(target.get("acp_command") or "")) is not None
     existing = target.get("workspace_folder")
     if isinstance(existing, str) and existing.startswith("/") and not leading_cd:
@@ -393,12 +396,16 @@ async def _refresh_checkout_metadata(target: dict) -> None:
     metadata = json.loads(output).get("codespace") or {}
     if metadata.get("name") != target.get("name"):
         raise RuntimeError("Provider returned a different CodeSpace checkout")
+    target.pop("portable_receiving_policy", None)
     for key in (
         "workspace_folder", "acp_command", "checkout_provision_command",
-        "requested_repo", "repo_remote",
+        "requested_repo", "repo_remote", "portable_receiving_policy",
     ):
         if key in metadata:
             target[key] = metadata[key]
+    from ..portable_policy import codespace_receiving_command
+
+    target["acp_command"] = codespace_receiving_command(target)
 
 
 async def provision_execution_checkout(target: dict, transport, *, prelude: str = "") -> None:

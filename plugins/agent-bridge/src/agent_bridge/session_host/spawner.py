@@ -231,6 +231,7 @@ def build_remote_launch(
     reverse_forwards: list[str] | None = None,
     unexpected_reap_seconds: float = 60.0,
     active_reap_seconds: float = 0.0,
+    policy_context: str | None = None,
 ) -> str:
     """Assemble the far-side bash command that launches a survivable Host.
 
@@ -277,6 +278,8 @@ def build_remote_launch(
         host_cmd += f"--reverse-forward {shlex.quote(spec)} "
     if cwd:
         host_cmd += f"--cwd {shlex.quote(cwd)} "
+    if policy_context is not None:
+        host_cmd += f"--repository-policy-context {shlex.quote(policy_context)} "
     host_cmd += "-- " + " ".join(shlex.quote(a) for a in child_argv)
     env_prefix = f"{_NONCE_ENV}={shlex.quote(nonce)} " if nonce else ""
     launch = (
@@ -376,6 +379,7 @@ class CodeSpaceSpawner:
         from .. import __version__
         from . import protocol as proto
         from .bundle import build_session_host_bundle
+        from ..portable_policy import selected_context
         from .endpoints import (
             CredentialRelayReadinessError,
             endpoint_from_ssh_config,
@@ -384,6 +388,7 @@ class CodeSpaceSpawner:
             wait_for_relay_serving,
         )
 
+        policy_context = await asyncio.to_thread(selected_context)
         nonce = new_nonce()
         bundle_path, _sha = await asyncio.to_thread(build_session_host_bundle)
         remote_bundle = f"{self._remote_dir}/{bundle_path.name}"
@@ -453,6 +458,7 @@ class CodeSpaceSpawner:
             host_version=__version__, reverse_forwards=reverse,
             unexpected_reap_seconds=self._unexpected_reap_seconds,
             active_reap_seconds=self._active_reap_seconds,
+            policy_context=policy_context,
         )
         try:
             rc, out, err = await self._transport.run(

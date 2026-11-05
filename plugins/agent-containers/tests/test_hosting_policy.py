@@ -86,3 +86,52 @@ def test_live_attachment_requires_receiver_support_but_not_a_new_launch_grant(mo
     assert len(calls) == 1
     assert "agent-policy check --help" in calls[0]
     assert "--path" not in calls[0]
+
+
+@pytest.mark.parametrize("allowed", [False, True])
+def test_portable_prepare_reads_actual_policy_before_projection_without_guest_owner(
+    tmp_path, monkeypatch, allowed,
+):
+    import shlex
+    import sys
+
+    from agent_procutil import no_window_flags
+    from agent_containers.config import ContainersConfig, FleetConfig
+    from agent_containers.session_host_context import TrustedContext
+
+    policy = tmp_path / ".copilot-extensions" / "agent-worktrees" / "config.yaml"
+    policy.parent.mkdir(parents=True)
+    policy.write_text(f"expose_agent: {str(allowed).lower()}\n")
+    selected = "a" * 64
+    context = TrustedContext(
+        ContainersConfig(), FleetConfig(acp_command="copilot --acp"),
+        "selected-user", "/actual", selected,
+    )
+    peer_context = json.dumps({
+        "schema": "agent-bridge.receiving-policy", "version": 1, "marketplaceId": "selected",
+    })
+    native_run = subprocess.run
+    seen = []
+
+    def run(argv, **kwargs):
+        assert argv[:6] == ["docker", "exec", "-i", "-u", "selected-user", selected]
+        assert "agent-policy" not in argv[-1]
+        words = shlex.split(argv[-1].split(" && ", 1)[1])
+        words[0], words[-4] = sys.executable, str(tmp_path)
+        seen.append(argv)
+        return native_run(
+            words, input=kwargs["input"], text=True, capture_output=True,
+            timeout=10, creationflags=no_window_flags(),
+        )
+
+    monkeypatch.setattr("agent_containers.runtime_drivers.run_routed", lambda *a, **k: None)
+    monkeypatch.setattr(hosting_policy.subprocess, "run", run)
+    if allowed:
+        command, _launcher, _count, instance = hosting_policy.session_host_launch_inputs(
+            context, selected, policy_context=peer_context,
+        )
+        assert command == "copilot --acp" and instance == selected
+    else:
+        with pytest.raises(RuntimeError, match="expose_agent: false"):
+            hosting_policy.session_host_launch_inputs(context, selected, policy_context=peer_context)
+    assert len(seen) == 1

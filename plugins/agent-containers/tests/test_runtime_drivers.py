@@ -608,6 +608,7 @@ def test_unlaunchable_driver_is_a_typed_error_and_skipped(fake, no_docker):
 def test_readiness_requires_ssh_only_for_ssh_capable_drivers(fake, monkeypatch, caps, failing):
     from agent_containers.installer_readiness import inspect_toolchain
 
+    monkeypatch.setattr("agent_containers.installer_readiness._is_windows", lambda: False)
     monkeypatch.setenv("FAKE_DRIVER_CAPS", json.dumps(caps))
     failures = inspect_toolchain(
         driver_config(), command_finder=lambda name: None,
@@ -646,6 +647,44 @@ def test_runtime_proxy_serves_bridge_hosting_checks(fake, no_docker, tmp_path, m
                      "/bin/sh", "-c", "echo policy-ok"]) == 0
     assert capsys.readouterr().out == "policy-ok\n"
     assert cli.main(["runtime-proxy", "inspect", "plain-1"]) == 1  # never a Docker fallback
+
+
+@pytest.mark.parametrize("denied", [False, True])
+def test_runtime_proxy_delivers_portable_policy_archive_to_real_driver_process(
+    fake, no_docker, tmp_path, monkeypatch, capsys, denied,
+):
+    import base64
+    import io
+
+    from repository_policy.receiving import build_receiving_policy_archive
+
+    config = _write_config(tmp_path, monkeypatch)
+    fleet.reconcile_up(config, "example")
+    member_id = {c.name: c for c in lifecycle.list_containers(config)}["example-1"].container_id
+    repo = tmp_path / "source"
+    (repo / ".git").mkdir(parents=True)
+    policy = repo / ".agent-worktrees" / "config.yaml"
+    policy.parent.mkdir()
+    policy.write_text(f"expose_agent: {'false' if denied else 'true'}\n", encoding="utf-8")
+    reader, payload = build_receiving_policy_archive()
+    context = json.dumps({
+        "schema": "agent-bridge.receiving-policy", "version": 1, "marketplaceId": "",
+    })
+    encoded = base64.b64encode(payload).decode("ascii")
+    monkeypatch.setattr(sys, "stdin", io.StringIO(encoded))
+    runtime_drivers.clear_bindings()
+    rc = cli.main([
+        "runtime-proxy", "--fleet", "example", "exec", "-i", "-u", "vscode", member_id,
+        sys.executable, "-I", "-S", "-c", reader, str(repo), context, "resume", "base64",
+    ])
+    assert rc == (3 if denied else 0)
+    answer = json.loads(capsys.readouterr().out)
+    if denied:
+        assert "expose_agent: false" in answer["error"]
+    else:
+        assert answer["allowed"] is True
+    executions = [call for call in fake.state()["calls"] if call["verb"] == "exec"]
+    assert len(executions) == 1 and executions[0]["request"]["stdin"] == encoded
 
 
 def test_session_host_state_reports_recreated_incarnation_missing(
@@ -1581,7 +1620,9 @@ def test_delayed_listing_from_a_replaced_registration_never_rebinds(
     retired.list_members()  # A's slow listing completes after B's
     assert runtime_drivers.owner_of("example-1").driver is current
     old_calls = len(fake.state()["calls"])
-    assert runtime_drivers.run_routed(["docker", "exec", "example-1", "true"]).returncode == 0
+    assert runtime_drivers.run_routed([
+        "docker", "exec", "example-1", sys.executable, "-c", "pass",
+    ]).returncode == 0
     assert len(fake.state()["calls"]) == old_calls  # never the retired executable
     assert [c["verb"] for c in _calls(replacement_root)][-1] == "exec"
 

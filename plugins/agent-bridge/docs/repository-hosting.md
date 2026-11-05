@@ -79,9 +79,10 @@ is attached only when plugin preparation or keyed creation needs that context.
 
 The receiving Session Host checks before survival setup, child spawn, state
 publication or readiness. Its child-spawn boundary checks again. The
-portable bundle carries a dependency-free adapter which invokes the guest's
-own enforcing Worktrees policy command; it does not import the frontend's
-installation configuration or silently omit admission. The `session-host-agent` runner
+portable bundle carries the canonical evaluator, portable PyYAML source and
+license notices. An explicitly selected portable receiving context supplies
+the host's validated marketplace scope; it is not read from request environment
+or the guest's installed suite. The `session-host-agent` runner
 applies an explicit cwd override before resolving
 the local launch. Plan cwd is authoritative for both the child process and
 ACP session creation; a configured anchor is not substituted for it.
@@ -127,14 +128,60 @@ Supported container and CodeSpace targets are checked, not blanket-refused.
 Container admission inspects the exact running Docker instance and executes
 the policy query as the provider-selected user at the actual guest checkout.
 CodeSpace admission uses its existing read-only availability and SSH transport,
-resolves execution checkout metadata, then asks the receiving owner. Neither
+resolves execution checkout metadata, then runs the advertised portable reader
+or the prior provider's enforcing guest-owner baseline. Neither
 query prepares credentials, submits a seed or starts a managed agent. A stopped
 or otherwise uninspectable guest refuses instead of being woken speculatively.
 
-Known CLI namespace providers first resolve an unprepared target and perform
-guest admission before `ensure_ready`; resolution is checked again before
-plugin staging and at the final target. The read-only resolver protocol and
+Known CLI namespace providers first resolve an unprepared target. Ordinary
+resolution performs guest admission before `ensure_ready` and cannot wake an
+uninspectable target. The HTTP start entry and initial stopped-session admission
+explicitly admit activation through the existing venue owner. They retain the
+CodeSpace launch-policy gate, then check fresh guest policy after readiness,
+before plugin staging and again at the final target. An operation's descriptive
+name is not activation authority. The read-only resolver protocol and
 actual receiving target, not the namespace's spelling, determine support.
+CodeSpace readiness alone does not wake a stopped target. After the typed
+no-wake refusal, an explicitly activating launch may consume the provider's
+version-1 `activation: start` declaration and call that same owner's
+`start` operation for the exact resolved name. It then repeats fresh admission;
+an available but denied repository never enters the activation branch.
+This activating namespace shortcut is CodeSpace-only. Containers retain fresh
+hosting admission before readiness and plugin staging; a stopped container
+cannot use the CodeSpace handoff to wake before its policy can be inspected.
+Container activation requires its own negotiated contract.
+Explicit resume can make this same typed transition during initial admission,
+before provider refresh. It retains the original stop fence, resolves the exact
+retained venue through its current provider and checks that fence before and
+after activation. Fresh policy at the retained execution checkout must then
+pass before recovery begins. A newer stop or a changed venue still refuses.
+Initial activation holds recovery admission, so an already-draining daemon
+refuses before waking the venue and a later drain waits for the admitted work.
+Cancellation settles the original bounded provider invocation before releasing
+that admission; it never replays activation. A retained legacy session may
+adopt the current provider's receiving contract without replacing its venue,
+execution checkout or conversation.
+HTTP start likewise holds manager-owned admission before resolving a provider;
+drain cannot report completion while that request can still activate a venue.
+Cross-repository resume supplies the retained repository and remote to that
+provider. Adopting a different leading `cd` cannot silently retarget the retained
+checkout; a changed execution path refuses before recovery.
+Explicit checkout selections receive that same check. Remote-host preparation
+also verifies every known retained checkout before updating its target or
+preparing a replacement child, so a later provider-default change cannot
+replace the directory that admission validated.
+Legacy retained CodeSpace metadata negotiates an advertising current provider's
+receiving declaration before choosing the first policy consumer, including when
+the venue is already Available. This is not fallback after a guest-owner failure.
+A provider without the declaration retains the prior enforcing adapter; an
+unsupported or denying guest owner still refuses. A failed current-provider
+negotiation cannot select another adapter. With no current namespace owner,
+retained portable inspection or reattachment does not acquire a new provider
+prerequisite.
+Later full-target refresh is non-activating and preserves the retained explicit
+checkout flag. If the venue stops after initial admission, that refresh refuses
+rather than issuing another unfenced activation. A newer durable stop therefore
+cannot be bypassed while resolution waits.
 Opaque commands and unknown resolver protocols still refuse before effects;
 invalid cross-repo requests are rejected before admission work.
 
@@ -154,6 +201,72 @@ Remote ACP-mode worktree import therefore refuses rather than persisting a
 conversation whose receiving policy cannot be checked by that synchronous
 boundary. Remote native import needs a receiver-aware asynchronous protocol;
 ordinary SSH creation with an exact path retains the checked route above.
+
+## Host-selected portable policy contract
+
+The private launch option `--repository-policy-context` selects
+`agent-bridge.receiving-policy`, version `1`, with a `marketplaceId` string.
+The host constructs it only after validating its selected Bridge installation.
+An empty marketplace is valid only when that host resolves the supported legacy
+installation. The selected context travels as a literal argument on the existing
+authenticated transport, outside child argv and request environment. Missing
+or unsupported context never silently selects a different marketplace.
+
+Provider preflight sends the same canonical evaluator and YAML sources in a
+bounded stdin archive to an isolated `python3 -I -S` receiving process. This
+is a deliberate Bridge-owned receiver, not fallback after invoking a failing
+guest command. It ignores unrelated guest installation selection and freshly
+reads the actual execution checkout and selected overlay. The original
+repository-policy library's legacy probe keeps its narrower preflight-only
+meaning and explicit-context refusal.
+
+The shared `repository_policy.receiving` entry supplies this explicit receiver;
+the original legacy probe is unchanged. Binary and text-only provider transports
+carry the same archive, with bounded base64 encoding for the latter. Direct
+Docker uses binary stdin; driver-backed containers use base64 text through
+`runtime-proxy exec -i`, which forwards stdin through the driver's existing
+`input_text` contract without changing the selected instance or user.
+
+Provider declarations are additive and selected before use. A CodeSpace's
+`portable_receiving_policy` version `1` includes its unguarded `acp_command`
+for the enforcing bundled Host; the ordinary guarded command stays available
+to prior callers. Bridge never strips policy text from a shell command.
+A trusted container advertises version `1` before Bridge passes the optional
+`--repository-policy-context` to `session-host-prepare`. That provider freshly
+executes the canonical reader as the pinned instance/user before credentials
+or environment projection, and returns the command in its existing response.
+It omits only the redundant guest-suite wrapper; the bundled Host still
+checks at actual execution. Without the declaration, new callers retain the
+prior provider contract and its guest-owner requirement. Unsupported or malformed
+declarations refuse before new syntax; an invocation failure is never replayed
+through another contract.
+The prior provider's preflight also uses that guest owner, rather than passing
+a portable check only to fail a retained guest-owner guard after preparation.
+Failure of that baseline never triggers a portable fallback.
+
+For actual Session Host launch, the same source closure is included in the
+content-addressed bundle. It rechecks before survival setup and child spawn,
+including the attested shell's pre-exec gate. It carries enforcement code,
+not an allow receipt. A changed policy can therefore refuse after a successful
+preflight without publishing a running child or new host authority.
+
+| Receiving path | Policy and workspace ownership |
+|---|---|
+| Local ACP | Current installation's canonical check; managed IDs stay with Worktrees |
+| CodeSpace workspace ACP | Selected portable preflight and bundled launch checks over existing transport |
+| Trusted-container workspace ACP | Exact instance/user inspection, stdin read over the runtime proxy, then bundled launch checks |
+| SSH/project ACP | Existing receiving owner and shell checks remain; no new SSH Session Host is introduced |
+| Managed remote worktree ID | Existing allocation/resolution owner remains required; an unavailable operation refuses rather than treating the ID as a path |
+| Muxed/standalone remote-driver | Existing owner and mode remain unchanged by this policy slice |
+
+This option is internal to the selected host bundle, not new syntax sent to an
+arbitrary installed executable. A new caller ships and names its own
+content-addressed closure. An older caller omitting the option retains the
+previous bundled guest-owner adapter; that path still refuses unavailable or
+incompatible guest commands. There is no effectful probe-and-replay fallback,
+package-version equality requirement or automatic guest upgrade. Reattachment
+to a retained host remains on its original protocol/lifecycle boundary;
+fresh recovery uses the newly selected launch checks.
 
 Already-running remote ACP connections remain connection-only targets, not
 local authoring-process launches. Bridge does not apply its local filesystem
@@ -188,6 +301,11 @@ The isolated effect-ledger coverage is in:
   UI/CLI pre-seed gates and continued live delivery.
 - `tests/test_hosting_capability.py`: actual command wiring, mixed-version
   daemon refusal, per-attempt capability/protocol composition and health support.
+- `tests/test_portable_receiving_policy.py`: isolated receiving processes,
+  selected overlays, malformed/unreadable policy, late denial in the actual
+  shipped bundle, no-wake versus launch activation, and a real bundled Host
+  with a mock ACP peer through one turn and same-conversation reattachment.
+  The peer is not native Copilot or installed/external acceptance.
 
 The required unit packet also admits
 `tools/promotion_unit_tests/test_ssh_hosting_policy.py`: cold connection ordering,

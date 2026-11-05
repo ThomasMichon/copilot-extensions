@@ -222,6 +222,16 @@ checkpoint nor author eligibility, holds, requirements or source/resource custod
 
 ## Plan
 
+The [eleven automatic-update/observation/compatibility contracts](finite-automatic-observation-compatibility-contracts.md)
+retain thirty-three ranked relationships and independently verify #9704,
+#10057 and #10078's finite source completions through actual current
+source, whole review/CI and audited provider dispositions.
+Eight originals stay OPEN; later all-background hold intent, live unknown
+Windows owners, exact native/fixture and release/consumer boundaries remain.
+The [journal](<journal/2026/11.05 finite-automatic-observation-compatibility-contracts.md>)
+records 785 verified dispositions and 1,002 whole open, 273 above 729,
+without new installed/native effects or source/resource release.
+
 The [eight installer/hook/account/recovery contracts](finite-installer-hook-account-recovery-contracts.md)
 retain twenty-four ranked relationships and independently verify #9435
 and #9597's finite source completions through actual current source,
@@ -280,6 +290,18 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 - [x] Preserve the initial cohort and oldest-first cursor in structured session state.
 
 ### Phase 2 - Continuing reconciliation
+
+The eight installer/hook/account/recovery contracts are actually delivered
+in #10725 after genuine exact-head approval, the resolved aggregate-count
+finding and nine complete successful/skipped check contexts before normal
+managed merge. All eight actual merged/current blobs equal the reviewed
+head. Only the serial publication child finalized, retained; the
+[delivery journal](<journal/2026/11.05 finite-installer-hook-account-recovery-contracts.md>)
+records the result. The next eleven admitted contracts include a freshly
+qualified Windows unknown-owner refinement and separately audited finite
+PR-default/ADO-reader and capture-flag source completions.
+Protected whole evidence and all source/resource custodians remain.
+The parent remains Active; its Plan and Validation stay open.
 
 The six consumer/index/configuration contracts are actually delivered in
 #10721 after genuine exact-head approval, no review threads and nine complete
