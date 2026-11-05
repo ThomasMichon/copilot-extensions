@@ -115,3 +115,19 @@ substitute for repairing the store. Review this plan before implementation.
   was not available on this Windows worker; analysis is not native execution.
 - Remaining gate: implementation review, required CI and merge, then close
   this source-only effort without implying release or installed acceptance.
+
+### 2026-11-04 - Review correction
+
+- Review found that the relay's synchronous authorization callback ran on its
+  asyncio serving loop. The new retry budget would therefore stall unrelated
+  requests. Both validator and authorizer callbacks now run off-loop, with
+  copied request fields and unchanged scope-denial handling.
+- Two file-contention/ping responsiveness regressions failed before correction
+  and pass afterwards. Complete Bridge relay packet: 48 passed. Shared relay
+  policy/server and token-gate packet: 65 passed. Strict library analysis and
+  Ruff passed.
+- CI found the changed Bridge reader's registered source fingerprint was stale.
+  Refreshed only that implementation-only source record and its explanation;
+  no historical fixture/capture was rewritten. Current contract validation
+  passes for two contracts and 1,005 fixtures; committed-diff validation follows
+  the correction commit.

@@ -32,6 +32,8 @@ from every venv — hence a lib installed into each, vendored the same way as
   five bounded delays (0.62 seconds total); other I/O errors fail immediately.
   Authorization readers fail closed after that budget without rewriting state.
   This helper does not acquire credentials, cache secrets or own writer locks.
+  The relay awaits synchronous authorization callbacks in worker threads, so
+  their file retries cannot block unrelated requests or pings on its event loop.
 - `credential_relay.sources` — `CredentialSource` protocol.
 - `credential_relay.sources.{git_credential,gh_auth,az_login}` — generic
   host-credential sources (shell out to host `git` / `gh` / `az`).
