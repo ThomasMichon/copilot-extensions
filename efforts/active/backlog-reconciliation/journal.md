@@ -3,6 +3,12 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-04 - Three cross-boundary Vault contracts](<journal/2026/11.04 vault-boundaries-contracts.md>)
+
+- [2026-11-04 - Two policy-compatible CI and publication contracts](<journal/2026/11.04 publication-policy-contracts.md>)
+
+- [2026-11-04 - Three self-update scheduling and observation contracts](<journal/2026/11.04 self-update-observation-contracts.md>)
+
 - [2026-11-04 - Three knowledge-onboarding contracts](<journal/2026/11.04 knowledge-onboarding-contracts.md>)
 
 - [2026-11-04 - Three Dispatch observability and capacity contracts](<journal/2026/11.04 dispatch-observability-contracts.md>)
