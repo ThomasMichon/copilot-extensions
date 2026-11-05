@@ -799,3 +799,33 @@ and is not evidence; the repository-root Python audit is the counted result.
 TLS and age policy remain unchanged. The new head must pass its actual complete
 hosted declaration audit, required CI and fresh review before merge. Earlier
 green heads do not clear those gates; parent and rollout boundaries remain open.
+
+### 2026-11-05 - Launch-freshness source merged; containing release next
+
+#10508 merged at 00:31:13 UTC as
+`7ebeee4b2b46fcea8eb06b0df418651ca1f416b0`. Copilot review 5777948367
+approved exact head `7f3f8e2920d9f0c754e3a94e84f9ac0dad48b1e2` with no
+open findings; all seven threads are resolved. Required CI 41940407320 actually
+executed 4,108 units in 54.401 seconds with coverage recorded once and fresh
+evidence uploaded, plus the complete 545-declaration age audit with zero
+violations. A description edit queued a later same-head run, so the first
+managed merge was refused until 41940484664 also passed its required gate.
+The configured review-rule exception did not bypass CI.
+
+Thirteen authored paths, including every production/test body, have identical
+reviewed-head and squash-merge blobs. Peer base changes are retained in the two
+shared documentation files and unit manifest; this slice's complete documentation
+sections, seventeen admitted nodes, changed source hashes and coverage-target
+addition are preserved. Initial managed pull-forward auto-aborted a replay
+conflict, leaving the approved tip and recovery ref intact. After proving the
+clean tip and merged content, continuation skipped only those confirmed merged
+commits; managed sync succeeded on the squash merge.
+
+This completes the bounded launch source/freshness reservation on #7030 at the
+source tier. It does not complete ROOT coordination, the native application/
+cache consumer, source construction, ordinary whole-update or affected-host
+acceptance. The canonical README has been reread in full and remains Active.
+Containing release is the immediate next gate; existing entry, execution,
+construction and lifecycle owners retain the other matrix boundaries. No
+installed runtime, service, credential, queue or protected session was changed,
+and no rollout is implied by this merge.
