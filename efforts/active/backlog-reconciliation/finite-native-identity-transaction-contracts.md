@@ -33,14 +33,16 @@ No native launch, setting change, identity relaxation or installation runs.
 and introducing-path inspection are already batched.
 Do not repeat the obsolete claim that batching itself is wholly missing.
 Remaining measured repeated revision resolution/reachability must be
-qualified within the same thirty-second/four-attempt boundary, not hidden
-by a global timeout increase or misreported as an authentication failure.
+qualified within the unchanged thirty-second publication deadline.
+Four past managed attempts reached that deadline; they are observations,
+not a qualification-attempt limit. Do not hide the remaining work with
+a global timeout increase or misreport it as an authentication failure.
 Preserve exact commit/path novelty, merge inheritance, gitlink/type/size
 handling, incomplete/error refusal and bounded subprocess counts.
 Real Git, native Windows, staged full-tree and end-to-end qualification
 remain distinct.
-#6420 is not established as a prerequisite; #6079, #6088 and #8803 retain
-their own ownership.
+This optimization is not established as a prerequisite for messaging
+PR #6420; #6079, #6088 and #8803 retain their own ownership.
 Previously whole-read #8803's target probe and #8530's pure private-publication
 reducer are not this production blob guard.
 Whole #10275 remains protected without retry.
@@ -50,7 +52,8 @@ No guard execution, timeout change, source takeover or Git mutation runs.
 
 **#7041** retains all seven original outcomes rather than a new workspace:
 real durable native conversation identity; exact sender/reply routing across
-peers; ambiguous legacy history refusal instead of selecting the newest;
+peers; bounded candidates or explicit selection for an unqualified anchor
+handle with multiple eligible live conversations, never newest-wins routing;
 one managed head with expected-head/stale-alias fencing; keyed allocation
 and embodiment for ordinary worktree-class repositories with normal failures
 before anchor creation; negotiated CLI/HTTP/extension selectors and docs;
