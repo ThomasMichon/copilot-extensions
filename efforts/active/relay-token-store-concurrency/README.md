@@ -1,0 +1,91 @@
+# Relay Token Store Concurrency
+
+- **Slug:** `relay-token-store-concurrency`
+- **Repo:** copilot-extensions
+- **Branch(es):** per-phase managed pull requests
+- **Created:** 2026-11-04
+- **Status:** Draft
+- **Vision:** [agent-codespaces](../../../visions/plugins/agent-codespaces/README.md) - reliable authenticated venue access
+- **Umbrella issue:** #10591
+
+## Guiding Intent
+
+Independent processes must agree on stable per-venue relay secrets without
+losing unrelated entries or replacing unreadable authorization state. A
+temporary file-access failure must not silently become an empty token store.
+
+## Participants
+
+| Participant | Role in this effort | Reached via |
+|-------------|---------------------|-------------|
+| Source owner | Reproduction, implementation, tests and PR stewardship | Managed source worktree |
+
+## Coordination
+
+One source owner, sequential planning and implementation PRs. This finite slice
+does not take over connection ownership, listener readiness, transport recovery,
+credential refresh, dispatch replay or deployment.
+
+## Context
+
+#10591 records a thread-only writer lock and one fixed temporary filename for
+a store shared by independent CLI processes. Bridge also reads that file
+through its file-backed validator/authorizer. Existing JSON entries include
+legacy string tokens and structured tokens with resource allowlists.
+
+## Request
+
+Public-safe source scope from #10591: serialize relay-token read-modify-write
+across processes, preserve stable tokens and the existing JSON format, tolerate
+bounded transient file-access failures, and refuse to overwrite unreadable or
+malformed authorization state. Prove behavior with synthetic independent
+processes and Windows held-open-file tests, including Bridge consumers.
+
+## Scope Approvals
+
+Source changes, synthetic tests and normal issue/PR publication only. No live
+credential inspection, service restart, token export, credential migration or
+installed rollout is part of this effort.
+
+## Plan
+
+### Phase 1 - Reproduction and compatibility
+- [ ] Reproduce lost updates, temporary-file collision or Windows replacement failure with synthetic state; distinguish the actual failures observed.
+- [ ] Trace issuer, revocation and Bridge readers; retain scope-denial behavior and legacy entry compatibility.
+
+### Phase 2 - Implementation
+- [ ] Use existing OS-held cross-process locking and unique atomic publication primitives for the complete mutation transaction.
+- [ ] Retry transient sharing/access failures within a bounded budget; preserve old bytes on persistent read/parse/write failure and clean only attempt-owned temporary files.
+- [ ] Keep normal readers lock-free where atomic publication permits; fail authorization closed on persistent unreadability without rewriting state.
+- [ ] Document compatibility, error behavior and the mixed-version limitation: old writers do not participate in the new lock.
+
+### Phase 3 - Delivery
+- [ ] Add changefiles for affected plugins/shared-library consumers and pass focused tests, lint and required contract checks.
+- [ ] Steward the implementation PR through review, required CI and merge; record release status without implying deployment.
+
+## Validation Plan
+
+- [ ] Focused unit tests for transient/persistent access errors, malformed state, stable token reuse, revocation and allowed/denied scope.
+- [ ] Real independent-process first-touch and concurrent update/revoke tests on synthetic stores; no global/runtime paths.
+- [ ] Native Windows held-open-reader replacement failure/recovery and bounded timeout test with unchanged old bytes.
+- [ ] Issuer-to-Bridge validator/authorizer consumption of the actual written store.
+- [ ] Record all exercised tiers and explicitly explain external-venue exclusions: this slice changes only host file transactions; no live store or service is authorized.
+- [ ] Resolve every Plan/Validation item before marking this finite effort Done; deployment remains outside its completion claim.
+
+## Proposal
+
+Reuse existing lock/publication libraries rather than introduce a second
+coordination service. Preserve the file format so existing readers remain
+compatible. Do not retry an uncertain dispatch or rotate existing secrets as a
+substitute for repairing the store. Review this plan before implementation.
+
+## Journal
+
+### 2026-11-04 - Planning
+
+- Claimed #10591 after searching relay-token issues and open PRs.
+- Source inspection confirms the thread-only lock, fixed temporary filename
+  and empty-state fallback. This supports a defect hypothesis, not proof of
+  any particular field incident.
+- Request, intent and plan compared against the bounded source scope; private
+  motivation is intentionally absent.
