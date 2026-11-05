@@ -215,6 +215,61 @@ installation, credentials or host configuration are used for source validation.
 
 ## Validation Plan
 
+### Confirmed existing-knowledge binding (#10763)
+
+Claimed by `shiny-actuator` as a bounded Wave 2 / #542 continuation. This
+realizes the existing Configurator staged-onboarding and local binding intent,
+not a new source-editing or authentication authority.
+
+The native Repositories contribution already inspects registration, binding
+and tracked pairing. Extend it with an owner-qualified local binding action
+only for existing canonical knowledge/worktree repositories. The
+`harness-knowledge` payload owns read-only preview and confirmed preserving
+apply; agent-worktrees invokes it across its existing payload process boundary.
+Manager reuses its Configuration forms and post-input preview/confirmation.
+No Manager domain import, generic YAML writer, copied registry or new service
+is introduced.
+
+- [x] Publish explicit required/bound/unavailable readiness and a Worktrees
+  navigation affordance without making browse an installation or auth flow.
+- [x] Preview the selected project, canonical repository, machine-local
+  destination and effects. Bind only an absent or identical selection; retain
+  existing usable bindings and refuse conflicting inherited/local choices.
+- [x] Recheck canonical class/path/provider identity and the configuration
+  baseline before the pointer write under the binding owner's shared lock.
+  Changed registration, malformed state, missing owner and stale preview
+  refuse without partial configuration writes or an automatic retry.
+- [x] Preserve registration, repository/knowledge source bytes, account maps,
+  live sessions and leases. The only permitted source-workspace effect is the
+  existing owner-managed, ignored personal-plugin overlay.
+- [x] Exercise production Manager navigation, form, Cancel, preview, confirmed
+  real owner invocation, refreshed readiness and actual native New admission
+  in isolated roots. Include missing owner, stale selection and conflicts.
+- [ ] Run focused suites, F/E9, install/module/documentation guards and
+  current-head review/CI; journal source versus fresh-install, installed/live
+  and rollout evidence separately before resolving this finite slice.
+
+The binding action never clones or creates a repository, mutates a Git
+branch/default checkout, or starts credentials. #3004 ambient prompting, #3030 server
+landing-policy preflight, #4827 conventional/default/creation onboarding and
+#1419 retrofit pairing retain their own acceptance. An existing-repository
+binding flow does not complete those contracts or the wider first-run matrix.
+
+**Source qualification, pending review/CI/merge:** 127 binding-owner controls,
+the 91-control native Repositories baseline plus three focused compatibility/
+partial-receipt controls, and 78 production Manager controls passed on Windows.
+The latter includes real native owner invocation and New allocation after
+confirmed binding, not a mocked binding result. The final CLI extraction also
+passed that complete flow independently. Strict Python 3.10 checks passed for
+Linux and Windows targets; F/E9, module-size, install-contract and documentation
+checks passed. No size baseline or preview schema was widened.
+
+Fresh-store configuration uses actual Git roots and native APIs but pre-provided
+native packages. Cold installer/Python-3.9/fresh-terminal, installed desktop,
+live-provider and rollout lanes were not exercised: this source slice has no
+authorized receiving/deployment target. Their existing #352 / Wave 5, setup,
+provider and wider #542 owners retain those gates. No agent process was launched.
+
 | Gate | Required evidence |
 |---|---|
 | Contracts | Unit tests for malformed/legacy manifests, provenance, scope, reset, validation, stale revisions, secret redaction |

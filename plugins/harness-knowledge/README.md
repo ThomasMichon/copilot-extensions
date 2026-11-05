@@ -56,6 +56,17 @@ flow, and re-pointing steps.
 
 ## Machine-local artifacts
 
+Manager's native Repositories contribution can invoke this same owner for a
+confirmed **existing** canonical knowledge/worktree repository. Its
+`knowledge-preview` / `knowledge-apply` CLI delegates to
+`bind_knowledge.py --configuration preview|apply`, with exact selected
+harness/knowledge names and the native engine entry. Preview is read-only;
+apply requires the returned token and rechecks the canonical registration and
+configuration baseline inside the existing pointer lock. It never registers,
+clones, creates a repository or silently replaces a conflicting binding.
+An incomplete post-write result reports the committed pointer explicitly.
+See [Repositories Configuration](../agent-worktrees/docs/repositories-configuration.md#confirmed-existing-knowledge-binding).
+
 `bind_knowledge.py` writes or refreshes these local artifacts:
 
 | Artifact | What it contains |
@@ -82,7 +93,7 @@ agent-worktrees' single managed-overlay implementation. The agent-worktrees
 
 ## Development checks
 
-The `harness-knowledge` typecheck project includes all five configurator scripts
+The `harness-knowledge` typecheck project covers the configurator scripts
 and all four test modules, without exclusions. Run
 `python tools/typecheck.py harness-knowledge` from the repository root for
 strict Python 3.10 checks on both Linux and Windows targets; use `--prepare`

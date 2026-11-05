@@ -1,0 +1,112 @@
+"""Native Configuration adapter to the selected knowledge-binding payload."""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import sysconfig
+
+from dropin_registry import ScanAuthority
+from plugin_activation import resolve_active_plugins
+
+from . import config as cfg
+from .repos_configuration_sources import ConfigurationError
+
+
+def owner_script(project: str) -> Path:
+    config = cfg.load_project_config(project, include_control_plane_related_pr=False)
+    report = resolve_active_plugins(
+        home=Path.home(), project_root=Path(config.default_repo.anchor),
+        plugin_names=("harness-knowledge",),
+    )
+    owners = list(report.active.values())
+    if report.authority is ScanAuthority.INDETERMINATE or len(owners) != 1:
+        raise ConfigurationError(
+            "binding-owner-unavailable", "Enable and prepare one qualified harness-knowledge owner.",
+        )
+    root = owners[0].root.resolve(strict=True)
+    script = (root / "skills" / "binding-knowledge" / "scripts" / "bind_knowledge.py").resolve(strict=True)
+    if not script.is_file() or not script.is_relative_to(root):
+        raise ConfigurationError("binding-owner-unavailable", "The selected binding payload is unavailable.")
+    return script
+
+
+def owner_status(project: str) -> str:
+    try:
+        owner_script(project)
+        return "available"
+    except (ValueError, OSError, RuntimeError):
+        return "unavailable"
+
+
+def invoke(project: str, name: str, operation: str, token: str = "") -> dict:
+    from agent_procutil.owned_budget import OwnedExecutionBudget
+    from agent_procutil.owned_process import OwnedCleanupError, run_owned
+
+    script = owner_script(project)
+    entry = Path(sysconfig.get_path("scripts")) / (
+        "agent-worktrees.exe" if sys.platform == "win32" else "agent-worktrees"
+    )
+    if not entry.is_file():
+        raise ConfigurationError("binding-native-owner-unavailable", "The selected native engine entry is unavailable.")
+    args = [
+        sys.executable, "-B", str(script), "--harness", project, "--knowledge", name,
+        "--agent-worktrees-path", str(entry), "--configuration", operation, "--json",
+    ]
+    if operation == "apply":
+        args += ["--preview-token", token]
+    environment = dict(os.environ)
+    for key in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "COPILOT_PLUGIN_ROOT"):
+        environment.pop(key, None)
+    budget = OwnedExecutionBudget.from_timeout(
+        26 if operation == "apply" else 18, cleanup_reserve=2,
+    )
+    try:
+        support = run_owned(
+            [sys.executable, "-B", str(script), "--capabilities", "--json"],
+            timeout=8, env=environment, budget=budget,
+        )
+        capabilities = json.loads(support.stdout)
+        if (
+            support.returncode or not isinstance(capabilities, dict)
+            or type(capabilities.get("version")) is not int or capabilities["version"] != 1
+            or type(capabilities.get("existing_binding_configuration")) is not int
+            or capabilities["existing_binding_configuration"] != 1
+        ):
+            raise ConfigurationError(
+                "binding-owner-unsupported", "The selected binding owner needs its Configuration capability update.",
+            )
+        result = run_owned(
+            args, timeout=26 if operation == "apply" else 18,
+            env=environment, budget=budget,
+        )
+        value = json.loads(result.stdout)
+    except OwnedCleanupError:
+        raise
+    except ConfigurationError:
+        raise
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        raise ConfigurationError(
+            "binding-owner-failed", "Binding observation failed; inspect current readiness before retrying.",
+        ) from exc
+    if not isinstance(value, dict):
+        raise ConfigurationError("binding-owner-failed", "Binding owner returned an invalid result.")
+    if result.returncode and value.get("pointer_committed") is not True:
+        raise ConfigurationError("binding-owner-refused", "Binding preconditions changed or are unavailable; preview again.")
+    if result.returncode:
+        return {**value, "status": "incomplete"}
+    if operation == "preview":
+        from .repos_configuration import target
+
+        if (
+            type(value.get("version")) is not int or value["version"] != 1
+            or not isinstance(value.get("target"), dict)
+            or value["target"].get("resource") != f"{project}/{name}"
+            or value.get("operation") != "set"
+        ):
+            raise ConfigurationError("binding-owner-failed", "Binding preview returned a different target.")
+        value["target"] = target(project, name)
+    return value

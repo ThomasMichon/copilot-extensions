@@ -170,6 +170,48 @@ def tree(root):
     }
 
 
+def test_missing_binding_owner_refuses_without_any_native_configuration_write(native):
+    before = tree(native)
+    result = request("knowledge-preview", name="sample")
+    assert result.returncode != 0
+    assert json.loads(result.stdout)["code"] == "binding-owner-unavailable"
+    assert SECRET not in result.stdout + result.stderr
+    assert tree(native) == before
+
+
+def test_old_binding_owner_is_not_invoked_for_apply(native, monkeypatch):
+    from agent_procutil import owned_process
+    from agent_worktrees import repos_knowledge_configuration as binding
+
+    calls = []
+    monkeypatch.setattr(binding, "owner_script", lambda _project: Path(__file__))
+
+    def execute(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, json.dumps({"version": 1}), "")
+
+    monkeypatch.setattr(owned_process, "run_owned", execute)
+    with pytest.raises(ConfigurationError) as caught:
+        binding.invoke("sample", "sample", "apply", "a" * 64)
+    assert caught.value.code == "binding-owner-unsupported"
+    assert len(calls) == 1 and "--capabilities" in calls[0]
+    assert "--configuration" not in calls[0]
+
+
+def test_incomplete_binding_keeps_committed_receipt_and_reports_failure(native, monkeypatch, capsys):
+    from agent_worktrees import repos_configuration, repos_knowledge_configuration
+
+    monkeypatch.setattr(repos_knowledge_configuration, "invoke", lambda *_args: {
+        "status": "incomplete", "pointer_committed": True, "plugins_status": "failed",
+    })
+    assert repos_configuration.command([
+        "knowledge-apply", "--context-project", "sample", "--repository", "sample",
+        "--preview-token", "a" * 64,
+    ]) == 1
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["pointer_committed"] is True and receipt["status"] == "incomplete"
+
+
 def test_real_cli_set_reset_inheritance_and_allowlisted_local_writes(native):
     before = tree(native)
     catalog = request("catalog")

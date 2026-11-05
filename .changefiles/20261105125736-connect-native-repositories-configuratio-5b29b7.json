@@ -1,0 +1,9 @@
+{
+  "comment": "Connect native Repositories Configuration to confirmed existing knowledge binding",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -6,6 +6,42 @@ from .engine_helpers import C_DIM, C_TAB_ACTIVE, C_TAB_FOCUS_ON, C_TABOFF, C_WAR
 
 
 class PickerConfigurationMixin:
+    def _refresh_knowledge_readiness(self):
+        reader = getattr(self.src, "knowledge_readiness", None)
+        if not callable(reader):
+            return
+        generation = self._knowledge_read_generation = object()
+        self._knowledge_readiness = {"ready": None, "code": "loading"}
+
+        def done(result):
+            if self._knowledge_read_generation is not generation:
+                return
+            valid = (
+                isinstance(result, dict) and type(result.get("version")) is int
+                and result["version"] == 1 and type(result.get("ready")) is bool
+                and isinstance(result.get("code"), str)
+                and result["code"] in {"ready", "knowledge_binding_required", "state_root_resolution_failed"}
+                and result["ready"] == (result["code"] == "ready")
+            )
+            self._knowledge_readiness = result if valid else {"ready": None, "code": "unavailable"}
+            if self.sel not in self.stops():
+                self.sel = self.default_sel()
+            self.refresh()
+
+        self._run_bg("Knowledge readiness", reader, done, quiet=True)
+
+    def _open_knowledge_configuration(self):
+        target = next((
+            index for index, descriptor in enumerate(self.pivots)
+            if getattr(descriptor.get("pivot"), "name", None) == "repositories-config"
+            and (getattr(descriptor.get("pivot"), "source_owner", None) or "").split("@")[0] == "agent-worktrees"
+        ), None)
+        if target is None:
+            self.debug = "Repositories Configuration is unavailable; prepare the selected engine payload."
+            return
+        self._last_config_key = self._pivot_descriptor_key(target)
+        self._open_cfgmenu()
+
     def _open_configuration_editor(
         self, label, fields, *, confirm, summary, submitted, submit_label=None,
     ):
@@ -45,6 +81,7 @@ class PickerConfigurationMixin:
         def reload():
             # Reload the originating scope, never the newly selected section.
             runtime.repoll(scope)
+            self._refresh_knowledge_readiness()
 
         from worktree_manager.installation_updates import PIVOT_NAME, request_result_screen
 

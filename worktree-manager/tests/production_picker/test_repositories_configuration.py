@@ -1,6 +1,7 @@
 """Configuration consumes the real native owner, never writes its files itself."""
 
 import asyncio
+from dataclasses import replace
 import json
 import os
 from pathlib import Path
@@ -275,3 +276,177 @@ def test_native_repositories_ui_real_cli_cancel_set_reset_and_concurrent_ordinar
             assert manifest_path.read_bytes() == manifest_bytes
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("observation", [
+    {"version": 1, "ready": False, "code": "knowledge_binding_required"},
+    {"version": 1, "ready": True, "code": "state_root_resolution_failed"},
+    {"error": "owner read failed"},
+])
+def test_worktrees_readiness_is_async_visible_and_never_runs_a_binding(monkeypatch, observation):
+    calls = []
+    source = _fixture_source()
+    source.knowledge_readiness = lambda: calls.append("read") or observation
+
+    async def run():
+        app = PickerApp(source, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            engine = app.query_one(PickerScreen)
+            await _wait_for_initial_setup(pilot, engine)
+            await _wait(pilot, lambda: getattr(engine, "_knowledge_readiness", {}).get("code") not in (None, "loading"))
+            assert calls == ["read"]
+            assert engine._knowledge_readiness["ready"] is not True
+            assert "KB" in engine.button_set() and "N" in engine.button_set()
+            text = "\n".join(row.text.plain for row in engine.build_body(118))
+            assert "Knowledge" in text
+            engine._open_knowledge_configuration()
+            assert "unavailable" in engine.debug
+            assert calls == ["read"]
+
+    asyncio.run(run())
+
+
+@pytest.mark.timeout(120)
+def test_missing_knowledge_to_confirmed_native_binding_and_new(tmp_path, monkeypatch):
+    owner_python = os.environ.get("REPOSITORIES_CONFIG_TEST_PYTHON")
+    if not owner_python:
+        pytest.skip("set REPOSITORIES_CONFIG_TEST_PYTHON to the isolated native engine interpreter")
+    from worktree_manager import engine_client
+    from worktree_manager.production_picker.picker_tui import data_local
+
+    root = Path(__file__).resolve().parents[3]
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("AGENT_HOME", str(home))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(context, "_project", "sample")
+    monkeypatch.setattr(context, "_bootstrap", None)
+    prefix = [owner_python, "-m", "agent_worktrees"]
+    monkeypatch.setattr(engine_client, "_ENGINE_CMD_OVERRIDE", prefix)
+    platform = "windows" if os.name == "nt" else "linux"
+
+    def native(*args, cwd=None):
+        return subprocess.run(
+            [*prefix, "--project", "sample", *args], cwd=cwd,
+            capture_output=True, text=True, timeout=25,
+            env=tasks._child_process_env(), **no_window_kwargs(),
+        )
+
+    def write(path, value):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(yaml.safe_dump(value), encoding="utf-8")
+
+    paths = {name: tmp_path / name for name in ("sample", "knowledge")}
+    for name, path in paths.items():
+        path.mkdir()
+        for arguments in (
+            ["init", "-b", "main", str(path)],
+            ["-C", str(path), "config", "user.email", "example@example.com"],
+            ["-C", str(path), "config", "user.name", "Example"],
+        ):
+            result = subprocess.run(["git", *arguments], capture_output=True, text=True,
+                                    timeout=10, **no_window_kwargs())
+            assert result.returncode == 0, result.stderr
+        (path / "README").write_text("Isolated binding control\n", encoding="utf-8")
+        if name == "sample":
+            write(path / ".agent-worktrees" / "config.yaml", {
+                "repo_name": "sample", "stateless": True, "requires_external_state_root": True,
+            })
+            settings = path / ".github" / "copilot" / "settings.json"
+            settings.parent.mkdir(parents=True)
+            settings.write_text(json.dumps({
+                "enabledPlugins": {"harness-knowledge@copilot-extensions": True},
+                "extraKnownMarketplaces": {"copilot-extensions": {
+                    "source": {"source": "directory", "path": str(root)},
+                }},
+            }), encoding="utf-8")
+        for arguments in (["add", "."], ["commit", "-m", "Isolated baseline"]):
+            result = subprocess.run(["git", "-C", str(path), *arguments],
+                                    capture_output=True, text=True, timeout=10, **no_window_kwargs())
+            assert result.returncode == 0, result.stderr
+    write(home / ".agent-worktrees" / "repos.yaml", {"repos": {
+        name: {"class": "worktree" if name == "sample" else "knowledge",
+               platform: str(path), "default_branch": "main"}
+        for name, path in paths.items()
+    }})
+    write(home / ".agent-worktrees" / "projects.yaml", {
+        "schema_version": 2, "projects": {"sample": {"config_dir": str(home / ".sample")}},
+    })
+    config = home / ".sample" / "config.yaml"
+    write(config, {
+        "repo_name": "sample", "machine": "fixture",
+        "repos": {"sample": {"anchor": str(paths["sample"]), "worktree_root": str(tmp_path / "worktrees")}},
+    })
+    before = snapshot(home), snapshot(paths["sample"]), snapshot(paths["knowledge"])
+    blocked = native("resolve", "--json", "--new", cwd=paths["sample"])
+    assert blocked.returncode != 0 and not (tmp_path / "worktrees").exists()
+    raw = json.loads((root / "plugins" / "agent-worktrees" / "pivots" / "repositories-config.json").read_text("utf-8"))
+    raw["list"] = [*prefix, *raw["list"][1:]]
+    for action in raw["actions"]:
+        for key in ("run", "preview"):
+            if key in action:
+                action[key] = [*prefix, *action[key][1:]]
+    reg = replace(pivots.parse_manifest(raw, name="repositories-config", source_path="fixture"),
+                  source_owner="agent-worktrees@fixture")
+    monkeypatch.setattr(PickerScreen, "_scan_pivot_payload", staticmethod(lambda: (
+        [reg], [{"label": "Worktrees", "kind": "worktrees", "pivot": None},
+                {"label": "Repositories", "kind": "registered", "pivot": reg}], [], [],
+    )))
+    source = _fixture_source()
+    source.knowledge_readiness = data_local.knowledge_readiness
+
+    async def run():
+        app = PickerApp(source, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            engine = app.query_one(PickerScreen)
+            await _wait_for_initial_setup(pilot, engine)
+            await _wait(pilot, lambda: getattr(engine, "_knowledge_readiness", {}).get("code") not in (None, "loading"))
+            assert engine._knowledge_readiness.get("ready") is False, engine._knowledge_readiness
+            assert "KB" in engine.button_set()
+            engine.btn_idx = engine.button_set().index("KB")
+            engine.sel = ("BTN", 0)
+            await pilot.press("enter")
+            await _wait(pilot, lambda: engine._task_state()[0] in ("ready", "error"))
+            assert engine._reg_pivot() is reg and engine._task_state()[0] == "ready"
+            row = next(row for row in engine._task_rows() if row["id"] == "knowledge")
+            assert row["knowledge_bindable"] == "true", (row["configuration"], engine._task_summary())
+            action = next(action for action in reg.actions if action.key == "bind-knowledge")
+
+            async def preview():
+                engine._open_pivot_form(reg, action, row, engine._task_action_ctx(reg, row), row["title"])
+                await pilot.pause()
+                assert isinstance(app.screen, ConfigurationFormScreen)
+                app.screen.dismiss(app.screen._collect())
+                await _wait(pilot, lambda: isinstance(app.screen, ConfigurationPreviewScreen)
+                            and not app.screen.query_one("#config-preview-retry", Button).disabled)
+                assert app.screen.preview is not None, str(app.screen.query_one("#config-preview").render())
+                assert not app.screen.preview.blocked, app.screen.preview.describe()
+
+            await preview()
+            assert app.focused.id == "config-preview-cancel"
+            await pilot.press("enter")
+            await pilot.pause()
+            assert (snapshot(home), snapshot(paths["sample"]), snapshot(paths["knowledge"])) == before
+            await preview()
+            await pilot.click("#config-preview-apply")
+            await _wait(pilot, lambda: isinstance(app.screen, ConfigurationResultScreen) and not app.screen.pending)
+            receipt = str(app.screen.query_one("#config-result").render())
+            assert '"status": "persisted"' in receipt, receipt
+            app.screen.action_close()
+            await _wait(pilot, lambda: engine._knowledge_readiness.get("ready") is True)
+            assert "KB" not in engine.button_set()
+            assert yaml.safe_load(config.read_text("utf-8"))["knowledge_repo"] == "knowledge"
+            assert snapshot(paths["knowledge"]) == before[2]
+            # Binding cannot commit or alter either repository's source history.
+            for path in paths.values():
+                status = subprocess.run(["git", "-C", str(path), "status", "--porcelain"],
+                                        capture_output=True, text=True, timeout=10, **no_window_kwargs())
+                assert status.returncode == 0
+                assert not status.stdout.replace("?? .github/copilot/settings.local.json\n", "").strip()
+
+    asyncio.run(run())
+    admitted = native("resolve", "--json", "--new", "--no-mux", cwd=paths["sample"])
+    assert admitted.returncode == 0, admitted.stdout + admitted.stderr
+    assert (tmp_path / "worktrees").is_dir()
