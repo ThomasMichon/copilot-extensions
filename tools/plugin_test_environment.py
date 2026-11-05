@@ -24,6 +24,8 @@ _ROOT_ENV = {
     "XDG_RUNTIME_DIR": "run",
     "COPILOT_HOME": "home/.copilot",
     "AGENT_HOME": "home",
+    "AGENT_SCRATCH_ROOT": "scratch",
+    "PYTHONPYCACHEPREFIX": "pycache",
     "AGENT_WORKTREES_HOME": "agent-worktrees",
     "AGENT_WORKTREES_PIVOTS_DIR": "agent-worktrees/pivots",
     "AGENT_WORKTREES_PLUGINS_DIR": "agent-worktrees/plugins",
@@ -53,7 +55,9 @@ _FILE_ENV = {
 
 ROOT_ENV_NAMES = tuple(_ROOT_ENV)
 OPTIONAL_FILE_ENV_NAMES = tuple(_FILE_ENV)
-ALWAYS_SANDBOX_ENV_NAMES = ("TEMP", "TMP", "TMPDIR", "XDG_RUNTIME_DIR")
+ALWAYS_SANDBOX_ENV_NAMES = (
+    "TEMP", "TMP", "TMPDIR", "XDG_RUNTIME_DIR", "AGENT_SCRATCH_ROOT", "PYTHONPYCACHEPREFIX",
+)
 
 # Shared with coverage collection so both runners detach from the same host state.
 ALWAYS_SCRUB_NAMES = {
@@ -64,6 +68,7 @@ ALWAYS_SCRUB_NAMES = {
     "COPILOT_AGENT_SESSION_ID",
     "COPILOT_CUSTOM_INSTRUCTIONS_DIRS",
     "COPILOT_PLUGIN_ROOT",
+    "COPILOT_EXTENSIONS_TEST_VENV_ROOT",
 }
 _ALWAYS_SCRUB_NAMES = ALWAYS_SCRUB_NAMES
 _CREDENTIAL_NAMES = {"GH_TOKEN", "GITHUB_TOKEN"}

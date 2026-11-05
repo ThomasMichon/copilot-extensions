@@ -67,39 +67,34 @@ def _executable(path: Path, text: str) -> None:
 
 
 def _venv_python_path(root: Path) -> Path:
-    """The platform-specific interpreter path inside a venv rooted at
-    ``root`` -- mirrors ``tools/run-plugin-tests.py``'s own
-    ``_venv_python()`` exactly (``Scripts/python.exe`` on Windows,
-    ``bin/python`` elsewhere -- NOT ``bin/python3``, which the installer's
-    own venv-health check (``_venv_healthy()``) never guarantees), since
-    the two must agree on where a venv's interpreter lives for the
-    ``.test-venvs`` fallback below to find it."""
+    """Keep the venv launcher spelling; never resolve it to the base Python."""
     if sys.platform == "win32":
         return root / "Scripts" / "python.exe"
     return root / "bin" / "python"
 
 
 def _resolve_test_venv_root() -> Path:
-    """Return a venv root this environment actually has, preferring the
-    facility's own managed test-runner venv location
-    (``.test-venvs/<sys.platform>/agent-logger``, see
-    ``tools/run-plugin-tests.py``'s ``VENV_ROOT``) over a raw dev-local
-    ``.venv`` -- the standard CI/test-runner path materializes ONLY the
-    former, so relying on ``.venv`` alone would silently skip these tests
-    (via the trailing ``pytest.skip``) under that runner, giving a false
-    sense of coverage. Falls back to ``.venv`` for a plain
-    ``uv run pytest`` dev invocation, which doesn't populate
-    ``.test-venvs`` at all.
-    """
-    managed = PLUGIN.parents[1] / ".test-venvs" / sys.platform / "agent-logger"
-    for candidate in (managed, PLUGIN / ".venv"):
+    """Use the active test environment, including external managed venvs."""
+    active = (Path(sys.prefix),) if sys.prefix != sys.base_prefix else ()
+    for candidate in (*active, PLUGIN / ".venv"):
         python_path = _venv_python_path(candidate)
         if python_path.is_file() or python_path.is_symlink():
             return candidate
-    pytest.skip(
-        "no usable venv found (.test-venvs/<platform>/agent-logger or .venv)"
-    )
+    pytest.skip("no usable active test environment or plugin .venv")
     raise AssertionError("unreachable")  # pytest.skip always raises
+
+
+def test_installer_fixture_selects_active_external_environment(tmp_path, monkeypatch):
+    source = tmp_path / "source" / "plugins" / "agent-logger"
+    source.mkdir(parents=True)
+    external = tmp_path / "external"
+    python = _venv_python_path(external)
+    python.parent.mkdir(parents=True)
+    python.touch()
+    monkeypatch.setattr(sys, "prefix", str(external))
+    monkeypatch.setattr(sys, "base_prefix", str(tmp_path / "base"))
+    monkeypatch.setattr(sys.modules[__name__], "PLUGIN", source)
+    assert _resolve_test_venv_root() == external
 
 
 def _real_venv_with_python() -> Path:

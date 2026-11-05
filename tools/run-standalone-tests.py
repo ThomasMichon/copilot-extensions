@@ -30,6 +30,8 @@ from standalone_consumers import (
     STANDALONE_CONSUMERS, local_dependency_source, standalone_build_resources,
 )
 from seasoned_uv import run_uv_install
+from plugin_test_cache import ordinary_cache_root
+from plugin_test_resources import record_owner, run_prefix, runs_root, venv_root
 
 REPO = Path(__file__).resolve().parent.parent
 COMPONENT_ALIASES = {
@@ -124,7 +126,7 @@ def cleanup_sandbox(temporary: tempfile.TemporaryDirectory) -> None:
 
 
 def default_python(component: str) -> Path:
-    root = REPO / ".test-venvs" / sys.platform / component
+    root = venv_root(REPO) / component
     return root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 
 
@@ -201,7 +203,8 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
         sources.append("--editable")
     sources.append(str(REPO / component) + f"[{extra}]")
     # Keep retained source/override topology below the Windows relative-path limit.
-    with tempfile.TemporaryDirectory(prefix="standalone-dependencies-", dir=REPO) as temporary:
+    with TestSandbox(prefix=run_prefix(component), dir=runs_root(REPO)) as temporary:
+        record_owner(Path(temporary), REPO, retention="disposable dependency overrides")
         overrides: list[str] = []
         if component == "services/index":
             # dev freezes source versions; test the local compatibility seam,
@@ -346,11 +349,16 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--environment-root cannot be used with --prepare")
     # Resolving bin/python itself follows a POSIX venv symlink to the base
     # interpreter and bypasses the venv. Resolve only its containing directory.
-    requested_python = args.python or default_python(args.component)
+    try:
+        default = default_python(args.component)
+    except (OSError, ValueError) as exc:
+        print(f"standalone tests: {exc}", file=sys.stderr)
+        return 1
+    requested_python = args.python or default
     python = requested_python.parent.resolve() / requested_python.name
     root = REPO / args.component
-    if args.prepare and not python.is_relative_to((REPO / ".test-venvs").resolve()):
-        parser.error("--prepare may only provision an interpreter under repository .test-venvs")
+    if args.prepare and python != default.parent.resolve() / default.name:
+        parser.error("--prepare may only provision this component's managed scratch interpreter")
     if not (root / "tests").is_dir():
         parser.error("component tests are required")
     limits = Limits(wall_seconds=args.timeout)
@@ -359,7 +367,6 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         parser.error(str(exc))
     try:
-        default = default_python(args.component)
         managed = python == default.parent.resolve() / default.name
         managed_prepare = args.prepare and python.parent.name.lower() in {"bin", "scripts"}
         environment_root = (
@@ -367,6 +374,8 @@ def main(argv: list[str] | None = None) -> int:
             else python.parent.parent.resolve() if managed or managed_prepare
             else interpreter_environment(python)
         )
+        if managed or managed_prepare:
+            environment_root = ordinary_cache_root(default.parent.parent)
         if args.environment_root:
             try:
                 discovered_root = interpreter_environment(python)
@@ -375,11 +384,10 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 if discovered_root != environment_root:
                     parser.error("--environment-root disagrees with the interpreter's standard environment")
-        if args.prepare and not environment_root.is_relative_to((REPO / ".test-venvs").resolve()):
-            parser.error("--prepare may only provision an environment under repository .test-venvs")
         if args.prepare:
             if not managed_prepare or environment_root != python.parent.parent.resolve():
                 parser.error("--prepare requires a standard managed venv launcher")
+            environment_root = ordinary_cache_root(default.parent.parent)
             environment_root.mkdir(parents=True, exist_ok=True)
         elif not environment_root.is_dir():
             parser.error("test environment root must already exist")
@@ -410,10 +418,12 @@ def main(argv: list[str] | None = None) -> int:
         # Windows: it tries to create the temp dir under a nonexistent
         # subdirectory). Sanitize for this use only.
         safe_component = args.component.replace("/", "-")
-        temporary = TestSandbox(prefix=f"{safe_component}-tests-")
+        temporary = TestSandbox(prefix=run_prefix(safe_component), dir=runs_root(REPO))
         try:
             sandbox = Path(temporary.name)
+            record_owner(sandbox, REPO, retention="disposable after verified process cleanup")
             env = isolated_environment(os.environ, sandbox)
+            env["COPILOT_EXTENSIONS_TEST_VENV_ROOT"] = str(venv_root(REPO))
             env.pop("AGENT_CHAT_TEST_SUITE", None)
             if chat_suite:
                 env["AGENT_CHAT_TEST_SUITE"] = chat_suite
@@ -433,8 +443,10 @@ def main(argv: list[str] | None = None) -> int:
                 if args.smoke else [root / "tests"]
             )
             outcome = run_contained(
-                [str(python), "-I", "-m", "pytest", "-q", *map(str, tests),
-                 "--basetemp", str(sandbox / "pytest")],
+                [str(python), "-I", "-X", f"pycache_prefix={sandbox / 'pycache'}",
+                 "-m", "pytest", "-q", *map(str, tests),
+                 "--basetemp", str(sandbox / "pytest"),
+                 "-o", f"cache_dir={sandbox / 'pytest-cache'}"],
                 cwd=root,
                 env=env,
                 sandbox=sandbox,
