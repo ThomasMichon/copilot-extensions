@@ -1534,3 +1534,26 @@ instead of false forced success, and the absence of a protection guarantee
 when rolling back to the older defective control client. U13/#10652 incoming
 publication and #10653's broader reaping/installer acceptance remain separate.
 The new source head still requires its own CI and review.
+
+### 2026-11-05 - U15 CI recovery and footprint-only rebase
+
+Run `42065880698` completes its unit and guard jobs but never schedules the
+required PR gate. GitHub's read API remains in progress while ordinary and
+force cancellation say not in progress; rerun says already running. No refused
+control operation is counted as an effect or a passing result.
+
+Rerunning the completed same-head run `42065711918` succeeds: attempt 2 passes
+units, guards and the actual required PR gate at 23:20:18 UTC. No source change
+or gate bypass is needed to recover CI. The precise internal GitHub cause is
+unknown.
+
+By then Dev has advanced and the source PR needs a rebase. Both conflicts are
+only in generated MCP producer digests, not the behavioral code or tests.
+Retain the new base's peer-launch and packaged-runtime changes, regenerate the
+combined current source digest through the canonical footprint tool, and keep
+contract revision 36 unchanged. All four touched source/test bodies remain
+identical to the approved revision. The rebased packet passes 39 controls with
+eight platform skips in 5.72 seconds, including the actual attached-session
+exchange; fatal lint and all thirteen install contracts pass. The rebased head
+still needs its own source CI and review before merge. Broader #10653 acceptance
+and all parent completion gates remain open.
