@@ -10,9 +10,12 @@ from datetime import datetime, tzinfo
 from rich.cells import cell_len
 
 from .companion_timeline_contract import (
-    EventRef, MAX_DETAIL_LINES, MAX_LANES, OVERSCAN_LINES, TimelineEvent, ViewportAnchor, literal_display,
+    EventRef, MAX_DETAIL_LINES, MAX_EXPANDED_GROUPS, MAX_LANES, MAX_PAGE_EVENTS,
+    OVERSCAN_LINES, Provider, TimelineEvent, TimelineKind, ViewportAnchor, literal_display,
 )
-from .companion_timeline_model import TimelineWindow
+from .companion_timeline_model import ResultCode, TimelineWindow, WindowResult
+
+OUTPUT_GROUP_LINE = 1_000_000
 
 
 def display_text(text: str) -> str:
@@ -61,6 +64,29 @@ class EventBlock:
     detail_text: str
     heading_clipped: bool
     detail_clipped: bool
+    members: tuple[EventRef, ...] = ()
+
+
+def output_runs(events: tuple[TimelineEvent, ...]) -> Iterator[tuple[TimelineEvent, ...]]:
+    """Partition only typed adjacent output, within a single source and reported actor."""
+    run: list[TimelineEvent] = []
+    for event in events:
+        output = (
+            event.source.provider is Provider.BRIDGE and event.kind is TimelineKind.SOURCE_OUTPUT
+            and event.actor.actor_id is not None
+        )
+        if run and (
+            not output or event.source != run[0].source or event.actor != run[0].actor
+            or len(run) == MAX_PAGE_EVENTS
+        ):
+            yield tuple(run)
+            run = []
+        if output:
+            run.append(event)
+        else:
+            yield (event,)
+    if run:
+        yield tuple(run)
 
 
 class TimelineLayout:
@@ -73,6 +99,10 @@ class TimelineLayout:
         self.blocks: tuple[EventBlock, ...] = ()
         self._starts: tuple[int, ...] = ()
         self._refs: dict[EventRef, EventBlock] = {}
+        self._groups: dict[EventRef, EventBlock] = {}
+        self._group_aliases: dict[EventRef, EventBlock] = {}
+        self._expanded_output: frozenset[EventRef] = frozenset()
+        self._expanded_output_count = 0
         self.materialized_rows = 0
         self.timezone: tzinfo | None = None
 
@@ -139,7 +169,10 @@ class TimelineLayout:
             lines.append("Additional linked child events omitted from this bounded detail group.")
         return "\n".join(lines)
 
-    def rebuild(self, window: TimelineWindow, width: int, *, now: datetime | None = None) -> None:
+    def rebuild(
+        self, window: TimelineWindow, width: int, *, now: datetime | None = None,
+        anchors: tuple[EventRef, ...] = (),
+    ) -> None:
         previous_width = self.text_width
         self.width = max(1, width)
         self._lane_count = window.lane_count
@@ -149,7 +182,25 @@ class TimelineLayout:
         blocks = []
         start = 0
         previous_day = None
-        for event in window.events:
+        groups: dict[EventRef, EventBlock] = {}
+        expanded_output: set[EventRef] = set()
+        projected: list[tuple[TimelineEvent, tuple[EventRef, ...], bool]] = []
+        expanded_count = 0
+        for run in output_runs(window.events):
+            output = run[0].source.provider is Provider.BRIDGE and run[0].kind is TimelineKind.SOURCE_OUTPUT
+            if output and run[0].actor.actor_id is not None:
+                members = tuple(event.ref for event in run)
+                expanded = bool(self._expanded_output.intersection(members)) and expanded_count < MAX_EXPANDED_GROUPS
+                projected.append((run[0], members, expanded))
+                if expanded:
+                    expanded_count += 1
+                    expanded_output.update(members)
+                    projected.extend((event, (), False) for event in run)
+            else:
+                projected.append((run[0], (), False))
+        self._expanded_output = frozenset(expanded_output)
+        self._expanded_output_count = expanded_count
+        for event, members, expanded in projected:
             previous = self._refs.get(event.ref) if previous_width == self.text_width else None
             stamp = event.occurred_at or event.observed_at
             local = self._local_time(event)
@@ -157,6 +208,12 @@ class TimelineLayout:
             heading = (
                 f"{self._time(event, now, include_date=day != previous_day)}  {event.summary}"
             )
+            if members:
+                heading = (
+                    f"{self._time(event, now, include_date=day != previous_day)}  "
+                    f"{'[-]' if expanded else '[+]'} Output: {len(members)} loaded records"
+                )
+                previous = self._groups.get(event.ref) if previous_width == self.text_width else None
             previous_day = day
             if window.lane(event) == MAX_LANES - 1:
                 heading = "Other actors (overflow lane) | " + heading
@@ -165,7 +222,7 @@ class TimelineLayout:
                 if previous is not None and previous.heading_text == heading
                 else self._count(heading, self.text_width, OVERSCAN_LINES)
             )
-            details = self._details(event, window) if event.ref in window.expanded else ""
+            details = self._details(event, window) if not members and event.ref in window.expanded else ""
             if details and stamp is not None and local is None:
                 details = "Local clock unavailable; original source time follows.\n" + details
             detail_rows, detail_clipped = (
@@ -177,12 +234,26 @@ class TimelineLayout:
             block = EventBlock(
                 event, start, height, heading_rows, detail_rows, heading, details,
                 heading_clipped, detail_clipped,
+                members,
             )
             blocks.append(block)
+            for ref in members:
+                groups[ref] = block
             start += height
         self.blocks, self.height = tuple(blocks), start
         self._starts = tuple(block.start for block in blocks)
-        self._refs = {block.event.ref: block for block in blocks}
+        aliases: dict[EventRef, EventBlock] = {}
+        for ref in anchors[:2]:
+            previous_group = self._output_group(ref)
+            if ref not in groups and previous_group is not None:
+                survivor = next((groups[member] for member in previous_group.members if member in groups), None)
+                if survivor is not None:
+                    aliases[ref] = survivor
+        self._group_aliases = aliases
+        self._groups = groups
+        self._refs = {
+            ref: block for block in blocks for ref in (block.members or (block.event.ref,))
+        }
         self.materialized_rows = 0
 
     def row(self, index: int, window: TimelineWindow) -> TimelineRow | None:
@@ -210,15 +281,20 @@ class TimelineLayout:
             rendered = next(wrap_lines(rendered, self.text_width))[0]
         self.materialized_rows += 1
         return TimelineRow(
-            block.event.ref, rendered, logical if heading else 1_000 + logical,
+            block.event.ref, rendered, OUTPUT_GROUP_LINE if block.members else logical if heading else 1_000 + logical,
             window.lane(block.event), heading, character_offset,
         )
 
     def anchor_row(self, anchor: ViewportAnchor, *, character_offset: int = 0) -> int | None:
-        block = self._refs.get(anchor.event)
+        block = self._output_group(anchor.event) if anchor.logical_line == OUTPUT_GROUP_LINE else self._refs.get(anchor.event)
+        if block is None:
+            block = self._group_aliases.get(anchor.event)
         if block is None:
             return None
-        if anchor.logical_line >= 1_000:
+        if block.members:
+            text, wanted = block.heading_text, 0
+            base, maximum = block.start, block.heading_rows
+        elif anchor.logical_line >= 1_000:
             if not block.detail_rows:
                 return block.start
             text, wanted = block.detail_text, anchor.logical_line - 1_000
@@ -241,8 +317,37 @@ class TimelineLayout:
             return candidate
         return block.start
 
-    def is_visible(self, ref: EventRef, top: int, height: int) -> bool:
+    def _output_group(self, ref: EventRef) -> EventBlock | None:
+        return self._groups.get(ref) or self._group_aliases.get(ref)
+
+    def visible_ref(self, ref: EventRef, *, group: bool = False) -> EventRef:
+        block = self._output_group(ref) if group else self._refs.get(ref)
+        if block is None:
+            block = self._group_aliases.get(ref)
+        return block.event.ref if block is not None else ref
+
+    def is_group(self, ref: EventRef) -> bool:
         block = self._refs.get(ref)
+        return bool(block is not None and block.members)
+
+    def has_group(self, ref: EventRef) -> bool:
+        return self._output_group(ref) is not None
+
+    def toggle_output(self, ref: EventRef) -> WindowResult | None:
+        group = self._output_group(ref)
+        if group is None:
+            return None
+        members = frozenset(group.members)
+        if self._expanded_output.intersection(members):
+            self._expanded_output -= members
+        elif self._expanded_output_count >= MAX_EXPANDED_GROUPS:
+            return WindowResult(False, ResultCode.LIMIT, "Expanded output-group budget exhausted; collapse a group to continue.")
+        else:
+            self._expanded_output |= members
+        return WindowResult(True, ResultCode.APPLIED, "Loaded output group toggled; source history unchanged.")
+
+    def is_visible(self, ref: EventRef, top: int, height: int, *, group: bool = False) -> bool:
+        block = self._output_group(ref) if group else self._refs.get(ref)
         return (
             block is not None and height > 0
             and block.start < top + height and block.start + block.height > top

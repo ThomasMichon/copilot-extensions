@@ -8,6 +8,20 @@ requirements remain in their issues and actual receiving objectives.
 
 ## Snapshot and boundaries
 
+The [seven producer/policy/fixture contracts](finite-producer-policy-fixture-contracts.md)
+retain twenty-one ranked relationships without closure credit.
+Current implementation partials, independent scope and explicit policy
+disposition remain distinct; all seven originals stay OPEN. The
+[journal](<journal/2026/11.05 finite-producer-policy-fixture-contracts.md>)
+preserves five protected originals and two protected ranked relations.
+
+The [eleven configured-consumer/recovery contracts](finite-configured-consumer-recovery-contracts.md)
+retain thirty-three ranked relationships without new closure credit.
+Current owner progression, released partials and independent finite residuals
+remain explicit; all eleven originals stay OPEN. The
+[journal](<journal/2026/11.05 finite-configured-consumer-recovery-contracts.md>)
+preserves changed-original qualification and three protected relations.
+
 The [twelve finite venue/composition/compatibility contracts](finite-venue-composition-compatibility-contracts.md)
 annotate thirty-six existing ranked relationships without closure credit.
 All twelve originals stay OPEN, retaining actual delivered partials and

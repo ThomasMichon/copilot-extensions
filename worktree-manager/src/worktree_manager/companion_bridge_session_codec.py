@@ -40,6 +40,8 @@ KINDS = {
     "source-event": TimelineKind.SOURCE_EVENT,
 }
 EVENT_LABELS = {
+    "agent_message": "Message output",
+    "agent_thought": "Thought output",
     "tool_call_start": "Tool started",
     "tool_call_update": "Tool update",
     "subagent_started": "Reported agent start",
@@ -62,6 +64,7 @@ ATTRIBUTED_EVENTS = frozenset({
     "subagent_started", "subagent_completed", "subagent_failed",
     "tool_call_start", "tool_call_update",
 })
+OUTPUT_EVENTS = frozenset({"agent_message", "agent_thought"})
 
 
 def _reported_label(details: dict[str, Any], fields: tuple[str, ...]) -> str | None:
@@ -104,7 +107,7 @@ def _event_summary(item: dict[str, Any]) -> str:
 
 
 def _event_actor(item: dict[str, Any], session_id: str) -> TimelineActor:
-    if item["native_kind"] in ATTRIBUTED_EVENTS:
+    if item["native_kind"] in ATTRIBUTED_EVENTS | OUTPUT_EVENTS:
         agent_id = item["details"].get("agent_id")
         if isinstance(agent_id, str):
             actor_id = "subagent:" + agent_id
@@ -329,7 +332,9 @@ class SessionCodec:
             result.append(TimelineEvent(
                 token.identity, self.position(token, item["id"]), "event:" + str(item["native_event_id"]),
                 actor,
-                KINDS[item["kind"]], EvidenceKind(item["evidence_kind"]), occurred,
+                (TimelineKind.SOURCE_OUTPUT
+                 if item["native_kind"] in OUTPUT_EVENTS and item["kind"] == "source-event"
+                 else KINDS[item["kind"]]), EvidenceKind(item["evidence_kind"]), occurred,
                 _event_summary(item), details=detail,
                 relations=relations,
                 payload_ref=item["payload_ref"] if len(item["payload_ref"].encode()) <= 1024 else None,

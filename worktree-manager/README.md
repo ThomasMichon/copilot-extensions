@@ -158,6 +158,24 @@ Missing, invalid or unknown-event attribution stays with the Bridge reporter.
 An observed start/completion is not current running state or allocated custody;
 parent tool-call metadata remains in Evidence, not an inferred hierarchy link.
 
+Known Bridge `agent_message` and `agent_thought` occurrences collapse into
+expandable output groups of at most 64 adjacent loaded records from the same
+source generation and reported actor. Work, requests, compaction, gaps and
+unknown native kinds remain distinct; summary prose never classifies output.
+The count is loaded records, not unique messages, current concurrency or an
+owner-qualified lifetime total. Enter or a prefix click opens a group; its
+individual rows retain the ordinary exact-time/Evidence expansion. At most
+16 output groups and the existing 16 event-detail groups can be open.
+Grouping retains every loaded raw record, identity, hash and independent
+history/live cursor. It neither copies omitted transcripts nor changes source
+history. **Older** or upward navigation requests one bounded page at a time,
+even on a short collapsed canvas; repeat to continue and hide to cancel.
+There is no automatic fill loop or page-budget renewal on incoming chunks.
+Browsing anchors and visible group selection follow prepend, append, split,
+merge and eviction. Short browsing canvases may leave space below their anchor;
+live-following alone enforces bottom alignment. Automatic resize clamps do not
+become user browsing or history demand.
+
 Timeline keeps the purpose, compact source/input qualification and bottom-anchored
 work canvas visible. Expand **Evidence** for exact source IDs, qualifications,
 effort reference, diagnostics and the Bridge feed selector; **Creation** expands

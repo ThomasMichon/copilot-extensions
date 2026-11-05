@@ -31,6 +31,7 @@ CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "reap_cli",
     "reclaim_cli",
     "record_cli",
+    "repository_setup",
     "resource_producer_cli",
     "session_binding_cli",
     "session_inspection_cli",

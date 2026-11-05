@@ -236,7 +236,7 @@ The initial normalized vocabularies are explicit and case-sensitive:
 | Actor kind | `worktree`, `session`, `subagent`, `bridge-session`, `resource`, `unknown` |
 | Actor/relation qualification | `authoritative`, `reported`, `unknown` |
 | Relation kind | `parent`, `return`, `resource`, `succession`, `unlinked` |
-| Timeline kind | `worktree-created`, `purpose-changed`, `effort-bound`, `effort-released`, `claim-added`, `claim-released`, `claim-settled`, `agenda-transition`, `contribution-reported`, `bridge-member-changed`, `input-request`, `permission-request`, `compaction`, `context-pressure`, `source-gap`, `observed-change`, `source-event` |
+| Timeline kind | `worktree-created`, `purpose-changed`, `effort-bound`, `effort-released`, `claim-added`, `claim-released`, `claim-settled`, `agenda-transition`, `contribution-reported`, `bridge-member-changed`, `input-request`, `permission-request`, `compaction`, `context-pressure`, `source-gap`, `observed-change`, `source-event`, `source-output` |
 
 These are Manager projection selectors, not replacements for each owner's wire
 vocabulary. Native event/state names and error codes remain exact owner-defined
@@ -244,6 +244,9 @@ identifiers, not arbitrary narrative selectors. Unknown native event kinds can
 be retained as `source-event`; they cannot be inferred from a prose substring.
 Reported phase and summary/details/reasons are free literal prose. Timestamps,
 numeric thresholds/counters and raw JSON are not prose or enum tokens.
+`source-output` identifies recognized Bridge message/thought occurrences for
+the [bounded view grouping](sidecar-output-presentation.md). It changes no
+native event, owner wire field, history identity or accounting authority.
 
 Source prose is never evaluated as Markdown/Rich markup or executed. Terminal
 control bytes are escaped for presentation without rewriting canonical values.

@@ -5171,6 +5171,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     installation_cli.add_parsers(sub)
     update_cli.add_parsers(sub)
+    repository_setup.add_parsers(sub)
 
     context_cli.add_parsers(sub)
     services_cli.add_parsers(sub)
@@ -5427,6 +5428,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'uninstall-plugins': ('update_cli', 'cmd_uninstall_plugins'),
     'unregister': ('installation_cli', 'cmd_unregister'),
     'update': ('update_cli', 'cmd_update_request'),
+    'trust-repository-configuration': ('repository_setup', 'cmd_trust_configuration'),
     'validate': ('picker_profiles_cli', 'cmd_validate'),
     'worktree-lineage': ('session_tracking_cli', 'cmd_worktree_lineage'),
     'worktree-status-audit': ('worktree_status_audit', 'cmd_worktree_status_audit'),
@@ -5600,7 +5602,7 @@ def _load_full_command_surface() -> None:
     global cmd_worktree_lineage, cmd_worktree_status_bundle, context_cli, copilot_cli, copilot_identity_cli, finalize_cli, finalize_one, follow_ups_cli, front_door_cli, git_cli
     global handoff_cli, handoff_diagnostics, handoff_successor_repair_cli, installation_cli, list_cli, maintenance_cli, doctor_render, picker_profiles_cli, plan_pre_launch, pr_cli
     global pr_state_cli, reap_cli, reap_orphan_launcher_shells, reclaim_cli, reclaim_one, related_cli, repos_cli, resolve_cli
-    global identifier_blocklist_cli
+    global identifier_blocklist_cli, repository_setup
     global resource_producer_cli
     global resolve_launch_cli, resolve_machine_cli, resolve_picker_cli, resolve_system_cli, services_cli, session_binding_cli, session_inspection_cli, session_metadata_cli
     global historical_daemons_cli
@@ -5609,6 +5611,7 @@ def _load_full_command_surface() -> None:
     global sync_one, terminal_conclusion, update_cli, worktree_ops_cli, cmd_resolve_handoff_successor, handoff_cancel_cli
     from . import (
         claims_cli, plugin_preparation,
+        repository_setup,
         cleanup_gc_cli,
         context_cli,
         copilot_cli,
@@ -6106,6 +6109,7 @@ def _load_full_command_surface() -> None:
         "picker-paths": cmd_picker_paths,
         "picker-reconcile-local": cmd_picker_reconcile_local,
         "pre-launch": cmd_pre_launch, "prepare-plugin-payloads": plugin_preparation.command,
+        "trust-repository-configuration": repository_setup.cmd_trust_configuration,
         "launch-update": update_launch_cli.cmd_launch_update,
         "repair-stale-anchor": cmd_repair_stale_anchor,
         "stage-update": update_cli.cmd_stage_request,
