@@ -356,7 +356,11 @@ class LocalControl:
                 peer = PeerIdentity(**record["peer"])
                 if peer == self.peer or peer.principal != self.peer.principal:
                     continue
-                if not absolute(record["root"]).samefile(self.binding.root):
+                try:
+                    same_root = absolute(record["root"]).samefile(self.binding.root)
+                except OSError:
+                    continue
+                if not same_root:
                     continue
                 if writer_identity(record["peer"], record["config_identity"]) != owner:
                     continue

@@ -112,6 +112,36 @@ def test_ready_new_native_owner_in_same_selected_slot_retires_old_process(
     assert owners.incoming.writer.current()
 
 
+@pytest.mark.parametrize("root_state", ["missing", "inaccessible"])
+def test_uninspectable_selected_record_does_not_hide_ready_successor(
+    owners: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, root_state: str,
+) -> None:
+    retained_root = owners.root.parent / "retained-runtime"
+    if root_state == "inaccessible":
+        retained_root.mkdir()
+        original = Path.samefile
+        def samefile(path: Path, other: Any) -> bool:
+            if path == retained_root:
+                raise PermissionError("fixture-retained-root-inaccessible")
+            return original(path, other)
+        monkeypatch.setattr(Path, "samefile", samefile)
+    retained = {
+        **owners.candidate, "root": str(retained_root),
+        "peer": {**owners.candidate["peer"], "pid": 300, "start_time": "3000"},
+    }
+    path = local_control.cell_directory(owners.outgoing.config) / "owner-aaa-retained.json"
+    local_control.publish_new(path, retained)
+    original_bytes = path.read_bytes()
+    successor_bytes = owners.candidate_path.read_bytes()
+    owners.outgoing._observe_supersession()
+    assert owners.calls == [owners.candidate]
+    assert len(owners.queued) == 1
+    owners.queued.pop()()
+    assert owners.outgoing.stop.is_set() and owners.incoming.writer.current()
+    assert path.read_bytes() == original_bytes
+    assert owners.candidate_path.read_bytes() == successor_bytes
+
+
 @pytest.mark.parametrize("evidence", ["not-ready", "unavailable", "wrong-native", "wrong-root",
                                     "wrong-birth", "wrong-config", "wrong-principal",
                                     "selection-unavailable", "DB-unavailable"])

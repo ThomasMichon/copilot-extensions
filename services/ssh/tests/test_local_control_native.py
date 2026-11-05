@@ -423,7 +423,9 @@ def test_linux_native_successor_self_retires_old_writer(
             assert request(config, incoming, "health")["ready"]
         fresh = references[-1]
         assert asdict(fresh.peer) == incoming["peer"]
-        assert old.exited(Deadline(10)) and first.wait(timeout=5) == 0
+        exit_deadline = Deadline(10)
+        old.wait_exit(exit_deadline)
+        assert old.exited(exit_deadline) and first.wait(timeout=5) == 0
         assert not fresh.exited(Deadline(1)) and records(config) == [incoming]
         with sqlite3.connect(Path(config.to_dict()["data_dir"]) / "directory.sqlite3") as db:
             assert db.execute("SELECT * FROM metadata").fetchall() == before
