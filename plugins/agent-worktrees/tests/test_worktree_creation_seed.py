@@ -93,9 +93,11 @@ def test_create_worktree_core_with_no_seed_has_execution_admission_fence(
     config = _create_config(tmp_path)
     monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path / "tracking")
     _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
+    monkeypatch.setenv("WORKTREE_NO_PROVISION", "1")
 
     result = m._create_worktree_core(config)
 
+    assert result["launch"]["env"]["WORKTREE_NO_PROVISION"] == "0"
     assert Path(result["launch"]["record_path"]) == (
         tmp_path / "tracking" / f'{result["worktree"]["id"]}.yaml'
     )

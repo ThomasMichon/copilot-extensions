@@ -958,6 +958,7 @@ def _create_worktree_core(
                 config=config,
             ), selection,
         )
+        env["WORKTREE_NO_PROVISION"] = "0"
         launch_cmd = deferred_command(
             launch_cmd, record.yaml_path,
             seed_id=staged_seed.seed_id if staged_seed is not None else None,
