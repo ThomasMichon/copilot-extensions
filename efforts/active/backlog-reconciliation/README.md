@@ -330,6 +330,21 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The next applied cohort wave delivers 28 audited dispositions: #7171 and
+#10739 are completed finite fixes; 26 unfinished child trackers are
+subsumed only after complete direct Plan/Validation and original-scope
+intake into OPEN #4050, #10377, #9448, #5665 and #2709. Implementation
+owners, claims, resource duties and actual qualification gates remain.
+Two equal complete 13:28 PST metadata scans observe 972 whole OPEN:
+698 creator-eligible, 274 excluded, 655 original-cohort and 317 inflow.
+One arrival and two external departures reconcile the net reduction of
+29 since the prior census; external actions receive no campaign credit.
+Verified campaign dispositions are 823, still 243 above the fixed 729
+whole-queue checkpoint. The [applied-cohort journal](<journal/2026/11.05 cohort-parent-luna-reconciliation.md>)
+records all five receiving groups and the coordinator's rejected
+source-only completion recommendations. This campaign remains Active;
+the remaining returned cohorts, inflow and stabilization work continue.
+
 The 2026-11-05 cohort-parent direction is executing through a complete
 1,006-identity metadata snapshot, 667 whole qualified Markdown research
 packets and 339 metadata-only placeholders. Eight disjoint Luna batches
