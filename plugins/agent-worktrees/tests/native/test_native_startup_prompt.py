@@ -6,6 +6,7 @@ import http.server
 import json
 import os
 from pathlib import Path
+import shutil
 import threading
 from uuid import uuid4
 
@@ -17,11 +18,15 @@ from agent_worktrees import embody_resume
 pytestmark = pytest.mark.guard
 
 
-def test_native_interactive_resume_preserves_literal_prompt_and_history(tmp_path):
+@pytest.mark.parametrize("normalized_setup", [False, True], ids=["direct", "normalized-setup"])
+def test_native_interactive_resume_preserves_literal_prompt_and_history(tmp_path, normalized_setup):
     executable = os.environ.get("COPILOT_NATIVE_TEST_EXECUTABLE")
     if not executable:
         pytest.skip("Set COPILOT_NATIVE_TEST_EXECUTABLE for isolated offline CLI qualification")
     assert Path(executable).is_absolute() and Path(executable).is_file()
+    shell = shutil.which("pwsh")
+    if normalized_setup and (os.name != "nt" or not shell):
+        pytest.skip("Windows normalized setup requires PowerShell")
     requests = []
 
     class Handler(http.server.BaseHTTPRequestHandler):
@@ -67,6 +72,19 @@ def test_native_interactive_resume_preserves_literal_prompt_and_history(tmp_path
         COPILOT_PROVIDER_TYPE="openai", COPILOT_PROVIDER_MODEL_ID="gpt-4.1",
         COPILOT_MODEL="gpt-4.1", COPILOT_ALLOW_ALL="true", USE_TGREP="false",
     )
+    if normalized_setup:
+        forwarder, batch = tmp_path / "forwarder", tmp_path / "batch"
+        forwarder.mkdir()
+        batch.mkdir()
+        (forwarder / "copilot.exe").touch()
+        (forwarder / "copilot").write_text(
+            "#!/bin/sh\n# vscode-copilot-launcher: forwards to another PATH command\n",
+            encoding="utf-8",
+        )
+        (batch / "copilot.cmd").write_text("@echo off\r\nexit /b 91\r\n", encoding="utf-8")
+        environment["PATH"] = os.pathsep.join((
+            str(forwarder), str(batch), str(Path(executable).parent), str(Path(shell).parent),
+        ))
     session = str(uuid4())
     prompts = ['--resume=literal\nFIRST_NATIVE "quote" \u03a9',
                "SECOND_NATIVE preserve the first turn\n" + "L" * 12000]
@@ -74,15 +92,22 @@ def test_native_interactive_resume_preserves_literal_prompt_and_history(tmp_path
         for index, prompt in enumerate(prompts):
             command = [
                 executable, "--no-auto-update", "--disable-builtin-mcps",
-                "--no-custom-instructions", "--no-remote", "--no-color", "--no-ask-user",
+                "--no-custom-instructions", "--no-color", "--no-ask-user",
                 "--model", "gpt-4.1", "--log-dir", str(tmp_path / "logs"),
             ]
             command = (
                 [*command, f"--session-id={session}"] if index == 0
                 else embody_resume.with_resume(command, session)
             )
+            seeded = embody_resume.with_seed(command, prompt)
+            if normalized_setup:
+                setup = Path(__file__).resolve().parents[2] / "scripts" / "default-setup.ps1"
+                seeded = [
+                    shell, "-NoProfile", "-File", str(setup), "-Recovery",
+                    "-NativeArgumentsJson", json.dumps({"args": seeded[1:]}),
+                ]
             result = run_caller_owned(
-                embody_resume.with_seed(command, prompt), cwd=str(cwd), env=environment,
+                seeded, cwd=str(cwd), env=environment,
                 timeout=30, max_stdout_bytes=65536, max_stderr_bytes=65536,
             )
             assert result.returncode == 0, result.stdout + result.stderr
