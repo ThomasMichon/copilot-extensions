@@ -132,6 +132,23 @@ that limited scope in `worktree_observations.native_receipts`; it does not
 advertise complete canonical history. Native observation failure never changes
 the canonical write result or disables the ordinary roster.
 
+Ordinary claim/disposition and effort-binding CLI writes retain their normal
+resident wake path. When no usable resident exists they check the current user's
+maintenance notice and selected installation maintenance flags, wait one brief
+100ms discovery backoff, then use the existing bounded ensure/start path if
+needed. Maintenance or unqualified notice contents prevent automatic recovery;
+they never trigger a restart, installation or marker removal. The normal ensure
+also checks maintenance before spawning. Live incompatible publishers retain
+their original same-code compatibility fallback without a forced replacement.
+
+A refused connection before any request bytes were sent may use one bounded
+recovery/retry; a possible post-send outcome never does. Deliberately no-wake
+native paths remain unchanged. Startup failure without a maintenance hold can
+still use the existing logged direct fallback, whose native coverage stays
+partial/unknown. This reduces avoidable fallback; it neither recovers missing
+past receipts nor promises complete history. Observation/history commands remain
+passive and never wake the resident.
+
 ## Point reads, pages and held feeds
 
 The control plane uses separate `worktree-observations-read`,

@@ -120,7 +120,10 @@ def dispatch(verb: str, args: dict) -> dict:
         verb,
         args,
         read_lock_data=lambda: locks.read_lock(status_monitor_runtime._monitor_lock_path()),
-        ensure_monitor=None,
+        ensure_monitor=(
+            status_monitor_runtime._ensure_status_monitor
+            if status_monitor_runtime._status_monitor_enabled() else None
+        ),
     )
 
 

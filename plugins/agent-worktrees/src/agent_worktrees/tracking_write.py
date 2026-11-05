@@ -674,15 +674,33 @@ def write_with_boot(
             and locks.pid_alive(pid) and locks.process_start_time(pid) == birth
         )
 
-    endpoint = _dial()
-    if endpoint is None and ensure_monitor is not None and not incompatible_live_owner():
-        ensure_monitor()
+    def recover_endpoint(
+        failed: tuple[str, int, str] | None = None,
+    ) -> tuple[str, int, str] | None:
+        from .resident_recovery import require_wake_allowed
+
+        require_wake_allowed()
+        time.sleep(min(0.1, max(0.0, boot_wait_s)))
+        recovered = _dial()
+        if recovered == failed and not incompatible_live_owner():
+            recovered = None
+        if recovered is None and not incompatible_live_owner():
+            require_wake_allowed()
+            ensure_monitor()
         while (
-            endpoint is None and not incompatible_live_owner()
+            recovered is None and not incompatible_live_owner()
             and time.time() - started < boot_wait_s
         ):
+            require_wake_allowed()
             time.sleep(poll_interval_s)
-            endpoint = _dial()
+            recovered = _dial()
+        if recovered is None and not incompatible_live_owner():
+            require_wake_allowed()
+        return recovered
+
+    endpoint = _dial()
+    if endpoint is None and ensure_monitor is not None and not incompatible_live_owner():
+        endpoint = recover_endpoint()
     if endpoint is None:
         return fallback()
 
@@ -703,6 +721,20 @@ def write_with_boot(
             return fallback()
         return result
     except _PreSendFailure:
+        if ensure_monitor is not None:
+            replacement = recover_endpoint(endpoint)
+            if replacement is not None:
+                try:
+                    replacement_result = _send_tracking_write_request(
+                        *replacement, key=key, payload=payload,
+                        request_deadline_s=request_deadline_s, client_id=client_id,
+                    )
+                    if not (isinstance(replacement_result, dict) and replacement_result.get("unsupported_verb")):
+                        return replacement_result
+                except _PreSendFailure:
+                    pass
+                finally:
+                    wcs_client.release(*replacement, client_id, timeout=request_deadline_s)
         return fallback()
     finally:
         wcs_client.release(host, port, token, client_id, timeout=request_deadline_s)

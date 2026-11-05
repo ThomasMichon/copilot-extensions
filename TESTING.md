@@ -1,5 +1,15 @@
 # Testing copilot-extensions
 
+Worktrees' opt-in `--test-file tests/test_resident_recovery.py
+--test-file tests/test_tracking_write.py --test-file tests/test_effort_focus.py
+--test-file tests/test_status_monitor.py --allow-explicit-tiers` packet checks
+maintenance holds, brief discovery backoff, ordinary ensure/wake, no-wake
+callers, compatibility fallback and non-replay after possible send. A private
+resident server executes the actual canonical claim transaction and publishes
+its captured persisted-mutation evidence. These are isolated source controls,
+not an installed daemon wake, rollout or complete history guarantee; required
+unit-only CI admission remains separate.
+
 Manager's opt-in `--test-file tests/test_companion_tool_statistics.py
 --test-file tests/test_companion_current_requests.py --test-file
 tests/test_companion_bridge_session_source.py --allow-explicit-tiers` packet
