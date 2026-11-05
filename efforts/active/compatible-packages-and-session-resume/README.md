@@ -87,25 +87,25 @@ window, shutdown policy and recovery custody.
 
 ### Phase 3 - Resume-by-default launches
 
-- [ ] Resume the existing head by default for ordinary seeded and unseeded
+- [x] Resume the existing head by default for ordinary seeded and unseeded
   embodiment and attended launch; preserve explicit new-task/fresh intent.
-- [ ] Announce the implicit-seeded-fresh to implicit-resume policy cutover.
+- [x] Announce the implicit-seeded-fresh to implicit-resume policy cutover.
   Migrate automated callers to explicit `--fresh` or `--resume-head` intent
   before relying on the new default; those existing embodiment flags retain
   their meaning across provider upgrade and rollback. Unknown external callers
   are not assumed to have migrated merely because this repository changed.
-- [ ] Keep live embodiment idempotent and report existing mux identity without
+- [x] Keep live embodiment idempotent and report existing mux identity without
   creating a duplicate or injecting another prompt.
-- [ ] Update callers that intentionally require fresh conversations and document
+- [x] Update callers that intentionally require fresh conversations and document
   detached programmatic creation versus current-terminal attachment.
 - [ ] Publish focused validation and land the launch source change.
 
 ### Phase 4 - Maintenance recovery contract and closeout
 
-- [ ] Document advance notice, cooperative checkpoint/drain, approved bounded
+- [x] Document advance notice, cooperative checkpoint/drain, approved bounded
   shutdown, saved original-conversation restoration and status-first recovery.
   Keep operation scope separate from package admission and ordinary launch.
-- [ ] Define the configurable default recovery prompt and distinguish launch,
+- [x] Define the configurable default recovery prompt and distinguish launch,
   prompt delivery and completed reconciliation. Reuse existing primitives.
 - [ ] Record release versus rollout state, resolve all validation items and
   close the finite source effort without implying a host upgrade occurred.
@@ -116,10 +116,10 @@ window, shutdown policy and recovery custody.
   missing live versions, exact-pin compatibility, conflicts and process deferral.
 - [x] Exercise the real package resource/CLI consumer with synthetic package-manager
   responses; no actual host package installation or removal.
-- [ ] Launch cases cover existing head with/without seed, explicit fresh,
+- [x] Launch cases cover existing head with/without seed, explicit fresh,
   new worktree, explicit resume arguments, already-live targets and unknown liveness.
-- [ ] Check intentional fresh callers and literal startup-prompt preservation.
-- [ ] Cover old explicit-intent callers with the new provider, new
+- [x] Check intentional fresh callers and literal startup-prompt preservation.
+- [x] Cover old explicit-intent callers with the new provider, new
   explicit-intent callers with the supported prior provider and provider
   rollback. Record the intentional behavior change for unmigrated implicit
   `--seed` callers rather than claiming backward-compatible defaults.
@@ -210,3 +210,19 @@ claims, and recover partial/unknown results without blindly replaying actions.
   witness. Lint, module-size, install-contract and docs-consistency checks passed.
   Real host package replacement and full fresh-machine provisioning are not
   authorized by this source scope; those installed lanes remain unexercised.
+- Package review identified generic detector admission gaps. Exact-entry parsing
+  now preserves complete version suffixes and distinguishes confirmed apt/pip
+  absence from probe failure. The expanded package packet passed 346 tests.
+- Implemented the requested resume default and shared attended/detached flags.
+  Ordinary live embodiment does not consume any startup text. The existing
+  externally-created-pane fallback explicitly opts into staged-New settlement;
+  its new provider/adapter pairing is an announced cutover, not silently
+  claimed compatible with old callbacks. Dispatch explicitly chooses fresh
+  versus continuation, retaining old/new-provider argument meaning.
+- Launch validation: 126 passed; 105 Linux/WSL restart-qualification cases
+  skipped on Windows. Dispatch's explicit-intent packet passed 67; Manager's
+  startup/guard packet passed 87 with four unavailable platform cases skipped.
+  A misplaced new-worktree assertion was corrected before the passing rerun.
+- Recorded the general maintenance-window intent and the existing status-first
+  resume command/default wording. No disruptive executor, host package update,
+  active-session stop, reboot or installed runtime rollout was performed.

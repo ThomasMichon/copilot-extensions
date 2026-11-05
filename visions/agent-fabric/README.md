@@ -679,6 +679,24 @@ torn-down ephemeral venue does **not** silently lose its work: in-flight agents
 are diagnosed and reattached where possible, and session state is recovered and
 compiled for whoever comes next.
 
+### planned-maintenance-windows
+A disruptive maintenance window is a separately authorized, bounded operation,
+whether replacing the terminal host or restarting the machine. Active agents
+receive advance notice and an opportunity to checkpoint and gracefully stop.
+Their exact conversation/workspace inventory and outstanding obligations remain
+durable; pauses, claims and unknown external effects are not erased by shutdown.
+The maintenance controller survives outside the affected sessions and prevents
+competing launches during the window.
+
+Recovery resumes the saved original conversations rather than silently creating
+replacements. The configurable default prompt is "Terminal session restarted.
+Check status and resume." Agents reconcile current status and recover lost
+process-owned work before continuing within their existing authority.
+Process creation, delivered context and completed recovery are distinct facts.
+Neither package compatibility nor a restart notification grants shutdown,
+deployment, reboot or replay authority; interrupted and partial recovery remains
+inspectable and safely resumable.
+
 ### reclaim-idle-process
 A durable agent's **live process is a reclaimable resource, not a permanent
 tenant**. When the fabric's connection to a hosted agent is lost, an agent that

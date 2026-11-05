@@ -501,6 +501,42 @@ continue to work unchanged.
 | `handoff-cutover` | Internal live-handoff primitive: spawn a seeded successor window, safely refocus an already-live successor with `--retry`, or retire an old pane |
 | `embody` | Agent-facing primitive to create/resume a detached mux+Copilot session in a worktree. `--codename <name>` selects the target by its assigned codename (effort `pr-attribution-codenames`), same local-then-cross-machine resolution as `resolve`; a match on a different machine fails closed (reports the machine, does not attempt a remote launch). Optional `--copilot-process-launcher <absolute-executable>` binds a one-launch native wrapper without putting inference credentials in the manager/mux environment. It supports direct `copilot` templates or normalized setup; incompatible templates, missing executables and configured `copilot_path` overrides refuse. The attended `copilot` counterpart can also write a nonsecret create-or-resume receipt with `--launch-result-file <launcher-directory>/result.json` before attaching. Rejoining a running session does not use a new launcher or refresh its authentication. |
 
+### Detached embodiment versus current-terminal attachment
+
+`embody` ensures a detached mux-backed process exists and returns JSON; it never
+connects the caller's terminal. `copilot` uses the same creation/resume policy,
+then connects this terminal and requires a controlling TTY. Neither command
+opens an unrelated terminal window.
+
+Both resume an existing worktree's head by default, with or without `--seed`.
+On a cold launch, the seed becomes the next turn in that conversation.
+`--fresh` explicitly selects a new conversation; `--new` selects a new worktree
+with no prior history. `--resume-head` remains an explicit compatibility
+spelling for callers using older providers. Raw explicit native resume arguments
+retain their existing selection behavior.
+
+An already-live mux wins: `embody` returns its existing session/pane identity
+with `created: false` and does not inject a supplied or staged prompt; `copilot`
+attaches to it without injecting a prompt. Even `--fresh` does not replace an
+already-live mux. Use the existing message/input owner to address a running
+conversation, or an explicitly authorized stop/handoff before cold creation.
+
+The launch-default cutover is intentional: older `embody --seed` implicitly
+started fresh. Automated new-task callers must now send `--fresh`; continuation
+callers can send `--resume-head` to retain the same meaning on old/new providers
+and rollback. Newly added attended-parser flags are unavailable on prior
+providers and fail before effects; do not probe by launching and retrying.
+
+Manager's legacy externally-created-pane callback explicitly opts into
+`embody --deliver-pending-seed`. It only settles retained staged New text in an
+already-created live mux and cannot be combined with a fresh/new/anchor launch
+or a separately supplied seed. Ordinary calls never perform that settlement.
+This callback requires the updated Worktrees provider; update the provider and
+Manager adapter together before relying on legacy fallback. An old callback
+against the new read-only default does not deliver its prompt; a new callback
+against an old parser is unsupported. In either case staged text must remain
+recoverable, not replayed through another delivery path on a guess.
+
 ### Cold embodiment startup prompts
 
 Windows PSMux new-session creation removes inherited mux-nesting selectors from
@@ -519,8 +555,8 @@ Without requested verification, `mux_verified` remains `null`.
 Ordinary cold `embody --seed` launches prefer the existing native startup
 boundary for direct Copilot and marked normalized setup commands. The prompt
 is staged privately; the final invocation owner claims it and supplies
-`--interactive <prompt>`, composing with `--resume=<id>` when `--resume-head`
-selects existing history. Option-leading prompts use the equivalent
+`--interactive <prompt>`, composing with `--resume=<id>` for the default existing
+history unless `--fresh` is explicit. Option-leading prompts use the equivalent
 `--interactive=<prompt>` form so the CLI cannot parse their contents as options.
 A staged New prompt uses the same path. Typed Resume
 staging on other launch surfaces retains its existing owner.
@@ -553,9 +589,10 @@ that opaque setup retains fallback rather than running the script as a probe.
 Non-UTF-8 custom PowerShell setup is unsupported for marker qualification and
 logs that selection without preventing its existing terminal launch.
 `--seed-ready-timeout` applies only there. No post-launch terminal fallback is
-attempted after selecting native startup. Already-live sessions, anchor launches,
-handoff cutover and Bridge-owned deferred acquisition retain their existing
-delivery paths. Subsequent Bridge messages still use the SDK inbox and its
+attempted after selecting native startup. Ordinary already-live joins do not
+deliver a prompt; the explicit startup callback, anchor launches, handoff
+cutover and Bridge-owned deferred acquisition retain their own delivery paths.
+Subsequent Bridge messages still use the SDK inbox and its
 receipts; startup transport does not change their authority.
 
 The existing `launch_seed_stage` writer advertises version 8 for guarded

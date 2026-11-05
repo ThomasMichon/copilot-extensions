@@ -1,0 +1,17 @@
+{
+  "comment": "Resume existing conversation history by default; keep live embodiment read-only and preserve explicit fresh/continuation and initial-pane prompt intent.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

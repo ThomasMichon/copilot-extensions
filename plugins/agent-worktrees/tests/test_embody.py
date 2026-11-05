@@ -229,6 +229,39 @@ class TestCmdEmbody:
         assert out["created"] is False and out["resumed"] is True
         assert out["session"] == "wt-wtY" and out["new_pane"] == "%1"
 
+    @pytest.mark.parametrize("options", [
+        {}, {"seed": "another turn"}, {"fresh": True},
+        {"bridge_seed_operation": "operation"},
+    ])
+    def test_live_embodiment_never_claims_or_delivers_pending_text(
+        self, monkeypatch, capfd, tmp_path, options,
+    ):
+        from types import SimpleNamespace
+        from agent_worktrees import bridge_seed_delivery, launch_seed_state
+
+        _stub_config(monkeypatch)
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda _: "wtLive")
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+        (tmp_path / "wtLive.yaml").write_text("x")
+        record = SimpleNamespace(worktree_path="/w/wtLive", pending_seed="retained startup")
+        monkeypatch.setattr(m.tracking, "load_record", lambda _: record)
+        monkeypatch.setattr(sessions, "has_mux_session", lambda _: True)
+        monkeypatch.setattr(sessions, "mux_copilot_pane", lambda _: "%3")
+        monkeypatch.setattr(sessions, "mux_new_session", lambda *a, **k: pytest.fail("no spawn"))
+        monkeypatch.setattr(sessions, "mux_seed_pane", lambda *a, **k: pytest.fail("no injection"))
+        monkeypatch.setattr(launch_seed_state, "claim_creation", lambda *a: pytest.fail("no claim"))
+        monkeypatch.setattr(bridge_seed_delivery, "claim", lambda *a: pytest.fail("no Bridge claim"))
+        assert m.cmd_embody(_ns(worktree_id="wtLive", **options)) == 0
+        result = json.loads(capfd.readouterr().out)
+        assert result["created"] is False and result["seeded"] is False
+        assert result["session"] == "wt-wtLive" and result["new_pane"] == "%3"
+        assert record.pending_seed == "retained startup"
+
+    def test_pending_delivery_opt_in_cannot_create_a_new_worktree(self, monkeypatch, capfd):
+        monkeypatch.setattr(m, "_create_worktree_core", lambda *a, **k: pytest.fail("no allocation"))
+        assert m.cmd_embody(_ns(new=True, deliver_pending_seed=True)) == 2
+        assert "only settles staged startup text" in capfd.readouterr().out
+
     def test_resume_delivers_pending_seed_left_by_an_external_pane_creator(
         self, monkeypatch, capfd, tmp_path,
     ):
@@ -261,7 +294,7 @@ class TestCmdEmbody:
                     "submitted": True, "reason": None}
         monkeypatch.setattr(sessions, "mux_seed_pane", _seed)
 
-        rc = m.cmd_embody(_ns(worktree_id="wtE"))
+        rc = m.cmd_embody(_ns(worktree_id="wtE", deliver_pending_seed=True))
 
         assert rc == 0
         out = json.loads(capfd.readouterr().out)
@@ -295,7 +328,7 @@ class TestCmdEmbody:
                                      "reason": "not-ready-timeout"},
         )
 
-        rc = m.cmd_embody(_ns(worktree_id="wtF"))
+        rc = m.cmd_embody(_ns(worktree_id="wtF", deliver_pending_seed=True))
 
         assert rc == 0
         out = json.loads(capfd.readouterr().out)
@@ -555,7 +588,7 @@ class TestCmdEmbody:
                                      "submitted": False, **outcome},
         )
 
-        rc = m.cmd_embody(_ns(worktree_id="wtA"))
+        rc = m.cmd_embody(_ns(worktree_id="wtA", deliver_pending_seed=live_pane))
 
         assert rc == 0
         out = json.loads(capfd.readouterr().out)
@@ -885,9 +918,10 @@ class TestCmdEmbody:
         "extra, resumed",
         [
             ({}, "head-1"),  # bringing a worktree back resumes its head
-            ({"seed": "new task"}, None),  # a seed is a new task: fresh
+            ({"seed": "next turn"}, "head-1"),
             ({"seed": "carry on", "resume_head": True}, "head-1"),
             ({"fresh": True}, None),
+            ({"seed": "new task", "fresh": True}, None),
             ({"copilot_args": ["--resume=other"]}, None),  # caller chose
         ],
     )
@@ -1013,7 +1047,7 @@ class TestCmdEmbody:
         assert outcome["native_launch_started"] is False
         assert outcome["worktree_id"] == "wtR"
 
-    def test_bridge_owned_seed_never_enters_tty_and_preserves_new_task_intent(
+    def test_bridge_owned_seed_never_enters_tty_and_preserves_resume_default(
         self, monkeypatch, capfd, tmp_path,
     ):
         from types import SimpleNamespace
@@ -1023,6 +1057,7 @@ class TestCmdEmbody:
         monkeypatch.setattr(m.tracking, "load_record", lambda _: SimpleNamespace(
             worktree_path="/w/wtR", resolved_head_session="native-original", status="active",
         ))
+        monkeypatch.setattr(embody_resume, "session_liveness", lambda _: "dead")
         report = {"bridge_seed_deferred": True, "bridge_seed_operation": "operation",
                   "deferred_creation_seed": {"seed": {"text": "creation task"}}}
         monkeypatch.setattr(bridge_seed_delivery, "claim", lambda *args: report)
@@ -1037,7 +1072,7 @@ class TestCmdEmbody:
         outcome = json.loads(capfd.readouterr().out)
         assert outcome["bridge_seed_deferred"] is True and outcome["seeded"] is False
         assert outcome["deferred_creation_seed"]["seed"]["text"] == "creation task"
-        assert outcome["resume_session"] is None
+        assert outcome["resume_session"] == "head-1"
 
     @pytest.mark.parametrize("dry_run", [True, False])
     def test_fresh_bridge_embody_uses_armed_allocation_not_native_replay(

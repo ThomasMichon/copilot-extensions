@@ -9,6 +9,39 @@ import subprocess
 from . import launch_seed_exec, launch_seed_state
 
 
+def existing_launch(
+    args, *, wt_id, work_dir, deferred, cfg, sessions, output, tracking_write,
+) -> int:
+    from . import agent_policy
+
+    pane = sessions.mux_copilot_pane(wt_id)
+    display = pane or sessions.mux_active_pane(wt_id)
+    seed_result, settled = {}, {}
+    if pane and not deferred and getattr(args, "deliver_pending_seed", False):
+        try:
+            receipt = launch_seed_state.claim_creation(cfg.tracking_dir() / f"{wt_id}.yaml")
+        except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
+            return output._json_error(f"Could not hand off staged New prompt: {exc}", exit_code=3)
+        if receipt["seed"]:
+            if refusal := agent_policy.json_refusal(work_dir):
+                return refusal
+            seed_result = sessions.mux_seed_pane(
+                pane, receipt["seed"]["text"], session_name=sessions.mux_session_name(wt_id),
+                ready_timeout=getattr(args, "seed_ready_timeout", None) or 180.0,
+            )
+            settled = launch_seed_state.settle_creation(
+                cfg.tracking_dir() / f"{wt_id}.yaml", receipt, seed_result,
+            )
+    output._json_output({
+        "ok": True, **deferred, "worktree_id": wt_id,
+        "session": sessions.mux_session_name(wt_id), "work_dir": work_dir,
+        "created": False, "resumed": True, "new_pane": display,
+        "note": "a live mux session already embodies this worktree",
+        "seeded": bool(seed_result.get("ok")), **settled,
+    })
+    return 0
+
+
 def prepare_startup_seed(
     command: list[str], record_path: Path, seed: str | None, *, explicit: bool,
     environment: dict[str, str] | None = None,

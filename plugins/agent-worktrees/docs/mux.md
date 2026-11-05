@@ -30,19 +30,24 @@ Copilot session."
 
 ## When you want a mux — and when you don't
 
-There are three ways to enter a worktree; the difference is **who's driving** and
-**whether a session launches**:
+Allocating a checkout and hosting an agent are separate operations. Choose by
+**who's driving**, **whether to start a process**, and **whether to attach**:
 
 | You are… | Use | Muxed? | Why |
 |----------|-----|--------|-----|
 | A human at a terminal, picking or resuming | `my-project` (the **Picker**) / `agent-worktrees resolve` | **Yes** — creates or **rejoins** the `wt-<id>` session | Persistent, detachable interactive work |
 | A human who wants a brand-new session now | `agent-worktrees resolve --new` | **Yes** — launches a fresh muxed session | Same, skipping the picker (refused without a TTY) |
 | An agent, daemon, or script | `agent-worktrees create [--json]` | **No** — prints the worktree path, launches nothing | Programmatic callers edit in their *current* process; a mux would just get in the way |
+| Automation that needs a hosted agent process | `agent-worktrees embody --worktree-id <id> --json` | **Yes**, detached | Ensure a process exists without taking the caller's terminal |
+| A human connecting this terminal | `agent-worktrees copilot --worktree-id <id>` | **Yes**, attached here | Ensure the same process, then connect the current TTY |
 
 Rule of thumb: **interactive human work → muxed** (persistence + detach/rejoin);
-**automated/programmatic work → `create` (no mux)**, then operate on the printed
-path in your existing session. `--new` is explicitly **refused without a TTY**,
-so a tool call can never accidentally spawn an interactive mux — use `create`.
+**checkout-only automation → `create` (no mux)**; **hosted-agent automation →
+`embody` (detached)**. `resolve --new` is refused without a TTY, whereas
+`embody --new` deliberately allocates and hosts a detached agent.
+Both `embody` and `copilot` resume existing history by default, including with
+a startup prompt; `--fresh` explicitly opts into a new conversation.
+An already-live target is reused without prompt injection or a duplicate process.
 
 An interactive launch retries multiplexer session creation up to three times
 before treating it as failed. If all attempts fail in an interactive terminal,
@@ -56,6 +61,35 @@ non-persistent diagnostic path.
 > **Windows over SSH:** the interactive TUI picker auto-falls back to a simpler
 > flow (a ConPTY limitation), but the muxed-session model is the same. See
 > [picker.md](picker.md).
+
+## Recovery after a maintenance window
+
+The [planned-maintenance contract](../../../visions/agent-fabric/README.md#planned-maintenance-windows)
+applies equally to disruptive mux replacement and machine restart. It calls for
+advance notice, an opportunity for cooperative checkpoint/drain, a durable
+inventory of original conversations, and status-first recovery afterward.
+This is not an implemented machine-wide shutdown/reboot coordinator and is not
+activated by package compatibility declarations.
+
+After an independently authorized stop and environment repair, an automation
+can resume a saved worktree through its normal owner:
+
+```text
+agent-worktrees embody --worktree-id <id> --resume-head --seed "Terminal session restarted. Check status and resume." --verify-timeout 30 --json
+```
+
+That is the default recovery wording; a scenario can replace the seed.
+`--resume-head` is explicit here so the same conversation intent survives the
+supported prior provider. If the target is already live the command is read-only,
+not an event-message transport.
+
+Recreated terminals do not restore process memory, shell variables, child jobs
+or native schedules. The resumed agent must inspect its objective, worktree/head,
+pauses, claims, background flows and external operations before continuing.
+Unknown consequential operations are reconciled through their owners, not
+blindly rerun. Mux creation, native startup, prompt consumption and completed
+self-recovery are separate observations. A future coordinator must remain
+outside affected sessions, fence competing launches and retain partial failures.
 
 ## Detach and rejoin
 

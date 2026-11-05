@@ -9,6 +9,18 @@ from .native_arguments import append_native_arguments
 from .session_liveness import session_liveness
 
 
+def add_arguments(group: argparse._ActionsContainer) -> None:
+    group.add_argument(
+        "--fresh", action="store_true",
+        help="Explicitly start a fresh conversation on a cold launch; an already-live mux is reused",
+    )
+    group.add_argument(
+        "--resume-head", dest="resume_head", action="store_true",
+        help="Explicitly resume the existing head, including with --seed (the default); "
+        "retained for callers interoperating with older providers",
+    )
+
+
 def resume_target(
     args: argparse.Namespace, record, seed: str | None, *, make_new: bool,
 ) -> str | None:
@@ -16,15 +28,13 @@ def resume_target(
 
     Bringing an existing worktree back (no new task) resumes its head
     (``sessions.resolve_resume_target``) so its history isn't lost; a seed is
-    a new task and starts fresh unless ``--resume-head``. ``--fresh``, a new
+    its next turn, not an implicit new conversation. ``--fresh``, a new
     worktree, or an explicit ``--copilot-arg=--resume=...`` never adds one.
     """
     acquisition = getattr(args, "bridge_acquisition", None)
     if acquisition:
         return None if acquisition == "fresh" else acquisition
     if make_new or record is None or getattr(args, "fresh", False):
-        return None
-    if (seed or getattr(args, "bridge_seed_pending", False)) and not getattr(args, "resume_head", False):
         return None
     for arg in getattr(args, "copilot_args", None) or []:
         if str(arg).split("=", 1)[0] in ("--resume", "--continue"):

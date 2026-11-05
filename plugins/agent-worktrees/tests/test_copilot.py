@@ -37,6 +37,30 @@ from agent_worktrees import copilot_cli as m
 from agent_worktrees import output
 
 
+@pytest.mark.parametrize("verb", ["copilot", "embody"])
+@pytest.mark.parametrize("flags, fresh, resume", [
+    ([], False, False),
+    (["--fresh"], True, False),
+    (["--resume-head"], False, True),
+])
+def test_attended_and_detached_parsers_share_conversation_intent(verb, flags, fresh, resume):
+    from agent_worktrees import __main__ as cli
+
+    args = cli.build_parser().parse_args([verb, "--worktree-id", "example", *flags])
+    assert args.fresh is fresh and args.resume_head is resume
+
+
+@pytest.mark.parametrize("verb", ["copilot", "embody"])
+def test_conversation_intents_are_mutually_exclusive(verb):
+    from agent_worktrees import __main__ as cli
+
+    with pytest.raises(SystemExit) as failure:
+        cli.build_parser().parse_args([
+            verb, "--worktree-id", "example", "--fresh", "--resume-head",
+        ])
+    assert failure.value.code == 2
+
+
 def _ns(**kwargs) -> argparse.Namespace:
     defaults = {
         "worktree_id": None, "new": False, "codename": None, "seed": None,

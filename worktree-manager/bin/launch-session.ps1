@@ -1675,21 +1675,9 @@ function Invoke-ManagedMuxRegister {
         Write-SetupLog "psmux: managed mux registration failed: $($_.Exception.Message)" 'WARN'
     }
 }
-# Deliver a worktree's queued `pending_seed` (picker-new-session-prompt-and-
-# composer Phase A) once this launcher has just created its FIRST live psmux
-# session for it -- this launcher creates the pane directly (`new-session`
-# above), so nothing else ever triggers delivery for a Picker-originated
-# creation. `agent-worktrees embody --worktree-id` already owns the whole
-# contract: its "already embodies this worktree" resume branch (now true,
-# since the session above just started existing) claims (clears) any pending
-# seed under a race-safe write-guard and types it into the registry-identified
-# Copilot pane via its own ready-poll/send-keys path -- this call needs no new
-# pane-ready-detection logic of its own. A no-op (no pending seed) costs one
-# cheap venv-python round trip. Dispatched detached (mirrors
-# Invoke-ManagedMuxRegister above): the ready-poll can legitimately take up to
-# embody's own `--seed-ready-timeout` (default 180s) for a slow-loading
-# MCP/skill-heavy session, and the operator's attach below must never wait on
-# it.
+# The external pane creator explicitly settles only its staged New prompt.
+# This callback is creation-only; ordinary embody/attach never injects text.
+# Keep the potentially slow readiness wait out of the operator's attach path.
 function Invoke-SeedDeliverySafe {
     param([string]$WorktreeId)
     if ([string]::IsNullOrWhiteSpace($WorktreeId)) { return }
@@ -1699,7 +1687,7 @@ function Invoke-SeedDeliverySafe {
         if (-not [string]::IsNullOrWhiteSpace([string]$script:LaunchProject)) {
             $embodyArgs += @('--project', [string]$script:LaunchProject)
         }
-        $embodyArgs += @('embody', '--worktree-id', $WorktreeId, '--json')
+        $embodyArgs += @('embody', '--worktree-id', $WorktreeId, '--deliver-pending-seed', '--json')
         # conhost --headless: -WindowStyle Hidden alone is ignored by the
         # DefTerm handoff and can flash a console (windows-launch-hardening
         # #786) -- mirrors Write-ActivityLog's own dispatch above.

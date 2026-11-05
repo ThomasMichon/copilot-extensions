@@ -77,7 +77,7 @@ from typing import Any
 from agent_procutil import no_window_kwargs
 
 from .authority import contributor, effective_authority, sort_decisions
-from . import package_versions
+from . import package_detection, package_versions
 from .registry_values import parse_reg_query as _parse_reg_query, registry_values_equal
 from .resource_file_ownership import (
     conflicting_git_config_files,
@@ -89,7 +89,6 @@ from .manifest import (
 from .surfaces._common import backup_file, read_json, write_json_atomic
 
 _ANCHOR_RE = re.compile(r"^\$(HOME|REPO)(?:\(([^)]*)\))?(.*)$")
-_SEMVER_RE = re.compile(r"\d+(?:\.\d+)+")
 DEFAULT_TIMEOUT = 1800
 
 
@@ -466,9 +465,9 @@ class PackageResourceHandler(ResourceHandler):
         except (OSError, subprocess.SubprocessError):
             return {"known": False, "present": False, "version": None}
         detected = mgr["parse_detect"](out, pkg_id)
-        detected["known"] = out.returncode == 0 or (
+        detected["known"] = detected.get("known", out.returncode == 0 or (
             not detected["present"] and out.returncode in mgr.get("absent_returncodes", set())
-        )
+        ))
         return detected
 
     def _detect_pin(self, ctx: ResourceContext, mgr: dict, pkg_id: str) -> dict[str, Any]:
@@ -1693,20 +1692,6 @@ def _parse_winget_pin(out: RunOutcome, pkg_id: str) -> dict[str, Any]:
     return {"present": True, "version": version}
 
 
-def _parse_dpkg(out: RunOutcome, pkg_id: str) -> dict[str, Any]:
-    present = out.returncode == 0 and bool(out.stdout.strip())
-    return {"present": present, "version": out.stdout.strip() or None}
-
-
-def _parse_line_list(out: RunOutcome, pkg_id: str) -> dict[str, Any]:
-    present = out.returncode == 0 and pkg_id.lower() in out.stdout.lower()
-    version = None
-    if present:
-        m = _SEMVER_RE.search(out.stdout)
-        version = m.group(0) if m else None
-    return {"present": present, "version": version}
-
-
 def _parse_tasklist(out: RunOutcome) -> set[str]:
     """Parse Windows ``tasklist /FO CSV /NH`` output to folded image names."""
     running: set[str] = set()
@@ -1785,7 +1770,7 @@ MANAGERS: dict[str, dict[str, Any]] = {
     "apt": {
         "platforms": {"linux", "wsl"},
         "bin": "apt-get",
-        "parse_detect": _parse_dpkg,
+        "parse_detect": package_detection.parse_dpkg,
         "detect": lambda i, v: ["dpkg-query", "-W", "-f=${Version}", i],
         "install": lambda i, v: ["apt-get", "install", "-y", f"{i}={v}" if v else i],
         "update": lambda i, v: ["apt-get", "install", "-y", f"{i}={v}" if v else i],
@@ -1795,7 +1780,7 @@ MANAGERS: dict[str, dict[str, Any]] = {
     "pipx": {
         "platforms": {"windows", "linux", "wsl"},
         "bin": "pipx",
-        "parse_detect": _parse_line_list,
+        "parse_detect": package_detection.parse_tool_list,
         "detect": lambda i, v: ["pipx", "list", "--short"],
         "install": lambda i, v: ["pipx", "install", f"{i}=={v}" if v else i],
         "update": lambda i, v: ["pipx", "install", "--force", f"{i}=={v}" if v else i],
@@ -1805,7 +1790,7 @@ MANAGERS: dict[str, dict[str, Any]] = {
     "uv-tool": {
         "platforms": {"windows", "linux", "wsl"},
         "bin": "uv",
-        "parse_detect": _parse_line_list,
+        "parse_detect": package_detection.parse_tool_list,
         "detect": lambda i, v: ["uv", "tool", "list"],
         "install": lambda i, v: ["uv", "tool", "install", f"{i}=={v}" if v else i],
         "update": lambda i, v: ["uv", "tool", "install", "--force", f"{i}=={v}" if v else i],
@@ -1815,7 +1800,7 @@ MANAGERS: dict[str, dict[str, Any]] = {
     "pip": {
         "platforms": {"windows", "linux", "wsl"},
         "bin": "pip",
-        "parse_detect": _parse_line_list,
+        "parse_detect": package_detection.parse_pip,
         "detect": lambda i, v: ["pip", "show", i],
         "install": lambda i, v: ["pip", "install", f"{i}=={v}" if v else i],
         "update": lambda i, v: ["pip", "install", "--upgrade", f"{i}=={v}" if v else i],

@@ -401,6 +401,7 @@ def test_spawn_embodied_worker_can_target_existing_worktree(monkeypatch, admissi
     # targeted task may land on a worktree id with unrelated prior context) --
     # the caller must opt in explicitly via resume_head.
     assert "--resume-head" not in cmd
+    assert "--fresh" in cmd
 
 
 def test_spawn_embodied_worker_resume_head_opts_into_resuming(monkeypatch, admission_owner):
@@ -422,6 +423,7 @@ def test_spawn_embodied_worker_resume_head_opts_into_resuming(monkeypatch, admis
     cmd = captured["cmd"]
     assert cmd[cmd.index("--worktree-id") + 1] == "wt-reviewer"
     assert "--resume-head" in cmd
+    assert "--fresh" not in cmd
 
 
 def test_spawn_embodied_worker_resume_head_ignored_without_worktree_id(monkeypatch, admission_owner):
