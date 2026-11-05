@@ -18,6 +18,18 @@ PLUGIN = Path(__file__).resolve().parents[1]
 SCRIPT = PLUGIN / "scripts" / "post-tool-hook.ps1"
 
 
+@pytest.fixture
+def admitted_protocol_script(tmp_path):
+    scripts = tmp_path / "protocol-scripts"
+    scripts.mkdir()
+    for name in ("post-tool-hook.ps1", "hook_client.py"):
+        shutil.copyfile(PLUGIN / "scripts" / name, scripts / name)
+    (scripts / "managed-session.ps1").write_text(
+        "function Test-ManagedWorktreesSession { return $true }\n", encoding="utf-8"
+    )
+    return scripts / "post-tool-hook.ps1"
+
+
 @pytest.mark.guard
 def test_post_hook_uses_same_shell_and_installs_the_client():
     hooks = json.loads((PLUGIN / "hooks.json").read_text(encoding="utf-8"))
@@ -46,6 +58,7 @@ def test_local_advisory_fallback_does_not_retry_daemon(monkeypatch):
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, module)
     spec.loader.exec_module(module)
+    monkeypatch.setattr(module, "_managed_session_admitted", lambda payload: True)
     calls = []
     monkeypatch.setattr(
         module, "_fallback_post",
@@ -221,13 +234,23 @@ def test_real_python_post_fallback_preserves_accounting_and_binding(tmp_path):
     from agent_procutil import no_window_kwargs
 
     root, record = _post_record(tmp_path, "worktree-a")
+    git_dir = root / ".git"
+    for name in ("objects", "refs"):
+        (git_dir / name).mkdir(parents=True)
+    (git_dir / "HEAD").write_text("ref: refs/heads/main\n")
+    registry = tmp_path / ".agent-worktrees"
+    registry.mkdir()
+    (registry / "projects.yaml").write_text(
+        f"projects:\n  example:\n    anchor: {json.dumps(str(root))}\n"
+    )
     env = os.environ.copy()
     env.update(
-        HOME=str(tmp_path), USERPROFILE=str(tmp_path),
+        HOME=str(tmp_path), USERPROFILE=str(tmp_path), AGENT_HOME=str(tmp_path),
         AGENT_WORKTREES_NUDGE="on", AGENT_WORKTREES_NUDGE_CALLS="2",
         AGENT_WORKTREES_NUDGE_MINUTES="999",
     )
-    payload = json.dumps({"cwd": str(root), "toolName": "view"})
+    env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    payload = json.dumps({"sessionId": "post-fixture", "cwd": str(root), "toolName": "view"})
 
     def invoke():
         result = subprocess.run(
@@ -256,7 +279,7 @@ def test_real_python_post_fallback_preserves_accounting_and_binding(tmp_path):
     os.environ.get("AGENT_WORKTREES_SHELL_HOOK_INTEGRATION") != "1",
     reason="explicit native shell/daemon integration",
 )
-def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path):
+def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path, admitted_protocol_script):
     from agent_procutil import no_window_kwargs
     from agent_worktrees.hook_ipc import HookIpcServer
 
@@ -284,7 +307,7 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path)
             json.dumps(server.rendezvous()), encoding="utf-8"
         )
         harness = tmp_path / "hook.ps1"
-        escaped = str(SCRIPT).replace("'", "''")
+        escaped = str(admitted_protocol_script).replace("'", "''")
         harness.write_text(
             f". '{escaped}'\n"
             "function Get-Command { throw 'a client/CLI child was requested' }\n"
@@ -344,6 +367,10 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path)
         bin_dir = root / "bin"
         bin_dir.mkdir()
         shutil.copyfile(SCRIPT, bin_dir / SCRIPT.name)
+        shutil.copyfile(
+            admitted_protocol_script.parent / "managed-session.ps1",
+            bin_dir / "managed-session.ps1",
+        )
         command = json.loads((PLUGIN / "hooks.json").read_text(encoding="utf-8"))[
             "hooks"
         ]["postToolUse"][0]["powershell"]
@@ -397,7 +424,7 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path)
     os.environ.get("AGENT_WORKTREES_SHELL_HOOK_INTEGRATION") != "1",
     reason="explicit native shell/daemon integration",
 )
-def test_real_shell_json_values_and_legacy_metadata_compatibility(tmp_path):
+def test_real_shell_json_values_and_legacy_metadata_compatibility(tmp_path, admitted_protocol_script):
     from agent_procutil import no_window_kwargs
     from agent_worktrees.hook_ipc import HookIpcServer
 
@@ -437,7 +464,7 @@ def test_real_shell_json_values_and_legacy_metadata_compatibility(tmp_path):
             json.dumps(server.rendezvous()), encoding="utf-8"
         )
         harness = tmp_path / "values.ps1"
-        escaped = str(SCRIPT).replace("'", "''")
+        escaped = str(admitted_protocol_script).replace("'", "''")
         env = os.environ.copy()
         env["USERPROFILE"] = str(tmp_path)
         env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
@@ -493,7 +520,7 @@ def test_real_shell_json_values_and_legacy_metadata_compatibility(tmp_path):
     os.environ.get("AGENT_WORKTREES_SHELL_HOOK_INTEGRATION") != "1",
     reason="explicit native shell/daemon integration",
 )
-def test_real_shell_rejects_invalid_or_unbounded_responses(tmp_path):
+def test_real_shell_rejects_invalid_or_unbounded_responses(tmp_path, admitted_protocol_script):
     from agent_procutil import no_window_kwargs
 
     shell = shutil.which(os.environ.get("AGENT_WORKTREES_TEST_SHELL", "pwsh"))
@@ -534,7 +561,7 @@ def test_real_shell_rejects_invalid_or_unbounded_responses(tmp_path):
             "hook_endpoint": f"127.0.0.1:{server.server_address[1]}",
             "hook_token": "fixture",
         }), encoding="utf-8")
-        escaped = str(SCRIPT).replace("'", "''")
+        escaped = str(admitted_protocol_script).replace("'", "''")
         harness.write_text(
             f". '{escaped}'\n"
             f"$endpoint=@{{hook_transport='tcp';hook_endpoint='127.0.0.1:{server.server_address[1]}';hook_token='fixture'}}\n"

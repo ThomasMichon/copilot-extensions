@@ -26,6 +26,7 @@ def test_running_client_hot_toggle_never_contacts_ipc_or_fallback_when_active(
     monkeypatch.setenv("PRETOOL_KILLSWITCH_STATE_FILE", str(path))
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     client = load_client()
+    monkeypatch.setattr(client, "_managed_session_admitted", lambda payload: True)
     calls = []
     monkeypatch.setattr(client, "_request", lambda *a: calls.append("ipc") or None)
     monkeypatch.setattr(client, "_fallback_pre", lambda *a: calls.append("guard") or {
@@ -46,6 +47,7 @@ def test_active_switch_is_not_consulted_for_other_events(tmp_path, monkeypatch, 
     path.write_text('{"active": true}', encoding="utf-8")
     monkeypatch.setenv("PRETOOL_KILLSWITCH_STATE_FILE", str(path))
     client = load_client()
+    monkeypatch.setattr(client, "_managed_session_admitted", lambda payload: True)
     monkeypatch.setattr(client, "_enrich_session_payload", lambda p: p)
     monkeypatch.setattr(client, "_enrich_session_end_payload", lambda p: p)
     monkeypatch.setattr(client, "_write_session_guidance", lambda *a, **k: None)
@@ -62,6 +64,7 @@ def test_invalid_switch_and_cell_keep_workflow_guards_enabled(tmp_path, monkeypa
     path = tmp_path / "pretool.json"
     monkeypatch.setenv("PRETOOL_KILLSWITCH_STATE_FILE", str(path))
     client = load_client()
+    monkeypatch.setattr(client, "_managed_session_admitted", lambda payload: True)
     calls = []
     monkeypatch.setattr(client, "decide", lambda kind, p: calls.append(kind) or {})
     for context, raw in (("", "broken"), ("other-cell", '{"active": true}')):
@@ -93,13 +96,17 @@ def test_cached_manifest_command_hot_stop_and_restore_without_restart(tmp_path):
     shell = (shutil.which("pwsh") or shutil.which("powershell")) if os.name == "nt" else shutil.which("bash")
     if shell is None:
         pytest.skip("native hook shell unavailable")
+    from test_managed_session import fixture_project
+
+    anchor, _ = fixture_project(tmp_path)
     root = tmp_path / ".agent-worktrees"
     scripts = root / "bin"
     scripts.mkdir(parents=True)
-    for name in ("hook_client.py", "hook_runtime.py", "pretool_killswitch.py", "hook_pre_policy.py"):
+    for name in ("hook_client.py", "hook_runtime.py", "pretool_killswitch.py", "hook_pre_policy.py",
+                 "managed_session.py", "registry_root.py", "guarded_anchor_map.py"):
         shutil.copyfile(PLUGIN / "scripts" / name, scripts / name)
     env = os.environ.copy()
-    env.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path),
+    env.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path), AGENT_HOME=str(tmp_path),
                PRETOOL_KILLSWITCH_STATE_FILE=str(tmp_path / "pretool.json"))
     env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
     env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env["PATH"]
@@ -116,7 +123,9 @@ def test_cached_manifest_command_hot_stop_and_restore_without_restart(tmp_path):
         def invoke(event):
             args = ([shell, "-NoProfile", "-NonInteractive", "-Command", cached[event]]
                     if os.name == "nt" else [shell, "-c", cached[event]])
-            result = subprocess.run(args, input='{"toolName":"powershell"}',
+            result = subprocess.run(args, input=json.dumps({
+                "toolName": "powershell", "sessionId": "cached-fixture", "cwd": str(anchor),
+            }),
                                     capture_output=True, text=True, env=env, timeout=15,
                                     **no_window_kwargs())
             assert result.returncode == 0, result.stderr
@@ -164,6 +173,7 @@ def test_relative_override_diagnostic_does_not_skip_normal_guard_evaluation(monk
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.setenv("PRETOOL_KILLSWITCH_STATE_FILE", "relative-stop.json")
     client = load_client()
+    monkeypatch.setattr(client, "_managed_session_admitted", lambda payload: True)
     calls = []
     monkeypatch.setattr(client, "decide", lambda kind, payload: calls.append(kind) or {
         "permissionDecision": "deny", "permissionDecisionReason": "workflow policy",

@@ -83,7 +83,7 @@ publication rules remain independent gates.
 ### Phase 3 - Validate and land the complete source fix
 
 - [x] Run focused unit and real consumer checks for unmanaged inertness, managed behavior and cache isolation/invalidation; record platform coverage and native measurements honestly.
-- [ ] Update authoritative behavior documentation, add the plugin changefile and pass applicable lint, typing, install-contract and required publication checks.
+- [x] Update authoritative behavior documentation, add the plugin changefile and pass applicable lint, typing, install-contract and required publication checks.
 - [ ] Land the complete implementation after review and required CI, preserving release-versus-installed-state distinctions.
 
 ### Phase 4 - Complete the canonical effort and source obligations
@@ -142,3 +142,14 @@ failure behavior, cache invalidation and mixed payload/runtime paths.
 - Required PR CI refused the changed status-monitor source before unit execution because its positively admitted digest still described the prior bytes.
 - Audited the source cohort: only `status_monitor_cli.py` differed from the declared inputs. Refreshed that one binding; node inventory, coverage targets, effect restrictions and execution budgets are unchanged.
 - Replaying the admitted packet in an isolated tooling environment before updating the implementation head. Local Windows-native results are separate from required Linux PR evidence.
+
+### 2026-11-04 - Cache, runtime discovery and consumer qualification
+
+- The initial admitted unit replay passed 4,136 tests locally under the unchanged effect restrictions and Windows-native budget. The required Linux PR run still needs the corrected source binding.
+- Ownership parsing without PyYAML now ignores optional repository metadata, including inline tag lists. The shared Git reader reports the actual dependency frontier for successful and failed probes; admission retains all failed owners for negative reuse, and only the workspace plus matching owner for positive reuse. Anchor HEAD, shared objects/refs and worktree backlinks therefore invalidate both revocation and repair cases.
+- PowerShell uses the canonical read-only runtime resolver before a legacy PATH fallback. The Windows extension can use the same owner without PATH Python and shares concurrent discovery. Explicit cells still validate before selecting their runtime and retain the canonical validator's PATH Python prerequisite.
+- Policy-only fixtures now explicitly admit their events; real unmanaged controls remain intact. Disposable native profiles prove legacy runtime-only discovery, selected-cell isolation, concurrent/warm reuse and zero visible windows or foreground transitions. The Node runtime-discovery path exercises two cold cycles.
+- The ten-file admission/native/adjacent packet passed 582 tests with four platform skips at unchanged item/group/plugin budgets. A final 59-case cache/resident packet passed after extending failed-probe/backlink coverage and reusing the hook client's admission function in the resident entrypoint.
+- Required CI also identified the resident entry module exceeding the 1,000-line cap. Reusing the existing admission function removes the duplicate lookup and restores that cap without widening its baseline. Its unit-source binding is refreshed; the admitted packet's node inventory, coverage targets, effect restrictions and budgets are unchanged.
+- Python lint, JavaScript syntax, install contract (13 plugins), version/docs consistency and all 40 enforced strict typing projects passed. The Hooks contract documents the ownership dependencies and interpreter prerequisites. No dependency, installed runtime, service or rollout changes were made.
+- Implementation review, corrected required CI, merge and canonical completion remain open.

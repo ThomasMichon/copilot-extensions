@@ -70,6 +70,20 @@ def fixture_project(tmp_path):
     return anchor, registry
 
 
+def fixture_linked_worktree(tmp_path, anchor, *, relative=False):
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    admin = anchor / ".git" / "worktrees" / "example-worktree"
+    admin.mkdir(parents=True)
+    (admin / "HEAD").write_text("ref: refs/heads/work\n")
+    (admin / "commondir").write_text("../..\n")
+    (admin / "gitdir").write_text(
+        (os.path.relpath(worktree / ".git", admin) if relative else str(worktree / ".git")) + "\n"
+    )
+    (worktree / ".git").write_text("gitdir: " + str(admin) + "\n")
+    return worktree, admin
+
+
 def test_positive_membership_is_cached_but_registration_alone_is_not(tmp_path, monkeypatch):
     module = load("managed_session")
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
@@ -93,16 +107,7 @@ def test_linked_worktree_requires_the_adopted_common_directory(tmp_path, monkeyp
     module = load("managed_session")
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     anchor, _ = fixture_project(tmp_path)
-    worktree = tmp_path / "worktree"
-    worktree.mkdir()
-    admin = anchor / ".git" / "worktrees" / "example-worktree"
-    admin.mkdir(parents=True)
-    (admin / "HEAD").write_text("ref: refs/heads/work\n")
-    (admin / "commondir").write_text("../..\n")
-    (admin / "gitdir").write_text(
-        (os.path.relpath(worktree / ".git", admin) if relative else str(worktree / ".git")) + "\n"
-    )
-    (worktree / ".git").write_text("gitdir: " + str(admin) + "\n")
+    worktree, admin = fixture_linked_worktree(tmp_path, anchor, relative=relative)
     nested = worktree / "src"
     nested.mkdir()
     payload = {"sessionId": "owned", "cwd": str(nested)}
@@ -115,8 +120,70 @@ def test_generated_registry_admission_needs_no_yaml_install(tmp_path, monkeypatc
     module = load("managed_session")
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.setitem(sys.modules, "yaml", None)
-    anchor, _ = fixture_project(tmp_path)
+    anchor, registry = fixture_project(tmp_path)
+    with (registry / "repos.yaml").open("a") as stream:
+        stream.write(
+            "    tags: [selected, local]\n"
+            "    metadata:\n      nested: [ignored]\n"
+            "  unrelated:\n    class: reference\n    tags: [docs]\n"
+        )
     assert module.admitted({"sessionId": "fresh", "cwd": str(anchor)}, home=tmp_path)
+
+
+def test_linked_admission_cache_tracks_failed_owner_and_common_metadata(tmp_path):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node is unavailable")
+    anchor, registry = fixture_project(tmp_path)
+    worktree, admin = fixture_linked_worktree(tmp_path, anchor)
+    unrelated = tmp_path / "unrelated" / ".git"
+    for folder in ("objects", "refs"):
+        (unrelated / folder).mkdir(parents=True)
+    (unrelated / "HEAD").write_text("ref: refs/heads/main\n")
+    with (registry / "projects.yaml").open("a") as stream:
+        stream.write(f"  other:\n    anchor: {json.dumps(str(unrelated.parent))}\n")
+    driver = tmp_path / "linked-cache.mjs"
+    driver.write_text("""
+import assert from "node:assert/strict";
+import {mkdirSync, readFileSync, rmdirSync, unlinkSync, writeFileSync} from "node:fs";
+import {join} from "node:path";
+import {pathToFileURL} from "node:url";
+const [module, scriptsRoot, python, workingDirectory, anchor, admin] = process.argv.slice(2);
+const {createManagedSessionAdmission} = await import(pathToFileURL(module));
+const check = createManagedSessionAdmission({scriptsRoot, python});
+const input = {sessionId: "linked-cache", workingDirectory};
+const head = join(anchor, ".git", "HEAD");
+const text = readFileSync(head);
+unlinkSync(head);
+assert.equal(await check(input), false);
+writeFileSync(head, text);
+assert.equal(await check(input), true, "repairing a failed anchor probe invalidates a negative");
+assert.equal(check.current(input), true);
+for (const name of ["objects", "refs"]) {
+  const path = join(anchor, ".git", name);
+  rmdirSync(path);
+  assert.equal(check.current(input), false);
+  assert.equal(await check(input), false, "shared metadata removal revokes admission");
+  mkdirSync(path);
+  assert.equal(await check(input), true, "restoring shared metadata invalidates a negative");
+}
+const backlink = join(admin, "gitdir");
+const linkText = readFileSync(backlink);
+unlinkSync(backlink);
+assert.equal(await check(input), false);
+writeFileSync(backlink, linkText);
+assert.equal(await check(input), true, "repairing a failed backlink probe invalidates a negative");
+unlinkSync(head);
+assert.equal(check.current(input), false);
+assert.equal(await check(input), false, "anchor HEAD remains a live ownership input");
+""")
+    result = subprocess.run(
+        [node, str(driver), str(SCRIPTS.parent / "extensions" / "agent-worktrees" / "managed-session.mjs"),
+         str(SCRIPTS), sys.executable, str(worktree), str(anchor), str(admin)],
+        capture_output=True, text=True, timeout=15,
+        env=environment(tmp_path, worktree), **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_cache_is_scoped_to_session_and_selected_registry(tmp_path, monkeypatch):
@@ -291,6 +358,135 @@ def test_session_start_forwards_unicode_membership_query(shell, tmp_path):
     )
     assert result.returncode == 0 and not result.stderr, result.stdout + result.stderr
     assert json.loads(result.stdout) == {}
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows runtime-only interpreter discovery")
+@pytest.mark.parametrize("consumer", ["powershell.exe", "pwsh", "node"])
+@pytest.mark.parametrize("cell", [False, True])
+def test_admission_resolves_healthy_selected_runtime(
+    tmp_path, monkeypatch, record_testsuite_property, consumer, cell,
+):
+    import venv
+    from types import SimpleNamespace
+    import test_registry_paths as fixtures
+
+    executable = shutil.which(consumer)
+    if not executable:
+        pytest.skip(f"{consumer} is unavailable")
+    anchor, legacy = fixture_project(tmp_path)
+    payload = tmp_path / "payload"
+    shutil.copytree(SCRIPTS, payload / "scripts")
+    (payload / "plugin.json").write_text('{"name":"agent-worktrees","version":"0.0.1-dev1"}')
+    env = environment(tmp_path, anchor)
+    env["COPILOT_PLUGIN_ROOT"] = str(payload)
+    runtime = legacy
+    if cell:
+        native_run = subprocess.run
+        monkeypatch.setattr(fixtures, "subprocess", SimpleNamespace(
+            run=lambda *args, **kwargs: native_run(*args, **(kwargs | no_window_kwargs())),
+        ))
+        context, runtime = fixtures._stamp(
+            tmp_path / "durable", payload, marketplace="runtime-only", repository="example/runtime-only",
+        )
+        for name in ("projects.yaml", "repos.yaml"):
+            shutil.copyfile(legacy / name, runtime / name)
+        env["COPILOT_EXTENSIONS_CONTEXT"] = str(context)
+        env["AGENT_WORKTREES_PAYLOAD_ROOT"] = str(payload)
+        (legacy / "projects.yaml").write_text("projects: {}\n")
+    slot = runtime / "versions" / "0.0.1"
+    venv.EnvBuilder(with_pip=False).create(slot / ".venv")
+    (slot / ".install-complete.json").write_text(json.dumps({
+        "version": "0.0.1", "completed_at": "2026-01-01T00:00:00Z", "pid": 1,
+    }))
+    (runtime / "current-version").write_text("0.0.1\n")
+    env["PATH"] = str(Path(env["SYSTEMROOT"]) / "System32")
+    assert shutil.which("python", path=env["PATH"]) is None
+    if cell:
+        # The canonical cell validator retains its own PATH Python prerequisite.
+        env["PATH"] += os.pathsep + str(Path(sys.executable).parent)
+    env["FIXTURE_EXPECTED_PYTHON"] = str(slot / ".venv" / "Scripts" / "python.exe")
+    if consumer == "node":
+        driver = tmp_path / "runtime-only.mjs"
+        driver.write_text("""
+import assert from "node:assert/strict";
+import childProcess from "node:child_process";
+import {syncBuiltinESMExports} from "node:module";
+import {pathToFileURL} from "node:url";
+const [module, scriptsRoot, workingDirectory] = process.argv.slice(2);
+let calls = 0;
+const original = childProcess.execFile;
+childProcess.execFile = (...args) => { calls++; return original(...args); };
+syncBuiltinESMExports();
+const {createManagedSessionAdmission} = await import(pathToFileURL(module));
+const check = createManagedSessionAdmission({scriptsRoot});
+for (const sessionId of ["runtime-only", "runtime-second"]) {
+  const input = {sessionId, workingDirectory};
+  assert.deepEqual(await Promise.all([check(input), check(input)]), [true, true]);
+  const coldCalls = calls;
+  assert.equal(await check(input), true);
+  assert.equal(calls, coldCalls, "warm membership must not spawn another discovery helper");
+}
+assert.equal(calls, process.env.COPILOT_EXTENSIONS_CONTEXT ? 2 : 4,
+  "concurrent checks share runtime discovery and the admission subprocess");
+""")
+        command = [
+            executable, str(driver),
+            str(SCRIPTS.parent / "extensions" / "agent-worktrees" / "managed-session.mjs"),
+            str(payload / "scripts"), str(anchor),
+        ]
+        frame = ""
+    else:
+        helper = str(payload / "scripts" / "managed-session.ps1").replace("'", "''")
+        command = [
+            executable, "-NoProfile", "-NonInteractive", "-Command",
+            f". '{helper}'; "
+            "if ((Get-ManagedWorktreesPython) -ne $env:FIXTURE_EXPECTED_PYTHON) "
+            "{ throw 'selected runtime was not resolved' }; "
+            "Test-ManagedWorktreesSession ([Console]::In.ReadToEnd())",
+        ]
+        frame = json.dumps({"sessionId": "runtime-only", "cwd": str(anchor)})
+    process = subprocess.Popen(
+        command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, cwd=anchor, env=env, **no_window_kwargs(),
+    )
+    visible, foreground, observed = set(), set(), set()
+    try:
+        process.stdin.write(frame)
+        process.stdin.close()
+        process.stdin = None
+        deadline = time.monotonic() + 15
+        from test_status_monitor_windows import (
+            _descendants, _foreground_state, _is_terminal_window,
+            _process_snapshot, _window_snapshot,
+        )
+
+        while process.poll() is None:
+            processes = _process_snapshot()
+            descendants = _descendants(process.pid, processes)
+            observed.update(pid for pid in descendants if pid != process.pid and
+                            "python" in processes.get(pid, ("", 0))[0].lower())
+            visible.update(hwnd for hwnd, window in _window_snapshot(processes).items()
+                           if window[0] in descendants)
+            active = _foreground_state(processes)
+            if active[1] in descendants and _is_terminal_window(active):
+                foreground.add(active[0])
+            assert time.monotonic() < deadline, "runtime-only admission exceeded its fixture deadline"
+            time.sleep(0.01)
+        stdout, stderr = process.communicate(timeout=5)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.communicate(timeout=5)
+    assert process.returncode == 0, stdout + stderr
+    if consumer != "node":
+        assert stdout.strip() == "True", stdout + stderr
+    assert observed and not visible and not foreground
+    record_testsuite_property(f"runtime_only_visible_windows:{consumer}:{cell}", len(visible))
+    record_testsuite_property(f"runtime_only_foreground_transitions:{consumer}:{cell}", len(foreground))
+    assert not (runtime / "logs").exists(), "passive resolver must not write boot traces"
+    assert not (tmp_path / ".copilot").exists()
+    if cell:
+        assert not (legacy / "cache").exists(), "selected cell must not admit through legacy ownership"
 
 
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
@@ -533,7 +729,9 @@ const environment = {...process.env, PATH: aliases};
 delete environment.Path;
 const input = {sessionId: "alias-fixture", workingDirectory};
 assert.equal(await createManagedSessionAdmission({scriptsRoot, environment})(input), false);
-assert.deepEqual(calls, []);
+assert.equal(calls.length, 1, "read-only runtime discovery may run without PATH Python");
+assert.match(calls[0], /powershell.exe$/i);
+calls.length = 0;
 environment.PATH += delimiter + dirname(python);
 assert.equal(await createManagedSessionAdmission({
   scriptsRoot, environment, python: join(aliases, "python.exe"),

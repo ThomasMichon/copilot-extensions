@@ -891,6 +891,13 @@ cached under the selected registry's `cache/managed-sessions/`. Registry and
 Git-ownership inputs invalidate reuse; the extension also checks these inputs
 before pulse, nudge or resident-policy effects. Membership is a reusable fact,
 not a cached tool permission: admitted events still evaluate current policy.
+The inputs include failed Git probes and the adopted anchor's shared metadata,
+so linked-worktree admission notices both repairs and revocation. The
+stdlib-only registry reader ignores optional fields such as repository tags.
+PowerShell resolves a healthy selected runtime read-only before PATH fallback;
+the Windows extension can use that same resolver when PATH Python is absent.
+Explicit installation cells retain the canonical validator's prerequisites;
+an invalid or unavailable context never selects an unvalidated cell interpreter.
 Missing admission helpers cannot activate a legacy bootstrap fallback.
 Fresh payload/runtime installation and a new session are needed to adopt this
 behavior; an already-loaded older extension is not retroactively changed.

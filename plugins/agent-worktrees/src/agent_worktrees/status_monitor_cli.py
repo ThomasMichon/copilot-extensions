@@ -324,10 +324,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         )
 
     def _decide(kind: str, payload: dict, deadline: float) -> dict:
-        if kind in {"preToolUse", "postToolUse", "sessionStart", "sessionEnd"}:
-            membership = hook_policy._module("managed_session.py")
-            if membership is None or not membership.admitted(payload):
-                return {}
+        if kind in {"preToolUse", "postToolUse", "sessionStart", "sessionEnd"} and not getattr(hook_client, "_managed_session_admitted", lambda _: False)(payload):
+            return {}
         if admission_closed and core.git_ops._windows_observation():
             if kind == "snapshot":
                 return {"segment": segment_cache.pending_segment_for_path(core._hook_payload_cwd(payload))}

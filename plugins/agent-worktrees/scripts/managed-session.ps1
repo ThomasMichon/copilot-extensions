@@ -1,15 +1,49 @@
-function Test-ManagedWorktreesSession {
-    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Raw)
-    $helper = Join-Path $PSScriptRoot 'managed_session.py'
-    if (-not [IO.File]::Exists($helper)) { return $false }
+function Get-ManagedWorktreesPython {
     $python = $env:AGENT_WORKTREES_RESIDENT_PRE_TOOL_PYTHON
-    if (-not $python -or $python -like '*\WindowsApps\*' -or
-        -not [IO.Path]::IsPathRooted($python) -or -not [IO.File]::Exists($python)) {
+    if ($python -and $python -notlike '*\WindowsApps\*' -and
+        [IO.Path]::IsPathRooted($python) -and [IO.File]::Exists($python)) { return $python }
+    $runtimeRoot = Join-Path $env:USERPROFILE '.agent-worktrees'
+    if ($env:COPILOT_EXTENSIONS_CONTEXT) {
+        $validator = Join-Path $PSScriptRoot 'installation-context\installation-context.ps1'
+        if (-not [IO.File]::Exists($validator)) { return $null }
+        $owner = if ($env:AGENT_WORKTREES_PAYLOAD_ROOT) { $env:AGENT_WORKTREES_PAYLOAD_ROOT }
+                 elseif ($env:COPILOT_PLUGIN_ROOT) { $env:COPILOT_PLUGIN_ROOT }
+                 else { Split-Path -Parent $PSScriptRoot }
+        $durableHome = $env:COPILOT_EXTENSIONS_CONTEXT
+        1..5 | ForEach-Object { $durableHome = Split-Path -Parent $durableHome }
+        $validation = @(& $validator -Action validate -Context $env:COPILOT_EXTENSIONS_CONTEXT `
+            -DurableHome $durableHome -ExpectedPluginId 'agent-worktrees' -ExpectedPayloadRoot $owner)
+        if ($LASTEXITCODE -ne 0) { return $null }
+        $context = ConvertFrom-Json -InputObject ($validation -join "`n") -ErrorAction Stop
+        if ($context.pluginRoot -isnot [string] -or
+            -not [IO.Path]::IsPathRooted($context.pluginRoot)) { return $null }
+        $runtimeRoot = $context.pluginRoot
+    }
+    $python = $null
+    $resolver = Join-Path $PSScriptRoot 'resolve-runtime.ps1'
+    if ([IO.File]::Exists($resolver)) {
+        $previousRoot = $env:AGENT_RT_ROOT
+        try {
+            $env:AGENT_RT_ROOT = $runtimeRoot
+            . $resolver -TraceMode read-only
+            $python = $AwPy
+        } finally {
+            if ($null -eq $previousRoot) { Remove-Item Env:AGENT_RT_ROOT -ErrorAction SilentlyContinue }
+            else { $env:AGENT_RT_ROOT = $previousRoot }
+        }
+    }
+    if (-not $python -and -not $env:COPILOT_EXTENSIONS_CONTEXT) {
         $python = Get-Command python -CommandType Application -All -ErrorAction SilentlyContinue |
         Where-Object { $_.Source -notlike '*\WindowsApps\*' } |
         Select-Object -First 1 -ExpandProperty Source
     }
-    if (-not $python) { return $false }
+    return $python
+}
+
+function Test-ManagedWorktreesSession {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Raw)
+    $helper = Join-Path $PSScriptRoot 'managed_session.py'
+    if (-not [IO.File]::Exists($helper)) { return $false }
     $process = $null
     try {
         if (-not $Raw.TrimStart().StartsWith('{')) { return $false }
@@ -21,6 +55,8 @@ function Test-ManagedWorktreesSession {
             }
         }
         $frame = ConvertTo-Json -InputObject $query -Compress
+        $python = Get-ManagedWorktreesPython
+        if (-not $python) { return $false }
         $info = [Diagnostics.ProcessStartInfo]::new()
         $info.FileName = $python
         $info.Arguments = '-I -B -X utf8 "' + $helper + '" --base64-input'

@@ -96,7 +96,10 @@ def _entries(path: Path, section: str) -> dict:
                 if value.strip() not in {"", "{}"}:
                     raise ValueError("unsupported project entry")
                 current = document[section][name] = {}
-            elif active and indent == 4 and current is not None:
+            elif (
+                active and indent == 4 and current is not None
+                and key in ({"anchor"} if section == "projects" else {"windows", "wsl", "linux"})
+            ):
                 if key in current:
                     raise ValueError("duplicate project field")
                 current[key] = _scalar(value)
@@ -150,16 +153,10 @@ def inspect(payload: dict, *, home: Path | None = None) -> dict:
         scope = {"session": session, "workspace": workspace, "registry": canonical(registry), "context": context}
         key = hashlib.sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()
         cache = registry / "cache" / "managed-sessions" / f"{key}.json"
-        identity = repository_identity(workspace)
-        for parent in (Path(workspace), *Path(workspace).parents):
-            marker = str(parent / ".git")
-            result["inputs"][marker] = _stamp(marker)
-            if identity is not None and canonical(parent) == identity["root"]:
-                break
-        if identity is not None:
-            for name in ("HEAD", "commondir", "gitdir"):
-                path = Path(identity["git_dir"]) / name
-                result["inputs"][str(path)] = _stamp(path)
+        def observe(path: Path) -> None:
+            result["inputs"][str(path)] = _stamp(path)
+
+        identity = repository_identity(cwd, observe=observe)
         try:
             cached = json.loads(_read(cache))
             if (
@@ -174,19 +171,13 @@ def inspect(payload: dict, *, home: Path | None = None) -> dict:
         except (OSError, ValueError, TypeError, KeyError, AttributeError):
             pass
         if identity is None:
-            if any(stamp is not None for path, stamp in result["inputs"].items() if Path(path).name == ".git"):
-                result["inputs"] = {}
-            else:
-                for parent in (Path(workspace), *Path(workspace).parents):
-                    for name in ("HEAD", "objects", "refs"):
-                        path = parent / name
-                        result["inputs"][str(path)] = _stamp(path)
             return result
         if inputs[str(sources[0])] is None:
             return result
         projects = _entries(sources[0], "projects")
         repos = _entries(sources[1], "repos") if inputs[str(sources[1])] is not None else {}
-        ownership_inputs = result["inputs"].copy()
+        workspace_inputs = result["inputs"].copy()
+        ownership_inputs = workspace_inputs.copy()
         platforms = ("windows",) if os.name == "nt" else (
             ("wsl", "linux") if os.environ.get("WSL_DISTRO_NAME") else ("linux",)
         )
@@ -203,30 +194,29 @@ def inspect(payload: dict, *, home: Path | None = None) -> dict:
             anchor = os.path.expanduser(anchor)
             if not os.path.isabs(anchor):
                 continue
-            owner = repository_identity(anchor)
+            result["inputs"] = workspace_inputs.copy()
+            owner = repository_identity(anchor, observe=observe)
+            owner_inputs = result["inputs"].copy()
+            ownership_inputs.update(owner_inputs)
+            result["inputs"] = ownership_inputs
             if owner is None or canonical(anchor) != owner["root"] or owner["common_dir"] != identity["common_dir"]:
                 continue
-            inputs = ownership_inputs.copy()
+            inputs = owner_inputs
             # Only the adopted anchor or an actual Git-linked worktree belongs.
             if identity["root"] != owner["root"]:
                 git_dir = Path(identity["git_dir"])
                 if git_dir.parent != Path(owner["common_dir"]) / "worktrees":
                     continue
                 backlink = git_dir / "gitdir"
+                inputs[str(backlink)] = _stamp(backlink)
+                ownership_inputs.update(inputs)
                 target = Path(_read(backlink).strip())
                 if not target.is_absolute():
                     target = git_dir / target
                 if canonical(target) != canonical(Path(identity["root"]) / ".git"):
                     continue
-                inputs[str(backlink)] = _stamp(backlink)
-            for root in {identity["root"], owner["root"]}:
-                marker = Path(root) / ".git"
-                inputs[str(marker)] = _stamp(marker)
-            common = Path(identity["git_dir"]) / "commondir"
-            inputs[str(common)] = _stamp(common)
-            head = Path(identity["git_dir"]) / "HEAD"
-            inputs[str(head)] = _stamp(head)
             if not _current(inputs):
+                result["inputs"] = ownership_inputs
                 return result
             record = {
                 "version": 1, "scope": scope, "identity": identity,
@@ -246,6 +236,7 @@ def inspect(payload: dict, *, home: Path | None = None) -> dict:
             except OSError:
                 pass
             return {"admitted": True, "workspace": workspace, "inputs": inputs}
+        result["inputs"] = ownership_inputs
         return result
     except Exception:
         return result
