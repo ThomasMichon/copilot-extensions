@@ -165,3 +165,10 @@ failure behavior, cache invalidation and mixed payload/runtime paths.
 - Required Linux units passed on the preceding submitted head. Its source guard identified an unclassified bounded admission-worker launch; the caller-contained census now names it, and the complete source-guard family passes locally. Lint, generation audits, install contract and version/docs consistency also pass.
 - The admitted source cohort now includes the extracted classifier and updated identity-module binding. Nodes, coverage targets, effect restrictions and budgets remain unchanged; exact-revision replay and fresh review/required CI precede merge. No installed update or service mutation is authorized or performed.
 - The committed source replay passed 4,136 admitted tests with coverage in 326.109 seconds under the Windows-native profile. The 1,000-line module-cap check also passes; exact-head Linux PR evidence and the fresh verdict remain independent gates.
+
+### 2026-11-04 - Native JSON dictionary compatibility
+
+- Required CI passed on the submitted ownership/runtime head. A remaining decoder mismatch could reject otherwise valid event data: PSObject projection loses empty or case-distinct JSON keys before membership extraction, including opaque tool data and case-aliased ownership paths in the helper response.
+- Native admission now uses dictionary decoding for both directions and extracts only exact workspace/session keys. PowerShell 5.1 retains its host's metadata resolver without PSObject projection or a new dependency; modern hosts use their native hashtable decoder.
+- The affected admission/selection/post-tool packet passed 96 tests with one platform skip. Eight real-process regressions then passed on both native PowerShell hosts with nested case-distinct/empty keys, reserved metadata, a dictionary-member shadow key and case-aliased registry roots.
+- The complete source-guard family, Python lint and unchanged admitted-unit source bindings pass. This native-only correction does not change the unit packet's admitted inputs or limits. Fresh review and exact-head required CI still precede merge; no installed mutation occurred.

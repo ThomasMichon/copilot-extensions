@@ -458,6 +458,40 @@ def test_session_start_forwards_unicode_membership_query(shell, tmp_path):
     assert json.loads(result.stdout) == {}
 
 
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("opaque", [
+    {"Name": 1, "name": 2},
+    {"": {"Name": 1, "name": 2}},
+    {"__type": None, "Name": 1, "name": 2, "": 3},
+    {"__type": "opaque", "Name": 1, "name": 2, "": 3},
+])
+def test_real_admission_accepts_opaque_json_keys(tmp_path, shell, opaque):
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    anchor, registry = fixture_project(tmp_path)
+    if os.name == "nt":
+        (registry / "repos.yaml").write_text(json.dumps({
+            "repos": {"example": {"windows": str(anchor).upper()}},
+        }))
+    event = {
+        "sessionId": "json-keys", "cwd": str(anchor), "CWD": str(tmp_path),
+        "toolArgs": opaque, "toolResult": opaque, "": "ignored", "Keys": "opaque",
+    }
+    helper = str(SCRIPTS / "managed-session.ps1").replace("'", "''")
+    env = environment(tmp_path, anchor)
+    env["AGENT_WORKTREES_RESIDENT_PRE_TOOL_PYTHON"] = sys.executable
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-Command",
+         f". '{helper}'; Test-ManagedWorktreesSession ([Console]::In.ReadToEnd())"],
+        input=json.dumps(event), capture_output=True, text=True, timeout=10,
+        env=env, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "True", result.stdout + result.stderr
+    assert not result.stderr
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows runtime-only interpreter discovery")
 @pytest.mark.parametrize("consumer", ["powershell.exe", "pwsh", "node"])
 @pytest.mark.parametrize("cell", [False, True])

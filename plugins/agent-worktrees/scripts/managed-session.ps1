@@ -46,6 +46,26 @@ function Get-ManagedWorktreesPython {
     return $python
 }
 
+function ConvertFrom-ManagedWorktreesJson {
+    param([string]$Text)
+    if (-not $Text.TrimStart().StartsWith('{')) { throw 'Expected a JSON object' }
+    if ($PSVersionTable.PSVersion.Major -ge 6) {
+        return ConvertFrom-Json -InputObject $Text -AsHashtable -ErrorAction Stop
+    }
+    if (-not $script:managedWorktreesJson) {
+        $null = ConvertFrom-Json -InputObject '{}' -ErrorAction Stop
+        [void][Reflection.Assembly]::Load('System.Web.Extensions, Version=4.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35')
+        # Retain the shell's metadata semantics without projecting keys onto PSObject.
+        $resolverType = [Microsoft.PowerShell.Commands.JsonObject].Assembly.GetType(
+            'Microsoft.PowerShell.Commands.JsonObjectTypeResolver', $true)
+        $resolver = [Activator]::CreateInstance($resolverType, $true)
+        $script:managedWorktreesJson = [System.Web.Script.Serialization.JavaScriptSerializer]::new($resolver)
+        $script:managedWorktreesJson.MaxJsonLength = [int]::MaxValue
+        $script:managedWorktreesJson.RecursionLimit = 100
+    }
+    return ,($script:managedWorktreesJson.DeserializeObject($Text))
+}
+
 function Test-ManagedWorktreesSession {
     param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Raw)
     $helper = Join-Path $PSScriptRoot 'managed_session.py'
@@ -53,11 +73,14 @@ function Test-ManagedWorktreesSession {
     $process = $null
     try {
         if (-not $Raw.TrimStart().StartsWith('{')) { return $false }
-        $event = ConvertFrom-Json -InputObject $Raw -ErrorAction Stop
+        $event = ConvertFrom-ManagedWorktreesJson $Raw
         $query = @{}
         foreach ($name in @('sessionId', 'cwd', 'workingDirectory')) {
-            if ($event.PSObject.Properties.Name -ccontains $name) {
-                $query[$name] = $event.$name
+            foreach ($key in $event.get_Keys()) {
+                if ($key -ceq $name) {
+                    $query[$name] = $event[$key]
+                    break
+                }
             }
         }
         $frame = ConvertTo-Json -InputObject $query -Compress
@@ -84,7 +107,7 @@ function Test-ManagedWorktreesSession {
         if (-not $process.WaitForExit(2000) -or
             -not [Threading.Tasks.Task]::WaitAll(@($stdout, $stderr), 1000) -or
             $process.ExitCode -ne 0 -or $stdout.Result.Length -gt 65536) { return $false }
-        $result = ConvertFrom-Json -InputObject $stdout.Result -ErrorAction Stop
+        $result = ConvertFrom-ManagedWorktreesJson $stdout.Result
         return $result.admitted -is [bool] -and $result.admitted
     } catch {
         return $false

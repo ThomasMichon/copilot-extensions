@@ -903,6 +903,8 @@ interpreters run admission with isolated, no-site imports; the owning payload's
 canonical validator accepts explicit-cell ownership before policy or lifecycle
 effects. SDK cold discovery shares those native owners, while warm callbacks
 reuse current dependencies without another child.
+Native dictionary JSON decoding keeps empty or case-distinct keys in unrelated
+event data from suppressing membership extraction.
 Missing admission helpers cannot activate a legacy bootstrap fallback.
 Fresh payload/runtime installation and a new session are needed to adopt this
 behavior; an already-loaded older extension is not retroactively changed.
