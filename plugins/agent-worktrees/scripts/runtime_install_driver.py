@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -25,6 +26,13 @@ TRANSIENT_KEYS = (
     "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", "COPILOT_PLUGIN_INSTALL_STAGED",
     "COPILOT_PLUGIN_STAGED_FROM", "COPILOT_EXTENSIONS_RUNTIME_PUBLICATION", NATIVE_ENV,
 )
+
+
+def positive_input_timeout(value: str) -> float:
+    seconds = float(value)
+    if not math.isfinite(seconds) or seconds <= 0:
+        raise argparse.ArgumentTypeError("input timeout must be positive and finite")
+    return seconds
 
 
 def bootstrap(payload: Path):
@@ -141,7 +149,7 @@ def _source_digest(payload: Path) -> str:
 
 def _native_arguments(args) -> list[str]:
     values = ["-Action", args.action, "-InstallDir", str(args.root.resolve())]
-    for option in ("project_name", "bootstrap_python", "owner", "install_source"):
+    for option in ("project_name", "bootstrap_python", "owner", "install_source", "input_timeout"):
         value = getattr(args, option, None)
         if value is not None:
             values.extend(["-" + "".join(word.title() for word in option.split("_")), str(value)])
@@ -251,7 +259,7 @@ def _foreground(args, driver) -> int:
         "--payload", str(args.payload), "--root", str(args.root),
         "--shell", str(args.shell), "--action", args.action, "--participant",
     ]
-    for option in ("project_name", "bootstrap_python", "owner", "install_source"):
+    for option in ("project_name", "bootstrap_python", "owner", "install_source", "input_timeout"):
         value = getattr(args, option, None)
         if value is not None:
             command.extend(["--" + option.replace("_", "-"), str(value)])
@@ -292,6 +300,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--bootstrap-python", type=Path)
     parser.add_argument("--owner", type=Path)
     parser.add_argument("--install-source", type=Path)
+    parser.add_argument("--input-timeout", type=positive_input_timeout)
     parser.add_argument("--source-descriptor", type=json.loads, help=argparse.SUPPRESS)
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--zero-downtime", action="store_true")
@@ -303,6 +312,8 @@ def main(argv: list[str] | None = None) -> int:
     inspection.add_argument("--check-removal", action="store_true", help=argparse.SUPPRESS)
     inspection.add_argument("--remove-runtime", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    if args.input_timeout is not None and not args.install_source:
+        parser.error("--input-timeout requires --install-source")
     if args.install_source and args.action not in ("install", "update", "provision", "repair"):
         parser.error("--install-source selects only installation, update, provisioning or independent repair")
     if args.install_source and not args.install_source.is_absolute():

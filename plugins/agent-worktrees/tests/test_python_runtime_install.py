@@ -356,11 +356,14 @@ def test_source_deployment_uses_exact_verified_snapshot_before_construction(
 
 
 @pytest.mark.parametrize("mode", ["ordinary", "repair", "dev"])
+@pytest.mark.parametrize("input_timeout", [None, 1200])
+@pytest.mark.parametrize("expired", [False, True])
 def test_install_source_cli_retains_inputs_through_native_owner_return(
-    driver, tmp_path, monkeypatch, mode,
+    driver, tmp_path, monkeypatch, mode, input_timeout, expired,
 ):
     from types import SimpleNamespace
     import install_source
+    import installer_wheel_inputs as guards
 
     snapshot = tmp_path / "snapshot"
     plugin = tmp_path / "plugin"
@@ -368,19 +371,34 @@ def test_install_source_cli_retains_inputs_through_native_owner_return(
     selected = SimpleNamespace(payload=plugin, identity=identity)
     wheels = object()
     held = []
+    now = [10.0]
+    clock_reads = []
+    budget = 600 if input_timeout is None else input_timeout
+
+    def clock():
+        clock_reads.append(now[0])
+        return now[0]
+
+    monkeypatch.setattr(driver, "time", SimpleNamespace(monotonic=clock))
+    monkeypatch.setattr(guards, "time", SimpleNamespace(monotonic=lambda: now[0]))
 
     @contextmanager
-    def inputs(path, component):
+    def inputs(path, component, *, deadline):
         assert path == snapshot and component == "agent-worktrees" and mode != "dev"
+        assert deadline == 10.0 + budget
+        guards._check_deadline(deadline)
         held.append(True)
         try:
             yield selected, wheels
         finally:
             held.pop()
+        guards._check_deadline(deadline)
 
     def install(root, selected_plugin, **options):
         assert held == [True] and selected_plugin == plugin
         assert options["wheel_inputs"] is wheels and options["repair"] == (mode == "repair")
+        if expired:
+            now[0] = 10.0 + budget
         return {"runtime_version": "selected-generation"}
 
     monkeypatch.setattr(install_source, "project_inputs", inputs)
@@ -393,14 +411,69 @@ def test_install_source_cli_retains_inputs_through_native_owner_return(
         "--base-python", sys.executable, "--result", str(result),
         "--install-source", str(snapshot), "--mode", mode,
     ]
+    if input_timeout is not None:
+        arguments += ["--input-timeout", str(input_timeout)]
     if mode == "dev":
         with pytest.raises(SystemExit) as refusal:
             driver.main(arguments)
         assert refusal.value.code == 2 and not result.exists()
+    elif expired:
+        with pytest.raises(guards.WheelDeadlineError):
+            driver.main(arguments)
+        assert not result.exists()
     else:
         assert driver.main(arguments) == 0
         assert json.loads(result.read_text()) == {"runtime_version": "selected-generation"}
+    assert clock_reads == ([] if mode == "dev" else [10.0])
     assert not held
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "inf", "-inf"])
+def test_install_source_cli_refuses_invalid_input_timeout(driver, tmp_path, value, capsys):
+    with pytest.raises(SystemExit) as failure:
+        driver.main(["--input-timeout=" + value])
+    assert failure.value.code == 2
+    assert "positive and finite" in capsys.readouterr().err
+    assert not (tmp_path / "runtime").exists()
+
+
+def test_install_source_cli_rejects_input_timeout_without_source(
+    driver, tmp_path, monkeypatch, capsys,
+):
+    from unittest.mock import Mock
+
+    install = Mock(return_value={})
+    monkeypatch.setattr(driver, "install", install)
+    result = tmp_path / "result.json"
+    with pytest.raises(SystemExit) as failure:
+        driver.main([
+            "--root", str(tmp_path / "runtime"), "--plugin", str(tmp_path / "plugin"),
+            "--payload", str(tmp_path / "payload"), "--uv", str(tmp_path / "uv"),
+            "--base-python", sys.executable, "--result", str(result),
+            "--input-timeout", "1200",
+        ])
+    assert failure.value.code == 2
+    assert "--input-timeout requires --install-source" in capsys.readouterr().err
+    install.assert_not_called()
+    assert not result.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native PowerShell parameter validation")
+@pytest.mark.parametrize("value", ["NaN", "Infinity"])
+def test_native_frontend_refuses_nonfinite_input_timeout_before_admission(tmp_path, value):
+    shell = shutil.which("pwsh.exe") or shutil.which("powershell.exe")
+    if shell is None:
+        pytest.skip("native PowerShell is unavailable")
+    root = tmp_path / "runtime"
+    script = Path(__file__).resolve().parents[1] / "scripts" / "install.ps1"
+    result = subprocess.run(
+        [shell, "-NoProfile", "-NonInteractive", "-File", str(script), "repair",
+         "-InstallDir", str(root), "-InstallSource", str(tmp_path / "snapshot"),
+         "-InputTimeout", value],
+        capture_output=True, timeout=30, **no_window_kwargs(),
+    )
+    assert result.returncode != 0 and b"InputTimeout" in result.stderr
+    assert not root.exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows installer argument admission")

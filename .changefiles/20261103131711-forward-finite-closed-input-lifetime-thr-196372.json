@@ -1,0 +1,9 @@
+{
+  "comment": "Forward finite closed-input lifetime through native Worktrees installation without renewing absolute custody",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
