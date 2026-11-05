@@ -1572,6 +1572,37 @@ def test_ssh_bootstrap_uses_explicit_bounded_native_portfolio() -> None:
         ]
 
 
+def test_worktree_state_durability_is_manual_native_and_source_pinned() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    trigger = workflow.get("on", workflow.get(True))
+    assert "worktree-state" in trigger["workflow_dispatch"]["inputs"]["portfolio"]["options"]
+    job = workflow["jobs"]["worktree-state-windows"]
+    assert job["if"] == (
+        "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'worktree-state'"
+    )
+    assert job["runs-on"] == "windows-latest" and job["timeout-minutes"] == 5
+    assert not job.get("continue-on-error")
+    checkout = next(step for step in job["steps"] if step.get("uses") == "actions/checkout@v4")
+    assert checkout["with"] == {"ref": "${{ github.sha }}", "persist-credentials": False}
+    commands = [step for step in job["steps"] if "run" in step]
+    assert commands[0]["env"]["EXPECTED_SOURCE"] == "${{ github.sha }}"
+    assert "assert actual == os.environ['EXPECTED_SOURCE']" in commands[0]["run"]
+    assert "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }" in commands[0]["run"]
+    assert [shlex.split(step["run"]) for step in commands[1:]] == [
+        ["python", "tools/run-plugin-tests.py", "agent-worktrees",
+         "--test-file", "tests/test_worktree_data_store.py",
+         "-k", "native_windows_allocation or final_project_root_barrier_failure",
+         "--allow-explicit-tiers"],
+        ["python", "tools/run-plugin-tests.py", "efforts",
+         "--test-file", "tests/test_agenda_export.py",
+         "-k", "native_windows_complete_export", "--allow-explicit-tiers"],
+    ]
+    required = yaml.safe_load((HERE.parent / ".github/workflows/ci.yml").read_text())
+    assert "worktree-state-windows" not in required["jobs"]
+
+
 def test_pr_service_acceptance_is_bounded_and_independently_selected() -> None:
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()

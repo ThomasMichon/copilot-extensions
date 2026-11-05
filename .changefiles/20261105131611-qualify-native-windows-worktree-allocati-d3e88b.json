@@ -1,0 +1,13 @@
+{
+  "comment": "Qualify native Windows worktree allocation retries and complete agenda export readback in an explicit private-fixture portfolio.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "efforts",
+      "type": "patch"
+    }
+  ]
+}
