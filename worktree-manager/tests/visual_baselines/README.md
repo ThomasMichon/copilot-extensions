@@ -9,6 +9,11 @@ expands an older event and retains its viewport when one new event arrives.
 evidence, a historical input occurrence and an expanded compaction occurrence
 with unknown pre-window qualification and durability. It uses synthetic data,
 not a provider-measurement claim.
+The four `timeline-current-*.svg` comparisons add independent pending, cleared,
+partial and unknown live-input qualification while retaining the same historical
+request and compaction occurrences. They use strict synthetic wire DTOs and the
+production summary renderer; a cleared live set does not erase the historical
+request, and partial/unknown coverage never means complete absence.
 The purpose, source qualifications, selection, details, controls and unread
 count are compared as rendered, not reconstructed from DTOs.
 
@@ -42,7 +47,17 @@ keyboard selection and semantic live delivery through private synthetic
 process pipes. It is an in-progress capture, not a deterministic baseline:
 its real fixture event timestamps vary. This packet also checks finite history,
 independent history cancellation, empty-to-first-event continuity, capability
-refusal and selected-head retirement. The private peer uses production semantic
-admission/projection and EventLog wakes, not a running Bridge HTTP service or
-SDK actor; HTTP authentication and subscriber accounting retain their owning
-Bridge test coverage.
+refusal and selected-head retirement. The private peer uses the production semantic route generator, admission,
+projection and EventLog wakes on an isolated owner loop, not a running Bridge
+HTTP service or SDK actor. The owning CLI negotiates a private fixture peer;
+HTTP authentication retains its independent Bridge coverage. Exact subscriber
+retirement is observed through the route's bounded lifecycle backstop.
+
+`tests/test_companion_current_requests.py` additionally retains four
+`current-*` full-app progress captures from actual parked local callbacks, the
+owning CLI and Textual, with no retained events at all. It verifies both input
+and permission waiters, clearing, lost coverage and disconnection without focus
+transfer or answering. These full-app captures remain progress evidence rather
+than deterministic golden comparisons. Dated SVG/PNG progress exports and
+curated screenshots are stored separately from source qualification; neither
+qualifies an installed runtime or native mux client.

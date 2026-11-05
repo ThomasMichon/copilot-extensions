@@ -716,6 +716,35 @@ def test_dispatch_preparation_fingerprints_same_checkout_replay_dependency(tmp_p
     assert runner._dep_fingerprint("agent-dispatch") != before
 
 
+def test_manager_bridge_is_prepared_only_by_the_test_runner(tmp_path, monkeypatch):
+    manager = tmp_path / "worktree-manager"
+    manager.mkdir()
+    (manager / "pyproject.toml").write_text(
+        '[project]\nname = "copilot-extensions-worktree-manager"\n'
+        '[project.optional-dependencies]\ndev = ["pytest>=8"]\n',
+    )
+    bridge = tmp_path / "plugins" / "agent-bridge"
+    bridge.mkdir(parents=True)
+    (bridge / "pyproject.toml").write_text('[project]\nname = "agent-bridge"\nversion = "1.0"\n')
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    monkeypatch.setattr(runner, "VENV_ROOT", tmp_path / "venvs")
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: manager)
+    (runner.VENV_ROOT / "worktree-manager").mkdir(parents=True)
+    calls = []
+    monkeypatch.setattr(
+        runner.subprocess, "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(command, 0),
+    )
+    monkeypatch.setattr(
+        runner, "run_uv_install", lambda uv, arguments, **kwargs: calls.append((arguments, kwargs)),
+    )
+    runner._ensure_venv("worktree-manager", "fixture-uv", reinstall=False)
+    arguments, options = calls[0]
+    assert arguments[arguments.index(str(bridge)) - 1] == "-e"
+    assert options["cwd"] == manager and options["trusted_source_roots"] == (tmp_path,)
+    assert "agent-bridge" not in (manager / "pyproject.toml").read_text()
+
+
 def test_ssh_optional_sdk_is_not_misattributed_as_a_canonical_library():
     import tomllib
 

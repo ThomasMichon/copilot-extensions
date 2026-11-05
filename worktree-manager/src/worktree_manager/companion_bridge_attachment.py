@@ -2,25 +2,32 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from copy import deepcopy
 import json
+from threading import Lock
 from typing import Any
 
 from rich.text import Text
 from textual.widgets import Select
 
 from .companion_bridge_session_source import BridgeSessionSource
+from .companion_bridge_current_requests import CurrentRequestState
 from .companion_bridge_source import BridgeMembershipSource
 from .companion_timeline_attachment import PreparedTimelineSource, TimelineAttachment
-from .companion_timeline_contract import Availability, Provider
+from .companion_timeline_contract import Availability, Provider, SourceToken
 from .companion_timeline_widget import SubwayTimeline
 
 
 class BridgeTimelineAttachment(TimelineAttachment):
     def __init__(
-        self, *args: Any, owner_ref: Callable[[], Any], project_root: Callable[[], str], **kwargs: Any,
+        self, *args: Any, owner_ref: Callable[[], Any], project_root: Callable[[], str],
+        current_status: Callable[[CurrentRequestState | None], None] | None = None, **kwargs: Any,
     ) -> None:
+        self._current_status = current_status
+        self.current_requests: CurrentRequestState | None = None
+        self._current_revision = 0
         super().__init__(*args, provider=Provider.BRIDGE, source_factory=self._source, **kwargs)
         self._owner_ref, self._project_root = owner_ref, project_root
         self.selection: tuple[str, str, str] | None = None
@@ -36,7 +43,52 @@ class BridgeTimelineAttachment(TimelineAttachment):
         if self._chosen is None:
             return BridgeMembershipSource(*selection, **options)
         member, generation = self._chosen
-        return BridgeSessionSource(*selection, **options, member=member, hosting_generation=generation)
+        loop = asyncio.get_running_loop()
+        revision, current_revision = self._revision, self._current_revision
+        pending: CurrentRequestState | None = None
+        scheduled = False
+        lock = Lock()
+
+        def accept() -> None:
+            nonlocal pending, scheduled
+            with lock:
+                state, pending, scheduled = pending, None, False
+            if (
+                revision == self._revision and current_revision == self._current_revision
+                and not self._stop.is_set() and self.selection == selection and self._renderable()
+                and (self._head_current is None or self._head_current(selection))
+            ):
+                self.current_requests = state
+                if self._current_status is not None:
+                    self._current_status(state)
+
+        def publish(state: CurrentRequestState | None) -> None:
+            nonlocal pending, scheduled
+            with lock:
+                pending = state
+                if scheduled:
+                    return
+                scheduled = True
+            loop.call_soon_threadsafe(accept)
+
+        return BridgeSessionSource(
+            *selection, **options, member=member, hosting_generation=generation,
+            current=publish,
+        )
+
+    def _invalidate_current(self) -> None:
+        self._current_revision += 1
+        self.current_requests = None
+        if self._current_status is not None:
+            self._current_status(None)
+
+    def stop_now(self) -> None:
+        self._invalidate_current()
+        super().stop_now()
+
+    def _error(self, token: SourceToken | None, message: str) -> None:
+        self._invalidate_current()
+        super()._error(token, message)
 
     def update_choices(self, control: Select[str]) -> None:
         """Only complete delivered membership states can offer exact local session bindings."""

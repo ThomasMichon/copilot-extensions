@@ -80,7 +80,9 @@ class MembershipCommands:
             *(["--follow"] if follow else []), *(["--after", after] if after is not None else []),
         ], cancelled)
 
-    def command(self, arguments: list[str], cancelled: Event) -> Generator[dict, None, None]:
+    def command(
+        self, arguments: list[str], cancelled: Event, *, json_document: bool = False,
+    ) -> Generator[dict, None, None]:
         """Use the selected owner's bounded passive CLI pipe for one operation."""
         if self.base is None:
             self.base = bridge_command(self.project_root)
@@ -97,6 +99,7 @@ class MembershipCommands:
                     "COPILOT_PLUGIN_ROOT": "",
                 },
                 startup_timeout=BRIDGE_STARTUP_TIMEOUT, idle_timeout=BRIDGE_IDLE_TIMEOUT,
+                **({"json_document": True} if json_document else {}),
             )
         except EngineCleanupError as error:
             raise TimelineCleanupError(str(error)) from error

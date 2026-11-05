@@ -56,7 +56,7 @@ from .companion_timeline_attachment import TimelineAttachment, selected_head
 from .companion_agenda_attachment import AgendaTimelineAttachment
 from .companion_bridge_attachment import BridgeTimelineAttachment
 from .companion_timeline_contract import Provider
-from .companion_summary import _claims_view, _fact, _summary_text, bridge_status
+from .companion_summary import _claims_view, _fact, _summary_text, bridge_status, render_current_input
 
 #: Blocker code (from the closure descriptor's ``blockers`` list) -> a short,
 #: plain-language reason. Mirrors the vocabulary in
@@ -263,6 +263,11 @@ class MuxCompanionApp(App):
         height: 3;
         overflow-y: auto;
     }
+    #timeline-current-input {
+        display: none;
+        height: 2;
+        overflow-y: auto;
+    }
     Screen {
         background: #1a1a1a;
         border: round #6c6c6c;
@@ -388,6 +393,7 @@ class MuxCompanionApp(App):
             owner_ref=lambda: (_fact(self._data, "claims")[0] or {}).get("owner_ref"),
             project_root=lambda: self._data.worktree.get("path") or "",
             status=self._bridge_status, evidence_owner=self._timeline_attachment,
+            current_status=lambda state: render_current_input(self, state),
         )
 
     def compose(self) -> ComposeResult:
@@ -401,6 +407,10 @@ class MuxCompanionApp(App):
             with TabPane("Timeline", id="timeline-tab"):
                 yield Static("Rich Agenda: awaiting selected owner publication", id="timeline-agenda-status")
                 yield Static("Bridge: awaiting selected owner", id="timeline-bridge-status")
+                yield Static(
+                    "Current input unknown; no qualified selected-session observation.",
+                    id="timeline-current-input",
+                )
                 yield Select([("Bridge feed: membership (discover delegates)", "membership")],
                              value="membership", allow_blank=False, id="bridge-feed")
                 yield self._timeline_panel

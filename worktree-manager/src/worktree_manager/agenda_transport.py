@@ -308,8 +308,9 @@ def command_frames(
     argv: list[str], *, cancelled: Event, cwd: str,
     environment: dict[str, str] | None = None,
     startup_timeout: float = STARTUP_TIMEOUT, idle_timeout: float = IDLE_TIMEOUT,
+    json_document: bool = False,
 ):
-    """Bounded JSONL for an already admitted owned command; no discovery or bootstrap."""
+    """Bounded JSONL or one finite JSON document from an admitted owned command."""
     if cancelled.is_set():
         return
     queue: Queue = Queue(maxsize=2)
@@ -322,6 +323,7 @@ def command_frames(
     pending_lock = Lock()
     stdout_pending = [None]
     not_ready = object()
+    document = bytearray()
 
     def take_ready():
         with pending_lock:
@@ -434,10 +436,26 @@ def command_frames(
                 f"agenda command exited {value['returncode']}: {detail or 'no diagnostic'}",
                 code="exit-failed",
             )
+        if json_document:
+            return None
         return AgendaUnavailable(
             "agenda feed disconnected without a going-away notice" + (f": {detail}" if detail else ""),
             retry=True, code="disconnected",
         )
+
+    def finish():
+        failure = ended()
+        if failure is not None:
+            raise failure
+        if json_document and not cancelled.is_set():
+            try:
+                frame = json.loads(document, object_pairs_hook=_object)
+                bounded_json(frame)
+            except (UnicodeError, RecursionError) as exc:
+                raise ValueError("owned command emitted an invalid bounded document") from exc
+            if not isinstance(frame, dict):
+                raise ValueError("owned command emitted a non-object document")
+            yield frame
 
     readers = []
     try:
@@ -469,10 +487,8 @@ def command_frames(
                             # settlement; it always precedes completion fallback.
                             line = take_ready()
                             if line is not_ready and (completed.is_set() or stdout_drained.is_set()):
-                                failure = ended()
-                                if failure is None:
-                                    return
-                                raise failure
+                                yield from finish()
+                                return
                             if line is not_ready:
                                 raise AgendaUnavailable("agenda feed missed its frame deadline", retry=True)
                         if line is not_ready:
@@ -486,12 +502,15 @@ def command_frames(
                     if isinstance(line, OSError):
                         raise line
                     if not line:
-                        failure = ended()
-                        if failure is None:
-                            return
-                        raise failure
+                        yield from finish()
+                        return
                     if len(line) > MAX_FRAME_BYTES or not line.endswith(b"\n"):
                         raise ValueError("agenda feed exceeded its atomic frame bound")
+                    if json_document:
+                        if len(document) + len(line) > MAX_FRAME_BYTES:
+                            raise ValueError("owned command exceeded its document bound")
+                        document.extend(line)
+                        continue
                     frame = json.loads(line, object_pairs_hook=_object)
                     if not isinstance(frame, dict):
                         raise ValueError("agenda feed emitted a non-object frame")
