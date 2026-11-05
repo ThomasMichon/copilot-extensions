@@ -7,6 +7,7 @@ import runpy
 import shutil
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -193,8 +194,22 @@ def test_actual_mcp_cold_recipe_survives_caller_exit_and_preserves_healthy_selec
             command("provision"), env=environment, cwd=project, root=root, diagnostic=diagnostic,
         ) for _ in range(2)
     ]
+    report_at = time.monotonic() + 60
+
+    def provisions_finished():
+        nonlocal report_at
+        if time.monotonic() >= report_at:
+            latest = sorted(root.glob("*.log"), key=lambda path: path.stat().st_mtime)[-3:]
+            with capsys.disabled():
+                for path in latest:
+                    print(f"MCP active log {path.name}:\n"
+                          + path.read_text(errors="replace")[-4096:], flush=True)
+            report_at = time.monotonic() + 60
+        return all(process.poll() is not None for process, _path in callers)
+
+    observe(provisions_finished, 600, diagnostic)
     for process, path in callers:
-        assert process.wait(timeout=900) == 0, path.read_text(errors="replace") + diagnostic()
+        assert process.returncode == 0, path.read_text(errors="replace") + diagnostic()
     stage("installed consumers")
     slot = assert_installed_mcp(installation, environment, project)
     selection = (installation / "current-version").read_bytes()

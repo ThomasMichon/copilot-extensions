@@ -951,3 +951,32 @@ the repository's existing pattern. The canonical trusted-CI checker passes;
 both jobs retain identical commands, environment and 35-minute job budgets.
 The guard and required unit-only selection are unchanged. This workflow
 correction does not turn the still-pending native run into a pass.
+
+Run `41961771318` at the UV correction completed as a failure on both
+platforms. Linux progressed through actual provisioning, installed consumers
+and healthy repeat, then its negative control expected an exception string
+that MCP's health gate intentionally suppresses. The actual initializer
+reported `Fresh runtime slot failed its health gate` and refused activation.
+The fixture now requires that public health-gate diagnostic while retaining
+the real incoming module failure and all old-selection/configuration checks.
+Windows exceeded the unchanged 900-second aggregate envelope without a useful
+stage report; no passing outcome or specific hung operation is inferred.
+
+The test now emits a finite stage marker at each native transition, without
+another polling process or changed deadline. Run `41963933663` qualifies
+candidate `92551780178074204922f0e615cfd8214cc23ee3` through the corrected
+fixed-runner jobs. Its outcome is pending; the source PR stays draft.
+
+The fixed-job run completed with Linux passing its full recipe, cold
+construction, installed-consumer, healthy-repeat, failed-candidate preservation
+and native settlement portfolio. Windows completed cold stamp, then timed out
+inside concurrent provision before any installed-consumer assertion. Required
+CI `41963918779` at the same candidate passed source guards, eligible units
+with coverage and the required PR gate. Neither result substitutes for the
+remaining Windows native qualification.
+
+The next diagnostic revision reports at most three 4 KiB active log tails per
+minute during the bounded provision wait. The wait now refuses at ten minutes,
+within the unchanged aggregate envelope; no timeout, process or storage limit
+is raised. This is test-only progress reporting, not a production poller or
+another execution owner.
