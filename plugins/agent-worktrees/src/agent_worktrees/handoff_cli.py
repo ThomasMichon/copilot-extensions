@@ -516,7 +516,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
                     launch_cmd, cfg.tracking_dir() / f"{wt_id}.yaml", seed, explicit=explicit_seed,
                     environment=env,
                 )
-            except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
+            except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome, tracking_write.ResidentRecoveryHeld) as exc:
                 return output._json_error(f"Could not prepare native startup prompt: {exc}", exit_code=3)
         try:
             admission.enter_context(launch_admission.guard(cfg.tracking_dir() / f"{wt_id}.yaml"))

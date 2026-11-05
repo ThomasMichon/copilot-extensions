@@ -291,7 +291,7 @@ def test_shared_home_isolation_covers_canonical_profile(_isolate_agent_worktrees
         recovery.require_wake_allowed()
 
 
-@pytest.mark.parametrize("command", ["embody", "handoff-cutover"])
+@pytest.mark.parametrize("command", ["embody", "handoff-cutover", "bridge-seed-settle"])
 def test_implicit_json_cli_maintenance_refusal(command, monkeypatch, capfd):
     from agent_worktrees import __main__ as cli
 
@@ -299,7 +299,8 @@ def test_implicit_json_cli_maintenance_refusal(command, monkeypatch, capfd):
         raise recovery.ResidentRecoveryHeld("active maintenance")
 
     monkeypatch.setitem(cli.COMMAND_MAP, command, held)
-    assert cli._dispatch_lazy(command, [command]) == 1
+    arguments = [command, *(["--worktree-id", "fixture"] if command == "bridge-seed-settle" else [])]
+    assert cli._dispatch_lazy(command, arguments) == 1
     captured = capfd.readouterr()
     assert "maintenance" in json.loads(captured.out)["error"]
     assert not captured.err

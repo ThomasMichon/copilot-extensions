@@ -91,9 +91,10 @@ def test_backend_observations_are_prompt_free_and_not_acceptance(record, monkeyp
     assert "accepted" not in serialized and "conversation" not in serialized
 
 
-def test_initial_failure_prevents_seed_claim_and_spawn(record, monkeypatch, capsys):
+@pytest.mark.parametrize("failure", [OSError, tracking_write.ResidentRecoveryHeld])
+def test_initial_failure_prevents_seed_claim_and_spawn(record, monkeypatch, capsys, failure):
     seed = seeds.stage(record, kind="new", text="must remain staged")
-    monkeypatch.setattr(audit.Execution, "append", lambda *a, **k: (_ for _ in ()).throw(OSError("secret")))
+    monkeypatch.setattr(audit.Execution, "append", lambda *a, **k: (_ for _ in ()).throw(failure("secret")))
     monkeypatch.setattr(launcher.subprocess, "Popen", lambda *a, **k: pytest.fail("spawned"))
     assert launcher.launch(
         record, ["copilot"], invoke=True, seed_id=seed.seed_id, correlation=_correlation(),
@@ -103,9 +104,11 @@ def test_initial_failure_prevents_seed_claim_and_spawn(record, monkeypatch, caps
 
 
 @pytest.mark.parametrize("failed_phase", ["seed-claimed", "process-spawned", "execution-returned"])
-@pytest.mark.parametrize("interrupted", [False, True])
+@pytest.mark.parametrize("failure", [
+    KeyboardInterrupt, tracking_write.AmbiguousWriteOutcome, tracking_write.ResidentRecoveryHeld,
+])
 def test_lost_observation_does_not_repeat_spawn_or_skip_seed_settlement(
-    record, monkeypatch, failed_phase, interrupted, capsys,
+    record, monkeypatch, failed_phase, failure, capsys,
 ):
     seed = seeds.stage(record, kind="resume", text="exactly one argv handoff")
     append = audit.Execution.append
@@ -113,9 +116,7 @@ def test_lost_observation_does_not_repeat_spawn_or_skip_seed_settlement(
     waits = []
     def observe(self, phase, **details):
         if phase == failed_phase:
-            if interrupted:
-                raise KeyboardInterrupt()
-            raise tracking_write.AmbiguousWriteOutcome("private diagnostic")
+            raise failure("private diagnostic")
         return append(self, phase, **details)
     monkeypatch.setattr(audit.Execution, "append", observe)
     _backend(monkeypatch, lambda argv, **k: calls.append(argv) or SimpleNamespace(

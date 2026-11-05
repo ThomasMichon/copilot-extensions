@@ -21,7 +21,7 @@ def existing_launch(
     if pane and not deferred and getattr(args, "deliver_pending_seed", False):
         try:
             receipt = launch_seed_state.claim_creation(cfg.tracking_dir() / f"{wt_id}.yaml")
-        except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
+        except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome, tracking_write.ResidentRecoveryHeld) as exc:
             return output._json_error(f"Could not hand off staged New prompt: {exc}", exit_code=3)
         if receipt["seed"]:
             if refusal := agent_policy.json_refusal(work_dir):
@@ -115,7 +115,7 @@ def complete_launch(
     if record is not None and not acquisition and not deferred and not native_seed_id:
         try:
             creation_receipt = launch_seed_state.claim_creation(cfg.tracking_dir() / f"{wt_id}.yaml")
-        except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
+        except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome, tracking_write.ResidentRecoveryHeld) as exc:
             return output._json_error(f"Could not hand off staged New prompt: {exc}", exit_code=3)
         claimed_seed = creation_receipt["seed"]["text"] if creation_receipt["seed"] else None
         if not explicit_seed:

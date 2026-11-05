@@ -18,6 +18,12 @@ the shared test home also isolates the canonical passwd lookup. These are isolat
 not an installed daemon wake, rollout or complete history guarantee; required
 unit-only CI admission remains separate.
 
+The additional `--test-file tests/test_launch_execution.py --test-file
+tests/test_launch_seed_state.py --test-file tests/test_launch_attempt.py` packet
+checks maintenance refusal before effects and during post-spawn observations
+or seed cleanup: the launcher still owns exactly one child wait, preserves its
+actual result, retains unconfirmed receipts, and never repeats the launch.
+
 Manager's opt-in `--test-file tests/test_companion_tool_statistics.py
 --test-file tests/test_companion_current_requests.py --test-file
 tests/test_companion_bridge_session_source.py --allow-explicit-tiers` packet

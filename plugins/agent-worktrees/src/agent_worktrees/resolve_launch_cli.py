@@ -437,7 +437,7 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
             verdict = None
     try:
         staged_seed = seed_for_attempt(record.yaml_path, record, args, verdict=verdict)
-    except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
+    except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome, tracking_write.ResidentRecoveryHeld) as exc:
         error = f"Could not stage launch prompt: {exc}"
         output.err(error)
         _emit_plan({"action": "error", "error": error, "exit_code": 3})
