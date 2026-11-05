@@ -274,13 +274,27 @@ Historical input/resolution events do not prove current pending requests or
 answerability, and compaction starts do not qualify active pre-window capacity.
 No answer, session start, claim release or installed/native acceptance is implied.
 
-For current input, Manager first reads the selected executable's passive
-`version --contracts-json` declaration once per selection. Only a supported CLI
-receives `--current-requests`; that CLI independently negotiates the running
-daemon before sending the optional query. An exact typed unsupported-capability
-refusal before any source read selects ordinary v1 observation with live input
-unknown. An unrecognized invocation, malformed source frame or uncertain
-transport outcome is not retried as a baseline request.
+For current input and optional tool statistics, Manager reads the selected
+executable's passive `version --contracts-json` declaration once per selection.
+Only a supported CLI receives `--current-requests` or `--tool-statistics`; that
+CLI independently negotiates the running daemon before sending each optional
+query. An exact typed unsupported-capability refusal before any source read
+removes only that optional flag, leaving the other feature independent. An
+unrecognized invocation, malformed source frame or uncertain transport outcome
+is not retried as a baseline request. History requests carry neither option.
+
+The short `N starts (observed range)` label counts owner-reported native
+tool-start **record occurrences**, not unique calls, completed/running work or
+session-lifetime totals. Evidence retains the exact source scope, interval,
+native head, observed-record count, contiguity and partial/unknown durability
+qualification. Empty/unqualified or unsupported statistics remain unknown,
+not zero. A qualified nonempty range containing no starts may show zero.
+Backward pages, duplicate delivery and display eviction cannot recalculate the
+count; replaced source continuity requires a fresh scoped observation. The input
+label remains a local waiter observation, with full coverage/reason and unknown
+answerability in Evidence. Both projections share the existing selected reader
+and one bounded UI callback; no extra worker, history scan or rendering I/O is
+introduced.
 
 The same reader delivers bounded live waiter state independently of the timeline
 window and history pages, including while an empty log still waits for its first

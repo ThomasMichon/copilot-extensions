@@ -188,6 +188,13 @@ projection at existing EventLog construction/lifecycle seams. The
 Optional provider/CLI negotiation and Manager consumption remain pending;
 this is not lifetime accounting, current concurrency or whole-S2 acceptance.
 
+#10712 merged as `6abf06b3ed22290d2f84f6b293a00e004400729a`, expanding
+the same statistics projection through independently optional parser/HTTP/CLI
+support. The [provider readback](journal/2026/11.05-sidecar-tool-statistics-provider.md)
+records 123 focused cases, the 91-case current HTTP-52 capture/verification and
+the corrected existing pure-unit admission. Manager consumption and its joined
+presentation/eviction controls remain open; the whole S2 row is not closed.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than
@@ -484,8 +491,9 @@ publication and installed support retain their separate qualification.
   the native/ACP source does not establish it.
   The [bounded tool-statistics amendment](sidecar-tool-statistics.md), reviewed in #10704, admits
   one source-range occurrence counter, not unique calls or lifetime totals.
-  #10707 supplies the internal owner projection, not its optional wire/consumer.
-  Provider, compatibility and actual consumer controls precede source closure.
+  #10707 supplies the internal owner projection; #10712 adds negotiated optional
+  provider/parser/CLI support and compatibility qualification. Actual Manager
+  consumption and its joined controls still precede source closure.
 - [x] Supply rich agenda-history access through its actual owner and an admitted
   locator for supported sources. Test old/missing sources as explicitly
   unavailable/observed-only, not as delivery of rich history.
