@@ -8,6 +8,16 @@ requirements remain in their issues and actual receiving objectives.
 
 ## Snapshot and boundaries
 
+The [nine standalone/reservation/runtime contracts](finite-standalone-reservation-runtime-contracts.md)
+retain twenty-seven ranked relationships and independently verify #8352's
+finite tested image deliverable through merged #8385 and #8876's source
+correction through merged #8961.
+Seven other originals remain OPEN; current source, exact original clauses,
+review/CI and audited disposition are separate from candidate similarity.
+The [journal](<journal/2026/11.05 finite-standalone-reservation-runtime-contracts.md>)
+records 779 verified dispositions and 1,008 whole open, 279 above 729,
+without new native, installed or custody effects.
+
 The [six release/stamp/inventory contracts](finite-release-stamp-inventory-contracts.md)
 retain eighteen ranked relationships without closure credit.
 Real earlier model/source progress and an unwired inventory foundation do

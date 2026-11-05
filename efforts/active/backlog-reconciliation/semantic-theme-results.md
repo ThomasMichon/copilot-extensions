@@ -5,6 +5,16 @@ Method: [weighted semantic consolidation](semantic-density-consolidation.md).
 
 ## Result and coverage
 
+The [nine standalone/reservation/runtime contracts](finite-standalone-reservation-runtime-contracts.md)
+retain twenty-seven ranked relationships and independently verify #8352's
+finite tested image deliverable through merged #8385 and #8876's source
+correction through merged #8961.
+Seven other originals remain OPEN; current source, exact original clauses,
+review/CI and audited disposition are separate from candidate similarity.
+The [journal](<journal/2026/11.05 finite-standalone-reservation-runtime-contracts.md>)
+records 779 verified dispositions and 1,008 whole open, 279 above 729,
+without new native, installed or custody effects.
+
 The [six release/stamp/inventory contracts](finite-release-stamp-inventory-contracts.md)
 retain eighteen ranked relationships without confusing native diagnostics
 with repair, a passed calendar date with feed success, or an unwired
