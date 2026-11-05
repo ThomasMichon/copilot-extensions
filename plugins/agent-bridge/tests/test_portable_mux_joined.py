@@ -337,8 +337,9 @@ def test_bridge_provider_receiver_and_extensions_share_one_conversation(
                 "--cli", "--detach", "--receiving-support", "portable",
             ])
             assert initial.returncode == 0, (
-                initial.stdout + "\n" + "\n".join(state.consumer.logs)
-                + "\n" + "\n".join(state.consumer.errors) + "\n" + "\n".join(state.sends)
+                initial.stdout + initial.stderr
+                + ("\n" + "\n".join(state.consumer.logs + state.consumer.errors) if state.consumer else "")
+                + "\n" + "\n".join(state.sends)
             )
             first = json.loads(initial.stdout)
             assert first["seeded"] is True

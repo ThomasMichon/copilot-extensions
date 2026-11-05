@@ -74,6 +74,13 @@ The selection resolver is now a semantic HTTP source. The current vector adds
 the named capability expectation; HTTP generation 52, prior feature floors,
 all earlier cases and historical packets remain unchanged.
 
+The joined portable-mux fixture retains the production native socket-path
+bound. Its isolated physical temporary root must be short enough for that
+bound; a long caller `TMPDIR` can correctly refuse before creating the mocked
+consumer. Use the runner's default managed temporary namespace for this capture,
+not a long task-directory override. Pre-launch assertions retain the original
+CLI diagnostics even when no consumer exists.
+
 Commit source and the generation declaration, run the new owner's `--prepare`,
 commit and publish that checkpoint, then run `--write`, no-write verification
 and `tools/check-agent-bridge-contracts.py --base <reviewed-base>`. Prepared
