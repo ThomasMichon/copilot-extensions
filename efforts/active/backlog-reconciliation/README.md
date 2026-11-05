@@ -252,6 +252,29 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The twelve-contract checkpoint is actually delivered in #10681 after genuine
+exact-head approval, no review issues/threads and nine complete successful/
+skipped checks before merge; a tenth successful attribution refresh followed.
+All seven merged blobs equal the approved head; only its publication child
+finalized, retained. The
+[delivery journal](<journal/2026/11.05 whole-consumer-ownership-contracts.md>)
+records two equal complete 01:27 PST scans: 1,010 whole open, 281 above 729;
+735 creator-eligible, 275 excluded, 672 original-cohort and 338 inflow.
+External #10639 supplies the sole departure and no campaign credit;
+dispositions remain 777 and the parent stays Active. The following ten whole
+contracts and thirty ranked relationships are integrated for reviewed delivery.
+Both-store atomicity, direct setup-cleanliness intake, original seed identity,
+actual finite credit and existing steward/claimant duties remain separate.
+
+The [ten finite acceptance/closeout contracts](finite-acceptance-closeout-contracts.md)
+integrate 34 whole texts and thirty ranked relationships. All ten remain OPEN:
+actual partial delivery, explicit steward/claimant retention, complete direct
+setup-cleanliness intake, original seed identity, both handoff stores and
+finite fork/receipt failure boundaries remain separate. Two whole originals
+and one whole description stay protected without retry. The
+[research journal](<journal/2026/11.05 finite-acceptance-closeout-contracts.md>)
+records no new receiving agreement, closure credit or custody effects.
+
 The [twelve whole consumer/ownership contracts](whole-consumer-ownership-contracts.md)
 integrate 38 whole texts and thirty-six ranked relationships. All twelve stay
 OPEN with independent elevated, shell, runtime/source, cursor, hook, WSL,
