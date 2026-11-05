@@ -3,6 +3,10 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-04 - Ten guidance, platform and live-state contracts retain current boundaries](<journal/2026/11.04 guidance-platform-state-contracts.md>)
+
+- [2026-11-04 - Ten attributable consumer outcomes retain independent acceptance](<journal/2026/11.04 attributable-consumer-contracts.md>)
+
 - [2026-11-04 - Eleven ungrouped outcomes retain five independent relationships](<journal/2026/11.04 independent-ungrouped-contracts.md>)
 
 - [2026-11-04 - Snapshot maintenance and recovery retain separate authority](<journal/2026/11.04 publication-snapshot-recovery-contracts.md>)
