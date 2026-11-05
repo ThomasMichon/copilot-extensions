@@ -19,6 +19,18 @@ def read(path, label):
 
 
 def main(argv=None):
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] in ("__source-setup", "__source-start"):
+        if len(arguments) != 1:
+            return 1
+        try:
+            from .gateway_host import callback
+
+            return callback(arguments[0])
+        except Exception as error:
+            print("fleet-manager: selected Gateway hosting callback failed ("
+                  + type(error).__name__ + ")", file=sys.stderr)
+            return 1
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", action="version", version=f"fleet-manager {__version__}")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -40,6 +52,8 @@ def main(argv=None):
     inspection.add_argument("--installation", required=True)
     diagnostic = commands.add_parser("doctor", help="Check this installed thin client; never install or probe a controller")
     diagnostic.add_argument("--role", choices=("client",), default="client")
+    gateway_host = commands.add_parser("gateway-host", help="Control an explicitly selected installed Gateway")
+    gateway_host.add_argument("action", choices=("capabilities", "status", "start", "stop"))
     hosting = commands.add_parser("serve", help="Run an explicitly configured foreground Fleet role")
     hosting.add_argument("--role", choices=("gateway", "ssh-client"), required=True)
     profile = hosting.add_mutually_exclusive_group(required=True)
@@ -130,9 +144,17 @@ def main(argv=None):
         if operation in ("unregister-commands", "uninstall"):
             forward.add_argument("--publication", required=True)
     try:
-        args = parser.parse_args(argv)
+        args = parser.parse_args(arguments)
     except SystemExit as exc:
         return 0 if exc.code == 0 else 1
+    if args.command == "gateway-host":
+        try:
+            from .gateway_host import main as hosting_main
+
+            return hosting_main(args.action)
+        except Exception:
+            print("fleet-manager: selected Gateway hosting control failed", file=sys.stderr)
+            return 1
     if args.command in ("capabilities", "bootstrap"):
         try:
             import asyncio

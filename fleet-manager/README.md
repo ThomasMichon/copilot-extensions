@@ -30,6 +30,11 @@ adds explicitly selected RS256 user JWTs and local-only handlers without a
 service identity or proof-key enrollment. Current route and operation grants
 remain separate; bearer replay is not proof of possession.
 
+The separately selected [installed Gateway host](docs/gateway-host.md) composes
+that SDK with the existing Source/application installer and an app-owned
+lifetime. It requires explicit private host inputs and the `gateway-host`
+dependency profile; ordinary thin-client installation remains inert.
+
 ```text
 fleet-manager plan --template recommended.json --config adopter.json --inventory live.json --fleet-id example --machine-limit 5
 ```

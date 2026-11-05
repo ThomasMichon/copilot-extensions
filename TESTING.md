@@ -114,6 +114,16 @@ omitted callbacks settle. Completion invalidations do not append history. It sta
 no SDK/model actor and does not qualify optional wire, Manager, installed or
 native-client behavior; required unit-only CI is unchanged.
 
+The optional `installation-context-acceptance.yml` selector `pr_artifacts=true`
+also runs Fleet's `test_gateway_host_distribution.py` packet on native Linux
+and Windows. It builds a noneditable selected-Gateway application from actual
+first-party wheels and an offline fixture of installed dependency bytes, then
+exercises stage, a known no-child log refusal and retry, first install,
+source-independent repeat, failed candidate
+preflight, a distinct generation update and confirmed native stop. The fixture
+does not qualify release-feed acquisition, provider authentication, reboot
+startup or fleet adoption. Required unit-only CI is unchanged.
+
 Efforts' optional `--test-file tests/test_agenda_export_contributors.py
 --test-file tests/test_agenda_export.py --test-file tests/test_agenda_export_cli.py
 --allow-explicit-tiers` packet checks complete verified contributor provenance,

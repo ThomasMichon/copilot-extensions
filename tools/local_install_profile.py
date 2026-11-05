@@ -270,13 +270,13 @@ def _write_snapshot(
         application = prepared / "applications" / component
         commands = metadata.get("scripts", {})
         primary = metadata["name"] if metadata["name"] in commands else next(iter(commands), "")
-        setup, start = install_callbacks(primary)
         roots = profile_record["roots"]
         root_names = {
             canonicalize_name(_requirement(requirement, deadline).name) for requirement in roots
         }
         with source_inputs.project_inputs(prepared, component, deadline=deadline) as (observed, inputs):
             construction = source_inputs.application_inputs(observed, inputs)
+        setup, start = install_callbacks(primary, extras=tuple(construction["extras"]))
         emit(
             application, distribution=metadata["name"], version=metadata["version"],
             requires_python=f">={environment['python_full_version']},<{major}.{int(minor) + 1}",
