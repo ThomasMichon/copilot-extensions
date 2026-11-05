@@ -4,8 +4,8 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** per-phase managed pull requests
 - **Created:** 2026-11-04
-- **Status:** Active - implementation validated; review and merge pending
-- **Vision:** [agent-codespaces](../../../visions/plugins/agent-codespaces/README.md) - reliable authenticated venue access
+- **Status:** Done
+- **Vision:** [agent-codespaces](../../../../visions/plugins/agent-codespaces/README.md) - reliable authenticated venue access
 - **Umbrella issue:** #10591
 
 ## Guiding Intent
@@ -61,7 +61,7 @@ installed rollout is part of this effort.
 
 ### Phase 3 - Delivery
 - [x] Add changefiles for affected plugins/shared-library consumers and pass focused tests, lint and required contract checks.
-- [ ] Steward the implementation PR through review, required CI and merge; record release status without implying deployment.
+- [x] Steward the implementation PR through review, required CI and merge; record release status without implying deployment.
 
 ## Validation Plan
 
@@ -70,7 +70,7 @@ installed rollout is part of this effort.
 - [x] Native Windows held-open-reader replacement failure/recovery and bounded timeout test with unchanged old bytes.
 - [x] Issuer-to-Bridge validator/authorizer consumption of the actual written store.
 - [x] Record all exercised tiers and explicitly explain external-venue exclusions: this slice changes only host file transactions; no live store or service is authorized.
-- [ ] Resolve every Plan/Validation item before marking this finite effort Done; deployment remains outside its completion claim.
+- [x] Resolve every Plan/Validation item before marking this finite effort Done; deployment remains outside its completion claim.
 
 ## Proposal
 
@@ -131,3 +131,14 @@ substitute for repairing the store. Review this plan before implementation.
   no historical fixture/capture was rewritten. Current contract validation
   passes for two contracts and 1,005 fixtures; committed-diff validation follows
   the correction commit.
+
+### 2026-11-04 - Source completion
+
+- #10597 approved at its corrected head, passed source CI and merged to Dev
+  as `a140deb18fe4530ae304abc50c70b1b5feef1f2c`. Committed-diff contract
+  validation passed; the fixed review thread is resolved.
+- All finite source Plan/Validation items are resolved. Release promotion and
+  installed/live acceptance are not claimed. Source issue #10591 records this
+  completion; broader relay readiness and non-restart recovery remain separate.
+- The next bounded source objective is #10601, cancellation-safe responsive
+  Codespace admission. This completed effort does not own that new objective.

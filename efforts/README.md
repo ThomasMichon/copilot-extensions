@@ -20,7 +20,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [MCP Session Generation Handover](active/mcp-session-generation-handover/README.md) | Draft; reviewed session-preserving handover before implementation | #10486; fresh calls select incoming code, held client wrappers reattach without session loss; existing installer and census owners retained |
-| [Relay Token Store Concurrency](active/relay-token-store-concurrency/README.md) | Draft; reviewed source plan before synthetic reproduction and repair | #10591; preserves relay/connection owners, JSON compatibility and scope gates; no live credentials or rollout |
+| [Responsive Codespace Admission](active/responsive-codespace-admission/README.md) | Draft; reviewed cancellation-safe serving-loop plan before implementation | #10601; preserves exact provider/claim custody and #8051/#3194/#6467 ownership; no live effects or rollout |
 | [Managed Session Activation](active/managed-session-activation/README.md) | Draft; reviewed admission plan before implementation | #10564; global availability is not managed-session membership, no installed rollout |
 | [Installer Upgrade Recovery](active/installer-upgrade-recovery/README.md) | Draft; priority source/upgrade-acceptance workstream, reviewed plan before implementation | #10377; latest explicit entry must recover affected prior footprints; existing entry, sequencing, construction and lifecycle owners retained; no rollout |
 | [Copilot CLI Live Controls](active/copilot-cli-live-controls/README.md) | Active; native controls qualified, implementation review and release pending | #10149; preserves native updater, active sessions and isolated execution controls |
@@ -169,6 +169,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Relay Token Store Concurrency](2026/11/04%20relay-token-store-concurrency/README.md) | Done for source scope; OS-held transactions, strict reads and responsive authorization merged in #10597 after approval and green CI | #10591; promotion and installed acceptance separate; next source objective #10601, no live credentials or rollout |
 | [PR Attention Setup](2026/11/03%20pr-attention-setup/README.md) | Done for delivered guidance-only source in #10217; dated archive and post-effort settlement governed by #10205 | #10205 retains archive-PR, issue/binding and owned-worktree settlement; no activation or rollout |
 | [Vault Configuration Activation](2026/11/03%20vault-configuration-activation/README.md) | Done; strict configuration opt-in merged in #10124, Linux/Windows native qualification passed, released as Vault 0.1.190-dev1 | Bounded #2350 Vault adopter only; existing installer owners retained; no installed rollout |
 | [Context-Qualified Agenda Continuations](2026/11/01%20context-qualified-agenda-continuations/README.md) | Done; explicit queue/stack and context-qualified source, complete raw-input policy and enum/prose/Markdown field contract merged in #9902 after review and required CI | #9897 retains immediate archive/issue/ownership settlement; normal promotion #3336 and authorized adoption separate; #8811 broader custody retained; no rollout |
