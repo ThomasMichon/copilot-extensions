@@ -1364,3 +1364,16 @@ deployment metadata writer requires. All eleven original lifecycle records
 settle. The map now preserves that required native metadata; the production
 installer is not changed to hide a missing prerequisite. Full exact-head
 Windows qualification, current CI/review, merge and release remain open.
+
+Run `42036393829` at `1766f0fd6dae` passes both complete native portfolios.
+Current source CI `42036372710` separately refuses the changed SDK module's
+stale unit-source admission and missing transitive changefiles for Fleet Manager
+and Chat. Neither failure is waived or replaced with the older full-CI pass.
+The SDK change is reviewed against the packet's existing import/fixture closure:
+it adds only the existing `contained_test_mode` read and a Job flag conditional,
+with no new module, test node, coverage target, effect permission or budget.
+Only that reviewed source's declared digest is refreshed, and the unchanged
+unit packet still owes actual bounded execution and effect/coverage verification.
+The two transitive consumers receive their own ordinary patch changefile.
+These are admission/version metadata corrections; native consumer code and
+qualification inputs remain unchanged from the successful native head.
