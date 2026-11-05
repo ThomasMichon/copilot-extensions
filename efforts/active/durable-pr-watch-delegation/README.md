@@ -288,6 +288,10 @@ _Operator-required outcome; agent-recommended slices and validation._
   the existing finite exporter, cache and journal; thin watch metadata alone is not full
   workspace acquisition. Operational configuration, installed/provider/shadow
   qualification and the remaining P1/P2 acceptance remain separate gates.
+  The next review-first [durable attention contract](durable-attention-slice.md)
+  separates explicit owner-layout expansion, actual observation/feedback
+  integration and the optional authenticated reader; it is not implemented
+  by the inert projection or conversation ACK.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -925,6 +929,25 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-04 - Continue from composed-host qualification to durable attention
+
+- #10631 merged as `d60196aa408aff2c1e8dc821636dcb912296b5a2`
+  after exact-head Copilot approval with no findings and successful required
+  CI. Its 64-case standalone packet and strict service analysis retain their
+  stated source-only bounds. Managed completion reconciled the same worktree.
+- Re-read the parent Plan/Validation and workspace companion after merge.
+  The next bounded proposal expands the existing storage owner for durable
+  interest age and confirmed handled progress, then composes actual acquisition,
+  protected feedback and an optional authenticated read-only consumer.
+- The [attention contract](durable-attention-slice.md) requires review before
+  a strict v4 adoption or runtime change. Journal hashes, watch ACK, current
+  votes and configuration labels cannot manufacture selection, feedback or
+  effect authority. Concurrent input and unclassified self-echoes cannot be
+  swallowed by a handled update.
+- Global body-bearing retention, shared selection/IO, driver qualification,
+  full CLI/Dispatch, installed and shadow/pane acceptance remain open. No
+  production state, credential, service or action policy changed.
 
 ### 2026-11-04 - Qualify the composed native workspace foreground path
 
