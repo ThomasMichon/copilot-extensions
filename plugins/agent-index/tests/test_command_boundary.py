@@ -120,7 +120,7 @@ def test_installers_are_base_only_and_never_implicitly_start_engine():
         assert "Invoke-ServiceCutover" in ps_branch
         assert "Install-LogonAutostart" in ps_branch
         assert "Install-Engine" not in ps_branch
-        assert "_service_cutover || _ensure_running" in sh_branch
+        assert "_service_cutover || exit $?" in sh_branch
         assert "_install_logon_autostart" in sh_branch
         assert "_install_engine" not in sh_branch
         assert "_ensure_engine" not in sh_branch

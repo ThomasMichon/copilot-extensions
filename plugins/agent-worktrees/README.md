@@ -11,6 +11,24 @@ sibling plugin to use local worktree isolation. Those sibling plugins compose
 gracefully when installed (extra picker pivots, cross-machine delegation,
 CodeSpace/container resolvers), but their absence only disables those features.
 
+Open and Resume preserve the worktree's existing repository and paired plugin
+setup; they do not submit software updates or implicitly fast-forward a branch.
+Use `sync --paired --worktree-id <id> --json` (or Picker **Sync**) to safely advance both
+registered worktree members of a harness/knowledge pair, then prepare local
+plugin settings and instructions. Active sessions, local changes, local commits,
+unavailable configured remotes, failed fetches and failed fast-forwards block paired plugin preparation without
+discarding either checkout's work. Partial Git progress is reported explicitly;
+it never authorizes incompatible plugin composition. An anchor pair is not a
+writable pair for this operation. New-worktree initial preparation and explicit
+machine-wide `update` remain separate.
+The optional `resolve --worktree-id <id> --first-launch` handoff retains initial
+provisioning for an already-created local worktree without creating it again.
+Ordinary Resume remains non-provisioning; older receivers reject the new flag
+rather than silently treating that first entry as ordinary Resume.
+The optional `--paired` flag preserves the original single-repository CLI
+contract; an older engine rejects it before mutating a checkout rather than
+silently reporting a selected-repository sync as complete paired preparation.
+
 For optional on-demand retirement of an authenticated displaced control-v1
 monitor, use `status-monitor-cleanup capabilities|inspect|apply --json`.
 Inspection never creates a token, starts a resident or provisions a runtime.

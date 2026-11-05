@@ -259,6 +259,30 @@ def test_without_host_channel_prepare_keeps_legacy_path_without_touching_files(
     assert channel.events == []
 
 
+def test_manager_new_keeps_first_launch_in_the_shell_owned_mux_command(channel, monkeypatch):
+    from worktree_manager import __main__ as main, launcher
+
+    plan = engine_client.launch_plan_from_dict({
+        "action": "exec", "worktree_id": "created-wt",
+    })
+    monkeypatch.setattr(main, "_is_windows", lambda: True)
+    monkeypatch.setattr(main, "_relocated_launch_script", lambda: channel.script)
+    monkeypatch.setattr(main, "_resolve_for", lambda *args, **kwargs: (plan, 0))
+    monkeypatch.setattr(launcher, "uses_ahp", lambda *args: False)
+    monkeypatch.setattr(relocated_launch.subprocess, "Popen",
+                        lambda *a, **k: pytest.fail("the terminal owns this launch"))
+    assert main._run_launch(SimpleNamespace(
+        project="fixture", mode="new", worktree_id=None, no_mux=False,
+        new_window=False, attempt_id=None, machine=None, ahp=False,
+    )) == 0
+    result = json.loads(channel.result.read_text())
+    assert result["arguments"] == [
+        "--project", "fixture", "--worktree-id", "created-wt", "--first-launch",
+    ]
+    assert result["environment"]["WORKTREE_NO_MUX"] is None
+    assert not any("FIRST_LAUNCH" in name for name in result["environment"])
+
+
 @pytest.mark.parametrize("selector", [None, "1", "0"])
 def test_manager_entrypoint_does_not_log_return_before_shell_completion(channel, monkeypatch, selector):
     from worktree_manager import __main__ as main, launcher

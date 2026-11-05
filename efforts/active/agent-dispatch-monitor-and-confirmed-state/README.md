@@ -16,10 +16,12 @@ Make Dispatch task execution and review reliable without replacing its existing
 queue, supervisor, native-session, Worktrees or resource owners.
 The effort remains **Active**. Passing one source phase or PR is not completion.
 
-Current source credit: first-proposal guarded submission merged in #10608.
-Next, preserve every rejected answer and exact feedback through same-worker
-resubmission, then qualify post-stop recovery, ordinary consumers and the
-complete running lifecycle. No deployment or cleanup permission is implied.
+Current source credit: first-proposal guarded submission merged in #10608;
+same-owner rejected-proposal lineage merged in #10674. The ordinary whole-stack
+case still fails at missing protected assignment/preparation integration.
+Next, qualify the actual participating writers and ordinary submission
+consumers, then post-stop same-native recovery and the complete running
+lifecycle. No deployment or cleanup permission is implied.
 
 ## Context
 
@@ -29,6 +31,7 @@ Read only the component relevant to the current work:
 |-----------|------|
 | [Current direction](current-direction.md) | Accepted priorities, source receipts and full coordination/custody |
 | [Assignment/startup plan](plan-assignment-startup.md) | Pool ordering, readiness, claim lifetime and remaining lifecycle integration |
+| [Participating-writer qualification](participating-writer-qualification.md) | Proposed actual-resident and delegated-writer admission before ordinary assignment |
 | [Core lifecycle plan](plan-core-lifecycle.md) | Original monitor/confirmation phases and current submission/output/delivery phases |
 | [Manual reliability acceptance](acceptance-manual-reliability.md) | Complete retained #3681 Plan, validation and receiving contract |
 | [Suspension reasons](acceptance-suspension-reasons.md) | Complete #2885/#2878 reason, clarification and general-viewer acceptance |

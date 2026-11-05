@@ -633,7 +633,7 @@ def remote_op_argv(machine, env, op, worktree_id, *, source_id=None,
             )
         else:  # sync
             inner = (
-                f"{project} sync --worktree-id "
+                f"{project} sync --paired --worktree-id "
                 f"{_remote_arg(s.shell, worktree_id)} --json"
             )
         return _wrap_remote(s.shell, s.alias, inner)

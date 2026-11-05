@@ -1290,7 +1290,7 @@ def _execute_launch(req) -> int:
         if use_ahp:
             script = None
     plan, code = _resolve_for(
-        req, **({"defer_projections": True} if script is not None else {}),
+        req, **({"defer_projections": True} if script is not None and req.mode != "new" else {}),
     )
     if plan is None:
         return code

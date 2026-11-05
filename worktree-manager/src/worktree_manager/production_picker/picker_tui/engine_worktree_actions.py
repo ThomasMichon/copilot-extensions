@@ -170,7 +170,7 @@ class PickerScreenWorktreeActionsMixin:
         # Cleanup/Sync would race the residue). A gone worktree still offers
         # Cleanup to prune the leftover record.
         if acts and not warning and not reclaimable and not gone and not rec.get("managed_child"):
-            if rec.get("ff_eligible"):
+            if rec.get("sync_eligible", rec.get("ff_eligible")):
                 acts.append("Sync")
             if PickerScreenWorktreeActionsMixin._cleanable(rec):
                 acts.append("Cleanup")

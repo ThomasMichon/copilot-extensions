@@ -2,16 +2,242 @@
 from __future__ import annotations
 
 import os
+import json
 import shlex
 import shutil
 import subprocess
 import sys
+import threading
 import venv
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
 
 from test_install_engine_adoption import environment, function, run_ps
+
+
+@pytest.mark.parametrize("failure,expected", [("service-files", 17), ("environment", 2)])
+def test_shell_cutover_propagates_setup_failure_inside_or_list(tmp_path, failure, expected):
+    bash = (
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Git" / "bin" / "bash.exe"
+        if os.name == "nt" else Path(shutil.which("bash") or "")
+    )
+    if not bash.is_file():
+        pytest.skip("Bash shell consumer is unavailable")
+    called = tmp_path / "deployed"
+    native = tmp_path / "native"
+    native.write_text(f"#!/bin/sh\ntouch {shlex.quote(called.as_posix())}\n", encoding="utf-8")
+    native.chmod(0o755)
+    env_file = tmp_path / "service.env"
+    env_file.write_text("invalid shell syntax (\n", encoding="utf-8")
+    harness = tmp_path / "setup-failure.sh"
+    harness.write_text(f"""
+set -euo pipefail
+NO_SERVICE=0
+LINK_PYTHON={shlex.quote(native.as_posix())}
+ENV_FILE={shlex.quote(env_file.as_posix())}
+SRC_VERSION=2.0.0
+_activation_role() {{ echo host; }}
+_machine_role() {{ echo host; }}
+_service_healthy() {{ return 0; }}
+_index_publication_fresh() {{ return 0; }}
+_write_service_files() {{ return {17 if failure == "service-files" else 0}; }}
+_skip() {{ :; }}; _step() {{ :; }}; _fail() {{ :; }}; _ok() {{ :; }}
+{function("_service_cutover", "sh")}
+result=0
+_service_cutover || result=$?
+exit "$result"
+""", encoding="utf-8", newline="\n")
+    result = subprocess.run(
+        [str(bash), harness.as_posix()], cwd=tmp_path, env=environment(tmp_path),
+        capture_output=True, text=True, timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == expected, result.stdout + result.stderr
+    assert not called.exists()
+
+
+@pytest.mark.parametrize("host", ["pwsh", "powershell", "bash"])
+@pytest.mark.parametrize("outcome", [
+    "native-failure", "stale", "health-stale", "wrong-owner", "ready", "dev-ready",
+    "source-mismatch", "superseded",
+    "client", "unconfigured", "no-service",
+    "existing-host-failure",
+])
+def test_native_installer_service_result_and_selected_identity(tmp_path, host, outcome):
+    if host == "bash" and os.name == "nt":
+        pytest.skip("This is a native POSIX consumer, not Windows Bash qualification")
+    if host == "powershell" and os.name != "nt":
+        pytest.skip("Windows PowerShell is unavailable")
+    executable = shutil.which(host)
+    if not executable:
+        pytest.skip(f"{host} unavailable")
+
+    from zdd import routing
+
+    root = tmp_path / "runtime"
+    root.mkdir()
+    selected = root / "versions" / "2.0.0"
+    selected.mkdir(parents=True)
+    preserved = selected / "preserved-content"
+    preserved.write_bytes(b"selected immutable content")
+    engine = root / "engine"
+    engine.mkdir()
+    (engine / "current-version").write_text("independent-engine", encoding="utf-8")
+    expected = "2.0.0-dev1" if outcome == "dev-ready" else "2.0.0"
+    if outcome == "source-mismatch":
+        expected = "2.0.0+source." + "a" * 64
+    (root / "current-version").write_text(expected, encoding="utf-8")
+    if outcome == "superseded":
+        (root / "current-version").write_text("3.0.0", encoding="utf-8")
+    before = {path: path.read_bytes() for path in (preserved, engine / "current-version")}
+    version = "2.0.0" if outcome in {"ready", "health-stale", "wrong-owner"} else "1.0.0"
+    if outcome == "dev-ready":
+        version = "2.0.0.dev1"
+    elif outcome == "source-mismatch":
+        version = "2.0.0+source." + "b" * 64
+    data = root / "service-data"
+    env_file = root / "service.env"
+    env_file.write_text(
+        "AGENT_INDEX_HOST=127.0.0.2\nAGENT_INDEX_DATA_DIR="
+        + (str(data) if os.name == "nt" else shlex.quote(str(data))) + "\n",
+        encoding="utf-8",
+    )
+
+    class Health(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = json.dumps({
+                "status": "ok", "plugin": "agent-index",
+                "version": "1.0.0" if outcome == "health-stale" else version,
+                "pid": os.getpid() + int(outcome == "wrong-owner"), "installationId": "",
+            }).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Health)
+    worker = threading.Thread(target=server.serve_forever)
+    worker.start()
+    try:
+        routing.publish_active(
+            root, bind="127.0.0.1", port=server.server_port, pid=os.getpid(), version=version,
+        )
+        log = tmp_path / "native-calls"
+        native = tmp_path / "native.py"
+        code = 37 if outcome in {"native-failure", "existing-host-failure"} else 0
+        native.write_text(
+            "import os, pathlib, subprocess, sys\n"
+            "args = sys.argv[1:]\n"
+            "if '-m' in args or '-c' in args:\n"
+            " assert os.environ['AGENT_INDEX_HOST'] == '127.0.0.2'\n"
+            " assert os.environ['AGENT_INDEX_DATA_DIR'] == os.environ['INDEX_FIXTURE_DATA']\n"
+            "if '-m' in args and args[args.index('-m') + 1:] == ['agent_index', 'deploy']:\n"
+            " pathlib.Path(os.environ['INDEX_FIXTURE_CALLS']).write_text('deploy')\n"
+            " print('native deployment diagnostic', file=sys.stderr)\n"
+            f" raise SystemExit({code})\n"
+            "raise SystemExit(subprocess.call([sys.executable, *args]))\n",
+            encoding="utf-8",
+        )
+        runtime = tmp_path / ("native.ps1" if os.name == "nt" else "native")
+        runtime.write_text(
+            f"& '{sys.executable}' '{native}' @args\nexit $LASTEXITCODE\n" if os.name == "nt" else
+            f"#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(native))} \"$@\"\n",
+            encoding="utf-8",
+        )
+        if os.name != "nt":
+            runtime.chmod(0o755)
+        env = environment(tmp_path)
+        env.update({
+            "AGENT_INDEX_HOME": str(root), "AGENT_INDEX_ROUTING_DIR": str(root),
+            "INDEX_FIXTURE_CALLS": str(log), "INDEX_FIXTURE_DATA": str(data),
+            "AGENT_INDEX_HOST": "127.0.0.3", "AGENT_INDEX_DATA_DIR": "unchanged-data",
+        })
+        role = outcome if outcome in {"client", "unconfigured"} else "host"
+        if outcome == "existing-host-failure":
+            role = "client"
+        machine_role = "host" if outcome == "existing-host-failure" else role
+        scripts = Path(__file__).resolve().parents[1] / "scripts"
+        if host == "bash":
+            # No systemctl is discoverable: the native owner must still run.
+            env["PATH"] = str(tmp_path) + os.pathsep + os.defpath
+            text = f"""
+set -euo pipefail
+INSTALL_DIR={shlex.quote(str(root))}
+LINK_PYTHON={shlex.quote(str(runtime))}
+SRC_VERSION={shlex.quote(expected)}
+ENV_FILE={shlex.quote(str(env_file))}
+NO_SERVICE={int(outcome == "no-service")}
+_ok() {{ echo "$*"; }}; _skip() {{ echo "$*"; }}; _step() {{ :; }}
+_fail() {{ echo "$*" >&2; }}
+_activation_role() {{ echo {role}; }}
+_machine_role() {{ echo {machine_role}; }}
+_write_service_files() {{ :; }}
+command() {{ [[ "${{1:-}}" != -v || "${{2:-}}" != systemctl ]] || return 1; builtin command "$@"; }}
+{function("_version_lt", "sh")}
+{function("_index_publication_fresh", "sh")}
+{function("_service_healthy", "sh")}
+{function("_service_cutover", "sh")}
+_service_cutover
+[[ "$AGENT_INDEX_HOST" == 127.0.0.3 && "$AGENT_INDEX_DATA_DIR" == unchanged-data ]]
+"""
+            command = [executable]
+            harness = tmp_path / "consumer.sh"
+        else:
+            engine_helpers = scripts.parents[2] / "libs" / "installer-engine" / "installer-engine.ps1"
+            text = f"""
+$ErrorActionPreference = 'Stop'
+. '{engine_helpers}'
+$InstallDir = '{root}'
+$LinkPython = '{runtime}'
+$SrcVersion = '{expected}'
+$EnvFile = '{env_file}'
+$NoService = ${str(outcome == "no-service").lower()}
+$Force = $false
+function Write-Ok {{ param($m) Write-Host $m }}
+function Write-Skip {{ param($m) Write-Host $m }}
+function Write-Warn {{ param($m) Write-Host $m }}
+function Write-Step {{ param($m) }}
+function Get-ActivationRole {{ return '{role}' }}
+function Get-MachineRole {{ return '{machine_role}' }}
+function Write-ServiceFiles {{ }}
+{function("Invoke-WithEnvFile", "ps1")}
+{function("Get-VerTuple", "ps1")}
+{function("Test-VersionLt", "ps1")}
+{function("Test-IndexPublicationFresh", "ps1")}
+{function("Get-ActiveServicePort", "ps1")}
+{function("Test-ServiceHealthy", "ps1")}
+{function("Invoke-ServiceCutover", "ps1")}
+Invoke-ServiceCutover
+if ($env:AGENT_INDEX_HOST -ne '127.0.0.3' -or $env:AGENT_INDEX_DATA_DIR -ne 'unchanged-data') {{
+    throw 'Service environment leaked into the installer'
+}}
+"""
+            command = [executable, "-NoProfile", "-NonInteractive", "-File"]
+            harness = tmp_path / "consumer.ps1"
+        harness.write_text(text, encoding="utf-8")
+        result = subprocess.run(
+            [*command, str(harness)], env=env, cwd=tmp_path, capture_output=True,
+            text=True, timeout=25,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        skipped = outcome in {"client", "unconfigured", "no-service", "superseded"}
+        success = skipped or outcome in {"ready", "dev-ready"}
+        assert (result.returncode == 0) is success, result.stdout + result.stderr
+        assert log.exists() is not skipped
+        if outcome in {"ready", "dev-ready"}:
+            assert f"{expected} is ready" in result.stdout
+        if not success:
+            assert "is ready" not in result.stdout
+        assert {path: path.read_bytes() for path in before} == before
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=5)
 
 
 @pytest.mark.parametrize("failure", ["filesystem", "probe"])
@@ -107,10 +333,10 @@ while (-not (Test-Path '{checked}')) {{
 try {{
     $probe = Enter-IndexStampLock -Scope Publish -TimeoutSeconds 0
     [void]$probe.ReleaseMutex(); $probe.Dispose()
-    [IO.File]::WriteAllText('{outcome}', 'unserialized')
+    Publish-FileAtomically -Path '{outcome}' -Content 'unserialized'
 }} catch {{
     if ($_.Exception.Message -notlike '*Timed out waiting*') {{ throw }}
-    [IO.File]::WriteAllText('{outcome}', 'blocked')
+    Publish-FileAtomically -Path '{outcome}' -Content 'blocked'
 }}
 if (-not (Publish-IndexRuntime)) {{ throw 'new activation failed' }}
 """, encoding="utf-8")

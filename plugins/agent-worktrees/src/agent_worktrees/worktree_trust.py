@@ -42,11 +42,8 @@ def ensure_record_trusted(record: tracking.WorktreeRecord, config: Config | None
 def prepare_for_launch(
     record: tracking.WorktreeRecord, config: Config, *, defer_projections: bool,
 ) -> None:
-    """Establish trust before guidance without coupling it to cache deferral."""
+    """Admit the existing setup without recomposing its paired plugin settings."""
     ensure_record_trusted(record, config)
     from . import local_cache_refresh
 
-    local_cache_refresh.prepare_admitted_launch(
-        record.worktree_path, compose_pair=True, config=config,
-        defer_projections=defer_projections,
-    )
+    local_cache_refresh.prepare_tool_roster(record.worktree_path, config=config)

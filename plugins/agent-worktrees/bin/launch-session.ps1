@@ -773,13 +773,7 @@ $resolveArgs += @('resolve') + $CopilotArgs
 Write-SetupLog "Calling agent_worktrees resolve"
 Write-LaunchTrace 'resolve_start'
 
-$savedProjectionDeferral = $env:AGENT_WORKTREES_DEFER_PROJECTIONS
-try {
-    $env:AGENT_WORKTREES_DEFER_PROJECTIONS = '1'
-    $jsonOutput = & $VenvPython @resolveArgs
-} finally {
-    $env:AGENT_WORKTREES_DEFER_PROJECTIONS = $savedProjectionDeferral
-}
+$jsonOutput = & $VenvPython @resolveArgs
 
 if ($LASTEXITCODE -ne 0) {
     Write-SetupLog "agent_worktrees resolve failed (exit $LASTEXITCODE)" 'ERROR'
@@ -1051,24 +1045,9 @@ function Assert-AwColdResume {
     exit 3
 }
 
-# ── Join the background update + apply, before the psmux handoff (#1430) ──
-# The Picker has closed, so it is now safe to swap the runtime venv. This waits
-# for the staged marketplace download, runs the installer if it changed the
-# payload (no re-exec -- a launcher change applies next launch), then the
-# pre-launch self-update and plugin reconcile, so Copilot starts on the
-# finished update.
 $joiningLiveSession = Test-AwJoiningLiveSession
 Assert-AwColdResume
-if ($joiningLiveSession) {
-    Write-SetupLog 'Joining an already-live mux session; skipping pre-launch update for a fast re-attach (update applies on the process next fresh start).'
-    if ($script:StageJob) {
-        try { Remove-Job $script:StageJob -Force -ErrorAction SilentlyContinue } catch {}
-        $script:StageJob = $null
-    }
-} else {
-    $script:StageJob = Start-UpdateStage
-    Invoke-UpdateApply -StageJob $script:StageJob -WithReconcile -ShowStatus
-}
+Write-SetupLog 'Opening the existing worktree setup; use Sync for repository and plugin updates.'
 
 # ── Execute the launch plan ──────────────────────────────────────────────
 
@@ -1076,9 +1055,7 @@ $policyPath = if ($plan.status_path) { [string]$plan.status_path } else { [strin
 Assert-LaunchTarget -Path $policyPath
 Set-Location $plan.work_dir
 
-# Compose the paired private knowledge repo's plugin settings into the harness
-# worktree before Copilot starts and performs plugin discovery. status_path is
-# the real worktree during deprecated Bare resume (work_dir is HOME).
+# An independent explicit update may have replaced the runtime since resolution.
 $refreshedVenvPython = Resolve-RuntimePython
 if (-not $refreshedVenvPython) {
     $runtimeMessage = (
@@ -1090,7 +1067,7 @@ if (-not $refreshedVenvPython) {
     exit 1
 }
 $VenvPython = $refreshedVenvPython
-Write-SetupLog "Runtime refreshed before knowledge preflight: $VenvPython"
+Write-SetupLog "Runtime selected for launch: $VenvPython"
 
 # Patch a stale `-RuntimePython` embedded in the resolved plan's cmd (#stale-venv).
 # `resolve` (run BEFORE the update-apply above) bakes the interpreter that ran
@@ -1119,22 +1096,6 @@ if ($plan.cmd) {
     }
     $plan.cmd = $planCmd
 }
-
-$knowledgeCwd = if ($plan.PSObject.Properties['status_path'] -and $plan.status_path) {
-    [string]$plan.status_path
-} else {
-    [string]$plan.work_dir
-}
-$knowledgeArgs = @('-m', 'agent_worktrees')
-if ($script:LaunchProject) {
-    $knowledgeArgs += @('--project', $script:LaunchProject)
-}
-$knowledgeArgs += @('knowledge', 'compose-plugins', '--cwd', $knowledgeCwd, '--prepare-projections', '--json')
-Invoke-RuntimePreflight -Label 'Knowledge plugin preflight' -PreflightArgs $knowledgeArgs -StreamProgress | Out-Null
-
-$marketplaceArgs = @('-m', 'agent_worktrees', 'reconcile-marketplaces',
-    '--cwd', $knowledgeCwd, '--ensure-ignored', '--json')
-Invoke-RuntimePreflight -Label 'Marketplace override preflight' -PreflightArgs $marketplaceArgs | Out-Null
 
 # Apply environment variables from the launch plan
 if ($plan.env) {

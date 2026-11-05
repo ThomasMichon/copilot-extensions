@@ -797,15 +797,15 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
         else:
             rows = self._scope_data()
         rows = [w for w in rows if self._record_supports(w, "sync")]
-        eligible = {self._row_key(w) for w in rows if w.get("ff_eligible")}
+        eligible = {self._row_key(w) for w in rows if w.get("sync_eligible", w.get("ff_eligible"))}
         skipped = len(rows) - len(eligible)
         dlg = {
-            "verb": "Sync", "prompt": "Fast-forward worktrees onto the default "
-            "branch (FF-only):",
+            "verb": "Sync", "prompt": "Fast-forward worktrees and paired repos, "
+            "then prepare local plugins (no software install):",
             "confirm": "Confirm", "scope": scope, "section": 0, "bidx": 0,
             "opts": [
                 {"label": "Eligible", "on": True, "ids": eligible,
-                 "hint": f"clean · behind · no local commits · {len(eligible)}"
+                 "hint": f"clean · no local commits · {len(eligible)}"
                          + (f"  ({skipped} skipped: ahead/dirty/active)"
                             if skipped else "")},
             ],

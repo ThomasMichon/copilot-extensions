@@ -3,6 +3,13 @@
 Parent: [complete effort](README.md), Step 7.
 Source obligation: [S2](sidecar-live-timeline.md#s2---worktree-and-agenda-owner-observations).
 
+**Status:** maintenance-aware source behavior merged in #10744. The
+[source readback](journal/2026/11.05-sidecar-resident-recovery.md) records the
+qualified transaction, refusal, readiness and child-custody controls. The
+additional actual private normal-ensure process packet passes its positive and
+maintenance-negative controls; its reviewed publication remains the next gate.
+Installed operation and the complete parent are not accepted by this receipt.
+
 ## Operator direction
 
 > If the local resident daemon isn't running, we should check if the maintenance-window flag is up, otherwise retry on a brief backoff and then use normal CLI commands which should wake it
@@ -53,17 +60,25 @@ Native/manual/Relay, qualified PRE and whole-parent acceptance remain separate.
   independent current-head approval and green CI, before implementation.
   The full parent, three original contracts and this amendment were read
   immediately after actual merge and confirmed unchanged by reconciliation.
-- [ ] Reuse the maintenance signals and normal ensure boundary, with one brief
+- [x] Reuse the maintenance signals and normal ensure boundary, with one brief
   pre-start retry and a maintenance recheck at wake.
-- [ ] Align effort-binding's normal CLI wake policy without changing passive
+- [x] Align effort-binding's normal CLI wake policy without changing passive
   readers or deliberately no-wake native paths.
 - [ ] Test absent/active/invalid/unreadable maintenance, a resident appearing
   during backoff, maintenance appearing during backoff, successful bounded
   normal startup, persistent absence, live incompatible owners and no-wake
   callers. Prove a post-send failure never replays canonical work.
-- [ ] Exercise the actual canonical transaction and resident observation intake
+  #10744 qualifies the isolated discovery/readiness/refusal state machine and
+  canonical intake. The additional private process packet passes actual normal
+  ensure/spawn, PID/birth/health, native mutation history and warm reuse, plus
+  maintenance/no-spawn and exact leased cleanup controls. Keep this item open
+  until those controls complete their independent reviewed publication.
+- [x] Exercise the actual canonical transaction and resident observation intake
   through isolated owned fixtures. A mocked getter or a wake return value alone
   does not establish a captured mutation.
-- [ ] Obtain independent current-head review, required green CI and actual
+- [x] Obtain independent current-head review, required green CI and actual
   merge; immediately reread the full parent and original contracts, journal
   only earned source progress and continue the complete parent gate.
+  #10744 merged as `a3184d0d46a77ddcd03f2979064aab8d35b711d3`.
+  The complete parent, all three original contracts and this amendment were
+  read immediately afterward, before bookkeeping or further source work.

@@ -24,7 +24,7 @@ on:
         type: boolean
         default: false
       native_launch:
-        description: Qualify copied native setup, POSIX terminal ownership and cross-entrypoint mux admission
+        description: Qualify native entry, paired Sync, copied setup, terminal ownership and mux admission
         type: boolean
         default: false
       watch_owner:
@@ -108,6 +108,81 @@ permissions:
   contents: read
 
 jobs:
+  worktree-entry-sync-linux:
+    if: ${{ inputs.native_launch }}
+    name: Worktree entry and paired Sync (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env: &worktree-entry-sync-env
+      UV_PYTHON: "3.12"
+    steps: &worktree-entry-sync-steps
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Verify the exact qualification source
+        shell: python
+        run: |
+          import os
+          import subprocess
+          assert subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip() == os.environ["GITHUB_SHA"]
+      - name: Retain the pinned legacy Manager repair input
+        shell: python
+        run: |
+          import subprocess
+          legacy = "9c7a61518540787498c77a284f640c36bbe7d8e4"
+          subprocess.run(["git", "fetch", "--no-tags", "--depth=1", "origin", legacy], check=True)
+          subprocess.run(["git", "cat-file", "-e", legacy + "^{tree}"], check=True)
+      - name: Qualify paired source and Resume preservation
+        shell: python
+        run: |
+          import subprocess
+          import sys
+          from pathlib import Path
+          subprocess.run([
+              sys.executable, str(Path("tools") / "run-plugin-tests.py"), "agent-worktrees",
+              "--test-file", "tests/test_worktree_sync.py",
+              "--test-file", "tests/test_local_cache_lifecycle.py",
+              "--test-file", "tests/test_static_instructions_standalone.py",
+              "--allow-explicit-tiers",
+          ], check=True)
+      - name: Qualify native entry and prior receiver refusal
+        shell: python
+        run: |
+          import subprocess
+          import sys
+          from pathlib import Path
+          subprocess.run([
+              sys.executable, str(Path("tools") / "run-plugin-tests.py"), "worktree-manager",
+              "--test-file", "tests/test_launch_admission_ordering.py",
+              "--test-file", "tests/production_picker/test_worktree_sync_actions.py",
+              "--allow-explicit-tiers",
+          ], check=True)
+      - name: Qualify fresh Manager construction and installed consumers
+        shell: python
+        run: |
+          import subprocess
+          import sys
+          from pathlib import Path
+          subprocess.run([
+              sys.executable, str(Path("tools") / "run-manager-runtime-acceptance.py"),
+              "--root", ".validation",
+          ], check=True)
+
+  worktree-entry-sync-windows:
+    if: ${{ inputs.native_launch }}
+    name: Worktree entry and paired Sync (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env: *worktree-entry-sync-env
+    steps: *worktree-entry-sync-steps
+
   native-launch-windows:
     if: ${{ inputs.native_launch }}
     name: Windows setup terminal and mux admission acceptance
@@ -155,6 +230,13 @@ jobs:
           --test-file tests/test_psmux_launch_home.py
           -k "published_creation_failure"
           --timeout 120 --plugin-timeout 600 --test-timeout 60
+      - name: Qualify New through the shell-owned terminal
+        shell: pwsh
+        run: >-
+          python tools/run-plugin-tests.py worktree-manager
+          --test-file tests/native/test_terminal_launch_native.py
+          -k "manager_new_mux_first_launch_survives_shell_owned_handoff"
+          --allow-explicit-tiers
 
   native-seed-reply-linux:
     if: ${{ inputs.native_launch }}
@@ -231,6 +313,13 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           /bin/bash --version
           /bin/bash -c '[[ "$BASH_VERSINFO" == 3 ]]'
+      - name: Provide the cold-handoff liveness probe
+        shell: bash
+        run: |
+          if ! command -v tmux; then
+            HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install tmux
+          fi
+          tmux -V
       - name: Exercise shipped reader and copied setup assets
         shell: bash
         run: |

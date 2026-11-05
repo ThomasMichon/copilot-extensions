@@ -228,6 +228,10 @@ def add_parsers(sub) -> None:
 
     p = sub.add_parser("sync", help="Fast-forward worktrees to the default branch")
     p.add_argument(
+        "--paired", action="store_true",
+        help="Sync both registered worktree members before preparing local plugins",
+    )
+    p.add_argument(
         "--worktree-id",
         default=None,
         help="Sync a single worktree by ID (default: all active worktrees on this machine)",
@@ -928,10 +932,14 @@ def cmd_sync(args: argparse.Namespace) -> int:
     session_ctx = sessions.scan_sessions_fast(records)
     active_paths = _build_active_paths(records, session_ctx)
 
-    results = [
-        _core_helper("_sync_one_record", _sync_one_record)(rec, repo, active_paths)
-        for rec in records
-    ]
+    results = []
+    for rec in records:
+        if getattr(args, "paired", False) and (rec.pair_id or rec.pair_ref):
+            from .worktree_sync import sync_pair
+
+            results.append(sync_pair(rec))
+        else:
+            results.append(_core_helper("_sync_one_record", _sync_one_record)(rec, repo, active_paths))
 
     if as_json:
         output._json_output(results[0] if single else {"results": results})
@@ -941,4 +949,4 @@ def cmd_sync(args: argparse.Namespace) -> int:
         for r in results:
             tag = f"updated ↑{r.get('behind', 0)}" if r.get("updated") else r.get("reason", "?")
             print(f"{r['worktree_id']}: {tag}")
-    return 0
+    return 1 if any(result.get("ok") is False for result in results) else 0

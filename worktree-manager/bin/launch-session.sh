@@ -679,7 +679,7 @@ launch_trace resolve_start
 resolve_args=(-m agent_worktrees)
 [[ -n "$LAUNCH_PROJECT" ]] && resolve_args+=(--project "$LAUNCH_PROJECT")
 resolve_args+=(resolve "$@")
-JSON=$(AGENT_WORKTREES_DEFER_PROJECTIONS=1 "$PYTHON" "${resolve_args[@]}")
+JSON=$("$PYTHON" "${resolve_args[@]}")
 RC=$?
 if [[ $RC -ne 0 ]]; then
     setup_log ERROR "agent_worktrees resolve failed (exit $RC)"
@@ -852,20 +852,11 @@ if [[ "$ACTION" == "exec" ]]; then
         [[ "$_launch_arg" != "--seed" && "$_launch_arg" != "--seed-id" ]] || _SEEDED_LAUNCH=1
     done
     aw_assert_cold_resume
-    # ── Join the background update + apply, before the tmux handoff (#1430) ──
-    # The Picker has closed, so it is now safe to swap the runtime venv. This
-    # waits for the staged marketplace download, runs the installer if it
-    # changed the payload (no re-exec -- a launcher change applies next launch),
-    # then the pre-launch self-update and plugin reconcile. Skipped entirely on
-    # a fast re-attach to an already-live session (see above).
     _JOINING_LIVE=0
     if aw_joining_live_session; then
         _JOINING_LIVE=1
-        setup_log INFO 'Joining an already-live mux session; skipping pre-launch update for a fast re-attach (update applies on the process next fresh start).'
-    else
-        start_update_stage
-        invoke_update_apply 1 1
     fi
+    setup_log INFO 'Opening the existing worktree setup; use Sync for repository and plugin updates.'
 
     WORK_DIR=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(d.get('work_dir',''))")
     # Path the status-bar updater renders from. Normally the pane cwd (work_dir),
@@ -1047,9 +1038,7 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
         cd "$WORK_DIR"
     fi
 
-    # Compose the paired private knowledge repo's plugin settings into the
-    # harness worktree before Copilot starts and performs plugin discovery.
-    # status_path is the real worktree during deprecated Bare resume.
+    # An independent explicit update may have replaced the runtime since resolution.
     if ! _REFRESHED_PYTHON="$(resolve_runtime_python)"; then
         setup_log ERROR "Agent-worktrees runtime is unavailable after update apply; expected a complete slot under $RUNTIME_DIR"
         printf 'ERROR: Agent-worktrees runtime is unavailable after update apply; expected a complete slot under %s\n' \
@@ -1057,7 +1046,7 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
         exit 1
     fi
     PYTHON="$_REFRESHED_PYTHON"
-    setup_log INFO "Runtime refreshed before knowledge preflight: $PYTHON"
+    setup_log INFO "Runtime selected for launch: $PYTHON"
     if [[ "$_PENDING_NEW_SEED" == "1" &&
         "${CMD_ARRAY[1]:-}" == "-m" &&
         "${CMD_ARRAY[2]:-}" == "agent_worktrees.launch_seed_exec" ]]; then
@@ -1082,17 +1071,6 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
             fi
         fi
     done
-
-    _KNOWLEDGE_CWD="${STATUS_PATH:-${WORK_DIR:-$PWD}}"
-    _KNOWLEDGE_ARGS=(-m agent_worktrees)
-    [[ -n "$LAUNCH_PROJECT" ]] \
-        && _KNOWLEDGE_ARGS+=(--project "$LAUNCH_PROJECT")
-    _KNOWLEDGE_ARGS+=(knowledge compose-plugins --cwd "$_KNOWLEDGE_CWD" --prepare-projections --json)
-    run_runtime_preflight "Knowledge plugin preflight" --stream-progress "${_KNOWLEDGE_ARGS[@]}" || true
-
-    _MARKETPLACE_ARGS=(-m agent_worktrees reconcile-marketplaces
-        --cwd "$_KNOWLEDGE_CWD" --ensure-ignored --json)
-    run_runtime_preflight "Marketplace override preflight" "${_MARKETPLACE_ARGS[@]}" || true
 
     aw_assert_cold_resume
     if [[ "$NO_MUX" == "1" ]]; then

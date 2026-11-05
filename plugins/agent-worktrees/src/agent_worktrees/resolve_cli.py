@@ -277,6 +277,8 @@ def add_parsers(sub) -> None:
         "--base", action="store_true", help="Resolve for the anchor repo (no picker, no worktree)"
     )
     parser.add_argument("--auto", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--first-launch", action="store_true",
+                        help="Retain initial provisioning for an already-created local worktree")
     parser.add_argument(
         "--new",
         action="store_true",
@@ -389,6 +391,13 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 
 
 def _cmd_resolve(args: argparse.Namespace) -> int:
+    if getattr(args, "first_launch", False) and (
+        not getattr(args, "worktree_id", None)
+        or any(getattr(args, name, None) for name in (
+            "new_worktree", "base", "bare_resume", "restore", "machine", "native_resume_session",
+        ))
+    ):
+        return output._json_error("First launch requires an existing local --worktree-id", exit_code=2)
     attempt_id = getattr(args, "launch_attempt_id", None)
     if attempt_id is not None and not getattr(args, "require_launch_attempt", False):
         from .launch_request import _protocol_fields
@@ -876,6 +885,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         _emit_parent_context_hint(record, to_stderr=True)
 
     seed_pending = bool(staged_seed and not getattr(state.args, "bare_resume", False))
+    env["WORKTREE_NO_PROVISION"] = "0" if getattr(state.args, "first_launch", False) else "1"
     if native_resume and (seed_pending or not no_resume):
         return output._json_error("Native ACP resume cannot consume a launch seed or select CLI history", exit_code=3)
     if not getattr(state.args, "dry_run", False):
