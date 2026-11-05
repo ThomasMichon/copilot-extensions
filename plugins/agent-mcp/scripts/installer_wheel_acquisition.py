@@ -85,6 +85,15 @@ class AcquiredWheels:
         return result
 
 
+@dataclass(frozen=True)
+class AdmittedRetainedWheels:
+    snapshot: WheelSnapshot
+    evidence_json: bytes
+
+    def evidence(self) -> dict:
+        return json.loads(self.evidence_json)
+
+
 def _url(value: str) -> tuple[str, str]:
     try:
         if (
@@ -505,7 +514,77 @@ def acquire_wheel_inputs(
             )
 
 
-def _download_one(root, item, feeds, origins, cutoffs, limits, deadline, context, budget):
+@contextmanager
+def admit_retained_wheel_inputs(
+    expected, *, snapshot: WheelSnapshot, feeds: tuple[WheelFeed, ...],
+    download_origins: tuple[str, ...], cutoffs: dict[str, datetime], policy_id: str,
+    limits: AcquisitionLimits, deadline: float, ssl_context: ssl.SSLContext,
+    proxies: dict[str, str], procutil: ModuleType,
+):
+    """Check selected retained bytes against one current feed-metadata pass.
+
+    The caller independently selects the exact records, owns snapshot custody,
+    and must re-admit feed policy at any later publication boundary. This does
+    not authenticate the transport, approve a profile or download wheel bytes.
+    Its temporary budget includes this worker and the selected borrowed copies;
+    any enclosing delivery or unselected wheels remain the caller's budget.
+    Consequential output must stay staged until this context exits successfully.
+    """
+    import installer_dependency_policy as policy
+
+    selected, origins = validate_acquisition_inputs(
+        expected, feeds=feeds, download_origins=download_origins, cutoffs=cutoffs,
+        policy_id=policy_id, limits=limits, deadline=deadline, ssl_context=ssl_context,
+        proxies=proxies, procutil=procutil,
+    )
+    if not isinstance(snapshot, WheelSnapshot):
+        raise WheelError("feed admission requires retained wheel custody")
+    _check_deadline(snapshot._deadline)
+    snapshot = replace(snapshot, _deadline=min(snapshot._deadline, deadline))
+    snapshot.verify()
+    expected_hashes = {item["filename"]: item["sha256"] for item in selected}
+    if dict(snapshot.digests) != expected_hashes:
+        raise WheelError("retained wheel set differs from independently selected inputs")
+    sizes = {name: snapshot._records[name][3] for name in expected_hashes}
+    if (
+        any(type(size) is not int or size < 0 or size > limits.max_wheel_bytes for size in sizes.values())
+        or sum(sizes.values()) > limits.max_closure_bytes
+        or sum(sizes.values()) > limits.max_temporary_bytes
+    ):
+        raise WheelError("retained wheel byte or storage budget exceeded")
+    with policy._temporary_inputs(None) as temporary:
+        root = policy._private_retained_root(Path(temporary)).resolve()
+        result = _run_worker(
+            root, selected, feeds, origins, cutoffs, limits, deadline, ssl_context, procutil,
+            retained_sizes=sizes,
+        )
+        try:
+            files = result["files"]
+            actual = {item["filename"]: (item["sha256"], item["size"]) for item in files}
+            if (
+                not isinstance(files, list) or len(files) != len(sizes)
+                or actual != {name: (expected_hashes[name], size) for name, size in sizes.items()}
+                or result["wheel_bytes"] != 0
+            ):
+                raise ValueError
+        except (KeyError, TypeError, ValueError):
+            raise WheelError("retained feed evidence differs from selected bytes") from None
+        snapshot.verify()
+        evidence = {
+            "schema": "copilot-extensions.retained-wheel-feed-admission", "version": 1,
+            "policy_id": policy_id, "files": files,
+            **{key: result[key] for key in ("metadata_bytes", "request_count", "redirect_count", "control_bytes")},
+            "downloaded_wheel_bytes": 0, "retained_wheel_bytes": sum(sizes.values()),
+            "temporary_highwater_bytes": result["control_bytes"] + sum(sizes.values()),
+        }
+        yield AdmittedRetainedWheels(
+            snapshot, json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode("ascii"),
+        )
+        _check_deadline(deadline)
+        snapshot.verify()
+
+
+def _download_one(root, item, feeds, origins, cutoffs, limits, deadline, context, budget, retained_size=None):
     client = _Client(limits, deadline, context, {}, budget)
     budget.check()
     name = _name(item["name"])
@@ -540,6 +619,16 @@ def _download_one(root, item, feeds, origins, cutoffs, limits, deadline, context
     if chosen is None:
         raise AcquisitionUnavailable("selected exact project is unavailable on permitted feeds")
     feed, origin, location, uploaded, hint, chain = chosen
+    if retained_size is not None:
+        _, selected_origin = _url(location)
+        if origins and selected_origin not in {origin, *origins}:
+            raise WheelError("wheel acquisition location is outside selected source trust")
+        return {
+            "filename": item["filename"], "sha256": item["sha256"], "size": retained_size,
+            "feed": feed.identity, "uploaded": uploaded, "source_origins": chain,
+            "yanked": False, "withdrawn": False,
+            **({"requires_python": hint} if hint not in (None, "") else {}),
+        }
     response = None
     try:
         response, _, downloads = client.request(
@@ -561,13 +650,18 @@ def _download_one(root, item, feeds, origins, cutoffs, limits, deadline, context
             response.close()
 
 
-def _download(root, expected, feeds, origins, cutoffs, limits, deadline, context, control_bytes):
+def _download(root, expected, feeds, origins, cutoffs, limits, deadline, context, control_bytes, retained_sizes=None):
     budget = _Budget(limits, deadline, control_bytes)
-    root.mkdir()
+    if retained_sizes is None:
+        root.mkdir()
 
     def transfer(item):
         try:
-            return _download_one(root, item, feeds, origins, cutoffs, limits, deadline, context, budget)
+            retained = {} if retained_sizes is None else {"retained_size": retained_sizes[item["filename"]]}
+            return _download_one(
+                root, item, feeds, origins, cutoffs, limits, deadline, context, budget,
+                **retained,
+            )
         except BaseException as error:
             budget.fail(error)
             raise
@@ -629,17 +723,19 @@ def _worker_sources():
     return result
 
 
-def _run_worker(root, expected, feeds, origins, cutoffs, limits, deadline, context, procutil):
+def _run_worker(root, expected, feeds, origins, cutoffs, limits, deadline, context, procutil, *, retained_sizes=None):
     from installer_engine_process import ChildLaunchError, run_owned
     from installer_dependency_policy import _native_retained_path
 
     _check_deadline(deadline)
     sources = _worker_sources()
     request = {
-        "version": 1, "expected": expected, "feeds": [asdict(feed) for feed in feeds],
+        "version": 1 if retained_sizes is None else 2,
+        "expected": expected, "feeds": [asdict(feed) for feed in feeds],
         "origins": sorted(origins), "cutoffs": {name: value.isoformat() for name, value in cutoffs.items()},
         "limits": asdict(limits), "deadline": deadline, "tls": _tls_record(context), "control_bytes": 0,
         "download_root": _native_retained_path(root / "downloads"),
+        **({"retained_sizes": retained_sizes} if retained_sizes is not None else {}),
     }
     while True:
         content = json.dumps(request, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("ascii")
@@ -647,7 +743,11 @@ def _run_worker(root, expected, feeds, origins, cutoffs, limits, deadline, conte
         if overhead == request["control_bytes"]:
             break
         request["control_bytes"] = overhead
-    if len(content) > 4 << 20 or overhead > limits.max_temporary_bytes:
+    if (
+        len(content) > 4 << 20
+        or overhead + (sum(retained_sizes.values()) if retained_sizes is not None else 0)
+        > limits.max_temporary_bytes
+    ):
         raise WheelError("acquisition control protocol exceeds its temporary storage budget")
     worker = root / "worker"
     worker.mkdir()
@@ -721,8 +821,15 @@ def _worker(path):
         if len(content) > 4 << 20:
             raise WheelError("acquisition worker control protocol budget exceeded")
         request = json.loads(content, object_pairs_hook=_unique)
-        if request.get("version") != 1:
+        if request.get("version") not in (1, 2):
             raise WheelError("unsupported acquisition worker protocol")
+        retained_sizes = request.get("retained_sizes") if request["version"] == 2 else None
+        if request["version"] == 2 and (
+            not isinstance(retained_sizes, dict)
+            or set(retained_sizes) != {item["filename"] for item in request["expected"]}
+            or any(type(size) is not int or size < 0 for size in retained_sizes.values())
+        ):
+            raise WheelError("invalid retained wheel worker inputs")
         feeds = tuple(WheelFeed(
             item["identity"], item["index_url"], tuple(tuple(pair) for pair in item["headers"]),
         ) for item in request["feeds"])
@@ -730,7 +837,7 @@ def _worker(path):
             Path(request["download_root"]), request["expected"], feeds, set(request["origins"]),
             {name: datetime.fromisoformat(value) for name, value in request["cutoffs"].items()},
             AcquisitionLimits(**request["limits"]), request["deadline"],
-            _tls_context(request["tls"]), request["control_bytes"],
+            _tls_context(request["tls"]), request["control_bytes"], retained_sizes=retained_sizes,
         )
         result = {"status": "ok", "evidence": evidence}
     except WheelError as error:

@@ -17,9 +17,10 @@ import pytest
 import runtime_feed_configuration as configuration
 import runtime_source_build as builds
 import runtime_source_wheels as completion
+import installer_wheel_acquisition as acquisition
 from installer_wheel_acquisition import AcquisitionLimits
 from installer_wheel_inputs import WheelLimits
-from test_installer_wheel_acquisition import CERTIFICATE
+from test_installer_wheel_acquisition import CERTIFICATE, FILENAME, acquisition_arguments, listed, project
 from test_installer_wheel_acquisition import feeds as feeds  # noqa: PLC0414
 from test_runtime_feed_configuration import environment
 from test_runtime_source_authentication import adopter as adopter  # noqa: PLC0414
@@ -109,6 +110,47 @@ def test_current_build_input_revocation_refuses_before_tools_installation_or_bac
             plan(adopter), **options(adopter, target, env), revoked_inputs=lambda: denied,
         ):
             pytest.fail("revoked inputs became a runtime")
+
+
+@pytest.mark.parametrize("hint,accepted", [(">= 3.9", True), (">=3.8", False)])
+def test_retained_feed_hint_is_checked_against_inspected_wheel_metadata(feeds, tmp_path, hint, accepted):
+    state = feeds()
+    content = wheel_bytes(
+        name="fixture", prefix="fixture-1.0.dist-info/",
+        metadata=b"Metadata-Version: 2.4\nName: fixture\nVersion: 1.0\nRequires-Python: >=3.9\n\n",
+    )
+    expected = {
+        "name": "fixture", "version": "1.0", "filename": FILENAME,
+        "sha256": "sha256:" + hashlib.sha256(content).hexdigest(),
+    }
+    project(state, [listed(hashes={"sha256": expected["sha256"][7:]}, **{"requires-python": hint})])
+    source = tmp_path / FILENAME
+    source.write_bytes(content)
+    options = acquisition_arguments(state)
+    deadline = options["deadline"]
+    with acquisition.retain_wheel_inputs(
+        {FILENAME: source}, {FILENAME: expected["sha256"]},
+        max_wheels=1, max_archive_bytes=4096, max_total_bytes=4096,
+        max_snapshot_bytes=4096, deadline=deadline,
+    ) as snapshot, acquisition.admit_retained_wheel_inputs(
+        [expected], snapshot=snapshot, **options,
+    ) as admitted:
+        hints = {
+            row["filename"]: row["requires_python"] for row in admitted.evidence()["files"]
+            if "requires_python" in row
+        }
+        limits = WheelLimits(1 << 20, 4 << 20, 1 << 20, 64 << 10, 100, 10, 32 << 10)
+        if accepted:
+            entries = builds._metadata_entries(
+                admitted.snapshot, [expected], limits=limits, deadline=deadline, hints=hints,
+            )
+            assert entries[0]["requires_python"] == ">=3.9"
+        else:
+            with pytest.raises(builds.ProfileError, match="Python metadata"):
+                builds._metadata_entries(
+                    admitted.snapshot, [expected], limits=limits, deadline=deadline, hints=hints,
+                )
+    assert [path for path, _ in state["requests"]] == ["/simple/fixture/"]
 
 
 @pytest.fixture

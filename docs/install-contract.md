@@ -4619,6 +4619,23 @@ failure or releases private inputs. The outer owned-process deadline remains
 the bound for blocked native DNS or socket operations. Evidence preserves the
 selected input order, regardless of completion order.
 
+`admit_retained_wheel_inputs` applies the same first-owner index, hash,
+seasoning and withdrawal rules to an independently selected, already-held
+`WheelSnapshot` without downloading its wheels again. It validates each listed
+link's HTTPS/origin policy but does not follow or attest an unused wheel
+redirect. Its distinct evidence records zero downloaded wheel bytes; it is not
+an acquisition receipt or approval. If the selected records omit a Python
+hint, callers must compare any returned feed hint with inspected wheel metadata
+using the existing semantic metadata owner before consumption. The worker and
+selected borrowed copies share the caller's storage budget and the earlier of
+the two custody deadlines; the enclosing delivery and any unselected wheels
+remain the caller's budget.
+This is one metadata pass, not a freshness lease: the installation owner must
+recheck current policy at any later publication boundary and retain the actual
+wheel owner throughout consumption. Consequential output stays staged until
+the admission context exits successfully. No existing installer selects this
+path automatically.
+
 The shared `installer_native_feed.py` captures a caller's retained native UV
 settings using only the standard-library installer resources. It owns parsing,
 captured credential/OS-trust inputs and supported feed-policy refusals, not

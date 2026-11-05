@@ -1,5 +1,6 @@
 """Pure shared transfer-budget and worker-policy controls; native overlap is separate."""
 import hashlib
+import json
 import ssl
 import sys
 import time
@@ -214,6 +215,68 @@ def test_redirected_reset_retry_does_not_forward_feed_headers():
     assert all(headers.get("X-fixture") == "value" for _, headers in calls[:2])
     assert all("X-fixture" not in headers for _, headers in calls[2:])
     assert client.requests == 4 and client.redirects == 1
+
+
+@pytest.mark.parametrize("outcome", ["eligible", "foreign-origin", "withdrawn", "yanked", "digest"])
+def test_retained_feed_admission_uses_exact_first_owner_metadata_without_download(monkeypatch, outcome):
+    digest = "a" * 64
+    expected = {"name": "fixture", "filename": "fixture-1.0-py3-none-any.whl", "sha256": "sha256:" + digest}
+    entry = {
+        "filename": expected["filename"], "url": "/wheels/" + expected["filename"],
+        "hashes": {"sha256": digest}, "upload-time": "2020-01-01T00:00:00Z",
+        "yanked": False,
+    }
+    if outcome == "foreign-origin":
+        entry["url"] = "https://foreign.invalid/wheel.whl"
+    elif outcome == "withdrawn":
+        entry["withdrawn"] = True
+    elif outcome == "yanked":
+        entry["yanked"] = True
+    elif outcome == "digest":
+        entry["hashes"]["sha256"] = "f" * 64
+    content = json.dumps({
+        "meta": {"api-version": "1.1"}, "name": "fixture", "files": [entry],
+    }).encode()
+    calls = []
+
+    class Response:
+        class headers:
+            @staticmethod
+            def get_content_type():
+                return "application/vnd.pypi.simple.v1+json"
+
+        def close(self):
+            pass
+
+    class Client:
+        def request(self, location, _feed, _origins, _accept, *, index=False):
+            assert index
+            calls.append(location)
+            return Response(), location, ["0" * 64]
+
+        def read(self, _response, _limit):
+            return content, "sha256:" + "0" * 64, len(content)
+
+    class Budget:
+        def check(self):
+            pass
+
+    monkeypatch.setattr(acquisition, "_Client", lambda *_args: Client())
+    feed = acquisition.WheelFeed("sha256:" + "b" * 64, "https://feed.invalid/simple")
+    arguments = (
+        Path("unused"), expected, (feed,), {"https://allowed.invalid"},
+        {"fixture": datetime.fromisoformat("2025-01-01T00:00:00+00:00")},
+        limits(), time.monotonic() + 5, None, Budget(),
+    )
+    if outcome == "eligible":
+        result = acquisition._download_one(*arguments, retained_size=123)
+        assert result["sha256"] == expected["sha256"] and result["size"] == 123
+        assert result["source_origins"] == ["0" * 64]
+    else:
+        error = acquisition.AcquisitionUnavailable if outcome in ("withdrawn", "yanked") else acquisition.WheelError
+        with pytest.raises(error):
+            acquisition._download_one(*arguments, retained_size=123)
+    assert calls == ["https://feed.invalid/simple/fixture/"]
 
 
 @pytest.mark.parametrize("workers,count,parallel", [(1, 3, False), (8, 1, False), (8, 3, True)])
