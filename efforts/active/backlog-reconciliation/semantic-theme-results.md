@@ -5,6 +5,14 @@ Method: [weighted semantic consolidation](semantic-density-consolidation.md).
 
 ## Result and coverage
 
+The [current inflow graph refresh](current-inflow-graph-refresh.md) requalifies
+584 legacy candidates and separates 71 unchanged semantic generations from
+six fresh lexical-retrieval originals after whole-reference exclusions.
+Unavailable fresh embeddings, one audited finite completion and the measured
+scope/checkpoint incompatibility remain explicit; no hold or target changes.
+The [typed supplement](graph/current-inflow-refresh.json) preserves the
+different evidence spaces without completion or receiving-transfer credit.
+
 The [four preparation/containment/liveness contracts](finite-preparation-containment-liveness-contracts.md)
 retain twelve ranked relationships and all four independent OPEN outcomes.
 Actual promoted preparation failure, test-global containment, pending-seed

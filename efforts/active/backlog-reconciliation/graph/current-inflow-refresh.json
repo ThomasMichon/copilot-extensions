@@ -1,0 +1,654 @@
+{
+  "schema": "backlog-current-inflow-refresh.v1",
+  "parent": "../README.md",
+  "narrative": "../current-inflow-graph-refresh.md",
+  "observed_at": "2026-11-05T15:39:04.594632+00:00",
+  "whole_queue_census": {
+    "observed_local": "2026-11-05 07:11 PST",
+    "whole_open": 1001,
+    "creator_eligible": 726,
+    "excluded_metadata_only": 275,
+    "original_cohort_open": 672,
+    "inflow_open": 329,
+    "fixed_target": 729,
+    "above_target": 272,
+    "verified_dispositions": 786
+  },
+  "admission": {
+    "fresh_candidates": 24,
+    "initial_whole_originals": 13,
+    "initial_whole_texts": 26,
+    "initial_characters": 34187,
+    "initial_protected_originals": 11,
+    "paginated_protected_discussion_comments": 211,
+    "complete_legacy_metadata_examined": 584,
+    "changed_or_ineligible_legacy_generations": 14,
+    "newly_reference_excluded_legacy": 499,
+    "newly_reference_excluded_fresh": 6,
+    "derived_exclusions_are_not_new_operator_hold_orders": true,
+    "current_legacy_semantic_nodes": 71,
+    "current_fresh_open_originals": [
+      10372,
+      10408,
+      10424,
+      10487,
+      10632,
+      10706
+    ],
+    "currently_usable_merged_descriptions": [
+      10488,
+      10495,
+      10500,
+      10503,
+      10512,
+      10599,
+      10640,
+      10696
+    ],
+    "whole_issue_and_description_reference_fixed_point": true,
+    "additional_original_excluded_after_description_feedback": [
+      10397
+    ],
+    "feedback_pass_provider_metadata_requests": 0,
+    "feedback_pass_embedding_requests": 0,
+    "protected_descriptions_or_previously_excluded504_originals_retried": false
+  },
+  "legacy_semantic_analysis": {
+    "model": "BAAI/bge-base-en-v1.5",
+    "fresh_vector_acquisition": false,
+    "runs": 9,
+    "thresholds": [
+      0.65,
+      0.72,
+      0.78
+    ],
+    "resolutions": [
+      1.0,
+      1.5,
+      2.0
+    ],
+    "default": {
+      "reciprocal_k": 15,
+      "threshold": 0.72,
+      "resolution": 1.5
+    },
+    "ranking": "weighted_density*log1p(size)*(1-conductance), cohesion not priority or completion",
+    "default_groups": [
+      {
+        "issues": [
+          8862,
+          9574,
+          10071,
+          10212
+        ],
+        "size": 4,
+        "weighted_density": 0.5519269406795502,
+        "conductance": 0.19920437283178868,
+        "ranking_score": 0.711340463941205,
+        "effort_fit": "unverified-use-existing-owner-not-automatic-transfer",
+        "closure_credit": 0
+      },
+      {
+        "issues": [
+          9177,
+          9456,
+          9460,
+          9462,
+          9466,
+          9467,
+          9471,
+          9482,
+          9489,
+          10060,
+          10154
+        ],
+        "size": 11,
+        "weighted_density": 0.43522657481106847,
+        "conductance": 0.35027751014109565,
+        "ranking_score": 0.7026731899442916,
+        "effort_fit": "unverified-use-existing-owner-not-automatic-transfer",
+        "closure_credit": 0
+      },
+      {
+        "issues": [
+          8774,
+          8780,
+          8781
+        ],
+        "size": 3,
+        "weighted_density": 0.5389730930328369,
+        "conductance": 0.2011082716442335,
+        "ranking_score": 0.5969122144690258,
+        "effort_fit": "unverified-use-existing-owner-not-automatic-transfer",
+        "closure_credit": 0
+      },
+      {
+        "issues": [
+          9412,
+          9414
+        ],
+        "size": 2,
+        "weighted_density": 0.817855179309845,
+        "conductance": 0.3442737542130918,
+        "ranking_score": 0.5891738024888273,
+        "effort_fit": "unverified-use-existing-owner-not-automatic-transfer",
+        "closure_credit": 0
+      },
+      {
+        "issues": [
+          9096,
+          9493,
+          9648,
+          10121,
+          10231
+        ],
+        "size": 5,
+        "weighted_density": 0.5926421165466309,
+        "conductance": 0.5399394235296916,
+        "ranking_score": 0.488525501590662,
+        "effort_fit": "unverified-use-existing-owner-not-automatic-transfer",
+        "closure_credit": 0
+      },
+      {
+        "issues": [
+          8729,
+          9233,
+          9568,
+          9742,
+          9809,
+          9957,
+          10031,
+          10032
+        ],
+        "size": 8,
+        "weighted_density": 0.4638003962380545,
+        "conductance": 0.5464904688559775,
+        "ranking_score": 0.46215960395774575,
+        "effort_fit": "unverified-use-existing-owner-not-automatic-transfer",
+        "closure_credit": 0
+      },
+      {
+        "issues": [
+          8715,
+          9295,
+          9323,
+          9325,
+          9468,
+          9732
+        ],
+        "size": 6,
+        "weighted_density": 0.582486077149709,
+        "conductance": 0.6727908887246554,
+        "ranking_score": 0.3708802615620909,
+        "effort_fit": "unverified-use-existing-owner-not-automatic-transfer",
+        "closure_credit": 0
+      },
+      {
+        "issues": [
+          8951,
+          10149
+        ],
+        "size": 2,
+        "weighted_density": 0.839104413986206,
+        "conductance": 0.6077391312791744,
+        "ranking_score": 0.3616058468469478,
+        "effort_fit": "unverified-use-existing-owner-not-automatic-transfer",
+        "closure_credit": 0
+      },
+      {
+        "issues": [
+          8972,
+          9717,
+          9794,
+          9946
+        ],
+        "size": 4,
+        "weighted_density": 0.7221016387144724,
+        "conductance": 0.7216586806789602,
+        "ranking_score": 0.32348208932776124,
+        "effort_fit": "unverified-use-existing-owner-not-automatic-transfer",
+        "closure_credit": 0
+      },
+      {
+        "issues": [
+          8900,
+          9095,
+          9097,
+          9629,
+          10188
+        ],
+        "size": 5,
+        "weighted_density": 0.5223276078701019,
+        "conductance": 0.7150026564093069,
+        "ranking_score": 0.26672486357575437,
+        "effort_fit": "unverified-use-existing-owner-not-automatic-transfer",
+        "closure_credit": 0
+      },
+      {
+        "issues": [
+          9277,
+          9281
+        ],
+        "size": 2,
+        "weighted_density": 0.834161639213562,
+        "conductance": 0.7101890782514194,
+        "ranking_score": 0.2655885908627151,
+        "effort_fit": "unverified-use-existing-owner-not-automatic-transfer",
+        "closure_credit": 0
+      },
+      {
+        "issues": [
+          9532,
+          9679,
+          10282,
+          10359
+        ],
+        "size": 4,
+        "weighted_density": 0.5691583454608917,
+        "conductance": 0.727924312738724,
+        "ranking_score": 0.2492281366917184,
+        "effort_fit": "unverified-use-existing-owner-not-automatic-transfer",
+        "closure_credit": 0
+      },
+      {
+        "issues": [
+          9758,
+          10126
+        ],
+        "size": 2,
+        "weighted_density": 0.872734785079956,
+        "conductance": 0.889348438028336,
+        "ranking_score": 0.10609240332782467,
+        "effort_fit": "unverified-use-existing-owner-not-automatic-transfer",
+        "closure_credit": 0
+      }
+    ],
+    "default_isolates": [
+      8689,
+      8735,
+      9163,
+      9464,
+      9465,
+      9481,
+      9618,
+      9688,
+      9870,
+      9970,
+      10089,
+      10239,
+      10316
+    ]
+  },
+  "fresh_retrieval": {
+    "method": "current-qualified sublinear-TF IDF cosine",
+    "not_comparable_to_legacy_semantic_cosine": true,
+    "fresh_semantic_density_available": false,
+    "relationships": [
+      {
+        "issue": 10372,
+        "issue_candidates": [
+          {
+            "issue": 8715,
+            "tfidf_cosine": 0.11776862591563236
+          },
+          {
+            "issue": 9295,
+            "tfidf_cosine": 0.10678663475919496
+          },
+          {
+            "issue": 9532,
+            "tfidf_cosine": 0.10269268615100703
+          },
+          {
+            "issue": 9946,
+            "tfidf_cosine": 0.10208551346397388
+          },
+          {
+            "issue": 8862,
+            "tfidf_cosine": 0.09673936052498208
+          }
+        ],
+        "merged_description_candidates": [
+          {
+            "pr": 10512,
+            "tfidf_cosine": 0.07282765038961514
+          },
+          {
+            "pr": 10640,
+            "tfidf_cosine": 0.07213041975829579
+          },
+          {
+            "pr": 10488,
+            "tfidf_cosine": 0.06874509297715065
+          },
+          {
+            "pr": 10696,
+            "tfidf_cosine": 0.06013534726325823
+          },
+          {
+            "pr": 10500,
+            "tfidf_cosine": 0.0535724421586714
+          }
+        ]
+      },
+      {
+        "issue": 10408,
+        "issue_candidates": [
+          {
+            "issue": 9325,
+            "tfidf_cosine": 0.1050700807272378
+          },
+          {
+            "issue": 9946,
+            "tfidf_cosine": 0.10423857131548012
+          },
+          {
+            "issue": 9970,
+            "tfidf_cosine": 0.10145640326784586
+          },
+          {
+            "issue": 9468,
+            "tfidf_cosine": 0.10084660238960105
+          },
+          {
+            "issue": 8715,
+            "tfidf_cosine": 0.09349824165477545
+          }
+        ],
+        "merged_description_candidates": [
+          {
+            "pr": 10599,
+            "tfidf_cosine": 0.17145084501954042
+          },
+          {
+            "pr": 10488,
+            "tfidf_cosine": 0.14411905234022104
+          },
+          {
+            "pr": 10500,
+            "tfidf_cosine": 0.12551003477487763
+          },
+          {
+            "pr": 10640,
+            "tfidf_cosine": 0.12360517250988302
+          },
+          {
+            "pr": 10696,
+            "tfidf_cosine": 0.11096729327591873
+          }
+        ]
+      },
+      {
+        "issue": 10424,
+        "issue_candidates": [
+          {
+            "issue": 9462,
+            "tfidf_cosine": 0.13039073925302072
+          },
+          {
+            "issue": 9468,
+            "tfidf_cosine": 0.127796325933498
+          },
+          {
+            "issue": 9096,
+            "tfidf_cosine": 0.12237534499462155
+          },
+          {
+            "issue": 9794,
+            "tfidf_cosine": 0.1056642536357344
+          },
+          {
+            "issue": 8715,
+            "tfidf_cosine": 0.10419302570038222
+          }
+        ],
+        "merged_description_candidates": [
+          {
+            "pr": 10696,
+            "tfidf_cosine": 0.11775856522831563
+          },
+          {
+            "pr": 10640,
+            "tfidf_cosine": 0.1168825497470974
+          },
+          {
+            "pr": 10488,
+            "tfidf_cosine": 0.10748965601523987
+          },
+          {
+            "pr": 10512,
+            "tfidf_cosine": 0.10188648054021548
+          },
+          {
+            "pr": 10500,
+            "tfidf_cosine": 0.09924825331790688
+          }
+        ]
+      },
+      {
+        "issue": 10487,
+        "issue_candidates": [
+          {
+            "issue": 10154,
+            "tfidf_cosine": 0.09213196228663177
+          },
+          {
+            "issue": 10408,
+            "tfidf_cosine": 0.09116256097219697
+          },
+          {
+            "issue": 10632,
+            "tfidf_cosine": 0.08251387516536277
+          },
+          {
+            "issue": 8972,
+            "tfidf_cosine": 0.08225382174635247
+          },
+          {
+            "issue": 10032,
+            "tfidf_cosine": 0.07744869714464585
+          }
+        ],
+        "merged_description_candidates": [
+          {
+            "pr": 10488,
+            "tfidf_cosine": 0.17703943771139596
+          },
+          {
+            "pr": 10640,
+            "tfidf_cosine": 0.12311490160249253
+          },
+          {
+            "pr": 10512,
+            "tfidf_cosine": 0.08102256758805129
+          },
+          {
+            "pr": 10696,
+            "tfidf_cosine": 0.0802477361687211
+          },
+          {
+            "pr": 10500,
+            "tfidf_cosine": 0.07609612985351917
+          }
+        ]
+      },
+      {
+        "issue": 10632,
+        "issue_candidates": [
+          {
+            "issue": 9464,
+            "tfidf_cosine": 0.23418724823526424
+          },
+          {
+            "issue": 9568,
+            "tfidf_cosine": 0.21274209980545697
+          },
+          {
+            "issue": 10126,
+            "tfidf_cosine": 0.17631124846290275
+          },
+          {
+            "issue": 9758,
+            "tfidf_cosine": 0.15973215987174014
+          },
+          {
+            "issue": 8689,
+            "tfidf_cosine": 0.1508468824863363
+          }
+        ],
+        "merged_description_candidates": [
+          {
+            "pr": 10640,
+            "tfidf_cosine": 0.15222292622346345
+          },
+          {
+            "pr": 10512,
+            "tfidf_cosine": 0.13002960327738064
+          },
+          {
+            "pr": 10495,
+            "tfidf_cosine": 0.12569348418925225
+          },
+          {
+            "pr": 10488,
+            "tfidf_cosine": 0.11288382025680872
+          },
+          {
+            "pr": 10696,
+            "tfidf_cosine": 0.10624913742786164
+          }
+        ]
+      },
+      {
+        "issue": 10706,
+        "issue_candidates": [
+          {
+            "issue": 9648,
+            "tfidf_cosine": 0.17241640947332126
+          },
+          {
+            "issue": 9096,
+            "tfidf_cosine": 0.13504050295687794
+          },
+          {
+            "issue": 8715,
+            "tfidf_cosine": 0.12526094547953398
+          },
+          {
+            "issue": 10359,
+            "tfidf_cosine": 0.11594355898251442
+          },
+          {
+            "issue": 9468,
+            "tfidf_cosine": 0.11164536664684216
+          }
+        ],
+        "merged_description_candidates": [
+          {
+            "pr": 10503,
+            "tfidf_cosine": 0.1265163622483675
+          },
+          {
+            "pr": 10640,
+            "tfidf_cosine": 0.10715745599192632
+          },
+          {
+            "pr": 10500,
+            "tfidf_cosine": 0.09705189332799694
+          },
+          {
+            "pr": 10696,
+            "tfidf_cosine": 0.09534293643430128
+          },
+          {
+            "pr": 10512,
+            "tfidf_cosine": 0.09282218318499764
+          }
+        ]
+      }
+    ]
+  },
+  "actual_source_objects": {
+    "plugins/context-handoff/extensions/context-handoff/handoff-cli.mjs": {
+      "revision": "556f5d8da862bc2257d9dd187bfa514faf9f8576",
+      "blob": "6e72fe1ed974d4c1a2fc481d990c35a33629878a",
+      "tier": "previously-admitted-fixed-source-observation-not-new-permission-or-native-execution"
+    },
+    "libs/agent-procutil/src/agent_procutil/daemon_instances.sh": {
+      "revision": "556f5d8da862bc2257d9dd187bfa514faf9f8576",
+      "blob": "a2b63ccc2783bed22cb2c4c3d46d18af8bd828c3",
+      "tier": "previously-admitted-fixed-source-observation-not-new-permission-or-native-execution"
+    },
+    "plugins/context-handoff/extensions/context-handoff/handoff-core.mjs": {
+      "revision": "556f5d8da862bc2257d9dd187bfa514faf9f8576",
+      "blob": "80894754741627087307769aad582b71d6312bf0",
+      "tier": "previously-admitted-fixed-source-observation-not-new-permission-or-native-execution"
+    },
+    "worktree-manager/src/worktree_manager/daemons_status.py": {
+      "revision": "556f5d8da862bc2257d9dd187bfa514faf9f8576",
+      "blob": "c91408541ff41541de8038b041ef41a939f09379",
+      "tier": "previously-admitted-fixed-source-observation-not-new-permission-or-native-execution"
+    },
+    "plugins/agent-worktrees/tests/test_providers.py": {
+      "revision": "b1e7f13079e3cd6968e6967ba878a684064b35c1",
+      "blob": "5ce0ba76460cfaa3ba5c50f2446ab231f30da92a",
+      "tier": "previously-admitted-fixed-source-observation-not-new-permission-or-native-execution"
+    },
+    "plugins/agent-worktrees/tests/test_lazy_dispatch.py": {
+      "revision": "b1e7f13079e3cd6968e6967ba878a684064b35c1",
+      "blob": "5723deb071306b2682c4c27964deda43d143b20b",
+      "tier": "previously-admitted-fixed-source-observation-not-new-permission-or-native-execution"
+    },
+    "plugins/agent-worktrees/src/agent_worktrees/pr_author_commands.py": {
+      "revision": "b1e7f13079e3cd6968e6967ba878a684064b35c1",
+      "blob": "1cfb242dfedd25238e3e0be4dcf9bd00016c9a21",
+      "tier": "previously-admitted-fixed-source-observation-not-new-permission-or-native-execution"
+    },
+    "plugins/agent-worktrees/src/agent_worktrees/cli_cluster_free.py": {
+      "revision": "b1e7f13079e3cd6968e6967ba878a684064b35c1",
+      "blob": "a2274deab7f232acc106ebfa5c0a7510329bf75e",
+      "tier": "previously-admitted-fixed-source-observation-not-new-permission-or-native-execution"
+    },
+    "plugins/agent-worktrees/src/agent_worktrees/pr_author_cli.py": {
+      "revision": "b1e7f13079e3cd6968e6967ba878a684064b35c1",
+      "blob": "230e5c5275e37000ac1fd083a8a95f72a3e17c6e",
+      "tier": "previously-admitted-fixed-source-observation-not-new-permission-or-native-execution"
+    },
+    "plugins/agent-worktrees/tests/test_pr_author_cli.py": {
+      "revision": "b1e7f13079e3cd6968e6967ba878a684064b35c1",
+      "blob": "c8928c6789dd8000ea53e1535814f771cdada5b0",
+      "tier": "previously-admitted-fixed-source-observation-not-new-permission-or-native-execution"
+    }
+  },
+  "finite_completion": {
+    "issue": 10410,
+    "fix_pr": 10543,
+    "merge": "f97d2a5245179a83f9c24014e42fbfe53a7d597d",
+    "comment": "https://github.com/ThomasMichon/copilot-extensions/issues/10410#issuecomment-6661486007",
+    "original_unchanged": true,
+    "actual_provider_disposition_audited": true,
+    "before_later_expanded_reference_exclusions": true,
+    "native_installed_or_custody_release": false
+  },
+  "scope_floor": {
+    "census_whole": 1001,
+    "creator_eligible": 726,
+    "excluded_metadata_only": 275,
+    "current_eligible_whole_guard_exclusions": 635,
+    "current_eligible_unheld_maximum": 91,
+    "remaining_above_fixed_target": 272,
+    "floor_even_if_every_unheld_eligible_issue_closed": 910,
+    "fixed_target": 729
+  },
+  "limits": [
+    "Fresh managed embedding requests and one scoped retry failed with HTTP 500.",
+    "No fresh semantic vectors, whole-current semantic coverage or duplicate probability is claimed.",
+    "Changed generations and genuine or conservatively inherited whole boundaries are not retried.",
+    "Cohesion and lexical retrieval do not establish priority, receiving acceptance or completion.",
+    "Actual source histories and final review remain separate from retrieval scores.",
+    "No implementation, native execution, shared-index maintenance, deployment or custody change.",
+    "The whole-queue checkpoint and canonical Plan/Validation remain unchanged.",
+    "Protected-description feedback excludes one additional original; no source retry follows."
+  ],
+  "source_observation_scope": "Previously admitted fixed-source observations; retained historically, not new permission to study a later-protected original or linked source."
+}
