@@ -210,6 +210,7 @@ def retain_source_runtime_inputs(
 
             def verify_build():
                 authenticated.verify()
+                locked.verify(deadline=deadline)
                 if revoked_inputs is not None:
                     from runtime_source_reuse import verify_not_revoked
 

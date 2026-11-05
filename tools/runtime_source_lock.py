@@ -446,6 +446,7 @@ def _retain_source_lock(
             canonical, content, configuration.payload, native_lock,
             transaction if wheel_witness else None,
             configuration.projections if wheel_witness else (),
+            _verification=configuration.verify,
         )
         _check_deadline(deadline)
 

@@ -10,8 +10,9 @@ import subprocess
 import sys
 import time
 import zipfile
-from pathlib import Path
+from contextlib import contextmanager
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 import runtime_feed_configuration as configuration
@@ -110,6 +111,35 @@ def test_current_build_input_revocation_refuses_before_tools_installation_or_bac
             plan(adopter), **options(adopter, target, env), revoked_inputs=lambda: denied,
         ):
             pytest.fail("revoked inputs became a runtime")
+
+
+def test_source_verification_rechecks_retained_native_feed_before_publication(
+    adopter, configured_source, target, feeds, tmp_path, monkeypatch,
+):
+    source_with_process_owner(configured_source)
+    state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
+    packaging_feed(state)
+    env = environment(adopter, state, tmp_path)
+    monkeypatch.setattr(configuration, "_opaque_index_identity", lambda value: hashlib.sha256(value.encode()).hexdigest())
+    actual = builds.retain_source_wheel_lock
+    captured = []
+
+    @contextmanager
+    def observe(*args, **kwargs):
+        with actual(*args, **kwargs) as locked:
+            captured.append(Path(locked.transaction.environment["UV_CONFIG_FILE"]))
+            yield locked
+
+    monkeypatch.setattr(builds, "retain_source_wheel_lock", observe)
+    with builds.retain_source_runtime_inputs(plan(adopter), **options(adopter, target, env)) as source:
+        retained = captured[0]
+        original = retained.read_bytes()
+        try:
+            retained.write_text("system-certs=true\n", encoding="utf-8")
+            with pytest.raises(ValueError, match="native index lacks"):
+                source.verify()
+        finally:
+            retained.write_bytes(original)
 
 
 @pytest.mark.parametrize("hint,accepted", [(">= 3.9", True), (">=3.8", False)])
