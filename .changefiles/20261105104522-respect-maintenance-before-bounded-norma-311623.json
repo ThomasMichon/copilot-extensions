@@ -1,0 +1,9 @@
+{
+  "comment": "Respect maintenance before bounded normal resident recovery and align effort writes with ordinary CLI wake",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

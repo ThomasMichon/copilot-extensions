@@ -643,6 +643,10 @@ def _ensure_status_monitor() -> bool:
                     return True
     except Exception:
         pass
+    from .resident_recovery import wake_allowed
+
+    if not wake_allowed():
+        return False
     from . import status_monitor_reap_stale as _smrs
     return _spawn_detached([_smrs.current_runtime_python(), "-m", "agent_worktrees", "status-monitor"])
 

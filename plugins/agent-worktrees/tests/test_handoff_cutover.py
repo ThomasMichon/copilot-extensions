@@ -3196,11 +3196,11 @@ class TestHandoffRepairDispatchArgs:
 
 
 @pytest.mark.parametrize("verb", ["claim_settle", "session_conclude"])
-@pytest.mark.parametrize("error", ["execution_space", "rejected"])
+@pytest.mark.parametrize("error", ["execution_space", "rejected", "maintenance"])
 def test_retire_report_does_not_claim_success_when_ledger_repair_is_refused(
     verb, error, monkeypatch, tmp_tracking_dir,
 ):
-    from agent_worktrees import handoff_cutover, tracking
+    from agent_worktrees import handoff_cutover, tracking, resident_recovery
 
     record = tracking.create_new_record(
         "wt-repair", "worktree/wt-repair", str(tmp_tracking_dir), "test-repo",
@@ -3218,13 +3218,16 @@ def test_retire_report_does_not_claim_success_when_ledger_repair_is_refused(
         reclaim, "ensure_session_copilot_reaped",
         lambda *args, **kwargs: {"checked": False, "identity_verified": True},
     )
-    monkeypatch.setattr(activity, "log_event", lambda *args, **kwargs: None)
+    events = []
+    monkeypatch.setattr(activity, "log_event", lambda *args, **kwargs: events.append((args, kwargs)))
     monkeypatch.setattr(m, "_maybe_emit_stage_13", lambda *args, **kwargs: None)
     calls = []
 
     def dispatch(name, args):
         calls.append(name)
         if name == verb:
+            if error == "maintenance":
+                raise resident_recovery.ResidentRecoveryHeld("active maintenance")
             return {"error": error, "message": "foreign authority refused"}
         return {"ok": True}
 
@@ -3235,7 +3238,14 @@ def test_retire_report_does_not_claim_success_when_ledger_repair_is_refused(
     key = "claim_settlement" if verb == "claim_settle" else "session_conclusion"
     assert rc == 1 and result["ok"] is False
     assert result["gone"] is True
-    assert result[key] == {"error": error, "message": "foreign authority refused"}
+    if error == "maintenance":
+        assert result[key]["error"] == "unconfirmed"
+        assert "maintenance" in result[key]["message"]
+    else:
+        assert result[key] == {"error": error, "message": "foreign authority refused"}
+    assert result["copilot"] == {"checked": False, "identity_verified": True}
+    assert len(events) == 1
+    assert events[0][0] == ("handoff_predecessor_retire",) and events[0][1]["outcome"] == "gone"
     assert calls == ["claim_settle", "session_conclude"]
     assert record.yaml_path.read_bytes() == before
 

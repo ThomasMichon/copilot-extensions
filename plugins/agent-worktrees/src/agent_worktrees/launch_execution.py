@@ -20,7 +20,7 @@ _FIELDS = {
     "schema", "version", "attempt_id", "resolution_id", "operation_id", "parent_id",
     "worktree_id", "creation_nonce", "events",
 }
-_ERRORS = (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome)
+_ERRORS = (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome, tracking_write.ResidentRecoveryHeld)
 NATIVE_HINT_ENV = "AGENT_WORKTREES_LAUNCH_EXECUTION"
 
 

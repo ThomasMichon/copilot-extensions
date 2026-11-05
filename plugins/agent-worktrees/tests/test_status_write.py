@@ -10,6 +10,32 @@ from agent_worktrees import __main__ as main
 from agent_worktrees import tracking, worktree_identity
 
 
+@pytest.mark.parametrize("json_output", [False, True])
+def test_maintenance_refusal_preserves_status_and_normal_output(
+    status_env, monkeypatch, capfd, json_output,
+):
+    import json
+    from agent_worktrees import tracking_write
+
+    record = tracking.load_record(status_env)
+    record.codename = "fixture-status"
+    tracking.save_record(record, status_env)
+    before = status_env.read_bytes()
+    def held(*args, **kwargs):
+        raise tracking_write.ResidentRecoveryHeld("active maintenance")
+    monkeypatch.setattr(tracking_write, "dispatch", held)
+    assert main._cmd_status_write(
+        argparse.Namespace(worktree_id=None, json=json_output),
+        summary="Must not persist", follow_up=True,
+    ) == 1
+    captured = capfd.readouterr()
+    assert "maintenance" in captured.out + captured.err
+    assert "Traceback" not in captured.out + captured.err
+    if json_output:
+        assert "maintenance" in json.loads(captured.out)["error"]
+    assert status_env.read_bytes() == before
+
+
 @pytest.fixture
 def status_env(tmp_path, tmp_tracking_dir, monkeypatch):
     record = tracking.WorktreeRecord(

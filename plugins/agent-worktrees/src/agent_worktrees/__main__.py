@@ -91,7 +91,7 @@ from agent_procutil import (
     windowless_daemon_kwargs as _windowless_daemon_kwargs_impl,
     windowless_python_env,
 )
-from lazy_cli_dispatch import dispatch_lazy as _shared_dispatch_lazy
+from .resident_recovery import dispatch_lazy as _shared_dispatch_lazy
 from lazy_cli_dispatch import self_override as _shared_self_override
 from . import (
     activity,
@@ -2555,6 +2555,7 @@ def _cmd_status_write(
             ensure_monitor=_ensure_status_monitor if _status_monitor_enabled() else None,
             min_version=2,  # unconditional: a v1 daemon drops paused on ANY write
         )
+    except tracking_write.ResidentRecoveryHeld as e: return tracking_write.refuse_recovery(e, json_output=getattr(args, "json", False))
     except tracking_write.AmbiguousWriteOutcome as e:
         output.err(f"Disposition write to worktree {worktree_id} is in an unknown state: {e}")
         return 1

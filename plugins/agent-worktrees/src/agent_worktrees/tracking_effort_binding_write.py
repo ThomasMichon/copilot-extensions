@@ -116,12 +116,18 @@ def apply_release(args: dict) -> dict:
 def dispatch(verb: str, args: dict) -> dict:
     from . import locks, status_monitor_runtime
 
-    return tracking_write.dispatch(
-        verb,
-        args,
-        read_lock_data=lambda: locks.read_lock(status_monitor_runtime._monitor_lock_path()),
-        ensure_monitor=None,
-    )
+    try:
+        return tracking_write.dispatch(
+            verb,
+            args,
+            read_lock_data=lambda: locks.read_lock(status_monitor_runtime._monitor_lock_path()),
+            ensure_monitor=(
+                status_monitor_runtime._ensure_status_monitor
+                if status_monitor_runtime._status_monitor_enabled() else None
+            ),
+        )
+    except tracking_write.ResidentRecoveryHeld as error:
+        return {"error": str(error)}
 
 
 tracking_write.register_verb("effort_bind", apply_bind)
