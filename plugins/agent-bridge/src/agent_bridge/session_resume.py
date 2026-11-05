@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 from repository_policy import AgentHostingError
 
 from .session_preferences import client_preferences
-from .cold_outages import admitted_recovery, guarded_resume
+from .cold_outages import admitted_recovery, guarded_resume, recovery_admission
 from .models import SessionStatus
 from .owned_workspace import (
     can_resume_allocation, prepare_session as prepare_owned_workspace, retains_allocation,
@@ -159,12 +159,13 @@ class _SessionResumeMixin:
         require_resume_owner(self, session, acquisition_launch, drain=drain, allow_recreate=allow_recreate)
         from .hosting_policy import require_session_hosting
 
-        hosting_fence = await require_session_hosting(self, session, operation="resume", activate=True)
-        return await self._resume_session_admitted(
-            session_id, permission_callback, drain=drain, allow_recreate=allow_recreate,
-            owner_native_resume=owner_native_resume, hosting_fence=hosting_fence,
-            acquisition_launch=acquisition_launch,
-        )
+        with recovery_admission(self, session_id):
+            hosting_fence = await require_session_hosting(self, session, operation="resume", activate=True)
+            return await self._resume_session_admitted(
+                session_id, permission_callback, drain=drain, allow_recreate=allow_recreate,
+                owner_native_resume=owner_native_resume, hosting_fence=hosting_fence,
+                acquisition_launch=acquisition_launch,
+            )
 
     @admitted_recovery
     @guarded_resume

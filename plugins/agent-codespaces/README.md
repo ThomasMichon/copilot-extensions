@@ -178,8 +178,9 @@ Its `activation: start` field names the provider-owned operation for an
 explicitly admitted stopped-target launch; ordinary `ensure_ready` only
 reports connectability and does not wake the venue.
 `agent-codespaces start <exact-name>` checks the registered launch policy,
-selects the venue's owning account, requests activation and waits for
-`Available`. A known owner's unavailable credentials refuse rather than
+uses the authoritative per-name account binding, requests activation and waits
+for `Available` under that same account. A missing or failed bound lookup never
+selects another account's same-named venue. A known owner's unavailable credentials refuse rather than
 fall back to ambient authentication. This operation does not provision guest
 tools, project credentials, stage plugins or launch a worker.
 The ordinary ACP/spawn command retains its guest-owner policy guard for prior

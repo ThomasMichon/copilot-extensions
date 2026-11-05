@@ -151,6 +151,12 @@ before provider refresh. It retains the original stop fence, resolves the exact
 retained venue through its current provider and checks that fence before and
 after activation. Fresh policy at the retained execution checkout must then
 pass before recovery begins. A newer stop or a changed venue still refuses.
+Initial activation holds recovery admission, so an already-draining daemon
+refuses before waking the venue and a later drain waits for the admitted work.
+Cancellation settles the original bounded provider invocation before releasing
+that admission; it never replays activation. A retained legacy session may
+adopt the current provider's receiving contract without replacing its venue,
+execution checkout or conversation.
 Opaque commands and unknown resolver protocols still refuse before effects;
 invalid cross-repo requests are rejected before admission work.
 

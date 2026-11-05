@@ -45,9 +45,9 @@ class TestCLI:
             activation_cli.launch_policy, "refused_exit_code",
             lambda name: 79 if outcome == "refused" else None,
         )
-        monkeypatch.setattr(lifecycle, "list_codespaces", lambda: [types.SimpleNamespace(
-            name="selected", state="Shutdown", account="owner",
-        )])
+        monkeypatch.setattr(
+            lifecycle, "get_codespace_status_with_account", lambda name: (True, "Shutdown", "owner"),
+        )
         monkeypatch.setattr(
             activation_cli.gh_account, "token_for_account",
             lambda account: None if outcome == "owner-unavailable" else "fixture-token",
@@ -77,7 +77,48 @@ class TestCLI:
             if outcome == "api-failed":
                 assert len(calls) == 1
             else:
-                assert calls[1] == ("wait", "selected", {"timeout": 180, "interval": 2})
+                assert calls[1] == ("wait", "selected", {"timeout": 180, "interval": 2, "account": "owner"})
+
+    @pytest.mark.parametrize("lookup", ["collision", "missing", "failed"])
+    def test_start_keeps_exact_account_binding_through_activation_and_polling(
+        self, monkeypatch, lookup,
+    ):
+        from agent_codespaces import __main__ as cli, account_binding, activation_cli, lifecycle
+
+        calls = []
+        monkeypatch.setattr(cli, "validate_context", lambda: None)
+        monkeypatch.setattr(lifecycle, "validate_context", lambda: None)
+        monkeypatch.setattr(cli, "_gh_binary_available", lambda: True)
+        monkeypatch.setattr(activation_cli.launch_policy, "refused_exit_code", lambda name: None)
+        monkeypatch.setattr(account_binding, "bound_account_or_raise", lambda name: "exact-owner")
+        monkeypatch.setattr(lifecycle, "list_codespaces", lambda: pytest.fail("unscoped listing selected"))
+        monkeypatch.setattr(
+            activation_cli.gh_account, "token_for_account",
+            lambda account: "fixture-token" if account == "exact-owner" else pytest.fail("wrong account"),
+        )
+
+        def status(name, account, **kwargs):
+            assert name == "selected" and account == "exact-owner"
+            calls.append(("status", account))
+            if lookup == "failed":
+                raise RuntimeError("bound lookup failed")
+            return (False, None) if lookup == "missing" else (
+                True, "Shutdown" if len(calls) == 1 else "Available",
+            )
+
+        def run(argv, **kwargs):
+            assert argv[-1] == "/user/codespaces/selected/start"
+            assert kwargs["env"]["GH_TOKEN"] == "fixture-token"
+            calls.append(("start", "exact-owner"))
+            return types.SimpleNamespace(returncode=0, stderr="")
+
+        monkeypatch.setattr(lifecycle, "_get_codespace_status_under", status)
+        monkeypatch.setattr(activation_cli.subprocess, "run", run)
+        assert main(["start", "selected"]) == (0 if lookup == "collision" else 1)
+        assert calls == (
+            [("status", "exact-owner"), ("start", "exact-owner"), ("status", "exact-owner")]
+            if lookup == "collision" else [("status", "exact-owner")]
+        )
 
     def test_no_args_shows_help(self, capsys):
         rc = main([])

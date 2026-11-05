@@ -331,7 +331,9 @@ async def test_available_policy_denial_is_not_a_stopped_venue_activation(monkeyp
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("outcome", ["allow", "deny", "stop-before", "stop-during", "retarget", "legacy"])
+@pytest.mark.parametrize("outcome", [
+    "allow", "deny", "stop-before", "stop-during", "retarget", "legacy", "upgrade",
+])
 async def test_stopped_codespace_resume_activates_under_original_stop_fence(
     repo: Path, session_manager, monkeypatch: pytest.MonkeyPatch, outcome: str,
 ) -> None:
@@ -344,13 +346,21 @@ async def test_stopped_codespace_resume_activates_under_original_stop_fence(
         "name": "selected", "workspace_folder": "/actual",
         "portable_receiving_policy": {"version": 1, "activation": "start", "acp_command": "copilot"},
     }
+    retained_metadata = dict(metadata)
+    if outcome == "upgrade":
+        retained_metadata.pop("portable_receiving_policy")
     session = Session(
-        "existing", "existing", SpawnTarget(type="command", codespace=metadata, cwd="/actual"),
+        "existing", "existing", SpawnTarget(
+            type="command", codespace=retained_metadata, cwd="/actual", explicit_cwd=True,
+        ),
         "codespace:selected",
     )
     session.status = SessionStatus.STOPPED
     session.acp_session_id = "retained-conversation"
     session_manager._sessions[session.session_id] = session
+    session_manager.db.create_session(
+        "existing", "existing", "codespace:selected", "/actual", "command", "stopped", 0,
+    )
     owner = AgentResolver({}, {})
     provider = CliNamespaceResolver("codespace", "agent-codespaces")
     owner.register_namespace_resolver(provider)
@@ -370,7 +380,10 @@ async def test_stopped_codespace_resume_activates_under_original_stop_fence(
                 session._stop_notices += 1
             return 0, "", ""
         assert arguments[:2] == ["namespace-resolve", "selected"]
-        current = {**metadata, "name": "another" if outcome == "retarget" else "selected"}
+        current = {
+            **metadata, "name": "another" if outcome == "retarget" else "selected",
+            "workspace_folder": "/provider-default",
+        }
         if outcome == "legacy":
             current.pop("portable_receiving_policy")
         return 0, json.dumps({
@@ -382,9 +395,11 @@ async def test_stopped_codespace_resume_activates_under_original_stop_fence(
         if outcome == "stop-before":
             session._stop_notices += 1
 
-    async def read(_command, **_kwargs):
+    async def read(command, **kwargs):
         from repository_policy import require_agent_hosting
 
+        assert "/actual" in command and "/provider-default" not in command
+        assert kwargs["input_bytes"]
         events.append("policy")
         answer = require_agent_hosting(repo, marketplace_id="selected-source")
         return 0, json.dumps({**answer.to_dict(), "allowed": True}), ""
@@ -399,11 +414,13 @@ async def test_stopped_codespace_resume_activates_under_original_stop_fence(
     provider._run = AsyncMock(side_effect=provider_call)
     admitted = AsyncMock(return_value=session)
     monkeypatch.setattr(session_manager, "_resume_session_admitted", admitted)
-    if outcome == "allow":
+    if outcome in ("allow", "upgrade"):
         assert await session_manager.resume_session("existing") is session
         assert events == ["launch-policy", "activate", "policy"]
         fence = admitted.await_args.kwargs["hosting_fence"]
         assert fence.session is session and fence.stop_notices == 0
+        assert session.target.cwd == "/actual" and session.target.explicit_cwd
+        assert session.target.codespace == metadata
     else:
         expected = ColdRecoveryStoppedError if outcome.startswith("stop-") else AgentHostingError
         with pytest.raises(expected):
@@ -412,6 +429,94 @@ async def test_stopped_codespace_resume_activates_under_original_stop_fence(
         assert ("activate" in events) is (outcome in ("deny", "stop-during"))
     assert session.status is SessionStatus.STOPPED
     assert session.acp_session_id == "retained-conversation"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["pre-drain", "drain", "cancel"])
+async def test_resume_activation_remains_owned_through_cancellation_and_drain(
+    tmp_path: Path, session_manager, monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.provider_hosting import CodeSpaceNotRunning
+    from agent_bridge.session_manager import DaemonDrainingError, Session
+    from agent_bridge.spawn_target import SpawnTarget
+
+    started, release, completed = (tmp_path / name for name in ("started", "release", "completed"))
+    program = (
+        "import pathlib,time\n"
+        f"started,release,completed=map(pathlib.Path,{[str(started), str(release), str(completed)]!r})\n"
+        "started.write_text('started')\n"
+        "deadline=time.monotonic()+15\n"
+        "while not release.exists() and time.monotonic()<deadline: time.sleep(.01)\n"
+        "assert release.exists(), 'fixture release timed out'\n"
+        "completed.write_text('activated')\n"
+    )
+    provider = CliNamespaceResolver("codespace", "fixture", command=[sys.executable, "-c", program])
+    target = SpawnTarget(type="command", cwd="/actual", explicit_cwd=True, codespace={
+        "name": "selected", "workspace_folder": "/actual",
+        "portable_receiving_policy": {"version": 1, "activation": "start", "acp_command": "copilot"},
+    })
+    session = Session("existing", "existing", target, "codespace:selected")
+    session.status = SessionStatus.STOPPED
+    session.acp_session_id = "retained-conversation"
+    session_manager._sessions[session.session_id] = session
+    session_manager.db.create_session(
+        "existing", "existing", "codespace:selected", "/actual", "command", "stopped", 0,
+    )
+    owner = AgentResolver({}, {})
+    owner.register_namespace_resolver(provider)
+    owner._call_resolver = AsyncMock(return_value=target)
+    session_manager._resolver = owner
+    async def hosting(*_args, **_kwargs):
+        if not completed.exists():
+            raise CodeSpaceNotRunning("stopped")
+
+    monkeypatch.setattr(hosting_policy, "require_target_hosting", hosting)
+    monkeypatch.setattr(
+        "agent_bridge.venue_launch_policy.gate_raw_codespace_spawn", AsyncMock(),
+    )
+    admitted = AsyncMock(return_value=session)
+    monkeypatch.setattr(session_manager, "_resume_session_admitted", admitted)
+    session_manager.set_draining(outcome == "pre-drain")
+    if outcome == "pre-drain":
+        with pytest.raises(DaemonDrainingError):
+            await session_manager.resume_session("existing")
+        owner._call_resolver.assert_not_awaited()
+        assert not started.exists()
+        return
+    operation = asyncio.create_task(session_manager.resume_session("existing"))
+    try:
+        deadline = asyncio.get_running_loop().time() + 10
+        while not started.exists() and asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(.01)
+        assert started.exists()
+        assert session_manager._active_acquisitions == 1
+        assert (await session_manager.drain(timeout=0))["drained"] is False
+        if outcome == "cancel":
+            for _ in range(2):
+                operation.cancel()
+                await asyncio.sleep(.02)
+                assert not operation.done()
+                assert session_manager._active_acquisitions == 1
+        release.write_text("settle original activation")
+        if outcome == "cancel":
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(operation, timeout=10)
+            admitted.assert_not_awaited()
+        else:
+            assert await asyncio.wait_for(operation, timeout=10) is session
+            admitted.assert_awaited_once()
+        assert completed.read_text() == "activated"
+        assert session_manager._active_acquisitions == 0
+        assert (await session_manager.drain(timeout=0))["drained"] is True
+        owner._call_resolver.assert_awaited_once()
+        assert session.target == target and session.acp_session_id == "retained-conversation"
+    finally:
+        release.touch()
+        if not operation.done():
+            operation.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await operation
 
 
 @pytest.mark.asyncio

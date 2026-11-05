@@ -59,7 +59,12 @@ Resume-level Shutdown controls retain the original stop fence across provider
 activation, including a newer stop, changed venue, provider rollback and a
 fresh denial after activation. CodeSpaces' `tests/test_cli.py` exercises the
 actual `start` parser/dispatch with owner-authentication, launch-policy and API
-boundaries substituted. Containers' `tests/test_runtime_drivers.py` sends the
+boundaries substituted, including exact account-binding collisions and failed
+bound lookups. A real delayed activation provider proves repeated cancellation
+retains recovery admission until the original process settles, an existing
+drain refuses before activation and a later drain waits. Retained legacy-session
+controls adopt the current receiving contract while pinning the actual checkout.
+Containers' `tests/test_runtime_drivers.py` sends the
 base64 archive through the real runtime-proxy, external-driver process and
 isolated canonical reader, proving both allow and deny without Docker.
 A real bundled Host drives a mock ACP peer through one prompt and reconnects

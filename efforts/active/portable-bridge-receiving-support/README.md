@@ -245,3 +245,20 @@ implementation. The exact support closure follows the consumer trace and tests.
   its implementation-only rationale; historical captures and provenance are
   unchanged. Final committed-source guards, unit admission and renewed
   review/CI remain required.
+
+### 2026-11-05 - Activation custody and account review corrections
+
+- The reconciled ACP head passed required CI. Subsequent reviews identified
+  activation cancellation/drain races, discarded current receiving support on
+  legacy resume and a merged-list account collision in provider activation.
+- Activation now settles its original bounded provider invocation before
+  cancellation releases recovery admission. Initial resume takes that admission
+  before activation, retaining the original stop fence. A negotiated receiving
+  contract updates only retained metadata, not the venue, checkout or conversation.
+- Provider activation resolves the authoritative exact-name account binding;
+  activation and readiness polling retain that account. Missing/failed bound
+  lookups cannot select a different account's same-named venue.
+- The focused Bridge packet passed 147 cases, including a real delayed provider
+  process, repeated cancellation, drain-before/during activation and retained
+  legacy upgrade. CodeSpace parser/lifecycle controls passed 136 cases. Final
+  source evidence, review and CI remain open; no installed or external acceptance.

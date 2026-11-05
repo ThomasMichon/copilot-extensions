@@ -79,19 +79,22 @@ async def require_session_hosting(
         except CodeSpaceNotRunning:
             if not activate:
                 raise
-            await _activate_resume_codespace(manager, session, fence)
-            await require_target_hosting(session.target, operation=operation)
+            target = await _activate_resume_codespace(manager, session, fence)
+            await require_target_hosting(target, operation=operation)
+            fence.require_current(manager)
+            session.target = target
     fence.require_current(manager)
     return fence
 
 
 async def _activate_resume_codespace(
     manager: SessionManager, session: Session, fence: SessionHostingFence,
-) -> None:
+) -> SpawnTarget:
     from .agent_registry_namespace import CliNamespaceResolver
     from .models import SessionStatus
 
-    metadata = session.target.codespace or {}
+    retained = session.target
+    metadata = retained.codespace or {}
     name = metadata.get("name")
     owner = manager._resolver
     provider = owner._namespace_resolvers.get("codespace") if owner is not None else None
@@ -108,6 +111,11 @@ async def _activate_resume_codespace(
         provider, candidate, check_current=lambda: fence.require_current(manager),
     )
     fence.require_current(manager)
+    negotiated = dict(metadata)
+    negotiated.pop("portable_receiving_policy", None)
+    if "portable_receiving_policy" in (candidate.codespace or {}):
+        negotiated["portable_receiving_policy"] = candidate.codespace["portable_receiving_policy"]
+    return replace(retained, codespace=negotiated)
 
 
 def marketplace_id() -> str:
@@ -360,7 +368,18 @@ async def _activate_provider_target(
                 ) from exc
             if check_current is not None:
                 check_current()
-            result = await resolver._run(["start", name], timeout=240)
+            activation = asyncio.create_task(resolver._run(["start", name], timeout=240))
+            try:
+                result = await asyncio.shield(activation)
+            except asyncio.CancelledError:
+                # The provider's native call can outlive cancellation of its thread join.
+                while not activation.done():
+                    try:
+                        await asyncio.shield(activation)
+                    except asyncio.CancelledError:
+                        continue
+                activation.result()
+                raise
             if check_current is not None:
                 check_current()
             if result is None or result[0]:
