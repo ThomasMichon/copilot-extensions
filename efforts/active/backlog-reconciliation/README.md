@@ -231,6 +231,172 @@ checkpoint nor author eligibility, holds, requirements or source/resource custod
 
 ### Phase 2 - Continuing reconciliation
 
+The [hosted staging](hosted-staging-cohort.md),
+[CI causality](ci-causality-cohort.md) and
+[installer liveness](installer-liveness-cohort.md) studies preserve nine whole
+originals, 48 texts and twenty-seven bounded relations: twenty-four
+noncompletion comparisons and three protected exclusions. Changed #8242
+was freshly read. Whole inherited matrices, finite alternatives, exclusive
+diagnosis and original Windows consumer acceptance remain with their actual
+owners; all nine originals remain OPEN.
+
+The [startup discovery/reuse](startup-reuse-cohort.md),
+[account/preflight](account-preflight-cohort.md) and
+[release-check guidance](release-check-guidance-cohort.md) studies preserve
+seven whole originals, 57 texts and twenty-one bounded relations: nineteen
+noncompletion comparisons, one protected exclusion and one independently
+verified finite-source completion. #10291 closed after actual #10293/current
+source and owner-merge checks; the other six remain OPEN. Two equal complete
+17:41 PST metadata-only scans show 1,006 WHOLE open, 277 above the fixed
+729 target. No other arrivals/departures or new acceptance are inferred.
+
+The [self-update observation](self-update-observation-cohort.md),
+[publication-policy](publication-policy-cohort.md) and
+[Vault boundary](vault-boundaries-cohort.md) studies preserve eight whole
+originals and twenty-two texts, with twenty-three bounded noncompletion
+comparisons. One original and one candidate were withheld before rendering;
+no held-source retry follows. Preserve scheduler-platform acceptance,
+documentation-OR-sweep convergence, causal receipts, policy-compatible
+coverage and independently authorized vault outcomes. Finite #8924 source
+mechanisms receive positive bounded credit without presumed whole completion.
+
+The [componentization/workbench](componentization-workbench-cohort.md),
+[Dispatch observability](dispatch-observability-cohort.md) and
+[knowledge-onboarding](knowledge-onboarding-cohort.md) studies preserve nine
+whole originals and all twenty-five texts, with twenty-seven bounded
+noncompletion comparisons. Subject-matter discipline, autonomous campaign
+judgment, installed worker UI, measurement, waiter display, capacity ownership
+and three onboarding boundaries remain separate. A finite #5452 source read
+confirms a relay residual; no original or receiving gate closes.
+
+The preceding eleven-document research delta merged in #10547; its
+[delivery journal](<journal/2026/11.04 timeout-causality-contracts.md>)
+records the genuine reviewed outcome and preserved original gates. Two
+complete 17:06 PST scans remain 1,007 whole open, 278 above 729, with no
+arrivals, departures or campaign credit. Continue weighted-graph research
+and independently supported consolidation, not held-lane resumption.
+
+The [timeout-causality](timeout-causality-cohort.md),
+[knowledge-pair](knowledge-pair-cohort.md) and
+[hosted-custody](hosted-custody-cohort.md) studies preserve ten whole
+originals and all fifty-one texts, plus thirty bounded noncompletion
+comparisons. Keep issue-specific causal alternatives, accepted repair custody,
+pairing/routing/removal policies, FINAL OPEN onboarding and non-expiring
+substantive claims distinct. No owner, native consumer or receiving gate closes.
+
+The preceding eleven-document research delta merged in #10541; its
+[delivery journal](<journal/2026/11.04 native-controls-contracts.md>) records
+the actual reviewed outcome and #10149's continuing owner acceptance.
+Two complete 16:50 PST scans remain 1,007 whole open, 278 above 729, with
+no arrivals, departures or campaign closure credit. Continue weighted-graph
+research and supported consolidation, not a held-lane or historical-cohort retry.
+
+The [daemon-scheduling](daemon-scheduling-cohort.md),
+[engine-adoption](engine-adoption-cohort.md) and
+[native-controls](native-controls-cohort.md) studies preserve twelve whole
+originals and all refinements, thirty-two noncompletion comparisons and four
+protected-description relations withheld. Existing historical intake/source
+credit, paused adopter gates and independent profile/permission policies remain;
+#10149 has a finite changed-source question, not a completion verdict.
+
+That [finite follow-through](native-controls-cohort.md#finite-10149-source-follow-through)
+now verifies the actual reviewed merge, green required CI, unchanged prior
+whole objects and whole skill/dispatcher. The actual CI selection excludes
+the focused control cases; the Active owner's remaining qualification and
+acceptance gates survive, and #10149 remains OPEN. Two complete 16:33 PST
+scans remain 1,007 whole open, 278 above 729, without new closure credit.
+
+The preceding eleven-document research delta merged in #10537; its
+[delivery journal](<journal/2026/11.04 repository-authority-contracts.md>)
+records the actual outcome. Two complete 16:25 PST scans count 1,007 whole
+open, 278 above 729; one metadata-only inflow adds no campaign closure credit.
+Continue genuine finite-source qualification and the weighted graph without
+resuming held lanes or treating documentation as the parent checkpoint.
+
+The [lifetime-control](lifetime-control-cohort.md),
+[finalization/recovery](finalization-recovery-cohort.md) and
+[repository-authority](repository-authority-cohort.md) studies retain eleven
+whole admitted originals and all refinements, thirty-one bounded noncompletion
+comparisons, two withheld descriptions and one closed metadata-only exclusion.
+Explicit canonical KEEP, exact owner acceptance, original alternatives and
+all inherited custody remain; no source or receiving state is completed.
+
+The three preceding core studies merged in #10531; the
+[dated delivery journal](<journal/2026/11.04 standalone-declaration-contracts.md>)
+records the verified outcome and continuing gate. The complete 16:11 PST
+census remains 1,006 whole open, 277 above 729. Continue the weighted graph
+and independently qualified source outcomes; documentary delivery does not
+resume a held lane or satisfy the parent checkpoint.
+
+The supervisor/qualification nine-document delta merged in #10527; the
+[dated delivery journal](<journal/2026/11.04 qualification-cache-contracts.md>)
+records its verified scope and continuing gate. Two equal complete 15:47 PST
+scans count 1,006 whole open, 277 above 729. One external departure supplies
+no campaign credit; verified campaign closures remain 773. The three newer
+core studies and independent finite-source research remain continuing work,
+not parent completion or authority to resume held/parked lanes.
+
+The [standalone-declaration study](standalone-declaration-cohort.md) retains
+four complete contracts, eleven bounded noncompletion comparisons and one
+known protected message relation withheld without retry. Two whole current
+Active homes preserve exact incumbent-mapping acceptance and remaining bare
+bootstrap/offline decisions. Independent finite runner/TOML observations are
+not a release-environment fix or native result. All four sources and every
+parent/receiver check state remain unchanged; no custody or execution follows.
+
+The [installation-scope study](installation-scope-cohort.md) admits two whole
+contracts and withholds two entire protected-lineage members before rendering.
+Five completed-work comparisons are noncompletion evidence; another whole
+description remains withheld. The assigned canonical retains every inherited
+scope and its explicit park, while the independent directory-parser contract
+retains actual native/history-consumer acceptance. Both sources stay OPEN;
+no parked ROOT, capability execution, implementation or custody is changed.
+
+The [head-succession study](head-succession-cohort.md) retains four complete
+contracts, seven bounded noncompletion comparisons and five whole-description
+relations withheld before rendering. Two complete current Draft homes are
+related, not accepted receivers. Explicit canonical KEEP, the same non-expiring
+claim, ground liveness versus allocator cleanup and acknowledgement-gated
+stable head admission remain distinct. All four sources and every parent
+check state remain OPEN/unchanged; no head, session, liveness or custody effect
+occurred. Continue the graph rather than treating related plans as completion.
+
+The [qualification/cache study](qualification-cache-cohort.md) retains five
+whole contracts and fifteen bounded noncompletion comparisons. Actual source
+history independently identifies #9623's finite #9472 manifest-expectation
+correction; exact merged/current assertions, full provider gates and guarded
+live readback support its COMPLETED source disposition. The other four
+contracts remain OPEN, #9455 is not completed work, and no receiver or
+native/installed/custody acceptance follows. Two equal complete 15:12 PST
+scans count 1,007 whole open, 278 above 729, with 773 verified campaign
+closures. A separate excluded-origin departure supplies no credit.
+
+The [native-supervisor study](supervisor-reconciliation-cohort.md) retains
+five whole contracts, a freshly changed readiness observation and fifteen
+bounded noncompletion relations. Whole actual #6137 BODY delivery/readback
+and separate guarded judgments support #6218/#6294 tracking supersessions,
+with ten new acceptance rows unchecked. The historical keeper, explicitly
+held rollout and pending source/release lanes remain OPEN. The complete
+14:49 PST census is 1,009 whole open, 280 above 729, with 772 verified
+campaign closures; no technical, native or custody completion follows.
+
+The exact eight-document attention/history research and outcome delta merged
+in #10522; the [dated delivery journal](<journal/2026/11.04 attention-history-contracts.md>)
+records its validation and delivery history. All actual merged blobs match
+reviewed content; only its publication child finalized, retained. All 101
+canonical/39 public parent states remain unchanged. Documentary delivery is
+not the fixed whole-queue checkpoint; continue the ranked graph and actual
+provider comparisons.
+
+The [attention/history study](attention-history-cohort.md) retains five whole
+originals/two refinements and fifteen message-level comparisons. Eight complete
+home/prior-art documents distinguish the Active cross-entity inbox, archived
+attention baseline, exact AHP migration, truthful transport-loss state and
+retrospective CLI-session review from these newer individual observation gaps.
+Two current CLI functions confirm finite deadline/outcome/position gaps,
+not a repair or whole-file/native acceptance. All five sources remain OPEN;
+no receiver, specific buy-in condition, Done state or custody is changed.
+
 The [native timeout/lifetime study](native-timeout-cohort.md) preserves seven
 whole contracts and sixteen bounded completed-work comparisons, with two whole
 messages withheld. One assigned finite source repair is actually complete;
@@ -241,6 +407,22 @@ common-cause finding, reviewed delivery, new native programme or implementation
 assignment. Their thirty local Plan/Validation and six actual ROOT global
 Validation rows remain unchecked; current readback and separate source
 judgments follow normal review and actual merge.
+
+That actual proposal merged in #10516 after genuine current-head approval,
+zero findings and successful required CI. All eight current blobs match the
+reviewed head. Complete post-merge portfolio readback covers 2,124 lines and
+four unchanged whole-read annexes/history; fresh source and #1303 metadata
+and the complete eleven-member roster support six separate source judgments.
+#6662 stays unchanged OPEN under its explicit live-tracker condition.
+#6663/#6690/#6900/#9442/#9815 are individually verified NOT_PLANNED tracking
+supersessions, not causal fixes. All 36 receiver rows remain unchecked;
+original evidence, deadlines, reporter custody and broader service duties remain.
+
+Two equal complete eleven-page metadata-only scans at 14:30 PST count
+1,010 whole open, 281 above the fixed 729 target: 735 eligible, 275 excluded,
+674 original-cohort and 336 inflow. These five departures are three
+original-cohort and two inflow tracking folds, with no arrivals or external
+departures. Campaign closure credit totals 770; the parent remains Active.
 
 The [interpreter/construction study](interpreter-construction-cohort.md)
 retains six whole originals/five refinements and seventeen bounded
@@ -829,6 +1011,107 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [hosted](hosted-staging-cohort.md),
+[CI](ci-causality-cohort.md) and
+[installer](installer-liveness-cohort.md) cores retain the simultaneous
+capability/provisioner matrix, exact emitted consumer/bootstrap seam,
+independent cache/inventory/compact-home scopes, owning selector bounds,
+current-policy replacement OR budget repair, exclusive causal diagnosis,
+live-slot/abandoned-installer conjunction and original Windows copied-
+bootstrap consumer. Protected candidates and parked ROOTs remain excluded;
+no implementation, test, native, receiving or custody acceptance is inferred.
+
+The [startup](startup-reuse-cohort.md),
+[account](account-preflight-cohort.md) and
+[release guidance](release-check-guidance-cohort.md) cores retain ACTIVE/RECENT
+cross-key discovery, all three warm-up tracks, original-owner New/Resume
+custody, ordinary/pinned push and inherited identity/401 matrices, both bounded
+preflight deadlines and pinned Main effective-content truth. #10291's finite
+source completion grants no installation, cutover, broader account closure or
+custody release; protected references and scoped publication/role holds remain.
+
+The [self-update](self-update-observation-cohort.md),
+[publication-policy](publication-policy-cohort.md) and
+[Vault](vault-boundaries-cohort.md) cores retain Linux-AND-macOS validation,
+the finite documentation alternative, same-occurrence exit/work evidence,
+retired-native-PR policy, stronger trusted-CI replacement before hook
+activation, dynamic authorized targets and endpoint-AND-owner-local context.
+Keep existing owners, all alternatives and protected-reference exclusions;
+no native, credential, installed, receiver or completion grant is inferred.
+
+The three [componentization](componentization-workbench-cohort.md),
+[Dispatch](dispatch-observability-cohort.md) and
+[onboarding](knowledge-onboarding-cohort.md) cores retain all original
+alternatives and current custodians. Preserve complete installer/module/
+recurrence obligations, actual campaign judgments, unread #6379 inheritance,
+SUBMITTED-versus-COMPLETED, report-OR-telemetry, both nonlocal waiter paths,
+non-expiring capacity custody, actual model admission and provider-policy
+uncertainty. Finite setup wording is not an invented whole-harness gate.
+
+The three [timeout](timeout-causality-cohort.md),
+[knowledge](knowledge-pair-cohort.md) and
+[hosted](hosted-custody-cohort.md) cores retain complete original alternatives,
+refinements, validation and actual custodians. Preserve the cancelled one-
+attempt retry, correction-OR-retry, both Boolean composition directions,
+all removal choices, actual shared recycler fence, credential recovery OR
+alternatives and FINAL OPEN/direct-readback boundaries. Historical partials,
+functional-profile passes and documentary intake are not causal/source completion.
+
+The [daemon](daemon-scheduling-cohort.md),
+[engine](engine-adoption-cohort.md) and
+[native-control](native-controls-cohort.md) cores retain all thirty-five
+whole texts and their original distinctions. Current messages/descriptions
+support thirty-two bounded comparisons, not source completion. Four protected
+relations receive no source/subset retry. Preserve historical intake without
+replay, actual production-witness uncertainty, paused rollout, native/installed
+acceptance, settings/permission authority and every incumbent claim/check state.
+
+The three [lifetime](lifetime-control-cohort.md),
+[recovery](finalization-recovery-cohort.md) and
+[authority](repository-authority-cohort.md) cores preserve all thirty-six whole
+texts and explicit source conditions. Thirty-one message/description
+comparisons are not whole completion; protected candidates and closed metadata
+receive no source retry or credit. Existing direct keeper intake and historical
+folds are retained, not repeated. Every parent/receiver check, exact claim,
+native/installed tier and source/resource custodian remains unchanged.
+
+The [standalone-declaration study](standalone-declaration-cohort.md) preserves
+all thirteen whole source texts, exact scoped incumbent ACK conditions and
+independent version/source identities. Two full Active ROOTs and eleven
+completed-work comparisons do not finish remaining bootstrap, offline or
+release-layout contracts. Relevant runner/TOML/policy source reading is not
+test preparation, a causal repair, native qualification or custody release.
+
+The [installation-scope study](installation-scope-cohort.md) retains all
+thirteen admitted whole texts, current assigned/parked conditions and original
+evidence tiers. Protected original/description material is wholly withheld,
+not retried through subsets. Documentary parking, footprint and typing work
+do not establish coexistence or directory-parser/native-consumer completion;
+all incumbent parent, receiver, waiver, activation and custody states survive.
+
+The [head-succession study](head-succession-cohort.md) preserves all sixteen
+whole source texts and current actual claims without republishing private
+runtime identities. Seven message/description comparisons are not repairs;
+five protected description relations remain withheld. Two whole Draft ROOTs
+do not accept later source refinements or authorize custom/native handoff,
+claimant release, allocation cleanup or stable-head qualification. All
+incumbent parent and receiver states remain unchanged.
+
+The [qualification/cache study](qualification-cache-cohort.md) distinguishes
+all original cache, raw-input, lifecycle-custody, exclusion and exact-manifest
+clauses. Fifteen retrieved relations remain noncompletion comparisons.
+The independently found #9472 source correction preserves the unchanged
+production manifest and routing assertions; actual provider/comment/closure
+readback is not a new native run, whole-suite acceptance or custody release.
+No remaining-source, receiver or parent check state is silently completed.
+
+The [native-supervisor study](supervisor-reconciliation-cohort.md) preserves
+all five whole contracts and fifteen comparison tiers. Two actual complete
+keeper-body deliveries/readbacks and separate guarded source dispositions
+are tracking acceptance only. All ten new rows stay unchecked; explicit
+historical OPEN, held operational rollout and pending source/release custody
+remain. No native/system or implementation result is claimed.
 
 The [native timeout/lifetime study](native-timeout-cohort.md) distinguishes
 #7820's verified finite source completion from the unresolved broader startup

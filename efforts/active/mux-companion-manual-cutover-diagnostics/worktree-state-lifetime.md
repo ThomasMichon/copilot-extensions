@@ -10,8 +10,12 @@ consumer source merged in #10251; D4's explicit collection/readback library
 merged in #10447; passive project retained-inventory source merged in #10488;
 Efforts export-contributor provenance merged in #10495; Logger's optional
 provenance collection/readback consumer merged in #10500; explicit passive
-exact-repository provider discovery merged in #10503.**
-Native durability and complete D4-D5 remain open.
+exact-repository provider discovery merged in #10503; explicit policy-first
+managed export/collection composition merged in #10512; D4's default-off
+existing-tick source integration merged in #10520; D5 checkout-preservation
+source controls merged in #10528; supported local rescue/finalization
+qualification merged in #10539.**
+Native durability, actual archive acknowledgment and D5 remain open.
 No source merge performs a live data move,
 export, collection, cleanup or rollout. The
 [D1 readback](journal/2026/11.03-sidecar-durable-placement.md) and
@@ -58,8 +62,16 @@ collection/readback library without coercing canonical session references.
 #10503 adds explicit passive discovery of the actual admitted repository's
 retained inventory and effective Efforts export provider, preserving lossless
 owner identity separately from the older aggregate-policy identity.
-Automatic export/collection, existing-tick orchestration and legacy rescue
-remain unfinished integrations.
+#10512 composes policy-first managed export, actual accepted-revision selection,
+complete contributor retention and fresh local readback with finite owner commands.
+#10520 connects this boundary to the existing sync tick through strict
+machine-local opt-in, preserving default behavior and accounting custody.
+Collection-context cursors retain independent repository/store progress.
+#10528 supplies conservative known-fallback preservation and actual isolated
+checkout retirement with independent managed data and retained discovery.
+#10539 qualifies supported local format-2 export/readback before actual isolated
+finalization without changing the original checkout hold or writer locator.
+Actual relocation, installed collection and archive acknowledgment remain open.
 
 Existing cleanup can remove a checkout while retaining a lifecycle tombstone.
 That tombstone does not preserve arbitrary checkout-local agenda bytes.
@@ -184,22 +196,45 @@ not consequences of a reviewed design.
   the owning rich reader, retaining one permanent Agenda subscription.
   #10251 merged as `8b01db9aff9064434c839d2275eada0d27f876da`; source and
   isolated real-process/Textual qualification only, not installed/native proof.
-- [ ] D4. Extend the existing logger collection and readback flow for exported
+- [x] D4. Extend the existing logger collection and readback flow for exported
   worktree state under its actual repository/privacy/destination policy. Retain
   the existing Session Sync/accounting owners; no parallel scheduler or service.
   #10447 supplies the policy-qualified local library and namespace/preservation
   fencing. #10488 supplies negotiated owner project inventory, including
   descriptors without canonical records. #10495 supplies complete owner-derived
   contributor provenance; #10500 supplies its explicit Logger library consumer.
-  #10503 supplies explicit passive selected-provider discovery. Automatic
-  export/collection and existing-tick orchestration remain open.
-  See the [provider readback](journal/2026/11.04-sidecar-logger-provider-discovery.md).
+  #10503 supplies explicit passive selected-provider discovery. #10512 composes
+  explicit policy-first managed export/collection and fresh local readback.
+  #10520 delivers the default-off existing-tick integration with actual typed
+  input admission, bounded shared execution, truthful per-pass outcomes and
+  independent collection-context rotation. This closes source integration,
+  not installed operation, native durability or actual archive acknowledgment.
+  See the [tick readback](journal/2026/11.04-sidecar-existing-tick-collection.md).
 - [ ] D5. Qualify legacy rescue and the separation of checkout removal from data
   reclamation. Actual relocation, collection, deletion and rollout need their
   own concrete authorization and evidence.
+  #10528 delivers the source preservation and independent checkout-retirement
+  controls. #10539 qualifies supported local format-2 rescue/readback through
+  actual owner commands before isolated finalization, without a writer switch or
+  disposal permission. Actual relocation, restoration/reclamation and operational
+  acceptance remain open. See the [preservation readback](journal/2026/11.04-sidecar-checkout-preservation.md)
+  and [rescue qualification](journal/2026/11.04-sidecar-rescue-qualification.md).
 
 ## Validation Plan
 
+- [x] Qualify the machine-opted-in existing sync tick through actual aggregate
+  policy and selected owners, including successive retained-store collection
+  without an ordinary session source, unchanged source bytes, complete contributor
+  retention, default-off/dry-run refusal and independent tenant repository/store
+  rotation. #10520 qualifies isolated source/process controls only; no installed
+  configuration, real-data collection or remote archive acknowledgment is implied.
+- [x] Qualify explicit policy-first managed export/collection through actual
+  selected owners: admission before staging/export, unchanged source bytes,
+  actual revision, complete provenance, fresh placement/readback, finite shared
+  process/copy budgets and exact temporary cleanup with retained failure evidence.
+  #10512 qualifies 224 isolated source/process controls, including retired
+  placement and native Linux descendant timeout. This is not scheduled/installed
+  collection, native Windows qualification or remote archive acknowledgment.
 - [x] Qualify explicit passive Logger provider selection at the actual admitted
   checkout, complete retained-store discovery, strict actual capabilities,
   effective Efforts activation, lossless origin identity and foreign-source
@@ -251,17 +286,22 @@ not consequences of a reviewed design.
   remain open.
   #10447 qualifies explicit local Logger collection and fresh owner readback in
   isolated processes, not automatic discovery or actual archive acknowledgment.
-- [ ] Multiple contributing sessions reference one revision-bound worktree
+- [x] Multiple contributing sessions reference one revision-bound worktree
   collection. Existing logger aggregate authorization, privacy, idempotency
   and destination ownership remain effective.
   #10447 qualifies two explicitly supplied references to one local collection;
   #10495 supplies the separately negotiated owner provenance projection.
   #10500 qualifies explicit complete attribution/readback alongside unchanged
-  canonical reference calls. Automatic consumer discovery/reference integration
-  remains open.
-- [ ] Checkout retirement retains managed data and its discoverable descriptor;
+  canonical reference calls. #10520 integrates actual owner discovery, export
+  and complete provenance collection into the default-off existing tick.
+  Qualification is isolated/local source evidence, not actual remote archival.
+- [x] Checkout retirement retains managed data and its discoverable descriptor;
   legacy or unverified rescue prevents data-destroying removal. Archive outage
   alone neither erases data nor fabricates an unfinished source objective.
+  #10528 qualifies actual isolated source finalization, unchanged managed
+  descriptor/member bytes and fresh discovery, plus legacy/partial/unsafe holds
+  at reporting and mutation boundaries. This is not installed/native acceptance,
+  actual legacy relocation or remote archive acknowledgment.
 - [ ] State reclamation refuses absent/stale archive receipts, changed revisions,
   missing retention decisions and absent deletion approval. Restoration never
   reacquires a claim, lease or head from archived bytes.

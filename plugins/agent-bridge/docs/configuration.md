@@ -50,10 +50,13 @@ fields → canonical plugin config beneath the owner's exact
 The repository+machine tier is cell-scoped; repository role sources retain
 physical source ownership. Lists replace and environment mappings deep-merge.
 
-Knowledge/repository+machine files may contain only these ordinary fields;
-native session modes, remote bindings, endpoint and installation settings cannot
-be supplied by those portable overrides. Pydantic validation and preference
-source validation remain independent. An unavailable optional installed owner
+Only ordinary fields participate in this composition. A valid `session_modes`
+namespace may coexist in the same source document: its schema is validated,
+but selection remains with the native operator/repository/service preference
+reader. Its presence in a knowledge or repository+machine source does not make
+it an inherited spawn-default override. Remote bindings, endpoint and installation
+settings cannot be supplied by portable overrides. Pydantic validation and
+preference source validation remain independent. An unavailable optional installed owner
 preserves legacy native defaults; invalid present reports or explicitly
 unresolved binding must not become absence. The derived roster's native
 `_effective_spawn_defaults` consumer applies the machine tier before the exact

@@ -1,5 +1,16 @@
 # Testing copilot-extensions
 
+Bridge's opt-in `--test-file tests/test_acp_current_requests.py
+--test-file tests/test_acp_client.py --test-file tests/test_attention_current.py
+--test-file tests/test_attention_wait.py --allow-explicit-tiers` packet checks
+actual local callback/Future lifetime, bounded candidate/output counts, privacy,
+manual-versus-forwarded/automatic permission, connection/process/session
+replacement and failed initialization. Delayed old callbacks never qualify as
+the new producer; overlapping/reset permission slots remain partial until their
+omitted callbacks settle. Completion invalidations do not append history. It starts
+no SDK/model actor and does not qualify optional wire, Manager, installed or
+native-client behavior; required unit-only CI is unchanged.
+
 Efforts' optional `--test-file tests/test_agenda_export_contributors.py
 --test-file tests/test_agenda_export.py --test-file tests/test_agenda_export_cli.py
 --allow-explicit-tiers` packet checks complete verified contributor provenance,
@@ -24,6 +35,20 @@ plus two descriptor-membership scans per worktree, without traversing domain
 contents. These isolated source controls do not qualify installed collection,
 native Windows inventory, remote latency or durable archive acknowledgment.
 
+Worktrees' optional `--test-file tests/test_retirement_obligations.py
+--test-file tests/test_resource_producer_finalize.py --allow-explicit-tiers`
+packet covers checkout-local agenda preservation across ordinary/forced cleanup,
+raw removal fallbacks, partial/linked/unreadable homes and state appearing during
+a failed Git removal. Its actual isolated Git finalization controls distinguish
+completed source work with a retained legacy checkout from removed checkouts whose
+managed data/descriptors remain discoverable outside them. The supported
+checkout-local format-2 control invokes the actual Efforts initialization,
+complete export, verification and readback commands before finalization.
+Original identity, records, metadata and source bytes survive, and a verified
+rescue copy does not release the checkout hold or create a managed locator.
+No archive provider is required for that separation. This is source/private-fixture qualification, not
+real-data rescue, native Windows durability or persistent-data deletion authority.
+
 The manual `windows-coverage-rotation.yml` selector `related_resolution=true`
 runs Worktrees' configuration-graft and execution-context consumers through the
 canonical hardened Linux container. Supply `ref` for the published candidate;
@@ -33,9 +58,37 @@ source/topology work counts, configuration forwarding, precedence, failure and
 separate-invocation freshness. It neither expands required unit-only CI nor
 qualifies installed runtime, native Windows, ACP or whole-hook throughput.
 
+The focused Worktrees `tests/test_reconcile_deployment.py` launch-freshness
+packet exercises real planning, staging, native execution-admission and the
+durable launch consumer with isolated metadata. It preserves newer installed
+and serving versions, independent same-version sources, payload refresh and
+forward standalone updates, and refuses changed cached actions without runtime
+writes. Its existing policy matrices may be selected separately with
+`-k 'stage_refreshes or prelaunch_retains'` to retain the ordinary group deadline.
+The actor-free `tools/promotion_unit_tests/test_launch_freshness.py` cases
+substitute only file/source observations and belong to the unit-only promotion
+packet. Neither lane qualifies an installed service, external rollout or every
+first-use adapter; #7030 retains those acceptance boundaries.
+
+The same focused packet separately exercises preexisting selector/manifest
+disagreement, actual canonical last-known-good/newest-complete recovery, named
+and packaged helper layouts, unchanged valid-current selection despite a newer
+unselected slot, constructor/helper-only changes, external transitive local
+dependency changes or loss (including cyclic declarations), and same-package
+repair serving. Generated dependency environments do not invalidate cached work.
+External dependency controls exercise both the stdlib TOML parser and the real
+backport with `tomllib` unavailable, preserving the declared Python 3.10 floor.
+Completion/interpreter records in these lookup fixtures are synthetic observations;
+the real canonical resolver is executed, not the selected fixture interpreter.
+They do not certify package health or installed serving. Own successful acquisition
+is replanned through the ordinary next pass; genuinely stale external actions
+still refuse. Runtime package normalization is checked against the canonical
+source/repair identity function, preserving profile and other package qualifiers.
+
 The manual `windows-coverage-rotation.yml` selector `post_tool_fallback=true`
 runs only Worktrees' post-tool shell, status/bind reminder, late-guidance and
-guard-publication consumers plus ordinary pre/post-hook idle-retention controls
+guard-publication consumers plus ordinary pre/post-hook idle-retention and
+late-demand/idle-drain and interruption-safe retirement controls
 through the canonical hardened Linux container. Supply `ref`
 to select a published candidate; execution records its immutable checkout,
 selector, container profile and actual result. It cannot be combined with
@@ -96,8 +149,15 @@ provenance, changed scope/placement refusal and exact temporary-member cleanup.
 Failed or uncertain exports retain their evidence. A native Linux pidfd witness
 requires an export timeout to settle its console descendant. Process commands
 and collection copying share the caller's absolute execution budget.
-This explicit library packet does not enable a sync tick, change ordinary
-accounting or qualify native Windows, installed collection or remote archival.
+The same native fixture also exercises actual filesystem policy loading and
+the default-off existing sync tick, collecting both retained stores across two
+passes while preserving ordinary missing-source failure. The separate
+`--test-file tests/test_worktree_state_tick.py --test-file tests/test_aggregate.py
+--test-file tests/test_sync.py --test-file tests/test_sync_protection.py` packet
+checks shared budgets, fair deferrals, independent failures, cursor refusal and
+unchanged default-off/dry-run/accounting/protection behavior. No packet enables
+installed collection or qualifies native Windows, whole-pass/remote-filesystem
+latency or remote archival.
 The preservation cases exercise actually eligible old sessions and a verified
 ordinary archive containing no worktree collection; neither justifies erasing
 marked nested evidence.
@@ -2825,6 +2885,10 @@ budgets, and peer settlement plus private-input cleanup after a digest failure.
 Pure worker-ceiling, budget and orchestration controls live in
 `tools/promotion_unit_tests/test_wheel_acquisition_budget.py`; its executor
 boundary is synthetic and does not qualify real overlap or native settlement.
+The retained-wheel controls exercise a real local-TLS metadata pass without a
+wheel download, exact-byte and storage limits, first-owner refusals, link
+trust, custody mutation and deadlines. Actor-free controls separately cover
+the selected-file decision; neither test approves a profile or runs an update.
 A simulated pre-header reset followed by a real local-TLS request exercises the
 bounded retry; pure controls cover shared budgets, deadline, peer cancellation
 and redirect credential isolation.

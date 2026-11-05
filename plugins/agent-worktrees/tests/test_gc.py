@@ -109,6 +109,23 @@ def test_sweep_dry_run_removes_nothing(tmp_path, monkeypatch):
     assert empty.exists()           # dry run: still on disk
 
 
+def test_sweep_dry_run_reports_empty_agenda_home_as_preserved(tmp_path, monkeypatch):
+    root = _mkdir(tmp_path / "roots")
+    checkout = _mkdir(root / "retained")
+    home = _mkdir(checkout / ".effort-agenda")
+    monkeypatch.setattr(gc, "candidate_roots", lambda _repo: [root])
+    import agent_worktrees.git_ops as git_ops
+    monkeypatch.setattr(git_ops, "list_worktree_paths", lambda **_kwargs: [])
+
+    report = gc.sweep_orphans(_repo(root), [], dry_run=True, min_settle_secs=0)
+
+    assert report["removed"] == []
+    assert len(report["skipped"]) == 1
+    assert report["skipped"][0]["path"] == str(checkout)
+    assert ".effort-agenda" in report["skipped"][0]["reason"]
+    assert home.is_dir() and list(home.iterdir()) == []
+
+
 def test_sweep_is_idempotent(tmp_path, monkeypatch):
     root = _mkdir(tmp_path / "roots")
     _mkdir(root / "empty")

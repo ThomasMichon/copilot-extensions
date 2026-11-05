@@ -93,6 +93,33 @@ They distinguish environment staging, candidate readiness, activation and
 release; they do not claim that every app already implements the target flow.
 Existing plugin-native installation remains supported during the migration.
 
+## Manager first-party artifact and retained hosts
+
+Manager's wheel-first target embeds its selected in-process first-party library
+core, resources and notices in one Manager wheel. Third-party runtime dependencies
+remain ordinary exactly locked distributions with normal package metadata and
+the existing approved-source, compatibility and origin checks. Independent tools
+and service hosts retain their actual external boundary; imported process-helper
+and client libraries remain first-party core.
+
+Preserve authoritative static source/wheel metadata and the complete third-party
+closure after embedding first-party code. Separate build-time first-party inputs
+remain permissible, but neither a ZIP of separate wheels nor installing those
+libraries beside Manager proves this target. The existing native artifact/profile
+association and final installed-content checks remain authoritative; do not
+introduce alternate metadata, dependency receipts or a second build pipeline.
+See the [application pattern](patterns/fast-application-install-and-cutover.md#manager-first-party-core-and-retained-hosts).
+
+Artifact membership and process lifetime are independent. Default survival uses
+the existing original-generation bootstrap and native retention lease, not a
+per-library service, permanent environment or copied venv. Preserve interpreter,
+completion and process identity through execution and eventual retirement, without
+turning outgoing retirement into an incoming readiness gate. An already-created
+virtual environment is not a relocatable artifact.
+
+These are target requirements, not claims that current Manager artifacts or all
+host entry points already implement them.
+
 Runtime installation and communication compatibility are separate contracts.
 For a new or changed CLI/service boundary, apply
 [service-contract-evolution](patterns/service-contract-evolution.md): publish
@@ -1688,6 +1715,43 @@ receipt through `COPILOT_EXTENSIONS_CONTEXT`; caller payload roots, Python
 paths, and any foreign plugin context are removed. A missing or invalid receipt
 blocks that plugin's mutation with an explicit diagnostic rather than falling
 through to an unattributed legacy root.
+
+Automatic runtime actions also use one read-only source/freshness decision
+across reconciliation, Worktrees staging, pre-launch planning and immediate
+execution admission. A payload older than either the deployed or serving
+package cannot replace it. A different local source or a source-qualified
+runtime without the same payload receipt requires an explicit selected-source
+update, including when package versions match. Missing or malformed required
+evidence produces a recovery diagnostic, not permission to deploy.
+Older standalone manifests that predate source-kind metadata retain their
+version-guarded compatibility path; a present invalid source kind or lost
+selected-runtime manifest does not qualify as that legacy case.
+
+Newly prepared actions retain their payload manifest, complete construction-input
+fingerprint, runtime source receipt, deployment manifest, selector and relevant
+serving identity facts. Construction inputs include transitive declared local
+package sources outside the payload directory; missing declared inputs refuse.
+Generated environments/caches/build output are excluded; ordinary staging keeps
+its existing curated staleness fingerprint. Versioned
+roots additionally use the owning payload's canonical `resolve-python` primitive
+to observe current, last-known-good or newest-complete selection. Its caller-owned
+read-only child has a fifteen-second deadline and 64 KiB per-stream limit;
+unversioned legacy roots need no extra child. Named and packaged primitives retain
+the exactly-one-resource contract.
+
+Selected package/profile/source facts must agree with the deployment manifest.
+Only canonical generated source/repair suffixes are removed for package-version
+comparison; raw source and generation identities remain separate. Execution
+re-reads the captured facts and rejects a changed decision before invoking the
+installer. After its own successful payload acquisition, the reconciler defers
+that service's runtime action to the next available normal planning pass instead
+of reporting the expected acquisition change as an execution failure.
+Older cached actions without a snapshot still undergo the current source/freshness
+decision. Publication policy, installation scope and the installer's
+construction/activation admission remain independent.
+These automatic-action guards do not constrain explicit `update` or its
+authoritative recovery path, disable marketplace content refresh, or suppress
+unrelated hooks. They do not prove installed service convergence.
 
 Installation-mode probes and explicit-context validation in read-only launch
 preflight invoke the owning payload's portable
@@ -4554,6 +4618,23 @@ cancel further work; the pool settles before the worker reports its original
 failure or releases private inputs. The outer owned-process deadline remains
 the bound for blocked native DNS or socket operations. Evidence preserves the
 selected input order, regardless of completion order.
+
+`admit_retained_wheel_inputs` applies the same first-owner index, hash,
+seasoning and withdrawal rules to an independently selected, already-held
+`WheelSnapshot` without downloading its wheels again. It validates each listed
+link's HTTPS/origin policy but does not follow or attest an unused wheel
+redirect. Its distinct evidence records zero downloaded wheel bytes; it is not
+an acquisition receipt or approval. If the selected records omit a Python
+hint, callers must compare any returned feed hint with inspected wheel metadata
+using the existing semantic metadata owner before consumption. The worker and
+selected borrowed copies share the caller's storage budget and the earlier of
+the two custody deadlines; the enclosing delivery and any unselected wheels
+remain the caller's budget.
+This is one metadata pass, not a freshness lease: the installation owner must
+recheck current policy at any later publication boundary and retain the actual
+wheel owner throughout consumption. Consequential output stays staged until
+the admission context exits successfully. No existing installer selects this
+path automatically.
 
 The shared `installer_native_feed.py` captures a caller's retained native UV
 settings using only the standard-library installer resources. It owns parsing,

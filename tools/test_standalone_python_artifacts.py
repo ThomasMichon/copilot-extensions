@@ -101,8 +101,9 @@ def _build(tmp_path, monkeypatch, component):
     monkeypatch.setattr(builder, "REPO", tmp_path)
     monkeypatch.setattr(builder, "LIBS_DIR", tmp_path / "libs")
 
-    def build(source_dir, out_dir, *, toolchain, reserved_names):
+    def build(source_dir, out_dir, *, toolchain, reserved_names, normalize_timestamps):
         assert toolchain is LOCK
+        assert normalize_timestamps
         package = next((source_dir / "src").iterdir()).name
         members = {
             name: path.read_bytes()

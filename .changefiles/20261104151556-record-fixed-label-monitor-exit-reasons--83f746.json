@@ -1,0 +1,9 @@
+{
+  "comment": "Record fixed-label monitor exit reasons and evaluated idle gates without changing retirement policy",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

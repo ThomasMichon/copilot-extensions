@@ -441,6 +441,12 @@ The Manager displays advisory/stale labels and never overlays Group C
 reconcile onto a current row. Unsupported `--current` is an actionable upgrade
 error; optional-flag retries cannot remove it.
 
+After admitting missing-resident startup, a one-shot read returns the saved
+database publication immediately when available instead of waiting behind live
+refresh. It remains advisory with its original observation time and generation.
+Startup without a usable saved publication retains the bounded API wait and
+explicit retryable unready result.
+
 The one-shot `--stream` current snapshot emits `begin` with the publication
 and selected row count, `worktree` frames from that same publication, then
 `done`. The Manager admits a complete barrier before replacing its rows and
@@ -596,6 +602,47 @@ PID/birth check. A live-peer timeout never authorizes replacement.
 The `machine-ssh:` source-ID namespace is stable for both local and remote
 machine sources; it is not transport evidence. Local Manager failure notices
 explicitly identify local execution (no SSH) and the resident current-roster read.
+
+#### Saved bootstrap during cold startup
+
+The additive `worktrees-feed-bootstrap-v1` capability admits Boolean
+`bootstrap: true` on a held feed request. Without that explicit request, the
+existing v1 feed is unchanged. Manager's direct transport sends it only after
+the authenticated resident advertises support. The CLI's existing
+`--follow --cache-only` combination opts into saved bootstrap output and
+negotiates the resident extension; older engines already accept `--cache-only`
+and retain their ordinary feed behavior.
+
+An opted-in CLI may flush its bounded saved DB transaction before connecting or
+launching the resident. An admitted resident with no first current publication
+may likewise serve its saved transaction. These use ordinary
+`begin`/`worktree`/`done` barriers, but retain `quality: advisory`, original
+generation/revision/time, and explicit advisory availability. They never claim
+current authority, rewrite the database, or run Git/tracking/session discovery.
+`pending` frames before the first current publication keep the idle connection
+alive without extending an unfinished transaction. A real producer failure is
+an error, not an indefinite startup wait.
+
+The first complete current `begin`/`done` transaction atomically replaces saved
+rows, even when its generation differs. Current rows cannot reset to advisory
+rows; late cached loader results cannot overwrite an accepted current source.
+Manager displays saved rows while loading and does not include that source in
+its authoritative-roster set. A structured retryable `unready` keeps loading,
+not the generic failed-load screen. Missing direct local transport falls back
+only to the existing CLI recovery owner; live-peer or authentication failures
+never authorize a replacement daemon.
+
+Before a current publication, cutover notices carry the resident generation and
+null cursor, even when advisory rows have already been displayed by the CLI or
+resident. Receivers retain those rows and reconnect; saved revision numbers are
+never incremental-update bases. Every new full snapshot resets its observation
+set, including v2 rows removed or revised in the new generation.
+
+The path-gated/manual `Cold roster native acceptance` workflow runs the focused
+client/feed/runtime/recovery and Manager consumer packets on disposable Windows
+and Linux workers. It preserves ordinary test deadlines and is separate from
+required unit-only CI. Its fixtures own temporary databases, sockets and child
+processes; it does not exercise a shared mux or qualify a full host installation.
 
 An admitted feed registers its project notification before reading its initial
 publication. Its `begin` includes the complete projection, `selected_count`,

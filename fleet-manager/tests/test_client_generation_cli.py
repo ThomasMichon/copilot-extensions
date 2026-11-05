@@ -444,6 +444,7 @@ def test_actual_installed_console_generation_transitions(
 @pytest.mark.timeout(90)
 @pytest.mark.parametrize("transition", [
     "retry", "forward-missing", "forward-malformed", "higher", "uninstall", "foreign", "legacy",
+    "installed-owner",
 ])
 def test_actual_installed_console_managed_lifecycle(tmp_path_factory, primitive, signed_wheel, transition):
     from fleet_manager import client_generation_frontdoor as frontdoor
@@ -479,10 +480,11 @@ def test_actual_installed_console_managed_lifecycle(tmp_path_factory, primitive,
     assert contract["schema"] == "fleet-manager.client-lifecycle-contract" and contract["version"] == 1
     assert contract["capabilities"]["explicit-generation-installation-v1"]["requires_explicit_command_replacement"]
 
-    def invoke(operation, *arguments, success=True, command="client-generation", location=root):
+    def invoke(operation, *arguments, success=True, command="client-generation", location=root,
+               prefix=None, refusal=None):
         started = time.monotonic()
         result = subprocess.run(
-            [str(console), command, operation, "--root", str(location),
+            [*(prefix or [str(console)]), command, operation, "--root", str(location),
              "--identity", str(paths["identity"]), *arguments],
             cwd=area, capture_output=True, text=True, timeout=45, **FLAGS,
         )
@@ -494,6 +496,8 @@ def test_actual_installed_console_managed_lifecycle(tmp_path_factory, primitive,
         if success:
             return json.loads(result.stdout)
         assert not result.stdout and "fleet-manager" in result.stderr and "Traceback" not in result.stderr
+        if refusal is not None:
+            assert refusal in result.stderr
 
     legacy = area / "legacy" if transition == "legacy" else None
     if legacy is not None:
@@ -510,7 +514,8 @@ def test_actual_installed_console_managed_lifecycle(tmp_path_factory, primitive,
         legacy_settings = legacy / "configuration"
         legacy_settings.write_bytes(b"preserved legacy configuration")
 
-    def install(generation=FIRST, request="managed-1", *, replace=True, success=True, origin=legacy):
+    def install(generation=FIRST, request="managed-1", *, replace=True, success=True, origin=legacy,
+                prefix=None, refusal=None):
         sources = [
             item for name in ("selection", "release", "proof", "policy", "sources", "target")
             for item in ("--" + name, str(paths[name]))
@@ -520,6 +525,7 @@ def test_actual_installed_console_managed_lifecycle(tmp_path_factory, primitive,
             "--command-directory", str(directory), "--generation", generation, "--request", request,
             *(["--replace-commands"] if replace else []),
             *(["--legacy-root", str(origin)] if origin is not None else []), success=success,
+            prefix=prefix, refusal=refusal,
         )
 
     install(replace=False, success=False)
@@ -591,6 +597,36 @@ def test_actual_installed_console_managed_lifecycle(tmp_path_factory, primitive,
             fixture["proof"]["payload"]["sequence"] += 1
             sign()
             inputs_at(area, fixture)
+        if transition == "installed-owner":
+            scripts = Path(first["direct_command"]).parent
+            python = scripts / ("python.exe" if os.name == "nt" else "python")
+            closure = subprocess.run(
+                [str(python), "-I", "-B", "-c",
+                 "import importlib.metadata,json; "
+                 "print(json.dumps(sorted(d.metadata['Name'] for d in importlib.metadata.distributions())))"],
+                cwd=area, capture_output=True, text=True, timeout=45, **FLAGS,
+            )
+            assert closure.returncode == 0, closure.stderr
+            assert json.loads(closure.stdout) == ["fleet-manager"]
+            if os.name == "nt":
+                powershell = Path(os.environ["SYSTEMROOT"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+                prefixes = [
+                    [str(powershell), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                     "-File", str(directory / "fleet-manager.ps1")],
+                    [os.environ["COMSPEC"], "/d", "/c", str(directory / "fleet-manager.cmd")],
+                ]
+            else:
+                prefixes = [[str(directory / "fleet-manager")]]
+            for prefix in prefixes:
+                assert invoke("inspect", prefix=prefix)["selected_generation"] == FIRST
+                install(
+                    SECOND, "managed-2", prefix=prefix, success=False,
+                    refusal="selected pinned-key verification capability is unavailable",
+                )
+                assert database_bytes(root) == before
+                assert states([Path(path) for path in first["commands"]]) == commands
+                assert configuration.read_bytes() == b"preserved user configuration"
+                direct_health(first, area)
         preserved = receipt.read_bytes() if receipt.exists() else None
         second = install(SECOND, "managed-2")
         assert second["selected"] and second["registered"]

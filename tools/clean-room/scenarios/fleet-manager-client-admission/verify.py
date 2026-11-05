@@ -10,7 +10,7 @@ assert sys.argv[2:] in ([], ["--managed"])
 managed = sys.argv[2:] == ["--managed"]
 expected = {
     f"test_actual_installed_console_managed_lifecycle[{transition}]"
-    for transition in ("retry", "forward-missing", "forward-malformed", "higher", "uninstall", "foreign", "legacy")
+    for transition in ("retry", "forward-missing", "forward-malformed", "higher", "uninstall", "foreign", "legacy", "installed-owner")
 } if managed else {
     "test_fresh_installed_console_admission_and_durable_reopen_without_hosting",
     "test_missing_packaged_resource_is_not_replaced_by_repository_helper",

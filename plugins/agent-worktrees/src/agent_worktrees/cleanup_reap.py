@@ -8,6 +8,7 @@ from pathlib import Path
 
 from . import activity, config as cfg, disposition_history, git_ops, handoff_trace
 from . import permissions, procs, tracking
+from .checkout_data import preservation_reason
 from .retirement_safety import retirement_blocker, same_pair
 
 
@@ -67,6 +68,8 @@ def _reap_locked(
         )
         return 0, warnings
 
+    if rec.worktree_path and (reason := preservation_reason(rec.worktree_path)):
+        return 1, [f"Cannot remove {rec.worktree_id}: {reason}"]
     if rec.worktree_path and Path(rec.worktree_path).exists():
         process_blocker = procs.checkout_retirement_blocker(rec.worktree_path)
         if process_blocker:
@@ -77,9 +80,13 @@ def _reap_locked(
 
         if not git_ops.remove_worktree(repo.anchor, rec.worktree_path):
             warnings.append("Could not remove worktree via git -- forcing directory removal.")
+        if reason := preservation_reason(rec.worktree_path):
+            return 1, [f"Cannot remove {rec.worktree_id}: {reason}"]
         wt_dir = Path(rec.worktree_path)
         if wt_dir.exists():
             for attempt in range(4):
+                if reason := preservation_reason(wt_dir):
+                    return 1, [f"Cannot remove {rec.worktree_id}: {reason}"]
                 shutil.rmtree(wt_dir, ignore_errors=True)
                 if not wt_dir.exists():
                     break

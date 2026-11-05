@@ -3,7 +3,61 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
-- [2026-11-04 - Seven native timeout/lifetime contracts, sixteen comparisons and six direct portfolio tracking families](<journal/2026/11.04 native-timeout-contracts.md>)
+- [2026-11-04 - Three installer liveness and copied-bootstrap contracts](<journal/2026/11.04 installer-liveness-contracts.md>)
+
+- [2026-11-04 - Three CI causality, budget and diagnosis contracts](<journal/2026/11.04 ci-causality-contracts.md>)
+
+- [2026-11-04 - Three hosted staging, bootstrap and reuse contracts](<journal/2026/11.04 hosted-staging-contracts.md>)
+
+- [2026-11-04 - One finite release-check guidance contract](<journal/2026/11.04 release-check-guidance-contract.md>)
+
+- [2026-11-04 - Intended-account contracts and a finite preflight completion](<journal/2026/11.04 account-preflight-contracts.md>)
+
+- [2026-11-04 - Three startup discovery and acceptance contracts](<journal/2026/11.04 startup-reuse-contracts.md>)
+
+- [2026-11-04 - Three cross-boundary Vault contracts](<journal/2026/11.04 vault-boundaries-contracts.md>)
+
+- [2026-11-04 - Two policy-compatible CI and publication contracts](<journal/2026/11.04 publication-policy-contracts.md>)
+
+- [2026-11-04 - Three self-update scheduling and observation contracts](<journal/2026/11.04 self-update-observation-contracts.md>)
+
+- [2026-11-04 - Three knowledge-onboarding contracts](<journal/2026/11.04 knowledge-onboarding-contracts.md>)
+
+- [2026-11-04 - Three Dispatch observability and capacity contracts](<journal/2026/11.04 dispatch-observability-contracts.md>)
+
+- [2026-11-04 - Three componentization and workbench contracts](<journal/2026/11.04 componentization-workbench-contracts.md>)
+
+- [2026-11-04 - Three hosted lifecycle and custody contracts](<journal/2026/11.04 hosted-custody-contracts.md>)
+
+- [2026-11-04 - Three knowledge-pair lifecycle contracts](<journal/2026/11.04 knowledge-pair-contracts.md>)
+
+- [2026-11-04 - Four timeout signatures and causal acceptance](<journal/2026/11.04 timeout-causality-contracts.md>)
+
+- [2026-11-04 - Four profile, settings and ACP control contracts](<journal/2026/11.04 native-controls-contracts.md>)
+
+- [2026-11-04 - Four engine, adopter and selector contracts](<journal/2026/11.04 engine-adoption-contracts.md>)
+
+- [2026-11-04 - Four daemon scheduling and retirement contracts](<journal/2026/11.04 daemon-scheduling-contracts.md>)
+
+- [2026-11-04 - Three repository-authority contracts, closed metadata exclusion and nine comparisons](<journal/2026/11.04 repository-authority-contracts.md>)
+
+- [2026-11-04 - Four finalization/recovery contracts, twelve comparisons and retained historical intake](<journal/2026/11.04 finalization-recovery-contracts.md>)
+
+- [2026-11-04 - Four lifetime/reclaim contracts, ten comparisons and two whole-description withholds](<journal/2026/11.04 lifetime-control-contracts.md>)
+
+- [2026-11-04 - Four standalone/declaration contracts, eleven comparisons and two whole Active homes](<journal/2026/11.04 standalone-declaration-contracts.md>)
+
+- [2026-11-04 - Two whole installation contracts, five comparisons and retained parked/consumer boundaries](<journal/2026/11.04 installation-scope-contracts.md>)
+
+- [2026-11-04 - Four head-succession contracts, seven comparisons and two whole Draft-home distinctions](<journal/2026/11.04 head-succession-contracts.md>)
+
+- [2026-11-04 - Five qualification/cache contracts, fifteen comparisons and one independently verified finite expectation correction](<journal/2026/11.04 qualification-cache-contracts.md>)
+
+- [2026-11-04 - Five native-supervisor contracts, fifteen comparisons and two actual whole-body tracking folds](<journal/2026/11.04 supervisor-reconciliation-contracts.md>)
+
+- [2026-11-04 - Five attention/history contracts, fifteen comparisons and eight whole home/prior-art distinctions](<journal/2026/11.04 attention-history-contracts.md>)
+
+- [2026-11-04 - Seven native timeout/lifetime contracts, sixteen comparisons, five verified tracking folds and retained completion symptom](<journal/2026/11.04 native-timeout-contracts.md>)
 
 - [2026-11-04 - Six interpreter/construction contracts, seventeen bounded comparisons and one finite installer intake proposal](<journal/2026/11.04 interpreter-construction-contracts.md>)
 

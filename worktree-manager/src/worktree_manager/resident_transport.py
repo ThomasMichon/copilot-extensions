@@ -77,6 +77,8 @@ def frames(root: Path, project: str, *, alive, startup_timeout: float):
             "codename": None, "status_filter": None,
             "platform_filter": detect_platform(), "include_missing": False,
         }
+        if "worktrees-feed-bootstrap-v1" in state["capabilities"]:
+            payload["bootstrap"] = True
         with socket.create_connection(
             (endpoint.client_host, endpoint.port), timeout=min(startup_timeout, 0.25),
         ) as sock:
@@ -118,7 +120,7 @@ def frames(root: Path, project: str, *, alive, startup_timeout: float):
                     elif kind in {"done", "commit"}:
                         in_transaction = False
                         deadline = time.monotonic() + 5.0
-                    elif not in_transaction and kind in {"heartbeat", "availability"}:
+                    elif not in_transaction and kind in {"heartbeat", "availability", "pending"}:
                         deadline = time.monotonic() + 5.0
                     yield frame
                     if not alive() or kind in {"going-away", "error"}:

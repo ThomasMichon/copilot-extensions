@@ -271,11 +271,7 @@ def create_foreign_pr_from_branch(
         "url": pull.url,
         "number": pull.number,
         "state": normalized_state,
-        # A reused PR's draft state is whatever the provider already
-        # reports it as, not the caller's OWN --draft request for a PR
-        # that was never actually created this call -- mirrors the local
-        # path's own retry contract (draft is only ever true for a PR
-        # THIS call just opened as one).
+        # Provider-observed draft state overrides this legacy default below.
         "draft": False if reused else bool(draft),
         "head": from_branch,
         "base": base_branch,
@@ -283,7 +279,10 @@ def create_foreign_pr_from_branch(
         "reused": reused,
     }
     from .pr_metadata import include_publication_metadata
-    include_publication_metadata(result, pull)
+    include_publication_metadata(
+        result, pull, requested_draft=draft,
+        require_draft_observation=prcfg.provider == "azure-devops",
+    )
     if evidence is not None:
         from . import pr_foreign_checks
         result["publication_checks"] = pr_foreign_checks.after_create(

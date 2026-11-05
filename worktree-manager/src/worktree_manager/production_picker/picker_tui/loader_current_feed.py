@@ -74,7 +74,8 @@ def feed_argv(source):
         raise FeedUnavailable("the engine is not installed", retry=False)
     return [
         *base, "--project", data_ssh._project(),
-        "list", "--json", "--current", "--stream", "--follow", "--classify", "--mux-details",
+        "list", "--json", "--current", "--stream", "--follow", "--cache-only",
+        "--classify", "--mux-details",
     ]
 
 
@@ -110,8 +111,16 @@ class CurrentFeedMixin:
         return not self._cancelled.is_set() and self._gen.get(source.cache_key, 0) == gen
 
     def _feed_commit(self, source, gen, rows, *, availability=None) -> None:
+        advisory = bool(availability and availability.get("status") == "advisory") or bool(
+            rows and rows[0].get("_projection", {}).get("quality") == "advisory"
+        )
         derive.NOW = _dt.datetime.now()
         with self._lock:
+            if (
+                advisory and source.cache_key in self._feed_complete
+                and self._feed_complete[source.cache_key] == source.instance_id
+            ):
+                return
             previous = {row["id"]: row for row in self._records.get(source.cache_key, [])}
         records = []
         for row in rows:
@@ -135,7 +144,11 @@ class CurrentFeedMixin:
             records.append({**normalized, "raw": row})
         with self._lock:
             if self._feed_current(source, gen):
-                self._publish_source_records(source, records)
+                if advisory:
+                    self._records[source.cache_key] = records
+                    self._state[source.cache_key] = "loading"
+                else:
+                    self._publish_source_records(source, records)
                 available = availability or (rows[0].get("_availability") if rows else None)
                 self._error[source.cache_key] = (
                     ReadFailure(available.get("reason") or "Resident refresh is unavailable", kind="content")
@@ -143,7 +156,9 @@ class CurrentFeedMixin:
                 )
                 self._feed_backoff[source.cache_key] = 0.25
 
-    def _feed_error(self, source, gen, reason: str, *, kind: str = "connection") -> None:
+    def _feed_error(
+        self, source, gen, reason: str, *, kind: str = "connection", pending: bool = False,
+    ) -> None:
         if source.local:
             reason = f"Local resident current-roster read failed: {reason}"
         with self._lock:
@@ -151,7 +166,9 @@ class CurrentFeedMixin:
                 return
             self._error[source.cache_key] = ReadFailure(reason, kind=kind)
             has_snapshot = self._feed_complete.get(source.cache_key) == source.instance_id
-            self._state[source.cache_key] = "ready" if has_snapshot else "failed"
+            self._state[source.cache_key] = (
+                "ready" if has_snapshot else "loading" if pending else "failed"
+            )
             if has_snapshot:
                 records = []
                 for row in self._records[source.cache_key]:
@@ -166,7 +183,12 @@ class CurrentFeedMixin:
 
             root = resident_picker.root_for(_project())
             if root is not None:
-                return self._feed_once_resident(source, gen, root)
+                try:
+                    return self._feed_once_resident(source, gen, root)
+                except FeedUnavailable as error:
+                    if error.connected or not error.retry:
+                        raise
+                    # The CLI owns missing-resident launch and bounded recovery.
         from .data_ssh import _kill_proc_tree
 
         proc = self._spawn_stream(feed_argv(source))
@@ -205,7 +227,7 @@ class CurrentFeedMixin:
                 if rows is not None:
                     self._feed_commit(source, gen, rows, availability=receiver.availability)
                     watchdog.arm(IDLE_TIMEOUT)
-                elif frame.get("type") == "heartbeat":
+                elif frame.get("type") in {"heartbeat", "pending"}:
                     watchdog.arm(IDLE_TIMEOUT)
                 if receiver.notice is not None:
                     return f"resident going away: {receiver.notice}"
@@ -263,6 +285,7 @@ class CurrentFeedMixin:
         try:
             while self._feed_current(source, gen):
                 kind = "connection"
+                pending = False
                 try:
                     reason = self._feed_once(source, gen)
                 except FeedUnavailable as exc:
@@ -271,13 +294,14 @@ class CurrentFeedMixin:
                         self._feed_error(source, gen, str(exc), kind=kind)
                         return
                     reason = str(exc)
+                    pending = exc.pending
                 except (OSError, TypeError, ValueError, subprocess.SubprocessError) as exc:
                     self._feed_error(
                         source, gen, str(exc) or type(exc).__name__,
                         kind="content" if isinstance(exc, (TypeError, ValueError)) else "connection",
                     )
                     return
-                self._feed_error(source, gen, reason, kind=kind)
+                self._feed_error(source, gen, reason, kind=kind, pending=pending)
                 with self._lock:
                     delay = self._feed_backoff.get(source.cache_key, 0.25)
                     self._feed_backoff[source.cache_key] = min(delay * 2, 5.0)

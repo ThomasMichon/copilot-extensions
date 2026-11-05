@@ -1,0 +1,9 @@
+{
+  "comment": "Use the bounded native command adapter for watch snapshots and allow on-demand boot after a confirmed-dead legacy watch owner.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

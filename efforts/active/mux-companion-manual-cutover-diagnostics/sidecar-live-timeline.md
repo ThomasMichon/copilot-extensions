@@ -91,6 +91,32 @@ records 120 isolated controls, the corrected lossless origin-identity boundary
 and actual reviewed merge. Automatic export/collection and existing-tick
 orchestration remain open; this does not complete D4 or authorize live effects.
 
+#10512 merged as `f2143b1467c72bab36ca30839f4ab0b8d8b93773`, delivering explicit
+policy-first managed export/collection composition and fresh local readback.
+The [source readback](journal/2026/11.04-sidecar-managed-export-composition.md)
+records 224 isolated controls, the corrected shared origin-probe deadline and
+actual reviewed merge.
+
+#10520 merged as `00e34cfad46186b9107b6febe6b3103f40d58bc6`, connecting the
+same composed boundary to the existing sync tick with strict machine-local
+opt-in, shared execution limits and independent collection-context cursors.
+The [source readback](journal/2026/11.04-sidecar-existing-tick-collection.md)
+closes D4's source integration, not D5 legacy preservation, actual archive
+acknowledgment, installed/native qualification or any original parent gate.
+
+#10528 merged as `7b48858d2b21dfa819c14ca34013dff973c14b69`, delivering
+conservative checkout-local agenda preservation and actual isolated retirement
+of checkouts with independent managed data. The
+[source readback](journal/2026/11.04-sidecar-checkout-preservation.md) closes
+that source preservation criterion, not D5 rescue, restoration/reclamation,
+actual archive acknowledgment or native/installed acceptance.
+
+#10539 merged as `20c140f142b273ec132b8d740240ed0dd3135e02`, qualifying
+supported checkout-local format-2 export/readback before actual isolated
+finalization without releasing the original data hold. The
+[source readback](journal/2026/11.04-sidecar-rescue-qualification.md) preserves
+D5's operational gates and continues S3's live input/permission evidence work.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than
@@ -396,6 +422,11 @@ publication and installed support retain their separate qualification.
   consumer; known-session event/history and installed adoption remain separate.
 - [ ] Expose actual pending/cleared input and permission evidence without answer
   or control authority.
+  The [live-request amendment](sidecar-current-requests.md), reviewed in #10545,
+  specifies the bounded
+  producer snapshot, optional version-skew-safe wire and existing-reader
+  consumer. Source implementation remains open; retained request history
+  remains separately qualified and unsupported sources stay unknown.
 - [ ] Deliver qualified pre-compaction evidence from a supported source adapter;
   retain direct start counts/attempt/target metadata but keep unknown until
   actual active-capacity and measurement/correlation qualification exists.

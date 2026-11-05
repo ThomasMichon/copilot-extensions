@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 import shutil
 import subprocess
 import sys
@@ -179,6 +180,122 @@ def test_confirmed_close_then_actual_finalize(final_owner, monkeypatch):
     assert finalize.validate_and_finalize("owner", config) is True
     current = tracking.load_record(path)
     assert current.status == "finalized" and current.resources[0].producer["phase"] == "closed"
+
+
+@pytest.mark.parametrize("layout", ["legacy", "legacy-exported", "managed"])
+def test_completed_finalize_retains_agenda_without_an_archive_dependency(
+    final_owner, monkeypatch, layout,
+):
+    from agent_worktrees import repos, worktree_data_store
+
+    root, path, config = final_owner
+    anchor = root / "anchor"
+    checkout = root / "checkout"
+    _git("worktree", "add", "-q", str(checkout), "-b", "worktree/owner", "base", cwd=anchor)
+    record = tracking.load_record(path)
+    record.worktree_path = str(checkout)
+    record.creation_nonce = "fixture-incarnation"
+    tracking.save_record(record, path)
+    registry = root / "fixture-repos.yaml"
+    registry.write_text(json.dumps({
+        "repos": {config.repo_name: {"remote": str(root / "origin.git")}},
+    }))
+    monkeypatch.setattr(repos, "_repos_yaml_path", lambda: registry)
+    if layout != "managed":
+        (anchor / ".git/info/exclude").write_text(".effort-agenda/\n")
+        home = checkout / ".effort-agenda/main"
+        home.mkdir(parents=True)
+    else:
+        placement = worktree_data_store.allocate_worktree_data(
+            config.repo_name, record.worktree_id, creation_nonce=record.creation_nonce,
+            domain="agendas", lane="main", store_id="a" * 32,
+        )
+        home = Path(placement.state_home)
+    member = home / "agenda.sqlite3"
+    rescue = None
+    if layout == "legacy-exported":
+        skill = Path(__file__).resolve().parents[2] / "efforts/skills/driving-effort-agendas"
+
+        def invoke(script, *args, request=None):
+            result = subprocess.run(
+                [sys.executable, "-B", str(skill / "scripts" / script), *args],
+                input=json.dumps(request) if request is not None else None,
+                capture_output=True, text=True, timeout=30,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            )
+            assert result.returncode == 0, result.stderr
+            return json.loads(result.stdout)
+
+        request = json.loads((skill / "assets/init.context-qualified.example.json").read_text())
+        request["change"]["worktree"] = record.worktree_id
+        invoke(
+            "agenda_cli.py", "init", "--mode", "context-qualified",
+            "--state-home", str(home), request=request,
+        )
+        state = invoke("agenda_cli.py", "read", "--state-home", str(home))
+        original = _owner_snapshot(home)
+        rescue = root / "verified-rescue"
+        rescue.mkdir(mode=0o700)
+        selection = [
+            "--destination", str(rescue), "--worktree", record.worktree_id,
+            "--store-id", state["store_id"], "--expected-revision", str(state["revision"]),
+            "--contract-version", "1",
+        ]
+        exported = invoke(
+            "agenda_export_cli.py", "export", "--state-home", str(home), *selection,
+        )
+        verified = invoke("agenda_export_cli.py", "verify", *selection)
+        assert verified["manifest"] == exported["manifest"]
+        assert verified["manifest"]["completeness"] == "complete"
+        historical = invoke("agenda_cli.py", "read", "--state-home", str(rescue))
+        for field in ("store_id", "revision", "documents", "records", "metadata"):
+            assert historical[field] == state[field]
+        assert _owner_snapshot(home) == original
+        rescue_before = _owner_snapshot(rescue)
+    else:
+        member.write_bytes(b"synthetic agenda bytes, not a live database")
+    original_member = member.read_bytes()
+    descriptor_root = path.parent.parent / "worktree-state"
+    before = {
+        item: item.read_bytes()
+        for item in descriptor_root.rglob("*") if item.is_file()
+    }
+    monkeypatch.setattr(finalize.procs, "checkout_retirement_blocker", lambda *_a: None)
+    monkeypatch.setattr(finalize, "_warn_of_codespace_claims_for_worktree", lambda *_a: None)
+    monkeypatch.setattr(finalize, "_warn_of_dev_slot_claims_for_worktree", lambda *_a: None)
+    events = []
+    monkeypatch.setattr(
+        finalize.activity, "log_event", lambda kind, **data: events.append((kind, data)),
+    )
+
+    assert finalize.validate_and_finalize("owner", config) is True
+    assert tracking.load_record(path).status == "finalized"
+    assert member.read_bytes() == original_member
+    assert checkout.exists() is (layout != "managed")
+    assert bool(_git("branch", "--list", "worktree/owner", cwd=anchor)) is (layout != "managed")
+    assert any(
+        kind == "worktree_finalized" and data["removed"] is (layout == "managed")
+        for kind, data in events
+    )
+    if layout != "managed":
+        assert any(
+            kind == "finalize_skipped_removal" and data["reason"] == "retained_data"
+            for kind, data in events
+        )
+    assert {
+        item: item.read_bytes()
+        for item in descriptor_root.rglob("*") if item.is_file()
+    } == before
+    if rescue is not None:
+        assert _owner_snapshot(home) == original
+        assert _owner_snapshot(rescue) == rescue_before
+        assert not descriptor_root.exists()
+    if layout == "managed":
+        observed = worktree_data_store.read_worktree_data(
+            config.repo_name, "owner", store_id="a" * 32,
+        )
+        assert observed is not None and observed.placements == (placement,)
+        assert not observed.live_authority
 
 
 def test_separate_process_producer_waits_for_lock_then_refuses_finalizing(final_owner):
