@@ -231,6 +231,24 @@ checkpoint nor author eligibility, holds, requirements or source/resource custod
 
 ### Phase 2 - Continuing reconciliation
 
+The [Windows update](windows-update-cohort.md),
+[incremental pipeline](incremental-pipeline-cohort.md) and
+[queue selection](queue-selection-cohort.md) studies preserve six whole
+originals, 78 texts and eighteen relations: eleven noncompletion
+comparisons and seven protected exclusions. Changed #7305 was freshly
+read. Required runtimes, inherited wrapper/hook acceptance, planning versus
+implementation, actual consumer gates and bounded existing-queue selection
+retain their original scope and owners. All six originals remain OPEN.
+
+The [cutover/RESTORE](cutover-restore-cohort.md),
+[exact recovery](exact-recovery-cohort.md) and
+[bounded portfolio](bounded-portfolio-cohort.md) studies preserve seven
+whole originals, 29 texts and twenty-one relations: twenty noncompletion
+comparisons and one protected exclusion. The allocation owner's authorized
+recovery is credited while its SAME-CLAIM disposition remains; optional
+protocols, original finite gates and unchanged portfolio budgets retain
+their actual scope and owners. All seven originals remain OPEN.
+
 The [hosted staging](hosted-staging-cohort.md),
 [CI causality](ci-causality-cohort.md) and
 [installer liveness](installer-liveness-cohort.md) studies preserve nine whole
@@ -1011,6 +1029,24 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [Windows](windows-update-cohort.md),
+[incremental](incremental-pipeline-cohort.md) and
+[queue](queue-selection-cohort.md) cores retain both runtime readbacks,
+configured-feed ARM64 required-MCP acceptance, truthful complete update and
+inherited headed-CLI/wrapper/hook boundaries, bounded incremental count and
+consumer matrices, existing-queue phase isolation and long exact complete
+slots. Source/planning/toolkit gains do not satisfy installed, consumer or
+parent gates; protected candidates and their source remain excluded.
+
+The [cutover/RESTORE](cutover-restore-cohort.md),
+[recovery](exact-recovery-cohort.md) and
+[portfolio](bounded-portfolio-cohort.md) cores retain authoritative
+incumbent context and ordinary-Windows routing, whole retained RESTORE
+convergence, positive conversation no-delivery proof, exact allocation
+same-claim disposition and complete selected bounded portfolios. Original
+source/native custody, optional versus required paths and NOT RUN removal
+remain distinct; no source, native, receiving or parent acceptance follows.
 
 The [hosted](hosted-staging-cohort.md),
 [CI](ci-causality-cohort.md) and

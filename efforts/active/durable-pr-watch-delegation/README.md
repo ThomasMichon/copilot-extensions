@@ -3244,6 +3244,12 @@ appoint an owner or authorize deployment. #6007 and this effort remain open.
   and 52 changefile/accumulation consumer cases pass. No test or CI deadline
   was increased.
 
+### 2026-10-18 - Consumer proposal review record
+
+- Preserve the [dated consumer-proposal review record](journal/2026/10.18%20Consumer%20proposal%20review.md)
+  without reinstating its historical diagnostic or operational permissions.
+  The current Plan and accepted #7208 disposition remain authoritative.
+
 ### 2026-10-18 - Concrete PR-service contract intake
 
 - Reconciled the fleet-service worktree with newly merged #7099. Its isolated
