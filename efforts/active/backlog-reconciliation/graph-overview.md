@@ -8,6 +8,13 @@ requirements remain in their issues and actual receiving objectives.
 
 ## Snapshot and boundaries
 
+The [eleven native/identity/transaction contracts](finite-native-identity-transaction-contracts.md)
+retain thirty-three ranked relationships without closure credit.
+Actual source and reported qualification are credited; exact finite consumer,
+native, hosted and recovery outcomes remain. All eleven stay OPEN; the
+[journal](<journal/2026/11.05 finite-native-identity-transaction-contracts.md>)
+retains protected whole evidence and the stopped-proposal boundary.
+
 The [eight obligation/preview/staging contracts](finite-obligation-preview-staging-contracts.md)
 retain twenty-four ranked relationships without closure credit.
 Actual merged staging and current retained kernels are credited; original
