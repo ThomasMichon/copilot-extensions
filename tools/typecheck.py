@@ -154,6 +154,10 @@ def _import_directory(root: Path, relative: str) -> Path:
     for part in _relative(relative).split("/"):
         directory /= part
         _import_identity(directory, directory=True)
+    if os.pathsep in str(directory.absolute()):
+        raise TypecheckError(
+            f"Import root contains the native path-list separator: {directory}"
+        )
     return directory
 
 
@@ -429,7 +433,6 @@ def check_project(
             key: value for key, value in os.environ.items()
             if key not in {"PYTHONPATH", "PYTHONHOME", "MYPYPATH"}
         }
-        env["MYPYPATH"] = os.pathsep.join(ordered_imports)
         if INSTALLATION_ENTRY in files or INSTALLATION_ENTRY in all_paths:
             view = installation_view(
                 root, all_paths,
@@ -440,7 +443,10 @@ def check_project(
                 if not members <= set(files):
                     raise TypecheckError(f"{project.name}: composed fragments must share one project owner")
                 files = (*tuple(file for file in files if file not in members), str(view.output))
-            env["MYPYPATH"] = str(view.output.parent) + os.pathsep + env["MYPYPATH"]
+            ordered_imports.insert(0, str(view.output.parent))
+        if project.import_roots and any(os.pathsep in entry for entry in ordered_imports):
+            raise TypecheckError("Import search paths contain the native path-list separator")
+        env["MYPYPATH"] = os.pathsep.join(ordered_imports)
         targets = path / "typecheck-targets.txt"
         targets.write_text("\n".join(files) + "\n", encoding="utf-8")
         config = path / "typecheck-mypy.ini"

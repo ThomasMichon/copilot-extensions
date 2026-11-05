@@ -345,8 +345,15 @@ defaults preserve existing seven-argument callers.
 For example, `["tools", "plugins/agent-worktrees/scripts"]` exposes those ordinary
 first-party helper directories after the existing checker import roots. These
 are real source directories, not module aliases, stubs or arbitrary MyPy options.
-Malformed, duplicate, missing, non-directory and redirected roots are refused;
-a checking root must contain Python source in the existing ownership inventory.
+Malformed, duplicate, missing, non-directory and redirected roots are refused.
+An explicit root's absolute path must not contain the native path-list separator,
+including in a repository ancestor. For explicit-root projects, the checker also
+refuses that separator in any final search component, including inherited source
+directories and the existing Installation Context view prefix. This uses the
+SDK host's delimiter, not the analysis target's platform: otherwise `MYPYPATH`
+could search different directories from those captured. Empty-root projects
+retain their existing search-path serialization and order. A checking root must
+contain Python source in the existing ownership inventory.
 Ambient `MYPYPATH`, `PYTHONPATH` and `PYTHONHOME` do not supply roots.
 
 For explicit roots, the checker captures the ordinary directory/file identities,

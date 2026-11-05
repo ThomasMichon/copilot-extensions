@@ -404,6 +404,115 @@ def test_manifest_refuses_invalid_import_roots(tmp_path: Path, field: str, roots
         typecheck.load_projects(tmp_path)
 
 
+@pytest.mark.parametrize("location", ["repository", "directory"])
+def test_import_roots_refuse_native_path_list_separators(
+    tmp_path: Path, location: str,
+) -> None:
+    root = tmp_path / ("repo" + os.pathsep + "split" if location == "repository" else "repo")
+    relative = "helpers" + os.pathsep + "split" if location == "directory" else "helpers"
+    (root / "tools").mkdir(parents=True)
+    (root / relative).mkdir()
+    (root / "sample.py").write_text("value: int = 1\n", encoding="utf-8")
+    (root / "requirements.txt").write_text("", encoding="utf-8")
+    (root / relative / "contract.py").write_text("value: int = 1\n", encoding="utf-8")
+    (root / "tools/typecheck-projects.json").write_text(json.dumps({
+        "version": 1, "python_version": "3.10", "platforms": ["linux"],
+        "requirements": "requirements.txt", "projects": [{
+            "name": "sample", "include": ["sample.py"], "exclude": [], "level": "pending",
+            "import_roots": [relative],
+        }],
+    }), encoding="utf-8")
+    message = (
+        "repository-relative path" if os.pathsep == ":" and location == "directory"
+        else "native path-list separator"
+    )
+    with pytest.raises(typecheck.TypecheckError, match=message):
+        typecheck.load_projects(root)
+    with pytest.raises(typecheck.TypecheckError, match=message):
+        typecheck._import_directory(root, relative)
+
+
+@pytest.mark.parametrize("component", ["src", "view"])
+@pytest.mark.parametrize("explicit", [False, True])
+def test_final_search_components_use_native_separator_guard(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, component: str, explicit: bool,
+) -> None:
+    root = tmp_path / "source"
+    (root / "helpers").mkdir(parents=True)
+    (root / "helpers/contract.py").write_text("value: int = 1\n", encoding="utf-8")
+    (root / "sample.py").write_text("value: int = 1\n", encoding="utf-8")
+    (root / "requirements.txt").write_text("", encoding="utf-8")
+    environment = tmp_path / "environment"
+    environment.mkdir()
+    (environment / ".typecheck-prepared").write_text("test-context\n", encoding="utf-8")
+    lease = Lease()
+    paths = ["sample.py", "helpers/contract.py"]
+    name = "sample"
+    if component == "src":
+        extra = "provider" + os.pathsep + "split/src/extra.py"
+        (root / extra).parent.mkdir(parents=True)
+        (root / extra).write_text("value: int = 1\n", encoding="utf-8")
+        paths.append(extra)
+    else:
+        name += os.pathsep + "split"
+        (root / "tools").mkdir()
+        (root / "tools/typecheck-projects.json").write_text(json.dumps({
+            "version": 1, "python_version": "3.10", "platforms": ["linux"],
+            "requirements": "requirements.txt", "projects": [{
+                "name": name, "include": ["sample.py"], "exclude": [], "level": "pending",
+                "import_roots": ["helpers"],
+            }],
+        }), encoding="utf-8")
+        with pytest.raises(typecheck.TypecheckError, match="Invalid project name"):
+            typecheck.load_projects(root)
+        for source in (typecheck.ROOT / "libs/installation-context").glob("*.py"):
+            relative = "libs/installation-context/" + source.name
+            (root / relative).parent.mkdir(parents=True, exist_ok=True)
+            (root / relative).write_bytes(source.read_bytes())
+            paths.append(relative)
+    item = replace(project(name=name), import_roots=("helpers",) if explicit else ())
+    output = environment.parent / ("source-views-" + environment.name) / name / "installation_context.py"
+    calls: list[str] = []
+
+    def environment_path(
+        _root: Path, _project: typecheck.Project, *, captured_lock: bytes | None = None,
+    ) -> tuple[Path, str]:
+        return environment, "test-context"
+
+    def acquire(_wait: float, _path: Path) -> Lease:
+        return lease
+
+    def run(
+        argv: list[str], _root: Path, *, env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        assert env is not None
+        expected = sorted({str(root), str(root / "libs/installer-engine"), *(
+            [str((root / paths[-1]).parent)] if component == "src" else []
+        )})
+        if component == "view":
+            expected.insert(0, str(output.parent))
+            assert output.is_file()
+        assert env["MYPYPATH"] == os.pathsep.join(expected)
+        calls.append(env["MYPYPATH"])
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(typecheck, "environment_path", environment_path)
+    monkeypatch.setattr(typecheck, "environment_python", lambda _path: Path(sys.executable))
+    monkeypatch.setattr(typecheck, "acquire_environment", acquire)
+    monkeypatch.setattr(typecheck, "_run", run)
+    if explicit:
+        with pytest.raises(typecheck.TypecheckError, match="native path-list separator"):
+            typecheck.check_project(root, item, ("sample.py",), all_paths=tuple(paths))
+        assert not calls
+    else:
+        assert typecheck.check_project(root, item, ("sample.py",), all_paths=tuple(paths)) == 0
+        assert len(calls) == 1
+    assert lease.released
+    assert not output.exists()
+    assert not (environment / "typecheck-targets.txt").exists()
+    assert not (environment / "typecheck-mypy.ini").exists()
+
+
 @pytest.mark.parametrize("foreign", [False, True])
 def test_import_directory_refuses_redirected_roots(
     tmp_path: Path, native_file_symlink: Callable[..., None], foreign: bool,
