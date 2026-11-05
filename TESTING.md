@@ -1,5 +1,23 @@
 # Testing copilot-extensions
 
+Manager's opt-in `--test-file tests/native/test_companion_app_tmux.py
+--test-file tests/native/test_companion_pane_tmux.py --allow-explicit-tiers`
+packet distinguishes the original observer-stub pane test from the actual
+Companion app. The latter runs unmodified `mux_companion.py` in a privately
+constructed source prefix, with synthetic wire-valid owner data and an inert
+CLI process. A foreground, caller-contained private tmux server and an attached
+client PTY exercise keyboard history/live navigation, pushed purpose updates
+while browsing, terminal resize, the Return-to-CLI button, observer reuse and
+Escape dismissal without replacing the CLI pane/PID or native incarnation.
+Owning feed retirement and exact fixture server/client cleanup are checked.
+JUnit properties retain server-buffer browsing/resize captures and the evidence
+boundary. These are native tmux/client source controls, not installed acceptance,
+headed pixels, measured frame/input-ready latency, real Copilot/SDK sessions or
+manual cutover. Native Windows and the parent gates remain separate. The hardened
+container skips this packet when its image lacks tmux; that skip is not a pass.
+Use the bounded host runner on an explicitly enrolled POSIX tmux host for this
+native fixture. Required unit-only CI is unchanged.
+
 Manager's opt-in `--test-file tests/test_companion_timeline_scale.py
 --test-file tests/test_companion_timeline_layout.py
 --test-file tests/test_companion_timeline_widget.py --allow-explicit-tiers`

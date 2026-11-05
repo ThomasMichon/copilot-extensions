@@ -130,6 +130,13 @@ clearing, gap recovery and observer retirement on the joined app. The
 complete source coverage, qualified PRE, installed/native/performance and
 every original parent gate.
 
+#10605 merged as `03ba13942a119499df30338719dbc1f771ba07fc`, delivering
+bounded geometry/reference reuse, short-content upward-wheel history intent
+and reproducible source-process scale observations. The
+[source readback](journal/2026/11.04-sidecar-bounded-render.md) distinguishes
+deterministic resource/viewport acceptance from still-open native, installed
+and complete performance qualification.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than
@@ -499,18 +506,21 @@ publication and installed support retain their separate qualification.
   duplicate and malformed-source tests; no render-path I/O or inferred custody.
 - [ ] History/live splice and gap tests: coalescing is current state, not lost
   canonical history; retention/replacement/append failure cannot look empty/complete.
-- [ ] Prepend, short-content padding, wheel/PageUp/Home/End/scrollbar,
+- [x] Prepend, short-content padding, wheel/PageUp/Home/End/scrollbar,
   follow/unread, expansion and wide-character resize tests on real Textual.
-- [ ] Enforce the resource limits in the contract structurally; exercise a long
+  #10605's 78-case packet includes the short/scrollable wheel regression and
+  full-window Unicode expansion/resize. This is actual framework source
+  qualification, not native mux-client dispatch.
+- [x] Enforce the resource limits in the contract structurally; exercise a long
   logical history without materializing it all. Report repaint/CPU/RSS benchmarks
   separately from deterministic CI correctness.
   The opt-in `test_companion_timeline_scale.py` source packet now selects 5,000
   rows from a synthetic 1,000,000-event logical source, checks bounded real
   Textual paint/update/resize behavior and retains separate raw paint and
   delta-to-Pilot-idle samples. Repeated immutable-reference validation and
-  unchanged text wrapping are removed from the hot path. Source publication
-  and review remain pending; native-frame, installed and tail qualification
-  remain separate.
+  unchanged text wrapping are removed from the hot path. #10605 merged after
+  current-head independent approval and required green CI; native-frame,
+  installed, source-tail and complete repaint qualification remain separate.
 - [x] At configured 65: 28, 35 and 64.99 are premature; 65 and 75 are not by this
   rule. Test rounding traps, invalid/bool/zero capacity, absent/stale/estimated/
   wrong-session/uncorrelated/model-only/post-only samples and context replacement.

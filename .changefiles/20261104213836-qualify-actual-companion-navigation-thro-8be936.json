@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify actual Companion navigation through an isolated native tmux client",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
