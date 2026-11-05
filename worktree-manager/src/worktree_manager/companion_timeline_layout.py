@@ -76,13 +76,23 @@ class TimelineLayout:
         self.materialized_rows = 0
         self.timezone: tzinfo | None = None
 
-    def _time(self, event: TimelineEvent, now: datetime | None, *, include_date: bool = False) -> str:
+    def _local_time(self, event: TimelineEvent) -> datetime | None:
         stamp = event.occurred_at or event.observed_at
         if stamp is None:
+            return None
+        try:
+            return stamp.astimezone(self.timezone)
+        except (OverflowError, OSError, ValueError):
+            return None
+
+    def _time(self, event: TimelineEvent, now: datetime | None, *, include_date: bool = False) -> str:
+        local = self._local_time(event)
+        if local is None:
             return "--:--"
+        stamp = event.occurred_at or event.observed_at
         qualifier = "" if event.occurred_at is not None else "~"
-        value = qualifier + stamp.astimezone(self.timezone).strftime("%Y-%m-%d %H:%M" if include_date else "%H:%M")
-        if now is not None:
+        value = qualifier + local.strftime("%Y-%m-%d %H:%M" if include_date else "%H:%M")
+        if now is not None and stamp is not None:
             age = max(0, int((now - stamp).total_seconds()))
             value += f" ({age // 60}m)"
         return value
@@ -142,7 +152,8 @@ class TimelineLayout:
         for event in window.events:
             previous = self._refs.get(event.ref) if previous_width == self.text_width else None
             stamp = event.occurred_at or event.observed_at
-            day = stamp.astimezone(self.timezone).date() if stamp is not None else None
+            local = self._local_time(event)
+            day = local.date() if local is not None else None
             heading = (
                 f"{self._time(event, now, include_date=day != previous_day)}  {event.summary}"
             )
@@ -155,6 +166,8 @@ class TimelineLayout:
                 else self._count(heading, self.text_width, OVERSCAN_LINES)
             )
             details = self._details(event, window) if event.ref in window.expanded else ""
+            if details and stamp is not None and local is None:
+                details = "Local clock unavailable; original source time follows.\n" + details
             detail_rows, detail_clipped = (
                 (previous.detail_rows, previous.detail_clipped)
                 if previous is not None and previous.detail_text == details

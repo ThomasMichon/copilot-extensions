@@ -145,7 +145,9 @@ head changes, immutable conflicts and exhausted proof budgets still refuse it.
 
 Collapsed rows show local clocks and literal summaries, with a date at each
 local-day boundary. A `~` clock is observation time, not an occurrence claim;
-`--:--` is unknown. Enter expands the exact timestamp, actor, event kind and
+`--:--` means the local clock is unavailable. Source timestamps outside the
+local zone's representable range remain intact in detail rather than aborting
+reflow or acquiring a fabricated clock. Enter expands the exact timestamp, actor, event kind and
 evidence qualification. Actor columns do not infer relationships or concurrency.
 The stable scrollbar gutter is excluded from line wrapping so narrow scrollable
 views do not silently clip text under the scrollbar.

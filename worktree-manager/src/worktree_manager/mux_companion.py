@@ -671,7 +671,8 @@ class MuxCompanionApp(App):
                 selection = selected_head(data.worktree, data.sessions, self._observer_identity)
             if selection is None:
                 self._timeline_attachment.unavailable(
-                    "Selected project/worktree and exactly one canonical head are required.",
+                    data.error or data.sessions_error
+                    or "Selected project/worktree and exactly one canonical head are required.",
                 )
         if selection is None or selection != self._rich_agenda_attachment.selection:
             self._rich_agenda_attachment.stop_now()

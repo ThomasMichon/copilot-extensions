@@ -1,7 +1,7 @@
 """Pure line-index geometry without Textual renderable materialization."""
 
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from rich.cells import cell_len
 import pytest
@@ -12,6 +12,7 @@ from worktree_manager.companion_timeline_contract import (
 )
 from worktree_manager.companion_timeline_layout import TimelineLayout, wrap_lines
 from worktree_manager.companion_timeline_model import TimelineWindow
+from worktree_manager.companion_worktree_codec import stamp
 from _companion_timeline_fixtures import event, position, snapshot, token
 
 
@@ -46,6 +47,27 @@ def test_sparse_heading_keeps_exact_clock_actor_and_qualification_in_details() -
     assert str(item.observed_at) in details and "observed, not occurrence" in details
     assert item.kind.value in details and item.actor.label in details
     assert item.actor.qualification.value in details
+
+
+@pytest.mark.parametrize("value,offset", [
+    ("0001-01-01T00:00:00+00:00", -8),
+    ("9999-12-31T23:59:59+00:00", 8),
+])
+def test_codec_accepted_boundary_time_cannot_abort_local_clock_reflow(value: str, offset: int) -> None:
+    source = token()
+    model = TimelineWindow()
+    model.bind(source)
+    item = replace(event(source, 0), observed_at=stamp(value))
+    assert item.observed_at is not None
+    assert model.apply_snapshot(snapshot(source, (item,))).applied
+    model.toggle_expansion(item.ref)
+    layout = TimelineLayout()
+    layout.timezone = timezone(timedelta(hours=offset))
+    layout.rebuild(model, 80)
+    assert layout.blocks[0].heading_text.startswith("--:--  ")
+    assert "Local clock unavailable" in layout.blocks[0].detail_text
+    assert str(item.observed_at) in layout.blocks[0].detail_text
+    assert model.events == (item,)
 
 
 def test_height_index_materializes_requested_rows_only_and_detail_bounds():
