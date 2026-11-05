@@ -31,10 +31,10 @@ class ConversationStore:
 
         def adopt(document: dict) -> dict:
             lifecycle_checkpoint()
-            if document["version"] == 3:
+            if document["version"] in (3, 4):
                 if document["capacities"]["conversation_bytes"] != conversation_bytes:
                     raise ValueError("conversation capacity differs from adopted layout")
-                return {"status": "already_adopted", "version": 3}
+                return {"status": "already_adopted", "version": document["version"]}
             document["version"] = 3
             document["conversations"] = ConversationJournal().snapshot()
             document["capacities"]["conversation_bytes"] = conversation_bytes
@@ -51,9 +51,12 @@ class ConversationStore:
         expires_at: int,
         checkpoint: Callable[[], None] | None = None,
         persist: bool,
+        versions: tuple[int, ...] = (3, 4),
     ) -> dict:
         def execute(document: dict) -> dict:
-            if document["version"] != 3:
+            if document["version"] not in versions:
+                if document["version"] == 4:
+                    raise ReplayStoreInvalid("conversation serving contract unavailable for adopted owner layout")
                 raise ReplayStoreInvalid("conversation journal requires explicit owner adoption")
             journal = ConversationJournal(document["conversations"])
             result = operation(journal)
@@ -82,6 +85,7 @@ class ConversationStore:
             expires_at=expires_at,
             checkpoint=checkpoint,
             persist=False,
+            versions=(3,),
         )
 
     def observe(

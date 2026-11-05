@@ -123,6 +123,9 @@ The source-only [inert attention foundation](docs/attention.md) supplies scoped
 candidate/cursor projections and bounded fair ordering for later service
 adoption. It performs no IO, policy authorization, persistence or effects;
 it adds no CLI/HTTP operation.
+The [explicit attention data expansion](docs/attention.md#explicit-data-owner-expansion)
+adds a separately adopted v4 storage foundation only; observation/feedback
+integration and authenticated attention serving remain unavailable.
 
 The optional [conversation metadata journal](docs/conversation-journal.md)
 adds bounded durable cursors and a read-only workspace `events` extension.
