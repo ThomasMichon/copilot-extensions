@@ -1,0 +1,329 @@
+{
+  "schema": "copilot-extensions.installation-governance-fixtures",
+  "version": 1,
+  "identity": {
+    "marketplaceId": "example--0123456789abcdef",
+    "otherMarketplaceId": "alternate--fedcba9876543210",
+    "pluginId": "agent-example"
+  },
+  "policies": [
+    {
+      "name": "global-false",
+      "document": {
+        "schema": "copilot-extensions.installation-mode",
+        "version": 1,
+        "installationMode": {
+          "enabled": false
+        }
+      },
+      "scope": "global",
+      "enabled": false,
+      "reason": "policy-global-false"
+    },
+    {
+      "name": "global-true",
+      "document": {
+        "schema": "copilot-extensions.installation-mode",
+        "version": 1,
+        "installationMode": {
+          "enabled": true
+        }
+      },
+      "scope": "global",
+      "enabled": true,
+      "reason": "policy-global-true"
+    },
+    {
+      "name": "marketplace-overrides-global",
+      "document": {
+        "schema": "copilot-extensions.installation-mode",
+        "version": 1,
+        "installationMode": {
+          "enabled": false,
+          "marketplaces": {
+            "example--0123456789abcdef": {
+              "enabled": true
+            }
+          }
+        }
+      },
+      "scope": "marketplace",
+      "enabled": true,
+      "reason": "policy-marketplace-true"
+    },
+    {
+      "name": "plugin-overrides-marketplace",
+      "document": {
+        "schema": "copilot-extensions.installation-mode",
+        "version": 1,
+        "installationMode": {
+          "enabled": true,
+          "marketplaces": {
+            "example--0123456789abcdef": {
+              "enabled": true,
+              "plugins": {
+                "agent-example": {
+                  "enabled": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "scope": "plugin",
+      "enabled": false,
+      "reason": "policy-plugin-false"
+    },
+    {
+      "name": "unsupported-version",
+      "document": {
+        "schema": "copilot-extensions.installation-mode",
+        "version": 2,
+        "installationMode": {
+          "enabled": true
+        }
+      },
+      "state": "unsupported",
+      "reason": "policy-version-unsupported"
+    },
+    {
+      "name": "invalid-known-field",
+      "document": {
+        "schema": "copilot-extensions.installation-mode",
+        "version": 1,
+        "installationMode": {
+          "enabled": "true"
+        }
+      },
+      "state": "invalid",
+      "reason": "policy-invalid"
+    }
+  ],
+  "legacyProbes": [
+    {
+      "name": "undeclared",
+      "value": {
+        "declared": false,
+        "result": "unknown",
+        "checkedAt": null
+      }
+    },
+    {
+      "name": "declared-absent",
+      "value": {
+        "declared": true,
+        "result": "absent",
+        "checkedAt": "2026-01-01T00:00:00Z"
+      }
+    },
+    {
+      "name": "declared-present",
+      "value": {
+        "declared": true,
+        "result": "present",
+        "checkedAt": "2026-01-01T00:00:00Z"
+      }
+    },
+    {
+      "name": "declared-unknown",
+      "value": {
+        "declared": true,
+        "result": "unknown",
+        "checkedAt": null
+      }
+    }
+  ],
+  "preActivation": [
+    {
+      "name": "legacy-default",
+      "desiredMode": "legacy",
+      "actualMode": "legacy",
+      "status": "ready",
+      "probeAllowMutation": true,
+      "probeReason": "legacy-active"
+    },
+    {
+      "name": "namespaced-clean",
+      "probe": "declared-absent",
+      "desiredMode": "namespaced",
+      "actualMode": "legacy",
+      "status": "ready",
+      "reason": "activation-required",
+      "probeAllowMutation": false,
+      "probeReason": "namespaced-requested"
+    },
+    {
+      "name": "namespaced-present",
+      "probe": "declared-present",
+      "desiredMode": "namespaced",
+      "actualMode": "legacy",
+      "status": "migration-required",
+      "reason": "migration-required",
+      "probeAllowMutation": true,
+      "probeReason": "migration-required"
+    },
+    {
+      "name": "namespaced-undeclared",
+      "probe": "undeclared",
+      "desiredMode": "namespaced",
+      "actualMode": "legacy",
+      "status": "migration-required",
+      "reason": "migration-required",
+      "probeAllowMutation": true,
+      "probeReason": "migration-required"
+    }
+  ],
+  "activationTemplates": {
+    "active": {
+      "schema": "copilot-extensions.installation-activation",
+      "version": 1,
+      "marketplaceId": "${marketplaceId}",
+      "pluginId": "${pluginId}",
+      "mode": "namespaced",
+      "state": "active",
+      "environment": "${environment}",
+      "context": "${context}",
+      "namespaceGeneration": 1,
+      "installGeneration": 2,
+      "generation": 3,
+      "legacy": {
+        "disposition": "absent",
+        "probe": {
+          "declared": true,
+          "result": "absent",
+          "checkedAt": "2026-01-01T00:00:00Z"
+        }
+      },
+      "createdAt": "2026-01-01T00:00:00Z",
+      "updatedAt": "2026-01-01T00:00:00Z"
+    },
+    "deactivated": {
+      "mode": "legacy",
+      "state": "deactivated"
+    },
+    "generationMismatch": {
+      "installGeneration": 1,
+      "classification": "revalidation-required"
+    },
+    "environmentMismatch": {
+      "environment": {
+        "platform": "posix",
+        "homeRealPath": "/home/other",
+        "wslDistro": null
+      },
+      "classification": "foreign-environment"
+    }
+  },
+  "tombstones": [
+    {
+      "name": "valid-same-cell",
+      "owner": "example--0123456789abcdef",
+      "disposition": "owned-by-current-cell",
+      "allowMutation": false
+    },
+    {
+      "name": "valid-other-cell",
+      "owner": "alternate--fedcba9876543210",
+      "disposition": "owned-by-other-cell",
+      "allowMutation": false
+    },
+    {
+      "name": "missing-destination",
+      "classification": "orphaned-transfer"
+    },
+    {
+      "name": "unreadable-destination",
+      "classification": "orphaned-transfer"
+    },
+    {
+      "name": "noncanonical-destination",
+      "classification": "orphaned-transfer"
+    },
+    {
+      "name": "mismatched-destination",
+      "classification": "orphaned-transfer"
+    },
+    {
+      "name": "foreign-destination",
+      "classification": "orphaned-transfer"
+    },
+    {
+      "name": "stale-generation",
+      "classification": "orphaned-transfer"
+    },
+    {
+      "name": "deactivated-destination",
+      "classification": "orphaned-transfer"
+    },
+    {
+      "name": "non-file-tombstone",
+      "classification": "orphaned-transfer"
+    }
+  ],
+  "maintenance": [
+    {
+      "name": "user-active",
+      "scope": "user",
+      "state": "active",
+      "reason": "maintenance-active"
+    },
+    {
+      "name": "plugin-active",
+      "scope": "plugin",
+      "state": "active",
+      "reason": "maintenance-active"
+    },
+    {
+      "name": "user-stale-wins",
+      "scope": "user",
+      "state": "stale",
+      "reason": "maintenance-stale"
+    }
+  ],
+  "statusPrecedence": [
+    "invalid",
+    "maintenance-blocked",
+    "foreign-environment",
+    "orphaned-transfer",
+    "revalidation-required",
+    "migration-required",
+    "deactivation-required",
+    "provenance-blocked",
+    "ready"
+  ],
+  "probeDecisions": [
+    {
+      "status": "ready",
+      "actualMode": "legacy",
+      "allowMutation": true,
+      "probeReason": "legacy-active",
+      "exitCode": 0
+    },
+    {
+      "status": "migration-required",
+      "actualMode": "legacy",
+      "allowMutation": true,
+      "probeReason": "migration-required",
+      "exitCode": 0
+    },
+    {
+      "status": "ready",
+      "actualMode": "namespaced",
+      "allowMutation": false,
+      "probeReason": "namespaced-active",
+      "exitCode": 3
+    },
+    {
+      "status": "maintenance-blocked",
+      "allowMutation": false,
+      "probeReason": "maintenance-active",
+      "exitCode": 3
+    },
+    {
+      "status": "orphaned-transfer",
+      "allowMutation": false,
+      "probeReason": "orphaned-transfer",
+      "exitCode": 3
+    }
+  ]
+}

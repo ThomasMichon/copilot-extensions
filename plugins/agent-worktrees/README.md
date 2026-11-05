@@ -318,6 +318,10 @@ Agent Worktrees has three shipped pieces:
 - **Project binstubs** -- one launcher per registered project, plus the global
   `agent-worktrees` CLI
 
+The payload also carries the canonical runtime-admission toolkit for callers
+using an independently admitted tooling environment. Its presence does not
+approve a profile, authorize installation or activate a runtime.
+
 The existing session command catalog also reports a source-qualified
 installation binding. Its legacy owner is published in the existing deploy
 manifest; its namespaced owner is the validated active installation receipt.
