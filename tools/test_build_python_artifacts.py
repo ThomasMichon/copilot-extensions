@@ -2329,26 +2329,12 @@ def test_governed_feed_configured_via_default_index_env_vars():
     )
 
 
-def test_governed_feed_not_configured_without_any_trust_policy():
-    # Regression: an affirmatively non-public, explicitly configured
-    # default index must still fail closed if this machine has not
-    # affirmatively asserted ANY trust policy at all -- inferring trust
-    # from "doesn't look like public PyPI" is exactly the inference this
-    # allowlist design replaces.
-    assert not bpa._governed_feed_configured(
-        env={"UV_DEFAULT_INDEX": "https://example.internal/simple/"}
-    )
-
-
-def test_governed_feed_not_configured_when_index_host_not_in_trust_policy():
-    # Regression: a trust policy that simply doesn't name the configured
-    # index's host must not somehow be satisfied by unrelated entries.
-    assert not bpa._governed_feed_configured(
-        env={
-            "UV_DEFAULT_INDEX": "https://unexpected.example/simple/",
-            _TRUST_VAR: "example.internal,other.internal",
-        }
-    )
+@pytest.mark.parametrize("host", ["packages.example", "other.example"])
+def test_governed_feed_configured_without_per_host_allowance(host):
+    env = {"UV_DEFAULT_INDEX": f"https://{host}/simple/"}
+    assert bpa._governed_feed_configured(env=env)
+    env[_TRUST_VAR] = "obsolete.example"
+    assert bpa._governed_feed_configured(env=env)
 
 
 def test_governed_feed_not_configured_via_supplemental_uv_index_alone():

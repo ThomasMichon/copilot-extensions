@@ -756,7 +756,7 @@ def test_native_profile_feed_refuses_untrusted_or_supplemental_indexes(monkeypat
             SimpleNamespace(index_url=url, identity=str(i)) for i, url in enumerate(indexes)
         ]),
     )
-    with pytest.raises(native.ProfileError, match="trusted|indexes"):
+    with pytest.raises(native.ProfileError, match="configured|indexes"):
         native._profile_feed(
             SimpleNamespace(identity=SimpleNamespace(document=lambda: {})),
             SimpleNamespace(environment={}), ["original", "retained"],
@@ -767,7 +767,6 @@ def test_native_profile_feed_refuses_untrusted_or_supplemental_indexes(monkeypat
 def test_native_profile_preserves_duplicate_selected_feed_evidence(monkeypatch):
     import local_install_profile as native
     import installer_native_feed
-    from governed_feed_trust import _TRUSTED_INDEX_HOSTS_ENV_VAR
 
     url = "https://packages.example/simple/"
     feeds = SimpleNamespace(feeds=[
@@ -779,9 +778,7 @@ def test_native_profile_preserves_duplicate_selected_feed_evidence(monkeypatch):
     )
     _, captured = native._profile_feed(
         SimpleNamespace(identity=SimpleNamespace(document=lambda: {})),
-        SimpleNamespace(environment={
-            "UV_DEFAULT_INDEX": url, _TRUSTED_INDEX_HOSTS_ENV_VAR: "packages.example",
-        }), ["original", "retained"],
+        SimpleNamespace(environment={"UV_DEFAULT_INDEX": url}), ["original", "retained"],
         uv="uv", download_origins=(), wheels=None, deadline=time.monotonic() + 5,
     )
     assert captured is feeds
