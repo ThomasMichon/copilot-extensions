@@ -11,6 +11,8 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+from credential_relay.token_store import read_token_store
+
 from .provider_process import run_captured
 
 log = logging.getLogger("agent-bridge")
@@ -28,8 +30,8 @@ class FileTokenValidator:
         if not token:
             return False
         try:
-            data = json.loads(self._path.read_text(encoding="utf-8")) or {}
-        except (OSError, json.JSONDecodeError):
+            data = read_token_store(self._path)
+        except (OSError, ValueError, UnicodeError):
             return False
         if not isinstance(data, dict):
             return False
@@ -74,8 +76,8 @@ class FileTokenAuthorizer:
         if action != "get-azure-token" or not token:
             return False
         try:
-            data = json.loads(self._path.read_text(encoding="utf-8")) or {}
-        except (OSError, json.JSONDecodeError):
+            data = read_token_store(self._path)
+        except (OSError, ValueError, UnicodeError):
             return False
         if not isinstance(data, dict):
             return False

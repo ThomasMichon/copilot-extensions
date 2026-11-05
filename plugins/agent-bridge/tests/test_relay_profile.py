@@ -14,8 +14,10 @@ import asyncio
 import json
 import secrets
 import subprocess
+import threading
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from credential_relay.server import ScopeDenied
@@ -98,6 +100,108 @@ def test_file_token_validator_missing_and_malformed_store(tmp_path):
     bad = tmp_path / "bad.json"
     bad.write_text("{not json", encoding="utf-8")
     assert FileTokenValidator(bad)("x") is False
+
+
+@pytest.mark.parametrize("transient", [False, True])
+def test_file_token_read_contention_preserves_scope_gate(tmp_path, monkeypatch, transient):
+    store = tmp_path / "relay-tokens.json"
+    _write_store(store, {"cs": {"token": "synthetic", "allowed_resources": ["https://example.com"]}})
+    read_text = Path.read_text
+    failures = []
+
+    def contended(path, *args, **kwargs):
+        if path == store and (not transient or not failures):
+            error = PermissionError("synthetic sharing violation")
+            error.winerror = 32
+            failures.append(True)
+            raise error
+        return read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", contended)
+    authorizer = FileTokenAuthorizer(store)
+    assert FileTokenValidator(store)("synthetic") is transient
+    if transient:
+        failures.clear()
+        assert authorizer("synthetic", "get-azure-token", {"resource": "https://example.com"})
+        with pytest.raises(ScopeDenied):
+            authorizer("synthetic", "get-azure-token", {"resource": "https://denied.example"})
+    else:
+        assert not authorizer("synthetic", "get-azure-token", {"resource": "https://example.com"})
+    assert store.read_bytes()
+
+
+def test_codespaces_issuer_store_is_consumed_and_revoked_by_bridge(tmp_path, monkeypatch):
+    source = Path(__file__).resolve().parents[2] / "agent-codespaces" / "src"
+    monkeypatch.syspath_prepend(str(source))
+    from agent_codespaces import relay_token
+
+    store = tmp_path / "relay-tokens.json"
+    monkeypatch.setattr(relay_token, "_TOKENS_FILE", store)
+    token = relay_token.token_for("cs", allowed_resources=["https://example.com"])
+    validator = FileTokenValidator(store)
+    authorizer = FileTokenAuthorizer(store)
+    assert validator(token)
+    assert authorizer(token, "get-azure-token", {"resource": "https://example.com"})
+    with pytest.raises(ScopeDenied):
+        authorizer(token, "get-azure-token", {"resource": "https://denied.example"})
+    relay_token.revoke("cs")
+    assert not validator(token)
+    assert not authorizer(token, "get-azure-token", {"resource": "https://example.com"})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("gate", ["validator", "authorizer"])
+async def test_file_contention_does_not_block_relay_ping(tmp_path, monkeypatch, gate):
+    from credential_relay import token_store
+    from credential_relay.server import CredentialRelayServer
+
+    store = tmp_path / "relay-tokens.json"
+    _write_store(store, {"cs": {"token": "synthetic", "allowed_resources": ["https://example.com"]}})
+    read_text = Path.read_text
+    entered, release = threading.Event(), threading.Event()
+    failures = []
+
+    def contended(path, *args, **kwargs):
+        if path == store and not failures:
+            failures.append(True)
+            error = PermissionError("synthetic sharing violation")
+            error.winerror = 32
+            raise error
+        return read_text(path, *args, **kwargs)
+
+    def wait_for_release(_delay):
+        entered.set()
+        release.wait(timeout=2)
+
+    def request(data):
+        reader = asyncio.StreamReader()
+        reader.feed_data(data)
+        reader.feed_eof()
+        writer = MagicMock()
+        writer.get_extra_info.return_value = ("synthetic", 0)
+        writer.drain = AsyncMock()
+        writer.wait_closed = AsyncMock()
+        return reader, writer
+
+    monkeypatch.setattr(Path, "read_text", contended)
+    monkeypatch.setattr(token_store, "time", SimpleNamespace(sleep=wait_for_release))
+    server = CredentialRelayServer(
+        sources=[], token_required_actions=frozenset({"get-azure-token"}),
+        token_validator=FileTokenValidator(store) if gate == "validator" else None,
+        token_authorizer=FileTokenAuthorizer(store) if gate == "authorizer" else None,
+    )
+    pending = asyncio.create_task(server._handle_client(*request(
+        b"get-azure-token\nauth=synthetic\nresource=https://example.com\n\n",
+    )))
+    try:
+        assert await asyncio.to_thread(entered.wait, 2)
+        ping_reader, ping_writer = request(b"ping\n\n")
+        await asyncio.wait_for(server._handle_client(ping_reader, ping_writer), timeout=0.5)
+        ping_writer.write.assert_called_once_with(b"pong\n\n")
+        assert not pending.done(), "authorization must still be held while the ping completes"
+    finally:
+        release.set()
+        await asyncio.wait_for(pending, timeout=3)
 
 
 def test_file_token_validator_defensive_on_non_str_values(tmp_path):

@@ -109,6 +109,28 @@ A copilot-extensions plugin that provides:
   `agent-worktrees related list`), so every session knows which repos have no
   local checkout and must be worked via a CodeSpace
 
+### Relay-token file transactions
+
+Relay secrets remain stable per Codespace in the existing `relay-tokens.json`
+format. Mint/re-scope and revoke hold one OS-backed transaction lock across the
+entire read-modify-write, with a five-second contention budget. Publication uses
+an attempt-owned temporary file and atomic replacement. Transient Windows
+sharing/access failures receive bounded retries; persistent failure preserves
+the old store and refuses the operation instead of inventing an empty store.
+The lock file stays in place and is released by descriptor close/process exit,
+not deleted or reclaimed by age.
+
+Bridge's file-backed authorization readers use the same bounded read behavior;
+they remain lock-free and reject requests if the store cannot be read. Legacy
+string entries and structured resource allowlists remain compatible. Older
+writers do not participate in this transaction lock: serialize mixed-version
+writers during rollout. This repair neither rotates existing secrets nor
+establishes listener/tunnel readiness or token-refresh recovery.
+
+The opt-in native regression packet is
+`python tools/run-plugin-tests.py agent-codespaces --test-file tests/test_relay_token_concurrency.py --allow-explicit-tiers`.
+It uses synthetic stores and caller-contained children, not installed credentials.
+
 ### Transport identity boundary
 
 `codespace:<name>` addresses a dynamic GitHub Codespace, not a static named

@@ -1,0 +1,21 @@
+{
+  "comment": "Preserve relay-token state across concurrent Codespaces writers and bounded Windows read contention.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}
