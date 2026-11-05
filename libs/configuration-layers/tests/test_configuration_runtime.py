@@ -55,23 +55,6 @@ def test_absent_resolver_never_starts_anything(tmp_path: Path, monkeypatch: pyte
     ) is None
 
 
-@pytest.mark.parametrize("nested", [False, True])
-def test_qualified_flat_and_nested_owner_interpreters(tmp_path: Path, nested: bool) -> None:
-    root, resolver = deploy(tmp_path)
-    environment = root / "versions" / "1.2.3"
-    if nested:
-        environment /= ".venv"
-    python = environment / "Scripts" / "python.exe"
-    python.parent.mkdir(parents=True)
-    python.write_bytes(b"fixture interpreter; never executed")
-    assert runtime.deployed_runtime_python(
-        root, resolver=resolver, environment={"SystemRoot": str(tmp_path)},
-        runner=lambda argv, **kwargs: subprocess.CompletedProcess(
-            argv, 0, str(python).encode("utf-8"), b"",
-        ),
-    ) == python
-
-
 def test_undeclared_read_only_resolver_fails_before_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     resolver = tmp_path / "resolver"
     resolver.write_text("echo unsafe", encoding="utf-8")

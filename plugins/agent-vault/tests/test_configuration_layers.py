@@ -301,6 +301,44 @@ def test_real_loader_checks_delivered_cell_against_actual_owner(tmp_path, monkey
     assert calls
 
 
+@pytest.mark.parametrize("shape", ["flat", "nested", "foreign", "deep"])
+def test_qualified_deployed_owner_layout_and_refusal(tmp_path, shape):
+    import os
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    from configuration_context.runtime import deployed_runtime_python
+
+    root = tmp_path / "owner"
+    resolver = tmp_path / ("resolve-runtime.ps1" if os.name == "nt" else "resolve-runtime.sh")
+    shutil.copyfile(Path(configuration.__file__).parents[2] / "scripts" / resolver.name, resolver)
+    environment = root / "versions" / "1.2.3"
+    if shape == "nested":
+        environment /= ".venv"
+    elif shape == "foreign":
+        environment = tmp_path / "foreign"
+    elif shape == "deep":
+        environment /= "extra/.venv"
+    python = environment / "Scripts" / "python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"fixture interpreter; never executed")
+
+    def resolve():
+        return deployed_runtime_python(
+            root, resolver=resolver, environment={"SystemRoot": str(tmp_path)},
+            runner=lambda argv, **kwargs: subprocess.CompletedProcess(
+                argv, 0, str(python).encode("utf-8"), b"",
+            ),
+        )
+
+    if shape in ("foreign", "deep"):
+        with pytest.raises(ConfigurationError, match="escaped"):
+            resolve()
+    else:
+        assert resolve() == python
+
+
 @pytest.mark.parametrize("tier", ["knowledge", "repository_machine"])
 def test_tier_null_keeps_native_fallback_and_does_not_claim_false_provenance(tmp_path, monkeypatch, tier):
     base, knowledge, local, global_path, report = setup(tmp_path, monkeypatch)
