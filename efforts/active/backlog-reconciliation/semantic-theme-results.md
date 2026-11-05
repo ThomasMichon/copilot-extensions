@@ -5,6 +5,15 @@ Method: [weighted semantic consolidation](semantic-density-consolidation.md).
 
 ## Result and coverage
 
+The [eleven finite consumer/upgrade/policy contracts](finite-consumer-upgrade-policy-contracts.md)
+retain thirty-three ranked relationships without replacing exact native,
+configuration, producer, header, exit or server-policy outcomes with
+neighboring progress. Current successor-first publication and retained
+outgoing retirement coexist; finite adjudication is not a new lifetime
+programme. All eleven stay OPEN; the
+[journal](<journal/2026/11.05 finite-consumer-upgrade-policy-contracts.md>)
+separates fresh, reused and protected whole evidence.
+
 The [eleven finite hosted/reader/lifecycle contracts](finite-hosted-reader-lifecycle-contracts.md)
 retain thirty-three ranked relationships and actual credited partials.
 Finite reader acceptance or an accepted residual, correct source-head
