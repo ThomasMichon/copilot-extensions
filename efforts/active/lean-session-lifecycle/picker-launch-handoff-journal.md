@@ -826,3 +826,10 @@ its saved installed-update, launch and handoff obligations.
 - The existing manual Git/roster Linux and Windows portfolio now selects the
   same two files with unchanged budgets. Source publication, external
   qualification, release and authorized installed proof remain separate gates.
+- Review identified two remaining admission gaps: terminal point-read errors
+  need the normal versioned JSON envelope, and an initially stale complete feed
+  transaction must not count as its first usable publication. Corrected both
+  and retained stale continuity only after usable output. The updated
+  contained native packet passes 145 cases with ordinary cleanup; no latency,
+  transport or cancellation budget changed. Repeat exact-head external and
+  source-review gates for this revision rather than reuse the prior result.

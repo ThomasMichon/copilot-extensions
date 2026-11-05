@@ -388,6 +388,50 @@ def test_waiting_feed_does_not_emit_an_early_cutover_notice(monkeypatch, capsys)
     assert capsys.readouterr().out == ""
 
 
+@pytest.mark.parametrize("later_stale", [False, True])
+def test_waiting_feed_rejects_initial_stale_but_retains_later_continuity(
+    owner, monkeypatch, capsys, later_stale,
+):
+    owner.publication_failed("project", RuntimeError("initial producer unavailable"))
+    monkeypatch.setattr(client, "_client", lambda *a, **k: object())
+    attempts = []
+    closed = []
+
+    def frames(*_args):
+        attempts.append(1)
+        attempt = len(attempts)
+        assert capsys.readouterr().out == ""
+        if attempt == 2:
+            owner.publish("project", [{"id": "fresh"}], observed_at=2)
+        snapshot = owner.handle(request())
+        try:
+            yield from feed.publication_frames(snapshot)
+            if later_stale and attempt == 2:
+                yield {
+                    "type": "availability", "projection": snapshot["projection"],
+                    "availability": {"status": "stale", "reason": "later producer unavailable"},
+                }
+                raise TimeoutError("after usable publication")
+        finally:
+            closed.append(attempt)
+
+    monkeypatch.setattr(client, "transport", frames)
+    monkeypatch.setattr(client.time, "sleep", lambda _: None)
+    if later_stale:
+        with pytest.raises(TimeoutError, match="after usable publication"):
+            client.relay(request(), wait=True)
+    else:
+        assert client.relay(request(), wait=True) == 0
+    emitted = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert [frame["type"] for frame in emitted] == [
+        "begin", "worktree", "done", *(["availability"] if later_stale else []),
+    ]
+    assert emitted[1]["wt"]["id"] == "fresh"
+    assert not emitted[0].get("availability")
+    assert attempts == [1, 1]
+    assert closed == [1, 2]
+
+
 @pytest.mark.parametrize("started", [True, False])
 def test_bounded_feed_client_without_an_advisory_roster_preserves_recovery_failure(
     monkeypatch, tmp_path, capsys, started,

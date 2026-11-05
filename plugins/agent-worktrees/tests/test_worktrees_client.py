@@ -101,6 +101,26 @@ def test_waiting_read_preserves_protocol_failure_and_cancellation(monkeypatch, f
     assert caught.value is failure
 
 
+@pytest.mark.parametrize("failure", [
+    OSError("read denied"), ValueError("malformed JSON"), RecursionError("nested response"),
+])
+def test_json_list_emits_terminal_reader_errors_as_json(monkeypatch, capfd, failure):
+    monkeypatch.setattr(client.cfg, "project_name", lambda: "project")
+    monkeypatch.setattr(list_cli.list_cache, "note_demand", lambda *a, **k: None)
+    monkeypatch.setattr(list_cli, "_status_monitor_enabled", lambda: True)
+
+    def failed(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(client, "read_current", failed)
+    assert list_cli.cmd_list(argparse.Namespace(
+        json=True, tracking_status="all", all=True, include_other_platforms=True,
+    )) == 1
+    captured = capfd.readouterr()
+    assert json.loads(captured.out)["error"] == str(failure)
+    assert captured.err == ""
+
+
 def test_waiting_read_retries_transport_timeout_without_restarting_live_owner(monkeypatch):
     ready = {"projection": {"quality": "current"}, "worktrees": []}
     replies = iter([TimeoutError("slow live owner"), ready])

@@ -355,7 +355,7 @@ def emit_current(args) -> int:
             return 1
     try:
         result = read_current(request, wait=True)
-    except (TimeoutError, ProjectionError, ProjectionUnavailable) as exc:
+    except (OSError, ValueError, RecursionError, ProjectionError, ProjectionUnavailable) as exc:
         return output._json_error(str(exc))
     if getattr(args, "stream", False):
         head = result["projection"]

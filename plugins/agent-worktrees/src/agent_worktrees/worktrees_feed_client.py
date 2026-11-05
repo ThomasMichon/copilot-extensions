@@ -370,6 +370,7 @@ def relay(request: dict, *, bootstrap: bool = False, wait: bool = False) -> int:
     retry_delay = 0.05
     while True:
         receiver = FeedReceiver(request)
+        accepted_current = False
         try:
             client = _client(request, wait=True) if wait and not bootstrap else _client(request)
             frames = transport(client, request)
@@ -380,6 +381,12 @@ def relay(request: dict, *, bootstrap: bool = False, wait: bool = False) -> int:
                         raise FeedFailure(
                             "resident changed before initial publication", code="superseded", retry=True,
                         )
+                    if wait and not bootstrap and not accepted_current and receiver.current is not None:
+                        if receiver.current.get("availability") is not None:
+                            raise FeedFailure(
+                                "waiting for a usable resident publication", code="unready", retry=True,
+                            )
+                        accepted_current = True
                     for output in admitted or ():
                         print(json.dumps(output, separators=(",", ":"), ensure_ascii=False))
                     if admitted:
@@ -389,7 +396,7 @@ def relay(request: dict, *, bootstrap: bool = False, wait: bool = False) -> int:
             return 0
         except (FeedFailure, TimeoutError, ConnectionError) as error:
             if (
-                not wait or bootstrap or receiver.current is not None
+                not wait or bootstrap or accepted_current
                 or (isinstance(error, FeedFailure) and not error.retry)
             ):
                 raise
