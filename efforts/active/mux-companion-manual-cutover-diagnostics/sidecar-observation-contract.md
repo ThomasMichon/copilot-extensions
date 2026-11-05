@@ -34,8 +34,9 @@ collection readback through those selected owners. #10520 integrates this
 boundary into the existing tick with strict machine-local opt-in, bounded shared
 execution and independent destination/source/lock/machine scheduling contexts.
 #10528 adds conservative checkout-local preservation and independent managed-data
-retirement controls at the existing lifecycle owner. Legacy rescue,
-restoration/reclamation, actual archive acknowledgment, complete source
+retirement controls at the existing lifecycle owner. Supported local format-2
+export/readback before finalization is qualified in #10539; actual relocation,
+restoration/reclamation, archive acknowledgment, complete source
 coverage, qualified current answerability/PRE, installed and native acceptance
 remain open.
 Providers advertise actual running support before independently installed
@@ -289,6 +290,13 @@ from its parent. Arbitrary federated relationship acquisition and concurrent
 per-delegate subscriptions are not part of this consumer.
 Missing source-recorded timestamps remain explicitly unknown; immutable event
 content does not acquire a different timestamp when another viewer loads it.
+
+The [proposed live-request amendment](sidecar-current-requests.md) defines an
+optional producer-owned current input/permission projection on this same held
+reader. Its review precedes new wire syntax. Existing v1 current-request and
+per-entry answerability fields remain unknown; retained events do not establish
+current waiters. Unsupported sources retain the original observation/history
+path with explicit unknown live input.
 
 ## Pre-compaction evidence and viewer policy
 

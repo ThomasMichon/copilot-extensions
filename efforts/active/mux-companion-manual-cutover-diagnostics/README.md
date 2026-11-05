@@ -486,7 +486,9 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       execution and independent collection-context scheduling. D4's source
       integration is complete. #10528 delivers D5's conservative checkout-local
       preservation and independent managed-data retirement source controls;
-      D5 rescue, actual archive acknowledgment and
+      #10539 qualifies supported format-2 local rescue/readback before actual
+      isolated finalization without releasing the original checkout hold.
+      D5 actual relocation, restoration/reclamation, archive acknowledgment and
       installed/native qualification remain open.
       Current answerability/PRE qualification, archival/rescue, native durability and
       whole S2-S5 and original root gates remain open.
@@ -566,6 +568,7 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+- [2026-11-04 - Supported local rescue qualified; live request evidence next](journal/2026/11.04-sidecar-rescue-qualification.md)
 - [2026-11-04 - Checkout preservation merged; rescue qualification continues](journal/2026/11.04-sidecar-checkout-preservation.md)
 - [2026-11-04 - Existing-tick collection merged; legacy preservation next](journal/2026/11.04-sidecar-existing-tick-collection.md)
 - [2026-11-04 - Explicit managed export composed; existing-tick integration next](journal/2026/11.04-sidecar-managed-export-composition.md)
