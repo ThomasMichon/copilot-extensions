@@ -231,6 +231,44 @@ checkpoint nor author eligibility, holds, requirements or source/resource custod
 
 ### Phase 2 - Continuing reconciliation
 
+The [native messaging/session tools](native-messaging-session-tools-cohort.md)
+and [account/authorization](account-preflight-auth-journey-cohort.md) studies
+preserve four originals through twelve whole texts and twelve noncompletion
+relations. Keep all six native-messaging phases, combined definition/tool/ACP
+operations, actual operation-account preflight and the separate operator/adopter
+journey. Bounded source completion does not close their remaining contracts.
+
+The [owner-safe retirement and readiness](retirement-readiness-boundaries-cohort.md)
+study preserves two originals through nine whole texts and six noncompletion
+relations. Credit delivered leak/family fixes and later verified primary
+rollout without completing whole census ownership or the separate historical
+20-second lazy-readiness margin; no fresh process or latency claim is made.
+
+The eleven-contract goal/lifecycle research delta merged in #10583 after
+genuine exact-head approval with no active findings and green required checks.
+All seventeen actual merged bodies equal the reviewed head; the
+[delivery journal](<journal/2026/11.04 anchor-observation-boundaries-contracts.md>)
+records the finalized retained child and continuing parent gate. Two equal
+complete 19:56 PST metadata-only scans remain 1,009 whole open, 280 above
+729, with no arrivals, departures or new campaign closure credit.
+Continue independent six-contract publication and graph research; no original
+acceptance, older-claim release or installed change follows.
+
+The [theme/clean-room](theme-cleanroom-boundaries-cohort.md) and
+[runtime cleanup/force wording](runtime-cleanup-force-guidance-cohort.md)
+studies preserve four distinct originals through twelve whole texts and
+twelve noncompletion relations. Retrieval pairs are not duplicate outcomes.
+Preserve supported palette configuration, chosen four-outcome CI, all nine
+owner-scoped cleanup clauses and complete removal OR accepted narrower
+force-advice wording, without new universal native gates or takeover.
+
+The [current-root and reserved-anchor](root-anchor-custody-cohort.md) study
+preserves two originals through eight whole texts and six noncompletion
+comparisons. Keep all six inherited root-reporting rows, legitimate parallel
+slices, selected no-write anchor v1, narrow explicit native-custody claim
+and independent contributor registration. Neither original is completed
+or reassigned by bounded discovery, provenance or publication gains.
+
 The twelve-contract build/hosting/incident research delta merged in #10580
 after genuine exact-head approval with no active findings and green required
 checks. All seventeen actual merged bodies equal the reviewed head; the
@@ -1119,6 +1157,32 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [messaging/session tools](native-messaging-session-tools-cohort.md) core
+distinguishes SDK ACK, matching-root consumption, request streams, independent
+subscriptions and durable terminal results without imposing host destruction.
+The [account/authorization](account-preflight-auth-journey-cohort.md) core
+preserves all six proposed intake rows, accepted delivery/readback before
+supersession and actual human ceremony plus authorized both-product adoption.
+
+The [retirement/readiness](retirement-readiness-boundaries-cohort.md) core
+preserves graceful AND accepted bounded cold replacement, positive identity/
+role/authorization, actual GOOD/recovery duties and separate readiness
+diagnosis. A later watchdog repair does not reopen the primary reaper rollout
+or settle the original lazy-start margin.
+
+The [theme/CI](theme-cleanroom-boundaries-cohort.md) and
+[cleanup/wording](runtime-cleanup-force-guidance-cohort.md) cores preserve
+defaults and truecolor distinctions, periodic/explicit integration with
+unit-only required CI, owner-loop OR consumer-schedule cleanup, exact
+publication/retention custody and truthful override evidence. Source-specific
+gains do not complete these independent original outcomes.
+
+The [root/anchor](root-anchor-custody-cohort.md) core distinguishes current
+responsibility from historical creation, direct holders from actual roots,
+and incomplete scope from no-owner proof. Existing singleton ledger credit
+does not complete linear anchor-session/handoff v1; resource settlement,
+explicit narrow-claim release and no-anchor-write boundaries remain intact.
 
 The [steering/guards](steering-abandon-guards-cohort.md),
 [release/startup](reservation-container-startup-cohort.md) and
