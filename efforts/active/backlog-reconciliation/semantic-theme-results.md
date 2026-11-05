@@ -5,6 +5,14 @@ Method: [weighted semantic consolidation](semantic-density-consolidation.md).
 
 ## Result and coverage
 
+The [ten finite acceptance/closeout contracts](finite-acceptance-closeout-contracts.md)
+retain thirty ranked relationships without denying actual delivered partials
+or weakening original finite outcomes. Existing reservations, both setup/eval
+products, direct cleanliness intake, actual seed consumption and same-owner
+closeout remain independent. All ten stay OPEN; the
+[journal](<journal/2026/11.05 finite-acceptance-closeout-contracts.md>)
+distinguishes fresh, reused and protected whole evidence.
+
 The [twelve whole consumer/ownership contracts](whole-consumer-ownership-contracts.md)
 integrate thirty-six ranked comparisons without substituting neighboring
 source progress for complete consumer acceptance. Both project-selection

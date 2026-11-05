@@ -58,6 +58,23 @@ EVENT_LABELS = {
     "turn_complete": "Turn completed",
     "session_state_changed": "Session state reported",
 }
+ATTRIBUTED_EVENTS = frozenset({
+    "subagent_started", "subagent_completed", "subagent_failed",
+    "tool_call_start", "tool_call_update",
+})
+
+
+def _reported_label(details: dict[str, Any], fields: tuple[str, ...]) -> str | None:
+    for field in fields:
+        value = details.get(field)
+        if isinstance(value, str) and len(value) <= 512 and value.strip():
+            try:
+                text(value, "Bridge reported label")
+            except TimelineContractError:
+                continue
+            value = value.strip()
+            return value[:160] + ("..." if len(value) > 160 else "")
+    return None
 
 
 def _event_summary(item: dict[str, Any]) -> str:
@@ -80,16 +97,30 @@ def _event_summary(item: dict[str, Any]) -> str:
         fields = ("title",)
     else:
         fields = ()
-    for field in fields:
-        value = details.get(field)
-        if isinstance(value, str) and len(value) <= 512 and value.strip():
-            try:
-                text(value, "Bridge reported label")
-            except TimelineContractError:
-                continue
-            value = value.strip()
-            return label + ": " + value[:160] + ("..." if len(value) > 160 else "")
+    value = _reported_label(details, fields)
+    if value is not None:
+        return label + ": " + value
     return label
+
+
+def _event_actor(item: dict[str, Any], session_id: str) -> TimelineActor:
+    if item["native_kind"] in ATTRIBUTED_EVENTS:
+        agent_id = item["details"].get("agent_id")
+        if isinstance(agent_id, str):
+            actor_id = "subagent:" + agent_id
+            try:
+                identifier(agent_id, "reported subagent ID")
+                identifier(actor_id, "reported subagent actor")
+            except TimelineContractError:
+                pass
+            else:
+                label = _reported_label(item["details"], ("agent_display_name", "agent_name"))
+                return TimelineActor(
+                    actor_id, ActorKind.SUBAGENT, Qualification.REPORTED, label or agent_id,
+                )
+    return TimelineActor(
+        "bridge-session:" + session_id, ActorKind.BRIDGE_SESSION, Qualification.REPORTED, session_id,
+    )
 
 
 class SessionCodec:
@@ -291,13 +322,16 @@ class SessionCodec:
             )
             if item["kind"] == "compaction":
                 detail += " Pre-context classification unknown; active pre-window capacity is unqualified."
+            actor = _event_actor(item, self.member["bridge_session_id"])
+            relations = () if actor.kind is ActorKind.SUBAGENT else (
+                TimelineRelation(RelationKind.PARENT, Qualification.REPORTED, reference=self.owner),
+            )
             result.append(TimelineEvent(
                 token.identity, self.position(token, item["id"]), "event:" + str(item["native_event_id"]),
-                TimelineActor(self.member["bridge_session_id"], ActorKind.BRIDGE_SESSION,
-                              Qualification.REPORTED, self.member["bridge_session_id"]),
+                actor,
                 KINDS[item["kind"]], EvidenceKind(item["evidence_kind"]), occurred,
                 _event_summary(item), details=detail,
-                relations=(TimelineRelation(RelationKind.PARENT, Qualification.REPORTED, reference=self.owner),),
+                relations=relations,
                 payload_ref=item["payload_ref"] if len(item["payload_ref"].encode()) <= 1024 else None,
                 data_json=payload,
             ))
