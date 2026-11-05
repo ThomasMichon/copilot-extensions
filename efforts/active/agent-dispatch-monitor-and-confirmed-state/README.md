@@ -22,7 +22,8 @@ case still fails at missing protected assignment/preparation integration.
 Resident-only inspection and coherent delegated lineage selection are available
 at their source boundaries. Executing-build and delegated-selection observation
 source subsequently merged in #10782. Actual running selections and the complete
-writer cohort remain unqualified.
+writer cohort remain unqualified. The effect-side executing-identity guard
+subsequently merged in #10804; ordinary consumers do not yet emit it.
 Next, bind generation-aware independent admission to those writers and qualify
 ordinary submission consumers,
 then post-stop same-native recovery and the complete running

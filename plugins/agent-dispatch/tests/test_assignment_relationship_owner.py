@@ -7,6 +7,7 @@ import io
 import json
 import os
 import subprocess
+import sys
 import threading
 import time
 from types import SimpleNamespace
@@ -24,6 +25,8 @@ from agent_dispatch.assignment_workspace import AssignmentWorkspace
 from agent_dispatch.queue_records import TaskError
 from agent_dispatch.queue_task_relationships import WRITER
 
+WRITER_IDENTITY = {"installation_root": "/selected/installation", "runtime_generation": "1" * 32}
+
 
 @pytest.fixture(autouse=True)
 def isolate_cleanup_custody(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -37,9 +40,19 @@ def support() -> dict:
         "operations": ["reserve", "bind", "inspect", "close"],
         "inspect_absence": True,
         "expected_creation_nonce": True,
+        "expected_writer_identity": True,
+        "writer_identity": dict(WRITER_IDENTITY),
         "writer_scope": "executing-process",
         "writer_contract": WRITER,
         "metadata_version": 2,
+    }
+
+
+def receipt(workspace):
+    return {
+        "ok": True, "owner": workspace.owner_ref,
+        "creation_nonce": workspace.creation_nonce,
+        "writer_contract": WRITER, "writer_identity": dict(WRITER_IDENTITY),
     }
 
 
@@ -62,17 +75,28 @@ def test_selected_prefix_and_authoritative_record_keep_original_identity(monkeyp
                 },
             }
         else:
-            assert json.loads(kwargs["input_text"])["expected_creation_nonce"] == "original"
-            value = {"ok": True}
+            assert json.loads(kwargs["input_text"]) == {
+                "request_id": "original-request", "expected_creation_nonce": "original",
+                "expected_writer_identity": WRITER_IDENTITY,
+            }
+            value = receipt(workspace)
         return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
 
     monkeypatch.setattr(module, "run_background_capture", capture)
     admitted = []
+
+    def admit(workspace, identity):
+        assert identity == WRITER_IDENTITY
+        admitted.append(workspace)
+        identity["runtime_generation"] = "2" * 32
+
     writer = module.WorktreeRelationshipWriter(
         ["/selected/python", "-m", "agent_worktrees"],
-        admit_workspace=admitted.append,
+        admit_workspace=admit,
     )
-    assert writer(workspace, "reserve", {"expected_creation_nonce": "original"}) == {"ok": True}
+    payload = {"request_id": "original-request"}
+    assert writer(workspace, "reserve", payload) == receipt(workspace)
+    assert payload == {"request_id": "original-request"}
     assert admitted == [workspace] and len(calls) == 3
     assert all(call[0][:3] == ["/selected/python", "-m", "agent_worktrees"] for call in calls)
     assert calls[-1][0][-3:] == ["--owner-ref", workspace.owner_ref, "--json"]
@@ -100,7 +124,9 @@ def test_payload_free_probes_use_owned_windows_capture_and_retain_cleanup(
         if "capabilities" in argv or "record" in argv:
             assert kwargs["input_text"] == ""
         else:
-            assert json.loads(kwargs["input_text"]) == {"expected_creation_nonce": "original"}
+            assert json.loads(kwargs["input_text"]) == {
+                "expected_creation_nonce": "original", "expected_writer_identity": WRITER_IDENTITY,
+            }
         if probe in argv and fail_probe:
             fail_probe = False
             raise failure
@@ -110,6 +136,8 @@ def test_payload_free_probes_use_owned_windows_capture_and_retain_cleanup(
                 "path": workspace.path, "creation_nonce": workspace.creation_nonce,
             },
         }
+        if "reserve" in argv:
+            value = receipt(workspace)
         return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
 
     monkeypatch.setattr(procutil, "sys", SimpleNamespace(platform="win32", maxsize=2**63 - 1))
@@ -117,7 +145,7 @@ def test_payload_free_probes_use_owned_windows_capture_and_retain_cleanup(
 
     def make_writer():
         return module.WorktreeRelationshipWriter(
-            ["selected"], admit_workspace=lambda workspace: None,
+            ["selected"], admit_workspace=lambda workspace, identity: None,
         )
 
     writer = None if probe == "capabilities" else make_writer()
@@ -143,7 +171,10 @@ def test_payload_free_probes_use_owned_windows_capture_and_retain_cleanup(
     assert any("reserve" in argv for argv, _ in calls)
 
 
-@pytest.mark.parametrize("change", ["old", "new_payload", "missing_nonce", "unknown"])
+@pytest.mark.parametrize("change", [
+    "old", "new_payload", "missing_nonce", "unknown", "missing_guard",
+    "unknown_build", "package_generation", "missing_identity", "extra_identity", "empty_root",
+])
 def test_missing_actual_runtime_support_refuses_before_record_or_effect(monkeypatch, change):
     calls = []
     declaration = copy.deepcopy(support())
@@ -153,6 +184,18 @@ def test_missing_actual_runtime_support_refuses_before_record_or_effect(monkeypa
         declaration["writer_scope"] = "installed-payload"
     elif change == "missing_nonce":
         declaration["expected_creation_nonce"] = False
+    elif change == "missing_guard":
+        declaration.pop("expected_writer_identity")
+    elif change == "unknown_build":
+        declaration["writer_identity"]["runtime_generation"] = None
+    elif change == "package_generation":
+        declaration["writer_identity"]["runtime_generation"] = "1.2.3"
+    elif change == "missing_identity":
+        declaration.pop("writer_identity")
+    elif change == "extra_identity":
+        declaration["writer_identity"]["other"] = True
+    elif change == "empty_root":
+        declaration["writer_identity"]["installation_root"] = ""
     else:
         declaration["version"] = True
 
@@ -163,12 +206,128 @@ def test_missing_actual_runtime_support_refuses_before_record_or_effect(monkeypa
     monkeypatch.setattr(module, "run_background_capture", capture)
     with pytest.raises(TaskError, match="cannot protect"):
         module.WorktreeRelationshipWriter(
-            ["/selected/owner"], admit_workspace=lambda workspace: None
+            ["/selected/owner"], admit_workspace=lambda workspace, identity: None
         )
     assert len(calls) == 1 and "capabilities" in calls[0]
 
 
-@pytest.mark.parametrize("reason", ["preservation", "incarnation"])
+@pytest.mark.parametrize("payload", [
+    {"expected_creation_nonce": "replacement"},
+    {"expected_writer_identity": None},
+    {"expected_writer_identity": {**WRITER_IDENTITY, "runtime_generation": "2" * 32}},
+    {"expected_writer_identity": {**WRITER_IDENTITY, "installation_root": "/other/installation"}},
+])
+def test_caller_cannot_replace_the_admitted_writer_or_original_workspace(monkeypatch, tmp_path, payload):
+    calls = []
+
+    def capture(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, json.dumps(support()), "")
+
+    admitted = []
+    monkeypatch.setattr(module, "run_background_capture", capture)
+    writer = module.WorktreeRelationshipWriter(
+        ["selected"], admit_workspace=lambda workspace, identity: admitted.append(workspace),
+    )
+    workspace = AssignmentWorkspace("host", "project", "worktree", str(tmp_path), "original")
+    with pytest.raises(TaskError, match="conflicts"):
+        writer(workspace, "reserve", payload)
+    assert admitted == [workspace] and len(calls) == 1
+
+
+@pytest.mark.parametrize("field,value", [
+    ("writer_identity", None),
+    ("writer_identity", {**WRITER_IDENTITY, "runtime_generation": "2" * 32}),
+    ("writer_identity", {**WRITER_IDENTITY, "installation_root": "/other/installation"}),
+    ("creation_nonce", "replacement"), ("writer_contract", None), ("ok", 1),
+    ("owner", "host/project/other"),
+])
+def test_unconfirmed_executing_writer_receipt_retains_request_without_replay(monkeypatch, tmp_path, field, value):
+    workspace = AssignmentWorkspace("host", "project", "worktree", str(tmp_path), "original")
+    calls = []
+
+    def capture(argv, **kwargs):
+        calls.append((argv, kwargs))
+        if "capabilities" in argv:
+            result = support()
+        elif "record" in argv:
+            result = {"ok": True, "worktree": {
+                "id": workspace.worktree, "repo": workspace.project,
+                "path": workspace.path, "creation_nonce": workspace.creation_nonce,
+            }}
+        else:
+            result = {**receipt(workspace), field: value}
+        return subprocess.CompletedProcess(argv, 0, json.dumps(result), "")
+
+    monkeypatch.setattr(module, "run_background_capture", capture)
+    writer = module.WorktreeRelationshipWriter(["selected"], admit_workspace=lambda workspace, identity: None)
+    payload = {"request_id": "retained-original"}
+    with pytest.raises(TaskError, match="original relationship retained"):
+        writer(workspace, "reserve", payload)
+    assert len(calls) == 3 and payload == {"request_id": "retained-original"}
+    assert json.loads(calls[-1][1]["input_text"]) == {
+        **payload, "expected_creation_nonce": "original",
+        "expected_writer_identity": WRITER_IDENTITY,
+    }
+
+
+@pytest.mark.parametrize("provider", ["prior", "unknown", "current", "changed"])
+def test_selected_provider_process_negotiates_guard_without_an_extra_probe(tmp_path, provider):
+    workspace = AssignmentWorkspace("host", "project", "worktree", str(tmp_path), "original")
+    declaration = support()
+    if provider == "prior":
+        declaration.pop("expected_writer_identity")
+    elif provider == "unknown":
+        declaration["writer_identity"]["runtime_generation"] = None
+    script = tmp_path / "selected_provider.py"
+    script.write_text(
+        "import json,sys\n"
+        "from pathlib import Path\n"
+        "settings=json.loads(sys.argv[1]); argv=sys.argv[2:]\n"
+        "root=Path(settings['root']); log=root/'calls'\n"
+        "with log.open('a') as stream: stream.write(json.dumps(argv)+'\\n')\n"
+        "if 'capabilities' in argv:\n"
+        " print(json.dumps(settings['support'])); sys.exit(0)\n"
+        "if 'record' in argv:\n"
+        " print(json.dumps({'ok': True, 'worktree': settings['record']})); sys.exit(0)\n"
+        "payload=json.load(sys.stdin)\n"
+        "identity=dict(settings['receipt']['writer_identity'])\n"
+        "if settings['changed']: identity['runtime_generation']='2'*32\n"
+        "if payload.get('expected_writer_identity') != identity:\n"
+        " print(json.dumps({'error': 'rejected', 'message': 'executing writer changed'})); sys.exit(1)\n"
+        "assert payload == {'request_id': 'original-request', 'expected_creation_nonce': 'original',\n"
+        "                   'expected_writer_identity': identity}\n"
+        "(root/'effect').write_text(json.dumps(payload))\n"
+        "print(json.dumps(settings['receipt']))\n",
+        encoding="utf-8",
+    )
+    settings = {
+        "root": str(tmp_path), "support": declaration, "changed": provider == "changed",
+        "record": {"id": workspace.worktree, "repo": workspace.project,
+                   "path": workspace.path, "creation_nonce": workspace.creation_nonce},
+        "receipt": receipt(workspace),
+    }
+
+    def execute():
+        writer = module.WorktreeRelationshipWriter(
+            [sys.executable, str(script), json.dumps(settings)],
+            admit_workspace=lambda workspace, identity: None,
+        )
+        return writer(workspace, "reserve", {"request_id": "original-request"})
+
+    if provider == "current":
+        assert execute() == receipt(workspace)
+        assert json.loads((tmp_path / "effect").read_text())["request_id"] == "original-request"
+    else:
+        with pytest.raises(TaskError, match="cannot protect|unconfirmed"):
+            execute()
+        assert not (tmp_path / "effect").exists()
+    calls = [json.loads(line) for line in (tmp_path / "calls").read_text().splitlines()]
+    assert len(calls) == (1 if provider in {"prior", "unknown"} else 3)
+    assert sum("capabilities" in call for call in calls) == 1
+
+
+@pytest.mark.parametrize("reason", ["preservation", "incarnation", "writer"])
 def test_unqualified_cohort_or_reused_workspace_cannot_reach_relationship_write(
     monkeypatch,
     tmp_path,
@@ -194,15 +353,19 @@ def test_unqualified_cohort_or_reused_workspace_cannot_reach_relationship_write(
         )
         return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
 
-    def admit(workspace):
+    def admit(workspace, identity):
+        assert identity == WRITER_IDENTITY
         if reason == "preservation":
             raise TaskError("participating writers are unqualified")
+        if reason == "writer" and identity != {**WRITER_IDENTITY, "runtime_generation": "2" * 32}:
+            raise TaskError("independently observed writer is unqualified")
 
     monkeypatch.setattr(module, "run_background_capture", capture)
     writer = module.WorktreeRelationshipWriter(["/selected/owner"], admit_workspace=admit)
     with pytest.raises(TaskError, match=r"unqualified|unconfirmed"):
         writer(workspace, "reserve", {"expected_creation_nonce": "original"})
     assert not any("reserve" in argv for argv in calls)
+    assert len(calls) == (2 if reason == "incarnation" else 1)
 
 
 def test_failed_capability_construction_retains_native_custody_across_new_instances(
@@ -230,16 +393,16 @@ def test_failed_capability_construction_retains_native_custody_across_new_instan
 
     monkeypatch.setattr(module, "run_background_capture", capture)
     with pytest.raises(TaskError, match="custody retained") as translated:
-        module.WorktreeRelationshipWriter(["selected"], admit_workspace=lambda workspace: None)
+        module.WorktreeRelationshipWriter(["selected"], admit_workspace=lambda workspace, identity: None)
     assert translated.value.__cause__ is failure
     assert module._pending_cleanup == [failure]
     assert failure.process is process and failure.job is job
     assert failure.cleanup_resources == (("pipe-worker", worker),)
     with pytest.raises(TaskError, match="custody retained"):
-        module.WorktreeRelationshipWriter(["selected"], admit_workspace=lambda workspace: None)
+        module.WorktreeRelationshipWriter(["selected"], admit_workspace=lambda workspace, identity: None)
     assert len(calls) == 1 and len(retried) == 1
     retry_allowed = True
-    module.WorktreeRelationshipWriter(["selected"], admit_workspace=lambda workspace: None)
+    module.WorktreeRelationshipWriter(["selected"], admit_workspace=lambda workspace, identity: None)
     assert len(calls) == 2 and len(retried) == 2
     assert module._pending_cleanup == []
 
@@ -267,7 +430,7 @@ def test_unresolved_mutation_is_not_replayed_until_exact_cleanup_succeeds(
 
     monkeypatch.setattr(module, "run_background_capture", capture)
     writer = module.WorktreeRelationshipWriter(
-        ["selected"], admit_workspace=lambda workspace: None,
+        ["selected"], admit_workspace=lambda workspace, identity: None,
     )
     arguments = ["resource-relationship", "reserve"]
     payload = {"expected_creation_nonce": "original", "task_id": "original-task"}
@@ -300,7 +463,7 @@ def test_cleanup_without_supported_retry_refuses_all_later_captures(
     monkeypatch.setattr(module, "run_background_capture", capture)
     for _ in range(2):
         with pytest.raises(TaskError, match="custody retained"):
-            module.WorktreeRelationshipWriter(["selected"], admit_workspace=lambda workspace: None)
+            module.WorktreeRelationshipWriter(["selected"], admit_workspace=lambda workspace, identity: None)
     assert len(calls) == 1 and module._pending_cleanup == [failure]
     assert failure.cleanup_resources == resources
 
@@ -317,7 +480,7 @@ def test_cleanup_and_next_capture_share_one_call_deadline(
 
     monkeypatch.setattr(module, "run_background_capture", capture)
     writer = module.WorktreeRelationshipWriter(
-        ["selected"], admit_workspace=lambda workspace: None, timeout=1,
+        ["selected"], admit_workspace=lambda workspace, identity: None, timeout=1,
     )
     clock = [time.monotonic()]
     monkeypatch.setattr(module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
@@ -398,7 +561,7 @@ def test_real_blocked_pipe_custody_survives_writer_translation_and_retry(
     monkeypatch.setattr(module, "run_background_capture", capture)
     try:
         with pytest.raises(TaskError, match="custody retained") as caught:
-            module.WorktreeRelationshipWriter(["selected"], admit_workspace=lambda workspace: None)
+            module.WorktreeRelationshipWriter(["selected"], admit_workspace=lambda workspace, identity: None)
         failure = caught.value.__cause__
         assert isinstance(failure, OwnedCleanupError)
         assert module._pending_cleanup == [failure]
@@ -411,11 +574,11 @@ def test_real_blocked_pipe_custody_survives_writer_translation_and_retry(
             assert any(worker.is_alive() for worker, _completed in workers)
         process.allow_wait = True
         with pytest.raises(TaskError, match="custody retained"):
-            module.WorktreeRelationshipWriter(["selected"], admit_workspace=lambda workspace: None)
+            module.WorktreeRelationshipWriter(["selected"], admit_workspace=lambda workspace, identity: None)
         assert len(captures) == 1 and module._pending_cleanup == [failure]
         assert process.close_calls == (0 if failed_stage == "retirement" else 1)
         process.allow_retirement = process.allow_close = True
-        module.WorktreeRelationshipWriter(["selected"], admit_workspace=lambda workspace: None)
+        module.WorktreeRelationshipWriter(["selected"], admit_workspace=lambda workspace, identity: None)
         assert len(captures) == 2 and module._pending_cleanup == []
         assert all(completed.is_set() and not worker.is_alive() for worker, completed in workers)
         assert process.stdin.closed and process.stdout.closed and process.stderr.closed
@@ -653,7 +816,7 @@ def test_owned_retry_delivers_original_settlement_once_only_after_native_cleanup
         capture = Mock(side_effect=AssertionError("unconfirmed delivery must hold new capture"))
         monkeypatch.setattr(module, "run_background_capture", capture)
         with pytest.raises(TaskError, match="custody retained"):
-            module.WorktreeRelationshipWriter(["selected"], admit_workspace=lambda workspace: None)
+            module.WorktreeRelationshipWriter(["selected"], admit_workspace=lambda workspace, identity: None)
         assert module._pending_cleanup == [failure]
         capture.assert_not_called()
     else:
