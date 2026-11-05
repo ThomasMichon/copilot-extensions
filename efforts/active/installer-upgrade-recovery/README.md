@@ -1080,3 +1080,28 @@ production caller-Job survival, existing queue repair or affected-host recovery.
 Containing release is the immediate next gate; existing first-foundation,
 execution/coalescing, MCP construction/application and broader hook owners
 retain their remaining scope. No updater, host integration or rollout ran.
+
+### 2026-11-05 - MCP containing release verified
+
+Validation/promotion `41977870141` succeeded. Release #10626 merged at
+06:18:46 UTC, publishing actual qualified Dev
+`f21518183df46b54a1328ebdd2626c96aa62d28f` as Main
+`19649c0bc538638cb5e58f8f16c96038b06acb8a`. That qualified source contains
+#10574's merge. All four changed canonical implementation bodies match the
+source merge, qualified Dev and released Main. MCP's packaged recipe and native
+receiver match canonical source; its plugin/package versions agree at
+`0.2.181-dev1`, with Worktrees `1.24.473-dev1`.
+
+The preceding successful release #10617 qualified an older Dev snapshot and
+does not contain this fix; it is not substituted. The normal scheduling filter
+waited for the then-current Dev source CI before dispatching the newer gate.
+No release-control change, force retry, capacity provision or updater was used.
+The source journal/U12 milestone separately merged through #10613 after
+current-head approval and required green CI.
+
+This completes U12's bounded source and containing-release observation, not
+ordinary publisher adoption, production caller-Job survival or whole-update/
+affected-host acceptance. The parent remains Active. The next stretch
+reconciles current MCP bootstrap ownership and the existing production-lifetime
+qualification lane before selecting any ordinary-publisher adoption; no new
+source claim or live recovery operation is established by this release record.
