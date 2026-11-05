@@ -215,6 +215,7 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "owner_loop": owner_loop, "old_cli": old_cli, "old_provider": old_provider,
         "declaration_override": declaration_override, "reject_flag": reject_flag,
         "refusal_version": refusal_version,
+        "failures": failures,
     }
     try:
         yield result

@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify joined Sidecar browsing, retention gaps and observer retirement with real private owners.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
