@@ -25,6 +25,7 @@ AFFECTED = (
     *(previous.PREFIX + name for name in (
         "acp_client.py", "acp_callbacks.py", "acp_current_requests.py",
         "session_current_requests.py", "resume_cli_contract.py",
+        "event_tool_statistics.py", "session_tool_statistics.py",
     )),
 )
 EXTRA_PATHS = (
@@ -46,11 +47,21 @@ PROBES = {
     "test_closing_one_current_follower_preserves_other_follower_push": 1,
     "test_optional_block_reserves_space_before_event_tail_and_preserves_page_ends": 1,
     "test_contribution_projection_retains_only_bounded_reported_names": 1,
+    "test_statistics_cover_owner_range_not_page_or_repeated_delivery": 1,
+    "test_statistics_empty_zero_and_ancillary_failure_keep_source_records": 1,
+    "test_statistics_atomic_cut_and_captured_gap_do_not_claim_full_history": 1,
+    "test_statistics_large_range_uses_only_bounded_event_projection": 1,
+    "test_statistics_only_qualification_change_pushes_on_existing_follower": 1,
+    "test_statistics_parser_rejects_malformed_or_cross_cut_claims": 20,
+    "test_statistics_wire_is_optional_and_independent_of_current_requests": 1,
+    "test_statistics_cli_checks_live_support_without_losing_supported_waiters": 4,
+    "test_statistics_actual_cli_parser_http_join_and_strict_legacy": 1,
 }
 TEST = retained.TEST
 CAPABILITY_VERSIONS = {
     **retained.CAPABILITY_VERSIONS, "owner_membership": 52,
     "bridge-session-current-requests-v1": 1,
+    "bridge-session-tool-statistics-v1": 1,
 }
 SPEC = common.EvidenceSpec(
     GENERATION, INPUT, PRIMARY, FAMILY, AFFECTED, EXTRA_PATHS, PROBES,

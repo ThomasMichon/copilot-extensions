@@ -180,6 +180,14 @@ and stable group/navigation anchors. The
 checks, fourteen rendered comparisons and immediate Follow-live reflow without
 claiming accumulated tool statistics or installed/native acceptance.
 
+#10707 merged as `d15ec3d21d462dadc7b3c1923d16fa3f3c9be159`, delivering
+the [statistics amendment](sidecar-tool-statistics.md)'s internal owner
+projection at existing EventLog construction/lifecycle seams. The
+[source readback](journal/2026/11.05-sidecar-tool-statistics-owner.md) records
+143 selected checks and source-bound HTTP-52 capture/verification.
+Optional provider/CLI negotiation and Manager consumption remain pending;
+this is not lifetime accounting, current concurrency or whole-S2 acceptance.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than
@@ -476,6 +484,7 @@ publication and installed support retain their separate qualification.
   the native/ACP source does not establish it.
   The [bounded tool-statistics amendment](sidecar-tool-statistics.md), reviewed in #10704, admits
   one source-range occurrence counter, not unique calls or lifetime totals.
+  #10707 supplies the internal owner projection, not its optional wire/consumer.
   Provider, compatibility and actual consumer controls precede source closure.
 - [x] Supply rich agenda-history access through its actual owner and an admitted
   locator for supported sources. Test old/missing sources as explicitly
