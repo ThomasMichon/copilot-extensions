@@ -58,6 +58,65 @@ def _wait_until(predicate, timeout: float = 3.0) -> bool:
     return predicate()
 
 
+def test_dead_rendezvous_reenters_boot_without_erasing_retained_state(tmp_path, monkeypatch):
+    import single_instance_lease
+    from work_coalescing_singleton import client
+    from agent_pull_requests import __main__ as cli, watch_daemon
+
+    stale = {
+        "pid": 123, "watch_endpoint": "localhost:1234", "watch_token": "old",
+    }
+    watch_daemon.write_lock_data(stale)
+    retained = tmp_path / "watch-subscriptions.json"
+    retained.write_text('[]', encoding="utf-8")
+    booted = []
+
+    def boot():
+        assert watch_daemon.read_lock_data() == stale
+        assert retained.read_text(encoding="utf-8") == "[]"
+        booted.append(True)
+        watch_daemon.write_lock_data(dict(stale, pid=456, watch_token="new"))
+
+    def request(host, port, token, **kwargs):
+        assert (host, port, token) == ("localhost", 1234, "new")
+        assert kwargs["kind"] == "health"
+        return {"pid": 456}
+
+    monkeypatch.setattr(cli, "_WATCH_INVOCATION", None)
+    monkeypatch.setattr(single_instance_lease, "pid_alive", lambda pid: pid == 456)
+    monkeypatch.setattr(cli, "_watch_boot", boot)
+    monkeypatch.setattr(client, "request", request)
+    assert cli._watch_request("health", {}) == {"pid": 456}
+    assert booted == [True]
+    assert retained.read_text(encoding="utf-8") == "[]"
+
+
+@pytest.mark.parametrize("pid", [123, None, "unknown", True, 0, -1])
+def test_live_or_unknown_rendezvous_does_not_authorize_boot(pid, monkeypatch):
+    import single_instance_lease
+    from work_coalescing_singleton import client
+    from agent_pull_requests import __main__ as cli, watch_daemon
+
+    data = {"pid": pid, "watch_endpoint": "localhost:1234", "watch_token": "retained"}
+    watch_daemon.write_lock_data(data)
+    probes = []
+
+    def alive(value):
+        probes.append(value)
+        return True
+
+    def unavailable(*args, **kwargs):
+        raise client.DaemonUnavailable("temporarily unreachable")
+
+    monkeypatch.setattr(cli, "_WATCH_INVOCATION", None)
+    monkeypatch.setattr(single_instance_lease, "pid_alive", alive)
+    monkeypatch.setattr(cli, "_watch_boot", lambda: pytest.fail("live/unknown owner booted"))
+    monkeypatch.setattr(client, "request", unavailable)
+    assert "error" in cli._watch_request("health", {})
+    assert probes == ([123] if type(pid) is int and pid > 0 else [])
+    assert watch_daemon.read_lock_data() == data
+
+
 def test_register_spawns_poller_and_fires_on_merge(daemon_factory):
     fetcher = _FakeFetcher()
     fetcher.set("o/n", 1, PRSnapshot(pr_state="open"))

@@ -208,6 +208,7 @@ Python invocation, preserving empty arguments, multiline bodies and quotes.
 Older PowerShell hosts and batch command shims are refused before the target
 command executes; use the catalog's PowerShell command or a validated same-cell
 native peer. An empty selector is invalid, never a request for GitHub fallback.
+Native watch snapshots use this same command adapter and 20-second read budget.
 
 ## Acknowledged watch callbacks (opt-in)
 
@@ -458,6 +459,11 @@ draining has a five-second deadline; worker joining allows 35 seconds so a
 even when handler draining fails. Exceeding either deadline raises an explicit
 error rather than reporting a completed graceful shutdown. Pending subscriptions
 are retained, not cleared by shutdown.
+
+Legacy discovery ignores an endpoint only when its recorded positive PID is
+confirmed dead, allowing ordinary on-demand startup without deleting retained
+subscriptions or rendezvous state. A live or uncertain owner remains protected;
+an unsuccessful connection alone does not authorize a replacement.
 
 Already-accepted legacy callbacks queued beyond the eight-worker limit are
 drained in bounded batches before shutdown finishes, with 35 seconds allowed
