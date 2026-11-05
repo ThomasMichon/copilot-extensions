@@ -354,7 +354,8 @@ def cmd_update_request(rest: list[str]) -> int:
             for name in ("detach", "wait", "supervised_debug", "json")
             if getattr(options, name)
         ]
-        controlled = handoff(forwarded, observer=observer)
+        with _request_environment(request_context()):
+            controlled = handoff(forwarded, observer=observer)
         if controlled is not None:
             return controlled
         if options.target is not None and options.target != "worktree-manager":

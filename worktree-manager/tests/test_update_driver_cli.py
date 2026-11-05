@@ -272,7 +272,8 @@ def queued(monkeypatch, tmp_path):
 @pytest.mark.parametrize("observer", [
     [], ["--detach", "--json"], ["--wait"], ["--supervised-debug"],
 ])
-def test_project_controller_routes_before_manager_source(queued, monkeypatch, observer):
+@pytest.mark.parametrize("project", [["--project", "example"], ["--project=example"]])
+def test_project_controller_routes_before_manager_source(queued, monkeypatch, observer, project):
     from worktree_manager import engine_client
 
     calls = []
@@ -287,11 +288,61 @@ def test_project_controller_routes_before_manager_source(queued, monkeypatch, ob
         lambda project, args, **kwargs: calls.append((project, args, kwargs)) or 47,
     )
     monkeypatch.setattr(driver, "_source_key", lambda: pytest.fail("Manager source queried"))
-    assert driver.cmd_update_request(["--project", "example", "--force", *observer]) == 47
+    assert driver.cmd_update_request([*project, "--force", *observer]) == 47
     assert calls == [(
         "example", ["update", "--force", *observer],
         {"headless": True} if "--detach" in observer else {},
     )]
+
+
+@pytest.mark.parametrize("root_form", ["default", "relative"])
+def test_project_controller_handoff_freezes_manager_policy_root(
+    queued, monkeypatch, tmp_path, root_form,
+):
+    import os
+    from update_driver import RequestSpec
+    from update_driver.core import automatic_update_refusal
+    from worktree_manager import engine_client
+
+    home = tmp_path / "home"
+    caller = tmp_path / "caller"
+    home.mkdir()
+    caller.mkdir()
+    root = home / ".worktree-manager" if root_form == "default" else caller / "manager"
+    root.mkdir()
+    (root / "config.toml").write_text(
+        "[maintenance]\nautomatic = false\n", encoding="utf-8",
+    )
+    monkeypatch.chdir(caller)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "cell.json"))
+    if root_form == "default":
+        monkeypatch.delenv("WORKTREE_MANAGER_ROOT", raising=False)
+    else:
+        monkeypatch.setenv("WORKTREE_MANAGER_ROOT", "manager")
+    seen = []
+    monkeypatch.setattr(engine_client, "get_value", lambda *_args: "tools/update.py")
+
+    def execute(_project, arguments, **_kwargs):
+        context = {
+            "WORKTREE_MANAGER_ROOT": os.environ.get("WORKTREE_MANAGER_ROOT", ""),
+            "COPILOT_EXTENSIONS_CONTEXT": os.environ["COPILOT_EXTENSIONS_CONTEXT"],
+        }
+        request = RequestSpec(
+            backend="engine", argv=tuple(arguments[1:]), cwd=str(caller),
+            context=tuple(context.items()),
+        )
+        seen.append((context, automatic_update_refusal(request)))
+        return 0
+
+    monkeypatch.setattr(engine_client, "run_engine_passthrough", execute)
+    assert driver.cmd_update_request(["--project", "example", "--auto"]) == 0
+    assert seen[0][0]["WORKTREE_MANAGER_ROOT"] == str(root.resolve())
+    assert "maintenance.automatic is false" in seen[0][1]
+    assert os.environ.get("WORKTREE_MANAGER_ROOT") == (
+        None if root_form == "default" else "manager"
+    )
 
 
 def test_project_controller_preserves_explicit_manager_skip(queued, monkeypatch):
