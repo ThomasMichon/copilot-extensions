@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify Companion popup dismissal through a real attached tmux client",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

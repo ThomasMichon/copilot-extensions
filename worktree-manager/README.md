@@ -112,6 +112,15 @@ resource references, states and notes. Each observation retains its own
 confirmation marker and timestamp; unavailable data is not an empty ledger.
 Reads and Refresh run off the UI loop. `r` refreshes and Escape closes.
 
+The on-demand popup explicitly binds Escape to clean exit. Ctrl+Q uses Textual's
+clean quit action; Tab/Shift+Tab followed by Enter/Space can activate **Exit**.
+Ctrl+C keeps Textual's quit-hint notification and leaves the Companion open.
+Clean exit cancels owned reads and closes `display-popup -E` without a second
+key, returning input to the original CLI. It does not invoke **Cut over**,
+consume a handoff, or retire the worktree/session. Private attached-client tmux
+tests cover ready, blocked and failed source reads; installed clients and
+Windows/PSMux retain separate qualification.
+
 Timeline is an alternate view backed by a bounded timeline contract, virtual
 line renderer and caller-owned observation controller. Its compaction policy
 compares qualified pre-context counts without rounding; target-only capacity
