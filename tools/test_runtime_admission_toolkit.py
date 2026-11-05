@@ -22,6 +22,9 @@ from test_runtime_source_lock import plan
 from test_installer_wheel_acquisition import CERTIFICATE
 from test_installer_packaging_seed import engine as engine  # noqa: F401
 from test_installer_packaging_seed import seed, selected_seed
+from test_runtime_profile_bundle import inputs as inputs  # noqa: F401
+from test_runtime_profile_delivery import produce
+from test_runtime_profile_delivery import selected as selected  # noqa: F401
 from promotion_unit_tests.test_runtime_profile_wheels import _record
 
 
@@ -144,6 +147,47 @@ print("copied-source-bound-discovery-ok")
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == "copied-source-bound-discovery-ok"
+
+
+def test_copied_toolkit_retains_a_delivery_without_checkout_imports(tmp_path, selected):
+    toolkit = _toolkit(tmp_path)
+    bundle = tmp_path / "delivery.zip"
+    result = produce(selected, bundle)
+    profile = tmp_path / "selected-profile.json"
+    profile.write_text(json.dumps(selected[0]), encoding="utf-8")
+    script = """
+import importlib.abc, json, pathlib, sys, time
+root = pathlib.Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(root.parent))
+import _runtime_admission
+_runtime_admission.activate()
+blocked = {"promotion_python_artifacts", "publish_python_artifacts", "promote_release"}
+class RejectRepositoryAdapters(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in blocked:
+            raise AssertionError("unexpected repository adapter: " + fullname)
+sys.meta_path.insert(0, RejectRepositoryAdapters())
+import runtime_profile_delivery as delivery
+assert pathlib.Path(delivery.__file__).resolve().is_relative_to(root)
+record = json.loads(pathlib.Path(sys.argv[2]).read_text())
+with delivery.retain_profile_delivery(
+    record, pathlib.Path(sys.argv[3]), delivery_sha256=sys.argv[4],
+    max_bytes=1_000_000, max_files=10, max_snapshot_bytes=10_000_000,
+    deadline=time.monotonic() + 30,
+) as retained:
+    assert len(retained.wheels.archives) == 2
+    assert retained.materials["source.tar.gz"].read() == b"independently qualified source archive"
+    retained.wheels.verify()
+assert not blocked.intersection(sys.modules)
+print("copied-delivery-intake-ok")
+"""
+    observed = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", script, str(toolkit), str(profile), str(bundle), result["sha256"]],
+        cwd=tmp_path, capture_output=True, text=True, timeout=60,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert observed.returncode == 0, observed.stdout + observed.stderr
+    assert observed.stdout.strip() == "copied-delivery-intake-ok"
 
 
 def test_admitted_seed_runs_payload_local_semantic_validation(
