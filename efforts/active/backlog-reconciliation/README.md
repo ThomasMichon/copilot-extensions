@@ -220,7 +220,28 @@ measured outputs and continuing gates. Serial small documentary batches are
 no longer the principal research engine. This changes neither the fixed
 checkpoint nor author eligibility, holds, requirements or source/resource custody.
 
+Operator clarification, 2026-11-05, summary:
+
+Research related issues together, organize the thoughts into cohort-sized
+bugs with a parent that encompasses the planned work, then resolve the
+individual bugs against that parent. Use rate-aware whole-list API acquisition,
+Markdown context/metadata and parallel Luna research for actual completed-work
+matches and bug-quality scrutiny. The [verbatim capture](inception-transcript.md)
+retains both instructions and the selected examples. This replaces leaf
+documentation as the deliverable, not actual author/source boundaries,
+implementation authority, resource custody or the fixed checkpoint.
+
 ## Plan
+
+The 2026-11-05 operator clarification makes cohort-sized canonical bugs and
+audited individual dispositions the principal deliverable. Research related
+originals together, ensure the actual parent encompasses the planned work and
+unique unfinished requirements, then resolve displaced tracking against that
+parent. Distinguish completed fixes, subsumed child tracking, recovered CI
+incidents and reports that are no longer actionable; do not call them all
+fixed. The [consolidation method](semantic-density-consolidation.md) records
+the whole-list Markdown snapshot and parallel Luna research direction.
+Actual author/source boundaries, ownership and the fixed checkpoint remain.
 
 The [current inflow graph refresh](current-inflow-graph-refresh.md) requalifies
 584 legacy candidates and separates 71 unchanged semantic generations from
@@ -308,6 +329,36 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 - [x] Preserve the initial cohort and oldest-first cursor in structured session state.
 
 ### Phase 2 - Continuing reconciliation
+
+The 2026-11-05 cohort-parent direction is executing through a complete
+1,006-identity metadata snapshot, 667 whole qualified Markdown research
+packets and 339 metadata-only placeholders. Eight disjoint Luna batches
+cover the 661 originals outside the six independently researched examples.
+Lexical routing is not fresh semantic proof or a duplicate verdict.
+Actual audited dispositions close #8689 as no longer actionable, #8398 as
+an inactive CI incident with its signature retained, and #6375/#951 on their
+completed original source outcomes. Existing assignments and source/resource
+obligations remain. The complete 11:47 PST census is 1,002 whole OPEN:
+670 original-cohort and 332 inflow, still 273 above 729. Verified campaign
+dispositions are 790; two arrivals offset part of the four departures.
+The [journal](<journal/2026/11.05 cohort-parent-luna-reconciliation.md>)
+records the remaining parent/child integrations without claiming completion.
+
+The current inflow graph refresh is actually delivered in #10731 after
+genuine exact-head approval, no review threads and canonical confirmation
+of successful checks before the normal managed merge. All eight reviewed,
+merged and current blobs match. The later attribution-refresh context also
+completed; all eleven observed contexts are successful or skipped.
+Only the serial publication child finalized, retained. The
+[delivery journal](<journal/2026/11.05 current-inflow-graph-refresh.md>)
+preserves 71 legacy generations, six fresh originals and eight whole merged
+descriptions, with no new closure or source/resource release.
+The complete 07:44 PST metadata census remains 1,001 whole OPEN, 272 above
+729, with unchanged identities and 786 verified dispositions. The optimistic
+floor under the conservative citation-inheritance guard remains 910.
+The next stretch is an explicit scope decision about citation-only exclusion
+inheritance, not unilateral relaxation of genuine holds, author eligibility,
+acceptance or the checkpoint. The parent Plan and Validation remain open.
 
 The four preparation/containment/liveness contracts are actually delivered
 in #10729 after genuine exact-head approval, no review threads and canonical

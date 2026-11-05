@@ -869,6 +869,18 @@ engine/Manager/mux/session owners, #6600 timing/configuration and separate
 startup/feed/release owners. This does not reopen completed transplant or
 bundled retirement, shift source/resource custody or make the Picker mandatory.
 
+- [ ] **Complete the Worktrees contribution migration:** Publish the Worktrees
+  pivot and row/view actions from the `agent-worktrees` payload/CLI as an
+  optional contribution, consumed by the Manager through generic,
+  provenance-bound rendering and action execution. The Manager must not retain
+  Worktrees-specific source, table schema, provider data model, render, or
+  launch-key paths; disabling or losing the contribution must remove its pivot
+  and leave coherent onboarding/empty state. Preserve fully usable headless
+  `agent-worktrees` CLI operation without the Manager and behavioral parity for
+  launch, resume, create, finalize, status, refresh, and consequential-action
+  safety. Remove built-in paths and the legacy Picker only after that parity is
+  demonstrated.
+
 - [ ] Keep agent-worktrees mechanics and authoritative lifecycle/state separate
   from Manager-owned interactive progress/choices. Expose a structured
   create/mux-attempt/backoff/readiness/attach/recoverable-failure/cancel/retry
