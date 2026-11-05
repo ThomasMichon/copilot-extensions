@@ -118,8 +118,9 @@ Do not silently abandon the requirement, call it implemented or reverse the
 HOME policy to make an obsolete expectation pass.
 The original matrix is two shells by four exit-code values for `cell recover`,
 not eight different actions.
-Prior whole #10257's actual guest-CWD correction and #9347's Index chunk-failure
-repair do not settle this expectation.
+Prior whole #10257 qualifies existing Codespaces owner-daemon CWD behavior;
+#9347 qualifies existing Index chunk-failure recovery. Both are test-only,
+not runtime corrections, and neither settles this expectation.
 One ranked whole message remains protected through #8669; no source, subset
 or alternative-provider retry follows.
 No cell recovery, Index command, native fixture or policy change runs.
