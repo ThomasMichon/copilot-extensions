@@ -166,10 +166,13 @@ if [ -n "$_rt_root" ]; then
   _rt_try_slot() {
     [ -n "$1" ] || return 1
     _rt_marker_valid "$1" || return 1
-    for _rt_sub in bin/python Scripts/python.exe; do
-      if [ -x "$_rt_root/versions/$1/$_rt_sub" ]; then
-        AGENT_RT_PY="$_rt_root/versions/$1/$_rt_sub"; return 0
-      fi
+    [ ! -L "$_rt_root/versions/$1/.venv" ] || return 1
+    for _rt_environment in "$_rt_root/versions/$1/.venv" "$_rt_root/versions/$1"; do
+      for _rt_sub in bin/python Scripts/python.exe; do
+        if [ -x "$_rt_environment/$_rt_sub" ]; then
+          AGENT_RT_PY="$_rt_environment/$_rt_sub"; return 0
+        fi
+      done
     done
     return 1
   }
@@ -273,7 +276,7 @@ if [ -n "$_rt_root" ]; then
     fi
   fi
 
-  unset _rt_root _rt_ver _rt_lkg _rt_sub _rt_v _rt_dir _rt_source_present \
+  unset _rt_root _rt_ver _rt_lkg _rt_sub _rt_v _rt_dir _rt_source_present _rt_environment \
     _rt_trace_buffer \
     _rt_trace_source _rt_trace_version _rt_bt_raw _rt_bt_plugin _rt_bt_extra \
     _rt_bt_log_path _rt_bt_log_dir _rt_bt_line _rt_bt_iso \

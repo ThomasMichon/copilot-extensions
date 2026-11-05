@@ -137,7 +137,7 @@ def ordinary_layers(root: Path) -> tuple[dict, list[dict]] | None:
             values = {} if values is None else values
             if not isinstance(values, dict):
                 raise ValueError("bridge ordinary source must be a mapping")
-            if origin != "base" and set(values) - FIELDS:
+            if origin != "base" and set(values) - FIELDS - {"session_modes"}:
                 raise ValueError("portable bridge overrides support ordinary spawn defaults only")
             if "preference_source" in values:
                 raise ValueError("repo preference policy belongs in default_env")

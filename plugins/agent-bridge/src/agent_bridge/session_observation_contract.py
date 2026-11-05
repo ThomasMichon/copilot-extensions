@@ -11,6 +11,7 @@ from typing import Any
 
 OBSERVATIONS = "bridge-session-observations-v1"
 HISTORY = "bridge-session-observation-history-v1"
+CURRENT_REQUESTS = "bridge-session-current-requests-v1"
 VERSION = 1
 MAX_BODY = 32 * 1024
 MAX_FRAME = 35 * 1024
@@ -106,13 +107,14 @@ class ReadRequest:
     follow: bool
     position: str | None
     limit: int
+    current_requests: bool = False
 
     @classmethod
     def parse(cls, session_id: str, pairs: list[tuple[str, str]], *, history: bool) -> ReadRequest:
         """Validate the actual HTTP query, including repeated/foreign fields."""
         query = _unique(pairs)
         allowed = {"contract_version", "project", "worktree_id", "head_session_id", "limit"}
-        allowed |= {"before"} if history else {"after", "follow"}
+        allowed |= {"before"} if history else {"after", "follow", "current_requests"}
         if set(query) - allowed or "contract_version" not in query or "worktree_id" not in query:
             raise ObservationError("invalid-request", "unknown or missing observation fields")
         if query["contract_version"] != "1":
@@ -131,6 +133,9 @@ class ReadRequest:
         follow = query.get("follow", "false")
         if follow not in {"true", "false"}:
             raise ObservationError("invalid-request", "follow must be true or false")
+        current_requests = query.get("current_requests", "false")
+        if current_requests not in {"true", "false"}:
+            raise ObservationError("invalid-request", "current_requests must be true or false")
         position = query.get("before" if history else "after")
         if position is not None:
             text(position, "position", maximum=4096)
@@ -147,6 +152,7 @@ class ReadRequest:
             follow == "true",
             position,
             limit,
+            current_requests == "true",
         )
 
 
@@ -248,4 +254,10 @@ def validate_frame(body: dict[str, Any], request: ReadRequest) -> None:
     for key in ("position", "next_before"):
         if body.get(key) is not None:
             read_position(body[key], source)
+    if request.current_requests and body["kind"] != "heartbeat":
+        from .session_current_requests import validate
+
+        validate(body.get("current_request_state"))
+    elif "current_request_state" in body:
+        raise ObservationError("invalid-frame", "unexpected live current request state")
     encode(body)

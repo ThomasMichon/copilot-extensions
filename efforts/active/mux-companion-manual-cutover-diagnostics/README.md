@@ -488,6 +488,8 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       preservation and independent managed-data retirement source controls;
       #10539 qualifies supported format-2 local rescue/readback before actual
       isolated finalization without releasing the original checkout hold.
+      #10551 delivers S3's bounded producer-only local ACP waiter projection;
+      optional wire, Manager consumption and current-input acceptance remain open.
       D5 actual relocation, restoration/reclamation, archive acknowledgment and
       installed/native qualification remain open.
       Current answerability/PRE qualification, archival/rescue, native durability and

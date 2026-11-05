@@ -231,6 +231,15 @@ checkpoint nor author eligibility, holds, requirements or source/resource custod
 
 ### Phase 2 - Continuing reconciliation
 
+The [hosted staging](hosted-staging-cohort.md),
+[CI causality](ci-causality-cohort.md) and
+[installer liveness](installer-liveness-cohort.md) studies preserve nine whole
+originals, 48 texts and twenty-seven bounded relations: twenty-four
+noncompletion comparisons and three protected exclusions. Changed #8242
+was freshly read. Whole inherited matrices, finite alternatives, exclusive
+diagnosis and original Windows consumer acceptance remain with their actual
+owners; all nine originals remain OPEN.
+
 The [startup discovery/reuse](startup-reuse-cohort.md),
 [account/preflight](account-preflight-cohort.md) and
 [release-check guidance](release-check-guidance-cohort.md) studies preserve
@@ -1002,6 +1011,16 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [hosted](hosted-staging-cohort.md),
+[CI](ci-causality-cohort.md) and
+[installer](installer-liveness-cohort.md) cores retain the simultaneous
+capability/provisioner matrix, exact emitted consumer/bootstrap seam,
+independent cache/inventory/compact-home scopes, owning selector bounds,
+current-policy replacement OR budget repair, exclusive causal diagnosis,
+live-slot/abandoned-installer conjunction and original Windows copied-
+bootstrap consumer. Protected candidates and parked ROOTs remain excluded;
+no implementation, test, native, receiving or custody acceptance is inferred.
 
 The [startup](startup-reuse-cohort.md),
 [account](account-preflight-cohort.md) and

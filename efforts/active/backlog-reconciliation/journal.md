@@ -3,6 +3,12 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-04 - Three installer liveness and copied-bootstrap contracts](<journal/2026/11.04 installer-liveness-contracts.md>)
+
+- [2026-11-04 - Three CI causality, budget and diagnosis contracts](<journal/2026/11.04 ci-causality-contracts.md>)
+
+- [2026-11-04 - Three hosted staging, bootstrap and reuse contracts](<journal/2026/11.04 hosted-staging-contracts.md>)
+
 - [2026-11-04 - One finite release-check guidance contract](<journal/2026/11.04 release-check-guidance-contract.md>)
 
 - [2026-11-04 - Intended-account contracts and a finite preflight completion](<journal/2026/11.04 account-preflight-contracts.md>)

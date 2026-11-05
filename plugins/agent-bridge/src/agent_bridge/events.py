@@ -76,6 +76,7 @@ class EventLog:
         self._lock = Lock()
         self._next_id = 1
         self._waiters: list[tuple[asyncio.AbstractEventLoop, asyncio.Event]] = []
+        self._observation_revision = 0
         #: Set when this log was merged into another: (target log, old id -> new id).
         self.merged_into: tuple[EventLog, dict[int, int]] | None = None
         self._db = db
@@ -518,13 +519,29 @@ class EventLog:
                 if registration in self._waiters:
                     self._waiters.remove(registration)
 
-    async def wait_for_observation(self, after: int, timeout: float = 0.5) -> None:
+    @property
+    def observation_revision(self) -> int:
+        with self._lock:
+            return self._observation_revision
+
+    def wake_observers(self) -> None:
+        """Invalidate held semantic reads without fabricating a journal event."""
+        with self._lock:
+            self._observation_revision += 1
+        self.wake_waiters()
+
+    async def wait_for_observation(
+        self, after: int, timeout: float = 0.5, *, revision: int | None = None,
+    ) -> None:
         """Wait for a source change without allocating an unbounded event list."""
         loop = asyncio.get_running_loop()
         waiter = asyncio.Event()
         registration = (loop, waiter)
         with self._lock:
-            if self._events and self._events[-1].id > after:
+            if (
+                (self._events and self._events[-1].id > after)
+                or (revision is not None and revision != self._observation_revision)
+            ):
                 return
             self._waiters.append(registration)
         try:

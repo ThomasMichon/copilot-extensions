@@ -136,9 +136,15 @@ if ($_rtRoot) {
     if (-not $ver) { return $null }
     $slot = Join-Path $_rtRoot ("versions\$ver")
     if (-not (_Rt-MarkerValid $slot $ver)) { return $null }
-    foreach ($sub in @('Scripts\python.exe', 'bin\python')) {
-      $p = Join-Path $slot $sub
-      if (Test-Path -LiteralPath $p) { return $p }
+    $nested = Get-Item -LiteralPath (Join-Path $slot '.venv') -Force -ErrorAction SilentlyContinue
+    if ($nested -and ($nested.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+      return $null
+    }
+    foreach ($environment in @((Join-Path $slot '.venv'), $slot)) {
+      foreach ($sub in @('Scripts\python.exe', 'bin\python')) {
+        $p = Join-Path $environment $sub
+        if (Test-Path -LiteralPath $p -PathType Leaf) { return $p }
+      }
     }
     return $null
   }

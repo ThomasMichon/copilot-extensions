@@ -255,6 +255,10 @@ def frame(
             else "hosting-log-not-lifetime-history",
         ],
     }
+    if request.current_requests:
+        from .session_current_requests import snapshot
+
+        body["current_request_state"] = snapshot(known)
     candidates = events if is_delta else list(reversed(events))
     accepted: list[dict[str, Any]] = []
     for event in candidates:
