@@ -1085,20 +1085,16 @@ jobs:
           --test-file tests/test_install_ps1_s4u_recovery.py
           --test-file tests/test_install_lifecycle_emit.py
           --test-timeout 60 --timeout 180
-  mcp-recipes:
+  mcp-recipes-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'mcp-recipes'
-    name: MCP fixed native recipes (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    name: MCP fixed native recipes (Linux)
+    runs-on: ubuntu-latest
     timeout-minutes: 35
-    env:
+    env: &mcp-recipes-env
       UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
       UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
       UV_PYTHON: "3.12"
-    steps:
+    steps: &mcp-recipes-steps
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -1133,6 +1129,13 @@ jobs:
           python tools/run-plugin-tests.py update-driver
           --test-file tests/test_first_use_mcp_materialized.py
           -k "cold_recipe" --test-timeout 900 --timeout 1080
+  mcp-recipes-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'mcp-recipes'
+    name: MCP fixed native recipes (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env: *mcp-recipes-env
+    steps: *mcp-recipes-steps
   promotion-controls:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'promotion-controls'
     name: Promotion controls and source retention (actual Git)

@@ -943,3 +943,11 @@ The revised candidate still needs actual Windows/Linux cold construction,
 installed consumers and failed-candidate preservation, plus current-head CI
 and review. The draft stays held. Parent and ordinary publisher adoption,
 original-caller Job loss and affected-host recovery gates remain open.
+
+Required CI `41961691461` also found that the new native portfolio's dynamic
+runner matrix violated the existing trusted-CI contract. The workflow now uses
+separate fixed Ubuntu/Windows jobs with shared steps and environment, following
+the repository's existing pattern. The canonical trusted-CI checker passes;
+both jobs retain identical commands, environment and 35-minute job budgets.
+The guard and required unit-only selection are unchanged. This workflow
+correction does not turn the still-pending native run into a pass.
