@@ -23,12 +23,27 @@ working directory must agree with the registered native context. Metadata alone
 cannot redirect a stale SDK handle's send target. A resume whose SDK handle
 does not follow the actual native session is explicitly held.
 
-Retained messages support `steer` and `queue` only. Startup prompts, interrupts,
-mode changes, plugin-readiness controls and history-replay controls have no
-qualified retained effect/recovery path. Selected retained delivery does not
-poll or apply controls and never aborts a turn or replays an in-flight cache.
-Pending legacy controls and unassociated legacy messages can prevent enrollment
-or polling; they are not silently acknowledged or discarded.
+Retained messages support `steer` and `queue` only. Typed queued startup prompts
+must carry their original operation-bound successful plugin observation. The
+consumer rechecks that selection before and after the final grant; missing,
+disabled or changed inputs remain held without resend.
+With `readonly_plugin_controls: 1`, the extension polls only plugin observations
+through `controls?readiness_only=true`. This filter neither claims nor expires
+mutation controls. Interrupts, mode changes and history replay remain
+unsupported: selected retained delivery never aborts a turn or replays an
+in-flight cache. Pending legacy mutation controls and unassociated legacy
+messages can prevent enrollment or polling; they are not silently acknowledged
+or discarded.
+
+The [explicit portable mux receiver](repository-hosting.md#explicit-portable-mux-receiving)
+selects the same consumer with a `portable_launch` attempt observation and
+requires `portable_inbox: 1`. Its first remote enrollment must match the host's
+claimed launch reservation, exact native ID and endpoint. A same-process
+successor uses the existing predecessor CAS, not another native launch; another
+attempt or process cannot inherit it. Ordinary remote venues and proxy ingress
+remain unsupported. Portable prompts cannot enter the legacy inbox while
+enrollment is pending. The selected standalone driver supplies mutation control
+and its attributed source; Bridge does not gain a direct-SDK fallback.
 
 ## Invocation and recovery
 
@@ -77,8 +92,15 @@ there is no SDK idempotency guarantee or inferred nonacceptance.
 `tests/retained-delivery.test.mjs` exercises controlled SDK boundaries and
 `tests/retained-extension.test.mjs` loads the actual extension with isolated SDK,
 endpoint and timer dependencies. `tests/test_plugin_readiness_extension.py`
-runs both with the legacy/readiness regressions. The VM test uses Node's
-`--experimental-vm-modules` flag only in tests.
+runs both with the legacy/readiness regressions. VM controls link named imports
+without changing the extension body.
+
+`tests/test_portable_mux_joined.py` composes the actual Bridge CLI,
+CodeSpace detached provider, selected archive and receiver, both extracted
+extensions, SQLite handoff and standalone driver HTTP route. Its SDK, native
+mux, provider process/SSH/forwarding and POSIX-to-private-scratch carrier are
+explicit substitutions. It proves one admitted/consumed send and same-conversation
+rejoin, plus duplicate-loadout refusal, not native Copilot/TMux or live transport.
 
 `tests/test_retained_sdk_recovery.py` routes independent Node consumers through
 the actual ASGI/installation/SQLite owners. It exits consumers after poll,

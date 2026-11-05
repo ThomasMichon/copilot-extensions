@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import time
 
 import pytest
@@ -11,6 +12,7 @@ from agent_bridge.db import Database
 from agent_bridge.live_inbox_runtime import LiveInboxRuntime
 from agent_bridge.loop_governance import LoopGovernance
 from agent_bridge.runtime_custody import RuntimeCustodyError, RuntimeInstallation
+from agent_bridge.plugin_readiness import PluginReadinessRequest, PluginReadinessResult, startup_input_digest
 from test_live_inbox_runtime import (
     PREFIX, attempt, enroll, installation as installation, poll,
     request as consumer_request, serving as serving,
@@ -247,7 +249,7 @@ def test_legacy_control_admission_and_enrollment_have_one_serial_order(serving) 
     assert len(db.execute_read("SELECT * FROM live_messages")) == 1
 
 
-def test_startup_readiness_refuses_before_creating_or_waiting_for_a_legacy_control(serving) -> None:
+def test_startup_without_native_readiness_times_out_without_admitting_a_prompt(serving) -> None:
     _, client, db, consumer = serving
     enroll(client, consumer)
     reply = client.post(MESSAGES, json={**PAYLOAD, "plugin_readiness": {
@@ -255,8 +257,63 @@ def test_startup_readiness_refuses_before_creating_or_waiting_for_a_legacy_contr
         "cwd": str(db.db_path.parent), "plugins": [], "timeout_seconds": 0.01,
     }})
     assert reply.status_code == 409, reply.text
-    assert "retained_inbox_requires_admission" in reply.text
-    assert db.execute_read("SELECT * FROM live_messages") == []
+    assert "readiness-timeout" in reply.text
+    control, = db.execute_read("SELECT * FROM live_messages")
+    assert control["kind"] == "control:plugin-readiness"
+    assert control["runtime_custody_json"] is None
+    assert control["outcome"] == "withdrawn"
+
+
+@pytest.mark.parametrize("changed", ["none", "body", "sender", "operation", "not-ready", "control"])
+def test_retained_startup_admission_requires_its_original_ready_input(serving, changed):
+    app, client, db, consumer = serving
+    enroll(client, consumer)
+    expectation = PluginReadinessRequest(
+        owner="bridge", expected_session_id=consumer.session_id, cwd=str(db.db_path.parent),
+        plugins=[], timeout_seconds=1,
+    )
+    digest = startup_input_digest(
+        expectation, body=PAYLOAD["body"], sender=PAYLOAD["sender"],
+        reply_to=PAYLOAD["reply_to"], delivery=PAYLOAD["delivery"],
+    )
+    control, reason = db.enqueue_live_message_if_fresh(
+        consumer.session_id, sender="bridge-startup:" + digest,
+        body=json.dumps({**expectation.model_dump(), "selection_digest": "selected"}),
+        now=time.time(), kind="control:plugin-readiness",
+        idempotency_key="startup-readiness-" + hashlib.sha256(PAYLOAD["idempotency_key"].encode()).hexdigest(),
+    )
+    assert control is not None and reason is None
+    assert [row["id"] for row in db.claim_live_controls(
+        consumer.session_id, time.time(), 130, readiness_only=True,
+    )] == [control]
+    outcome = PluginReadinessResult(
+        status="failed" if changed == "not-ready" else "ready",
+        reason="selected-loadout-registered", session_id=consumer.session_id,
+        cwd=str(db.db_path.parent), selection_digest="selected",
+    )
+    db.ack_live_messages(
+        consumer.session_id, [control], time.time(), controls=True, outcome=outcome.model_dump_json(),
+    )
+    options = {
+        **PAYLOAD, "kind": f"startup:prompt:{control}", "expected_session_id": consumer.session_id,
+        "now": time.time(), "enrolled_inbox": True,
+        "runtime_admission": app.state.live_inbox_runtime._admission,
+    }
+    if changed in {"body", "sender"}:
+        options[changed] = "changed"
+    elif changed == "operation":
+        options["idempotency_key"] = "another-operation"
+    elif changed == "control":
+        options["kind"] = f"startup:prompt:{control + 1}"
+    if changed == "none":
+        message_id, reason = db.enqueue_live_message_if_fresh(consumer.session_id, **options)
+        assert message_id is not None and reason is None
+        message, = db.execute_read("SELECT * FROM live_messages WHERE kind NOT LIKE 'control:%'")
+        assert message["runtime_custody_json"] is not None
+    else:
+        with pytest.raises(RuntimeCustodyError, match="unsupported"):
+            db.enqueue_live_message_if_fresh(consumer.session_id, **options)
+        assert db.execute_read("SELECT * FROM live_messages WHERE kind NOT LIKE 'control:%'") == []
 
 
 def test_new_frontend_retains_original_admission_on_retry_and_selects_new_one_for_new_work(serving) -> None:

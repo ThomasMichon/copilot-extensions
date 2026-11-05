@@ -16,7 +16,7 @@ COMMIT = "a" * 40
 @pytest.fixture
 def source(tmp_path, monkeypatch):
     committed = {}
-    for path in (*evidence.AFFECTED, declarations.REFERENCE):
+    for path in sorted({*evidence.AFFECTED, *membership_evidence.AFFECTED, declarations.REFERENCE}):
         data = (path + "\n").encode()
         target = tmp_path / path
         target.parent.mkdir(parents=True, exist_ok=True)

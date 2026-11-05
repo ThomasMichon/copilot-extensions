@@ -1,0 +1,13 @@
+{
+  "comment": "Preserve portable mux endpoint custody through the shared venue helper.",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

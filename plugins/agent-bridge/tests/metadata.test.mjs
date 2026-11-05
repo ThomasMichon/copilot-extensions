@@ -4,8 +4,39 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { mkdtempSync, writeFileSync, chmodSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { registrationMetadata, resolveMetadataAsync, runCliAsync } from "../extensions/agent-bridge/metadata.mjs";
+
+test("selected receiving metadata keeps its provider scope without inventing guest ownership", async () => {
+  const { metadataRefresher } = await import("../extensions/agent-bridge/metadata.mjs");
+  const meta = await resolveMetadataAsync({
+    cwd: process.cwd(), env: {
+      AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT: fileURLToPath(new URL("../", import.meta.url)),
+      AGENT_BRIDGE_SCOPE_ID: "provider-workspace@selected-venue",
+      AGENT_BRIDGE_NATIVE_SESSION_ID: "11111111-1111-4111-8111-111111111111",
+    },
+  });
+  const wire = registrationMetadata(meta);
+  assert.equal(wire.worktree_id, "provider-workspace@selected-venue");
+  assert.equal(wire.machine, null);
+  assert.equal(wire.repo, null);
+  assert.equal(wire.clear_targeting_metadata, undefined);
+  let queried = false;
+  const refresh = metadataRefresher({ meta }, async () => { queried = true; });
+  assert.equal(await refresh(), false);
+  assert.equal(queried, false);
+});
+
+test("receiving metadata refuses another plugin root rather than querying guest Worktrees", async () => {
+  await assert.rejects(resolveMetadataAsync({
+    env: {
+      AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT: fileURLToPath(new URL("../../agent-remote-driver/", import.meta.url)),
+      AGENT_BRIDGE_SCOPE_ID: "scope",
+      AGENT_BRIDGE_NATIVE_SESSION_ID: "11111111-1111-4111-8111-111111111111",
+    },
+  }), /differs from its selected launch/);
+});
 
 // A disposable directory with a fake "agent-worktrees" and "git" binstub so
 // these tests exercise real child-process spawning (the actual regression

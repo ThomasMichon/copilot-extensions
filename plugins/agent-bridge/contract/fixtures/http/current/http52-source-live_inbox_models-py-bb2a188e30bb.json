@@ -1,20 +1,16 @@
 {
-  "evidence_family": "http52-unchanged-source-link-v1",
-  "preserved_from": {
-    "path": "plugins/agent-bridge/contract/fixtures/http/current/http51-source-live_inbox_models-py-bb2a188e30bb.json",
-    "sha256": "2743482bc965e7d4cb8510fade1309cff506aa4e0a23403f3179a7e11ee2fb61"
-  },
-  "advertisement_evidence": {
+  "evidence_family": "http52-shared-asgi-v1",
+  "shared_operation_evidence": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/http52-owner-membership.json",
-    "sha256": "2aab731f7104c520aae18e3f18ec8d4efd468a0c0c67146f87b3f8e9c66d066a"
+    "sha256": "122c6263f4fc13b7cfe6097b6992399ecd4d9b084295ab086e90bb93da9ac6a6"
   },
-  "scope": "unchanged source and immutable prior operation; no new runtime observation",
+  "scope": "shared named ASGI portfolio, not an independent capture",
   "captured_from": {
-    "commit": "0d6e9566021ef811e718cea46dcfc580040513c5",
+    "commit": "b9d56fdb83825fb44114e38072cc53b81e1356cd",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 52,
     "source_path": "plugins/agent-bridge/src/agent_bridge/live_inbox_models.py",
-    "source_git_blob": "b32826e35e4ce54b8b3733430bb2f4f3fb8678b6",
-    "source_sha256": "f0b28cfb62f1c9244ca54b0eed8cb74aa3313e195d5261c4dbebac882e0d7186"
+    "source_git_blob": "666ce82fb4f5c61c0b500c1eaec8ac42a30c5076",
+    "source_sha256": "8aea3a3d3e562ee3f9c7548bfb43879e5643be8615e694a69843911af6f92664"
   }
 }

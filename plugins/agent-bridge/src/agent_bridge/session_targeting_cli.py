@@ -5,14 +5,15 @@ import json
 
 import argparse
 import os
-import shutil
+import shutil as shutil
 import socket
-import subprocess
+import subprocess as subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
 from . import workspace_creation_cli
+from .cli_mode_provider import _cmd_create_cli, _portable_provider_run as _portable_provider_run
 from .client_protocol_floor import connection_refused, hold_protocol_floor as _hold_protocol_floor
 
 _connection_refused = connection_refused
@@ -651,126 +652,13 @@ def _match_agents(target: str, agents: list[dict]) -> list[str]:
     return matches
 
 
-# agent-bridge-cli-mode-sessions Phase 4: --cli dispatches to a venue's own
-# CLI-mode `copilot` verb instead of the ordinary headless ACP session this
-# command otherwise creates. Deliberately NOT a provider-registry action
-# (agent-bridge never imports sibling plugins -- process-boundary CLI seam,
-# #892/#1643): a namespaced target's prefix maps directly to its owning
-# plugin's binstub by the same fixed convention `codespace:`/`container:`/`ssh:`
-# already use everywhere else in this codebase.
-_CLI_MODE_VENUE_BINSTUBS = {
-    "codespace": "agent-codespaces",
-    "container": "agent-containers",
-    "ssh": "agent-ssh",
-}
-
-
-def _cmd_create_cli(
-    target: str, prompt: str | None, driver: str | None, *, detach: bool = False,
-    worktree_id: str | None = None,
-) -> None:
-    """``agent-bridge create <target> "<prompt>" --cli``: deliver a live,
-    human-attachable CLI-mode Copilot session on the venue ``target`` names,
-    optionally seeded with ``prompt`` as its first turn.
-
-    Resolves ``target``'s ``<prefix>:<name>`` the same way every other
-    namespaced target in this codebase does, then hands off entirely to that
-    provider's own venue `copilot` verb (`agent-codespaces copilot <name>` /
-    `agent-containers copilot <name>` / `agent-ssh copilot <alias>`) -- this
-    command owns none of the
-    reserve/connect/attach mechanics itself, just the target-prefix ->
-    binstub resolution. Defaults to anchor mode on the remote venue (neither
-    verb requires --worktree-id): a CodeSpace/trusted container is
-    conventionally anchor-only, so this is the zero-ceremony common case.
-
-    A bare (unprefixed) target is refused with a pointer to
-    `agent-worktrees copilot` directly -- a *local* CLI-mode session needs no
-    agent-bridge mediation at all; inventing a redundant local-dispatch path
-    here would only be a second, divergent way to do what that verb already
-    does.
-
-    ``detach=True`` forwards ``--detach``: the venue verb starts the session in
-    the background and prints a JSON handle
-    instead of taking over this terminal -- the shape an orchestrating agent
-    needs. The seed then travels over stdin (``--seed-file -``) so a long,
-    multi-line prompt never transits a binstub's argv re-parsing.
-    """
-    prompt = _companion_seed_prompt(prompt)
-    prefix, sep, name = target.partition(":")
-    binstub = _CLI_MODE_VENUE_BINSTUBS.get(prefix) if sep else None
-    if not binstub or not name:
-        print(
-            f"[FAIL] --cli requires a namespaced venue target "
-            f"({'/'.join(f'{p}:<name>' for p in _CLI_MODE_VENUE_BINSTUBS)}), "
-            f"got {target!r}.\n"
-            "       For a local session, use `agent-worktrees copilot "
-            "--anchor` (or `--worktree-id <id>`) directly -- agent-bridge's "
-            "mediation isn't needed on this machine.",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-    resolved = shutil.which(binstub)
-    if not resolved:
-        print(
-            f"[FAIL] '{binstub}' not found on PATH -- is it installed?",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    argv = [resolved, "copilot", name]
-    if worktree_id and prefix == "ssh":
-        print("[FAIL] SSH CLI selects its configured --workspace; --worktree-id is not supported.", file=sys.stderr)
-        sys.exit(2)
-    if worktree_id and prefix in {"codespace", "container"}:
-        argv += ["--worktree-id", worktree_id]
-    if prefix in {"codespace", "container", "ssh"}:
-        from .local_cache_refresh import _checkout_root
-        from .related_plugins import control_plane_anchors, related_plugins_for_repo
-        from agent_procutil import no_window_flags
-        from plugin_resolve.reflection import selection_cli_args
-
-        roots = control_plane_anchors()
-        try:
-            controller = _checkout_root(Path.cwd()).resolve(strict=True)
-            if controller.is_dir() and (controller / ".git").exists():
-                roots = list(dict.fromkeys([controller, *roots]))
-        except OSError:
-            pass
-        if roots:
-            repository = subprocess.run(
-                [resolved, "namespace-target-repo", name], capture_output=True, text=True,
-                check=True, timeout=90, creationflags=no_window_flags(),
-            ).stdout.strip()
-            if prefix == "ssh" and repository:
-                argv += ["--expected-repository", repository]
-            for plugin in related_plugins_for_repo(
-                repository, anchors=roots,
-                **({"match_registered_remote": True} if prefix == "ssh" else {}),
-            ) if repository else []:
-                argv += selection_cli_args(plugin.selection())
-            for root in roots:
-                argv += ["--plugin-root", str(root)]
-    if detach:
-        argv.append("--detach")
-        if prompt:
-            argv += ["--seed-file", "-"]
-        if driver:
-            argv += ["--driver", driver]
-        # Stdout carries the venue verb's JSON handle; stderr its progress.
-        sys.exit(subprocess.run(argv, input=prompt or None, text=True).returncode)
-    if prompt:
-        argv += ["--seed", prompt]
-    if driver:
-        argv += ["--driver", driver]
-    # Inherits this process's stdio directly (no capture): the child becomes
-    # the interactive session, exactly like the venue verbs' own os.execvp
-    # mux-attach handoff -- this process just needs to block until it exits.
-    sys.exit(subprocess.run(argv).returncode)
-
-
 def _cmd_create(args: argparse.Namespace) -> None:
     workspace_creation_cli.validate_arguments(args)
     if getattr(args, "detach", False) and not getattr(args, "cli", False):
         print("[FAIL] --detach requires --cli", file=sys.stderr)
+        sys.exit(2)
+    if getattr(args, "receiving_support", None) and not getattr(args, "cli", False):
+        print("[FAIL] --receiving-support requires --cli --detach", file=sys.stderr)
         sys.exit(2)
     if getattr(args, "cli", False):
         if getattr(args, "require_agent_hosting", False):
@@ -789,6 +677,7 @@ def _cmd_create(args: argparse.Namespace) -> None:
             getattr(args, "driver", None),
             detach=getattr(args, "detach", False),
             worktree_id=getattr(args, "worktree_id", None),
+            **({"receiving_support": args.receiving_support} if getattr(args, "receiving_support", None) else {}),
         )
         return
     core = _core()
@@ -989,5 +878,7 @@ def register_session_targeting_commands(sub: argparse._SubParsersAction) -> None
     create_p.add_argument("--cli", action="store_true", help="Deliver a live, human-attachable CLI-mode Copilot session on the venue TARGET names (codespace:<name>, container:<name>, or ssh:<name>) instead of an ordinary headless ACP session -- hands off entirely to that provider's own `copilot` verb, optionally seeded with the positional prompt as its first turn (agent-bridge-cli-mode-sessions Phase 4). Defaults to anchor mode on the venue (no worktree required). Refused for a bare/unprefixed TARGET -- use `agent-worktrees copilot` directly for a local session.")
     create_p.add_argument("--driver", default=None, metavar="LABEL", help="With --cli: forwarded to the remote `agent-worktrees copilot --driver` (stamps the 'driven by' banner).")
     create_p.add_argument("--detach", action="store_true", help="With --cli on a codespace:<name>, container:<name>, or ssh:<name> target: start the CLI-mode session in the background (seeded with the prompt) and print a JSON handle (session id plus attach/observe/nudge/stop commands) instead of taking over this terminal -- for an orchestrating agent that must not hand its TTY away.")
+    create_p.add_argument("--receiving-support", choices=["portable"], default=None,
+                         help="With --cli --detach on a CodeSpace: select portable Bridge receiving support.")
     core._add_stream_args(create_p)
     create_p.set_defaults(func=_cmd_create)

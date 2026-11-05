@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import AliasPath, BaseModel, ConfigDict, Field
+from pydantic import AliasPath, BaseModel, ConfigDict, Field, model_serializer
 
 from .inbox_custody import InboxConsumer
 from .live_inbox_runtime import InboxBinding
@@ -21,6 +21,14 @@ class InboxConsumerInfo(BaseModel):
     incarnation: str = Field(min_length=1)
     pid: int = Field(gt=0)
     process_started_at: float = Field(gt=0)
+    portable_launch: str | None = Field(default=None, pattern=r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$")
+
+    @model_serializer(mode="wrap")
+    def serialize(self, handler):
+        value = handler(self)
+        if self.portable_launch is None:
+            value.pop("portable_launch", None)
+        return value
 
     def observation(self) -> InboxConsumer:
         return InboxConsumer(**self.model_dump())

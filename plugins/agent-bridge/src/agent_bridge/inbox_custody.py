@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 import json
 import math
 import sqlite3
+import uuid
 
 from .runtime_custody import (
     RuntimeCustodyError, _normalized_schema, nonblank, operation_triggers, positive,
@@ -32,15 +33,25 @@ class InboxConsumer:
     incarnation: str
     pid: int
     process_started_at: float
+    portable_launch: str | None = None
 
     def __post_init__(self) -> None:
         nonblank(self.session_id)
         nonblank(self.incarnation)
         positive(self.pid)
         observed_time(self.process_started_at)
+        if self.portable_launch is not None:
+            try:
+                if str(uuid.UUID(self.portable_launch)) != self.portable_launch:
+                    raise ValueError("noncanonical launch")
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise RuntimeCustodyError("Inbox consumer requires a canonical portable launch") from exc
 
     def document(self) -> dict[str, object]:
-        return asdict(self)
+        result = asdict(self)
+        if self.portable_launch is None:
+            result.pop("portable_launch")
+        return result
 
 
 def decode_handoff(raw: str) -> dict[str, object]:

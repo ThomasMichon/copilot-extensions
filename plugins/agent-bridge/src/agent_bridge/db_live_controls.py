@@ -11,7 +11,7 @@ from .runtime_custody import RuntimeCustodyError
 
 class LiveControlsMixin:
     def claim_live_controls(
-        self, session_id: str, now: float, max_age: float
+        self, session_id: str, now: float, max_age: float, *, readiness_only: bool = False,
     ) -> list[dict[str, Any]]:
         """Claim a session's pending controls for its extension to apply.
 
@@ -22,6 +22,7 @@ class LiveControlsMixin:
         are expired instead: their requester is gone (e.g. the daemon
         restarted mid-wait), so they must never apply late.
         """
+        selected = "kind = 'control:plugin-readiness'" if readiness_only else "kind LIKE 'control:%'"
         with self._write_lock:
             conn = self._get_conn()
             conn.execute("BEGIN IMMEDIATE")
@@ -30,7 +31,7 @@ class LiveControlsMixin:
                     f"SELECT {_CANON}", (session_id, session_id)
                 ).fetchone()[0]
                 if conn.execute(
-                    "SELECT 1 FROM live_messages WHERE session_id=? AND kind LIKE 'control:%' "
+                    f"SELECT 1 FROM live_messages WHERE session_id=? AND {selected} "
                     "AND (runtime_custody_json IS NOT NULL OR handoff_json IS NOT NULL) LIMIT 1",
                     (session_id,),
                 ).fetchone() is not None:
@@ -39,13 +40,13 @@ class LiveControlsMixin:
                     )
                 conn.execute(
                     "UPDATE live_messages SET delivered_at=?, outcome='expired' "
-                    "WHERE session_id=? AND kind LIKE 'control:%' "
+                    f"WHERE session_id=? AND {selected} "
                     "AND delivered_at IS NULL AND claimed_at IS NULL AND created_at < ?",
                     (now, session_id, now - max_age),
                 )
                 rows = [dict(r) for r in conn.execute(
                     "SELECT * FROM live_messages WHERE session_id=? "
-                    "AND kind LIKE 'control:%' AND delivered_at IS NULL "
+                    f"AND {selected} AND delivered_at IS NULL "
                     "AND claimed_at IS NULL ORDER BY id ASC",
                     (session_id,),
                 ).fetchall()]

@@ -505,9 +505,13 @@ async function drainObservedInbox(sid, { getJson, post, session, inFlight, mainT
 // really happened; acked under ``sid``, the id it was claimed under (see
 // ``drainInbox``). An older bridge without /controls answers 404 (null).
 export async function drainControls(sid, { getJson, post, session, replayHistory = null,
-  isCurrent = () => true, readinessTasks = null, log = () => {} }) {
+  isCurrent = () => true, readinessTasks = null, readinessOnly = false, log = () => {} }) {
   const base = `/api/v1/live-sessions/${encodeURIComponent(sid)}`;
-  const data = await getJson(`${base}/controls`);
+  if (readinessOnly) {
+    const health = await getJson("/health");
+    if (health?.capabilities?.readonly_plugin_controls !== 1) return;
+  }
+  const data = await getJson(`${base}/controls${readinessOnly ? "?readiness_only=true" : ""}`);
   const controls = data?.messages;
   if (!Array.isArray(controls) || controls.length === 0) return;
   const applied = [];
@@ -515,6 +519,7 @@ export async function drainControls(sid, { getJson, post, session, replayHistory
   for (const c of controls) {
     if (!c || typeof c.id !== "number") continue;
     const plan = controlPlan(c);
+    if (readinessOnly && plan.action !== "plugin-readiness") continue;
     if (plan.action === "plugin-readiness") {
       let request;
       try {

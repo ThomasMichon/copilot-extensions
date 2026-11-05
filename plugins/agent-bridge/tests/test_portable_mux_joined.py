@@ -1,0 +1,374 @@
+"""Joined source consumer, not native Copilot, mux, SSH or installed acceptance."""
+
+from __future__ import annotations
+
+import base64
+import contextlib
+import copy
+import io
+import json
+from pathlib import Path
+from pathlib import PurePosixPath
+import shlex
+import shutil
+import subprocess
+import sys
+import threading
+import traceback
+from types import SimpleNamespace
+
+from agent_procutil import no_window_kwargs
+from fastapi.testclient import TestClient
+import pytest
+
+from agent_bridge import __main__ as core
+from agent_bridge import receiving_mux, session_targeting_cli
+from agent_bridge import cli_mode_provider
+from agent_bridge.app_routes import configure_serving_app
+from agent_bridge.client import BridgeClient, BridgeClientError
+from agent_bridge.loop_governance import LoopGovernance
+from agent_bridge.models import ServiceConfig
+from test_loop_governance_custody import installation as installation
+
+pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+ROOT = Path(__file__).resolve().parents[3]
+CHILD = Path(__file__).parent / "fixtures" / "portable-mux-sdk.mjs"
+
+
+def _cli(argv, payload=None):
+    output = io.StringIO()
+    errors = io.StringIO()
+    stream = io.TextIOWrapper(io.BytesIO((payload or "").encode()), encoding="utf-8")
+    with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+        saved = sys.stdin
+        try:
+            sys.stdin = stream
+            try:
+                core.main(argv)
+                code = 0
+            except SystemExit as exc:
+                code = exc.code
+        finally:
+            sys.stdin = saved
+    return subprocess.CompletedProcess(argv, code, output.getvalue(), errors.getvalue())
+
+
+class Consumer:
+    def __init__(self, client, environment, cwd, *, duplicate):
+        self.client = client
+        self.calls, self.effects, self.errors, self.logs = [], [], [], []
+        self.ready = threading.Event()
+        self.consumed = threading.Event()
+        self.refused = threading.Event()
+        self.process = subprocess.Popen(
+            ["node", str(CHILD), json.dumps({"duplicateDriver": duplicate})],
+            cwd=cwd, env=environment, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, encoding="utf-8", **no_window_kwargs(),
+        )
+        self.writer = threading.Lock()
+        self.reader = threading.Thread(target=self._read, daemon=True)
+        self.stderr = threading.Thread(target=self._stderr, daemon=True)
+        self.reader.start()
+        self.stderr.start()
+
+    def _stderr(self):
+        for line in self.process.stderr:
+            self.logs.append(line)
+            if "duplicated" in line:
+                self.refused.set()
+
+    def _write(self, value):
+        with self.writer:
+            self.process.stdin.write(json.dumps(value) + "\n")
+            self.process.stdin.flush()
+
+    def _read(self):
+        try:
+            for line in self.process.stdout:
+                message = json.loads(line)
+                if message.get("ready"):
+                    self.ready.set()
+                elif "effect" in message:
+                    self.effects.append(message["effect"])
+                elif "method" in message:
+                    self.calls.append(message)
+                    response = self.client.request(
+                        message["method"], message["path"], json=message.get("body"),
+                        headers=message["headers"],
+                    )
+                    if not response.is_success:
+                        self.logs.append(f"{response.status_code}: {response.text}\n")
+                    self._write({
+                        "id": message["id"], "status": response.status_code,
+                        "body": response.json(),
+                    })
+                    if message["path"].endswith("/outcome") and (
+                        message.get("body", {}).get("outcome") == "consumed"
+                        and response.is_success
+                    ):
+                        self.consumed.set()
+        except BaseException:
+            self.errors.append(traceback.format_exc())
+            self.ready.set()
+
+    def close(self):
+        try:
+            if self.process.poll() is None:
+                self._write({"stop": True})
+                self.process.wait(timeout=10)
+        finally:
+            if self.process.poll() is None:
+                self.process.terminate()
+                self.process.wait(timeout=10)
+            self.reader.join(timeout=10)
+            self.stderr.join(timeout=10)
+            for stream in (self.process.stdin, self.process.stdout, self.process.stderr):
+                try:
+                    stream.close()
+                except OSError:
+                    pass
+        assert not self.reader.is_alive() and not self.stderr.is_alive()
+        assert self.process.returncode == 0, "".join(self.logs)
+        assert not self.errors
+
+
+@pytest.mark.parametrize("duplicate", [False, True], ids=["one-admitted-send", "duplicate-loadout-holds"])
+@pytest.mark.parametrize("installation", ["namespaced"], indirect=True)
+def test_bridge_provider_receiver_and_extensions_share_one_conversation(
+    installation, tmp_db, tmp_path, tmp_path_factory, monkeypatch, duplicate,
+):
+    # Cross-plugin composition lives in this opt-in packet, not either runtime's imports.
+    for source in (
+        ROOT / "plugins/agent-codespaces/src",
+        ROOT / "libs/venue-copilot/src",
+        ROOT / "libs/session-liveness-probe/src",
+    ):
+        monkeypatch.syspath_prepend(str(source))
+    from agent_codespaces import bridge_receiving, config, copilot_detach as detach
+    from agent_codespaces import portable_mux_launch as launch, session_forwards, worktrees
+    from agent_codespaces import copilot_venue
+    from repository_policy.receiving import build_receiving_policy_check
+    from repository_policy import validate_hosting_result
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    root = tmp_path_factory.mktemp("mux")
+    state = SimpleNamespace(pending=None, meta=None, consumer=None, native=[], observations=[], sends=[])
+    app = configure_serving_app(
+        ServiceConfig(db_path=str(tmp_db.db_path), bind="127.0.0.1"),
+        "synthetic-secret", lifespan=None,
+    )
+    app.state.db = tmp_db
+    app.state.ready = True
+    app.state.loop_governance = LoopGovernance()
+    app.state.session_manager = SimpleNamespace(is_draining=False)
+    scheme = "Bear" + "er "
+    headers = {"Authorization": scheme + "synthetic-secret"}
+    assert headers["Authorization"].endswith("synthetic-secret")
+
+    with TestClient(app, headers=headers, client=("127.0.0.1", 12345)) as client:
+        def selected(*, ensure=True):
+            bridge = BridgeClient("http://127.0.0.1:12001", "synthetic-secret")
+
+            def request(method, path, body=None, **kwargs):
+                response = client.request(method, path, json=body, params=kwargs.get("params"))
+                if not response.is_success:
+                    raise BridgeClientError(response.status_code, response.json().get("detail"))
+                return response.json()
+
+            bridge._request = request
+            return bridge
+
+        monkeypatch.setattr(core, "_get_client", selected)
+        monkeypatch.setattr(worktrees, "validate_context", lambda: None)
+        def bridge_run(self, argv, **kwargs):
+            result = _cli(argv[1:], kwargs.get("input"))
+            if "send" in argv:
+                state.sends.append(result.stdout + result.stderr)
+            return result
+
+        monkeypatch.setattr(bridge_receiving.BridgeReceiving, "run", bridge_run)
+        monkeypatch.setattr(session_targeting_cli.shutil, "which", lambda name: "fixture-provider")
+        monkeypatch.setattr("agent_bridge._peer_launch.launch_prefix", lambda *a: ["fixture-provider"])
+        monkeypatch.setattr("agent_bridge.related_plugins.control_plane_anchors", lambda: [])
+        monkeypatch.setattr("agent_bridge.local_cache_refresh._checkout_root", lambda path: workspace)
+        monkeypatch.setattr(config, "load_merged_config", lambda: SimpleNamespace(
+            resolved_workspace_folder_for=lambda repo: str(workspace),
+        ))
+        monkeypatch.setattr(detach, "_codespace", lambda name: SimpleNamespace(
+            name=name, state="Available", repository="example/project",
+        ))
+        monkeypatch.setattr(launch, "model_copilot_args", lambda args: [])
+        monkeypatch.setattr(launch, "require_owner", lambda: None)
+        monkeypatch.setattr(copilot_venue, "claim_or_exit_code", lambda *a, **k: None)
+        monkeypatch.setattr(launch.owner, "ensure_owner_running", lambda config: True)
+        monkeypatch.setattr(launch.owner, "get_pending_delivery", lambda *a: copy.deepcopy(state.pending))
+        monkeypatch.setattr(launch.owner, "record_pending_delivery", lambda name, tenant, value: setattr(
+            state, "pending", copy.deepcopy(value),
+        ))
+        monkeypatch.setattr(launch.owner, "get_hold", lambda *a: SimpleNamespace(
+            sessions={state.meta["tenant"]: state.meta},
+        ) if state.meta else None)
+
+        def hold(name, tenant, **kwargs):
+            state.meta = {"tenant": tenant, **kwargs}
+
+        monkeypatch.setattr(launch.owner, "hold", hold)
+        monkeypatch.setattr(launch.owner, "release", lambda *a, **k: pytest.fail("native custody released"))
+
+        async def forward(*args, **kwargs):
+            return True
+
+        monkeypatch.setattr(session_forwards, "await_owner_bridge_forward", forward)
+
+        def policy(request, support):
+            checked = subprocess.run(
+                [
+                    sys.executable, "-I", "-S", "-c",
+                    "import json,runpy,sys; from pathlib import Path; "
+                    "runpy.run_path(sys.argv[1])['_policy'](json.load(sys.stdin), Path(sys.argv[2]))",
+                    str(support / "receiver.py"), str(support),
+                ],
+                input=json.dumps(request).encode(), capture_output=True, timeout=15,
+                **no_window_kwargs(),
+            )
+            assert checked.returncode == 0, checked.stderr.decode()
+
+        monkeypatch.setattr(receiving_mux, "_policy", policy)
+        monkeypatch.setattr(receiving_mux, "_mux_binary", lambda: "fixture-tmux")
+        monkeypatch.setattr(receiving_mux, "_socket_identity", lambda path: {"device": 1, "inode": 2})
+
+        def native(argv, *, cwd):
+            state.native.append(argv)
+            assert argv[3] == "new-session"
+            assert state.consumer is None
+            attempt = Path(argv[-1])
+            captured = []
+            with monkeypatch.context() as child_patch:
+                child_patch.chdir(cwd)
+                child_patch.setattr(receiving_mux.os, "execvpe", lambda *args: captured.append(args))
+                receiving_mux.child(attempt)
+            executable, arguments, environment = captured[0]
+            assert executable == "bash" and arguments[2:4] == [
+                "--aw-manager-root", str(attempt / "support/mux"),
+            ]
+            assert arguments[4:7] == ["copilot", "--session-id", json.loads(
+                (attempt / "launch.json").read_text(),
+            )["session_id"]]
+            state.consumer = Consumer(client, environment, cwd, duplicate=duplicate)
+            assert state.consumer.ready.wait(10), state.consumer.logs
+            assert not state.consumer.errors
+            return subprocess.CompletedProcess(argv, 0, "$1:1234|%2\n", "")
+
+        monkeypatch.setattr(receiving_mux, "_run_tmux", native)
+
+        def probe(name, directory, context, remote):
+            command, payload = build_receiving_policy_check("/portable-fixture/workspace", context)
+            words = shlex.split(command)
+            argv = words[words.index("python3"):]
+            argv[0] = sys.executable
+            argv[5] = directory
+            checked = subprocess.run(
+                argv, input=payload, capture_output=True, timeout=15, **no_window_kwargs(),
+            )
+            assert checked.returncode == 0, checked.stderr.decode()
+            validate_hosting_result(json.loads(checked.stdout))
+            # The synthetic carrier maps its POSIX state namespace into private scratch.
+            return "/portable-fixture"
+
+        monkeypatch.setattr(launch, "_probe", probe)
+
+        def ssh(args, *, remote_cmd_builder, remote_input_builder, receiving_context, result_sink, **kwargs):
+            args.plugin_prepared_context["plugin_context"] = {
+                "version": 1, "cwd": str(workspace), "plugins": [],
+            }
+            command = remote_cmd_builder([])
+            wire = remote_input_builder()
+            if wire:
+                envelope = json.loads(wire)
+                assert envelope["request"]["policy_context"] == receiving_context
+                assert state.pending["phase"] == "submitted"
+                request = {**envelope["request"], "state_root": str(root)}
+                receipt = receiving_mux.receive(
+                    request, base64.b64decode(envelope["support"], validate=True),
+                )
+                receipt["mux_socket"] = str(
+                    PurePosixPath("/portable-fixture") / request["attempt"] / "tmux.sock",
+                )
+                output = json.dumps(receipt)
+            else:
+                state.observations.append(command)
+                assert state.meta["mux_endpoint"]["native"] == {"incarnation": "$1:1234", "pane": "%2"}
+                output = "present\n"
+            return result_sink(SimpleNamespace(exit_code=0, stdout=output))
+
+        provider_calls = []
+
+        def provider(argv, **kwargs):
+            provider_calls.append(argv)
+            assert argv[1:3] == ["copilot", "fixture-venue"]
+            import argparse
+
+            parser = argparse.ArgumentParser()
+            parser.add_argument("--receiving-support")
+            parser.add_argument("--detach", action="store_true")
+            parser.add_argument("--seed-file")
+            parser.add_argument("--driver")
+            args = parser.parse_args(argv[3:])
+            args.name = argv[2]
+            args.worktree_id = args.seed = None
+            args.ensure_mux = args.no_relay = False
+            args.copilot_args = []
+            args.register_timeout = 10
+            with contextlib.redirect_stdout(io.StringIO()) as output:
+                saved = sys.stdin
+                try:
+                    sys.stdin = io.StringIO(kwargs.get("input") or "")
+                    code = detach.cmd_detach(args, ssh_session=ssh)
+                finally:
+                    sys.stdin = saved
+            print(output.getvalue(), end="")
+            return subprocess.CompletedProcess(argv, code)
+
+        monkeypatch.setattr(cli_mode_provider, "_portable_provider_run", provider)
+        try:
+            initial = _cli([
+                "--json", "create", "codespace:fixture-venue", "one task\nsecond line",
+                "--cli", "--detach", "--receiving-support", "portable",
+            ])
+            assert initial.returncode == 0, (
+                initial.stdout + "\n" + "\n".join(state.consumer.logs)
+                + "\n" + "\n".join(state.consumer.errors) + "\n" + "\n".join(state.sends)
+            )
+            first = json.loads(initial.stdout)
+            assert first["seeded"] is True
+            assert state.pending is None
+            consumer = state.consumer
+            if duplicate:
+                assert consumer.refused.wait(12), "\n".join(consumer.logs)
+                assert not consumer.effects
+            else:
+                assert consumer.consumed.wait(12), "\n".join(consumer.logs)
+                assert len(consumer.effects) == 1
+                effect = consumer.effects[0]
+                assert effect["sessionId"] == first["session_id"]
+                assert "one task\nsecond line" in effect["options"]["prompt"]
+            second = _cli([
+                "--json", "create", "codespace:fixture-venue", "--cli", "--detach",
+                "--receiving-support", "portable",
+            ])
+            assert second.returncode == 0, second.stdout
+            assert json.loads(second.stdout)["session_id"] == first["session_id"]
+            assert len(state.native) == len(state.observations) == 1
+            assert len(provider_calls) == 2
+            messages = tmp_db.execute_read("SELECT * FROM live_messages WHERE kind NOT LIKE 'control:%'")
+            assert len(messages) == 1
+            assert messages[0]["body"].endswith("one task\nsecond line")
+            assert not any(
+                "/messages/ack" in call["path"] or call["path"].endswith("/controls")
+                for call in consumer.calls
+            )
+            assert consumer.process.poll() is None
+        finally:
+            if state.consumer:
+                state.consumer.close()

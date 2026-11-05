@@ -32,6 +32,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from remote_login_shell import wrap_login_shell
+from venue_copilot.portable_mux import MuxEndpoint
 
 from .connection_owner import (
     DEFAULT_TTL,
@@ -83,7 +84,9 @@ LocalForwardFactory = Callable[[str, int, int], RelayChannel]
 # True = still running (renew), False = provably gone or the CodeSpace is no
 # longer Available (release -- never wake a stopped box), None = unknown
 # (neither renew nor release; the tenant TTL is the backstop).
-SessionProbe = Callable[[str, list[str]], Awaitable[dict[str, bool | None]]]
+SessionProbe = Callable[
+    [str, list[str | MuxEndpoint]], Awaitable[dict[str | MuxEndpoint, bool | None]],
+]
 
 # Check a CodeSpace's host-bridge forward end to end:
 # ``(codespace, codespace_listen_port) -> True`` (it serves), ``False`` (it
@@ -399,13 +402,21 @@ class SessionForwards:
             if last is not None and now - last < self._probe_interval:
                 continue
             self._last_probe[hold.codespace] = now
-            by_mux: dict[str, list[tuple[str, bool, str | None]]] = {}
+            by_mux: dict[str | MuxEndpoint, list[tuple[str, bool, str | None]]] = {}
             for tenant, meta in hold.sessions.items():
-                by_mux.setdefault(meta["mux_session"], []).append(
+                target: str | MuxEndpoint = meta["mux_session"]
+                if "mux_endpoint" in meta:
+                    try:
+                        target = MuxEndpoint.parse(meta["mux_endpoint"])
+                        if not target.confirmed or target.mux_session != meta["mux_session"]:
+                            continue
+                    except (TypeError, ValueError):
+                        continue
+                by_mux.setdefault(target, []).append(
                     (tenant, bool(meta.get("confirmed")), meta.get("generation")),
                 )
             try:
-                verdicts = await self._probe(hold.codespace, sorted(by_mux))
+                verdicts = await self._probe(hold.codespace, sorted(by_mux, key=str))
             except Exception as exc:
                 log.warning("Connection Owner: session probe for %s failed: %s", hold.codespace, exc)
                 continue
@@ -423,7 +434,7 @@ class SessionForwards:
                 verdict = verdicts.get(mux)
                 for tenant, confirmed, generation in tenants:
                     if verdict is True:
-                        heartbeat(hold.codespace, tenant, self._ttl)
+                        heartbeat(hold.codespace, tenant, self._ttl, generation=generation)
                     elif verdict is False and confirmed:
                         log.info(
                             "Connection Owner: session %s on %s is gone (or the "
@@ -768,6 +779,7 @@ def make_remote_mux_probe(
     *,
     list_codespaces: Callable[[], Any] | None = None,
     open_manager: Callable[[str], Awaitable[Any]] | None = None,
+    portable_probe: SessionProbe | None = None,
 ) -> SessionProbe:
     """Build the Owner's default :data:`SessionProbe`.
 
@@ -787,8 +799,14 @@ def make_remote_mux_probe(
 
     opener = open_manager or _open_codespace
 
-    async def probe(codespace: str, mux_sessions: list[str]) -> dict[str, bool | None]:
-        unknown: dict[str, bool | None] = {m: None for m in mux_sessions}
+    async def probe(
+        codespace: str, mux_sessions: list[str | MuxEndpoint],
+    ) -> dict[str | MuxEndpoint, bool | None]:
+        if any(isinstance(target, MuxEndpoint) for target in mux_sessions):
+            from .owner_mux_probe import RemoteMuxProbe
+
+            return await (portable_probe or RemoteMuxProbe())(codespace, mux_sessions)
+        unknown: dict[str | MuxEndpoint, bool | None] = {m: None for m in mux_sessions}
         try:
             rows = await owner_native_call(lambda: list(list_codespaces()))
             states = {cs.name: str(cs.state) for cs in rows}
@@ -805,12 +823,15 @@ def make_remote_mux_probe(
         manager = None
         try:
             manager = await opener(codespace)
-            verdicts: dict[str, bool | None] = {}
+            verdicts: dict[str | MuxEndpoint, bool | None] = {}
             for mux in mux_sessions:
+                if not isinstance(mux, str):
+                    return unknown
+                command = f"tmux has-session -t {shlex.quote('=' + mux)}"
                 result = await exec_with_retry(
                     manager,
                     codespace,
-                    wrap_login_shell(f"tmux has-session -t {shlex.quote('=' + mux)}"),
+                    wrap_login_shell(command),
                     timeout=30.0,
                     attempts=2,
                 )

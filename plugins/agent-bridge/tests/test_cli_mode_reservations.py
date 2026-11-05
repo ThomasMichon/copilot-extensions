@@ -475,6 +475,33 @@ class TestReservationVenueRoutes:
         assert resp.status_code == 200, resp.text
         assert resp.json()["venue"] == {**_VENUE, "supervisor_ref": None}
 
+    def test_portable_endpoint_is_inherited_from_reservation_not_registering_client(
+        self, tmp_db: Database,
+    ) -> None:
+        client = self._client(tmp_db)
+        attempt = "00000000-0000-4000-8000-000000000001"
+        native_id = "00000000-0000-4000-8000-000000000002"
+        endpoint = {
+            "version": 1, "attempt": attempt, "session_id": native_id,
+            "mux_session": "wt-bridge-" + attempt, "mux_socket": f"/tmp/p/{attempt}/tmux.sock",
+            "native": None, "socket_identity": None,
+        }
+        venue = {**_VENUE, "mux_session_name": endpoint["mux_session"], "mux_endpoint": endpoint}
+        created = client.post(
+            "/api/v1/live-sessions/cli-mode-reservations/anchor-example@cs-1",
+            json={"worktree_id": "anchor-example@cs-1", "venue": venue},
+        )
+        assert created.status_code == 200
+        assert created.json()["venue"]["mux_endpoint"] == endpoint
+        registered = client.post("/api/v1/live-sessions", json={
+            "session_id": native_id, "worktree_id": "anchor-example@cs-1", "cwd": "/workspace",
+            "venue": {**venue, "mux_endpoint": {"version": 999}},
+        })
+        assert registered.status_code == 200, registered.text
+        view = client.get(f"/api/v1/live-sessions/{native_id}")
+        assert view.status_code == 200
+        assert view.json()["venue"]["mux_endpoint"] == endpoint
+
     def test_registered_session_id_change_forwards_old_handle(
         self, tmp_db: Database
     ) -> None:
@@ -844,8 +871,8 @@ def test_a_registration_right_after_the_purge_keeps_its_new_alias(
     tmp_db.execute_write("UPDATE live_sessions SET status='expired', updated_at=0 WHERE session_id='resumed'")
     real_write = tmp_db.execute_write
 
-    def _register_after_the_purge(sql, params=()):
-        cur = real_write(sql, params)
+    def _register_after_the_purge(sql, params=(), **kwargs):
+        cur = real_write(sql, params, **kwargs)
         if sql.startswith("DELETE FROM live_sessions WHERE session_id IN"):
             assert _register(tmp_db, "resumed", "wt-R", now + 2, pid=4242) == "live"
         return cur

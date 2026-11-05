@@ -1,0 +1,17 @@
+{
+  "comment": "Compose launch-scoped mux support assets and generation-fenced Bridge delivery",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

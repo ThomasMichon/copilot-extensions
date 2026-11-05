@@ -94,6 +94,17 @@ def prepared_readiness(
         raise PluginReadinessError("prepared-selection-invalid") from exc
 
 
+def startup_input_digest(expectation: PluginReadinessRequest, *, body: str, sender: str,
+                         reply_to: str | None, delivery: str) -> str:
+    """Bind the compiled startup selection and message to one original intent."""
+    selection = expectation.model_dump(exclude={"timeout_seconds", "expected_session_id"})
+    selection["plugins"] = sorted(selection["plugins"], key=lambda value: value["projected_source"])
+    return hashlib.sha256(json.dumps({
+        "selection": selection, "body": body, "sender": sender,
+        "reply_to": reply_to, "delivery": delivery,
+    }, sort_keys=True).encode()).hexdigest()
+
+
 async def wait_plugin_readiness(
     db: Any, session_id: str, expectation: PluginReadinessRequest,
     *, operation_key: str | None = None, operation_digest: str | None = None,

@@ -35,6 +35,48 @@ def _args(**kw):
     return argparse.Namespace(**base)
 
 
+def _portable_endpoint():
+    from venue_copilot.portable_mux import MuxEndpoint
+
+    attempt = "00000000-0000-4000-8000-000000000001"
+    return MuxEndpoint.parse({
+        "version": 1, "attempt": attempt, "session_id": "00000000-0000-4000-8000-000000000002",
+        "mux_session": "wt-bridge-" + attempt, "mux_socket": f"/tmp/p/{attempt}/tmux.sock",
+        "native": {"incarnation": "$1:123", "pane": "%2"},
+        "socket_identity": {"device": 1, "inode": 2},
+    })
+
+
+def test_portable_stop_uses_native_socket_and_retains_unknown_effect(seams, capsys):
+    endpoint = _portable_endpoint()
+    seams.live_rows["anchor-example-web@cs-1"]["venue"].update({
+        "kind": "codespace", "mux_session_name": endpoint.mux_session,
+        "mux_endpoint": endpoint.record(),
+    })
+    rc = detach.cmd_stop(
+        _args(stop=True, detach=False), ssh_session=_ssh(seams, stdout="", code=255),
+    )
+    assert rc == 1
+    assert len(seams.ssh) == 1
+    assert endpoint.mux_socket in seams.ssh[0]["remote"]
+    assert "has-session" not in seams.ssh[0]["remote"]
+    assert seams.releases == [] and seams.release_res == [] and seams.deregistered == []
+    assert json.loads(capsys.readouterr().out)["ok"] is False
+
+
+def test_portable_stop_releases_only_after_native_confirmation(seams, capsys):
+    endpoint = _portable_endpoint()
+    seams.live_rows["anchor-example-web@cs-1"]["venue"].update({
+        "kind": "codespace", "mux_session_name": endpoint.mux_session,
+        "mux_endpoint": endpoint.record(),
+    })
+    assert detach.cmd_stop(
+        _args(stop=True, detach=False), ssh_session=_ssh(seams, stdout="STOPPED\n"),
+    ) == 0
+    assert len(seams.releases) == 1 and len(seams.release_res) == 1
+    assert json.loads(capsys.readouterr().out)["stopped"] is True
+
+
 @pytest.fixture
 def seams(monkeypatch):
     monkeypatch.setattr("agent_codespaces.hosting_policy.require_codespace_hosting",
@@ -997,7 +1039,7 @@ def test_launch_reports_assigned_local_forward_from_owner_hold(seams, monkeypatc
 
     def get_hold(*a, **k):
         calls["get_hold"] += 1
-        if calls["get_hold"] == 1:
+        if not seams.holds:
             return None
         return types.SimpleNamespace(
             local_forwards={"49152": 3000},
@@ -1061,7 +1103,7 @@ def test_rejoin_reports_current_reassigned_dynamic_local_forward(seams, monkeypa
 
     def get_hold(*a, **k):
         calls["get_hold"] += 1
-        return prior if calls["get_hold"] == 1 else current
+        return prior if not seams.holds else current
 
     monkeypatch.setattr(owner, "get_hold", get_hold)
     monkeypatch.setattr(
