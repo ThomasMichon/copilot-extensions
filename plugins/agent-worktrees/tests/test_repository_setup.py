@@ -572,7 +572,8 @@ if ($r.mode -eq 'apply') { exit 9 }
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Native POSIX subprocess contract")
-def test_real_posix_consumer_check_apply_final_check(source: Path) -> None:
+def test_real_posix_consumer_check_apply_final_check(source: Path, monkeypatch) -> None:
+    monkeypatch.setenv("COPILOT_HOME", str(Path.home() / ".copilot"))
     body = """
 import json, os, pathlib, subprocess, sys
 assert sys.argv[1] == '--request-file'
