@@ -145,6 +145,10 @@ def test_mcp_recipe_runs_own_init_under_same_queue_and_preserves_result(
     owning_mcp, area, monkeypatch, action,
 ):
     payload, installation, project = owning_mcp
+    if os.name == "nt":
+        home = area / "distinct-home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
     root = area / "queue"
     request = provision.enqueue(payload, installation, project, root=root, installer_action=action)
     repeated = provision.enqueue(payload, installation, project, root=root, installer_action=action)

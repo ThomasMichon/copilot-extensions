@@ -1399,3 +1399,21 @@ SDK copies; the MCP producer digest is refreshed with contract revision 36
 unchanged. This completes the already reviewed SDK source propagation rather
 than changing the lifetime policy again. Archive sync, source admission,
 install-contract and lint checks remain required before the new push.
+
+Head `7793205431` passes all current source CI, including the canonical SDK
+vendoring check. Its fresh review resolves the launch-time Medium finding
+but identifies a related High gap in ordinary `_inspect_payload`: the SDK
+defaults could still select `HOME` after the native launch. The distinct-home
+Windows native packet reproduces that provenance refusal before ordinary
+acceptance; Linux passes.
+
+Ordinary inspection now explicitly uses the same native `Path.home()` profile
+already used by its canonical-root checks, supplies its Copilot root to both
+SDK reads and its durable root to deployment resolution. Execution-time
+revalidation uses this same function, so the profile remains coherent before
+enqueue and before effects. The environment and generic SDK defaults are not
+rewritten. Existing stamp/provision recipe controls now retain distinct homes
+through both ordinary acceptance and execution. All six batching, native
+admission and real recipe controls pass in 38.17 seconds; Ruff, source-admission
+and whitespace checks pass. The full distinct-home native lane remains required
+on the new source head; the earlier successful packet is supporting history.
