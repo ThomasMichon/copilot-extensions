@@ -42,9 +42,10 @@ reviewed adapter, with their existing original claim intact.
 
 Preserve the complete composition boundary: explicit nonempty
 `AGENT_INDEX_MACHINE` is a case-insensitive literal designation override and
-terminates a forwarded SSH child without topology discovery. Do not canonicalize
-it into another physical host, guest key or SSH alias. Nonoverride routing
-uses strict shared native/guest execution locality; optional topology uses
+ends recursive forwarding inside the SSH child without topology discovery.
+The child stays running to execute the request and return its result. Do not
+canonicalize the designation into another physical host, guest key or SSH alias.
+Nonoverride routing uses strict shared native/guest execution locality; optional topology uses
 attributed read-only process composition, not sibling imports, an unconditional
 dependency or another machine registry.
 
@@ -55,9 +56,9 @@ and setup decisions. Preserve exact configured SSH targets, selected-indexer
 forwarded configuration, authoritative remote-command errors, connection-only
 failover, client-local endpoint precedence and SSH-only repository isolation.
 
-Original key/alias/hostname/case, local/remote, ambiguity, actual forwarded-child
-termination, standalone native/WSL, packaging/platform and applicable installed
-acceptance remain scoped duties. Historical unchanged 88-case behavior is
+Original key/alias/hostname/case, local/remote, ambiguity, actual recursive-
+forwarding termination inside the child, standalone native/WSL, packaging/platform
+and applicable installed acceptance remain scoped duties. Historical unchanged 88-case behavior is
 credited, not new integration proof or installed routing. No Index command,
 optional provider, SSH, test, source implementation or custody changed.
 
