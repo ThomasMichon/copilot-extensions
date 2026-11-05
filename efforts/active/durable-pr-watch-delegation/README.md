@@ -294,8 +294,8 @@ _Operator-required outcome; agent-recommended slices and validation._
   by the inert projection or conversation ACK.
   Its A1 explicit data-owner expansion merged in #10641 and finite atomic
   acquisition half of A2 in #10648. The
-  [captured-feedback refinement](captured-attention-feedback.md) proposes the
-  remaining pre-effect capture, confirmed retry readback and interest-specific
+  [captured-feedback refinement](captured-attention-feedback.md), merged in
+  #10664, defines the remaining pre-effect capture, confirmed retry readback and interest-specific
   echo integration before runtime changes. A2's full exit and negotiated
   serving remain open.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
@@ -935,6 +935,28 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-05 - Review capture contract; realize its finite data-owner expansion
+
+- #10664 actually merged as `1fcb7efce751cecbea9955e498ee690af6c196d0`
+  after exact-head Copilot approval with no findings and required green CI.
+  The existing source worktree is reconciled. The canonical Plan/Validation
+  remains Active; the next finite leaf is B1, not full A2 feedback.
+- B1 implements explicit v4-to-v5 adoption, bounded body-free capture values
+  and complete-envelope validation under ReplayStore. Retained capture
+  references must match their original immutable review intents; these checks
+  are data consistency, not selection, freshness, actual-target or effect proof.
+  Default provisioning and serving contracts remain unchanged.
+- The focused capture/attention/acquisition/conversation/review-owner/replay
+  packet passes 174 cases with bounded cleanup verified. It covers retained
+  confirmed and unknown review state, replay writes, restart, non-downgrading
+  prior adoption, uncertain replacement, lifecycle withdrawal, capacity and
+  corrupt/foreign capture refusal. Existing strict service closure passes
+  Linux and Windows targets; install contract and documentation checks pass.
+- No capture admission, protected sender integration, handled-progress writer
+  or interest-specific echo coverage is implemented by this data leaf.
+  Continue B2/B3 and A3 through their actual owners; no live migration,
+  provider write, retained service or rollout is authorized.
 
 ### 2026-11-05 - Land atomic acquisition; refine the remaining feedback contract
 
