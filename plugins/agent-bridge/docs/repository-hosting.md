@@ -146,6 +146,10 @@ no-wake refusal, an explicitly activating launch may consume the provider's
 version-1 `activation: start` declaration and call that same owner's
 `start` operation for the exact resolved name. It then repeats fresh admission;
 an available but denied repository never enters the activation branch.
+This activating namespace shortcut is CodeSpace-only. Containers retain fresh
+hosting admission before readiness and plugin staging; a stopped container
+cannot use the CodeSpace handoff to wake before its policy can be inspected.
+Container activation requires its own negotiated contract.
 Explicit resume can make this same typed transition during initial admission,
 before provider refresh. It retains the original stop fence, resolves the exact
 retained venue through its current provider and checks that fence before and

@@ -331,6 +331,63 @@ async def test_available_policy_denial_is_not_a_stopped_venue_activation(monkeyp
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("running", [False, True])
+async def test_http_container_refusal_precedes_activating_readiness(
+    session_manager, monkeypatch: pytest.MonkeyPatch, running: bool,
+) -> None:
+    import httpx
+    from fastapi import FastAPI
+
+    from agent_bridge.routes import sessions
+    from agent_bridge.session_host import container_transport
+
+    owner = AgentResolver({}, {})
+    provider = CliNamespaceResolver("container", "fixture-provider")
+    provider._run = AsyncMock(return_value=(0, json.dumps({
+        "type": "command", "spawn_command": ["fixture-provider"], "user": "fixture-user",
+        "container": {
+            "name": "selected", "instance_id": "fixture-instance", "workspace_folder": "/actual",
+            "portable_receiving_policy": {"version": 1},
+        },
+    }), ""))
+    provider.ensure_ready = AsyncMock()
+    owner.register_namespace_resolver(provider)
+    monkeypatch.setattr(owner, "refresh_provider_resolvers", lambda: None)
+    staging = AsyncMock(return_value=[])
+    monkeypatch.setattr(owner, "_related_plugins_for", staging)
+    calls = []
+
+    async def runtime(argv, **kwargs):
+        calls.append(argv)
+        if argv == ["docker", "inspect", "fixture-instance"]:
+            return 0, json.dumps([{
+                "Id": "fixture-instance", "State": {"Running": running},
+            }]).encode(), b""
+        assert argv[:6] == ["docker", "exec", "-i", "-u", "fixture-user", "fixture-instance"]
+        assert kwargs["input_bytes"]
+        return 3, b"", b"expose_agent: false"
+
+    monkeypatch.setattr(container_transport, "_run_provider", runtime)
+    app = FastAPI()
+    app.state.session_manager = session_manager
+    app.state.resolver = owner
+    app.state.ready = True
+    app.include_router(sessions.router)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://fixture",
+    ) as client:
+        response = await client.post("/api/v1/sessions", json={"agent": "container:selected"})
+    assert response.status_code == 400, response.text
+    assert ("expose_agent: false" if running else "actual running container") in response.json()["detail"]
+    provider.ensure_ready.assert_not_awaited()
+    staging.assert_not_awaited()
+    assert len(calls) == (2 if running else 1)
+    assert session_manager.list_sessions() == []
+    assert session_manager.db.execute_read("SELECT * FROM sessions") == []
+    assert session_manager._active_acquisitions == 0
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("outcome", [
     "allow", "deny", "stop-before", "stop-during", "retarget", "legacy", "upgrade",
     "available-upgrade", "available-upgrade-stop", "available-legacy", "available-portable-owner-absent",

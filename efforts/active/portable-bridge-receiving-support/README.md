@@ -328,3 +328,14 @@ implementation. The exact support closure follows the consumer trace and tests.
   parent: no observed visible windows, terminal acquisitions or child focus
   changes, and no remaining fixture descendants. It substitutes `gh --version`
   for backend requests and does not qualify live activation or native Copilot.
+
+### 2026-11-05 - Preserve container policy-before-readiness
+
+- The next exact-head review confirmed both resume corrections and identified a
+  container shortcut gap. Restricted activating namespace admission to
+  CodeSpaces; containers retain their existing policy check before readiness
+  until an independently negotiated activation contract exists.
+- Actual HTTP namespace/hosting controls substitute container inspect/exec
+  results for stopped and running-but-denied members. They refuse before
+  readiness, staging or session creation. All 15 focused container and preserved
+  CodeSpace activation controls pass; final unit/source and review gates remain.

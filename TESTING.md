@@ -82,6 +82,10 @@ available without a current namespace owner. A real admitted-resume control
 pauses provider refresh, records an actual durable stop while lifecycle custody
 is held, then makes the venue Shutdown: refresh cannot activate it, prepare a
 new Host or clear that newer stop.
+HTTP container controls use the real namespace/parser and hosting pipeline with
+substituted inspect/exec results. Both a stopped member and a running member
+with a repository denial refuse before `ensure_ready`, plugin staging or session
+creation; the CodeSpace activation shortcut cannot admit container readiness.
 CodeSpaces' opt-in Windows desktop check sets
 `CODESPACES_ACTIVATION_WINDOWS_E2E=1` and selects
 `agent-codespaces --test-file tests/native/test_activation_windowless.py

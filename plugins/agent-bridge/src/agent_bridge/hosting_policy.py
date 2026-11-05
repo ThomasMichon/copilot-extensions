@@ -377,7 +377,7 @@ async def require_namespace_hosting(
     )
     if target.type == "session":
         return target
-    if activate and (target.codespace or target.container):
+    if activate and target.codespace:
         await _activate_provider_target(resolver, target)
         # Only a launch entry may ask the venue owner to activate before a
         # fresh read. Resolution checks again before staging or child creation.
@@ -394,7 +394,7 @@ async def _activate_provider_target(
     from .provider_hosting import CodeSpaceNotRunning
     from .venue_launch_policy import gate_raw_codespace_spawn
 
-    metadata = target.codespace or target.container or {}
+    metadata = target.codespace or {}
     name = metadata.get("name")
     if (
         not isinstance(name, str) or not name.strip()
