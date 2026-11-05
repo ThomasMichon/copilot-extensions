@@ -18,6 +18,13 @@ the shared test home also isolates the canonical passwd lookup. These are isolat
 not an installed daemon wake, rollout or complete history guarantee; required
 unit-only CI admission remains separate.
 
+The opt-in `--test-file tests/native/test_resident_recovery_process.py
+--allow-explicit-tiers` packet exercises actual normal ensure/spawn and an
+owned leased POSIX resident, PID/birth/route/health, captured canonical mutation,
+warm reuse, maintenance/no-spawn and exact process/instance cleanup. It waits
+only for declared initial roster admission; direct fallback is forbidden.
+This is private source-process qualification, not installed or Windows proof.
+
 The additional `--test-file tests/test_launch_execution.py --test-file
 tests/test_launch_seed_state.py --test-file tests/test_launch_attempt.py` packet
 checks maintenance refusal before effects and during post-spawn observations
