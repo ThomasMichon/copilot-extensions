@@ -264,6 +264,18 @@ passed that complete flow independently. Strict Python 3.10 checks passed for
 Linux and Windows targets; F/E9, module-size, install-contract and documentation
 checks passed. No size baseline or preview schema was widened.
 
+The first review of #10783 identified unavailable-owner guidance that was not
+rendered and the missing readiness reader in the live-mode data source. The
+section now uses the supported warning banner, and live mode delegates to the
+same selected-engine reader. Four focused native controls passed, including
+the new no-write catalog warning. The Manager packet passed 75 controls,
+including the actual rendered missing-owner warning and confirmed binding/New
+flow; after correcting the readiness test fixture, its six runner-selected
+local/live observation and refresh cases passed separately. F/E9, documentation
+and install-contract guards passed again. Current-head review and CI remain
+publication gates; these source tests do not establish a live SSH or installed
+desktop qualification.
+
 Fresh-store configuration uses actual Git roots and native APIs but pre-provided
 native packages. Cold installer/Python-3.9/fresh-terminal, installed desktop,
 live-provider and rollout lanes were not exercised: this source slice has no

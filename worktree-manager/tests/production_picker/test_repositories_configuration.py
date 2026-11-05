@@ -283,10 +283,38 @@ def test_native_repositories_ui_real_cli_cancel_set_reset_and_concurrent_ordinar
     {"version": 1, "ready": True, "code": "state_root_resolution_failed"},
     {"error": "owner read failed"},
 ])
-def test_worktrees_readiness_is_async_visible_and_never_runs_a_binding(monkeypatch, observation):
+@pytest.mark.parametrize("live", [False, True])
+def test_worktrees_readiness_is_async_visible_and_never_runs_a_binding(monkeypatch, observation, live):
+    from worktree_manager import engine_client, resident_picker
+    from worktree_manager.production_picker import runner
+    from worktree_manager.production_picker.picker_tui import data_local, data_ssh
+
+    observation = dict(observation)
     calls = []
-    source = _fixture_source()
-    source.knowledge_readiness = lambda: calls.append("read") or observation
+    monkeypatch.setattr(context, "_project", "sample")
+    monkeypatch.setattr(context, "_bootstrap", None)
+    monkeypatch.setattr(resident_picker, "root_for", lambda _project: None)
+
+    def read(project, args, **kwargs):
+        if args == ["coordination-readiness"]:
+            calls.append((project, args, kwargs))
+            return observation
+        return {}
+
+    monkeypatch.setattr(engine_client, "run_json", read)
+
+    def select(**kwargs):
+        binding = kwargs["prepare"]()
+        assert binding.live is live
+        return binding.source
+
+    monkeypatch.setattr(runner, "run_tui_picker", select)
+    source = runner.run("sample", mock_mode=True, bootstrap_supplier=lambda: (
+        "sample", {"project": "sample", "default_live": live},
+    ))
+    assert source is (data_ssh if live else data_local)
+    for name, value in vars(_fixture_source()).items():
+        monkeypatch.setattr(source, name, value)
 
     async def run():
         app = PickerApp(source, live=False)
@@ -294,14 +322,18 @@ def test_worktrees_readiness_is_async_visible_and_never_runs_a_binding(monkeypat
             engine = app.query_one(PickerScreen)
             await _wait_for_initial_setup(pilot, engine)
             await _wait(pilot, lambda: getattr(engine, "_knowledge_readiness", {}).get("code") not in (None, "loading"))
-            assert calls == ["read"]
+            assert calls == [("sample", ["coordination-readiness"], {"timeout": 20, "allow_nonzero": True})]
             assert engine._knowledge_readiness["ready"] is not True
             assert "KB" in engine.button_set() and "N" in engine.button_set()
             text = "\n".join(row.text.plain for row in engine.build_body(118))
             assert "Knowledge" in text
             engine._open_knowledge_configuration()
             assert "unavailable" in engine.debug
-            assert calls == ["read"]
+            assert len(calls) == 1
+            observation.update(version=1, ready=True, code="ready")
+            engine._refresh_knowledge_readiness()
+            await _wait(pilot, lambda: engine._knowledge_readiness.get("ready") is True)
+            assert "KB" not in engine.button_set() and len(calls) == 2
 
     asyncio.run(run())
 
@@ -379,9 +411,12 @@ def test_missing_knowledge_to_confirmed_native_binding_and_new(tmp_path, monkeyp
         "repo_name": "sample", "machine": "fixture",
         "repos": {"sample": {"anchor": str(paths["sample"]), "worktree_root": str(tmp_path / "worktrees")}},
     })
-    before = snapshot(home), snapshot(paths["sample"]), snapshot(paths["knowledge"])
     blocked = native("resolve", "--json", "--new", cwd=paths["sample"])
     assert blocked.returncode != 0 and not (tmp_path / "worktrees").exists()
+    settings = paths["sample"] / ".github" / "copilot" / "settings.json"
+    activation = json.loads(settings.read_text("utf-8"))
+    activation["enabledPlugins"]["harness-knowledge@copilot-extensions"] = False
+    settings.write_text(json.dumps(activation), encoding="utf-8")
     raw = json.loads((root / "plugins" / "agent-worktrees" / "pivots" / "repositories-config.json").read_text("utf-8"))
     raw["list"] = [*prefix, *raw["list"][1:]]
     for action in raw["actions"]:
@@ -398,6 +433,7 @@ def test_missing_knowledge_to_confirmed_native_binding_and_new(tmp_path, monkeyp
     source.knowledge_readiness = data_local.knowledge_readiness
 
     async def run():
+        before = snapshot(home), snapshot(paths["sample"]), snapshot(paths["knowledge"])
         app = PickerApp(source, live=False)
         async with app.run_test(size=(118, 40)) as pilot:
             engine = app.query_one(PickerScreen)
@@ -410,6 +446,18 @@ def test_missing_knowledge_to_confirmed_native_binding_and_new(tmp_path, monkeyp
             await pilot.press("enter")
             await _wait(pilot, lambda: engine._task_state()[0] in ("ready", "error"))
             assert engine._reg_pivot() is reg and engine._task_state()[0] == "ready"
+            assert all(row["knowledge_bindable"] == "false" for row in engine._task_rows())
+            text = "\n".join(line.text.plain for line in engine.build_body(118))
+            assert "Knowledge binding is unavailable" in text and "Enable and prepare" in text
+            assert (snapshot(home), snapshot(paths["sample"]), snapshot(paths["knowledge"])) == before
+            activation["enabledPlugins"]["harness-knowledge@copilot-extensions"] = True
+            settings.write_text(json.dumps(activation), encoding="utf-8")
+            before = snapshot(home), snapshot(paths["sample"]), snapshot(paths["knowledge"])
+            engine._pivot_runtime(reg).repoll(engine._pivot_scope_key())
+            await _wait(pilot, lambda: any(
+                row["id"] == "knowledge" and row["knowledge_bindable"] == "true"
+                for row in engine._task_rows()
+            ))
             row = next(row for row in engine._task_rows() if row["id"] == "knowledge")
             assert row["knowledge_bindable"] == "true", (row["configuration"], engine._task_summary())
             action = next(action for action in reg.actions if action.key == "bind-knowledge")

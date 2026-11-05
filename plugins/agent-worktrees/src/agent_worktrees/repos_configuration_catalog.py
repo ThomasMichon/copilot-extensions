@@ -257,7 +257,13 @@ def catalog(project: str, *, workspace: str = "") -> dict:
             ).lower(),
             "binding_fields": [],
         })
-    return {"entries": rows, "summary": {
+    summary = {
         "repositories": len(rows), "knowledge_readiness": inspection.readiness,
         "binding_owner": binding_owner,
-    }}
+    }
+    if binding_owner != "available" and inspection.readiness.get("ready") is False:
+        summary.update(
+            banner_text="Knowledge binding is unavailable. Enable and prepare one qualified harness-knowledge owner.",
+            banner_level="warn",
+        )
+    return {"entries": rows, "summary": summary}

@@ -1519,10 +1519,12 @@ Highlighting the right-docked **Configuration** entry immediately displays its
 last selected section. This is browsing only; Apply/confirmation remains
 required for changes. Escape returns to the previous operational view.
 
-Worktrees reads the selected engine's knowledge readiness off the input thread.
+Worktrees reads the selected engine's knowledge readiness off the input thread
+in both local and live modes.
 Missing required knowledge shows **Configure knowledge**, which navigates to
 the native Repositories section and its confirmed existing-repository binding
-action. Unavailable/failed reads remain explicit; a banner is not proof of
+action. An unavailable binding payload shows preparation guidance in the
+Repositories banner. Unavailable/failed reads remain explicit; a banner is not proof of
 readiness. Completion refreshes the owner observation. The native New gate
 still decides admission, while source-only Bare allocation and existing-session
 recovery retain their separate behavior. This flow does not create a repository,

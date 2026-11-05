@@ -179,6 +179,23 @@ def test_missing_binding_owner_refuses_without_any_native_configuration_write(na
     assert tree(native) == before
 
 
+def test_missing_binding_owner_catalog_exposes_visible_recovery_without_writes(native):
+    source = native / "repository" / ".agent-worktrees" / "config.yaml"
+    source.parent.mkdir()
+    source.write_text("stateless: true\nrequires_external_state_root: true\n", encoding="utf-8")
+    before = tree(native)
+    result = cli("catalog", "--context-project", "sample")
+    assert result.returncode == 0, result.stderr
+    value = json.loads(result.stdout)
+    assert value["summary"]["knowledge_readiness"]["ready"] is False
+    assert "Enable and prepare" in value["summary"]["banner_text"]
+    assert "harness-knowledge" in value["summary"]["banner_text"]
+    assert value["summary"]["banner_level"] == "warn"
+    assert all(row["knowledge_bindable"] == "false" for row in value["entries"])
+    assert SECRET not in result.stdout + result.stderr
+    assert tree(native) == before
+
+
 def test_old_binding_owner_is_not_invoked_for_apply(native, monkeypatch):
     from agent_procutil import owned_process
     from agent_worktrees import repos_knowledge_configuration as binding
