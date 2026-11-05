@@ -224,6 +224,12 @@ child, replacing any inherited value:
 }
 ```
 
+For a shell entry that needs to start its repository-owned Python adapter before
+it can parse JSON, `AGENT_WORKTREES_REPOSITORY_SETUP_PYTHON` contains that same
+absolute interpreter path without JSON encoding. The engine sets both values
+together and replaces inherited values; the adapter can verify they agree.
+This avoids using an ambient Python merely to discover the selected one.
+
 Invoke this exact argv plus the intended engine arguments. It preserves the
 selected interpreter environment, including a virtual environment's executable
 path, rather than resolving its symlink to a different base interpreter.

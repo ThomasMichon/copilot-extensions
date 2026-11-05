@@ -253,21 +253,24 @@ def test_real_setup_child_uses_selected_engine_for_native_trust_and_payload_obse
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("COPILOT_HOME", str(home / ".copilot"))
     monkeypatch.setenv(setup.ENGINE_CONTEXT, "unqualified inherited invocation")
+    monkeypatch.setenv(setup.ENGINE_PYTHON, "unqualified inherited Python")
     selected = consumer(source, """
 $engine = $env:AGENT_WORKTREES_REPOSITORY_SETUP_ENGINE | ConvertFrom-Json
 if ($engine.schema -ne 'copilot-extensions.repository-setup-engine' -or
     $engine.version -ne 1 -or -not [IO.Path]::IsPathRooted($engine.argv[0])) {
     throw 'Missing selected engine contract'
 }
+$python = $env:AGENT_WORKTREES_REPOSITORY_SETUP_PYTHON
+if ($python -ne $engine.argv[0]) { throw 'Selected interpreter differs' }
 if (($r.PSObject.Properties.Name | Sort-Object) -join ',' -ne
     'mode,repository,result_file,version') { throw 'Request v1 changed' }
 $arguments = @($engine.argv | Select-Object -Skip 1)
 if ($r.mode -eq 'apply') {
-    $trusted = & $engine.argv[0] @arguments trust-repository-configuration `
+    $trusted = & $python @arguments trust-repository-configuration `
         --repo $r.repository.path --repository $r.repository.url `
         --commit $r.repository.commit --apply | ConvertFrom-Json
     if ($LASTEXITCODE -ne 0 -or $trusted.status -ne 'ready') { throw 'Trust failed' }
-    $payloads = & $engine.argv[0] @arguments prepare-plugin-payloads `
+    $payloads = & $python @arguments prepare-plugin-payloads `
         --repo $r.repository.path | ConvertFrom-Json
     if ($LASTEXITCODE -ne 0 -or -not $payloads.payloadsReady) { throw 'Observation failed' }
     Set-Content -LiteralPath $state -Value 'done'
@@ -540,6 +543,7 @@ engine = json.loads(os.environ['AGENT_WORKTREES_REPOSITORY_SETUP_ENGINE'])
 assert engine['schema'] == 'copilot-extensions.repository-setup-engine'
 assert engine['version'] == 1
 assert engine['argv'][0] == sys.executable
+assert os.environ['AGENT_WORKTREES_REPOSITORY_SETUP_PYTHON'] == engine['argv'][0]
 root = pathlib.Path(r['repository']['path'])
 assert pathlib.Path.cwd() == root
 state = root.parent / 'state.txt'

@@ -22,6 +22,7 @@ from .git_ops import repository_identity_env
 
 DECLARATION = ".agent-worktrees/repository-setup.json"
 ENGINE_CONTEXT = "AGENT_WORKTREES_REPOSITORY_SETUP_ENGINE"
+ENGINE_PYTHON = "AGENT_WORKTREES_REPOSITORY_SETUP_PYTHON"
 LIMIT = 16 * 1024
 STATUSES = frozenset({"ready", "needed", "waiting", "refused", "failed"})
 
@@ -309,9 +310,10 @@ def _call(setup: Setup, mode: str) -> Outcome:
             argv = [executable, str(setup.script), "--request-file", str(request)]
         # Inherit handles: a credential owner may need the actual caller terminal.
         environment = _environment(attended=_terminal())
+        environment[ENGINE_PYTHON] = os.path.abspath(sys.executable)
         environment[ENGINE_CONTEXT] = json.dumps({
             "schema": "copilot-extensions.repository-setup-engine", "version": 1,
-            "argv": [os.path.abspath(sys.executable), "-I", "-m", "agent_worktrees"],
+            "argv": [environment[ENGINE_PYTHON], "-I", "-m", "agent_worktrees"],
         })
         completed = subprocess.run(
             argv, cwd=setup.source.path, env=environment,
