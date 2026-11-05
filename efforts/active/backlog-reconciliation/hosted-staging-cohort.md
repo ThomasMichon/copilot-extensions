@@ -64,8 +64,8 @@ loadout. Neither seam has whole receiver or native acceptance here.
 
 ### #8242 - Keep cache, inventory and installation-home owners separate
 
-The finite preparation ask retains the large-marketplace hard 240-second
-timeout OR a configurable/progress-based alternative, one clone across plugins
+The finite preparation ask corrects the large-marketplace hard 240-second
+timeout with a configurable OR progress-based timeout, one clone across plugins
 in a preparation, and phase/elapsed/setting diagnostics. Persistent cross-
 checkout OR shallow reuse is optional, not mandatory. Reported 279/304-second
 cold versus 7-9-second shared-cache observations are historical, not new runs.
