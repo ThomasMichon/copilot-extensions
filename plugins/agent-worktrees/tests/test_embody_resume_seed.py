@@ -2,9 +2,33 @@
 
 from __future__ import annotations
 
+import argparse
+
 import pytest
 
 from agent_worktrees import embody_resume
+
+import _prior_embody_resume
+
+
+@pytest.mark.parametrize("intent, expected", [
+    ({"fresh": True}, None),
+    ({"resume_head": True}, "original-head"),
+    ({"copilot_args": ["--resume=chosen"]}, None),
+])
+def test_explicit_intent_survives_provider_upgrade_and_rollback(monkeypatch, intent, expected):
+    monkeypatch.setattr(embody_resume.sessions, "resolve_resume_target", lambda _: "original-head")
+    args = argparse.Namespace(**intent)
+    for provider in (_prior_embody_resume, embody_resume):
+        assert provider.resume_target(args, object(), "next turn", make_new=False) == expected
+
+
+@pytest.mark.parametrize("seed", [None, "next turn"])
+def test_default_existing_history_does_not_depend_on_a_startup_prompt(monkeypatch, seed):
+    monkeypatch.setattr(embody_resume.sessions, "resolve_resume_target", lambda _: "original-head")
+    assert embody_resume.resume_target(
+        argparse.Namespace(), object(), seed, make_new=False,
+    ) == "original-head"
 
 
 class TestWithResume:

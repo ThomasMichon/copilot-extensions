@@ -233,8 +233,10 @@ Converge a package-manager package. Identity is `(manager, id)`, so the same
 | `id` | yes | Manager-native package id (e.g. a winget `--id`). |
 | `manager` | yes | `winget`, `apt`, `pipx`, `uv-tool`, or `pip`. |
 | `version` | no | Exact version pin. |
+| `minimum_version` | no | Schema 5 numeric compatibility floor; preserves any acceptable installed version. Cannot share a declaration with `version` or `pin: true`. |
+| `blocked_versions` | no | Schema 5 known-bad numeric release prefixes; requires `minimum_version`. |
 | `state` | no | `present` (default) or `absent`. |
-| `pin` | no | Hold at `version` where the manager supports pinning (`winget pin`, `apt-mark hold`). |
+| `pin` | no | Hold at `version` where supported. With a schema-5 compatibility declaration, explicit `false` removes a WinGet pin; omission preserves pin metadata. |
 | `process_guard.names` | no | Exact process image names that defer replacement/removal while running. Windows process probing is supported now; an unavailable/unsupported probe defers safely. |
 | `platforms` | no | Restrict to a subset of `windows` / `linux` / `wsl`. |
 | `gate` | no | Restrict to specific machines (defaults to the package gate). |
@@ -259,6 +261,49 @@ probe platform, or missing probe binary returns `status: deferred` without
 mutation, and reports the reason plus the command that remains pending. If
 installed package state cannot be established, guarded mutation also defers
 instead of assuming that the package is absent.
+
+#### Minimum plus known-bad exclusions
+
+```yaml
+schema_version: 5
+package: example/windows-tools
+gate: ["*"]
+resources:
+  - type: package
+    id: marlocarlo.psmux
+    manager: winget
+    minimum_version: "3.3.5"
+    blocked_versions: ["3.3.6"]
+    pin: false
+    process_guard:
+      names: ["psmux.exe"]
+    platforms: [windows]
+```
+
+Versions have two to four numeric components, compared numerically with
+missing trailing components treated as zero. Each exclusion matches its
+declared numeric prefix: `3.3.6` excludes that release and its revision
+variants; `3.3.6.1` excludes only that complete four-component version.
+There is no speculative upper bound. An installed `3.4.0`, `3.10.0` or later
+acceptable version is left unchanged, not upgraded merely because it is old.
+Absent or incompatible packages use the manager's ordinary install/upgrade
+without an exact target, then verify the resulting compatibility constraint.
+Unknown installed state defers; a present package with an unparseable version
+blocks rather than being replaced on a guess. A successful manager exit is
+not sufficient when the resulting version is still excluded or below the floor.
+
+Explicit `pin: false` is a migration request, not the default: it removes and
+verifies only this package's WinGet pin. Other managers report unsupported pin
+removal rather than silently claiming it. Omitting `pin` leaves existing
+metadata alone. If replacement is needed, process deferral covers the entire
+operation, including planned pin removal; compatible-package pin metadata can
+be reconciled without stopping sessions. Unattended mutation still requires
+the existing maintenance-safe opt-in.
+
+Publish schema-5 engine support before adopting these declarations. An older
+engine, including a provider rollback, refuses schema 5 before effects; do not
+drop the schema or constraints to work around that refusal. Existing schema
+1-4 exact pins and unspecified-presence resources retain their behavior.
 
 ### `file`
 
@@ -517,6 +562,9 @@ compatibility data from lower-authority declarations remain effective:
 | --- | --- |
 | package `present` + `absent` | highest authority wins; equal-highest disagreement errors |
 | package two different `version` pins | highest authority wins; equal-highest disagreement errors |
+| package compatibility floors differ | highest numeric minimum across all declarations wins |
+| package known-bad exclusions differ | exclusions are unioned across all declarations |
+| package exact pin violates a compatibility constraint | error, independent of pin authority |
 | package `pin` flags differ | OR'd to pinned (compatible) |
 | package `process_guard.names` differ | names are case-folded and unioned (conservative, compatible) |
 | resource `maintenance_safe` flags differ | OR'd to maintenance-safe (compatible opt-in) |

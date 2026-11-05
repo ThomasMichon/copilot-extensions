@@ -282,7 +282,7 @@ def test_launchers_deliver_new_worktree_pending_seed_only_on_create():
     sh = _LAUNCH_SCRIPT.read_text()
 
     assert "function Invoke-SeedDeliverySafe" in ps
-    assert "'embody', '--worktree-id', $WorktreeId, '--json'" in ps
+    assert "'embody', '--worktree-id', $WorktreeId, '--deliver-pending-seed', '--json'" in ps
     assert ps.count("Invoke-SeedDeliverySafe $plan.worktree_id") == 1
     join_idx = ps.index('Write-Host "Joining existing session: $sessName"')
     create_branch_idx = ps.index('Write-SetupLog "psmux: creating session $sessName"')
@@ -297,7 +297,7 @@ def test_launchers_deliver_new_worktree_pending_seed_only_on_create():
 
     # bash: the mirrored helper function ...
     assert "_aw_deliver_pending_seed() {" in sh
-    assert 'embody_args+=(embody --worktree-id "$wtid" --json)' in sh
+    assert 'embody_args+=(embody --worktree-id "$wtid" --deliver-pending-seed --json)' in sh
     assert sh.count('_aw_deliver_pending_seed "$WORKTREE_ID"') == 1
     join_idx_sh = sh.index('echo "Joining existing session: $TMUX_SESS"')
     create_branch_idx_sh = sh.index('activity_log mux_attached "$WORKTREE_ID" mux=create')
