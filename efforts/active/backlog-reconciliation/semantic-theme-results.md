@@ -5,6 +5,16 @@ Method: [weighted semantic consolidation](semantic-density-consolidation.md).
 
 ## Result and coverage
 
+The [eleven automatic-update/observation/compatibility contracts](finite-automatic-observation-compatibility-contracts.md)
+retain thirty-three ranked relationships and independently verify #9704,
+#10057 and #10078's finite source completions through actual current
+source, whole review/CI and audited provider dispositions.
+Eight originals stay OPEN; later all-background hold intent, live unknown
+Windows owners, exact native/fixture and release/consumer boundaries remain.
+The [journal](<journal/2026/11.05 finite-automatic-observation-compatibility-contracts.md>)
+records 785 verified dispositions and 1,002 whole open, 273 above 729,
+without new installed/native effects or source/resource release.
+
 The [eight installer/hook/account/recovery contracts](finite-installer-hook-account-recovery-contracts.md)
 retain twenty-four ranked relationships and independently verify #9435
 and #9597's finite source completions through actual current source,
