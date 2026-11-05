@@ -67,6 +67,11 @@ Uncertain replacement is reconciled by inspecting/retrying that same adoption.
 
 New code continues reading/writing existing replay/service envelopes and owner
 v2. Older strict owner-v2 file readers refuse v3 rather than losing its journal.
+The separately reviewed [attention data expansion](attention.md#explicit-data-owner-expansion)
+adds explicit v4 adoption without changing ordinary v3 serving. Internal
+conversation transactions preserve that expanded envelope, but the current
+v3 serving descriptor refuses v4 until its compatible reader is implemented;
+it never advertises adopted v4 bytes as v3. No default host adopts that layout.
 Consequently, a runtime rollback after explicit v3 adoption needs a capable
 reader or an authorized, separately reviewed downgrade; replacing the executable
 does not authorize rewriting the state. No automatic downgrade is supplied.

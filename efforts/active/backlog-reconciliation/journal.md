@@ -3,6 +3,12 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-04 - Snapshot maintenance and recovery retain separate authority](<journal/2026/11.04 publication-snapshot-recovery-contracts.md>)
+
+- [2026-11-04 - Guard maps retain independent native qualification](<journal/2026/11.04 guard-map-native-qualification-contracts.md>)
+
+- [2026-11-04 - Configured feed callers retain independent approval](<journal/2026/11.04 configured-feed-policy-contracts.md>)
+
 - [2026-11-04 - Scoped selector repair retains genuine hosted delivery](<journal/2026/11.04 hosted-selector-refresh-contracts.md>)
 
 - [2026-11-04 - Bridge spelling and watchdog PID retain separate acceptance](<journal/2026/11.04 bridge-process-identity-contracts.md>)
