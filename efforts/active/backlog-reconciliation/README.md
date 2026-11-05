@@ -222,6 +222,15 @@ checkpoint nor author eligibility, holds, requirements or source/resource custod
 
 ## Plan
 
+The [six consumer/index/configuration contracts](finite-consumer-index-configuration-contracts.md)
+retain eighteen ranked relationships, the freshly admitted current mux
+contract and #9286's independently verified finite source completion.
+Five originals remain OPEN; native index/controller/typing/configuration
+acceptance and all incumbent ownership remain separate from similarity.
+The [journal](<journal/2026/11.05 finite-consumer-index-configuration-contracts.md>)
+records 780 verified dispositions and 1,007 whole open, 278 above 729,
+without new native, installed or custody effects.
+
 The [nine standalone/reservation/runtime contracts](finite-standalone-reservation-runtime-contracts.md)
 retain twenty-seven ranked relationships and independently verify #8352's
 finite tested image deliverable through merged #8385 and #8876's source
@@ -261,6 +270,18 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 - [x] Preserve the initial cohort and oldest-first cursor in structured session state.
 
 ### Phase 2 - Continuing reconciliation
+
+The nine-contract standalone/reservation/runtime checkpoint is actually
+delivered in #10719 after genuine exact-head approval, its one resolved
+review finding and nine complete successful/skipped checks before normal
+managed merge. All eight actual merged/current blobs equal the reviewed
+head. Only the serial publication child finalized, retained; the
+[delivery journal](<journal/2026/11.05 finite-standalone-reservation-runtime-contracts.md>)
+records the valuable stale-summary correction without repeating #8352.
+The next publication is the six consumer/index/configuration contracts,
+including #9286's separately audited finite source completion, then
+remaining weighted-graph supply and fresh changed-original admission.
+The parent remains Active; its Plan and Validation stay open.
 
 The six-contract release/stamp/inventory checkpoint is actually delivered
 in #10717 after genuine exact-head approval, no review threads and nine
