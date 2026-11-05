@@ -119,6 +119,8 @@ echo lookup/readback. Optional evidence receives only half the then-remaining
 request budget through the existing per-request transport checks, leaving the
 rest for settlement and return. An echo timeout cannot consume the entire
 workspace deadline or erase the already-persisted original baseline.
+The executor's budget is capped by the workspace's original absolute monotonic
+deadline, so validation/cache/setup time before executor entry cannot extend it.
 
 After readback, ReplayStore atomically rechecks the original capture/receipts,
 actual acquired position, complete current journal meaning, retained event,

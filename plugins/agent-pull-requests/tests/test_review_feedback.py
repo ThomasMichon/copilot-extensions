@@ -397,7 +397,7 @@ def test_original_reply_and_owned_edit_use_exact_native_object_readback(
     }
 
 
-@pytest.mark.parametrize("mode", ["normal", "reopen", "unbound", "echo", "echo_timeout"])
+@pytest.mark.parametrize("mode", ["normal", "reopen", "unbound", "echo", "echo_timeout", "echo_setup_timeout"])
 def test_workspace_selects_feedback_from_embedding_not_request_json(
     feedback_environment: tuple, monkeypatch: pytest.MonkeyPatch, mode: str,
 ) -> None:
@@ -442,20 +442,27 @@ def test_workspace_selects_feedback_from_embedding_not_request_json(
         )
 
     operations = make_operations()
-    if mode in ("echo", "echo_timeout"):
+    if mode in ("echo", "echo_timeout", "echo_setup_timeout"):
         backend.versioned_reply = True
         backend.pr["reviewers"] = copy.deepcopy(generation["sections"]["reviewers"]["data"])
-    if mode == "echo_timeout":
+    if mode in ("echo_timeout", "echo_setup_timeout"):
         import agent_pull_requests.workspace_operations as workspace_module
-        monotonic = time.monotonic
+        import agent_worktrees.providers.azure_owned_evidence as owned_module
+        started = time.monotonic()
         elapsed = [0.0]
-        clock = lambda: monotonic() + elapsed[0]
+        clock = lambda: started + elapsed[0]
         executor = workspace_module.execute_review
+        acquire = owned_module.acquire_owned_evidence
         monkeypatch.setattr(workspace_module.time, "monotonic", clock)
         monkeypatch.setattr(
-            workspace_module, "execute_review",
-            lambda *args, **kwargs: executor(*args, **kwargs, clock=clock),
+            owned_module, "acquire_owned_evidence",
+            lambda *args, **kwargs: acquire(*args, **kwargs, clock=clock),
         )
+        def delayed_executor(*args, **kwargs):
+            if mode == "echo_setup_timeout":
+                elapsed[0] += 0.2
+            return executor(*args, **kwargs, clock=clock)
+        monkeypatch.setattr(workspace_module, "execute_review", delayed_executor)
     payload = {
         "number": selected["scope"]["number"], "intent": selected,
         "source_attachment": attachment, "budget_seconds": 10,
@@ -503,7 +510,7 @@ def test_workspace_selects_feedback_from_embedding_not_request_json(
             "load", {"number": 42, "expected_current": generation["id"], "budget_seconds": 10},
             expires_at=expires, checkpoint=backend.checkpoint,
         )
-    if mode == "echo_timeout":
+    if mode in ("echo_timeout", "echo_setup_timeout"):
         def acquire_echo(current: object) -> None:
             evidence["sections"]["discussions"]["data"] = copy.deepcopy(backend.threads)
             for section in evidence["sections"].values():
@@ -513,11 +520,15 @@ def test_workspace_selects_feedback_from_embedding_not_request_json(
                 "load", {"number": 42, "expected_current": generation["id"], "budget_seconds": 10},
                 expires_at=expires, checkpoint=backend.checkpoint,
             )
+            if mode == "echo_setup_timeout":
+                elapsed[0] += 9.7
 
         def exhaust_optional_budget(current: object, remaining: float) -> None:
             assert document(value)["attention"]["records"][0]["handled"]["cursor"]["sequence"] == 1
-            assert 0 < remaining < 5
-            elapsed[0] += remaining + 0.01
+            assert 0 < remaining <= 5
+            if mode == "echo_setup_timeout":
+                assert remaining < 0.1
+            elapsed[0] += remaining + 0.001
             backend.on_changes = None
 
         backend.after_write = acquire_echo
@@ -526,7 +537,7 @@ def test_workspace_selects_feedback_from_embedding_not_request_json(
     assert result["result"]["feedback"]["status"] == "handled", result
     assert called[-1] == generation["id"]
     assert result["result"]["feedback"]["cursor"]["epoch"] == (2 if mode == "reopen" else 1)
-    if mode == "echo_timeout":
+    if mode in ("echo_timeout", "echo_setup_timeout"):
         assert result["result"]["status"] == "complete"
         assert result["result"]["feedback"]["echo"] == {
             "status": "unavailable", "reason": "echo_readback_unavailable",

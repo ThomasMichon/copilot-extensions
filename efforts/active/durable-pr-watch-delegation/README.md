@@ -962,7 +962,9 @@ callback an implicit credential store.
   Original handled persistence precedes optional echo work, which uses only
   half the remaining request budget. A workspace-deadline regression proves
   optional readback timeout preserves the structured result and no-resend retry.
-  The coupled PR packet passes 316 cases and the native response/exporter
+  The executor is capped by the original enclosing absolute deadline, including
+  delayed entry after setup; its regression reaches the near-deadline boundary.
+  The coupled PR packet passes 317 cases and the native response/exporter
   packet passes 42, both with bounded cleanup verified. Fatal Ruff,
   documentation consistency, the install contract and admitted strict service
   Linux/Windows targets pass; these are not native Windows or live-provider

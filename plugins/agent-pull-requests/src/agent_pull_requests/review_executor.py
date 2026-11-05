@@ -153,7 +153,7 @@ def _check_selected_ownership(action, actual, principal):
 def execute_review(
     store, selected, generation, source_attachment, *, context_factory, checkpoint,
     expires_at: int, budget_seconds: float, clock=time.monotonic, feedback=None,
-    feedback_position=None, feedback_current=None,
+    feedback_position=None, feedback_current=None, enclosing_deadline: float | None = None,
 ):
     """Existing owner factory supplies actual pinned auth/input/transport, not caller labels."""
     from agent_worktrees.providers.azure_owned_review import (
@@ -163,6 +163,10 @@ def execute_review(
         raise ValueError("existing protected context factory/checkpoint required")
     if type(budget_seconds) not in (int, float) or not math.isfinite(budget_seconds) or budget_seconds <= 0:
         raise ValueError("finite review IO budget required")
+    if enclosing_deadline is not None and (
+        type(enclosing_deadline) not in (int, float) or not math.isfinite(enclosing_deadline)
+    ):
+        raise ValueError("finite enclosing monotonic deadline required")
     selected = review_intent.intent(selected)
     generation = copy.deepcopy(generation)
     source_attachment = copy.deepcopy(source_attachment)
@@ -193,7 +197,10 @@ def execute_review(
     ):
         raise ValueError("review source manifest differs from the exact reviewed generation")
     baseline = _threads(generation["sections"]["discussions"]["data"])
-    start, deadline = clock(), clock() + budget_seconds
+    start = clock()
+    deadline = start + budget_seconds
+    if enclosing_deadline is not None:
+        deadline = min(deadline, enclosing_deadline)
 
     def remaining():
         checkpoint()
@@ -202,6 +209,7 @@ def execute_review(
             raise TimeoutError("review operation IO budget exhausted")
         return result
 
+    remaining()
     admitted = store.admit_review(selected, expires_at=expires_at, checkpoint=checkpoint)
     operation_id = selected["operation_id"]
     result = {

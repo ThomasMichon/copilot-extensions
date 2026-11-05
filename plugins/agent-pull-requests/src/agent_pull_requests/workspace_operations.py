@@ -267,6 +267,7 @@ class WorkspaceOperations:
                 expires_at=expires_at, budget_seconds=seconds, feedback=feedback,
                 feedback_position=feedback_position,
                 feedback_current=feedback_current,
+                enclosing_deadline=deadline,
             )
         check()
         return {"protocol": PROTOCOL, "scope": scope, "result": copy.deepcopy(result)}

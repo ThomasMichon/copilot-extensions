@@ -71,6 +71,11 @@ readiness is **not** an unconditional review gate. Existing caller policy checks
 run on current action-relevant inputs; hashes and context objects do not grant
 authority.
 
+An enclosing owner may additionally supply its absolute monotonic
+`enclosing_deadline` in the same clock domain. The executor uses the earlier of
+that deadline and its local duration limit; workspace submission always supplies
+its original request deadline, including setup time before executor entry.
+
 Execution persists selected intent before effects, checks actual current identity/
 revision/discussion and target ownership, durably fences an action as unknown,
 then repeats current-owner and candidate checks after persistence before sending.
