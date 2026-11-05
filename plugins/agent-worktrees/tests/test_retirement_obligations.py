@@ -452,6 +452,41 @@ def test_checkout_agenda_raw_removal_cannot_bypass_preservation(
     assert (agenda / "unverified-partial-export").read_bytes() == b"retained evidence"
 
 
+@pytest.mark.parametrize("protected", [False, True])
+def test_git_removal_resolves_relative_checkout_against_anchor(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, protected: bool,
+) -> None:
+    from agent_worktrees import git_ops
+
+    anchor = tmp_path / "anchor"
+    checkout = tmp_path / "checkout"
+    caller = tmp_path / "other" / "cwd"
+    anchor.mkdir()
+    checkout.mkdir()
+    caller.mkdir(parents=True)
+    if protected:
+        (checkout / ".effort-agenda").mkdir()
+    monkeypatch.chdir(caller)
+    calls = []
+    monkeypatch.setattr(
+        git_ops, "git",
+        lambda *args, **kwargs: calls.append((args, kwargs))
+        or SimpleNamespace(returncode=0),
+    )
+
+    if protected:
+        with pytest.raises(ValueError, match=r"\.effort-agenda"):
+            git_ops.remove_worktree(anchor, "../checkout")
+        assert calls == []
+    else:
+        assert git_ops.remove_worktree(anchor, "../checkout")
+        assert len(calls) == 1
+        args, kwargs = calls[0]
+        assert Path(args[2]).is_absolute()
+        assert Path(args[2]).resolve() == checkout
+        assert kwargs["cwd"] == anchor
+
+
 @pytest.mark.parametrize("layout", ["empty", "malformed", "broken-link", "unreadable"])
 def test_checkout_agenda_unknown_or_partial_presence_is_not_disposable(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, layout: str,

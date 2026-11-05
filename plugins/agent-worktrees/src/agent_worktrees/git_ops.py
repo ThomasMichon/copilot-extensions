@@ -1496,10 +1496,13 @@ def create_worktree(
 
 def remove_worktree(anchor: str | Path, worktree_path: str) -> bool:
     """Remove a worktree. Returns True on success."""
-    if reason := preservation_reason(worktree_path):
+    target = Path(worktree_path)
+    if not target.is_absolute():
+        target = (Path(anchor) / target).absolute()
+    if reason := preservation_reason(target):
         raise ValueError(reason)
     result = git(
-        "worktree", "remove", worktree_path, "--force",
+        "worktree", "remove", str(target), "--force",
         cwd=anchor, check=False,
     )
     return result.returncode == 0
