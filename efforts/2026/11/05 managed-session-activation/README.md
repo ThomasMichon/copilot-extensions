@@ -4,8 +4,8 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent review-first plan and implementation PRs against `dev`
 - **Created:** 2026-11-04
-- **Status:** Active
-- **Vision:** [Worktree agency and cooperative write guards](../../../visions/plugins/agent-worktrees/README.md#write-guards-are-hygiene-nudges-named-for-their-plain-mundane-reason); [bounded hook failures](../../../visions/harness-guidance/README.md#bounded-actionable-hook-failures)
+- **Status:** Done
+- **Vision:** [Worktree agency and cooperative write guards](../../../../visions/plugins/agent-worktrees/README.md#write-guards-are-hygiene-nudges-named-for-their-plain-mundane-reason); [bounded hook failures](../../../../visions/harness-guidance/README.md#bounded-actionable-hook-failures)
 - **Umbrella issue:** #10564
 - **Sub-issues:** none
 
@@ -39,7 +39,7 @@ Isolated event-replay controls now cover the reported scope failure and compare
 registry-only no-ops with preserved managed-anchor denial.
 
 This closes the existing vision's cooperative, applicable intervention intent.
-It follows [circumstantial hook contracts](../../../docs/patterns/circumstantial-hook-contracts.md):
+It follows [circumstantial hook contracts](../../../../docs/patterns/circumstantial-hook-contracts.md):
 acquire reusable ownership facts first, evaluate current occurrences only in
 scope, and preserve the existing managed policy rather than caching decisions.
 It introduces no global adoption, daemon, network dependency or CLI-management
@@ -84,12 +84,13 @@ publication rules remain independent gates.
 
 - [x] Run focused unit and real consumer checks for unmanaged inertness, managed behavior and cache isolation/invalidation; record platform coverage and native measurements honestly.
 - [x] Update authoritative behavior documentation, add the plugin changefile and pass applicable lint, typing, install-contract and required publication checks.
-- [ ] Land the complete implementation after review and required CI, preserving release-versus-installed-state distinctions.
+- [x] Land the complete implementation after review and required CI, preserving release-versus-installed-state distinctions.
 
 ### Phase 4 - Complete the canonical effort and source obligations
 
-- [ ] Re-read this README after merge, resolve every Plan/Validation item, and publish the Done/archive delta through the normal PR flow.
-- [ ] Settle the coordination issue and owned source-worktree/PR obligations; complete the driver's agenda without claiming installed rollout.
+- [x] Re-read this README after merge and resolve every Plan/Validation item.
+- [x] Deferred to `#10564`: Publish the Done/archive delta through the normal PR flow.
+- [x] Deferred to `#10564`: Settle the coordination issue and owned source-worktree/PR obligations; complete the driver's agenda without claiming installed rollout.
 
 ## Validation Plan
 
@@ -98,8 +99,9 @@ publication rules remain independent gates.
 - [x] Positive associations are reused, cannot leak across session/workspace/installation boundaries, and invalidate when relevant ownership inputs change; a prior unmanaged result does not permanently suppress later legitimate admission.
 - [x] Command and resident pre-tool paths, session start/end, post-tool behavior and compatibility fallbacks agree on membership; absence or failure of admission does not fabricate a lifecycle outcome.
 - [x] Lightweight real-process consumer checks and a fresh temporary profile exercise the first-touch and warm paths without changing the operator's installation; native Windows and available POSIX coverage are distinguished.
-- [ ] Targeted tests and required source gates pass on the submitted revision; public documentation and reproducible validation steps describe the implemented behavior.
-- [ ] Review and required CI pass, implementation and completion deltas merge, the effort is Done/archived, and source obligations settle. Installed rollout is explicitly excluded.
+- [x] Targeted tests and required source gates pass on the submitted revision; public documentation and reproducible validation steps describe the implemented behavior.
+- [x] Review and required CI pass, the implementation merges, and the effort is Done/archived.
+- [x] Deferred to `#10564`: Merge the completion delta and settle source obligations. Installed rollout is explicitly excluded.
 
 ## Proposal
 
@@ -208,3 +210,11 @@ failure behavior, cache invalidation and mixed payload/runtime paths.
 - The final complete admission/selection packet passed 120 tests with one platform skip in 152.62 seconds including preparation and cleanup, at original budgets. A preceding focused packet passed all 16 scalar, metadata and runtime-discovery controls.
 - An intermediate packet also observed one unexplained false admission in the Windows selected-runtime Node control. It did not recur in the focused six-runtime matrix or final complete packet; failure-code diagnostics are retained in the fixture. These functional runs do not establish cold-tail/two-second availability qualification, which remains with #7935. No timeouts or budgets were widened.
 - Required CI passed before this correction; exact-head required CI and fresh review remain open. No installed update, service restart or rollout occurred.
+
+### 2026-11-05 - Source complete and archived
+
+- #10589 merged at `eb6bad37779a403a315ce946758ac0e84e6e16ea`. Its final head `39f0767712` passed required CI; review `5782795144` reports no open issues and all twelve formal findings are resolved. The documented owner-authored Comment policy was satisfied by the recorded author assessment, not by an assertion of human review.
+- Re-read the canonical effort immediately after merge and advanced the adopted driver agenda to completion/settlement. The native landing explanation confirms the implementation's squash is upstream; continued from the verified merged revision without replaying the source changes.
+- Source implementation, documentation, unit/consumer controls and mandatory checks are complete. Earlier journal entries retain the actual evidence and its platform/latency limitations; no native Linux/macOS, live Copilot, external-venue or installed acceptance is invented.
+- The source driver explicitly retains the circular archival-publication, issue, source-worktree and agenda settlement in #10564 until this Done/archive delta has itself cleared review and CI and merged. The issue stays open until those effects are verified.
+- No installed update, service restart or rollout occurred. Normal release promotion and any separately authorized local adoption remain distinct from this source completion.
