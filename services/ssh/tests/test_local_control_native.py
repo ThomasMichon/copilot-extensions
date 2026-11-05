@@ -550,6 +550,50 @@ def test_cancelled_native_activation_drains_guard_waiter_without_fencing_old_own
                 process.wait(timeout=6)
 
 
+def test_lost_native_preparation_reply_reuses_original_owner_on_retry(
+    config: ServiceConfig, tmp_path: Path, native_environment: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+    from agent_ssh_service import local_service, source_start
+
+    process, log = recovery_child(config, tmp_path, native_environment, "serve")
+    try:
+        owner = wait_record(config, process)
+        binding = SimpleNamespace(
+            root=Path(owner["root"]), slot=Path(owner["root"]) / "versions" / owner["slot"],
+            identity=SimpleNamespace(document=lambda: {"fixture": "service-source"}),
+        )
+        real_read = local_control.read_frame
+
+        def lost_reply(channel: Channel, deadline: Deadline) -> None:
+            assert real_read(channel, deadline)["prepared"] is True
+            raise TimeoutError("fixture-lost-preparation-reply")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(local_control, "read_frame", lost_reply)
+            with pytest.raises(TimeoutError, match="lost-preparation-reply"):
+                request(config, owner, "prepare")
+        assert request(config, owner, "health")["ready"] is False
+        monkeypatch.setattr(source_start, "ensure_selected", lambda _: None)
+        monkeypatch.setattr(
+            local_service, "spawn_daemon", lambda *a, **k: pytest.fail("spawned another owner"),
+        )
+        assert local_service.start(binding, tmp_path / "policy.json", config) == {
+            "state": "ready", "reused": True,
+        }
+        assert records(config) == [owner]
+        assert request(config, owner, "health")["ready"] is True
+        assert process.poll() is None
+        request(config, owner, "stop", wait_exit=True)
+        assert process.wait(timeout=5) == 0, log.read_text()
+        assert records(config) == []
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=6)
+
+
 def test_admitted_external_dotdot_native_startup_reuse_keeps_config_and_fence_identity(
     config: ServiceConfig, tmp_path: Path, native_environment: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,

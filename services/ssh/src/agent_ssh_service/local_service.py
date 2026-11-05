@@ -63,6 +63,11 @@ def start(binding: Any, policy_path: Path, config: ServiceConfig) -> Document:
             continue
         if health["ready"]:
             return {"state": "ready", "reused": True}
+        preparation = call(record, "prepare")
+        if preparation["prepared"]:
+            health = call(record, "activate")
+            check(health["ready"], "local-service-resume-not-ready")
+            return {"state": "ready", "reused": True}
     check(time.monotonic() < deadline, "local-start-deadline")
     logs = binding.root / "logs"
     private_directory(logs)

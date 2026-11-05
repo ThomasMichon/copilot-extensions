@@ -72,10 +72,84 @@ def test_unready_owner_is_preserved_and_failed_candidate_stays_attributable(
     monkeypatch.setattr(local_service, "records", lambda _: [owner_record(selected, config)])
     candidate = SimpleNamespace(pid=456, poll=lambda: 1)
     monkeypatch.setattr(local_service, "spawn_daemon", lambda *a, **k: candidate)
-    monkeypatch.setattr(local_service, "request", lambda *a, **_: {"ready": False})
+    monkeypatch.setattr(
+        local_service, "request",
+        lambda _config, _record, action, **_: (
+            {"prepared": False} if action == "prepare" else {"ready": False}
+        ),
+    )
     with pytest.raises(local_service.LocalStartupUncertain) as caught:
         local_service.start(selected, tmp_path / "policy.json", config)
     assert caught.value.process is candidate
+
+
+def test_startup_retry_resumes_exact_owner_after_lost_preparation_reply(
+    config: ServiceConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    selected = binding(tmp_path / "runtime")
+    record = owner_record(selected, config)
+    candidate = SimpleNamespace(pid=456, poll=lambda: None)
+    record["peer"]["pid"] = candidate.pid
+    launches: list[Any] = []
+    calls: list[str] = []
+    prepared = ready = False
+
+    def spawn(*_: Any, **__: Any) -> SimpleNamespace:
+        assert not launches, "retry spawned another exact owner"
+        launches.append(candidate)
+        return candidate
+
+    def control(_: ServiceConfig, actual: Document, action: str, **__: Any) -> Document:
+        nonlocal prepared, ready
+        assert actual is record
+        calls.append(action)
+        if action == "prepare":
+            if not prepared:
+                prepared = True
+                raise TimeoutError("fixture-lost-preparation-reply")
+            return {"prepared": True}
+        if action == "activate":
+            ready = True
+        return {"ready": ready}
+
+    monkeypatch.setattr(local_service, "records", lambda _: [record] if launches else [])
+    monkeypatch.setattr(local_service, "spawn_daemon", spawn)
+    monkeypatch.setattr(local_service, "request", control)
+    with pytest.raises(local_service.LocalStartupUncertain) as caught:
+        local_service.start(selected, tmp_path / "policy.json", config)
+    assert caught.value.process is candidate
+    assert local_service.start(selected, tmp_path / "policy.json", config) == {
+        "state": "ready", "reused": True,
+    }
+    assert launches == [candidate]
+    assert calls == ["prepare", "health", "prepare", "activate"]
+
+
+@pytest.mark.parametrize("failure", ["prepare", "activate", "not-ready"])
+def test_exact_prepared_owner_resume_failure_does_not_spawn(
+    config: ServiceConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    selected = binding(tmp_path / "runtime")
+    record = owner_record(selected, config)
+    monkeypatch.setattr(local_service, "records", lambda _: [record])
+    monkeypatch.setattr(local_service, "spawn_daemon", lambda *a, **k: pytest.fail("spawned"))
+    calls: list[str] = []
+
+    def control(_: ServiceConfig, actual: Document, action: str, **__: Any) -> Document:
+        assert actual is record
+        calls.append(action)
+        if action == failure:
+            raise TimeoutError("fixture-lost-resume-reply")
+        return {"prepared": True} if action == "prepare" else {"ready": False}
+
+    monkeypatch.setattr(local_service, "request", control)
+    if failure == "not-ready":
+        with pytest.raises(ValueError, match="local-service-resume-not-ready"):
+            local_service.start(selected, tmp_path / "policy.json", config)
+    else:
+        with pytest.raises(TimeoutError, match="lost-resume-reply"):
+            local_service.start(selected, tmp_path / "policy.json", config)
+    assert calls == ["health", "prepare"] + ([] if failure == "prepare" else ["activate"])
 
 
 def test_different_source_owner_is_preserved_without_control(

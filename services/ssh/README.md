@@ -93,6 +93,12 @@ Containment uses resolved physical paths, including native spelling aliases,
 without rewriting the admitted installation-root or configuration spelling.
 
 Managed startup prepares a service-local authenticated native control worker.
+When an exact owner's authenticated health is not yet ready, startup resumes
+that owner's existing `prepare`/`activate` sequence instead of spawning another
+process. A lost resume reply or a final not-ready result remains an explicit
+failure without creating a duplicate owner in that attempt. A positive
+preparation refusal still permits fresh startup; different owners and unknown
+health retain their existing handling. No control schema or deadline changes.
 Discovery reconciles only positively dead or birth-reused native owners before
 applying the 32-live/uninspectable-owner bound. Changed records and uninspectable
 peers are retained. Missing, inaccessible or unrelated runtime roots are

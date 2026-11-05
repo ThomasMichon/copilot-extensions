@@ -1,0 +1,9 @@
+{
+  "comment": "Resume authenticated exact prepared SSH owners after an interrupted startup reply",
+  "changes": [
+    {
+      "plugin": "services/ssh",
+      "type": "patch"
+    }
+  ]
+}
