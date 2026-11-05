@@ -31,17 +31,20 @@ class VisualApp(App[None]):
 
     def __init__(
         self, window: TimelineWindow, *, session: bool = False, current: CurrentRequestState | None = None,
+        bridge_message: str | None = None,
     ) -> None:
         super().__init__()
         self.window = window
         self.session = session
         self.current = current
+        self.bridge_message = bridge_message
         self.theme = "textual-dark"
 
     def compose(self) -> ComposeResult:
         if self.session:
             yield Static(bridge_status(
-                self.window, "selected session: partial retained events; answerability unknown; membership discovery paused",
+                self.window, self.bridge_message or
+                "selected session: partial retained events; answerability unknown; membership discovery paused",
             ))
             yield Select([
                 ("Bridge feed: membership (discover delegates)", "membership"),
@@ -98,14 +101,16 @@ def current_fixture(state: str) -> CurrentRequestState:
 
 
 @pytest.mark.parametrize("state", [
-    "live", "browsing", "session", "current-pending", "current-cleared", "current-partial", "current-unknown",
+    "live", "browsing", "session", "session-gap",
+    "current-pending", "current-cleared", "current-partial", "current-unknown",
 ])
 def test_timeline_visual(
     state: str, record_property: Callable[[str, object], None],
 ) -> None:
     async def capture() -> str:
         window = visual_window()
-        session = state == "session" or state.startswith("current-")
+        gap_message = "Timeline history error: retention-gap: position lies outside the retained event range"
+        session = state in {"session", "session-gap"} or state.startswith("current-")
         if session:
             membership = window.sources["bridge"].token
             assert not window.source_error(membership, "Reader paused; retained evidence only.").applied
@@ -123,6 +128,7 @@ def test_timeline_visual(
             assert window.apply_snapshot(snapshot(selected, rows)).applied
         app = VisualApp(
             window, session=session, current=current_fixture(state) if state.startswith("current-") else None,
+            bridge_message=gap_message if state == "session-gap" else None,
         )
         async with app.run_test(size=(100, 32)) as pilot:
             timeline = app.query_one(SubwayTimeline)
@@ -145,6 +151,11 @@ def test_timeline_visual(
                 assert window.follow_live and timeline.is_vertical_scroll_end
                 if session:
                     await pilot.press("end", "enter")
+                    await pilot.pause()
+                if state == "session-gap":
+                    assert not timeline.source_error(
+                        selected, gap_message,
+                    ).applied
                     await pilot.pause()
             return offline_svg(app.export_screenshot())
 

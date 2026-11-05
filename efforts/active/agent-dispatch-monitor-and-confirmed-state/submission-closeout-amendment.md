@@ -83,6 +83,7 @@ original proposal, relationship and allocation. It rechecks queue custody after
 the external read without submitting work or weakening the persisted rollback
 guard. This is source preparation, not ordinary caller activation; guarded
 advancement and the broader lifecycle/native matrix remain pending.
+It merged in #10466 after current-head independent approval and required CI.
 
 The CLI's completion command and client reach the coordinator's `/complete`
 route. Its queue transition records `SUBMITTED` and clears the task owner.

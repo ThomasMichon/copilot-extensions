@@ -407,7 +407,7 @@ class GitHubProvider:
             pr_state="closed" if str(pr.get("state", "")).lower() == "closed" else "open",
             merged=bool(pr.get("merged", False)),
             head_sha=head_sha,
-            base_ref=str((pr.get("base") or {}).get("ref", "")),
+            base_ref=str((pr.get("base") or {}).get("ref", "")), base_sha=str((pr.get("base") or {}).get("sha") or ""),
             updated_at=str(pr.get("updated_at", "") or ""),
             reviews=self._all_review_objs(
                 repo, number, token, host=host,

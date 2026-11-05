@@ -14,6 +14,8 @@ partial and unknown live-input qualification while retaining the same historical
 request and compaction occurrences. They use strict synthetic wire DTOs and the
 production summary renderer; a cleared live set does not erase the historical
 request, and partial/unknown coverage never means complete absence.
+`timeline-session-gap.svg` retains the same historical occurrences and expanded
+detail while showing an explicit retention-gap diagnostic and unavailable source.
 The purpose, source qualifications, selection, details, controls and unread
 count are compared as rendered, not reconstructed from DTOs.
 
@@ -61,3 +63,10 @@ transfer or answering. These full-app captures remain progress evidence rather
 than deterministic golden comparisons. Dated SVG/PNG progress exports and
 curated screenshots are stored separately from source qualification; neither
 qualifies an installed runtime or native mux client.
+
+`tests/test_companion_joined_lifecycle.py` retains ordered `sidecar-state` /
+`sidecar-svg` pairs for three-owner browsing, an actual expired history boundary
+and its explicit Refresh recovery. Its full-app captures use actual private
+owner processes and live timestamps; they are progress evidence, not goldens.
+The stable gap comparison above instead uses deterministic synthetic records
+with the production source-error and summary renderers.

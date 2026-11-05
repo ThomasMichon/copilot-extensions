@@ -4722,7 +4722,7 @@
         "tools/promotion_unit_tests/test_daemon_cwd_contract.py": "a48c87d1835969aa7f40a72a000e6081821028cd6500355a19ced798331e3e25",
         "plugins/agent-codespaces/src/agent_codespaces/owner_startup.py": "b49522cc34a28da9966820fc2590925425e2bdcbb9f793b4a943092928ee4962",
         "plugins/agent-worktrees/src/agent_worktrees/installer_run.py": "0aeb1946faedaf902c55c5153a15bc430f4207262ddd1d7b51ee65265bfa2408",
-        "plugins/agent-worktrees/src/agent_worktrees/reconcile.py": "840e378586bd2d2a0cf1ab0177ac1021ecbf660211d4431967f68a488c1369c8",
+        "plugins/agent-worktrees/src/agent_worktrees/reconcile.py": "6b4e1d79afdc42ca0c2e049340139401e22074ad409ebc4250390b0c3421fa2e",
         "plugins/agent-worktrees/src/agent_worktrees/reconcile_freshness.py": "88c017962d9d03ca1ad9d2a7a4cad7351159a1327e70793854739091d6f4a9ae",
         "tools/promotion_unit_tests/test_launch_freshness.py": "ad42ff259246d16df7ad8583a486e26db5b8b5861e5a1dc498c08d60d9d112f8",
         "plugins/agent-worktrees/src/agent_worktrees/update_installer_process.py": "6cc476966f7c03b4c256926af80ab93aa2c92f7ef5bbd8818794521f7f965e77",

@@ -547,6 +547,48 @@ def test_actual_fixed_request_has_durable_result_on_empty_inventory(tmp_path, mo
     assert request.spec.backend == "engine-launch-update"
 
 
+def test_actual_reconcile_request_retains_skipped_payload_failure(tmp_path, monkeypatch):
+    from agent_procutil.owned_process import run_owned
+    import update_driver as driver
+
+    home = tmp_path / "home"
+    home.mkdir()
+    repo = tmp_path / "repo"
+    settings = repo / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({
+        "enabledPlugins": {"agent-example@copilot-extensions": True},
+    }))
+    for key in ("HOME", "USERPROFILE", "AGENT_HOME"):
+        monkeypatch.setenv(key, str(home))
+    for key in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "AGENT_WORKTREES_PAYLOAD_ROOT"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("COPILOT_HOME", str(home / ".copilot"))
+    monkeypatch.setenv("COPILOT_CACHE_HOME", str(home / ".copilot-cache"))
+    monkeypatch.setenv("PATH", str(tmp_path / "empty-path"))
+    monkeypatch.chdir(tmp_path)
+    status = tmp_path / "status.json"
+
+    result = run_owned([
+        sys.executable, "-m", "agent_worktrees", "reconcile-plugins",
+        "--repo", str(repo), "--apply", "--with-payload-refresh", "--status", str(status),
+    ], timeout=30)
+
+    assert result.returncode == 1, result.stderr
+    summary = json.loads(result.stdout)
+    assert summary["executed"] == []
+    assert summary["skipped"] == [{
+        "service": "agent-example", "phase": "payload", "reason": "copilot-unavailable",
+    }]
+    recorded = json.loads(status.read_text())
+    assert recorded["ok"] is False
+    assert recorded["skipped"] == summary["skipped"]
+    request_id = result.stderr.split("Update request ", 1)[1].split(";", 1)[0]
+    request = driver.status(request_id, root=home / ".copilot-extensions" / "update-driver")
+    assert request.state == "completed" and request.exit_code == 1
+    assert json.loads(boundary._result_path(request).read_text()) == summary
+
+
 def test_actual_staged_install_survives_submitter_job_and_preserves_two_results(tmp_path, monkeypatch):
     import os
     import shutil

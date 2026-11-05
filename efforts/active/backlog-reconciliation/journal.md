@@ -3,6 +3,18 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-04 - Finite deploy architecture and mixed-version launch contracts](<journal/2026/11.04 deploy-architecture-launch-compatibility-contracts.md>)
+
+- [2026-11-04 - Independent cleanup and exact terminal recovery contracts](<journal/2026/11.04 cleanup-recovery-evidence-contracts.md>)
+
+- [2026-11-04 - Present-unknown ownership and finite dead-route completion](<journal/2026/11.04 ownership-observation-dead-route-contracts.md>)
+
+- [2026-11-04 - Two explicit-integration and payload-provenance contracts](<journal/2026/11.04 install-integration-provenance-contracts.md>)
+
+- [2026-11-04 - Two caller-owned asyncio transport-cleanup contracts](<journal/2026/11.04 async-transport-cleanup-contracts.md>)
+
+- [2026-11-04 - One three-hazard monitor-restart contract](<journal/2026/11.04 monitor-restart-exclusivity-contract.md>)
+
 - [2026-11-04 - Two healthy-replacement and stale-slot recovery contracts](<journal/2026/11.04 bridge-replacement-recovery-contracts.md>)
 
 - [2026-11-04 - Two per-unit supervision and independent-native-lifetime contracts](<journal/2026/11.04 supervision-native-lifetime-contracts.md>)

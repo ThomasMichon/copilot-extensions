@@ -31,8 +31,9 @@ from test_companion_agenda_live import current_data, until
 from test_companion_agenda_rich import managed as managed, current_managed_data
 from test_companion_bridge_codec import OWNER, raw, snapshot
 from _worktree_timeline_fixtures import (
-    JOIN_COMMAND_CLEANUP, JOIN_PREPARATION_SECONDS, JoinPhase, resident_join,
+    JOIN_COMMAND_CLEANUP, JOIN_PREPARATION_SECONDS, JoinPhase,
 )
+from _companion_joined_fixtures import managed_join
 
 pytestmark = [
     pytest.mark.portfolio_tier("T3"), pytest.mark.effect("filesystem"),
@@ -665,69 +666,13 @@ def test_actual_three_source_commit_binding_and_child_join_preserves_history(
     native_bridge, tmp_path, monkeypatch,
 ) -> None:
     root = tmp_path / "joined-owner"
-    root.mkdir()
-    with resident_join(root, monkeypatch, with_agenda=True) as peer:
-        config = importlib.import_module("agent_worktrees.config")
-        project_state = importlib.import_module("agent_worktrees.project_state")
-        placement = importlib.import_module("agent_worktrees.worktree_data_store")
-        store = importlib.import_module("agenda_store")
-        publisher = importlib.import_module("agenda_publish")
-        monkeypatch.setattr(config, "_home", lambda: root / "profile")
-        monkeypatch.setattr(project_state, "_normalized_repository_remote", lambda project: f"network:example.invalid/{project}")
+    with managed_join(root, monkeypatch) as peer:
         checkout = peer["checkout"]
-        settings = checkout / ".github/copilot/settings.json"
-        settings.parent.mkdir(parents=True)
-        settings.write_text(json.dumps({
-            "enabledPlugins": {"efforts@source-fixture": True},
-            "extraKnownMarketplaces": {"source-fixture": {
-                "source": {"source": "directory", "path": str(ROOT), "manifestName": "copilot-extensions"},
-            }},
-        }))
-        bootstrap = root / "bootstrap/sitecustomize.py"
-        bootstrap.write_text(bootstrap.read_text() + (
-            f"\nconfig._home=lambda:Path({str(root / 'profile')!r})\n"
-            "from agent_worktrees import project_state\n"
-            "project_state._normalized_repository_remote=lambda project:f'network:example.invalid/{project}'\n"
-        ))
-        interpreter = root / "selected-python"
-        prefix = (
-            f"import sys;sys.path[:0]={[str(root / 'bootstrap'), *map(str, SOURCE_PATHS)]!r};"
-            "import sitecustomize\n"
-        )
-        interpreter.write_text(
-            f"#!{sys.executable} -I\nimport os,sys\n"
-            f"prefix={prefix!r}\n"
-            "if '-c' in sys.argv:\n"
-            "    index=sys.argv.index('-c')\n"
-            "    code=prefix+sys.argv[index+1]; args=sys.argv[index+2:]\n"
-            "else:\n"
-            "    assert sys.argv[1:3]==['-m','agent_worktrees']\n"
-            "    code=prefix+'from agent_worktrees.__main__ import main;main(sys.argv[1:])'; args=sys.argv[3:]\n"
-            "os.execv(sys.executable,[sys.executable,'-I','-B','-c',code,*args])\n",
-        )
-        interpreter.chmod(0o700)
-        monkeypatch.setattr(companion.ec, "engine_base_command", lambda: [str(interpreter), "-m", "agent_worktrees"])
-        allocated = placement.allocate_worktree_data(
-            "example", "selected", creation_nonce="f" * 32,
-            domain="agendas", lane="main", store_id="c" * 32,
-        )
-        home = Path(allocated.state_home)
-        initialization = json.loads((ROOT / "plugins/efforts/skills/driving-effort-agendas/assets/init.context-qualified.example.json").read_text())
-        initialization["change"]["worktree"] = "selected"
-        store.mutate(home, initialization, session="head-a", initial_store_id="c" * 32)
-
-        def data():
-            return companion._CompanionData(
-                worktree={**peer["row"], "repo": "example", "path": str(checkout)},
-                sessions=[{"id": "head-a", "is_head": True}],
-                bundle={"facts": {"claims": {"value": {"owner_ref": OWNER}, "confirmed": True}}},
-            )
-
-        monkeypatch.setattr(companion, "_load_current_worktree", lambda *args, **kwargs: data())
+        home, store, publisher = peer["agenda_home"], peer["agenda_store"], peer["agenda_publisher"]
 
         async def publish() -> None:
             result = await asyncio.to_thread(
-                publisher.publish, home, [], provider_python=str(interpreter), provider_project="example",
+                publisher.publish, home, [], provider_python=peer["provider_python"], provider_project="example",
             )
             assert result["state"] == "delivered", result
 

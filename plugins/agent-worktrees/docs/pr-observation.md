@@ -29,6 +29,21 @@ pr-watch wait Project/repository 7 --since <cursor> --until any --timeout 600 --
 `agent-worktrees.pr-snapshot` version-1 envelope identifies the provider,
 endpoint, repository, PR and head, and carries the same `observation` that the
 tracked `pr-status` live block and foreground wait report.
+The one-shot envelope additionally carries `base_sha`: the target-tip object
+ID returned by the same native PR read, not the merge base or synthetic merge
+commit. GitHub/Gitea use `base.sha`; native and legacy ADO use
+`lastMergeTargetCommit.commitId`. Missing or malformed target evidence is the
+empty string, never a branch name, cached local ref or invented object ID.
+No extra provider request is made. This is observation evidence, not an atomic
+multi-page forge snapshot or action authorization.
+
+This is additive version-1 JSON. Older consumers may ignore it; newer consumers
+against prior providers must treat an absent field as unknown. A consumer that
+needs an exact head/target candidate must require both full object IDs in the
+correct admitted scope rather than substitute `base_ref`. Existing watch
+cursors, transition criteria and merge policy are unchanged; exporting this
+field does not silently add a target-movement transition.
+
 On-demand `threads` reads return discussion bodies, stable comment identities and
 comparison-round context; persisted watch snapshots contain metadata only.
 Each readable thread also reports a reply fingerprint or an explicit
