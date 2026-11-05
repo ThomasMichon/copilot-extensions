@@ -130,7 +130,10 @@ see a confirmed comment as new input. The existing v3 serving descriptor still
 refuses v4; A3 must qualify negotiated reading before a serving host can adopt
 this layout. No HTTP/CLI operation or default host enables this source seam.
 
-The separately reviewed [feedback capture data](feedback-capture.md) expands
-the same owner explicitly to v5 without changing attention-state/v1. Its B1
-data-only exit does not supply the protected capture/confirmation or
-interest-specific echo integration above.
+The [feedback capture owner](feedback-capture.md) expands the same owner
+explicitly to v5 without changing attention-state/v1. Its optional protected
+submit composition reserves immutable pre-effect context and reconciles exact
+confirmed comment/reply/edit readback to only the originally captured interests
+and position. Tracking does not resend confirmed effects or consume later
+dialogue. Verdict attribution and later interest-specific echo coverage remain
+unavailable until separately qualified; B1 storage alone provides neither.

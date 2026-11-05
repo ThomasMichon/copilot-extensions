@@ -46,7 +46,7 @@ def _validate_capture(value: dict) -> str:
 
 
 class FeedbackCaptures:
-    """Strict detached records; only a future protected owner may admit captures."""
+    """Strict detached records; capture admission stays with the protected owner."""
 
     def __init__(self, state: dict | None = None) -> None:
         self.records: list[dict] = []

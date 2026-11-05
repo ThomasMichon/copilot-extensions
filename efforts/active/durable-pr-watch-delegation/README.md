@@ -295,9 +295,12 @@ _Operator-required outcome; agent-recommended slices and validation._
   Its A1 explicit data-owner expansion merged in #10641 and finite atomic
   acquisition half of A2 in #10648. The
   [captured-feedback refinement](captured-attention-feedback.md), merged in
-  #10664, defines the remaining pre-effect capture, confirmed retry readback and interest-specific
-  echo integration before runtime changes. A2's full exit and negotiated
-  serving remain open.
+  #10664, defines the remaining pre-effect capture, confirmed retry readback
+  and interest-specific echo integration. Its finite B1 storage expansion
+  merged in #10665. The optional protected B2 source seam captures original
+  positions and reconciles confirmed comment/reply/edit readback without
+  resends or consuming newer input. Exact vote attribution, B3 echo coverage,
+  A2's full exit and negotiated serving remain open.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -935,6 +938,54 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-05 - Realize protected original-position feedback
+
+- The optional trusted submit embedding now captures positively admitted
+  interests and exact complete/fresh generation/journal meaning before the
+  first native attempt. Missing capture after an attempt cannot be backfilled;
+  capacity and newer unavailable evidence refuse before sending.
+- Capture additionally requires the exact position returned by that
+  generation's successful acquisition, not a cursor inferred from equal
+  current contents. The existing workspace bounds this metadata by its cache's
+  generation limit; missing metadata requires reacquisition for new effects,
+  while a durable original capture still reconciles after restart. Old
+  pre-reopen and same-epoch round-trip generations cannot borrow a new cursor.
+- The same protected owner guards the actual target tip and performs fresh
+  readback on all-confirmed retries without another send. Exact confirmed
+  comment/reply/edit objects can record only their captured position and
+  interests; later independent input remains pending, age gaps stay
+  conservative, newer handled proof is not regressed and reopen epochs fence
+  old progress. Native action disposition and tracking are separate.
+  Target motion or missing capture does not block read-only original receipt
+  attribution, and cannot authorize remaining writes.
+- Protected synthetic cases cover restart, unknown-response reconciliation,
+  original attempt/receipt custody, target-only motion, concurrent input,
+  tracking-write failure before/after replacement, unavailable acquisition,
+  retained gaps, interest binding and request-side override rejection.
+  Current votes or equal VoteUpdate counts cannot identify an immutable vote
+  event and remain explicitly tracking-unavailable. Exact vote attribution,
+  B3 echo coverage, A3 serving and all broader acceptance remain open.
+- The final bounded feedback/executor/capture/acquisition/workspace/
+  conversation/review-owner/replay packet passes 288 cases, with container
+  cleanup verified. Fatal Ruff, documentation consistency and the 13-plugin
+  install contract pass. This is protected synthetic source qualification,
+  not native Windows, live provider, installed or serving acceptance.
+- No default host, serving descriptor, strict wire, provisioner or lifecycle
+  adoption changes. No real provider write, retained service or rollout is
+  authorized by this source contribution.
+
+### 2026-11-05 - Land capture storage; continue protected integration
+
+- #10665 actually merged as `ca22dc3698229c5af9c5ec2709e87f456fc599a9`
+  after exact-head Copilot approval with no findings and all required CI green,
+  including the PR gate. The managed source worktree is reconciled; the
+  174-case bounded packet remains source qualification, not installed adoption.
+- Re-read the canonical Plan/Validation and preserve the Active parent.
+  Continue B2's trusted pre-effect capture, actual-target protected checks,
+  fresh readback on confirmed retries and captured-position handled progress
+  through the current owners. B3 echo coverage and A3 serving remain later
+  exits. No live effect, migration or deployment is authorized.
 
 ### 2026-11-05 - Review capture contract; realize its finite data-owner expansion
 

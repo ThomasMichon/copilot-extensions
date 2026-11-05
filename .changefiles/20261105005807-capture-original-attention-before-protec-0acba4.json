@@ -1,0 +1,9 @@
+{
+  "comment": "Capture original attention before protected review effects and reconcile exact confirmed readback without resending.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}
