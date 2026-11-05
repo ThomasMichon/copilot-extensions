@@ -4778,6 +4778,17 @@ production consumer, persistent offline discovery, source-cache GC, activation
 or a live-feed exception. See [source preparation](../tools/prepare_runtime_source.md)
 and [validation coverage](../TESTING.md#wheel-input-inspection).
 
+`retain_associated_source_runtime_inputs` also accepts first-party wheels held by
+an independently authenticated association owner. It derives the exact native
+source lock and checks retained external wheels against current feed metadata
+without downloading their bodies in that admission step; the native resolver
+may make its own requests. Source, association, feed and optional revocation
+are rechecked through the returned context; the Worktrees source adapter can
+pass those held inputs to its existing publication owner. The association
+callback must come from the trusted caller, not from a candidate. This is
+source fallback, not artifact-profile approval, bundle discovery or
+ordinary-update enablement.
+
 ### Explicit registered-marketplace source authentication
 
 `runtime_marketplace_source.retain_authenticated_marketplace_source` is a

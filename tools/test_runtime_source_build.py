@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 import zipfile
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import replace
 from pathlib import Path
 
@@ -32,6 +32,7 @@ from test_runtime_source_authentication import git
 from test_runtime_source_lock import plan
 from test_runtime_source_lock import target as target  # noqa: PLC0414
 from test_runtime_marketplace_source import registered_source as registered_source  # noqa: PLC0414
+from test_runtime_source_wheels import built_wheels as built_wheels, toolchain as toolchain  # noqa: PLC0414
 from wheel_input_fixture import wheel_bytes
 
 
@@ -591,18 +592,253 @@ def test_registered_marketplace_source_reaches_the_real_closed_builder(
         source.verify()
 
 
+@pytest.mark.parametrize("with_external", [False, True])
+def test_retained_associated_wheels_keep_source_and_feed_owners_live(
+    adopter, configured_source, target, feeds, tmp_path, monkeypatch, built_wheels, toolchain,
+    with_external,
+):
+    source = source_with_process_owner(configured_source)
+    if with_external:
+        manifest = source / "pyproject.toml"
+        manifest.write_text(manifest.read_text().replace(
+            'dependencies=["agent-procutil"]',
+            'dependencies=["agent-procutil","fixture==1.0"]',
+        ))
+        select_source(configured_source)
+    expected_commit = git(configured_source[1], "rev-parse", "HEAD")
+    pool = tmp_path / "pool"
+    first = built_wheels(source, pool)
+    helper = built_wheels(source / "_vendor" / "procutil", pool)
+    monkeypatch.setattr(completion, "build_wheel", lambda *_args, **_kwargs: pytest.fail(
+        "associated wheels must not execute a backend",
+    ))
+    state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
+    paths = {path.name: path for path in (first, helper)}
+    if with_external:
+        external = wheel_bytes(
+            name="fixture", prefix="fixture-1.0.dist-info/",
+            metadata=b"Metadata-Version: 2.4\nName: fixture\nVersion: 1.0\nRequires-Python: >=3.9\n\n",
+        )
+        external_path = pool / FILENAME
+        external_path.write_bytes(external)
+        paths[external_path.name] = external_path
+        digest = hashlib.sha256(external).hexdigest()
+        project(state, [listed(hashes={"sha256": digest}, **{"requires-python": ">= 3.9"})])
+        state["routes"]["/files/" + FILENAME] = 200, {}, external
+    monkeypatch.setattr(
+        configuration, "_opaque_index_identity", lambda value: hashlib.sha256(value.encode()).hexdigest(),
+    )
+    env = environment(adopter, state, tmp_path)
+    owner = {"valid": True, "calls": 0}
+
+    def verify_association(identity):
+        assert identity.source_commit == expected_commit
+        owner["calls"] += 1
+        if not owner["valid"]:
+            raise ValueError("associated release changed")
+
+    hashes = {
+        name: "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+        for name, path in paths.items()
+    }
+    arguments = options(adopter, target, env)
+    with acquisition.retain_wheel_inputs(
+        paths, hashes, max_wheels=8, max_archive_bytes=1 << 20,
+        max_total_bytes=4 << 20, max_snapshot_bytes=8 << 20, deadline=arguments["deadline"],
+    ) as snapshot:
+        associated = builds.AssociatedSourceWheels(
+            snapshot, (("agent-example", first.name), ("agent-procutil", helper.name)),
+            toolchain, verify_association,
+        )
+        owner["valid"] = False
+        with monkeypatch.context() as preflight:
+            preflight.setattr(builds, "retain_source_wheel_lock", lambda *_args, **_kwargs: pytest.fail(
+                "unverified association reached source resolution",
+            ))
+            with pytest.raises(ValueError, match="associated release changed"):
+                with builds.retain_associated_source_runtime_inputs(
+                    plan(adopter), associated=associated, **arguments,
+                ):
+                    pytest.fail("unverified association reached a consumer")
+        owner["valid"] = True
+        with builds.retain_associated_source_runtime_inputs(
+            plan(adopter), associated=associated, **arguments,
+        ) as selected:
+            assert selected.identity.source_commit == expected_commit
+            assert selected.build_slot is None
+            assert selected.local_packages == ("agent-example", "agent-procutil")
+            assert {name for name, *_ in selected.wheels.distributions} == (
+                {"agent-example", "agent-procutil", "fixture"}
+                if with_external else {"agent-example", "agent-procutil"}
+            )
+            lock = selected.wheels.receipt()["binding"]["source_lock"]
+            if with_external:
+                assert lock["acquisition"]["schema"] == "copilot-extensions.retained-wheel-feed-admission"
+            else:
+                assert "acquisition" not in lock
+            selected.verify()
+            assert owner["calls"] >= 2
+            if with_external:
+                original = state["routes"]["/simple/fixture/"]
+                project(state, [listed(hashes={"sha256": digest}, yanked=True)])
+                try:
+                    with pytest.raises(ValueError):
+                        selected.verify()
+                finally:
+                    state["routes"]["/simple/fixture/"] = original
+                    state["routes"]["/files/" + FILENAME] = 200, {}, external
+                real_admission = builds.admit_retained_wheel_inputs
+
+                @contextmanager
+                def change_owner_during_admission(*args, **kwargs):
+                    with real_admission(*args, **kwargs) as admitted:
+                        owner["valid"] = False
+                        yield admitted
+
+                try:
+                    with monkeypatch.context() as changed:
+                        changed.setattr(builds, "admit_retained_wheel_inputs", change_owner_during_admission)
+                        with pytest.raises(ValueError, match="associated release changed"):
+                            selected.verify()
+                finally:
+                    owner["valid"] = True
+            owner["valid"] = False
+            try:
+                with pytest.raises(ValueError, match="associated release changed"):
+                    selected.verify()
+            finally:
+                owner["valid"] = True
+        with pytest.raises(ValueError, match="custody is closed"):
+            selected.verify()
+        with pytest.raises(ValueError, match="revoked"):
+            with builds.retain_associated_source_runtime_inputs(
+                plan(adopter), associated=associated,
+                revoked_inputs=lambda: frozenset({hashes[first.name]}), **arguments,
+            ):
+                pytest.fail("revoked associated wheel reached a consumer")
+
+    if not with_external:
+        foreign_dir = tmp_path / "foreign-first-party"
+        foreign_dir.mkdir()
+        foreign = foreign_dir / first.name
+        foreign.write_bytes(wheel_bytes(
+            name="agent_example", prefix="agent_example-1.0.0.dist-info/",
+            metadata=b"Metadata-Version: 2.4\nName: agent-example\nVersion: 1.0.0\n\n",
+            extra={"agent_example/changed.py": b"changed\n"},
+        ))
+        foreign_paths = {path.name: path for path in (foreign, helper)}
+        foreign_hashes = {
+            name: "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+            for name, path in foreign_paths.items()
+        }
+        arguments["deadline"] = time.monotonic() + 120
+        with acquisition.retain_wheel_inputs(
+            paths, hashes, max_wheels=8, max_archive_bytes=1 << 20,
+            max_total_bytes=4 << 20, max_snapshot_bytes=8 << 20, deadline=arguments["deadline"],
+        ) as snapshot, acquisition.retain_wheel_inputs(
+            foreign_paths, foreign_hashes, max_wheels=8, max_archive_bytes=1 << 20,
+            max_total_bytes=4 << 20, max_snapshot_bytes=8 << 20, deadline=arguments["deadline"],
+        ) as foreign_snapshot:
+            associated = builds.AssociatedSourceWheels(
+                snapshot, (("agent-example", first.name), ("agent-procutil", helper.name)),
+                toolchain, verify_association,
+            )
+            real_completion = builds.retain_source_profile
+
+            @contextmanager
+            def substitute(*args, **kwargs):
+                with real_completion(*args, **kwargs) as completed:
+                    distributions = tuple(
+                        (name, version, filename, foreign_snapshot.digests[filename])
+                        for name, version, filename, _digest in completed.wheels.distributions
+                    )
+                    wheels = replace(completed.wheels, snapshot=foreign_snapshot, distributions=distributions)
+                    yield replace(completed, wheels=wheels)
+
+            with monkeypatch.context() as changed:
+                changed.setattr(builds, "retain_source_profile", substitute)
+                with pytest.raises(ValueError, match="completed source wheels differ"):
+                    with builds.retain_associated_source_runtime_inputs(
+                        plan(adopter), associated=associated, **arguments,
+                    ):
+                        pytest.fail("foreign completed wheels reached a consumer")
+        return
+    foreign_dir = tmp_path / "foreign"
+    foreign_dir.mkdir()
+    foreign = foreign_dir / FILENAME
+    foreign.write_bytes(wheel_bytes(
+        name="fixture", prefix="fixture-1.0.dist-info/",
+        metadata=b"Metadata-Version: 2.4\nName: fixture\nVersion: 1.0\nRequires-Python: >=3.9\n\n",
+        extra={"fixture/changed.py": b"changed\n"},
+    ))
+    foreign_paths = {path.name: path for path in (first, helper, foreign)}
+    foreign_hashes = {
+        name: "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+        for name, path in foreign_paths.items()
+    }
+    arguments["deadline"] = time.monotonic() + 120
+    with acquisition.retain_wheel_inputs(
+        foreign_paths, foreign_hashes, max_wheels=8, max_archive_bytes=1 << 20,
+        max_total_bytes=4 << 20, max_snapshot_bytes=8 << 20, deadline=arguments["deadline"],
+    ) as snapshot:
+        associated = builds.AssociatedSourceWheels(
+            snapshot, (("agent-example", first.name), ("agent-procutil", helper.name)),
+            toolchain, verify_association,
+        )
+        with monkeypatch.context() as mismatch:
+            mismatch.setattr(builds, "admit_retained_wheel_inputs", lambda *_args, **_kwargs: pytest.fail(
+                "mismatched wheels reached feed admission",
+            ))
+            with pytest.raises(ValueError, match="selected source lock"):
+                with builds.retain_associated_source_runtime_inputs(
+                    plan(adopter), associated=associated, **arguments,
+                ):
+                    pytest.fail("mismatched wheels reached a consumer")
+
+
+@pytest.mark.parametrize("invalid", ["missing-owner", "false-owner", "duplicate-wheel", "foreign-wheel"])
+def test_associated_source_selection_rejects_unowned_or_ambiguous_inputs(
+    tmp_path, toolchain, invalid,
+):
+    wheel = tmp_path / FILENAME
+    wheel.write_bytes(b"selected")
+    digest = "sha256:" + hashlib.sha256(wheel.read_bytes()).hexdigest()
+    with acquisition.retain_wheel_inputs(
+        {wheel.name: wheel}, {wheel.name: digest}, max_wheels=2, max_archive_bytes=1024,
+        max_total_bytes=1024, max_snapshot_bytes=2048, deadline=time.monotonic() + 30,
+    ) as snapshot:
+        projects = (("fixture", wheel.name),)
+        if invalid == "duplicate-wheel":
+            projects += (("another", wheel.name),)
+        elif invalid == "foreign-wheel":
+            projects = (("fixture", "foreign-1.0-py3-none-any.whl"),)
+        owner = None if invalid == "missing-owner" else (
+            (lambda _identity: False) if invalid == "false-owner" else (lambda _identity: None)
+        )
+        with pytest.raises(ValueError, match="associated source"):
+            selected = builds.AssociatedSourceWheels(snapshot, projects, toolchain, owner)
+            selected.verify(None)
+
+
+@pytest.mark.parametrize("route", ["built", "associated"])
 @pytest.mark.parametrize("revoke", [False, True])
 def test_worktrees_native_constructor_consumes_the_live_source_owner(
-    adopter, configured_source, target, feeds, tmp_path, monkeypatch, revoke,
+    adopter, configured_source, target, feeds, tmp_path, monkeypatch, request, revoke, route,
 ):
     import importlib.util
     from types import SimpleNamespace
 
-    project = source_with_process_owner(configured_source)
-    worktrees = project.with_name("agent-worktrees")
-    project.rename(worktrees)
+    source_project_path = source_with_process_owner(configured_source)
+    worktrees = source_project_path.with_name("agent-worktrees")
+    source_project_path.rename(worktrees)
     manifest = worktrees / "pyproject.toml"
-    manifest.write_text(manifest.read_text().replace('name="agent-example"', 'name="agent-worktrees"'))
+    content = manifest.read_text().replace('name="agent-example"', 'name="agent-worktrees"')
+    if route == "associated":
+        content = content.replace(
+            'dependencies=["agent-procutil"]',
+            'dependencies=["agent-procutil","fixture==1.0"]',
+        )
+    manifest.write_text(content)
     (worktrees / "plugin.json").write_text('{"name":"agent-worktrees","version":"1.0.0"}')
     (worktrees / "src" / "agent_example").rename(worktrees / "src" / "agent_worktrees")
     select_source(configured_source)
@@ -619,6 +855,14 @@ def test_worktrees_native_constructor_consumes_the_live_source_owner(
     adopter[2].write_text(json.dumps(settings))
     state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
     packaging_feed(state)
+    if route == "associated":
+        external = wheel_bytes(
+            name="fixture", prefix="fixture-1.0.dist-info/",
+            metadata=b"Metadata-Version: 2.4\nName: fixture\nVersion: 1.0\nRequires-Python: >=3.9\n\n",
+        )
+        digest = hashlib.sha256(external).hexdigest()
+        project(state, [listed(hashes={"sha256": digest})])
+        state["routes"]["/files/" + FILENAME] = 200, {}, external
     env = environment(adopter, state, tmp_path)
     monkeypatch.setattr(configuration, "_opaque_index_identity", lambda value: hashlib.sha256(value.encode()).hexdigest())
     scripts = Path(__file__).resolve().parents[1] / "plugins" / "agent-worktrees" / "scripts"
@@ -675,13 +919,20 @@ def test_worktrees_native_constructor_consumes_the_live_source_owner(
         verify("helpers")
         effects.append("helpers")
         original = config.read_bytes()
+        original_feed = state["routes"].get("/simple/fixture/")
         try:
             if revoke:
-                config.write_text("system-certs=true\n")
+                if route == "associated":
+                    project(state, [listed(hashes={"sha256": digest}, yanked=True)])
+                else:
+                    config.write_text("system-certs=true\n")
             verify("selector")
             effects.append("selector")
         finally:
             config.write_bytes(original)
+            if original_feed is not None:
+                state["routes"]["/simple/fixture/"] = original_feed
+                state["routes"]["/files/" + FILENAME] = 200, {}, external
         Path(argv[argv.index("--result") + 1]).write_text('{"runtime_version":"candidate"}')
 
     monkeypatch.setattr(native.publication_recheck, "run", publish)
@@ -689,13 +940,44 @@ def test_worktrees_native_constructor_consumes_the_live_source_owner(
         **options(adopter, target, env), "component": "agent-worktrees",
         "deadline": time.monotonic() + 180,
     }
-    if revoke:
-        with pytest.raises(ValueError, match="source configuration changed"):
-            adapter.install_source_runtime(plan(adopter), **arguments)
-        assert effects == ["construct", "helpers"]
-    else:
-        assert adapter.install_source_runtime(plan(adopter), **arguments)["runtime_version"] == "candidate"
-        assert effects == ["construct", "helpers", "selector"]
+    with ExitStack() as stack:
+        if route == "associated":
+            build_fixture = request.getfixturevalue("built_wheels")
+            toolchain = request.getfixturevalue("toolchain")
+            pool = tmp_path / "associated"
+            first = build_fixture(worktrees, pool)
+            helper = build_fixture(worktrees / "_vendor" / "procutil", pool)
+            monkeypatch.setattr(completion, "build_wheel", lambda *_args, **_kwargs: pytest.fail(
+                "associated source reached a backend",
+            ))
+            wheel = pool / FILENAME
+            wheel.write_bytes(external)
+            paths = {path.name: path for path in (first, helper, wheel)}
+            hashes = {
+                name: "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+                for name, path in paths.items()
+            }
+            snapshot = stack.enter_context(acquisition.retain_wheel_inputs(
+                paths, hashes, max_wheels=8, max_archive_bytes=1 << 20,
+                max_total_bytes=4 << 20, max_snapshot_bytes=8 << 20,
+                deadline=arguments["deadline"],
+            ))
+            commit = git(configured_source[1], "rev-parse", "HEAD")
+
+            def verify_association(identity):
+                assert identity.source_commit == commit
+
+            arguments["associated"] = builds.AssociatedSourceWheels(
+                snapshot, (("agent-worktrees", first.name), ("agent-procutil", helper.name)),
+                toolchain, verify_association,
+            )
+        if revoke:
+            with pytest.raises(ValueError):
+                adapter.install_source_runtime(plan(adopter), **arguments)
+            assert effects == ["construct", "helpers"]
+        else:
+            assert adapter.install_source_runtime(plan(adopter), **arguments)["runtime_version"] == "candidate"
+            assert effects == ["construct", "helpers", "selector"]
 
 
 @pytest.mark.parametrize("reuse", [False, True])

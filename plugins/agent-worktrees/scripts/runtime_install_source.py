@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 
-def install_source_runtime(plan, *, frontend=None, **options):
+def install_source_runtime(plan, *, frontend=None, associated=None, **options):
     """Keep the authenticated source and feed owner alive through cutover."""
     import runtime_install as native
 
@@ -43,7 +43,15 @@ def install_source_runtime(plan, *, frontend=None, **options):
     )
     governance.require_owned_lifecycle()
     selected_options = {**options, "uv": str(uv), "python": python}
-    with retain_source_runtime_inputs(plan, **selected_options) as source:
+    if associated is None:
+        retained = retain_source_runtime_inputs(plan, **selected_options)
+    else:
+        from runtime_source_build import retain_associated_source_runtime_inputs
+
+        retained = retain_associated_source_runtime_inputs(
+            plan, associated=associated, **selected_options,
+        )
+    with retained as source:
         def verify():
             governance.require_owned_lifecycle()
             source.verify()

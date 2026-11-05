@@ -151,6 +151,7 @@ def test_parent_publication_recheck_is_ordered_and_fail_closed(denied):
 
 @pytest.mark.parametrize("outcome", [
     "flat", "owned", "revoked", "missing-owner", "missing-selection", "foreign-lock",
+    "associated", "associated-unbound", "associated-denied", "associated-mismatch",
 ])
 def test_source_wheel_profile_requires_its_live_owner(outcome):
     path = ROOT / "plugins" / "agent-worktrees" / "scripts" / "runtime_install_recheck.py"
@@ -172,26 +173,38 @@ def test_source_wheel_profile_requires_its_live_owner(outcome):
     }
     if outcome == "flat":
         binding = profile
+    elif outcome.startswith("associated"):
+        binding.pop("build_profile")
+        lock = binding["source_lock"]
+        lock.update({
+            "policy": {"policyId": "sha256:" + "d" * 64},
+            "trigger": "release-index-unavailable", "files": [],
+            "source_authentication": {
+                "source": {} if outcome == "associated-mismatch" else source.document(),
+                "owner_policy": "sha256:" + "d" * 64, "mode": "source",
+                "trigger": "release-index-unavailable",
+            },
+        })
     events = []
 
     def verify():
         events.append("verified")
-        if outcome == "revoked":
+        if outcome in ("revoked", "associated-denied"):
             raise ValueError("revoked")
 
-    callback = None if outcome == "missing-owner" else verify
+    callback = None if outcome in ("missing-owner", "associated-unbound") else verify
     selection = None if outcome == "missing-selection" else {}
-    if outcome in ("flat", "owned"):
+    if outcome in ("flat", "owned", "associated"):
         assert recheck.wheel_profile(binding, source, callback, selection, ValueError) == profile
         assert events == ([] if outcome == "flat" else ["verified"])
     else:
         with pytest.raises(ValueError):
             recheck.wheel_profile(binding, source, callback, selection, ValueError)
-        assert events == (["verified"] if outcome == "revoked" else [])
+        assert events == (["verified"] if outcome in ("revoked", "associated-denied") else [])
 
 
 @pytest.mark.parametrize("outcome", [
-    "owned", "revoked", "foreign-native", "foreign-lock", "artifact", "lost-lifecycle",
+    "owned", "associated", "revoked", "foreign-native", "foreign-lock", "artifact", "lost-lifecycle",
 ])
 def test_source_adapter_rechecks_the_retained_owner(outcome, monkeypatch):
     scripts = ROOT / "plugins" / "agent-worktrees" / "scripts"
@@ -236,6 +249,14 @@ def test_source_adapter_rechecks_the_retained_owner(outcome, monkeypatch):
         finally:
             held.pop()
 
+    association = object()
+
+    @contextmanager
+    def retain_associated(*args, **kwargs):
+        assert kwargs.pop("associated") is association
+        with retain(*args, **kwargs) as result:
+            yield result
+
     engine = SimpleNamespace(
         _package_roots=lambda path: (path,), _package_name=lambda _path: "agent-worktrees",
         _source_files=lambda _paths: (), _construction_hash=lambda *_args: "source",
@@ -266,7 +287,10 @@ def test_source_adapter_rechecks_the_retained_owner(outcome, monkeypatch):
 
     native.install = install
     monkeypatch.setitem(sys.modules, "runtime_install", native)
-    monkeypatch.setitem(sys.modules, "runtime_source_build", SimpleNamespace(retain_source_runtime_inputs=retain))
+    monkeypatch.setitem(sys.modules, "runtime_source_build", SimpleNamespace(
+        retain_source_runtime_inputs=retain,
+        retain_associated_source_runtime_inputs=retain_associated,
+    ))
     path = scripts / "runtime_install_source.py"
     spec = importlib.util.spec_from_file_location("_worktrees_source_adapter_unit", path)
     assert spec and spec.loader
@@ -276,7 +300,9 @@ def test_source_adapter_rechecks_the_retained_owner(outcome, monkeypatch):
         "installation": {"payload_root": ROOT}, "component": "agent-worktrees",
         "python": Path(sys.executable), "uv": sys.executable, "deadline": 1e20,
     }
-    if outcome != "owned":
+    if outcome == "associated":
+        arguments["associated"] = association
+    if outcome not in ("owned", "associated"):
         with pytest.raises(ValueError):
             adapter.install_source_runtime(plan, **arguments)
         assert "selector" not in events

@@ -69,6 +69,63 @@ def test_parent_rechecks_each_publication_boundary(handover, tmp_path, denied):
     process.stderr.close()
 
 
+@pytest.mark.parametrize("outcome", [
+    "owned", "local-only", "missing-owner", "missing-selection", "revoked", "foreign-source",
+    "missing-admission", "changed-admission", "duplicate-admission", "missing-authentication",
+])
+def test_associated_source_profile_requires_its_live_owner(handover, outcome):
+    identity = {"plugin": "agent-worktrees", "source_commit": "a" * 40}
+    source = SimpleNamespace(
+        document=lambda: identity, source_commit="a" * 40, assembly_hash="b" * 64,
+    )
+    profile = {
+        "component": "agent-worktrees", "mode": "source",
+        "release": {"identity": "source:" + source.source_commit, "sha256": "sha256:" + source.assembly_hash},
+    }
+    wheel = {"filename": "fixture-1.0-py3-none-any.whl", "sha256": "sha256:" + "c" * 64}
+    lock = {
+        "source": identity, "policy": {"policyId": "sha256:" + "d" * 64},
+        "trigger": "release-index-unavailable", "files": [wheel],
+        "source_authentication": {
+            "source": identity, "owner_policy": "sha256:" + "d" * 64,
+            "trigger": "release-index-unavailable", "mode": "source",
+        },
+        "acquisition": {
+            "schema": "copilot-extensions.retained-wheel-feed-admission", "version": 1,
+            "policy_id": "sha256:" + "e" * 64, "files": [dict(wheel)],
+        },
+    }
+    if outcome == "foreign-source":
+        lock["source_authentication"]["source"] = {"plugin": "foreign"}
+    elif outcome == "missing-authentication":
+        lock.pop("source_authentication")
+    elif outcome == "missing-admission":
+        lock.pop("acquisition")
+    elif outcome == "changed-admission":
+        lock["acquisition"]["files"][0]["sha256"] = "sha256:" + "f" * 64
+    elif outcome == "duplicate-admission":
+        lock["acquisition"]["files"].append(dict(wheel))
+    elif outcome == "local-only":
+        lock["files"] = []
+        lock.pop("acquisition")
+    binding = {"profile": profile, "source_lock": lock, "build_toolchain": {}}
+    calls = []
+
+    def verify():
+        calls.append("verified")
+        if outcome == "revoked":
+            raise ValueError("association revoked")
+
+    callback = None if outcome == "missing-owner" else verify
+    selection = None if outcome == "missing-selection" else {}
+    if outcome in ("owned", "local-only"):
+        assert handover.wheel_profile(binding, source, callback, selection, ValueError) == profile
+        assert calls == ["verified"]
+    else:
+        with pytest.raises(ValueError):
+            handover.wheel_profile(binding, source, callback, selection, ValueError)
+
+
 @pytest.mark.parametrize("mode", ["wrong-order", "early"])
 def test_missing_or_unordered_boundary_never_reports_success(handover, tmp_path, mode):
     marker = tmp_path / "published"

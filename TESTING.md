@@ -2805,6 +2805,12 @@ The composition exercises the existing `retain_source_profile` owner with
 owned offline build custody and its exact local-package selection. Foreign
 build roles, changed tool versions/files and an online build request refuse
 before the backend runs; ordinary promotion-toolchain controls remain intact.
+Associated-wheel controls also use a real source lock and local TLS feed,
+verify local-only and external closures with the completion owner's
+first-party builder disabled, and refuse changed association, mismatched wheel
+bytes or withdrawn feed metadata. Worktrees' native publication-boundary
+fixture refuses a withdrawal before selector publication; its constructor and
+association authority are synthetic, not ordinary-update or rollout evidence.
 Fresh and reused tools slots validate their installed interpreter against the
 selected marker environment before any backend runs. Native regressions query
 real tools interpreters, inject a mismatched target result and require refusal;

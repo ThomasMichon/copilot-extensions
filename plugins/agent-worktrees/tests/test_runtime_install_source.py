@@ -12,7 +12,7 @@ import pytest
 
 
 @pytest.mark.parametrize("outcome", [
-    "accepted", "revoked", "foreign-owner", "artifact",
+    "accepted", "associated", "revoked", "foreign-owner", "artifact",
     "foreign-lock", "foreign-profile", "local-packages", "foreign-native",
     "no-lifecycle", "lost-lifecycle",
 ])
@@ -53,7 +53,8 @@ def test_source_adapter_retains_live_owner_through_native_install(tmp_path, monk
         "binding": binding, "lock_id": "sha256:" + "a" * 64,
         "distributions": {"agent-worktrees": {}},
     })
-    held, events = [], []
+    held, events, builders = [], [], []
+    associated_owner = object()
 
     def verify():
         assert held == [True]
@@ -70,6 +71,8 @@ def test_source_adapter_retains_live_owner_through_native_install(tmp_path, monk
 
     @contextmanager
     def retain(actual, **options):
+        builders.append(options.pop("_associated_marker", "built"))
+        assert "associated" not in options
         assert actual is plan and options["installation"]["payload_root"] == payload
         held.append(True)
         try:
@@ -77,6 +80,12 @@ def test_source_adapter_retains_live_owner_through_native_install(tmp_path, monk
         finally:
             held.pop()
             events.append("released")
+
+    @contextmanager
+    def retain_associated(actual, *, associated, **options):
+        assert associated is associated_owner
+        with retain(actual, _associated_marker="associated", **options) as selected:
+            yield selected
 
     engine = SimpleNamespace(
         _package_roots=lambda path: (path,),
@@ -123,7 +132,10 @@ def test_source_adapter_retains_live_owner_through_native_install(tmp_path, monk
     native.install = install
     monkeypatch.setitem(sys.modules, "runtime_install", native)
     monkeypatch.setitem(
-        sys.modules, "runtime_source_build", SimpleNamespace(retain_source_runtime_inputs=retain),
+        sys.modules, "runtime_source_build", SimpleNamespace(
+            retain_source_runtime_inputs=retain,
+            retain_associated_source_runtime_inputs=retain_associated,
+        ),
     )
     specification = importlib.util.spec_from_file_location(
         "_test_worktrees_source_owner", scripts / "runtime_install_source.py",
@@ -137,6 +149,8 @@ def test_source_adapter_retains_live_owner_through_native_install(tmp_path, monk
         "python": Path(sys.executable), "uv": str(tmp_path / "uv"),
         "deadline": time.monotonic() + 60,
     }
+    if outcome == "associated":
+        arguments["associated"] = associated_owner
     if outcome in (
         "foreign-owner", "artifact", "foreign-lock", "foreign-profile",
         "local-packages", "foreign-native", "no-lifecycle",
@@ -158,4 +172,5 @@ def test_source_adapter_retains_live_owner_through_native_install(tmp_path, monk
         assert events == [
             "verify", "verify", "helpers", "verify", "selector", "verify", "released",
         ]
+        assert builders == (["associated"] if outcome == "associated" else ["built"])
     assert held == []

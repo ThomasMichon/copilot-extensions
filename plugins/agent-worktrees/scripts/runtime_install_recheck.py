@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from contextlib import ExitStack, contextmanager
@@ -14,14 +15,68 @@ class HandoverError(RuntimeError):
     """The construction owner did not authorize a publication boundary."""
 
 
+def _associated_lock(lock, source):
+    authentication = lock.get("source_authentication")
+    policy, files = lock.get("policy"), lock.get("files")
+    if (
+        not isinstance(authentication, dict) or not isinstance(policy, dict)
+        or not isinstance(policy.get("policyId"), str)
+        or re.fullmatch(r"sha256:[0-9a-f]{64}", policy["policyId"]) is None
+        or authentication.get("source") != source.document()
+        or authentication.get("owner_policy") != policy["policyId"]
+        or authentication.get("mode") != "source"
+        or authentication.get("trigger") != lock.get("trigger")
+        or not isinstance(files, list)
+    ):
+        return False
+    expected = {}
+    for item in files:
+        if (
+            not isinstance(item, dict) or not isinstance(item.get("filename"), str)
+            or not isinstance(item.get("sha256"), str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", item["sha256"]) is None
+            or item["filename"] in expected
+        ):
+            return False
+        expected[item["filename"]] = item["sha256"]
+    admission = lock.get("acquisition")
+    if not expected:
+        return admission is None
+    if (
+        not isinstance(admission, dict)
+        or set(admission) != {"schema", "version", "policy_id", "files"}
+        or admission["schema"] != "copilot-extensions.retained-wheel-feed-admission"
+        or type(admission["version"]) is not int or admission["version"] != 1
+        or not isinstance(admission["policy_id"], str)
+        or re.fullmatch(r"sha256:[0-9a-f]{64}", admission["policy_id"]) is None
+        or not isinstance(admission["files"], list)
+    ):
+        return False
+    actual = {}
+    for item in admission["files"]:
+        if (
+            not isinstance(item, dict) or not isinstance(item.get("filename"), str)
+            or not isinstance(item.get("sha256"), str) or item["filename"] in actual
+        ):
+            return False
+        actual[item["filename"]] = item["sha256"]
+    return actual == expected
+
+
 def wheel_profile(binding, source, verify_owner, selection, refused):
     nested = "profile" in binding
     if nested and (
-        set(binding) != {"profile", "source_lock", "build_toolchain", "build_profile"}
+        set(binding) not in (
+            {"profile", "source_lock", "build_toolchain"},
+            {"profile", "source_lock", "build_toolchain", "build_profile"},
+        )
         or not isinstance(binding["source_lock"], dict)
         or binding["source_lock"].get("source") != source.document()
         or not isinstance(binding["build_toolchain"], dict)
-        or not isinstance(binding["build_profile"], dict)
+        or (
+            not isinstance(binding["build_profile"], dict) if "build_profile" in binding
+            else not _associated_lock(binding["source_lock"], source)
+        )
         or verify_owner is None or selection is None
     ):
         raise refused("Source-built wheels require their retained source owner")
