@@ -397,8 +397,9 @@ def get_snapshot(
     native_project = validate_target(pr, provider, repo)
     status = str(pr.get("status") or "").casefold()
     head = str((pr.get("lastMergeSourceCommit") or {}).get("commitId") or "")
+    target = str((pr.get("lastMergeTargetCommit") or {}).get("commitId") or "")
     if status in ("completed", "abandoned"):
-        return PRSnapshot(pr_state="closed", merged=status == "completed", head_sha=head)
+        return PRSnapshot(pr_state="closed", merged=status == "completed", head_sha=head, base_sha=target)
     if status != "active":
         raise ProviderError("ADO PR lifecycle state is unavailable")
     if not head:
@@ -523,6 +524,7 @@ def get_snapshot(
         pr_state="closed" if status in ("completed", "abandoned") else "open",
         merged=status == "completed", head_sha=head,
         base_ref=str(pr.get("targetRefName") or "").removeprefix("refs/heads/"),
+        base_sha=target,
         reviews=reviews, author=identity((pr.get("createdBy") or {}).get("id")),
         mergeable=False if merge == "conflicts" else True if merge_state == "satisfied" else None,
         checks_state=checks, checks_complete=policies_known, title=str(pr.get("title") or ""),

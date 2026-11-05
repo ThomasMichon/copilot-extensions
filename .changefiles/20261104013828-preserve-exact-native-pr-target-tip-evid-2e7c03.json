@@ -1,0 +1,13 @@
+{
+  "comment": "Preserve exact native PR target-tip evidence without additional provider reads.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}
