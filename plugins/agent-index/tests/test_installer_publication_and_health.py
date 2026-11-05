@@ -17,6 +17,46 @@ import pytest
 from test_install_engine_adoption import environment, function, run_ps
 
 
+@pytest.mark.parametrize("failure,expected", [("service-files", 17), ("environment", 2)])
+def test_shell_cutover_propagates_setup_failure_inside_or_list(tmp_path, failure, expected):
+    bash = (
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Git" / "bin" / "bash.exe"
+        if os.name == "nt" else Path(shutil.which("bash") or "")
+    )
+    if not bash.is_file():
+        pytest.skip("Bash shell consumer is unavailable")
+    called = tmp_path / "deployed"
+    native = tmp_path / "native"
+    native.write_text(f"#!/bin/sh\ntouch {shlex.quote(called.as_posix())}\n", encoding="utf-8")
+    native.chmod(0o755)
+    env_file = tmp_path / "service.env"
+    env_file.write_text("invalid shell syntax (\n", encoding="utf-8")
+    harness = tmp_path / "setup-failure.sh"
+    harness.write_text(f"""
+set -euo pipefail
+NO_SERVICE=0
+LINK_PYTHON={shlex.quote(native.as_posix())}
+ENV_FILE={shlex.quote(env_file.as_posix())}
+SRC_VERSION=2.0.0
+_activation_role() {{ echo host; }}
+_machine_role() {{ echo host; }}
+_service_healthy() {{ return 0; }}
+_write_service_files() {{ return {17 if failure == "service-files" else 0}; }}
+_skip() {{ :; }}; _step() {{ :; }}; _fail() {{ :; }}; _ok() {{ :; }}
+{function("_service_cutover", "sh")}
+result=0
+_service_cutover || result=$?
+exit "$result"
+""", encoding="utf-8")
+    result = subprocess.run(
+        [str(bash), harness.as_posix()], cwd=tmp_path, env=environment(tmp_path),
+        capture_output=True, text=True, timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == expected, result.stdout + result.stderr
+    assert not called.exists()
+
+
 @pytest.mark.parametrize("host", ["pwsh", "powershell", "bash"])
 @pytest.mark.parametrize("outcome", [
     "native-failure", "stale", "health-stale", "wrong-owner", "ready", "dev-ready",

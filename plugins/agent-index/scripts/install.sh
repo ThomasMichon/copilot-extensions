@@ -2296,11 +2296,11 @@ _service_cutover() (
         fi
     fi
     [[ -x "$LINK_PYTHON" ]] || { _fail 'Required service runtime is unavailable'; return 1; }
-    _write_service_files
+    _write_service_files || return $?
     if [[ -f "$ENV_FILE" ]]; then
         set -a
         # shellcheck disable=SC1090
-        . "$ENV_FILE"
+        . "$ENV_FILE" || return $?
         set +a
     fi
     _step 'Deploying the selected service runtime through its native owner...'
