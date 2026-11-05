@@ -137,6 +137,12 @@ and reproducible source-process scale observations. The
 deterministic resource/viewport acceptance from still-open native, installed
 and complete performance qualification.
 
+#10612 merged as `e6d154b53ecf38a8434a2c2e3ac2d7ded9376df2`, qualifying
+actual app input through an attached private tmux client with a synthetic
+wire-valid owner. The [source readback](journal/2026/11.04-sidecar-native-client.md)
+records browsing, push, resize, return/reopen, pane/PID and cleanup controls;
+Windows/PSMux, popup, installed and native performance remain separate.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than
@@ -165,6 +171,39 @@ Then authorized planning and execution:
 The generic detector has a configurable policy. The 65% value is the explicitly
 selected observer policy in this request, not a new universal runtime compaction
 or handoff threshold. The plan below is the coordinator's implementation proposal.
+
+### Operator correction after viewing progress captures, 2026-11-04
+
+> The screenshots show a very messy UX. We want to be closer to the information-sparseness of the original concept ASCII illustrations
+
+> The screenshots also show a ton of data errors
+
+The [original concept examples](timeline-guidance.md) remain the presentation
+target, not the diagnostic-heavy progress captures. The following correction is
+the coordinator's implementation proposal within that existing intent:
+
+- Purpose and compact agenda/subway rows lead. Short human-readable time and
+  work labels replace repeated ISO timestamps, event-enum names and source IDs
+  in collapsed rows. Exact provenance, clocks, qualifiers and raw fields remain
+  available through explicit bounded details; do not infer missing agenda work.
+- Normal Timeline chrome uses compact current-input, source-health and unread
+  indicators. Move verbose owner diagnostics and the advanced feed selector
+  into an explicit evidence disclosure. Retain visible warnings for actual
+  unavailable/error/gap states without filling the canvas with their internals.
+- Diagnose the displayed errors before presentation changes. Intentional
+  fixture faults, unsupported optional providers, deliberately paused
+  membership discovery and actual integration defects are different states.
+  Normal reader selection must not manufacture a source-error result or make
+  retained evidence look current.
+- Demonstrate a coherent healthy full-app scenario, plus separate intentional
+  degraded/gap cases, at ordinary and narrow sizes. Retain dated progress
+  captures and reviewed visual comparisons for both; do not market a negative
+  test fixture as the normal experience.
+
+This correction preserves owner facts, literal untrusted text, unknown versus
+zero, independent current-input/history qualification, virtual scrolling,
+viewport anchors and every original completion/effect gate. It authorizes no
+installed rollout, live rebinding, new source inference or hidden error waiver.
 
 ## Scope approvals and retained custody
 
@@ -479,10 +518,24 @@ publication and installed support retain their separate qualification.
 
 - [ ] Exercise the real Textual app through actual isolated tmux/PSMux clients,
   not synthetic observer modules or server-side `send-keys` as client proof.
+  #10612 delivers the private POSIX tmux/client app portion, not PSMux or the
+  original popup/Relay qualification.
 - [ ] Qualify current pane/PID preservation, focus, resize, observer exit,
   mode guides and the separately owned permanent Claims chrome.
 - [ ] Record performance/retention/coverage and source versus installed/native
   evidence distinctly. Do not claim rollout or complete the parent from S1-S4.
+
+### Presentation correction - sparse concept fidelity
+
+- [ ] Trace the displayed data/error states to their actual producers and
+  distinguish a deliberately paused reader from a failed source. Fix confirmed
+  source/consumer defects without suppressing genuine uncertainty.
+- [ ] Deliver compact purpose-first chrome, readable collapsed timeline rows
+  and explicit bounded evidence disclosure, matching the original ASCII
+  concept's information hierarchy rather than a raw event-log console.
+- [ ] Qualify the actual full app at ordinary and narrow sizes, healthy and
+  degraded, with viewport/input/cancellation controls and reviewed visual
+  comparisons. Keep installed/native and whole-parent acceptance separate.
 
 ## Validation Plan
 
