@@ -359,6 +359,7 @@ def _cmd_installation_repair(args: argparse.Namespace) -> int:
     try:
         result = repair(
             args.project_root, modules=args.module, apply=args.apply,
+            required=args.required,
             expected_plan_digest=args.expected_plan_digest,
             readiness_timeout=args.readiness_timeout, installer_timeout=args.installer_timeout,
             confirm_restart=args.confirm_restart,
@@ -831,7 +832,12 @@ def _build_parser() -> argparse.ArgumentParser:
     add("installer-readiness", _cmd_installer_readiness)
     installation_repair = add("installation-repair", _cmd_installation_repair)
     installation_repair.add_argument("--project-root", type=Path, default=Path.cwd())
-    installation_repair.add_argument("--module", action="append", default=[])
+    repair_selection = installation_repair.add_mutually_exclusive_group()
+    repair_selection.add_argument("--module", action="append", default=[])
+    repair_selection.add_argument(
+        "--required", action="store_true",
+        help="select every required enabled owner module and its prerequisites",
+    )
     installation_repair.add_argument("--apply", action="store_true")
     installation_repair.add_argument("--expected-plan-digest")
     installation_repair.add_argument(

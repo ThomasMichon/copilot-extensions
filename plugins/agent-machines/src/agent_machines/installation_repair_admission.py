@@ -12,6 +12,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import installation_context as context
+from dropin_registry import ScanAuthority
 from installer_readiness import discover_modules
 from installer_readiness.model import (
     DiscoveryReport,
@@ -134,6 +135,7 @@ class HostAdmission:
     bindings: Mapping[str, OwnerBinding]
     refused: Mapping[str, str]
     activation_digest: str
+    activation_complete: bool
 
 
 def _load(path: Path) -> dict[str, object]:
@@ -315,7 +317,9 @@ def admit_host(
             bindings[owner_id] = replace(binding, refusal="ordinary-legacy-writer-ambiguous")
     return HostAdmission(
         report=discover_modules(installations), bindings=bindings, refused=refused,
+        activation_complete=activation.authority is not ScanAuthority.INDETERMINATE,
         activation_digest=digest({
+            "authority": activation.authority.value,
             "decisions": {
                 source: decision.status.value
                 for source, decision in sorted(activation.decisions.items())

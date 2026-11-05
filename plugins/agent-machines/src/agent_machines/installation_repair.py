@@ -328,6 +328,7 @@ def _readmit_owner(
 @cancel_on_termination()
 def repair(
     project_root: Path, *, modules: Sequence[str] = (), apply: bool = False,
+    required: bool = False,
     expected_plan_digest: str | None = None, home: Path | None = None,
     readiness_timeout: float = 15, installer_timeout: float = 300,
     confirm_restart: str | None = None,
@@ -336,7 +337,7 @@ def repair(
     journal = RestartJournal(home if home is not None else Path.home())
     try:
         if confirm_restart is not None:
-            if apply or modules or expected_plan_digest or not isinstance(confirm_restart, str):
+            if apply or modules or required or expected_plan_digest or not isinstance(confirm_restart, str):
                 raise RepairAdmissionError("restart confirmation cannot also plan or apply repair")
             with journal.locked():
                 confirmed = journal.evidence()
@@ -351,6 +352,7 @@ def repair(
             with journal.locked():
                 return _repair(
                     project_root, modules=modules, apply=apply,
+                    required=required,
                     expected_plan_digest=expected_plan_digest, home=home,
                     readiness_timeout=readiness_timeout, installer_timeout=installer_timeout,
                     journal=journal,
@@ -358,6 +360,7 @@ def repair(
         journal.load()
         return _repair(
             project_root, modules=modules, apply=apply,
+            required=required,
             expected_plan_digest=expected_plan_digest, home=home,
             readiness_timeout=readiness_timeout, installer_timeout=installer_timeout,
             journal=journal,
@@ -368,21 +371,31 @@ def repair(
 
 def _repair(
     project_root: Path, *, modules: Sequence[str], apply: bool,
+    required: bool,
     expected_plan_digest: str | None, home: Path | None,
     readiness_timeout: float, installer_timeout: float, journal: RestartJournal,
 ) -> dict[str, object]:
     """Reconstruct host admission and invoke only the explicit selected closure."""
     if (
-        type(apply) is not bool or isinstance(modules, str) or len(modules) > 256
+        type(apply) is not bool or type(required) is not bool
+        or isinstance(modules, str) or len(modules) > 256
+        or required and modules
         or any(not isinstance(item, str) or not 1 <= len(item) <= 256 for item in modules)
         or any(not math.isfinite(value) or not 0 < value <= 3600
                for value in (readiness_timeout, installer_timeout))
     ):
         raise RepairAdmissionError("repair selection or timeout is invalid")
-    if apply and (not modules or not expected_plan_digest):
+    if apply and (not (modules or required) or not expected_plan_digest):
         raise RepairAdmissionError("repair apply requires qualified modules and the expected plan digest")
     platform = current_platform()
     host = admit_host(project_root, home=home)
+    if required:
+        if not host.activation_complete or host.refused or host.report.findings:
+            raise RepairAdmissionError("required selection needs a complete enabled-owner inventory")
+        modules = [
+            module.qualified_id for module in host.report.modules
+            if module.classification is Requirement.REQUIRED
+        ]
     selected = _closure(host, modules, platform)
     bound, owners = _binding_inputs(host, selected, platform)
     plan_digest = digest(bound)
@@ -504,7 +517,7 @@ def _repair(
         "platform": platform.value, "apply": apply, "planDigest": plan_digest,
         "interrupted": interrupted,
         "restarts": journal.evidence(),
-        "status": ("discovered" if not selected else "observed") if not apply else (
+        "status": ("observed" if selected or required else "discovered") if not apply else (
             "ready" if satisfied else "incomplete" if not required_satisfied else "optional-incomplete"
         ),
         "requiredSatisfied": required_satisfied,
