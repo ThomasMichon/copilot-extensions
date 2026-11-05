@@ -222,6 +222,16 @@ checkpoint nor author eligibility, holds, requirements or source/resource custod
 
 ## Plan
 
+The [nine standalone/reservation/runtime contracts](finite-standalone-reservation-runtime-contracts.md)
+retain twenty-seven ranked relationships and independently verify #8352's
+finite tested image deliverable through merged #8385 and #8876's source
+correction through merged #8961.
+Seven other originals remain OPEN; current source, exact original clauses,
+review/CI and audited disposition are separate from candidate similarity.
+The [journal](<journal/2026/11.05 finite-standalone-reservation-runtime-contracts.md>)
+records 779 verified dispositions and 1,008 whole open, 279 above 729,
+without new native, installed or custody effects.
+
 The [Windows census/registration study](windows-census-registration-encoding-cohort.md)
 retains #7171's exact nonblocking registration regression and independently
 verifies #9327's completed source/native-subprocess correction in #9330.
@@ -251,6 +261,19 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 - [x] Preserve the initial cohort and oldest-first cursor in structured session state.
 
 ### Phase 2 - Continuing reconciliation
+
+The six-contract release/stamp/inventory checkpoint is actually delivered
+in #10717 after genuine exact-head approval, no review threads and nine
+complete successful/skipped checks before normal managed merge.
+All eight actual merged/current blobs equal the approved head.
+Only the reused publication child finalized, retained; the
+[delivery journal](<journal/2026/11.05 finite-release-stamp-inventory-contracts.md>)
+records the result. All six originals stay OPEN, without new completion
+or receiving-transfer credit. The next publication is the nine-contract
+standalone/reservation/runtime study, including both separately audited
+finite source completions. Subsequent research follows the remaining weighted
+graph and freshly admitted current contracts.
+The parent stays Active; its Plan and Validation remain open.
 
 The eleven-contract checkpoint is actually delivered in #10715 after genuine
 exact-head approval, no active findings, all eight resolved threads and nine
