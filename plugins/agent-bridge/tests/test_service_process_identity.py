@@ -37,6 +37,23 @@ def test_windows_watchdog_entrypoint_is_not_posix_exec_identity(monkeypatch):
     ])
 
 
+def test_leased_python_wrapper_identifies_only_the_bridge_start_entrypoint(tmp_path):
+    from agent_procutil._daemon_instance_child import _BOOTSTRAP, leased_python_command
+
+    prefix = ["python", "-c", _BOOTSTRAP, str(tmp_path)]
+    assert bridge_daemon_argv([*prefix, "-m", "agent_bridge", "start", "--passive"])
+    assert not bridge_daemon_argv([*prefix, "-m", "agent_bridge", "status"])
+    assert not bridge_daemon_argv([*prefix, "-m", "other", "start"])
+    assert not bridge_daemon_argv(["python", "-c", _BOOTSTRAP, ".", "-m", "agent_bridge", "start"])
+    assert not bridge_daemon_argv([
+        "python", "-c", _BOOTSTRAP + ";pass", "/runtime", "-m", "agent_bridge", "start",
+    ])
+    actual, _environment = leased_python_command([sys.executable, "-m", "agent_bridge", "start"])
+    assert bridge_daemon_argv(actual)
+    if sys.platform == "win32":
+        assert bridge_daemon_argv(split_windows_command(subprocess.list2cmdline(actual)))
+
+
 @pytest.mark.parametrize("arguments", [
     ["python", "-m", "agent_bridge", "start"],
     ["/runtime/bin/python3.10", "-u", "-m", "agent_bridge", "start", "--passive"],

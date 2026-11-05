@@ -47,6 +47,21 @@ def bridge_daemon_argv(arguments: list[str]) -> bool:
                 and _starts_daemon(arguments[index + 2:])
             )
         if option == "-c":
+            try:
+                from agent_procutil._daemon_instance_child import _BOOTSTRAP
+            except ImportError:
+                _BOOTSTRAP = None
+            if (
+                _BOOTSTRAP is not None
+                and arguments[index + 1:index + 2] == [_BOOTSTRAP]
+                and arguments[index + 2:index + 3]
+            ):
+                helper = arguments[index + 2]
+                absolute = (
+                    bool(ntpath.splitdrive(helper)[0]) and ntpath.isabs(helper)
+                    if sys.platform == "win32" else posixpath.isabs(helper)
+                )
+                return absolute and bridge_daemon_argv([arguments[0], *arguments[index + 3:]])
             return (
                 sys.platform == "win32"
                 and arguments[index + 1:index + 2] == [WINDOWS_WATCHDOG_START_CODE]
