@@ -125,6 +125,8 @@ from test_receiving_bundle import (
 from test_worktree_writer_observation import (
     test_health_observes_canonical_writer_selection_without_launch
     as test_health_observes_canonical_writer_selection_without_launch,
+    test_repeated_health_reuses_real_resolver_but_refreshes_selected_slot
+    as test_repeated_health_reuses_real_resolver_but_refreshes_selected_slot,
 )
 
 ROOT = Path(__file__).resolve().parents[3]

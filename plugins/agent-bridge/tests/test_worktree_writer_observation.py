@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import json
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -69,3 +71,61 @@ def test_health_observes_canonical_writer_selection_without_launch(
         assert after["slot"]["role"] == "passive"
         assert after["slot"]["active"]["generation"] != before["slot"]["active"]["generation"]
         assert after["worktree_record_writer"] == before["worktree_record_writer"]
+
+
+def test_repeated_health_reuses_real_resolver_but_refreshes_selected_slot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(lifecycle, "_legacy_runtime_modules", {})
+    own = tmp_path / ".agent-bridge"
+    peer = tmp_path / ".agent-worktrees"
+    scripts = own / "scripts"
+    scripts.mkdir(parents=True)
+    for source in (Path(__file__).resolve().parents[1] / "scripts").glob("versioned_runtime*.py"):
+        shutil.copyfile(source, scripts / source.name)
+    monkeypatch.setattr(lifecycle, "_agent_bridge_owner_root", lambda: own)
+    monkeypatch.setattr(lifecycle.shutil, "which", lambda name: pytest.fail("lost installed owner"))
+    monkeypatch.setattr(lifecycle.subprocess, "run", lambda *a, **k: pytest.fail("health launched a child"))
+    monkeypatch.setattr(health, "config_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        health, "get_default_manager", lambda: SimpleNamespace(carrier_diagnostics=lambda: {}),
+    )
+    registrations = []
+    register = getattr(os, "register_at_fork", None)
+    if register is not None:
+        def remember(**kwargs: object) -> None:
+            registrations.append(kwargs)
+            register(**kwargs)
+
+        monkeypatch.setattr(os, "register_at_fork", remember)
+
+    def select(version: str) -> Path:
+        slot = peer / "versions" / version
+        python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        python.parent.mkdir(parents=True)
+        python.write_bytes(b"selected interpreter fixture")
+        (slot / ".install-complete.json").write_text(
+            json.dumps({"version": version, "completed_at": "fixture", "pid": 0}),
+            encoding="utf-8",
+        )
+        (peer / "current-version").write_text(version, encoding="utf-8")
+        return python
+
+    first = select("1.0.0")
+    app = FastAPI()
+    app.include_router(health.router)
+    with TestClient(app) as client:
+        response = client.get("/health")
+        assert response.status_code == 200
+        assert response.json()["worktree_record_writer"]["installation_root"] == str(peer)
+        initial = len(registrations)
+        assert initial > 0 if register is not None else initial == 0
+        assert lifecycle._legacy_worktrees_runtime_prefix(own)[0] == str(first)
+        for _ in range(32):
+            assert client.get("/health").json()["worktree_record_writer"]["installation_root"] == str(peer)
+        second = select("2.0.0")
+        assert client.get("/health").status_code == 200
+        assert lifecycle._legacy_worktrees_runtime_prefix(own)[0] == str(second)
+        assert len(registrations) == initial

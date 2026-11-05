@@ -323,7 +323,10 @@ selection resolver. A validated same-cell or completed legacy runtime reports
 its selected root; unavailable/refused selection and the unattributable legacy
 PATH compatibility path report null. Ordinary health does not execute Worktrees,
 bootstrap a runtime or negotiate a serializer. Selection work runs off the
-HTTP event loop.
+HTTP event loop. The real legacy resolver module is retained once per canonical
+owner path, with serialized first load; runtime selection is still recomputed
+on each observation. Repeated health polls therefore do not accumulate its
+fork callbacks or freeze the previously selected slot.
 
 This declaration covers coherent acquisition/lineage delegation, not support in
 the selected Worktrees build. An assembling owner must independently observe that
