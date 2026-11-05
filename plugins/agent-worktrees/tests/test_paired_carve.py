@@ -72,7 +72,7 @@ class TestCarvePairedKnowledge:
         _common_patches(monkeypatch, tmp_path)
         monkeypatch.setattr(
             m.state_root_mod, "resolve_state_root",
-            lambda c: _state_root(path=None, repo="", requires_external=False,
+            lambda c, cwd=None: _state_root(path=None, repo="", requires_external=False,
                                   bound=False),
         )
         out = m._carve_paired_knowledge(
@@ -87,7 +87,7 @@ class TestCarvePairedKnowledge:
         # Even a bound stateless resolve must yield None when disabled.
         monkeypatch.setattr(
             m.state_root_mod, "resolve_state_root",
-            lambda c: _state_root(path=str(tmp_path), repo="k"),
+            lambda c, cwd=None: _state_root(path=str(tmp_path), repo="k"),
         )
         out = m._carve_paired_knowledge(
             _config(), harness_id="h", timestamp="ts", suffix="ab",
@@ -109,7 +109,7 @@ class TestCarvePairedKnowledge:
         k_anchor.mkdir()
         monkeypatch.setattr(
             m.state_root_mod, "resolve_state_root",
-            lambda c: _state_root(path=str(k_anchor), repo="citadel-knowledge"),
+            lambda c, cwd=None: _state_root(path=str(k_anchor), repo="citadel-knowledge"),
         )
         entry = repos_mod.RepoEntry(
             name="citadel-knowledge",
@@ -217,7 +217,7 @@ class TestCarvePairedKnowledge:
         k_anchor.mkdir()
         monkeypatch.setattr(
             m.state_root_mod, "resolve_state_root",
-            lambda c: _state_root(path=str(k_anchor), repo="kb"),
+            lambda c, cwd=None: _state_root(path=str(k_anchor), repo="kb"),
         )
         entry = repos_mod.RepoEntry(name="kb", repo_class="singleton")
         monkeypatch.setattr(repos_mod, "find_repo", lambda n: entry)
@@ -294,7 +294,7 @@ class TestCarvePairedKnowledgeAttributionPolicy:
         k_anchor.mkdir()
         monkeypatch.setattr(
             m.state_root_mod, "resolve_state_root",
-            lambda c: _state_root(path=str(k_anchor), repo="citadel-knowledge"),
+            lambda c, cwd=None: _state_root(path=str(k_anchor), repo="citadel-knowledge"),
         )
         entry = repos_mod.RepoEntry(
             name="citadel-knowledge", repo_class="worktree",
@@ -420,7 +420,7 @@ class TestCarvePairedKnowledgeAttributionPolicy:
         k_anchor.mkdir()
         monkeypatch.setattr(
             m.state_root_mod, "resolve_state_root",
-            lambda c: _state_root(path=str(k_anchor), repo="citadel-knowledge"),
+            lambda c, cwd=None: _state_root(path=str(k_anchor), repo="citadel-knowledge"),
         )
         entry = repos_mod.RepoEntry(
             name="citadel-knowledge", repo_class="worktree",
@@ -563,7 +563,7 @@ class TestPairedKnowledgeAllocationEarlyPreflight:
         k_anchor.mkdir()
         monkeypatch.setattr(
             m.state_root_mod, "resolve_state_root",
-            lambda c: _state_root(path=str(k_anchor), repo="citadel-knowledge"),
+            lambda c, cwd=None: _state_root(path=str(k_anchor), repo="citadel-knowledge"),
         )
         entry = repos_mod.RepoEntry(
             name="citadel-knowledge", repo_class="worktree",
@@ -595,7 +595,7 @@ class TestPairedKnowledgeAllocationEarlyPreflight:
     def test_unbound_harness_is_a_no_op(self, monkeypatch, tmp_path):
         monkeypatch.setattr(
             m.state_root_mod, "resolve_state_root",
-            lambda c: _state_root(path=None, repo="", requires_external=False,
+            lambda c, cwd=None: _state_root(path=None, repo="", requires_external=False,
                                    bound=False),
         )
         # Must not raise -- no pairing applies.
@@ -666,7 +666,7 @@ class TestOriginDoesNotSkipPairing:
         k_anchor.mkdir()
         monkeypatch.setattr(
             m.state_root_mod, "resolve_state_root",
-            lambda c: _state_root(path=str(k_anchor), repo="citadel-knowledge"),
+            lambda c, cwd=None: _state_root(path=str(k_anchor), repo="citadel-knowledge"),
         )
         entry = repos_mod.RepoEntry(
             name="citadel-knowledge", repo_class="worktree",
@@ -919,7 +919,7 @@ class TestStateRootPairAnchor:
         )
         monkeypatch.setattr(
             m.state_root_mod, "resolve_state_root",
-            lambda c: _state_root(path=str(k_anchor), repo="kb"),
+            lambda c, cwd=None: _state_root(path=str(k_anchor), repo="kb"),
         )
         rc = m.cmd_state_root_dispatch(["--pair"])
         out = capsys.readouterr().out.strip()

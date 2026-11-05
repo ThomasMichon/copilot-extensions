@@ -787,19 +787,9 @@ def cmd_state_root_dispatch(argv: list[str]) -> int:
 
 def cmd_coordination_readiness_dispatch(argv: list[str]) -> int:
     """Emit the versioned preflight for claim-producing integrations."""
-    p = argparse.ArgumentParser(
-        prog="agent-worktrees coordination-readiness",
-        description=(
-            "Report whether resource-claim coordination has a usable durable state root."
-        ),
-    )
-    try:
-        p.parse_args(argv)
-    except SystemExit as exc:
-        return int(exc.code or 0)
-    readiness = state_root_mod.coordination_readiness(cfg.load_config())
-    print(json.dumps(readiness.as_dict(), indent=2))
-    return 0 if readiness.ready else 3
+    from .coordination_readiness_cli import dispatch
+
+    return dispatch(argv)
 
 
 def cmd_config_root_dispatch(argv: list[str]) -> int:
