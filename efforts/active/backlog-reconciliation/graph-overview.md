@@ -8,6 +8,14 @@ requirements remain in their issues and actual receiving objectives.
 
 ## Snapshot and boundaries
 
+The [nine finite allocation/recovery/observation contracts](finite-allocation-recovery-observation-contracts.md)
+annotate twenty-seven existing ranked relationships without closure credit.
+Current allocation-owner continuation and credited native idempotency remain
+distinct from complete generic acceptance; all nine originals stay OPEN.
+Four whole-description relations and three other whole originals remain
+protected without retry. The [journal](<journal/2026/11.05 finite-allocation-recovery-observation-contracts.md>)
+preserves direct intake, finite residuals and unchanged custody.
+
 The initial inventory contained 942 open issues: 695 eligible research identities
 and 247 excluded-author issues. The same four researchers received disjoint
 primary scopes of 170, 187, 169 and 169.

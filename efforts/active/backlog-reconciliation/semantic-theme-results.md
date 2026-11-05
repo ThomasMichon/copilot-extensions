@@ -5,6 +5,14 @@ Method: [weighted semantic consolidation](semantic-density-consolidation.md).
 
 ## Result and coverage
 
+The [nine finite allocation/recovery/observation contracts](finite-allocation-recovery-observation-contracts.md)
+retain twenty-seven ranked relationships and actual partial deliveries
+without completing generic allocation, acceptance, replay or rendering.
+Current owner continuation, all six readiness clauses, deliberate zero TTL,
+episode rearm, unknown coverage and tolerant shapes survive. All nine stay
+OPEN; the [journal](<journal/2026/11.05 finite-allocation-recovery-observation-contracts.md>)
+keeps whole protected evidence and previously credited intake separate.
+
 The [eleven finite trigger/identity/anchoring contracts](finite-trigger-identity-anchoring-contracts.md)
 retain thirty-three ranked relationships without activating dormant
 performance work, erasing delivered native/health/transport progress or
