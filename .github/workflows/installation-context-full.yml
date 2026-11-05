@@ -377,10 +377,12 @@ jobs:
       - name: Record exact qualification source
         run: >-
           python -c "import os,subprocess; actual=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(); assert actual == os.environ['GITHUB_SHA']; print('source='+actual)"
-      - name: Qualify the complete Git and credential probe packet
+      - name: Qualify Git probes and resident roster admission
         run: >-
           python tools/run-plugin-tests.py agent-worktrees
           --test-file tests/test_bounded_process.py
+          --test-file tests/test_worktrees_client.py
+          --test-file tests/test_worktrees_feed.py
           --test-file tests/test_git_ops.py
           --test-file tests/test_pr_remote_evidence.py
           --test-file tests/test_pr_target_probes.py

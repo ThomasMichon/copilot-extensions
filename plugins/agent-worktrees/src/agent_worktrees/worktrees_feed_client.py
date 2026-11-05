@@ -293,7 +293,7 @@ class FeedReceiver:
         return frames
 
 
-def _client(request: dict):
+def _client(request: dict, *, wait: bool = False):
     from . import status_monitor_cutover as control
     from . import config as cfg
     from .worktrees_client import read_current, resident_endpoint
@@ -302,7 +302,7 @@ def _client(request: dict):
     try:
         endpoint = resident_endpoint(runtime_home)
     except ConnectionError:
-        restored = read_current(request)
+        restored = read_current(request, wait=True) if wait else read_current(request)
         if restored["projection"]["quality"] != "current" and not request.get("bootstrap"):
             raise FeedFailure(
                 restored["availability"]["reason"], code="unready", retry=True,
@@ -323,7 +323,7 @@ def _client(request: dict):
     except ConnectionError as exc:
         # A retained route whose listener actually refused/reset the connection
         # is a crash/recovery case. A slow, malformed or old live peer is not.
-        restored = read_current(request)
+        restored = read_current(request, wait=True) if wait else read_current(request)
         if restored["projection"]["quality"] != "current" and not request.get("bootstrap"):
             raise FeedFailure(
                 restored["availability"]["reason"], code="unready", retry=True,
@@ -349,7 +349,7 @@ def _client(request: dict):
     return client
 
 
-def relay(request: dict, *, bootstrap: bool = False) -> int:
+def relay(request: dict, *, bootstrap: bool = False, wait: bool = False) -> int:
     request = dict(request)
     if bootstrap:
         from .worktrees_client import saved_result
@@ -367,16 +367,31 @@ def relay(request: dict, *, bootstrap: bool = False) -> int:
                 print(json.dumps(frame, separators=(",", ":"), ensure_ascii=False))
             sys.stdout.flush()
         print(json.dumps({"type": "pending", "reason": "Connecting to the resident"}), flush=True)
-    client = _client(request)
-    receiver = FeedReceiver(request)
-    frames = transport(client, request)
-    try:
-        for frame in frames:
-            admitted = receiver.receive(frame)
-            for output in admitted or ():
-                print(json.dumps(output, separators=(",", ":"), ensure_ascii=False))
-            if admitted:
-                sys.stdout.flush()
-    finally:
-        frames.close()
-    return 0
+    retry_delay = 0.05
+    while True:
+        receiver = FeedReceiver(request)
+        try:
+            client = _client(request, wait=True) if wait and not bootstrap else _client(request)
+            frames = transport(client, request)
+            try:
+                for frame in frames:
+                    admitted = receiver.receive(frame)
+                    if wait and not bootstrap and receiver.current is None and frame.get("type") == "going-away":
+                        raise FeedFailure(
+                            "resident changed before initial publication", code="superseded", retry=True,
+                        )
+                    for output in admitted or ():
+                        print(json.dumps(output, separators=(",", ":"), ensure_ascii=False))
+                    if admitted:
+                        sys.stdout.flush()
+            finally:
+                frames.close()
+            return 0
+        except (FeedFailure, TimeoutError, ConnectionError) as error:
+            if (
+                not wait or bootstrap or receiver.current is not None
+                or (isinstance(error, FeedFailure) and not error.retry)
+            ):
+                raise
+            time.sleep(retry_delay)
+            retry_delay = min(retry_delay * 2, 1.0)

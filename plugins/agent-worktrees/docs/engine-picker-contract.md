@@ -11,6 +11,16 @@ The independent optional [current-head agenda contract](worktree-agendas.md)
 uses the same resident owner and process boundary, not fields added to roster
 rows or a dependency on a planning runtime.
 
+Ordinary CLI JSON lists wait for a usable current resident publication before
+emitting a response. Cold owner startup, temporary publication contention and
+short transport timeouts remain internal wait states; the caller owns the
+overall process timeout and cancellation. The existing protocol, authentication
+and finite per-operation transport bounds are unchanged. Non-bootstrap
+`--stream --follow` callers likewise wait before their first atomic publication;
+after that publication their existing disconnect/timeout contract applies.
+Explicit saved-preview bootstrap and bounded internal read APIs remain separate
+and never identify advisory rows as current.
+
 ## Optional resident Picker bootstrap
 
 The elected monitor advertises `picker-bootstrap-v1` on its existing control
