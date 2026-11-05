@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from .queue_common import CompletionOutcome
 from .queue_records import Status, TaskError
 from .queue_submission_preparation import _encoded, _latest
-from .queue_submission_readiness import _state, observe_owner_state, read_preparation
+from .queue_submission_readiness import _state, observe_owner_state
 
 if TYPE_CHECKING:
     from .queue import TaskQueue
@@ -53,10 +53,19 @@ def advance(queue: TaskQueue, task_id: str, *, request_id: str) -> CompletionOut
         replay = _replay(queue, conn, task_id, request_id)
         if replay is not None:
             return replay
-    original = read_preparation(queue, task_id, request_id)
+        original = _state(queue, conn, task_id, request_id)
     if not original["task"]["require_verification"]:
         raise TaskError("guarded submission requires an existing independent review policy")
-    observe_owner_state(task_id, original)
+    try:
+        observe_owner_state(task_id, original)
+    except TaskError:
+        # A concurrent identical commit needs no later readiness permission.
+        with queue._connect() as conn:
+            conn.execute("BEGIN")
+            replay = _replay(queue, conn, task_id, request_id)
+            if replay is not None:
+                return replay
+        raise
     ts = queue._now(None)
     with queue._connect() as conn:
         conn.execute("BEGIN IMMEDIATE")

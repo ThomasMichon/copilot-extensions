@@ -119,7 +119,7 @@ def migrate_submission_preparation(conn: sqlite3.Connection) -> None:
         " BEGIN SELECT RAISE(ABORT, 'submission advancement receipt is immutable'); END"
     )
     conn.execute(
-        "CREATE TRIGGER IF NOT EXISTS submission_preparation_result_retained"
+        "CREATE TRIGGER IF NOT EXISTS submission_preparation_result_retained_v2"
         " BEFORE UPDATE ON tasks"
         " WHEN OLD.status IN ('submitted','completed')"
         " AND NEW.status IN ('submitted','completed')"
@@ -127,10 +127,10 @@ def migrate_submission_preparation(conn: sqlite3.Connection) -> None:
         " AND e.submission_preparation IS NOT NULL)"
         " AND (NEW.result IS NOT OLD.result OR NEW.result_ref IS NOT OLD.result_ref"
         " OR NEW.completed_by IS NOT OLD.completed_by OR NEW.completed_at IS NOT OLD.completed_at"
-        " OR NEW.owner_session_id IS NOT OLD.owner_session_id"
-        " OR NEW.generation IS NOT OLD.generation OR NEW.require_verification<>1)"
+        " OR NEW.require_verification<>1)"
         " BEGIN SELECT RAISE(ABORT, 'submission preparation result is retained'); END"
     )
+    conn.execute("DROP TRIGGER IF EXISTS submission_preparation_result_retained")
     conn.execute("DROP TRIGGER IF EXISTS submission_preparation_completion_guard")
 
 

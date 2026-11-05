@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from agent_dispatch import submission_readiness_observation as observation
+from agent_dispatch import queue_submission_advancement as advancement
 from agent_dispatch.procutil import run_background_capture
 from agent_dispatch.queue import Status, TaskError, TaskQueue
 from tests import test_submission_readiness as readiness_controls
@@ -336,3 +337,84 @@ def test_missing_consumption_never_commits_a_reusable_permission(ready):
     assert restarted.advance_prepared_submission(
         task.id, request_id="proposal",
     ).task.status == Status.SUBMITTED
+
+
+@pytest.mark.parametrize("owner_failure", [False, True])
+def test_identical_commit_between_replay_and_snapshot_is_a_replay_not_an_owner_error(
+    ready, monkeypatch, owner_failure,
+):
+    queue, _, task, _, _, _, _, calls = ready
+    replay = advancement._replay
+    observe = advancement.observe_owner_state
+    concurrent = []
+
+    def commit_between_reads(queue, conn, task_id, request_id):
+        result = replay(queue, conn, task_id, request_id)
+        if result is None and not concurrent:
+            concurrent.append(None)
+            concurrent[0] = queue.advance_prepared_submission(task_id, request_id=request_id)
+        return result
+
+    def owner_read(task_id, original):
+        if owner_failure and concurrent and concurrent[0] is not None:
+            raise TaskError("owner stopped after concurrent submission")
+        return observe(task_id, original)
+
+    monkeypatch.setattr(advancement, "_replay", commit_between_reads)
+    monkeypatch.setattr(advancement, "observe_owner_state", owner_read)
+    outcome = queue.advance_prepared_submission(task.id, request_id="proposal")
+    assert outcome.task == concurrent[0].task
+    assert outcome.event_type is None and concurrent[0].event_type == "task.submitted"
+    assert len(calls) == (3 if owner_failure else 6)
+    assert len(queue.list_verification_requests(task.id)) == 1
+
+
+@pytest.mark.parametrize("confirm_first", [False, True])
+@pytest.mark.parametrize("prior_guard", [False, True])
+def test_qualified_retirement_detachment_preserves_original_receipt_and_output(
+    ready, confirm_first, prior_guard,
+):
+    queue, owner, task, _, _, _, _, _ = ready
+    submitted = queue.advance_prepared_submission(task.id, request_id="proposal").task
+    if confirm_first:
+        queue.confirm(task.id)
+    original = queue.submission_preparation(task.id)
+    relationship = queue.task_relationship(task.id)
+    snapshot = queue.task_diagnostics(task.id)
+    assert not snapshot["actions"]["detach_agent"]["allowed"]
+    with pytest.raises(TaskError, match="retained reservation|native"):
+        queue.recover_task(
+            task.id, operation="detach_agent", expected_revision=snapshot["revision"],
+            request_id="too-early", actor="operator", reason="not yet retired",
+        )
+    reservation = queue.latest_reservation(task.id)
+    queue.request_spawn_release(reservation.key, disposition="settled")
+    queue.retire_spawn(reservation.key, exact_absence=True)
+    if prior_guard:
+        with queue._connect() as conn:
+            conn.execute(
+                "CREATE TRIGGER submission_preparation_result_retained"
+                " BEFORE UPDATE ON tasks WHEN NEW.owner_session_id IS NOT OLD.owner_session_id"
+                " OR NEW.generation IS NOT OLD.generation"
+                " BEGIN SELECT RAISE(ABORT, 'prior result guard'); END"
+            )
+        queue = TaskQueue(queue.db_path, relationship_writer=owner, relationship_authority="local")
+        owner.queue = queue
+    snapshot = queue.task_diagnostics(task.id)
+    assert snapshot["actions"]["detach_agent"]["allowed"]
+    detached = queue.recover_task(
+        task.id, operation="detach_agent", expected_revision=snapshot["revision"],
+        request_id="detach-retired-native", actor="operator", reason="qualified retirement",
+    )["task"]
+    assert detached["generation"] == submitted.generation + 1
+    assert detached["owner_session_id"] is None
+    assert queue.get(task.id).result == submitted.result
+    assert queue.submission_preparation(task.id) == original
+    assert queue.task_relationship(task.id) == relationship and len(owner.claims) == 1
+    if not confirm_first:
+        assert queue.get(task.id).status == Status.SUBMITTED
+        assert queue.reconcile_task_relationship(task.id)["state"] == "bound"
+        queue.confirm(task.id)
+    assert queue.reconcile_task_relationship(task.id)["state"] == "closed"
+    with pytest.raises(TaskError, match="no longer matches"):
+        queue.advance_prepared_submission(task.id, request_id="proposal")

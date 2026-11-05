@@ -331,7 +331,8 @@ workspace, result proposal and native capacity remain retained.
 `advance_prepared_submission(task_id, request_id=...)` is an internal queue
 operation, not an advertised HTTP, CLI or MCP capability. It accepts no copied
 readiness result or worker-supplied success flag. Before its first transition it
-requires an existing independent review policy, obtains a new owner observation
+reads replay and preparation in one SQLite snapshot, requires an existing
+independent review policy, obtains a new owner observation
 through the same selected-runtime path, then compares the original semantic
 queue state under `BEGIN IMMEDIATE`. Heartbeats and progress remain independent;
 proposal, relationship, native/allocation, holds, admission and review-policy
@@ -354,7 +355,10 @@ retained. The worktree is not finalized or cleaned up. Independent confirmation
 still owns `COMPLETED`.
 
 An exact committed retry reads that receipt and current matching submission
-without another observation, transition or evaluator request. A changed request
+without another observation, transition or evaluator request. An identical
+concurrent commit may also satisfy a caller whose later owner read fails; that
+only returns the exact committed receipt, never authorizes another transition.
+A changed request
 or rejected/reassigned binding cannot reuse it. Legacy completion and late-result
 enrichment refuse prepared tasks, including after restart; SQL also preserves
 the submitted proposal against older backfill code. This bounded operation
@@ -362,3 +366,11 @@ supports the first retained proposal only. Multiple rejected/resubmitted
 proposals, post-stop same-native recovery, non-circular decline, negotiated
 ordinary callers, manual/absent-workspace applicability and full native
 qualification remain open. Ordinary callers and assignment writers stay disabled.
+
+The immutable preparation retains the original native/generation even after
+metadata-only agent detachment. Existing recovery may advance current attachment
+metadata only after its qualified native-retirement checks; accepted output and
+the original receipt/relationship remain unchanged. Submitted work stays
+provisional and keeps its claim until independent confirmation. Detachment is
+not execution readmission, and a detached incarnation cannot replay the old
+advancement as a new submission.
