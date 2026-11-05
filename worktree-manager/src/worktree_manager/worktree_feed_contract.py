@@ -51,12 +51,6 @@ class CurrentFeed:
         if not isinstance(frame, dict):
             raise TypeError("current-roster feed emitted a non-object frame")
         kind = frame.get("type")
-        if kind == "pending":
-            if self._begin is not None or (
-                self.head is not None and self.head["quality"] == "current"
-            ) or not isinstance(frame.get("reason"), str) or not frame["reason"]:
-                raise ValueError("current-roster feed sent an invalid pending notice")
-            return None
         if kind == "error":
             error = frame.get("error")
             message = error.get("message") if isinstance(error, dict) else None
@@ -92,6 +86,12 @@ class CurrentFeed:
             return None
         if self.notice is not None:
             raise ValueError("current-roster feed continued after its cutover notice")
+        if kind == "pending":
+            if self._begin is not None or (
+                self.head is not None and self.head["quality"] == "current"
+            ) or not isinstance(frame.get("reason"), str) or not frame["reason"]:
+                raise ValueError("current-roster feed sent an invalid pending notice")
+            return None
         if kind in {"heartbeat", "availability"}:
             if self.head is None or self._begin is not None:
                 raise ValueError("current-roster feed interrupted its publication barrier")

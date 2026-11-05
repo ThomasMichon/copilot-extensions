@@ -176,6 +176,13 @@ def test_saved_bootstrap_is_visible_but_not_current_and_live_replacement_is_atom
     assert loader.records()[0]["id"] == "live"
     with pytest.raises(ValueError, match="unexpected reset"):
         receiver.receive(cached[0])
+    retiring = CurrentFeed()
+    receive(retiring, cached)
+    retiring.receive({
+        "type": "going-away", "generation": "a" * 32, "cursor": 1, "reason": "update",
+    })
+    with pytest.raises(ValueError, match="after its cutover"):
+        retiring.receive({"type": "pending", "reason": "late startup"})
 
 
 def test_retryable_cold_resident_is_loading_not_a_failed_source(monkeypatch):
