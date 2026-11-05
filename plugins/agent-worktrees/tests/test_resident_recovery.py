@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -14,6 +15,7 @@ from agent_worktrees import resident_recovery as recovery, tracking_write as wri
 
 @pytest.fixture
 def private_recovery(tmp_path, monkeypatch):
+    monkeypatch.setattr(recovery, "_user_profile", lambda: tmp_path)
     monkeypatch.setattr(cfg, "_home", lambda: tmp_path)
     monkeypatch.setattr(cfg, "install_dir", lambda: tmp_path / "runtime")
     root = tmp_path / ".copilot-extensions"
@@ -156,6 +158,11 @@ def test_refused_connection_can_recover_only_before_any_send(
     if held:
         notice(private_recovery)
     monkeypatch.setattr(writes.time, "sleep", lambda delay: None)
+    def connect(*args, **kwargs):
+        if "wake" not in calls:
+            raise ConnectionRefusedError()
+        return nullcontext()
+    monkeypatch.setattr(writes.socket, "create_connection", connect)
     monkeypatch.setattr(writes, "_send_tracking_write_request", send)
     monkeypatch.setattr(writes.wcs_client, "release", lambda *args, **kwargs: None)
     options = dict(
@@ -169,6 +176,96 @@ def test_refused_connection_can_recover_only_before_any_send(
     else:
         assert writes.write_with_boot(**options) == {"ok": True}
         assert calls == [49152, "wake", 49152 if same_endpoint else 49153]
+
+
+@pytest.mark.parametrize("value", [[], {}])
+def test_container_status_is_a_safe_refusal(private_recovery, value):
+    notice(private_recovery)
+    path = private_recovery / "maintenance.json"
+    body = json.loads(path.read_text())
+    body["status"] = value
+    path.write_text(json.dumps(body))
+    assert recovery.wake_allowed() is False
+    with pytest.raises(recovery.ResidentRecoveryHeld, match="invalid"):
+        recovery.require_wake_allowed()
+
+
+@pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX passwd profile resolution")
+def test_os_profile_hold_survives_redirected_state(tmp_path, monkeypatch):
+    import pwd
+    profile, redirected = tmp_path / "profile", tmp_path / "redirected"
+    (profile / ".copilot-extensions").mkdir(parents=True)
+    notice(profile / ".copilot-extensions")
+    redirected.mkdir()
+    monkeypatch.setenv("HOME", str(redirected))
+    monkeypatch.setenv("AGENT_HOME", str(redirected))
+    monkeypatch.setattr(cfg, "install_dir", lambda: redirected / "runtime")
+    monkeypatch.setattr(pwd, "getpwuid", lambda uid: SimpleNamespace(pw_dir=str(profile)))
+    with pytest.raises(recovery.ResidentRecoveryHeld, match="active"):
+        recovery.require_wake_allowed()
+
+
+def test_delayed_same_endpoint_readiness_does_not_consume_send_retry(private_recovery, monkeypatch):
+    clock, calls = [0.0], []
+    endpoint = {
+        "tracking_write_endpoint": "127.0.0.1:49152", "tracking_write_token": "fixture",
+        "tracking_write_verbs": ["fixture"],
+    }
+    monkeypatch.setattr(writes, "time", SimpleNamespace(
+        time=lambda: clock[0], sleep=lambda delay: clock.__setitem__(0, clock[0] + delay),
+    ))
+    def connect(*args, **kwargs):
+        if clock[0] < .5:
+            raise ConnectionRefusedError()
+        return nullcontext()
+    def send(*args, **kwargs):
+        calls.append("send")
+        if len(calls) == 1:
+            raise writes._PreSendFailure("not listening")
+        return {"ok": True}
+    monkeypatch.setattr(writes.socket, "create_connection", connect)
+    monkeypatch.setattr(writes, "_send_tracking_write_request", send)
+    monkeypatch.setattr(writes.wcs_client, "release", lambda *args, **kwargs: None)
+    assert writes.write_with_boot(
+        read_lock_data=lambda: endpoint, ensure_monitor=lambda: calls.append("wake"),
+        payload={"verb": "fixture"}, fallback=lambda: pytest.fail("premature fallback"),
+        boot_wait_s=1,
+    ) == {"ok": True}
+    assert calls == ["send", "wake", "send"] and .5 <= clock[0] < 1
+
+
+@pytest.mark.parametrize("json_output", [False, True])
+@pytest.mark.parametrize("action", ["add", "settle", "release"])
+def test_claim_cli_maintenance_refusal_is_not_a_traceback(
+    private_recovery, tmp_path, monkeypatch, capfd, json_output, action,
+):
+    from agent_worktrees import claims_cli, tracking
+    from _native_receipt_fixtures import setup
+    owner, path, home = setup(tmp_path / "source", monkeypatch)
+    def held(*args, **kwargs):
+        raise recovery.ResidentRecoveryHeld("active maintenance")
+    monkeypatch.setattr(claims_cli.worktree_identity, "_infer_worktree_id", lambda *args: "native-one")
+    monkeypatch.setattr(claims_cli, "_require_coordination_readiness", lambda *args, **kwargs: None)
+    monkeypatch.setattr(claims_cli, "_dispatch_claim", held)
+    try:
+        import argparse
+        args = argparse.Namespace(json=json_output, owner_ref=None, note="", remove=False)
+        if action == "add":
+            result = claims_cli._claims_add(args, "codespace", "fixture")
+        elif action == "settle":
+            args.claim_disposition = "at-rest"
+            result = claims_cli._claims_settle(args, "fixture")
+        else:
+            result = claims_cli._claims_release(args, "fixture")
+        assert result == 1
+        captured = capfd.readouterr()
+        text = captured.out + captured.err
+        assert "maintenance" in text and "Traceback" not in text
+        if json_output:
+            assert "maintenance" in json.loads(captured.out)["error"]
+        assert not tracking.load_record(path).resources
+    finally:
+        owner.shutdown()
 
 
 def test_recovery_reaches_actual_canonical_capture(private_recovery, tmp_path, monkeypatch):

@@ -2555,6 +2555,11 @@ def _cmd_status_write(
             ensure_monitor=_ensure_status_monitor if _status_monitor_enabled() else None,
             min_version=2,  # unconditional: a v1 daemon drops paused on ANY write
         )
+    except tracking_write.ResidentRecoveryHeld as e:
+        if getattr(args, "json", False):
+            return output._json_error(str(e))
+        output.err(str(e))
+        return 1
     except tracking_write.AmbiguousWriteOutcome as e:
         output.err(f"Disposition write to worktree {worktree_id} is in an unknown state: {e}")
         return 1

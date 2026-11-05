@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
+from pathlib import Path
 
 from . import config as cfg
 
@@ -12,9 +14,20 @@ class ResidentRecoveryHeld(RuntimeError):
     """Maintenance or unreadable maintenance evidence prevents automatic wake."""
 
 
+def _user_profile() -> Path:
+    from . import _installation_context as installation_context
+
+    try:
+        return installation_context._current_environment(
+            environment=os.environ, os_profile=None, platform=None, wsl_distro=None,
+        )[1]
+    except (ValueError, OSError) as error:
+        raise ResidentRecoveryHeld("Canonical maintenance profile is unavailable") from error
+
+
 def require_wake_allowed() -> None:
     """Read existing maintenance signals without starting any runtime or service."""
-    roots = (cfg._home() / ".copilot-extensions", cfg.install_dir())
+    roots = (_user_profile() / ".copilot-extensions", cfg.install_dir())
     for root in dict.fromkeys(roots):
         marker = root / "maintenance"
         notice = root / "maintenance.json"
@@ -46,6 +59,7 @@ def require_wake_allowed() -> None:
                 continue
             if (
                 type(value.get("version")) is not int or value["version"] != 1
+                or not isinstance(value.get("status"), str)
                 or value.get("status") not in {"active", "complete"}
                 or any(not isinstance(value.get(key), str) or not value[key].strip()
                        for key in ("ownerSessionId", "summary", "startedAt"))

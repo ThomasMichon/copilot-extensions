@@ -475,6 +475,11 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
                 "session_id": claim_history.current_session_id(),
             },
         )
+    except tracking_write.ResidentRecoveryHeld as exc:
+        if args.json:
+            return output._json_error(str(exc))
+        output.err(str(exc))
+        return 1
     except tracking_write.AmbiguousWriteOutcome as exc:
         msg = f"claims add: write to {wt_id} is in an unknown state: {exc}"
         if args.json:
@@ -571,6 +576,11 @@ def _claims_release(args: argparse.Namespace, ref: str) -> int:
                 "session_id": claim_history.current_session_id(),
             },
         )
+    except tracking_write.ResidentRecoveryHeld as exc:
+        if args.json:
+            return output._json_error(str(exc))
+        output.err(str(exc))
+        return 1
     except tracking_write.AmbiguousWriteOutcome as exc:
         msg = f"claims release: write to {wt_id} is in an unknown state: {exc}"
         if args.json:
@@ -644,6 +654,11 @@ def _claims_settle(args: argparse.Namespace, ref: str) -> int:
                 "session_id": claim_history.current_session_id(),
             },
         )
+    except tracking_write.ResidentRecoveryHeld as exc:
+        if args.json:
+            return output._json_error(str(exc))
+        output.err(str(exc))
+        return 1
     except tracking_write.AmbiguousWriteOutcome as exc:
         msg = f"claims settle: write to {wt_id} is in an unknown state: {exc}"
         if args.json:

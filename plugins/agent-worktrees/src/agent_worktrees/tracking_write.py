@@ -87,6 +87,7 @@ from collections.abc import Callable
 
 from work_coalescing_singleton import CoalescingServer
 from work_coalescing_singleton import client as wcs_client
+from .resident_recovery import ResidentRecoveryHeld as ResidentRecoveryHeld
 
 logger = logging.getLogger(__name__)
 
@@ -674,6 +675,15 @@ def write_with_boot(
             and locks.pid_alive(pid) and locks.process_start_time(pid) == birth
         )
 
+    def connectable(endpoint: tuple[str, int, str] | None) -> bool:
+        if endpoint is None:
+            return False
+        try:
+            with socket.create_connection(endpoint[:2], timeout=0.1):
+                return True
+        except OSError:
+            return False
+
     def recover_endpoint(
         failed: tuple[str, int, str] | None = None,
     ) -> tuple[str, int, str] | None:
@@ -682,7 +692,7 @@ def write_with_boot(
         require_wake_allowed()
         time.sleep(min(0.1, max(0.0, boot_wait_s)))
         recovered = _dial()
-        if recovered == failed and not incompatible_live_owner():
+        if failed is not None and not connectable(recovered):
             recovered = None
         if recovered is None and not incompatible_live_owner():
             require_wake_allowed()
@@ -694,6 +704,8 @@ def write_with_boot(
             require_wake_allowed()
             time.sleep(poll_interval_s)
             recovered = _dial()
+            if failed is not None and not connectable(recovered):
+                recovered = None
         if recovered is None and not incompatible_live_owner():
             require_wake_allowed()
         return recovered

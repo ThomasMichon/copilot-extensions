@@ -140,9 +140,15 @@ needed. Maintenance or unqualified notice contents prevent automatic recovery;
 they never trigger a restart, installation or marker removal. The normal ensure
 also checks maintenance before spawning. Live incompatible publishers retain
 their original same-code compatibility fallback without a forced replacement.
+User maintenance resolves from the canonical OS profile, not redirected
+`HOME` or `AGENT_HOME`; selected installation flags retain their own root.
+Held ordinary claim, disposition and effort writes return their normal
+text/JSON error rather than a traceback.
 
 A refused connection before any request bytes were sent may use one bounded
-recovery/retry; a possible post-send outcome never does. Deliberately no-wake
+recovery/retry; readiness connection probes send no mutation bytes and wait
+within the startup budget even if the same address remains published.
+A possible post-send outcome never retries. Deliberately no-wake
 native paths remain unchanged. Startup failure without a maintenance hold can
 still use the existing logged direct fallback, whose native coverage stays
 partial/unknown. This reduces avoidable fallback; it neither recovers missing
