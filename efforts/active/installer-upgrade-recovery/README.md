@@ -829,3 +829,31 @@ Containing release is the immediate next gate; existing entry, execution,
 construction and lifecycle owners retain the other matrix boundaries. No
 installed runtime, service, credential, queue or protected session was changed,
 and no rollout is implied by this merge.
+
+### 2026-11-05 - Launch-freshness containing release verified
+
+#10542 published the canonical source milestone and U11 acceptance row to Dev
+as `91091ecacc322ce3ccb1e244cbfd8541494e4926`, after exact-head approval
+and green required CI. The canonical README was reread and remains Active.
+Post-merge Dev CI 41941930339 also passed the source fix's actual merge.
+
+Validation/promotion 41943616923 succeeded. Release #10548 merged at
+01:02:40 UTC, publishing qualified Dev
+`20c140f142b273ec132b8d740240ed0dd3135e02` as Main
+`0adc4e2e8284bdbd72b8a99cbb4172841aac2088`, Worktrees `1.24.468-dev1`.
+That actual qualified source contains #10508's merge. All six changed production
+bodies match the fix, qualified source and released Main; the materialized
+runtime dependency set retains the Python 3.10 backport. The earlier release
+#10540 qualifies an older snapshot and is not substituted for this proof.
+No test rerun or installed/runtime/service result is inferred from matching
+released bytes.
+
+This completes U11's source and containing-release observation, not #7030's
+native adoption or this parent's remaining Plan/Validation gates. No updater
+was invoked. Existing fresh-entry, ordinary interrupted-request/coalescing,
+first-foundation and native application/cache owners retain their scope.
+Read-only reconciliation found #10499's related report of five legacy Windows
+startup reconciles losing their worker with an SSH session; it is a candidate,
+not a claim or source change. Current source and overlapping ownership must
+be reconciled before selecting any migration, preserving the Python-free
+budget hook, source/action policy and existing execution owner.
