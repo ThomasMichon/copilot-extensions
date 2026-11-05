@@ -60,7 +60,10 @@ def observe(project: Path, *, home: Path | None = None) -> dict:
         )
         context._get_declarations(marketplace, home / ".copilot", project)
         expected = context.source_identity(normalized, marketplace)["fingerprint"]
-        row = {"source": source, "sourceFingerprint": expected, "state": "needed", "reason": ""}
+        row = {
+            "source": source, "sourceFingerprint": expected, "state": "needed",
+            "reason": "", "payloadRoot": None,
+        }
         root = roots[source]
         if root is not None:
             if normalized.kind != "directory":
@@ -70,7 +73,9 @@ def observe(project: Path, *, home: Path | None = None) -> dict:
                 )
                 if actual["sourceFingerprint"] != expected:
                     raise PreparationError("Available payload does not match its declared source.")
-            row.update(state="ready", reason="source-qualified-payload")
+            row.update(
+                state="ready", reason="source-qualified-payload", payloadRoot=str(root.resolve()),
+            )
         else:
             if normalized.kind not in {"github", "git"}:
                 raise PreparationError("Unavailable authored local payload requires source-owner reconciliation.")

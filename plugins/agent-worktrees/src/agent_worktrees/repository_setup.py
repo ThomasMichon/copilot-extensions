@@ -21,6 +21,7 @@ from agent_procutil import no_window_kwargs
 from .git_ops import repository_identity_env
 
 DECLARATION = ".agent-worktrees/repository-setup.json"
+ENGINE_CONTEXT = "AGENT_WORKTREES_REPOSITORY_SETUP_ENGINE"
 LIMIT = 16 * 1024
 STATUSES = frozenset({"ready", "needed", "waiting", "refused", "failed"})
 
@@ -308,6 +309,10 @@ def _call(setup: Setup, mode: str) -> Outcome:
             argv = [executable, str(setup.script), "--request-file", str(request)]
         # Inherit handles: a credential owner may need the actual caller terminal.
         environment = _environment(attended=_terminal())
+        environment[ENGINE_CONTEXT] = json.dumps({
+            "schema": "copilot-extensions.repository-setup-engine", "version": 1,
+            "argv": [os.path.abspath(sys.executable), "-I", "-m", "agent_worktrees"],
+        })
         completed = subprocess.run(
             argv, cwd=setup.source.path, env=environment,
             **_stdio_kwargs(),
@@ -342,3 +347,47 @@ def run(setup: Setup, *, apply: bool, trusted: bool) -> Outcome:
     if applied.status not in ("ready", "needed"):
         return applied
     return _call(setup, "check")
+
+
+def add_parsers(sub) -> None:
+    parser = sub.add_parser(
+        "trust-repository-configuration", allow_abbrev=False,
+        help="Explicitly trust native Copilot configuration for a qualified repository revision",
+    )
+    parser.add_argument("--repo", type=Path, required=True)
+    parser.add_argument("--repository", required=True)
+    parser.add_argument("--commit", required=True)
+    parser.add_argument("--apply", action="store_true")
+
+
+def cmd_trust_configuration(args) -> int:
+    from . import permissions
+
+    try:
+        if not args.apply:
+            raise SetupError("Explicit --apply is required; native folder trust was not changed.")
+        if (
+            len(args.commit) not in (40, 64)
+            or re.fullmatch(r"[a-fA-F0-9]+", args.commit) is None
+        ):
+            raise SetupError("Native configuration trust requires an exact full commit ID.")
+        source = qualify(args.repo, args.repository)
+        if source.commit != args.commit.lower():
+            raise SetupError("Repository revision differs from the selected configuration trust.")
+        native_home = os.environ.get("COPILOT_HOME")
+        if native_home and Path(native_home).resolve() != permissions._copilot_dir().resolve():
+            raise SetupError("Native Copilot home differs from the folder-trust owner.")
+        changed = permissions.ensure_trusted_folder(str(source.path))
+        if qualify(source.path, source.url) != source:
+            raise SetupError("Repository changed after native trust; preserve and reconcile it.")
+        result = {
+            "schema": "copilot-extensions.repository-configuration-trust", "version": 1,
+            "status": "ready", "changed": changed,
+        }
+    except (SetupError, OSError, permissions.FolderTrustError) as error:
+        result = {
+            "schema": "copilot-extensions.repository-configuration-trust", "version": 1,
+            "status": "refused", "message": str(error),
+        }
+    print(json.dumps(result))
+    return 0 if result["status"] == "ready" else 1

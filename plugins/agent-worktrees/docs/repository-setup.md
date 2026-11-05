@@ -210,6 +210,54 @@ Interruption does not trigger a replay: a later invocation starts with the
 owner's read-only check. Temporary files are communication, not a second
 persistent operation ledger.
 
+### Selected engine invocation and native configuration trust
+
+The request/result files remain version one. The selected engine additionally
+sets invocation-local `AGENT_WORKTREES_REPOSITORY_SETUP_ENGINE` for its setup
+child, replacing any inherited value:
+
+```json
+{
+  "schema": "copilot-extensions.repository-setup-engine",
+  "version": 1,
+  "argv": ["<selected-python>", "-I", "-m", "agent_worktrees"]
+}
+```
+
+Invoke this exact argv plus the intended engine arguments. It preserves the
+selected interpreter environment, including a virtual environment's executable
+path, rather than resolving its symlink to a different base interpreter.
+It does not search PATH, bootstrap another engine or advertise package versions
+as capabilities. Existing scripts may ignore this additive environment contract;
+new consumers requiring it must refuse its absence or an unsupported shape.
+They must not retry a different engine or weaker operation after refusal.
+
+The descriptor grants no folder trust. A trusted setup entry that explicitly
+needs native repository configuration may invoke:
+
+```text
+<selected-engine-argv> trust-repository-configuration --repo <absolute-checkout>
+  --repository <https-url> --commit <full-commit-id> --apply
+```
+
+This explicit action qualifies the clean ordinary checkout, canonical remote
+and exact current commit before calling the existing serialized folder-trust
+owner. It refuses missing apply, invalid/stale commit, unqualified source or a
+different native Copilot home before changing trust. Success emits
+`copilot-extensions.repository-configuration-trust`, version `1`, with
+`status: "ready"` and `changed` (false means already trusted). It preserves
+other configuration and grants no tool permissions or extension approval.
+Source change detected after the trust write refuses completion without
+silently undoing or replaying that completed effect.
+
+This command is not a replacement for the admitted managed-worktree trust owner.
+Source execution consent alone still creates no Copilot trust record: the
+repository's declared setup behavior must explicitly choose the native trust
+action. This additive action and environment descriptor are provider expansion;
+older request-v1 scripts retain their prior behavior. A newer consumer on an
+older provider must retain missing-descriptor or unknown-command refusal before
+dependent effects, not infer support from a newer payload's metadata.
+
 ### Explicit enabled-payload preparation
 
 A trusted repository entry can prepare its enabled payloads before composing
@@ -222,6 +270,12 @@ agent-worktrees prepare-plugin-payloads --repo <absolute-checkout> --apply --exp
 
 The read-only form emits `copilot-extensions.plugin-payload-preparation`, version
 `1`, with `planDigest`, qualified per-source `entries` and `payloadsReady`.
+Each entry's additive `payloadRoot` is the qualified physical payload directory
+when ready, or null when unavailable. It is an availability observation, not an
+installer command or runtime-readiness claim. A caller may use the selected
+owner's documented command catalog at that root; it must not reconstruct another
+plugin's path from a sibling payload. Consumers requiring this additive field
+must refuse its absence on an older provider.
 Exit zero from observation means a valid observation, not that payloads are
 available. The plan binds the resolved checkout and physical Copilot home as well as its
 declarations, so retargeting a state-directory symlink or junction invalidates it.

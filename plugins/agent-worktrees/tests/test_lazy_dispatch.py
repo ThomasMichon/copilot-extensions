@@ -51,7 +51,7 @@ _ADD_PARSERS_MODULES = [
     "pane_lifecycle", "handoff_cli", "handoff_successor_repair_cli", "handoff_cancel_cli", "list_cli", "claims_cli", "follow_ups_cli",
     "session_metadata_cli", "cleanup_gc_cli", "reap_cli", "reclaim_cli", "resource_producer_cli",
     "worktree_ops_cli", "picker_profiles_cli", "maintenance_cli",
-    "installation_cli", "update_cli", "plugin_preparation", "update_launch_cli", "context_cli", "services_cli",
+    "installation_cli", "update_cli", "plugin_preparation", "repository_setup", "update_launch_cli", "context_cli", "services_cli",
     "repos_cli", "related_cli", "git_cli", "pr_cli", "pr_author_cli", "session_binding_cli",
     "session_inspection_cli", "session_tracking_cli", "session_observations_cli", "record_cli", "worktree_status_audit",
     "picker_reconcile_cli", "launch_registry", "launch_attempt_inspection",
@@ -158,6 +158,7 @@ def test_non_fast_tracked_command_still_calls_build_parser(monkeypatch):
 
 @pytest.mark.parametrize("command", [
     "get", "status", "list", "history-digest", "launch-attempts", "prepare-plugin-payloads",
+    "trust-repository-configuration",
 ])
 def test_fast_path_help_matches_full_parser_help(command, capsys):
     """A fast-tracked subcommand's own --help text must be byte-identical
@@ -346,6 +347,10 @@ def test_launch_update_bootstrap_handler_runs_without_full_cluster(monkeypatch, 
         ("pr-status", ["pr-status", "--json"]),
         ("pre-launch", ["pre-launch"]),
         ("prepare-plugin-payloads", ["prepare-plugin-payloads", "--repo", "."]),
+        ("trust-repository-configuration", [
+            "trust-repository-configuration", "--repo", ".",
+            "--repository", "https://example.invalid/repository", "--commit", "a" * 40,
+        ]),
         ("reconcile-plugins", ["reconcile-plugins", "--peek"]),
         ("worktree-status-audit", ["worktree-status-audit", "--sample", "1", "--no-log", "--seed", "1"]),
         ("list-sessions", ["list-sessions"]),

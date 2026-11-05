@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 from pathlib import Path
@@ -134,6 +135,57 @@ def test_never_executes_without_trust(source: Path, monkeypatch: pytest.MonkeyPa
     assert setup.run(selected, apply=True, trusted=False).status == "refused"
 
 
+@pytest.mark.parametrize("refusal", ["apply", "commit", "abbreviation", "remote", "home"])
+def test_native_configuration_trust_refuses_unqualified_effects(
+    source: Path, monkeypatch, capsys, refusal,
+) -> None:
+    from agent_worktrees import permissions
+
+    args = argparse.Namespace(
+        repo=source, repository=URL, commit=git(source, "rev-parse", "HEAD"), apply=True,
+    )
+    if refusal == "apply":
+        args.apply = False
+    elif refusal == "commit":
+        args.commit = "0" * 40
+    elif refusal == "abbreviation":
+        args.commit = args.commit[:8]
+    elif refusal == "remote":
+        args.repository = "https://example.invalid/another/repository"
+    else:
+        monkeypatch.setenv("COPILOT_HOME", str(source.parent / "another-state"))
+    monkeypatch.setattr(
+        permissions, "ensure_trusted_folder",
+        lambda *_: pytest.fail("unqualified native configuration was trusted"),
+    )
+    assert setup.cmd_trust_configuration(args) == 1
+    assert json.loads(capsys.readouterr().out)["status"] == "refused"
+    assert git(source, "status", "--porcelain") == ""
+
+
+def test_native_configuration_trust_preserves_config_and_is_idempotent(
+    source: Path, tmp_path, monkeypatch, capsys,
+) -> None:
+    home = tmp_path / "home"
+    copilot = home / ".copilot"
+    copilot.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("COPILOT_HOME", str(copilot))
+    config = copilot / "config.json"
+    config.write_text(json.dumps({"trustedFolders": ["existing"], "unrelated": True}))
+    args = argparse.Namespace(
+        repo=source, repository=URL, commit=git(source, "rev-parse", "HEAD"), apply=True,
+    )
+    for changed in (True, False):
+        assert setup.cmd_trust_configuration(args) == 0
+        assert json.loads(capsys.readouterr().out)["changed"] is changed
+        assert json.loads(config.read_text()) == {
+            "trustedFolders": ["existing", str(source.resolve())], "unrelated": True,
+        }
+    assert git(source, "status", "--porcelain") == ""
+
+
 @pytest.mark.parametrize("flag", ["--assume-unchanged", "--skip-worktree"])
 def test_cannot_hide_modified_entry_in_index_flags(source: Path, flag: str) -> None:
     git(source, "update-index", flag, "setup.ps1")
@@ -190,6 +242,45 @@ def consumer(source: Path, body: str) -> setup.Setup:
         pytest.skip("Windows script case; POSIX native consumer covered separately")
     commit(source)
     return setup.inspect(source, URL)
+
+
+def test_real_setup_child_uses_selected_engine_for_native_trust_and_payload_observation(
+    source: Path, tmp_path, monkeypatch,
+) -> None:
+    home = tmp_path / "selected-home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("COPILOT_HOME", str(home / ".copilot"))
+    monkeypatch.setenv(setup.ENGINE_CONTEXT, "unqualified inherited invocation")
+    selected = consumer(source, """
+$engine = $env:AGENT_WORKTREES_REPOSITORY_SETUP_ENGINE | ConvertFrom-Json
+if ($engine.schema -ne 'copilot-extensions.repository-setup-engine' -or
+    $engine.version -ne 1 -or -not [IO.Path]::IsPathRooted($engine.argv[0])) {
+    throw 'Missing selected engine contract'
+}
+if (($r.PSObject.Properties.Name | Sort-Object) -join ',' -ne
+    'mode,repository,result_file,version') { throw 'Request v1 changed' }
+$arguments = @($engine.argv | Select-Object -Skip 1)
+if ($r.mode -eq 'apply') {
+    $trusted = & $engine.argv[0] @arguments trust-repository-configuration `
+        --repo $r.repository.path --repository $r.repository.url `
+        --commit $r.repository.commit --apply | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or $trusted.status -ne 'ready') { throw 'Trust failed' }
+    $payloads = & $engine.argv[0] @arguments prepare-plugin-payloads `
+        --repo $r.repository.path | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or -not $payloads.payloadsReady) { throw 'Observation failed' }
+    Set-Content -LiteralPath $state -Value 'done'
+}
+$status = if (Test-Path -LiteralPath $state) { 'ready' } else { 'needed' }
+@{version=1;status=$status;message='Selected engine consumer checked'} |
+    ConvertTo-Json -Compress | Set-Content -LiteralPath $r.result_file -Encoding utf8
+""")
+    assert setup.run(selected, apply=True, trusted=True).status == "ready"
+    config = json.loads((home / ".copilot" / "config.json").read_text())
+    assert config["trustedFolders"] == [str(source.resolve())]
+    assert (source.parent / "calls.txt").read_text().splitlines() == ["check", "apply", "check"]
+    assert git(source, "status", "--porcelain") == ""
 
 
 def test_real_consumer_check_apply_final_check(source: Path) -> None:
@@ -441,15 +532,29 @@ if ($r.mode -eq 'apply') { exit 9 }
 @pytest.mark.skipif(sys.platform == "win32", reason="Native POSIX subprocess contract")
 def test_real_posix_consumer_check_apply_final_check(source: Path) -> None:
     body = """
-import json, pathlib, sys
+import json, os, pathlib, subprocess, sys
 assert sys.argv[1] == '--request-file'
 r = json.loads(pathlib.Path(sys.argv[2]).read_text())
+assert set(r) == {'version', 'mode', 'repository', 'result_file'}
+engine = json.loads(os.environ['AGENT_WORKTREES_REPOSITORY_SETUP_ENGINE'])
+assert engine['schema'] == 'copilot-extensions.repository-setup-engine'
+assert engine['version'] == 1
+assert engine['argv'][0] == sys.executable
 root = pathlib.Path(r['repository']['path'])
 assert pathlib.Path.cwd() == root
 state = root.parent / 'state.txt'
 with (root.parent / 'calls.txt').open('a') as log:
     log.write(r['mode'] + '\\n')
 if r['mode'] == 'apply':
+    subprocess.run([
+        *engine['argv'], 'trust-repository-configuration', '--repo', str(root),
+        '--repository', r['repository']['url'], '--commit', r['repository']['commit'],
+        '--apply',
+    ], check=True)
+    observed = subprocess.run([
+        *engine['argv'], 'prepare-plugin-payloads', '--repo', str(root),
+    ], check=True, capture_output=True, text=True)
+    assert json.loads(observed.stdout)['payloadsReady']
     state.write_text('done')
 pathlib.Path(r['result_file']).write_text(json.dumps({
     'version': 1, 'status': 'ready' if state.exists() else 'needed', 'message': 'Owner checked'
