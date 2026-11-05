@@ -32,6 +32,147 @@ def test_relay_listening_detects_open_and_closed_ports():
 
 
 class TestCLI:
+    @pytest.mark.parametrize("outcome", ["started", "owner-unavailable", "refused", "api-failed", "timeout"])
+    def test_start_dispatches_to_owning_account_without_guest_provisioning(
+        self, monkeypatch, capsys, outcome,
+    ):
+        from agent_codespaces import __main__ as cli, activation_cli, lifecycle
+
+        calls = []
+        monkeypatch.setattr(cli, "validate_context", lambda: None)
+        monkeypatch.setattr(cli, "_gh_binary_available", lambda: True)
+        monkeypatch.setattr(
+            activation_cli.launch_policy, "refused_exit_code",
+            lambda name: 79 if outcome == "refused" else None,
+        )
+        monkeypatch.setattr(
+            lifecycle, "get_codespace_status_with_account", lambda name: (True, "Shutdown", "owner"),
+        )
+        monkeypatch.setattr(
+            activation_cli.gh_account, "token_for_account",
+            lambda account: None if outcome == "owner-unavailable" else "fixture-token",
+        )
+
+        def run(argv, **kwargs):
+            calls.append(("start", argv, kwargs))
+            return types.SimpleNamespace(
+                returncode=1 if outcome == "api-failed" else 0, stderr="activation unavailable",
+            )
+
+        def wait(name, **kwargs):
+            calls.append(("wait", name, kwargs))
+            return outcome != "timeout"
+
+        monkeypatch.setattr(activation_cli.subprocess, "run", run)
+        monkeypatch.setattr(lifecycle, "wait_for_available", wait)
+        assert main(["start", "selected"]) == (0 if outcome == "started" else 79 if outcome == "refused" else 1)
+        if outcome in ("owner-unavailable", "refused"):
+            assert calls == []
+        else:
+            assert calls[0][1] == [
+                "gh", "api", "--method", "POST", "/user/codespaces/selected/start",
+            ]
+            assert calls[0][2]["env"]["GH_TOKEN"] == "fixture-token"
+            assert "GITHUB_TOKEN" not in calls[0][2]["env"]
+            if outcome == "api-failed":
+                assert len(calls) == 1
+            else:
+                assert calls[1] == ("wait", "selected", {"timeout": 180, "interval": 2, "account": "owner"})
+
+    @pytest.mark.parametrize("lookup", ["collision", "missing", "failed"])
+    def test_start_keeps_exact_account_binding_through_activation_and_polling(
+        self, monkeypatch, lookup,
+    ):
+        from agent_codespaces import __main__ as cli, account_binding, activation_cli, lifecycle
+
+        calls = []
+        monkeypatch.setattr(cli, "validate_context", lambda: None)
+        monkeypatch.setattr(lifecycle, "validate_context", lambda: None)
+        monkeypatch.setattr(cli, "_gh_binary_available", lambda: True)
+        monkeypatch.setattr(activation_cli.launch_policy, "refused_exit_code", lambda name: None)
+        monkeypatch.setattr(account_binding, "bound_account_or_raise", lambda name: "exact-owner")
+        monkeypatch.setattr(lifecycle, "list_codespaces", lambda: pytest.fail("unscoped listing selected"))
+        monkeypatch.setattr(
+            activation_cli.gh_account, "token_for_account",
+            lambda account: "fixture-token" if account == "exact-owner" else pytest.fail("wrong account"),
+        )
+
+        def status(name, account, **kwargs):
+            assert name == "selected" and account == "exact-owner"
+            calls.append(("status", account))
+            if lookup == "failed":
+                raise RuntimeError("bound lookup failed")
+            return (False, None) if lookup == "missing" else (
+                True, "Shutdown" if len(calls) == 1 else "Available",
+            )
+
+        def run(argv, **kwargs):
+            assert argv[-1] == "/user/codespaces/selected/start"
+            assert kwargs["env"]["GH_TOKEN"] == "fixture-token"
+            calls.append(("start", "exact-owner"))
+            return types.SimpleNamespace(returncode=0, stderr="")
+
+        monkeypatch.setattr(lifecycle, "_get_codespace_status_under", status)
+        monkeypatch.setattr(activation_cli.subprocess, "run", run)
+        assert main(["start", "selected"]) == (0 if lookup == "collision" else 1)
+        assert calls == (
+            [("status", "exact-owner"), ("start", "exact-owner"), ("status", "exact-owner")]
+            if lookup == "collision" else [("status", "exact-owner")]
+        )
+
+    @pytest.mark.parametrize("outcome", ["started", "identity-failed", "lookup-failed", "missing", "token-failed"])
+    def test_start_revalidates_unmapped_venue_under_authenticated_login(
+        self, monkeypatch, outcome,
+    ):
+        from agent_codespaces import __main__ as cli, account_binding, activation_cli, lifecycle
+
+        calls = []
+        commands = []
+        monkeypatch.setattr(cli, "validate_context", lambda: None)
+        monkeypatch.setattr(lifecycle, "validate_context", lambda: None)
+        monkeypatch.setattr(cli, "_gh_binary_available", lambda: True)
+        monkeypatch.setattr(activation_cli.launch_policy, "refused_exit_code", lambda name: None)
+        monkeypatch.setattr(account_binding, "bound_account_or_raise", lambda name: None)
+        monkeypatch.setattr(account_binding, "bound_accounts_or_raise", lambda: ())
+        monkeypatch.setattr(activation_cli.gh_account, "mapped_accounts", lambda: ())
+        monkeypatch.setattr(
+            activation_cli.gh_account, "token_for_account",
+            lambda account: None if outcome == "token-failed" else "fixture-token",
+        )
+
+        def status(name, account, **kwargs):
+            assert name == "selected"
+            calls.append(account)
+            if account is None:
+                return True, "Shutdown"
+            assert account == "authenticated-owner"
+            if outcome == "lookup-failed":
+                raise RuntimeError("explicit owner lookup failed")
+            return (False, None) if outcome == "missing" else (
+                True, "Shutdown" if len(calls) == 2 else "Available",
+            )
+
+        def run(argv, **kwargs):
+            commands.append(argv)
+            if argv == ["gh", "api", "user", "--jq", ".login"]:
+                return types.SimpleNamespace(
+                    returncode=1 if outcome == "identity-failed" else 0,
+                    stdout="authenticated-owner\n", stderr="",
+                )
+            assert argv == ["gh", "api", "--method", "POST", "/user/codespaces/selected/start"]
+            assert kwargs["env"]["GH_TOKEN"] == "fixture-token"
+            return types.SimpleNamespace(returncode=0, stderr="")
+
+        monkeypatch.setattr(lifecycle, "_get_codespace_status_under", status)
+        monkeypatch.setattr(activation_cli.subprocess, "run", run)
+        assert main(["start", "selected"]) == (0 if outcome == "started" else 1)
+        if outcome == "started":
+            assert calls == [None, "authenticated-owner", "authenticated-owner"]
+            assert len(commands) == 2
+        else:
+            assert calls == ([None] if outcome == "identity-failed" else [None, "authenticated-owner"])
+            assert commands == [["gh", "api", "user", "--jq", ".login"]]
+
     def test_no_args_shows_help(self, capsys):
         rc = main([])
         assert rc == 1
@@ -872,9 +1013,10 @@ class TestNamespaceSeams:
     def test_plugin_plan_forwards_explicit_controller_roots(self, capsys):
         seen = {}
 
-        def plan(repo, config, *, repo_roots):
+        def plan(repo, config, *, repo_roots, sources):
             seen["repo"] = repo
             seen["roots"] = repo_roots
+            seen["sources"] = sources
             return {"plugins": []}
 
         with (
@@ -885,7 +1027,9 @@ class TestNamespaceSeams:
                 "plugin-plan", "synthetic", "--repo", "example/project",
                 "--plugin-root", "controller with spaces", "--plugin-root", "secondary",
             ]) == 0
-        assert seen == {"repo": "example/project", "roots": ["controller with spaces", "secondary"]}
+        assert seen == {
+            "repo": "example/project", "roots": ["controller with spaces", "secondary"], "sources": [],
+        }
         assert '"plugins": []' in capsys.readouterr().out
 
     def test_namespace_resolve_not_found_exit3(self, capsys):

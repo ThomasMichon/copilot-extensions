@@ -209,6 +209,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     host_prepare.add_argument("name", help="Container name")
     host_prepare.add_argument("--expected-instance", default=None)
+    host_prepare.add_argument("--repository-policy-context", default=None)
     host_prepare.add_argument(
         "--host-relay-port",
         type=int,
@@ -447,6 +448,7 @@ def _trusted_session_host_context(name: str, expected_instance: str | None = Non
 
 def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
     """Prepare endpoint + auth inputs; agent-bridge owns the Host lifecycle."""
+    policy_context = getattr(args, "repository_policy_context", None)
     from ._invoke import payload_command_argv
     from .container_shims import (
         deploy as deploy_shims,
@@ -463,7 +465,7 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
         fleet, args.name, relay_enabled, require_ssh=True,
     ).agent_relay
     acp_command, launcher_token, token_count, instance_id = hosting_policy.session_host_launch_inputs(
-        context, args.expected_instance,
+        context, args.expected_instance, policy_context=policy_context,
     )
     # A driver member is addressed by its fleet-qualified handle; its raw id
     # may be shared by another runtime.
@@ -507,7 +509,7 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
     _, acp_command = process_auth.prepare_acp_launch(
         config, fleet, projection_target, user, acp_command, remote_env,
     )
-    acp_command = hosting_policy.guarded_launch(acp_command, workspace)
+    acp_command = acp_command if policy_context is not None else hosting_policy.guarded_launch(acp_command, workspace)
     remote_command = build_remote_command(
         acp_command,
         remote_env,

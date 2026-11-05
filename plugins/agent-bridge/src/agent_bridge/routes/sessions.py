@@ -591,6 +591,15 @@ async def create_workspace(req: StartSessionRequest, request: Request):
 @router.post("", response_model=StartSessionResponse, status_code=201)
 async def start_session(req: StartSessionRequest, request: Request):
     mgr: SessionManager = request.app.state.session_manager
+    try:
+        with mgr.start_admission():
+            return await _start_session_admitted(req, request)
+    except DaemonDrainingError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+async def _start_session_admitted(req: StartSessionRequest, request: Request):
+    mgr: SessionManager = request.app.state.session_manager
     resolver = getattr(request.app.state, "resolver", None)
     agent_name = req.agent
     if agent_name and not getattr(request.app.state, "ready", True):
@@ -604,16 +613,6 @@ async def start_session(req: StartSessionRequest, request: Request):
             canonical = canonicalize(agent_name)
             if isinstance(canonical, str) and canonical:
                 agent_name = canonical
-
-    # Refuse new sessions fast while draining, before any agent resolution
-    # or spawn work, so a redeploy stops growing the daemon about to
-    # retire (the manager enforces the same gate as a backstop).
-    if mgr.is_draining:
-        raise HTTPException(
-            status_code=503,
-            detail="agent-bridge is draining for a redeploy and is not "
-                   "accepting a new session; retry shortly.",
-        )
 
     if req.parity_fault:
         from ..protocol import FAILED_ACP_HANDSHAKE_FAULT
@@ -688,7 +687,7 @@ async def start_session(req: StartSessionRequest, request: Request):
             )
         try:
             target = await resolver.resolve_async(
-                agent_name, sender_repo=req.sender_repo,
+                agent_name, sender_repo=req.sender_repo, activate=True,
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc))

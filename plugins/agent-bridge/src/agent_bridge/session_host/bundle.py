@@ -45,6 +45,7 @@ _AGENT_BRIDGE_MODULES = (
     "session_host/host.py",
     "session_host/osutil.py",
     "session_host/launcher.py",
+    "session_host/receiver_policy.py",
 )
 _MAIN = "agent_bridge.session_host.launcher:main"
 _PROCUTIL_MODULES = (
@@ -85,6 +86,13 @@ def bundle_source_hash() -> str:
         h.update(b"\0")
         h.update(source.read_bytes())
         h.update(b"\0")
+    from ..portable_policy import policy_sources
+
+    for archive_rel, contents in policy_sources():
+        h.update(archive_rel.encode("utf-8"))
+        h.update(b"\0")
+        h.update(contents)
+        h.update(b"\0")
     h.update(_MAIN.encode("utf-8"))
     return h.hexdigest()
 
@@ -120,6 +128,12 @@ def build_session_host_bundle(
             dst = stage / archive_rel
             dst.parent.mkdir(parents=True, exist_ok=True)
             dst.write_bytes(source.read_bytes())
+        from ..portable_policy import policy_sources
+
+        for archive_rel, contents in policy_sources():
+            dst = stage / archive_rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_bytes(contents)
         tmp_out = Path(td) / "bundle.pyz"
         # A shebang so the far side can also run ``./bundle.pyz`` directly.
         zipapp.create_archive(

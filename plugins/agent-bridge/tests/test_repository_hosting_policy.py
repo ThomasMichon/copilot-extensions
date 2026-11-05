@@ -218,6 +218,10 @@ async def test_late_policy_preserves_custody_and_refuses_reembodiment(
     session.event_log = MagicMock()
     session.client = MagicMock(is_running=False)
     session_manager._sessions["existing"] = session
+    session_manager.db.create_session(
+        "existing", "existing", "source", str(repo), "local", session.status.value, 0,
+    )
+    retained_row = session_manager.db.get_session("existing")
     old_status = session.status
     effects: list[str] = []
     for method in ("_try_reattach_live_host", "_refresh_provider_target", "_run_turn_sync", "stop_session"):
@@ -240,6 +244,8 @@ async def test_late_policy_preserves_custody_and_refuses_reembodiment(
     session.client.shutdown.assert_not_called()
     session.event_log.append.assert_not_called()
     assert session_manager.db.execute_read("SELECT * FROM turns") == []
+    assert session_manager.db.get_session("existing") == retained_row
+    assert not getattr(session_manager, "_active_acquisitions", 0)
 
 
 def test_read_only_session_inspection_does_not_check_new_policy(

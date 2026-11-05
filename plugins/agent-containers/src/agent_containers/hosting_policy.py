@@ -104,11 +104,30 @@ def require_container_checkout(container_id: str, user: str, workspace: str) -> 
 
 def session_host_launch_inputs(
     context: TrustedContext, expected_instance: str | None,
+    *, policy_context: str | None = None,
 ) -> tuple[str, str, int, str]:
     """Admit the selected checkout and preference launcher before projection."""
-    require_container_checkout(
-        getattr(context, "target", context.instance_id), context.user, context.workspace,
-    )
+    if policy_context is None:
+        require_container_checkout(
+            getattr(context, "target", context.instance_id), context.user, context.workspace,
+        )
+    else:
+        from repository_policy.receiving import build_receiving_policy_check
+
+        from .config import _installation_owner
+
+        _installation_owner()
+        command, payload = build_receiving_policy_check(
+            context.workspace, policy_context, text_transport=True,
+        )
+        result = _run(SimpleNamespace(
+            container_id=getattr(context, "target", context.instance_id),
+            user=context.user, workspace_folder=context.workspace,
+        ), command, input_text=payload.decode("ascii"))
+        try:
+            validate_hosting_result(json.loads(result.stdout))
+        except (AgentHostingError, TypeError, ValueError) as exc:
+            raise RuntimeError("Portable receiving policy returned invalid admission") from exc
     command = context.config.acp_command_for(context.fleet)
     launcher = "{{target_preference_launcher}}"
     count = command.count(launcher)
@@ -119,14 +138,22 @@ def session_host_launch_inputs(
     return command, launcher, count, context.instance_id
 
 
-def _run(target: ExecutionCheckout, command: str) -> subprocess.CompletedProcess[str]:
+def _run(
+    target: ExecutionCheckout, command: str, *, input_text: str | None = None,
+) -> subprocess.CompletedProcess[str]:
     from .runtime_drivers import run_routed
 
-    argv = ["docker", "exec", "-u", target.user, target.container_id, "bash", "-lc", command]
+    argv = [
+        "docker", "exec", *(["-i"] if input_text is not None else []),
+        "-u", target.user, target.container_id, "bash", "-lc", command,
+    ]
     try:
-        result = run_routed(argv, timeout=90) or subprocess.run(
+        result = run_routed(
+            argv, timeout=90, **({"input_text": input_text} if input_text is not None else {}),
+        ) or subprocess.run(
             argv, capture_output=True, text=True, timeout=90, check=False,
             creationflags=no_window_flags(),
+            **({"input": input_text} if input_text is not None else {}),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise RuntimeError(f"Required guest repository hosting check is unavailable: {exc}") from exc

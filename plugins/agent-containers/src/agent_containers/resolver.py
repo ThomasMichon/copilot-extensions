@@ -818,6 +818,7 @@ class ContainerResolver:
                 "security_profile": fleet.security_profile,
                 "user": user,
                 "acp_command": guarded_launch(config.acp_command_for(fleet), workspace_folder),
+                "portable_receiving_policy": {"version": 1},
                 "ssh": asdict(ssh_config),
                 "provider_command": payload_command_argv(),
                 "relay_remote_port": (

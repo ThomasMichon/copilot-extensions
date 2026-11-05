@@ -329,6 +329,7 @@ class CodespaceResolver:
         )
         from .hosting_policy import guarded_launch
 
+        session_host_command = acp_command
         acp_command = guarded_launch(acp_command, workspace_folder, provision=checkout_command)
         spawn_cmd = _build_spawn_command(cs.name, acp_command, stage_plugins=stage)
         log.info("Resolved codespace:%s -> %s", cs.name, " ".join(spawn_cmd))
@@ -341,6 +342,9 @@ class CodespaceResolver:
                 "name": cs.name,
                 "repo": repo or cs.repository,
                 "acp_command": acp_command,
+                "portable_receiving_policy": {
+                    "version": 1, "acp_command": session_host_command, "activation": "start",
+                },
                 "workspace_folder": workspace_folder,
                 "provider_command": dispatch_argv(),
                 "plugin_plan": True,

@@ -8,6 +8,8 @@ import os
 import time
 from typing import TYPE_CHECKING, Any
 
+from repository_policy import AgentHostingError
+
 from .connect import ConnectTracker
 from .models import SessionStatus
 from .session_host.codespace_transport import codespace_session_operation
@@ -835,6 +837,7 @@ class _SessionHostRecoveryMixin:
             cs_target = parse_codespace_target(target.spawn_command)
         if not cs_target:
             return None
+        cs_target = dict(cs_target)
         from .venue_plugins import resolve_controller_cwd
         controller_cwd = await resolve_controller_cwd(
             target, caller_session_id=getattr(session, "caller_session_id", None),
@@ -866,6 +869,8 @@ class _SessionHostRecoveryMixin:
             )
             from .session_host.codespace_transport import resolve_execution_workspace
             remote_cwd = await resolve_execution_workspace(cs_target, spawner.transport)
+            if target.cwd and remote_cwd != target.cwd:
+                raise AgentHostingError("CodeSpace recovery changed the retained execution checkout")
             target.codespace = cs_target
             target.cwd = remote_cwd
             self._db.update_session_target(session.session_id, target.to_json(), remote_cwd)

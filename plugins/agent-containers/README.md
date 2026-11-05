@@ -197,9 +197,19 @@ Managed agent launch checks repository hosting eligibility inside the actual
 guest checkout, using the selected physical container instance. This includes
 ACP, trusted Session Host preparation, attached launch, and restricted task
 receivers. Guest ACP commands recheck at execution; an explicit prepared
-worktree is checked instead of its anchor. Required receivers must support
+worktree is checked instead of its anchor. The default receivers must support
 `agent-worktrees agent-policy check --path <checkout> --operation launch --json`;
 unsupported receivers refuse without a weaker launch fallback.
+
+Trusted Session Host metadata additionally advertises
+`portable_receiving_policy` version `1`. A matching Bridge caller can pass
+`--repository-policy-context` to `session-host-prepare`: the provider validates
+its own installation, freshly reads canonical guest policy in the selected
+instance/user before credential projection, and hands the unguarded command
+to Bridge's enforcing bundled Host. Absent selection retains the original
+guest-owner checks and guarded command. This does not change restricted
+dispatch, standalone CLI launch, allocation or existing session custody. See
+the [receiving contract](../agent-bridge/docs/repository-hosting.md#host-selected-portable-policy-contract).
 
 `dispatch-check-hosting <name> --expected-container-id <id>` is the read-only
 preflight for restricted supervisors, before binding or credential projection.

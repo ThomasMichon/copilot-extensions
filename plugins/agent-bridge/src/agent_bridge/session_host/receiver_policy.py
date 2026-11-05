@@ -10,6 +10,15 @@ import subprocess
 from agent_procutil import no_window_flags
 
 
+def require_portable_path_hosting(
+    cwd: str | os.PathLike[str] | None, context: str, *, operation: str = "launch",
+) -> None:
+    """Enforce fresh policy using the explicitly selected host-owned closure."""
+    from repository_policy.receiving import require_receiving_policy
+
+    require_receiving_policy(cwd, context, operation=operation)
+
+
 def require_path_hosting(cwd: str | os.PathLike[str] | None, *, operation: str = "launch") -> None:
     """The guest's attributed owner resolves its own validated marketplace context."""
     if not cwd:

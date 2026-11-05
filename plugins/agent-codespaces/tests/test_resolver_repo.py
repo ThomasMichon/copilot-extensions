@@ -158,6 +158,10 @@ class TestResolveCrossRepo:
         assert cmd == guarded_launch(
             f"cd /workspaces/example-web && {_COPILOT}", "/workspaces/example-web",
         )
+        assert target.codespace["portable_receiving_policy"] == {
+            "version": 1, "acp_command": f"cd /workspaces/example-web && {_COPILOT}",
+            "activation": "start",
+        }
         assert "git clone" not in cmd
 
     @pytest.mark.asyncio
@@ -188,6 +192,10 @@ class TestResolveCrossRepo:
             "name": "cs-1",
             "repo": _CS_REPO,
             "acp_command": cmd,
+            "portable_receiving_policy": {
+                "version": 1, "acp_command": f"cd /workspaces/example-web && {_COPILOT}",
+                "activation": "start",
+            },
             "workspace_folder": "/workspaces/example-web",
             "provider_command": dispatch_argv(),
             "plugin_plan": True,

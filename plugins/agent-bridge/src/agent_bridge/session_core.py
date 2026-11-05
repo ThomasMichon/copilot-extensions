@@ -320,6 +320,7 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
         refreshed = replace(
             resolved,
             cwd=persisted.cwd,
+            explicit_cwd=persisted.explicit_cwd,
             project=persisted.project,
             worktree_id=persisted.worktree_id,
             caller_worktree=persisted.caller_worktree,
