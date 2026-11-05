@@ -235,7 +235,10 @@ def test_actual_companion_attached_client_browsing_resize_and_return(
         wait_for(lambda: "Observed change 40" in screen(), screen)
         client.send(b"\x1b[H")
         wait_for(lambda: re.search(r"Observed change 1(?!\d)", screen()), screen)
-        (owner_root / "push.json").write_text(json.dumps(delta()), encoding="utf-8")
+        delivery = owner_root / "push.json"
+        pending = delivery.with_suffix(".pending")
+        pending.write_text(json.dumps(delta()), encoding="utf-8")
+        pending.replace(delivery)
         wait_for(lambda: "Updated purpose from pushed owner facts." in screen(), screen)
         assert re.search(r"Observed change 1(?!\d)", screen())
         assert "Observed change 41" not in screen()
