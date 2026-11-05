@@ -222,6 +222,14 @@ checkpoint nor author eligibility, holds, requirements or source/resource custod
 
 ## Plan
 
+The [current inflow graph refresh](current-inflow-graph-refresh.md) requalifies
+584 legacy candidates and separates 71 unchanged semantic generations from
+six fresh lexical-retrieval originals after whole-reference exclusions.
+Unavailable fresh embeddings, one audited finite completion and the measured
+scope/checkpoint incompatibility remain explicit; no hold or target changes.
+The [typed supplement](graph/current-inflow-refresh.json) preserves the
+different evidence spaces without completion or receiving-transfer credit.
+
 The [four preparation/containment/liveness contracts](finite-preparation-containment-liveness-contracts.md)
 retain twelve ranked relationships and all four independent OPEN outcomes.
 Actual promoted preparation failure, test-global containment, pending-seed
@@ -300,6 +308,19 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 - [x] Preserve the initial cohort and oldest-first cursor in structured session state.
 
 ### Phase 2 - Continuing reconciliation
+
+The four preparation/containment/liveness contracts are actually delivered
+in #10729 after genuine exact-head approval, no review threads and canonical
+confirmation of successful required checks before normal managed merge.
+The later post-merge attribution refresh also completed successfully; all
+ten observed contexts and eight merged/current blobs are verified.
+Only the serial publication child finalized, retained; the
+[delivery journal](<journal/2026/11.05 finite-preparation-containment-liveness-contracts.md>)
+records the result. Fresh whole admission retains thirteen further contracts
+and eleven protected originals. Independent actual-source/review verification
+closes only #10410's finite cleanup-fixture regression; twelve stay OPEN.
+Current weighted-graph requalification, thematic fit and original acceptance
+remain continuing research. The parent Plan and Validation stay open.
 
 The eleven automatic-update/observation/compatibility contracts are actually
 delivered in #10727 after genuine exact-head approval, no review threads
