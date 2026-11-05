@@ -85,6 +85,9 @@ def test_application_preparation_uses_wheel_assets_without_rewriting_wheel(
     assert (slot / ".runtime-bootstrap" / "runtime-generation").read_text().strip() == (
         record["runtime_generation"]
     )
+    assert (slot / ".runtime-bootstrap" / "installer_marker_environment.py").read_bytes() == (
+        source_scripts / "installer_marker_environment.py"
+    ).read_bytes()
     assert not (environment / ".runtime-bootstrap").exists()
 
 
@@ -100,17 +103,18 @@ def test_application_preparation_retains_its_source_without_a_payload(
     slot = tmp_path / "runtime" / "versions" / ("1.2.3+" + "a" * 140 if legacy_paths else "1.2.3")
     package = slot / ".venv" / "Lib" / "site-packages" / "agent_worktrees"
     scripts = package / "_runtime_assets" / "scripts"
-    scripts.mkdir(parents=True)
+    native = candidate._native if legacy_paths else lambda path: path
+    native(scripts).mkdir(parents=True)
     source_scripts = Path(__file__).resolve().parents[1] / "scripts"
     for name in candidate._LIFECYCLE_FILES:
-        shutil.copyfile(source_scripts / name, scripts / name)
-    shutil.copytree(source_scripts / "installation-context", scripts / "installation-context")
-    (slot / ".runtime-bootstrap").mkdir()
-    (slot / "application.json").write_text("{}", encoding="utf-8")
+        shutil.copyfile(source_scripts / name, native(scripts / name))
+    shutil.copytree(source_scripts / "installation-context", native(scripts / "installation-context"))
+    native(slot / ".runtime-bootstrap").mkdir()
+    native(slot / "application.json").write_text("{}", encoding="utf-8")
     source = {"plugin": "agent-worktrees", "package_version": "1.2.3", "source_commit": "a" * 40}
-    (slot / "runtime-source.json").write_text(json.dumps(source), encoding="utf-8")
+    native(slot / "runtime-source.json").write_text(json.dumps(source), encoding="utf-8")
     immutable = package / "_build_info.py"
-    immutable.write_bytes(b"immutable wheel\n")
+    native(immutable).write_bytes(b"immutable wheel\n")
     monkeypatch.setattr(agent_worktrees, "__file__", str(package / "__init__.py"))
     monkeypatch.setattr(sys, "prefix", str(slot / ".venv"))
     monkeypatch.setattr(candidate, "distribution_version", lambda _name: "1.2.3")
@@ -126,14 +130,14 @@ def test_application_preparation_retains_its_source_without_a_payload(
         monkeypatch.setattr(os, "scandir", legacy_scandir)
         assert len(str(scripts / "installation-context")) > 260
     candidate.prepare_runtime_candidate()
-    record = json.loads((slot / ".runtime-bootstrap" / "build-info.json").read_text())
+    record = json.loads(native(slot / ".runtime-bootstrap" / "build-info.json").read_text())
     assert record["commit"] == source["source_commit"]
     assert json.loads(record["deployment_source"]) == source
-    assert immutable.read_bytes() == b"immutable wheel\n"
+    assert native(immutable).read_bytes() == b"immutable wheel\n"
     assert not (slot / "payload").exists()
     copied = slot / ".runtime-bootstrap" / "installation-context"
     for member in (source_scripts / "installation-context").glob("*.py"):
-        assert (copied / member.name).read_bytes() == member.read_bytes()
+        assert native(copied / member.name).read_bytes() == member.read_bytes()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows installation ownership")
@@ -455,6 +459,26 @@ def test_install_source_rechecks_the_updater_wheel_selection(driver, tmp_path, m
         assert json.loads(result.read_text())["runtime_version"] == selection["runtime_version"]
 
 
+def test_wheel_marker_probe_matches_the_actual_interpreter(driver):
+    from packaging.markers import default_environment
+
+    assert driver._wheel_marker_environment(Path(sys.executable)) == default_environment()
+
+
+@pytest.mark.parametrize("failure", ["exit", "malformed", "timeout"])
+def test_wheel_marker_probe_refuses_unusable_interpreters(driver, monkeypatch, failure):
+    from types import SimpleNamespace
+
+    def run(*_args, **_kwargs):
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired("python", 30)
+        return SimpleNamespace(returncode=1 if failure == "exit" else 0, stdout="not-json")
+
+    monkeypatch.setattr(driver.subprocess, "run", run)
+    with pytest.raises(driver.InstallationRefused, match="interpreter probe failed"):
+        driver._wheel_marker_environment(Path(sys.executable))
+
+
 def test_wheel_selection_without_install_source_refuses_before_install(driver, tmp_path, monkeypatch):
     monkeypatch.setenv(driver.install_driver.SOURCE_SELECTION_ENV, '{"selection":"fixture"}')
     monkeypatch.setattr(driver, "install", lambda *args, **kwargs: pytest.fail("unselected wheels reached installation"))
@@ -468,7 +492,7 @@ def test_wheel_selection_without_install_source_refuses_before_install(driver, t
     assert failure.value.code == 2 and not result.exists()
 
 
-@pytest.mark.parametrize("fault", ["hash", "custody"])
+@pytest.mark.parametrize("fault", ["hash", "custody", "base-target", "slot-target"])
 def test_wheel_candidate_refuses_changed_inputs_before_publication(driver, tmp_path, monkeypatch, fault):
     from types import SimpleNamespace
     from installer_wheel_snapshot import retain_wheel_inputs
@@ -476,6 +500,7 @@ def test_wheel_candidate_refuses_changed_inputs_before_publication(driver, tmp_p
     monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
     root, plugin = tmp_path / "runtime", tmp_path / "payload"
     plugin.mkdir()
+    (root / ".installer-inputs").mkdir(parents=True)
     (plugin / "plugin.json").write_text('{"name":"agent-worktrees","version":"1.0.0"}', encoding="utf-8")
     (plugin / "pyproject.toml").write_text(
         '[project]\nname="agent-worktrees"\nversion="1.0.0"\n', encoding="utf-8",
@@ -494,13 +519,26 @@ def test_wheel_candidate_refuses_changed_inputs_before_publication(driver, tmp_p
 
     @contextmanager
     def candidate(*_args, **_kwargs):
-        yield SimpleNamespace(payload_hash=("f" if fault == "hash" else "e") * 64)
+        reached.append(True)
+        yield SimpleNamespace(
+            payload_hash=("f" if fault == "hash" else "e") * 64,
+            slot=tmp_path / "candidate", reused=False,
+        )
 
+    reached, probes = [], []
     monkeypatch.setattr(driver, "Governance", lambda requested, payload: SimpleNamespace(
-        root=requested, payload=payload, held=held,
+        root=requested, payload=payload, held=held, signature=lambda: {},
     ))
     monkeypatch.setattr(source, "publish_source_snapshot", lambda *_args: plugin)
     monkeypatch.setattr(driver.engine, "numbered_candidate", candidate)
+    monkeypatch.setattr(driver.runtime, "slot_python", lambda *_args: tmp_path / "slot-python")
+
+    def marker_environment(python):
+        probes.append(python)
+        mismatched = fault == "base-target" or (fault == "slot-target" and len(probes) == 2)
+        return {"python_version": "3.12" if mismatched else "3.11"}
+
+    monkeypatch.setattr(driver, "_wheel_marker_environment", marker_environment, raising=False)
     monkeypatch.setattr(driver.subprocess, "Popen", lambda *args, **kwargs: pytest.fail(
         "mismatched candidate reached publication",
     ))
@@ -518,6 +556,7 @@ def test_wheel_candidate_refuses_changed_inputs_before_publication(driver, tmp_p
                 "identity": "source:" + identity.source_commit,
                 "sha256": "sha256:" + identity.assembly_hash,
             },
+            "target": {"environment": {"python_version": "3.11"}},
         }
         wheels = driver.engine.WheelInstallInputs(
             snapshot, json.dumps(profile, sort_keys=True, separators=(",", ":")),
@@ -539,13 +578,21 @@ def test_wheel_candidate_refuses_changed_inputs_before_publication(driver, tmp_p
                 actual_verify(current)
 
             monkeypatch.setattr(driver.engine.WheelInstallInputs, "verify", verify)
-        error = driver.InstallationRefused if fault == "hash" else ValueError
-        message = "candidate differs" if fault == "hash" else "retained wheel changed"
+        error = ValueError if fault == "custody" else driver.InstallationRefused
+        message = (
+            "candidate differs" if fault == "hash" else
+            "retained wheel changed" if fault == "custody" else
+            "interpreter differs"
+        )
         with pytest.raises(error, match=message):
             driver.install(
                 root, plugin, payload=plugin, uv=tmp_path / "uv", base_python=Path(sys.executable),
                 wheel_inputs=wheels, expected_wheel_selection=selection,
             )
+        if fault == "base-target":
+            assert len(probes) == 1 and not reached
+        elif fault == "slot-target":
+            assert len(probes) == 2 and reached
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows installer argument admission")

@@ -399,6 +399,28 @@ def _installed_identity(slot: Path) -> dict:
     return json.loads(result.stdout)
 
 
+def _wheel_marker_environment(python: Path) -> dict:
+    from installer_marker_environment import MARKER_ENVIRONMENT_QUERY
+
+    try:
+        environment = {key: value for key, value in os.environ.items()
+                       if key.upper() not in {"PYTHONPATH", "PYTHONHOME"}}
+        result = subprocess.run(
+            [str(python), "-I", "-S", "-B", "-c", MARKER_ENVIRONMENT_QUERY],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8",
+            timeout=30, check=False, env=environment,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        if result.returncode or len(result.stdout) > 16384:
+            raise ValueError("invalid interpreter response")
+        observed = json.loads(result.stdout)
+        if not isinstance(observed, dict):
+            raise ValueError("invalid interpreter response")
+        return observed
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        raise InstallationRefused("Wheel target interpreter probe failed") from error
+
+
 @install_driver.owned
 def install(
     root: Path, plugin: Path, *, payload: Path, uv: Path, base_python: Path,
@@ -430,6 +452,7 @@ def install(
         raise InstallationRefused("Source identity changed after frontend runtime selection")
     version = source_identity.runtime_version if source_identity is not None else package_version
     wheel_options = {}
+    wheel_environment = None
     if expected_wheel_selection is not None and (
         not isinstance(expected_wheel_selection, dict) or wheel_inputs is None
     ):
@@ -464,6 +487,18 @@ def install(
             or re.fullmatch(r"[0-9a-f]{64}", expected_wheel_selection["payload_hash"]) is None
         ):
             raise InstallationRefused("Retained wheels differ from the expected source selection")
+        if expected_wheel_selection is not None:
+            target = profile.get("target")
+            wheel_environment = target.get("environment") if isinstance(target, dict) else None
+            if not isinstance(wheel_environment, dict):
+                raise InstallationRefused("Construction interpreter differs from the selected wheel target: missing environment")
+            observed = _wheel_marker_environment(base_python)
+            if observed != wheel_environment:
+                fields = sorted(key for key in observed.keys() | wheel_environment.keys()
+                                if observed.get(key) != wheel_environment.get(key))
+                raise InstallationRefused(
+                    f"Construction interpreter differs from the selected wheel target ({base_python}): {', '.join(fields)}",
+                )
     if repair:
         if wheel_inputs is None:
             raise InstallationRefused("Direct source repair requires complete wheel inputs")
@@ -505,6 +540,10 @@ def install(
                     and candidate.payload_hash != expected_wheel_selection["payload_hash"]
                 ):
                     raise InstallationRefused("Constructed candidate differs from the expected wheel selection")
+                if wheel_environment is not None:
+                    python = runtime.slot_python(root, candidate.slot.name)
+                    if python is None or _wheel_marker_environment(python) != wheel_environment:
+                        raise InstallationRefused("Candidate interpreter differs from the selected wheel target")
         except engine.HealthRepairRequired:
             if source_identity is None:
                 raise

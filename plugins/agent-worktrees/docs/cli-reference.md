@@ -1602,11 +1602,13 @@ declare matching `runtime-wheel-source.json` support. The installed owner
 inspects the selected source and wheel profile, computes the exact target and
 construction hash, and rechecks that selection before execution. The native
 installer compares the same selection and candidate hash before publication;
-currentness requires the source, selected slot, interpreter and completion hash
-to agree. A missing or older provider refuses rather than ignoring the wheel
-selection. This explicit packet is not source, profile or feed authorization:
-its caller must retain and recheck those existing authorities through cutover.
-No ordinary update selects or downloads a bundle automatically.
+its actual construction and candidate interpreters must also match the selected
+profile's marker environment. Currentness requires the source, selected slot,
+interpreter and completion hash to agree. A missing or older provider refuses
+rather than ignoring the wheel selection. This explicit packet is not source,
+profile or feed authorization: its caller must retain and recheck those
+existing authorities through cutover. No ordinary update selects or downloads a
+bundle automatically.
 
 Omitting the option retains ordinary marketplace runtime delivery.
 This suite-only input cannot combine with target/authentication/inspection or

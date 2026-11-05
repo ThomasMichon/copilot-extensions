@@ -1,12 +1,12 @@
 """Actor-free checks for prepared Worktrees wheel-source selection."""
 from __future__ import annotations
 
-from contextlib import contextmanager
 import dataclasses
 import importlib.util
 import json
-from pathlib import Path
 import sys
+from contextlib import contextmanager
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -18,6 +18,32 @@ sys.path[:0] = [
 ]
 from agent_worktrees import update_runtime_source as source_owner
 from agent_worktrees import update_runtime_target as target_owner
+
+
+@pytest.fixture
+def native_driver(monkeypatch):
+    class Refused(RuntimeError):
+        pass
+
+    modules = {}
+    for name in (
+        "installer_engine", "versioned_runtime", "versioned_runtime_source",
+        "runtime_install_publication", "runtime_install_driver",
+        "runtime_install_governance", "install_source",
+    ):
+        modules[name] = ModuleType(name)
+        monkeypatch.setitem(sys.modules, name, modules[name])
+    modules["runtime_install_driver"].owned = lambda function: function
+    modules["runtime_install_driver"].SOURCE_SELECTION_ENV = target_owner.WHEEL_SELECTION_ENV
+    modules["runtime_install_governance"].Governance = object
+    modules["runtime_install_governance"].InstallationRefused = Refused
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    path = ROOT / "plugins" / "agent-worktrees" / "scripts" / "runtime_install.py"
+    spec = importlib.util.spec_from_file_location("_worktrees_wheel_install_unit", path)
+    assert spec and spec.loader
+    driver = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(driver)
+    return driver, modules, Refused
 
 
 @pytest.mark.parametrize(("platform", "input_option", "descriptor_option"), [
@@ -134,10 +160,10 @@ def test_prepared_wheel_packet_requires_both_owner_capabilities_and_exact_select
 
 
 @pytest.mark.parametrize("outcome", ["success", "changed", "missing-snapshot"])
-def test_native_worktrees_owner_rechecks_planned_wheel_selection(tmp_path, monkeypatch, outcome):
-    class Refused(RuntimeError):
-        pass
-
+def test_native_worktrees_owner_rechecks_planned_wheel_selection(
+    native_driver, tmp_path, monkeypatch, outcome,
+):
+    driver, modules, Refused = native_driver
     identity = SimpleNamespace(package_version="1.0")
     plugin, snapshot = tmp_path / "plugin", tmp_path / "snapshot"
     selected = SimpleNamespace(payload=plugin, identity=identity, source_descriptor=None)
@@ -149,29 +175,11 @@ def test_native_worktrees_owner_rechecks_planned_wheel_selection(tmp_path, monke
         assert path == snapshot and component == "agent-worktrees"
         yield selected, wheels
 
-    modules = {}
-    for name in (
-        "installer_engine", "versioned_runtime", "versioned_runtime_source",
-        "runtime_install_publication", "runtime_install_driver",
-        "runtime_install_governance", "install_source",
-    ):
-        modules[name] = ModuleType(name)
-        monkeypatch.setitem(sys.modules, name, modules[name])
-    modules["runtime_install_driver"].owned = lambda function: function
-    modules["runtime_install_driver"].SOURCE_SELECTION_ENV = target_owner.WHEEL_SELECTION_ENV
-    modules["runtime_install_governance"].Governance = object
-    modules["runtime_install_governance"].InstallationRefused = Refused
     modules["versioned_runtime_source"].read_source_identity = lambda *_a, **_kw: identity
     modules["install_source"].project_inputs = inputs
     modules["install_source"].native_selection = lambda *_args: (
         selection | {"payload_hash": "c" * 64} if outcome == "changed" else selection
     )
-    monkeypatch.setattr(sys, "path", list(sys.path))
-    path = ROOT / "plugins" / "agent-worktrees" / "scripts" / "runtime_install.py"
-    spec = importlib.util.spec_from_file_location("_worktrees_wheel_install_unit", path)
-    assert spec and spec.loader
-    driver = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(driver)
     calls = []
 
     def install(_root, _plugin, **options):
@@ -197,3 +205,30 @@ def test_native_worktrees_owner_rechecks_planned_wheel_selection(tmp_path, monke
         with pytest.raises(SystemExit if outcome == "missing-snapshot" else Refused):
             driver.main(arguments)
         assert not calls and not result.exists()
+
+
+@pytest.mark.parametrize("outcome", ["success", "exit", "malformed"])
+def test_wheel_marker_probe_is_isolated_and_fail_closed(native_driver, tmp_path, monkeypatch, outcome):
+    driver, _modules, Refused = native_driver
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return SimpleNamespace(
+            returncode=1 if outcome == "exit" else 0,
+            stdout=json.dumps({"python_version": "3.11"}) if outcome == "success" else "invalid",
+        )
+
+    monkeypatch.setattr(driver.subprocess, "run", run)
+    monkeypatch.setenv("PYTHONPATH", "untrusted")
+    monkeypatch.setenv("PYTHONHOME", "untrusted")
+    python = tmp_path / "python"
+    if outcome == "success":
+        assert driver._wheel_marker_environment(python) == {"python_version": "3.11"}
+    else:
+        with pytest.raises(Refused, match="interpreter probe failed"):
+            driver._wheel_marker_environment(python)
+    assert calls[0][0][:5] == [str(python), "-I", "-S", "-B", "-c"]
+    assert calls[0][1]["timeout"] == 30
+    assert "PYTHONPATH" not in calls[0][1]["env"]
+    assert "PYTHONHOME" not in calls[0][1]["env"]

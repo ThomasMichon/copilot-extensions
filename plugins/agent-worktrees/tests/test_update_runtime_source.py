@@ -156,6 +156,7 @@ def test_engine_rechecks_wheel_selection_before_launch(selected, tmp_path, monke
         update_runtime_target.SourceWheelTarget(json.dumps({
             "runtime_version": source.version + ".profile." + value * 16,
             "payload_hash": "e" * 64,
+            "source_descriptor": {"kind": "github", "canonical": "github:example/repo", "ref": ""},
         }, sort_keys=True))
         for value in ("a", "b")
     ]
