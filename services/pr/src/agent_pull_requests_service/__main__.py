@@ -29,7 +29,7 @@ def main(argv: list[str] | None = None) -> int:
             native = config.root / "watch-subscriptions.json"
             if native.exists() or native.is_symlink():
                 raise ValueError("native and replay state roots must be separate")
-            config.store().provision()
+            config.provision()
         else:
             asyncio.run(run(config))
         return 0

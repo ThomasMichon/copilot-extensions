@@ -728,3 +728,121 @@
   consumer evidence, not a latency guarantee or installed adoption.
 - Source review, release, actual installed reader and CMD attachment,
   full-update failure reconciliation and the parent gates remain open.
+
+### 2026-11-04 - Native reader source merged
+
+- #10514 merged as `d9fe83390433f03da6bed344fdfac03b9b46d0a7` after
+  Copilot approval at `b70202abd21c2592356302eab66c7b558d102cd8`,
+  no review threads, and green required CI. Recording the external receipt in
+  the PR body triggered another CI run; the first merge correctly refused its
+  then-expected required gate. The later merge waited for that run to succeed.
+- External portfolio `41919470838` covers the same exact head. Its Windows
+  native Companion/reader step and Linux Companion native job both succeed.
+  The new reader packet is selected explicitly, not inferred from unrelated
+  installation tests or a skipped native case.
+- Re-read the parent and mini-effort after merge. No installed, singleton,
+  launch or handoff checkbox closes from this source result. The saved
+  continuation now observes promotion and the separately authorized installed
+  reader, then returns to the failed full-update and launch qualification.
+
+### 2026-11-04 - Publisher permission boundary
+
+- Release run `41920408755` has one failed job, promotion `126896518220`.
+  Admission, frozen candidate, source units, construction and artifact
+  attestation succeed. GitHub refuses the candidate branch push because its
+  configured publication credential lacks workflow-write permission.
+  #10515 already tracks this exact signature and administrative-owner action;
+  this is distinct from #10432's earlier missing artifact.
+- The workflow selects its existing publisher credential at the push step and
+  disables persisted checkout credentials. No source test correction or
+  unchanged retry supplies the missing permission. Do not copy another
+  account's credential, change publisher identity, weaken branch gates or
+  claim release from the merged source.
+- The bounded decision is whether the credential owner restores only the
+  existing repository-scoped publisher's ability to publish reviewed workflow
+  changes, preserving its actor and source policy, or retains the permission
+  hold. Credential values are not requested in conversation or published.
+- After owner-confirmed repair, re-inspect the actual release and use the
+  documented exact-candidate recovery where needed; a confirmation is not
+  itself a completed promotion or installed rollout. Until then retain this
+  release branch and all parent completion gates while continuing permitted
+  independent diagnosis.
+
+### 2026-11-04 - Operator-requested installed cold-roster check
+
+- The operator explicitly selected stopping the local Worktrees status daemon
+  and timing the ordinary CLI read. The selected installed runtime is
+  `1.24.464-dev1`. Only the authenticated status-monitor shutdown was requested;
+  no session or mux process was stopped, and no lock was removed manually.
+- The shutdown RPC exceeded its ten-second response timeout. A separately
+  retained native process-incarnation check subsequently confirmed exit.
+  The timed CLI invocation therefore starts after confirmed exit, not merely
+  after a shutdown acknowledgment.
+- The first `list --current --json` returns exit 0 with 50 rows in 2.996
+  seconds. That is retained advisory continuity, not completed recovery:
+  the old endpoint still refuses connections. A subsequent 3.317-second read
+  explicitly reports advisory quality and `unready: project cleanup pending`.
+- Normal owner recovery starts a replacement. A later 3.757-second read
+  returns 50 rows with current quality, a new publication generation and no
+  availability warning. Authenticated health confirms the replacement ready,
+  published and serving a ready current roster.
+- These observations establish first-return latency and eventual recovery for
+  this installed test. The gap between observations prevents an exact
+  stop-to-current-publication latency claim. Returning cached rows quickly is
+  not evidence that the initial current-roster readiness gate is fixed.
+
+### 2026-11-04 - Blocking JSON list requirement
+
+The operator's follow-up requirement, verbatim:
+
+> We need to not expose this error unless there is a timeout. When any caller asks for `agent-worktrees list --json`, even if the daemon is not running, it should just block and wait until the daemon can be queried for status. The caller can have its own timeout if it cares
+
+The bounded correction waits for the selected resident's usable publication
+without an implicit overall CLI deadline or advisory success. Keep individual
+transport bounds, cancellation, strict protocol/authentication failures and the
+existing startup owner; do not compute a roster in the caller, release custody
+or label retained rows current. Existing explicitly selected UI bootstrap
+previews remain a separate contract. Qualification covers a genuinely absent
+resident, temporary producer contention, caller cancellation/timeout and a
+healthy current publication. This prerequisite retains the parent effort and
+its saved installed-update, launch and handoff obligations.
+
+- Implemented the wait at ordinary JSON/one-shot-stream CLI admission and
+  before a non-bootstrap feed's first atomic publication. Existing bounded
+  programmatic and explicit saved-preview bootstrap reads remain unchanged.
+  Malformed/authentication/unsupported-contract failures remain errors;
+  startup, transient publication states and short transport timeouts remain
+  cancellable waits under the caller's overall lifetime.
+- A first feed implementation performed an unnecessary full point read before
+  every subscription. Actual CLI startup controls caught its latency regression.
+  Removed that warm-path read; only confirmed missing/dead-owner recovery uses
+  the waiting point read. No startup or test deadline was increased.
+- The final native ARM64 contained client/feed packet passes 140 cases in
+  27.49 seconds, including actual CLI startup/update/cutover controls, delayed
+  authenticated first publication, no premature output and real caller-timeout
+  cleanup. The earlier x64 cache encountered the separately tracked #7643
+  executable-retention problem; preserve it rather than changing ACLs, services
+  or process custody. A separate runner-owned cache supplies the final packet.
+- The existing manual Git/roster Linux and Windows portfolio now selects the
+  same two files with unchanged budgets. Source publication, external
+  qualification, release and authorized installed proof remain separate gates.
+- Review identified two remaining admission gaps: terminal point-read errors
+  need the normal versioned JSON envelope, and an initially stale complete feed
+  transaction must not count as its first usable publication. Corrected both
+  and retained stale continuity only after usable output. The updated
+  contained native packet passes 145 cases with ordinary cleanup; no latency,
+  transport or cancellation budget changed. Repeat exact-head external and
+  source-review gates for this revision rather than reuse the prior result.
+- Subsequent review found that a missing control-token file followed the
+  absent-endpoint retry path indefinitely. Missing routes already report a
+  connection error, so the waiting reader now lets the credential-file failure
+  reach the existing JSON error boundary without restarting the live owner.
+  The bounded internal reader remains unchanged. Actual CLI credential-file
+  controls cover JSON, one-shot stream and follow output without synthesizing
+  a credential or emitting successful rows. The contained native client/feed
+  packet passes 148 cases with ordinary cleanup; source review, exact-head
+  external qualification and installed acceptance remain pending.
+- Documentation-impact review: the existing CLI and engine contracts already
+  distinguish retryable startup from terminal authentication failures. This
+  correction restores that documented boundary; no new option, protocol or
+  reader contract is introduced.

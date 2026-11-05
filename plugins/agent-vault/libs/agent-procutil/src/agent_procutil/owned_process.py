@@ -208,6 +208,44 @@ def _retire_posix_group(
             raise
 
 
+def _posix_cleanup_error(
+    process, *, confirm_group=False, inherit_process_group=False,
+    output=None, native_settled=False, on_settled=None,
+) -> OwnedCleanupError:
+    """Retain the exact unreaped leader and remaining stream custody for retry."""
+    def retry(deadline):
+        nonlocal native_settled
+
+        def remaining():
+            seconds = deadline - time.monotonic()
+            if seconds <= 0:
+                raise TimeoutError("owned POSIX cleanup deadline expired")
+            return seconds
+
+        if not native_settled:
+            # Popen retains a completed reap even if interruption prevented this
+            # closure from recording its own stage before the previous unwind.
+            if process.returncode is None:
+                remaining()
+                _retire_posix_group(process, inherit_process_group=inherit_process_group)
+                if confirm_group:
+                    from agent_procutil._caller_owned import _confirm_group
+                    _confirm_group(process, budget=OwnedExecutionBudget(deadline, .01))
+                process.wait(timeout=remaining())
+            native_settled = True
+        if output is not None:
+            output.finish(remaining(), deadline=deadline)
+        for stream in (process.stdin, process.stdout, process.stderr):
+            if stream is not None:
+                remaining()
+                stream.close()
+
+    return OwnedCleanupError(
+        process, cleanup_resources=(("output", output),) if output is not None else (),
+        cleanup_retry=retry, on_settled=on_settled,
+    )
+
+
 def _communicate_unreaped(
     process: subprocess.Popen, *, input_text: str | None, deadline: float,
     argv: list[str], timeout: float, capture_limits: tuple[int, int] | None = None,
@@ -706,11 +744,9 @@ def _run_owned(
                         process.wait(timeout=budget.cleanup_timeout() if budget else 2.0)
                     except BaseException as error:
                         retained = True
-                        raise OwnedCleanupError(
-                            process, cleanup_resources=(
-                                (("output", stream_capture),) if stream_capture is not None else ()
-                            ),
-                            on_settled=on_settled,
+                        raise _posix_cleanup_error(
+                            process, confirm_group=True, output=stream_capture,
+                            native_settled=process.returncode is not None, on_settled=on_settled,
                         ) from error
                 else:
                     try:
@@ -718,7 +754,10 @@ def _run_owned(
                         process.wait(timeout=budget.cleanup_timeout() if budget else 2.0)
                     except BaseException as error:
                         retained = True
-                        raise OwnedCleanupError(process, on_settled=on_settled) from error
+                        raise _posix_cleanup_error(
+                            process, inherit_process_group=inherit_process_group,
+                            native_settled=process.returncode is not None, on_settled=on_settled,
+                        ) from error
         finally:
             if not retained:
                 if streaming and stream_capture is None:
@@ -736,6 +775,11 @@ def _run_owned(
                             pending.output, pending.stderr = stdout, stderr
                     except BaseException as error:
                         retained = True
+                        if not windows:
+                            raise _posix_cleanup_error(
+                                process, output=stream_capture, native_settled=True,
+                                on_settled=on_settled,
+                            ) from error
                         raise OwnedCleanupError(
                             process, cleanup_resources=(("output", stream_capture),),
                             on_settled=on_settled,
@@ -747,6 +791,10 @@ def _run_owned(
                     if bounded_windows:
                         process.close()
                 except BaseException as error:
+                    if not windows:
+                        raise _posix_cleanup_error(
+                            process, native_settled=True, on_settled=on_settled,
+                        ) from error
                     raise OwnedCleanupError(process, job, on_settled=on_settled) from error
                 if on_settled is not None:
                     on_settled()

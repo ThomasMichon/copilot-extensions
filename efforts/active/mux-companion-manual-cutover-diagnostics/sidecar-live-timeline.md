@@ -130,6 +130,19 @@ clearing, gap recovery and observer retirement on the joined app. The
 complete source coverage, qualified PRE, installed/native/performance and
 every original parent gate.
 
+#10605 merged as `03ba13942a119499df30338719dbc1f771ba07fc`, delivering
+bounded geometry/reference reuse, short-content upward-wheel history intent
+and reproducible source-process scale observations. The
+[source readback](journal/2026/11.04-sidecar-bounded-render.md) distinguishes
+deterministic resource/viewport acceptance from still-open native, installed
+and complete performance qualification.
+
+#10612 merged as `e6d154b53ecf38a8434a2c2e3ac2d7ded9376df2`, qualifying
+actual app input through an attached private tmux client with a synthetic
+wire-valid owner. The [source readback](journal/2026/11.04-sidecar-native-client.md)
+records browsing, push, resize, return/reopen, pane/PID and cleanup controls;
+Windows/PSMux, popup, installed and native performance remain separate.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than
@@ -158,6 +171,39 @@ Then authorized planning and execution:
 The generic detector has a configurable policy. The 65% value is the explicitly
 selected observer policy in this request, not a new universal runtime compaction
 or handoff threshold. The plan below is the coordinator's implementation proposal.
+
+### Operator correction after viewing progress captures, 2026-11-04
+
+> The screenshots show a very messy UX. We want to be closer to the information-sparseness of the original concept ASCII illustrations
+
+> The screenshots also show a ton of data errors
+
+The [original concept examples](timeline-guidance.md) remain the presentation
+target, not the diagnostic-heavy progress captures. The following correction is
+the coordinator's implementation proposal within that existing intent:
+
+- Purpose and compact agenda/subway rows lead. Short human-readable time and
+  work labels replace repeated ISO timestamps, event-enum names and source IDs
+  in collapsed rows. Exact provenance, clocks, qualifiers and raw fields remain
+  available through explicit bounded details; do not infer missing agenda work.
+- Normal Timeline chrome uses compact current-input, source-health and unread
+  indicators. Move verbose owner diagnostics and the advanced feed selector
+  into an explicit evidence disclosure. Retain visible warnings for actual
+  unavailable/error/gap states without filling the canvas with their internals.
+- Diagnose the displayed errors before presentation changes. Intentional
+  fixture faults, unsupported optional providers, deliberately paused
+  membership discovery and actual integration defects are different states.
+  Normal reader selection must not manufacture a source-error result or make
+  retained evidence look current.
+- Demonstrate a coherent healthy full-app scenario, plus separate intentional
+  degraded/gap cases, at ordinary and narrow sizes. Retain dated progress
+  captures and reviewed visual comparisons for both; do not market a negative
+  test fixture as the normal experience.
+
+This correction preserves owner facts, literal untrusted text, unknown versus
+zero, independent current-input/history qualification, virtual scrolling,
+viewport anchors and every original completion/effect gate. It authorizes no
+installed rollout, live rebinding, new source inference or hidden error waiver.
 
 ## Scope approvals and retained custody
 
@@ -472,10 +518,24 @@ publication and installed support retain their separate qualification.
 
 - [ ] Exercise the real Textual app through actual isolated tmux/PSMux clients,
   not synthetic observer modules or server-side `send-keys` as client proof.
+  #10612 delivers the private POSIX tmux/client app portion, not PSMux or the
+  original popup/Relay qualification.
 - [ ] Qualify current pane/PID preservation, focus, resize, observer exit,
   mode guides and the separately owned permanent Claims chrome.
 - [ ] Record performance/retention/coverage and source versus installed/native
   evidence distinctly. Do not claim rollout or complete the parent from S1-S4.
+
+### Presentation correction - sparse concept fidelity
+
+- [ ] Trace the displayed data/error states to their actual producers and
+  distinguish a deliberately paused reader from a failed source. Fix confirmed
+  source/consumer defects without suppressing genuine uncertainty.
+- [ ] Deliver compact purpose-first chrome, readable collapsed timeline rows
+  and explicit bounded evidence disclosure, matching the original ASCII
+  concept's information hierarchy rather than a raw event-log console.
+- [ ] Qualify the actual full app at ordinary and narrow sizes, healthy and
+  degraded, with viewport/input/cancellation controls and reviewed visual
+  comparisons. Keep installed/native and whole-parent acceptance separate.
 
 ## Validation Plan
 
@@ -499,18 +559,21 @@ publication and installed support retain their separate qualification.
   duplicate and malformed-source tests; no render-path I/O or inferred custody.
 - [ ] History/live splice and gap tests: coalescing is current state, not lost
   canonical history; retention/replacement/append failure cannot look empty/complete.
-- [ ] Prepend, short-content padding, wheel/PageUp/Home/End/scrollbar,
+- [x] Prepend, short-content padding, wheel/PageUp/Home/End/scrollbar,
   follow/unread, expansion and wide-character resize tests on real Textual.
-- [ ] Enforce the resource limits in the contract structurally; exercise a long
+  #10605's 78-case packet includes the short/scrollable wheel regression and
+  full-window Unicode expansion/resize. This is actual framework source
+  qualification, not native mux-client dispatch.
+- [x] Enforce the resource limits in the contract structurally; exercise a long
   logical history without materializing it all. Report repaint/CPU/RSS benchmarks
   separately from deterministic CI correctness.
   The opt-in `test_companion_timeline_scale.py` source packet now selects 5,000
   rows from a synthetic 1,000,000-event logical source, checks bounded real
   Textual paint/update/resize behavior and retains separate raw paint and
   delta-to-Pilot-idle samples. Repeated immutable-reference validation and
-  unchanged text wrapping are removed from the hot path. Source publication
-  and review remain pending; native-frame, installed and tail qualification
-  remain separate.
+  unchanged text wrapping are removed from the hot path. #10605 merged after
+  current-head independent approval and required green CI; native-frame,
+  installed, source-tail and complete repaint qualification remain separate.
 - [x] At configured 65: 28, 35 and 64.99 are premature; 65 and 75 are not by this
   rule. Test rounding traps, invalid/bool/zero capacity, absent/stale/estimated/
   wrong-session/uncorrelated/model-only/post-only samples and context replacement.

@@ -142,13 +142,16 @@ async def _run_service(config: HostConfig, *, stop: asyncio.Event | None = None)
     credentials = load_service_credentials(
         proof_key_file=config.proof_key_file, access_token_file=config.access_token_file,
     )
+    store = config.store()
     service = WatchService(
-        config.store(), fleet=config.fleet, gateway=config.gateway, slot=config.slot,
+        store, fleet=config.fleet, gateway=config.gateway, slot=config.slot,
         bindings=config.bindings, observations=config.observations,
         gateway_origin=config.gateway_origin, access_token_callback=credentials.access_token,
         proof_key=credentials.proof_key, authority=scope.deadline, checkpoint=scope.check,
         gateway_ca=str(config.gateway_ca) if config.gateway_ca else None,
         interval=config.interval,
+        workspaces=config.workspaces.operations(store, scope.check, config.operation_seconds)
+        if config.workspaces is not None else None,
     )
     loop = asyncio.get_running_loop()
     previous = {}

@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent, serial per-slice PRs targeting `dev`
 - **Created:** 2026-10-08
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/plugin-services/README.md` - process-count-scales-with-services-not-sessions and hooks-and-callbacks-are-transient; `visions/plugins/context-handoff/README.md` - host-agnostic trigger and durable recovery
 - **Tracking issues:** #5579, #5664, #2619
 - **Related, separately driven mitigation:** #5637
@@ -147,6 +147,11 @@ continuation.
   interactive host processes, transient helpers, trampolines, and shared daemons.
 - [ ] Compare measured CPU and process counts with the pre-change evidence.
 - [ ] Resolve all validation items, journal results, and mark this effort Done.
+
+The diagnostic prerequisite in #10514 removes Windows daemon-status probe
+subprocesses without changing cutover authority. Observe its release and
+authorized installed reader before resuming the saved launch/singleton
+qualification. The failed full-update outcome remains an independent open gate.
 
 ## Validation Plan
 

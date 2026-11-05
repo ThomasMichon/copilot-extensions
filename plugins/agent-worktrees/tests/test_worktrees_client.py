@@ -7,6 +7,7 @@ import json
 import runpy
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -26,7 +27,7 @@ def test_fresh_current_dispatch_cannot_acknowledge_bridge_live_refresh(
     owner = runtime.WorktreesRuntime(tmp_path / "current.sqlite3")
     owner.activate()
     owner.publish("project", [{"id": "one"}], observed_at=time.time())
-    monkeypatch.setattr(client, "read_current", owner.handle)
+    monkeypatch.setattr(client, "read_current", lambda payload, **kw: owner.handle(payload))
     monkeypatch.setattr(list_cli.list_cache, "note_demand", lambda *a, **kw: None)
     monkeypatch.setattr(list_cli.cfg, "project_name", lambda: "project")
     monkeypatch.setattr(list_cli.cfg, "detect_platform", lambda: "windows")
@@ -53,6 +54,235 @@ def test_fresh_current_dispatch_cannot_acknowledge_bridge_live_refresh(
 
 def request(**extra):
     return {"contract_version": 1, "project": "project", **extra}
+
+
+def test_waiting_read_starts_once_and_waits_past_old_recovery_budget(
+    monkeypatch, capfd, no_caller_compute,
+):
+    ready = {"projection": {"quality": "current"}, "worktrees": [{"id": "one"}]}
+    results = iter([
+        ConnectionRefusedError("owner absent"),
+        *[client._ResidentUnready("project cleanup pending") for _ in range(12)],
+        {**ready, "availability": {"status": "stale", "reason": "producer busy"}},
+        ready,
+    ])
+    clock = [0.0]
+    starts = []
+
+    def resident(payload):
+        assert payload == request()
+        assert capfd.readouterr().out == ""
+        result = next(results)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(client, "_resident", resident)
+    monkeypatch.setattr(client.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(client.time, "sleep", lambda delay: clock.__setitem__(0, clock[0] + delay))
+    monkeypatch.setattr(client.monitor, "_status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(client.monitor, "_ensure_status_monitor", lambda: starts.append(1) or True)
+    monkeypatch.setattr(client, "read_advisory", lambda *a, **k: pytest.fail("returned saved rows"))
+    assert client.read_current(request(), wait=True) is ready
+    assert clock[0] > client.RECOVERY_WAIT
+    assert starts == [1]
+
+
+@pytest.mark.parametrize("failure", [
+    projection.ProjectionUnavailable("authentication refused"),
+    ValueError("malformed response"),
+    KeyboardInterrupt(),
+])
+def test_waiting_read_preserves_protocol_failure_and_cancellation(monkeypatch, failure):
+    monkeypatch.setattr(client, "_resident", lambda _: (_ for _ in ()).throw(failure))
+    monkeypatch.setattr(client.time, "sleep", lambda _: pytest.fail("retried a terminal failure"))
+    with pytest.raises(type(failure)) as caught:
+        client.read_current(request(), wait=True)
+    assert caught.value is failure
+
+
+@pytest.mark.parametrize("failure", [
+    OSError("read denied"), ValueError("malformed JSON"), RecursionError("nested response"),
+])
+def test_json_list_emits_terminal_reader_errors_as_json(monkeypatch, capfd, failure):
+    monkeypatch.setattr(client.cfg, "project_name", lambda: "project")
+    monkeypatch.setattr(list_cli.list_cache, "note_demand", lambda *a, **k: None)
+    monkeypatch.setattr(list_cli, "_status_monitor_enabled", lambda: True)
+
+    def failed(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(client, "read_current", failed)
+    assert list_cli.cmd_list(argparse.Namespace(
+        json=True, tracking_status="all", all=True, include_other_platforms=True,
+    )) == 1
+    captured = capfd.readouterr()
+    assert json.loads(captured.out)["error"] == str(failure)
+    assert captured.err == ""
+
+
+@pytest.mark.parametrize("stream,follow", [(False, False), (True, False), (False, True)])
+def test_json_list_missing_control_token_fails_without_recovery(
+    tmp_path, monkeypatch, capfd, stream, follow,
+):
+    token = tmp_path / "missing-token"
+    monkeypatch.setattr(client.cfg, "install_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        client, "resident_endpoint", lambda _: SimpleNamespace(base_url="http://127.0.0.1:1"),
+    )
+    monkeypatch.setattr(control, "control_token_path", lambda _: token)
+    monkeypatch.setattr(client.cfg, "project_name", lambda: "project")
+    monkeypatch.setattr(list_cli.list_cache, "note_demand", lambda *a, **k: None)
+    monkeypatch.setattr(list_cli, "_status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(client.time, "sleep", lambda _: pytest.fail("retried a missing credential"))
+    monkeypatch.setattr(
+        client.monitor, "_ensure_status_monitor", lambda: pytest.fail("restarted a live owner"),
+    )
+    assert list_cli.cmd_list(argparse.Namespace(
+        json=True, stream=stream, follow=follow, tracking_status="all", all=True,
+        include_other_platforms=True,
+    )) == 1
+    captured = capfd.readouterr()
+    result = json.loads(captured.out)
+    message = result["error"]["message"] if follow else result["error"]
+    assert token.name in message
+    assert "worktrees" not in result
+    if follow:
+        assert result["type"] == "error"
+        assert result["error"]["retry"] is False
+    assert not token.exists()
+    assert captured.err == ""
+
+
+def test_waiting_read_retries_transport_timeout_without_restarting_live_owner(monkeypatch):
+    ready = {"projection": {"quality": "current"}, "worktrees": []}
+    replies = iter([TimeoutError("slow live owner"), ready])
+
+    def resident(_request):
+        reply = next(replies)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    monkeypatch.setattr(client, "_resident", resident)
+    monkeypatch.setattr(client.time, "sleep", lambda _: None)
+    monkeypatch.setattr(
+        client.monitor, "_ensure_status_monitor", lambda: pytest.fail("restarted a slow live owner"),
+    )
+    assert client.read_current(request(), wait=True) is ready
+
+
+def test_waiting_read_throttles_absent_owner_recovery_and_stays_cancellable(monkeypatch):
+    clock = [0.0]
+    starts = []
+    monkeypatch.setattr(client, "_resident", lambda _: (_ for _ in ()).throw(ConnectionError()))
+    monkeypatch.setattr(client.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(client.monitor, "_status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(
+        client.monitor, "_ensure_status_monitor", lambda: starts.append(clock[0]) or False,
+    )
+
+    def sleep(delay):
+        clock[0] += delay
+        if clock[0] > 12:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(client.time, "sleep", sleep)
+    with pytest.raises(KeyboardInterrupt):
+        client.read_current(request(), wait=True)
+    assert 2 <= len(starts) <= 3
+    assert all(later - earlier >= 5 for earlier, later in zip(starts, starts[1:]))
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_json_list_waits_for_real_cold_resident_publication(
+    tmp_path, monkeypatch, capfd, no_caller_compute, stream,
+):
+    owner = runtime.WorktreesRuntime(tmp_path / "current.sqlite3")
+    owner.activate()
+    token = tmp_path / "token"
+    token.write_text("fixture-token")
+    server = control.ControlServer(lambda action, payload: owner.handle(payload), token="fixture-token")
+    endpoint = []
+    starts = []
+    published = threading.Event()
+
+    def publish():
+        owner.publish("project", [{"id": "one"}], observed_at=time.time())
+        published.set()
+
+    publisher = threading.Timer(0.8, publish)
+
+    def start():
+        starts.append(1)
+        server.start()
+        endpoint.append(SimpleNamespace(base_url=f"http://127.0.0.1:{server.port}"))
+        publisher.start()
+        return True
+
+    monkeypatch.setattr(client.cfg, "install_dir", lambda: tmp_path)
+    monkeypatch.setattr(client.routing, "read_active_endpoint", lambda *a, **kw: endpoint[0] if endpoint else None)
+    monkeypatch.setattr(control, "control_token_path", lambda *args: token)
+    monkeypatch.setattr(client.monitor, "_status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(client.monitor, "_ensure_status_monitor", start)
+    monkeypatch.setattr(list_cli.list_cache, "note_demand", lambda *a, **kw: None)
+    monkeypatch.setattr(list_cli.cfg, "project_name", lambda: "project")
+    monkeypatch.setattr(list_cli, "_status_monitor_enabled", lambda: True)
+    args = argparse.Namespace(
+        json=True, stream=stream, tracking_status="all", all=True,
+        include_other_platforms=True,
+    )
+    try:
+        assert list_cli.cmd_list(args) == 0
+        assert published.is_set()
+        assert starts == [1]
+        raw = capfd.readouterr().out
+        frames = [json.loads(line) for line in raw.splitlines()] if stream else [json.loads(raw)]
+        if stream:
+            assert [frame["type"] for frame in frames] == ["begin", "worktree", "done"]
+            assert all(frame["projection"]["quality"] == "current" for frame in frames)
+        else:
+            assert len(frames) == 1
+            assert frames[0]["worktrees"] == [{"id": "one"}]
+            assert frames[0]["projection"]["quality"] == "current"
+        assert all(not frame.get("availability") for frame in frames)
+    finally:
+        publisher.cancel()
+        if publisher.ident is not None:
+            publisher.join(5)
+        server.close()
+        owner.shutdown()
+
+
+def test_waiting_json_list_has_no_output_before_callers_process_timeout(tmp_path):
+    from agent_procutil.owned_process import run_caller_owned
+
+    marker = tmp_path / "waiting"
+    source = Path(__file__).resolve().parents[1] / "src"
+    program = """
+import argparse,sys
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+from agent_worktrees import list_cli,worktrees_client as client
+client.cfg.project_name=lambda:'project'
+list_cli.list_cache.note_demand=lambda *a,**k:None
+list_cli._status_monitor_enabled=lambda:True
+def unready(request):
+    Path(sys.argv[2]).touch()
+    raise client._ResidentUnready('project cleanup pending')
+client._resident=unready
+raise SystemExit(list_cli.cmd_list(argparse.Namespace(
+    json=True,tracking_status='all',all=True,include_other_platforms=True,
+)))
+"""
+    with pytest.raises(subprocess.TimeoutExpired) as caught:
+        run_caller_owned(
+            [sys.executable, "-I", "-B", "-c", program, str(source), str(marker)],
+            timeout=4, max_stdout_bytes=4096, max_stderr_bytes=4096,
+        )
+    assert marker.is_file(), "the caller timed out before reaching the list wait"
+    assert not caught.value.output
+    assert not caught.value.stderr
 
 
 def test_cold_read_starts_owner_and_returns_saved_db_without_waiting_for_live_probe(
@@ -416,7 +646,7 @@ def test_worktrees_current_cli_routes_all_read_modes_before_record_resolution(
     monkeypatch.setattr(
         client,
         "read_current",
-        lambda payload: {
+        lambda payload, **kw: {
             "ok": True,
             "contract_version": 1,
             "worktrees": [{"id": "one"}],

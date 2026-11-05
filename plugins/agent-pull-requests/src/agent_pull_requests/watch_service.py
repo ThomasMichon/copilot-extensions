@@ -121,9 +121,16 @@ class WatchService:
             if (self.store.root / "watch-subscriptions.json").exists():
                 raise ValueError("native and replay state roots must be separate")
             self._check()
+            def validate_storage():
+                self.store.observation_targets(
+                    expires_at=self._authority(), checkpoint=self._check,
+                )
+                for workspace in self.gateway.workspaces.values():
+                    workspace.validate_storage(
+                        expires_at=self._authority(), checkpoint=self._check,
+                    )
             self._disk = asyncio.create_task(asyncio.to_thread(
-                self.store.observation_targets,
-                expires_at=self._authority(), checkpoint=self._check,
+                validate_storage,
             ))
             await asyncio.shield(self._disk)
             if stop is not None and stop.is_set():

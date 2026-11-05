@@ -10,6 +10,7 @@ import time
 import pytest
 
 from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
+from agent_procutil.owned_budget import OwnedExecutionBudget
 from agent_worktrees import pr_cli, pr_credential_command
 from agent_worktrees.pr_credential_command import command_source
 from agent_worktrees.providers.observation_credentials import (
@@ -76,6 +77,24 @@ def test_exhausted_remaining_budget_refuses_before_launch(monkeypatch):
     source = command_source(json.dumps([sys.executable]), remaining=lambda: 0.0)
     with pytest.raises(ObservationCredentialError):
         source()
+
+
+def test_explicit_enclosing_owner_preserves_scope_and_shared_deadline(monkeypatch):
+    observed = []
+    budget = OwnedExecutionBudget.from_timeout(3, cleanup_reserve=.5)
+
+    def run(argv, **kwargs):
+        observed.append(kwargs)
+        return subprocess.CompletedProcess(argv, 0, json.dumps(envelope()), "")
+
+    monkeypatch.setattr(pr_credential_command, "run_caller_owned", run)
+    source = command_source(
+        json.dumps([sys.executable]), remaining=lambda: 30, enclosing_budget=budget,
+    )
+    source()
+    assert len(observed) == 1
+    assert observed[0]["budget"] is budget and observed[0]["borrow_parent_scope"] is True
+    assert 0 < observed[0]["timeout"] <= 2.5
 
 
 def test_real_slow_helper_is_retired_at_the_remaining_budget(tmp_path):

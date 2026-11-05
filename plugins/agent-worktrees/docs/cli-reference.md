@@ -938,10 +938,17 @@ current-roster publication or make session liveness unknown by themselves.
 Permission errors, timeouts, missing executables and other probe failures remain
 unavailable evidence; they are never treated as proof that sessions are gone.
 
-Responses include complete generation/revision/count provenance. A failed
-producer preserves last-good rows with explicit stale availability. An
-unreachable or incompatible resident permits only independently indexed,
-labeled advisory data or an unavailable error, never direct recomputation.
+Responses include complete generation/revision/count provenance. Ordinary
+JSON and one-shot stream listings wait for a usable resident publication.
+An absent resident reaches the existing startup owner; temporary producer
+contention, stale availability and bounded transport timeouts do not emit
+cached success or an intermediate cleanup error. There is no implicit overall
+CLI wait deadline: the invoking caller owns cancellation and any overall
+timeout. Recovery attempts are throttled, and live owners are never restarted
+merely because a read is slow. Authentication, malformed replies, invalid
+requests and unsupported contracts remain explicit failures.
+The internal bounded/advisory reader and explicitly selected saved-preview
+bootstrap retain their separate contracts; saved rows are never labeled current.
 `--stream --follow` holds the engine-owned snapshot/update feed. See the
 [engine/Picker contract](engine-picker-contract.md) for barriers, order,
 selection, recovery and cutover rules.
