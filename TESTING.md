@@ -394,6 +394,16 @@ status/CLI suites. The existing manual `mux-companion` portfolio also selects
 these status/CLI and native files on its Windows runner; its job and test
 budgets remain unchanged. No native packet is added to required unit-only CI.
 
+Blocking ordinary JSON-list admission is covered by
+`agent-worktrees --test-file tests/test_worktrees_client.py --test-file tests/test_worktrees_feed.py`
+through the contained runner. Real authenticated socket controls begin without
+a resident endpoint and delay first publication beyond the old recovery budget;
+JSON and one-shot stream calls return only the complete current publication.
+A real caller-owned subprocess timeout settles a still-waiting CLI with no
+premature stdout. The existing manual `worktrees-git-probes` Linux/Windows
+portfolio includes both files, retaining its current deadlines and isolation.
+Explicit saved-preview bootstrap remains covered separately.
+
 The explicitly selected Windows Picker-handoff packet is
 `python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_terminal_launch_native.py --test-file tests/native/test_terminal_launch_mux_native.py --allow-explicit-tiers`.
 It requires native PowerShell 7 and PSMux. A caller-contained, headless ConPTY

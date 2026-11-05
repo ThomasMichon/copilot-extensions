@@ -1,0 +1,9 @@
+{
+  "comment": "Wait for usable resident publications in ordinary JSON list calls while retaining caller-owned overall timeout and cancellation.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
