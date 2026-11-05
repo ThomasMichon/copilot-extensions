@@ -4,8 +4,8 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** sequential managed plan and implementation PRs
 - **Created:** 2026-11-04
-- **Status:** Active
-- **Vision:** [agent-codespaces](../../../visions/plugins/agent-codespaces/README.md) - reliable authenticated access; [agent-bridge](../../../visions/plugins/agent-bridge/README.md) - session continuity
+- **Status:** Done
+- **Vision:** [agent-codespaces](../../../../visions/plugins/agent-codespaces/README.md) - reliable authenticated access; [agent-bridge](../../../../visions/plugins/agent-bridge/README.md) - session continuity
 - **Umbrella issue:** #10601
 
 ## Guiding Intent
@@ -39,7 +39,7 @@ can block unrelated serving until their own subprocess deadlines expire.
 
 #10597 repaired token-store transactions and offloaded relay authorization
 callbacks. That does not repair these separate launch/claim operations.
-The [completed token-store effort](../../2026/11/04%20relay-token-store-concurrency/README.md)
+The [completed token-store effort](../04%20relay-token-store-concurrency/README.md)
 records only its own finite source acceptance.
 
 ## Request
@@ -73,7 +73,7 @@ A reviewed plan does not authorize those effects.
 
 ### Phase 3 - Delivery
 - [x] Update affected tests, runtime/contract documentation, source registry and changefiles without rebaselining historical evidence.
-- [ ] Pass targeted tests and required source gates, then steward review, CI and merge. Record promotion separately from installed acceptance.
+- [x] Pass targeted tests and required source gates, then steward review, CI and merge. Record promotion separately from installed acceptance.
 
 ## Validation Plan
 
@@ -85,7 +85,7 @@ A reviewed plan does not authorize those effects.
 - [x] Relay failure is explicit before authenticated plugin preparation; valid disabled-relay output and legacy-compatible JSON remain supported.
 - [x] Real caller-contained synthetic provider processes exercise the async boundary, not just mocked timer helpers; all children and fixture listeners settle.
 - [x] Record focused unit, local consumer, first-touch and external-venue tiers honestly; no live service/credential/venue effects are authorized by this source effort.
-- [ ] Resolve every Plan/Validation item before marking Done or transfer a residual to a named tracked objective.
+- [x] Resolve every Plan/Validation item before marking Done or transfer a residual to a named tracked objective.
 
 ## Proposal
 
@@ -222,3 +222,17 @@ daemon. Review the plan before implementation.
 - Focused packet: 46 passed. Integrated admission, transport, session, resume,
   host-claim and parity packet: 341 passed. Required source gates, exact-head CI
   and renewed review are checked before merge. No rollout or live acceptance.
+
+### 2026-11-05 - Source completion
+
+- #10622 received a fresh approving review with no active findings on
+  `c2071605fdb754325080025081e9c22b10a7fb30`, passed the actual required
+  exact-head CI summary and merged as
+  `7c58f5cb113cfd19d7486455bf8d52a9f08a84a0`.
+- All Plan and Validation Plan items are resolved for this finite source
+  scope. Architecture documentation carries the current behavior. No native
+  platform skip or unexercised live venue is counted as a pass.
+- Promotion remains the normal #3336 release-pipeline responsibility.
+  Installed rollout, external credentials and broader connection acceptance
+  remain separately authorized work, not an outcome of this source merge.
+  #10636 owns the next reviewed portable receiving-support proposal.
