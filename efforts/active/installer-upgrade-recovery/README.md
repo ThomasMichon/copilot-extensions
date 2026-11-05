@@ -876,3 +876,207 @@ Windows/Linux construction, installed consumers and original-caller loss.
 Ordinary bootstrap adoption follows separately. No production code, runtime,
 queue, service or host state is changed by this proposal, and the parent
 remains Active.
+
+### 2026-11-05 - MCP prerequisite review and first source controls
+
+#10558 merged as `ac9ac7c03ef2e740871696755438434cd1ee9cd8` after
+current-head approval and required green CI. The canonical README was reread;
+this is a reviewed plan, not completed recipe or bootstrap adoption.
+
+Four regressions failed against the unchanged source at unsupported MCP recipe
+admission. The bounded adapter adds its actual init-backed actions to the
+existing Python/native front doors and retained queue. Those four controls now
+pass in 93.35 seconds under an explicit 60-second native item bound. The first
+default-30-second receipt attempt timed out; its isolated stamp subsequently
+passed in 29.94 seconds. The combined refusal packet also exceeded its
+unchanged 300-second group limit and is being qualified in disjoint groups,
+not reported as passing.
+
+Native qualification also reconciles the plan's overly broad Python-free
+wording with the existing setup-owned prerequisite amendment. Windows lifetime
+admission requires supported `python` on PATH before a plugin runtime exists.
+Preserve and test that current boundary; do not add another acquisition path
+or claim a fully Python-free machine. The Python-free Budget hook remains
+outside this MCP slice. Materialized native qualification, failed-candidate
+preservation, source review, release and affected-host recovery remain open.
+
+The latest declaration/protocol packet passes eight controls, including the
+four lifecycle/CMD admission cases. Actual materialized missing-Python refusal
+and corrected CMD stamp both pass. The first cold native attempt failed while
+the fixture read queue status before observing a durable ordinary receipt;
+foundation readiness alone was not a request-acceptance signal. The observer
+now waits for that existing public receipt before querying its request and
+still propagates schema/terminal failures afterward. This is a fixture
+correction, not queue recovery or a relaxation of schema admission. Cold native
+qualification remains pending under the same budgets.
+
+The corrected cold observer's next run failed honestly at the unchanged native
+foundation builder's five-minute owned-process deadline. Source wheel assembly
+completed, but foundation construction did not finish and no ordinary MCP
+receipt was accepted. This is neither MCP qualification nor evidence that a
+larger test deadline would repair production construction. Preserve the actual
+failure and existing foundation owner; run the explicit Windows/Linux recipe
+portfolio against the candidate before merge. No constructor, queue, recovery
+policy or process deadline was changed to obtain a passing result.
+
+### 2026-11-05 - Hosted MCP cold path exposes missing UV handoff
+
+Draft #10574 published the actual candidate, not an accepted native result.
+Explicit run `41959758429` at `53b83d549022286da0abca0a26232ae808256af5`
+passed all admission/protocol/refusal and materialized stamp/prerequisite
+steps on Windows and Ubuntu. Both cold cases completed foundation and stamp,
+then failed during provision because the legacy MCP initializer lacked UV
+while its dependency-policy helper still required it. This is a real
+acquisition handoff gap, separate from the earlier local foundation timeout.
+
+Two focused regressions fail before the correction; the deferred-stamp
+negative control already passes. The recipe now invokes the frozen payload's
+existing canonical UV acquisition helper only for provision, supplies the
+selected tool on PATH and stops before init on acquisition failure. The actual
+MCP initializer, constructor, foundation, queue and deadlines are unchanged.
+All three queue/native-process controls pass in 43.39 seconds of pytest
+(74.31 seconds including preparation and cleanup). Eleven retained fixed
+first-use controls also pass in 66.24 seconds (108.98 total) on the first
+published head.
+
+The revised candidate still needs actual Windows/Linux cold construction,
+installed consumers and failed-candidate preservation, plus current-head CI
+and review. The draft stays held. Parent and ordinary publisher adoption,
+original-caller Job loss and affected-host recovery gates remain open.
+
+Required CI `41961691461` also found that the new native portfolio's dynamic
+runner matrix violated the existing trusted-CI contract. The workflow now uses
+separate fixed Ubuntu/Windows jobs with shared steps and environment, following
+the repository's existing pattern. The canonical trusted-CI checker passes;
+both jobs retain identical commands, environment and 35-minute job budgets.
+The guard and required unit-only selection are unchanged. This workflow
+correction does not turn the still-pending native run into a pass.
+
+Run `41961771318` at the UV correction completed as a failure on both
+platforms. Linux progressed through actual provisioning, installed consumers
+and healthy repeat, then its negative control expected an exception string
+that MCP's health gate intentionally suppresses. The actual initializer
+reported `Fresh runtime slot failed its health gate` and refused activation.
+The fixture now requires that public health-gate diagnostic while retaining
+the real incoming module failure and all old-selection/configuration checks.
+Windows exceeded the unchanged 900-second aggregate envelope without a useful
+stage report; no passing outcome or specific hung operation is inferred.
+
+The test now emits a finite stage marker at each native transition, without
+another polling process or changed deadline. Run `41963933663` qualifies
+candidate `92551780178074204922f0e615cfd8214cc23ee3` through the corrected
+fixed-runner jobs. Its outcome is pending; the source PR stays draft.
+
+The fixed-job run completed with Linux passing its full recipe, cold
+construction, installed-consumer, healthy-repeat, failed-candidate preservation
+and native settlement portfolio. Windows completed cold stamp, then timed out
+inside concurrent provision before any installed-consumer assertion. Required
+CI `41963918779` at the same candidate passed source guards, eligible units
+with coverage and the required PR gate. Neither result substitutes for the
+remaining Windows native qualification.
+
+The next diagnostic revision reports at most three 4 KiB active log tails per
+minute during the bounded provision wait. The wait now refuses at ten minutes,
+within the unchanged aggregate envelope; no timeout, process or storage limit
+is raised. This is test-only progress reporting, not a production poller or
+another execution owner.
+
+The bounded diagnostic run `41966134747` again passed Linux and failed Windows.
+Its Windows log shows that actual MCP construction, manifest publication and
+module verification finished, but the enclosing native consumer rejected
+CLIXML mixed into the forwarded error stream. A focused queue regression with
+real native host/warning records reproduces that output-format defect.
+
+A contained stock-PowerShell probe confirms that `-EncodedCommand` serializes
+those streams even with explicit text input/output flags; the ordinary fixed
+`-Command` form does not. The adapter now uses that fixed form while retaining
+base64-encoded JSON path data, actual init, canonical acquisition and the same
+queue custody. All three acquisition/stamp/refusal controls pass in 33.13
+seconds of pytest (52.97 total). The unsuccessful text-flag attempt remains
+failed evidence. Actual Windows native convergence still needs qualification;
+neither completed installer output nor the passing focused test clears it.
+
+### 2026-11-05 - Native functional pass and participant-handoff review gap
+
+Run `41969056781` at `c4c7de194e4ed158516bccc451e2e1c46d4401ea`
+passes the complete native recipe portfolio on both Windows and Linux.
+Required CI `41969027369` and the later same-head `41969073865` also pass.
+The draft hold was removed for review; no merge or release was inferred.
+
+Review `5780027744` correctly identifies a high-severity production handoff
+gap. The contained installer path bypasses native-driver admission, so its
+functional pass did not prove that the real initializer would join the outer
+request instead of submitting another request against its held lock.
+Two actual-native-admission regressions fail before the correction, and the
+explicit-root case independently reproduces the receiver's default-root
+assumption after supplying the missing witness.
+
+Windows MCP provision now explicitly re-exports the existing authenticated
+participant witness and native re-entry marker. The shared native receiver
+addresses the execution root carried in the bounded witness, authenticates
+that original IPC owner, and retains exact running-request/backend checks.
+No new root override, queue, protocol, launcher, installer or containment
+exception is introduced. Invalid witness metadata remains a refusal.
+Canonical synchronization updates only the declared helper copies.
+
+Both materialized native-admission cases pass in 89.33 seconds of pytest
+(115.19 total), with runner containment unchanged and exactly the original
+queue request retained. Eighteen focused shared-receiver controls pass in
+5.40 seconds (96.58 total), including malformed/oversized/missing-root/
+foreign-root refusal and retained participant contracts. Current revised
+native portfolio, required CI and a fresh review must still qualify this
+correction; the earlier head's passing results do not close this finding.
+
+The next native run `41972283777` passes Linux, including the new shared
+receiver controls. Windows stops in the synthetic protocol fixture: it still
+rejects every witness with exit 91, including the newly required legitimate
+native handoff. The MCP-only fixture now requires witness plus re-entry marker
+for Windows provision, keeps stamp witness-free and still rejects unrelated
+lifecycle custody. Actual authenticated admission remains separately exercised
+by the materialized native tests; no production check is removed for this
+fixture correction.
+
+The intervening review confirms the native custody finding resolved and
+correctly requests that preservation cover MCP's real configuration directory.
+The cold fixture now seeds a synthetic stdio configuration under the
+installation's `bridges` directory instead of an unrelated home-directory
+sentinel. Installed consumer checks load it through the real configuration
+loader, require the actual configuration root and unchanged declared command,
+and retain byte comparisons after healthy reuse and incoming failure. The
+declared server is never started and no authentication provider is consulted.
+The corrected Windows synthetic protocol packet passes five focused controls
+in 91.10 seconds of pytest (117.45 total). Revised configuration preservation
+still needs actual native qualification before completion is credited.
+
+### 2026-11-05 - MCP fixed-recipe source merged; containing release next
+
+#10574 merged at 05:39:20 UTC as
+`322a4e5adebcd066a920ca52c5e808d41fe1d617`. Exact head
+`5834222f8a6cab0b286d96bcd8582921169104a1` received clean Copilot
+review `5780289807`, with no open findings and both prior threads resolved.
+Required CI `41973744346` passed; the later same-head metadata-triggered
+`41973863391` also passed before the managed merge. The configured
+Maintainer review-rule exception did not bypass CI.
+
+Native run `41973788482` passes every selected Windows/Linux step, including
+the actual native participant handoff, shared receiver controls, real cold
+construction, installed command/module/distribution and configuration loading,
+healthy reuse, incoming-health failure preservation and native settlement.
+The installed loader reads the unchanged synthetic configuration from the
+actual `bridges` directory without starting a server or authentication provider.
+Earlier failed runs remain failed evidence; their eventual corrections do not
+retroactively qualify those runs.
+
+All twenty-five non-shared authored files and the complete MCP testing section
+match the actual squash merge; unrelated peer additions in `TESTING.md` are
+retained. Managed pull-forward safely aborted a replay conflict. After verifying
+the clean tip, backup and already-merged content, continuation skipped only
+that confirmed merged range and managed sync succeeded on the squash merge.
+No unmerged work was discarded.
+
+The canonical README has been reread in full and remains Active. U12 records
+this bounded source/contained-consumer result, not ordinary publisher adoption,
+production caller-Job survival, existing queue repair or affected-host recovery.
+Containing release is the immediate next gate; existing first-foundation,
+execution/coalescing, MCP construction/application and broader hook owners
+retain their remaining scope. No updater, host integration or rollout ran.

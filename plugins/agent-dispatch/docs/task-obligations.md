@@ -323,8 +323,54 @@ and the readiness owner independently enforces actual managed custody.
 This method neither persists a readiness permission nor advances the task.
 Every invocation reacquires evidence; later advancement still needs its own
 fresh observation and atomic checks. Both the existing completion refusal and
-its rollback-resistant SQLite guard remain unchanged. The task claim,
+its rollback-resistant SQLite enforcement remain in effect. The task claim,
 workspace, result proposal and native capacity remain retained.
-Guarded advancement, negotiated ordinary caller migration, manual/absent-workspace
-applicability and repeated rejected attempts remain unimplemented. Ordinary
-callers and assignment writers stay disabled pending those qualification gates.
+
+### Internal guarded submission advancement
+
+`advance_prepared_submission(task_id, request_id=...)` is an internal queue
+operation, not an advertised HTTP, CLI or MCP capability. It accepts no copied
+readiness result or worker-supplied success flag. Before its first transition it
+reads replay and preparation in one SQLite snapshot, requires an existing
+independent review policy, obtains a new owner observation
+through the same selected-runtime path, then compares the original semantic
+queue state under `BEGIN IMMEDIATE`. Heartbeats and progress remain independent;
+proposal, relationship, native/allocation, holds, admission and review-policy
+changes refuse. A prior point-in-time observation is not permission for this call.
+
+The original preparation audit event carries a transaction-local admission
+marker. The task update consumes it through a persisted SQLite trigger before
+commit, retaining an immutable advancement receipt on that same event. A
+failure or process exit rolls back admission, task/result/audit and evaluator
+writes together; no committed ready permission is left for an older writer.
+The replacement guard is installed before removing the old stricter trigger.
+An older migrator may reinstate that stricter refusal; reopening through the
+current queue restores the guarded path without an unprotected interval.
+
+Submission shares the existing result/audit, evaluator scheduling and suspended
+waiter-retirement owner. It only reaches `SUBMITTED`: manual review remains
+pending when no evaluator is selected, and the task's original native/generation,
+completing worker, protected task claim and accountable allocation remain
+retained. The worktree is not finalized or cleaned up. Independent confirmation
+still owns `COMPLETED`.
+
+An exact committed retry reads that receipt and current matching submission
+without another observation, transition or evaluator request. An identical
+concurrent commit may also satisfy a caller whose later owner read fails; that
+only returns the exact committed receipt, never authorizes another transition.
+A changed request
+or rejected/reassigned binding cannot reuse it. Legacy completion and late-result
+enrichment refuse prepared tasks, including after restart; SQL also preserves
+the submitted proposal against older backfill code. This bounded operation
+supports the first retained proposal only. Multiple rejected/resubmitted
+proposals, post-stop same-native recovery, non-circular decline, negotiated
+ordinary callers, manual/absent-workspace applicability and full native
+qualification remain open. Ordinary callers and assignment writers stay disabled.
+
+The immutable preparation retains the original native/generation even after
+metadata-only agent detachment. Existing recovery may advance current attachment
+metadata only after its qualified native-retirement checks; accepted output and
+the original receipt/relationship remain unchanged. Submitted work stays
+provisional and keeps its claim until independent confirmation. Detachment is
+not execution readmission, and a detached incarnation cannot replay the old
+advancement as a new submission.

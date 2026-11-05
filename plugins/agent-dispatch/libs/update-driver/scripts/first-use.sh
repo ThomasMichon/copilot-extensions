@@ -5,6 +5,7 @@
 # Installation driver lifecycle contract: ssh-command-v1
 # Installation driver lifecycle contract: logger-command-v1
 # Installation driver lifecycle contract: bridge-command-v1
+# Installation driver lifecycle contract: mcp-recipes-v1
 # Fixed first-adopter launch; ordinary acceptance appears only in the canonical queue.
 set -euo pipefail
 if [[ -v UPDATE_DRIVER_WITNESS ]]; then
@@ -67,6 +68,7 @@ case "$plugin" in
     agent-codespaces) prefix=AGENT_CODESPACES ;;
     agent-logger) prefix=AGENT_LOGGER ;;
     agent-bridge) prefix=AGENT_BRIDGE ;;
+    agent-mcp) prefix=AGENT_MCP ;;
     *) printf 'Owning payload does not declare the fixed first-use provision recipe.\n' >&2; exit 1 ;;
 esac
 if [[ "$installer_action" == stamp-provision && "$plugin" != agent-ssh ]]; then
@@ -101,10 +103,35 @@ if [[ "$plugin" == agent-bridge ]]; then
         }
     done
 fi
-if [[ "$plugin" == agent-ssh || "$plugin" == agent-codespaces || "$plugin" == agent-logger || "$plugin" == agent-bridge ]]; then
+if [[ "$plugin" == agent-mcp ]]; then
+    [[ "$(query_type "$manifest" installerLifecycle)" == boolean &&
+        "$(query "$manifest" installerLifecycle)" == true &&
+        "$(query_type "$manifest" inProcessCatalog)" == boolean &&
+        "$(query "$manifest" inProcessCatalog)" == true &&
+        "$(query "$manifest" windowsCatalogShim)" == cmd ]] || {
+        printf 'MCP first use requires its native installer lifecycle and CMD catalog.\n' >&2; exit 1;
+    }
+    for helper in init.ps1 init.sh installer-engine.ps1 installer-engine.sh \
+        installer_engine.py installer_engine_process.py runtime_launcher.py \
+        installer_wheel_inputs.py installer_wheel_snapshot.py installer_wheel_acquisition.py \
+        installer_dependency_policy.py installer_dependency_config.py installer_dependency_arguments.py \
+        installer_source_build.py installer_source_wheel_cache.py \
+        installation-context/installation_context.py installation-context/installation-context.ps1 \
+        installation-context/installation-context.sh installer-instance-reconcile.ps1 \
+        installer-instance-reconcile.sh installer_instance_reconcile.py command_binding.py command_lifecycle.py \
+        versioned_runtime_native.ps1 versioned_runtime.py versioned_runtime_construction.py \
+        versioned_runtime_source.py versioned_runtime_publication.py versioned_runtime_leases.py \
+        uninstall-profile.json; do
+        [[ -f "$payload/scripts/$helper" ]] || {
+            printf 'MCP first use requires its complete materialized installation helpers.\n' >&2; exit 1;
+        }
+    done
+fi
+if [[ "$plugin" == agent-ssh || "$plugin" == agent-codespaces || "$plugin" == agent-logger || "$plugin" == agent-bridge || "$plugin" == agent-mcp ]]; then
     label=SSH; [[ "$plugin" != agent-codespaces ]] || label=CodeSpaces
     [[ "$plugin" != agent-logger ]] || label=Logger
     [[ "$plugin" != agent-bridge ]] || label=Bridge
+    [[ "$plugin" != agent-mcp ]] || label=MCP
     [[ ( "$plugin" == agent-logger || "$(query "$manifest" module)" == "${plugin//-/_}" ) &&
         "$(query "$manifest" legacyRuntimeRoot)" == ".$plugin" &&
         "$(query "$manifest" payloadRootEnv)" == "${prefix}_PAYLOAD_ROOT" &&
@@ -115,7 +142,7 @@ if [[ "$plugin" == agent-ssh || "$plugin" == agent-codespaces || "$plugin" == ag
         printf '%s first use requires its declared native runtime gate.\n' "$label" >&2; exit 1;
     }
 fi
-if [[ "$plugin" == agent-codespaces || "$plugin" == agent-logger || "$plugin" == agent-bridge ]]; then
+if [[ "$plugin" == agent-codespaces || "$plugin" == agent-logger || "$plugin" == agent-bridge || "$plugin" == agent-mcp ]]; then
     installation_hint="${prefix}_INSTALLATION_ID"
     [[ ! -v "$installation_hint" && "$runtime" == "$HOME/.$plugin" && (
         ( "$(dirname -- "$(dirname -- "$payload")")" == "$HOME/.copilot/installed-plugins" &&
@@ -214,9 +241,11 @@ else
         printf 'Owning payload does not declare the fixed first-use provision recipe.\n' >&2; exit 1;
     }
 fi
+expected_installer=install
+[[ "$plugin" != agent-mcp ]] || expected_installer=init
 [[ "$(query "$manifest" schema)" == copilot-extensions.payload-invocation &&
     "$(query_type "$manifest" version)" == number &&
-    "$(query "$manifest" version)" == 2 && "$installer" == install &&
+    "$(query "$manifest" version)" == 2 && "$installer" == "$expected_installer" &&
     "$(query "$manifest" noSelfProvisionEnv)" == "$no_self" &&
     ( "$plugin" == agent-logger || "$(query "$manifest" command)" == "$plugin" ) &&
     "$(query "$manifest" installationContext)" == required ]] || {

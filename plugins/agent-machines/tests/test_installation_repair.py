@@ -159,6 +159,192 @@ def test_installation_repair_discovery_and_plan_never_install(repair_fixture):
     assert "fixture-private-detail" not in json.dumps(plan)
 
 
+@pytest.mark.parametrize("dependency", [True, False])
+def test_installation_repair_required_selects_only_required_closure(repair_fixture, dependency):
+    home, project, _, configure, identity = repair_fixture
+    configure(classification="optional", dependencies=("agent-example/base",) if dependency else ())
+    result = repair_api.repair(project, home=home, required=True)
+    expected = ["child"] if not dependency else ["base", "child"]
+    assert result["selected"] == [identity + "::agent-example/" + name for name in expected]
+    assert result["status"] == "observed" and not result["requiredSatisfied"]
+    assert not list(home.glob("*.ready"))
+
+
+@pytest.mark.parametrize("invalid", ["settings", "missing-payload", "missing-contract"])
+def test_installation_repair_required_refuses_incomplete_census_before_probes(
+    repair_fixture, monkeypatch, invalid,
+):
+    home, project, payload, _, _ = repair_fixture
+    settings_path = project / ".github" / "copilot" / "settings.json"
+    if invalid == "settings":
+        settings_path.write_text("{", encoding="utf-8")
+    elif invalid == "missing-payload":
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        settings["enabledPlugins"]["absent@fixture"] = True
+        write_json(settings_path, settings)
+    else:
+        manifest_path = payload / "plugin.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest.pop("installerReadiness")
+        manifest["runtimeScope"] = "machine-gated"
+        write_json(manifest_path, manifest)
+    monkeypatch.setattr(repair_api, "_observe", lambda *args: pytest.fail("probe before census"))
+    with pytest.raises(RepairAdmissionError, match="complete enabled-owner inventory"):
+        repair_api.repair(project, home=home, required=True)
+    assert not list(home.glob("*.ready"))
+
+
+def test_installation_repair_required_empty_set_is_qualified_observation(repair_fixture):
+    home, project, payload, _, _ = repair_fixture
+    manifest_path = payload / "installer-readiness.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for module in manifest["modules"]:
+        module["classification"] = "optional"
+    write_json(manifest_path, manifest)
+    result = repair_api.repair(project, home=home, required=True)
+    assert result["status"] == "observed" and result["requiredSatisfied"]
+    assert result["selected"] == [] and not list(home.glob("*.ready"))
+
+
+def test_installation_repair_required_keeps_unsupported_requirement(repair_fixture):
+    home, project, payload, _, _ = repair_fixture
+    manifest_path = payload / "installer-readiness.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    platform = repair_api.current_platform().value
+    for module in manifest["modules"]:
+        module["platforms"].remove(platform)
+        module["installer"].pop(platform)
+        module["readiness"]["invocations"].pop(platform)
+    write_json(manifest_path, manifest)
+    result = repair_api.repair(project, home=home, required=True)
+    assert result["selected"] and not result["requiredSatisfied"]
+    assert all(row["observedBefore"]["state"] == "unsupported" for row in result["outcomes"])
+    assert not list(home.glob("*.ready"))
+
+
+def test_installation_repair_required_rejects_mixed_selection(repair_fixture):
+    home, project, _, _, identity = repair_fixture
+    with pytest.raises(RepairAdmissionError, match="selection"):
+        repair_api.repair(
+            project, home=home, required=True, modules=[identity + "::agent-example/child"],
+        )
+    with pytest.raises(RepairAdmissionError, match="restart confirmation"):
+        repair_api.repair(project, home=home, required=True, confirm_restart="unused")
+
+
+def test_installation_repair_required_rejects_changed_selection_before_apply(repair_fixture):
+    home, project, _, configure, _ = repair_fixture
+    configure(classification="optional")
+    preview = repair_api.repair(project, home=home, required=True)
+    configure(classification="required")
+    with pytest.raises(RepairAdmissionError, match="inputs changed"):
+        repair_api.repair(
+            project, home=home, required=True, apply=True,
+            expected_plan_digest=preview["planDigest"],
+        )
+    assert not list(home.glob("*.ready"))
+
+
+def add_repair_peer(fixture, name, *, shared_root=False):
+    _, project, payload, _, _ = fixture
+    peer = payload.parent / name
+    shutil.copytree(payload, peer)
+    for relative in ("plugin.json", "payload-invocation.json", "installer-readiness.json"):
+        path = peer / relative
+        value = json.loads(path.read_text(encoding="utf-8").replace("agent-example", name))
+        if relative == "payload-invocation.json" and shared_root:
+            value["legacyRuntimeRoot"] = ".agent-example"
+        write_json(path, value)
+    catalog = payload.parent / ".claude-plugin" / "marketplace.json"
+    value = json.loads(catalog.read_text(encoding="utf-8"))
+    value["plugins"].append({"name": name, "source": "./" + name})
+    write_json(catalog, value)
+    settings = project / ".github" / "copilot" / "settings.json"
+    value = json.loads(settings.read_text(encoding="utf-8"))
+    value["enabledPlugins"][name + "@fixture"] = True
+    write_json(settings, value)
+    return peer
+
+
+def test_installation_repair_required_refuses_collisions_before_independent_probe(
+    repair_fixture, monkeypatch,
+):
+    home, project, _, _, _ = repair_fixture
+    add_repair_peer(repair_fixture, "agent-peer", shared_root=True)
+    add_repair_peer(repair_fixture, "agent-independent")
+    host = admit_host(project, home=home)
+    assert not host.refused and len(host.bindings) == 3
+    assert sum(owner.refusal is not None for owner in host.bindings.values()) == 2
+    monkeypatch.setattr(repair_api, "_observe", lambda *args: pytest.fail("probe before refusal"))
+    with pytest.raises(RepairAdmissionError, match="complete enabled-owner inventory"):
+        repair_api.repair(project, home=home, required=True)
+    assert not list(home.glob("*.ready"))
+
+
+@pytest.mark.parametrize("apply,transition,stage", [
+    (False, "missing-contract", "initial"),
+    (True, "missing-contract", "initial"),
+    (True, "missing-contract", "initial-ready"),
+    (True, "new-required", "initial"),
+    (True, "missing-contract", "post-install"),
+])
+def test_installation_repair_required_revalidates_complete_selection_after_probe(
+    repair_fixture, monkeypatch, apply, transition, stage,
+):
+    home, project, _, _, _ = repair_fixture
+    peer = add_repair_peer(repair_fixture, "agent-peer")
+    manifest_path = peer / "plugin.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if transition == "missing-contract":
+        manifest.pop("installerReadiness")
+        write_json(manifest_path, manifest)
+    else:
+        declaration = peer / "installer-readiness.json"
+        value = json.loads(declaration.read_text(encoding="utf-8"))
+        for module in value["modules"]:
+            module["classification"] = "optional"
+        write_json(declaration, value)
+    initially_ready = not apply or stage == "initial-ready"
+    if initially_ready:
+        for name in ("base", "child"):
+            (home / ("agent-example-" + name + ".ready")).write_text("ready", encoding="utf-8")
+    preview = repair_api.repair(project, home=home, required=True)
+    assert preview["requiredSatisfied"] is initially_ready
+    original_invoke = repair_api._invoke
+    changed = False
+
+    def invoke_then_change(*args, **kwargs):
+        nonlocal changed
+        result = original_invoke(*args, **kwargs)
+        if kwargs["readonly"] and not changed and (
+            stage.startswith("initial") or (home / "agent-example-base.ready").is_file()
+        ):
+            changed = True
+            if transition == "missing-contract":
+                manifest["runtimeScope"] = "machine-gated"
+                write_json(manifest_path, manifest)
+            else:
+                for module in value["modules"]:
+                    module["classification"] = "required"
+                write_json(declaration, value)
+        return result
+
+    monkeypatch.setattr(repair_api, "_invoke", invoke_then_change)
+    result = repair_api.repair(
+        project, home=home, required=True, apply=apply,
+        expected_plan_digest=preview["planDigest"] if apply else None,
+    )
+    assert changed and not result["requiredSatisfied"]
+    assert (home / "agent-example-child.ready").exists() is initially_ready
+    assert sum(row["attempted"] for row in result["outcomes"]) == int(stage == "post-install")
+    if not apply:
+        assert result["selectionRefusal"] == "required-inventory-changed"
+    if stage == "post-install":
+        assert (home / "agent-example-base.ready").is_file()
+    elif not initially_ready:
+        assert not list(home.glob("*.ready"))
+
+
 @pytest.mark.timeout(60 if os.name == "nt" else 30)
 def test_installation_repair_native_apply_freshly_probes_dependencies(repair_fixture):
     plan = invoke(repair_fixture)
@@ -1113,7 +1299,8 @@ def test_installation_repair_process_reaps_inherited_pipe_descendant(tmp_path):
         time.sleep(0.02)
 
 
-def test_installation_repair_installed_cli_native_first_touch(repair_fixture):
+@pytest.mark.parametrize("required", [False, True])
+def test_installation_repair_installed_cli_native_first_touch(repair_fixture, required):
     home, project, _, _, identity = repair_fixture
     command = Path(sys.executable).parent / (
         "agent-machines.exe" if os.name == "nt" else "agent-machines"
@@ -1122,7 +1309,7 @@ def test_installation_repair_installed_cli_native_first_touch(repair_fixture):
     environment = ordinary_environment(os.environ, home=home, payload=project / ".ai")
     argv = [
         str(command), "installation-repair", "--project-root", str(project),
-        "--module", identity + "::agent-example/child",
+        *(["--required"] if required else ["--module", identity + "::agent-example/child"]),
     ]
     plan = run_action(argv, cwd=project, environment=environment, timeout=15, readonly=True)
     assert plan.status == "exited" and plan.exit_code == 0

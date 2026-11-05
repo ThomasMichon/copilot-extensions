@@ -491,6 +491,12 @@ restoration of historical terminal enums follows.
       head, retain the original claim/allocation and recheck queue custody after
       observation. Corrected source passes 128 isolated controls. Guarded advancement,
       ordinary caller migration and complete native qualification stay open.
+ - [ ] Land bounded first-proposal [internal guarded advancement](journal/2026/11.04-consumer-readiness.md#internal-guarded-advancement-implementation):
+      fresh independent observation, locked semantic recheck and atomic
+      consumed admission through the existing submission owner. Retain the
+      task claim/native return binding and existing independent review policy.
+      Source controls pass; review, required CI and actual merge remain pending.
+      Rejected resubmission, ordinary callers and native qualification stay open.
 - [x] Land read-only [task-obligation provider evidence](journal/2026/11.03-task-obligation-provider.md)
       in [#10365](https://github.com/ThomasMichon/copilot-extensions/pull/10365),
       merged as `e9c3c3f9bd` after exact-head approval and required CI.

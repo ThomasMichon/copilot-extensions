@@ -159,6 +159,41 @@ agent-machines installation-repair --project-root <project>
 agent-machines installation-repair --project-root <project> --module <marketplace-id>::<plugin>/<module>
 ```
 
+For an explicit complete required-module selection, use `--required` instead of
+`--module`. It selects every discovered required module and its transitive
+prerequisites, including optional prerequisites, but not unrelated optional
+modules. Unsupported required modules remain visible and unsatisfied. Missing
+enabled payloads, indeterminate settings, refused owners or invalid declarations
+refuse this selection before any probe or installer; an incomplete inventory
+cannot establish that all requirements were selected.
+Binding-level refusals, including ambiguous legacy writers, also refuse before
+probes. Required selection and complete inventory are revalidated before each
+installer, after its readiness and before accepting the final observation.
+Changes retain completed installer outcomes but cannot satisfy requirements;
+`selectionRefusal: required-inventory-changed` identifies final census drift.
+
+```text
+agent-machines installation-repair --project-root <project> --required
+agent-machines installation-repair --project-root <project> --required --apply --expected-plan-digest <digest>
+```
+
+The same exact-input digest and owner re-admission apply. An observed result
+still exits zero when requirements are not ready: inspect `requiredSatisfied`
+and the per-module outcomes. This selects existing admitted payload contracts;
+it does not acquire missing payloads, change enablement or deployment authority,
+supply credentials or add support for unready active-core repair. Explicit apply
+still requires authority for every selected installer. A valid empty required
+set is an observation, not an uninspected discovery. `--required` cannot be
+combined with explicit modules or restart confirmation.
+
+This is an additive selection form of
+`copilot-extensions.installation-repair/v1`; existing explicit-module callers
+retain their syntax and semantics. A consumer first obtains a read-only
+`--required` observation from its selected executable and validates that result
+before applying its digest. Older runtimes reject the unknown option; retain
+that unsupported outcome without retrying a weaker selection. Payload versions
+alone do not establish receiver support. No existing form is deprecated.
+
 Review the returned closure and `planDigest`, then apply that exact selection:
 
 ```text

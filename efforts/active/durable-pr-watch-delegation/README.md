@@ -961,6 +961,45 @@ callback an implicit credential store.
 - Installed/provider/shadow and whole P1/P2 acceptance remain open. No live
   backend, credential or service authority moved.
 
+### 2026-11-04 - Retain failed Manager source acceptance
+
+- The acceptance-sandbox retention correction merged in #10590 at
+  `8b26d2c729d023b97c1f3b0c8329178b8c7b4015`, after exact-head approval,
+  green required checks and no open review threads. Eight focused wrapper
+  controls passed. This changes test ownership and cleanup, not Manager
+  construction, installation policy or the existing acceptance budgets.
+- The documented Manager source contract at that source did not reach its
+  assertions within the unchanged 300-second construction group. Two-build
+  diagnostics also exhausted that group after a successful first constructor;
+  they do not replace the four-build acceptance matrix or establish a pass.
+  Their contained sandboxes settled and were removed normally.
+- Fixture-only tracing reached the actual installed preparation worker. In
+  one instrumented run, the first constructor completed in 166.943 seconds;
+  its payload copy took 6.932 seconds and its inventory walk took 52.628
+  seconds. Samples show artifact reads and ancestor/path checks, not a proven
+  deadlock. Profiling overhead and separate source/build work preclude treating
+  these measurements as an uninstrumented benchmark or a complete root cause.
+- Preserve #10126's preparation ownership and inventory/path checks, #7028's
+  source-generation and packaging ownership, and #7305's separate installed
+  ordinary-update/headed-CLI acceptance. No deadline was enlarged, build
+  omitted, live runtime changed or delegation activated. The original #6286
+  installed-adoption exit and the parent Plan/Validation remain open.
+
+### 2026-11-04 - Reconcile retained planning records
+
+- #10572 merged after exact-head automated approval, green required checks
+  and no open review threads. The complete historical #7193 review entry is
+  preserved in its linked journal document; the later accepted #7208
+  disposition remains authoritative.
+- The five retained adoption/bootstrap journal entries from October 19-20
+  already appear verbatim in the canonical effort. Their release and partial
+  update outcomes do not replace the remaining installed-contract acceptance.
+- Continue the finite original #6286 acceptance through its direct retained
+  outcome rows, independently of the broader #7188 service work. The parent
+  remains Active; existing implementation and operational owners are unchanged.
+  No new diagnostic, installation, rollout or delegation activation follows
+  from this documentation merge.
+
 ### 2026-11-04 - Qualify normalized workspace-to-journal acquisition
 
 - The opt-in ADO workspace owner now projects confirmed load/sync acquisition
