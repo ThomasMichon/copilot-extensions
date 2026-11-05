@@ -443,7 +443,7 @@ class CompanionTimelinePanel(Vertical):
         """Retain typed preparation failures even before a source token can bind."""
         if message is None:
             self._provider_notices.pop(provider, None)
-        else:
+        elif failed or not self._provider_notices.get(provider, ("", False))[1]:
             self._provider_notices[provider] = (message[:2048], failed)
         self._update_context()
 

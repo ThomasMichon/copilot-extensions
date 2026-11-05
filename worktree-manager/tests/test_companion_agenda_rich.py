@@ -334,6 +334,9 @@ def test_rich_push_history_hide_reopen_and_reload_reuse_one_coarse_subscription(
             key = app._rich_agenda_attachment.token.identity.source_key
             await until(pilot, lambda: timeline.window.sources[key].availability.value == "unavailable")
             assert "Agenda: error" in str(app.query_one(".timeline-health", Static).content)
+            app._receive_agenda(app._data, app._agenda_generation, app._agenda_cancel, None, None)
+            await pilot.pause()
+            assert "Agenda: error" in str(app.query_one(".timeline-health", Static).content)
             for _ in range(70):
                 managed["update"]()
             publications.put(managed["publication"]())

@@ -173,7 +173,8 @@ class AgendaTimelineAttachment:
     def _failure(self, message: str, *, failed: bool = True) -> None:
         if self._renderable() and (self.selection is None or self._head_current()):
             self._history_epoch += 1
-            self.panel.provider_notice(Provider.AGENDA, message if failed else None, failed=failed)
+            if failed:
+                self.panel.provider_notice(Provider.AGENDA, message, failed=True)
             self.status("Rich Agenda: " + message)
             for token in self._tokens():
                 if failed:

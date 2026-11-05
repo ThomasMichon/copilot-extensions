@@ -402,6 +402,9 @@ def test_unbound_provider_error_stays_visible_when_evidence_is_collapsed() -> No
             assert "Worktrees: error" in str(app.query_one(".timeline-health", Static).content)
             assert "unsupported provider capability" in str(app.query_one(".timeline-state", Static).content)
             assert app.query_one(SubwayTimeline).size.height >= 16
+            panel.provider_notice(Provider.WORKTREES, "Loading a new observation.")
+            assert "Worktrees: error" in str(app.query_one(".timeline-health", Static).content)
+            assert "unsupported provider capability" in str(app.query_one(".timeline-state", Static).content)
             panel.provider_notice(Provider.WORKTREES, None)
             assert "error" not in str(app.query_one(".timeline-health", Static).content)
 
@@ -439,6 +442,16 @@ def test_unbound_agenda_failure_is_visible_but_ordinary_wait_is_not_an_error(fai
                 assert "worktree root is unavailable" in details
             else:
                 assert "error" not in health.lower()
+            if failure != "awaiting":
+                attachment.publication({
+                    "project": "example", "worktree_id": "selected", "session_id": "head-a",
+                    "availability": "not-published",
+                }, None)
+                attachment.publication(None, None)
+                await pilot.pause()
+                assert app.query_one(Collapsible).collapsed
+                assert "Agenda: error" in str(app.query_one(".timeline-health", Static).content)
+                assert details == str(app.query_one(".timeline-state", Static).content)
             await attachment.close()
 
     asyncio.run(check())
