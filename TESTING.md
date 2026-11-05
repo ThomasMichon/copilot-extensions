@@ -3,7 +3,8 @@
 Worktrees' opt-in `--test-file tests/test_resident_recovery.py
 --test-file tests/test_tracking_write.py --test-file tests/test_effort_focus.py
 --test-file tests/test_status_monitor.py --allow-explicit-tiers` packet checks
-maintenance holds, brief discovery backoff, ordinary ensure/wake, no-wake
+maintenance holds (including holds appearing with recovered readiness),
+brief discovery backoff, ordinary ensure/wake, no-wake
 callers, compatibility fallback and non-replay after possible send. The additional
 `--test-file tests/test_follow_ups_cmd.py --test-file tests/test_lazy_dispatch.py`
 controls exercise parsed write refusal envelopes, including lifecycle commands'

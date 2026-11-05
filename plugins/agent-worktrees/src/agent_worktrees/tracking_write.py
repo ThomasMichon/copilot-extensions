@@ -709,8 +709,7 @@ def write_with_boot(
             recovered = _dial()
             if failed is not None and not connectable(recovered):
                 recovered = None
-        if recovered is None and not incompatible_live_owner():
-            require_wake_allowed()
+        require_wake_allowed()
         return recovered
 
     endpoint = _dial()

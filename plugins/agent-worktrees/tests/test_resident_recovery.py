@@ -57,7 +57,10 @@ def test_maintenance_holds_before_backoff_wake_or_fallback(private_recovery, mon
     assert recovery.wake_allowed() is False
 
 
-@pytest.mark.parametrize("mode", ["arrives", "wake", "absent", "maintenance", "ambiguous", "no-wake"])
+@pytest.mark.parametrize("mode", [
+    "arrives", "wake", "absent", "maintenance", "maintenance-arrives",
+    "maintenance-wake", "maintenance-delayed", "ambiguous", "no-wake",
+])
 def test_bounded_recovery_sequence(private_recovery, monkeypatch, mode):
     clock, effects = [0.0], []
     ready = False
@@ -70,15 +73,20 @@ def test_bounded_recovery_sequence(private_recovery, monkeypatch, mode):
         nonlocal ready
         effects.append("backoff")
         clock[0] += delay
-        if mode == "maintenance":
+        if mode in {"maintenance", "maintenance-arrives"}:
             notice(private_recovery)
-        if mode == "arrives":
+        if mode in {"arrives", "maintenance-arrives"}:
+            ready = True
+        if mode == "maintenance-delayed" and clock[0] >= .2:
+            notice(private_recovery)
             ready = True
 
     def wake():
         nonlocal ready
         effects.append("wake")
-        ready = mode in {"wake", "ambiguous"}
+        ready = mode in {"wake", "ambiguous", "maintenance-wake"}
+        if mode == "maintenance-wake":
+            notice(private_recovery)
 
     def send(*args, **kwargs):
         effects.append("send")
@@ -95,9 +103,9 @@ def test_bounded_recovery_sequence(private_recovery, monkeypatch, mode):
         payload={"verb": "fixture"}, fallback=lambda: effects.append("fallback") or {"direct": True},
         boot_wait_s=.3,
     )
-    if mode in {"maintenance", "ambiguous"}:
+    if mode.startswith("maintenance") or mode == "ambiguous":
         with pytest.raises(
-            recovery.ResidentRecoveryHeld if mode == "maintenance" else writes.AmbiguousWriteOutcome,
+            writes.AmbiguousWriteOutcome if mode == "ambiguous" else recovery.ResidentRecoveryHeld,
         ):
             writes.write_with_boot(**options)
         assert "fallback" not in effects
@@ -211,8 +219,9 @@ def test_os_profile_hold_survives_redirected_state(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("live_owner", [False, True])
+@pytest.mark.parametrize("held_when_ready", [False, True])
 def test_delayed_same_endpoint_readiness_does_not_consume_send_retry(
-    private_recovery, monkeypatch, live_owner,
+    private_recovery, monkeypatch, live_owner, held_when_ready,
 ):
     from agent_worktrees import locks
 
@@ -231,6 +240,8 @@ def test_delayed_same_endpoint_readiness_does_not_consume_send_retry(
     def connect(*args, **kwargs):
         if clock[0] < .5:
             raise ConnectionRefusedError()
+        if held_when_ready:
+            notice(private_recovery)
         return nullcontext()
     def send(*args, **kwargs):
         calls.append("send")
@@ -240,12 +251,19 @@ def test_delayed_same_endpoint_readiness_does_not_consume_send_retry(
     monkeypatch.setattr(writes.socket, "create_connection", connect)
     monkeypatch.setattr(writes, "_send_tracking_write_request", send)
     monkeypatch.setattr(writes.wcs_client, "release", lambda *args, **kwargs: None)
-    assert writes.write_with_boot(
+    options = dict(
         read_lock_data=lambda: endpoint, ensure_monitor=lambda: calls.append("wake"),
         payload={"verb": "fixture"}, fallback=lambda: pytest.fail("premature fallback"),
         boot_wait_s=1,
-    ) == {"ok": True}
-    assert calls == ["send", "wake", "send"] and .5 <= clock[0] < 1
+    )
+    if held_when_ready:
+        with pytest.raises(recovery.ResidentRecoveryHeld, match="active"):
+            writes.write_with_boot(**options)
+        assert calls == ["send", "wake"]
+    else:
+        assert writes.write_with_boot(**options) == {"ok": True}
+        assert calls == ["send", "wake", "send"]
+    assert .5 <= clock[0] < 1
 
 
 @pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX passwd profile resolution")
