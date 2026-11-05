@@ -252,6 +252,35 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The six-contract native/Bridge/selector checkpoint is delivered in #10634.
+All eleven actual merged bodies equal the reviewed head after genuine
+exact-head approval with no findings, zero threads and ten complete
+successful/skipped checks. Only its publication child finalized, retained.
+The [delivery journal](<journal/2026/11.04 native-komodo-compatibility-contracts.md>)
+records two equal complete 22:55 PST scans: 1,008 whole open, 279 above
+729. Eligible arrival #10636 remains metadata-only; no departure or new
+credit follows, and verified dispositions remain 777. Continue groups
+111-113: preserved snapshot/recovery custody, native guard-map qualification
+and configured-feed policy. Parent Plan/Validation and all custodians remain.
+
+The [snapshot/recovery comparison](publication-snapshot-recovery-cohort.md)
+retains #9946's explicit OPEN historical-ref boundary and #10064's seven
+individual recovery outcomes. Preventive snapshot delivery, exact source
+attachment, a dispatch proposal and release promotion do not supply historical
+authority or per-PR confirmations. Both issues remain OPEN.
+
+The [guard-map native comparison](guard-map-native-qualification-cohort.md)
+retains #10031's large-caller startup/cutover and #10032's actual UNC/complete
+POSIX entry/deployment qualification. Completed source/consumer delivery,
+discovery optimization and the reused finite package-reader proof do not
+execute these independent native lanes. Both issues remain OPEN.
+
+The [configured-feed policy comparison](configured-feed-policy-cohort.md)
+distinguishes #10188's two caller outcomes from the already-completed
+duplicate-feed correction and narrower redirect qualification. Its released
+implementation reservation preserves OPEN Draft #10202, remaining acceptance
+and source/resource custody; #10188 remains OPEN with no new closure credit.
+
 The [native Komodo compatibility](native-komodo-compatibility-cohort.md),
 [Bridge process identity](bridge-process-identity-cohort.md) and
 [hosted selector](hosted-selector-refresh-cohort.md) studies preserve six
