@@ -6,10 +6,9 @@ builds the shared runtime (``~/.agent-worktrees/``), the venv, and the
 ``~/.local/bin`` binstubs. This keeps the dependency-free boundary: the installer
 knows *how to invoke* the core, not how the core works.
 
-Detection is idempotent and heals a partial install: it inspects the runtime dir
-and the global binstub independently, so a half-finished state (runtime present
-but binstub missing, or vice-versa) is reported as ``partial`` and a re-run of the
-real installer repairs it.
+Detection uses Manager's shared read-only installed-runtime resolver. Directory
+and global-binstub presence remain diagnostic facts, not proof of a selected
+complete runtime. A partial install is repaired by re-running the real installer.
 """
 
 from __future__ import annotations
@@ -20,10 +19,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .catalog import find_repo_root
+from . import agent_plugin_runtime
 
 
 def _home() -> Path:
-    return Path(os.environ.get("USERPROFILE") or os.path.expanduser("~"))
+    return Path(os.environ.get("AGENT_HOME") or os.environ.get("USERPROFILE") or os.path.expanduser("~"))
 
 
 def runtime_dir(home: Path | None = None) -> Path:
@@ -61,12 +61,16 @@ class CoreStatus:
 
 
 def core_status(home: Path | None = None) -> CoreStatus:
-    rt = runtime_dir(home)
-    venv = (rt / ".venv").exists() or (rt / "versions").exists()
+    slot = agent_plugin_runtime.resolve_installed_plugin_slot(
+        "agent-worktrees",
+        **({"environment": {**os.environ, "AGENT_HOME": str(home)}} if home is not None else {}),
+    )
+    rt = slot.parent.parent if slot is not None else runtime_dir(home)
+    venv = slot is not None or (rt / ".venv").exists() or (rt / "versions").exists()
     runtime_present = rt.is_dir()
     stub = global_binstub(home)
     have_stub = stub is not None
-    if runtime_present and venv and have_stub:
+    if slot is not None:
         state = "installed"
     elif runtime_present or have_stub:
         state = "partial"

@@ -527,7 +527,12 @@ or unresolved prerequisites stop before the core installer; a PATH-changing
 install that still leaves a gap requests a shell restart. Re-running is
 idempotent and can heal a partial install. The core install is never
 reimplemented — the Worktree Manager locates and calls agent-worktrees' own
-`install.{ps1,sh}`. A failed core installer remains a failure even when an
+`install.{ps1,sh}`. Core detection uses the same read-only, installation-context-
+qualified runtime selection as the engine client. Empty runtime/versions
+directories and a leftover global stub cannot satisfy it; a selected complete
+runtime does not require a legacy global stub. This is installed-runtime
+selection, not a live service, authentication or complete-toolkit health check.
+A failed core installer remains a failure even when an
 installed-state marker is present; setup success is not a full authentication
 or repository-adoption verdict.
 
