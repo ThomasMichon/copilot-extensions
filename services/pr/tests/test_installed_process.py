@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 import json
 import os
 import signal
@@ -20,6 +21,37 @@ from agent_pull_requests_service.hosting import ready
 
 class ProcessFlags(TypedDict, total=False):
     creationflags: int
+
+_WORKSPACE_NATIVE = """
+import argparse,json,pathlib,sys
+path=pathlib.Path(sys.argv[1])
+operation=sys.argv[2]
+with path.with_suffix('.calls').open('a') as calls:
+    calls.write(operation+'\\n')
+if operation=='capabilities':
+    print(json.dumps({
+        'schema':'agent-worktrees.review-evidence-capabilities','version':1,
+        'providers':['azure-devops'],'evidence_versions':[1],
+        'capabilities':['finite_acquisition','renewable_observe_credentials',
+            'principal_binding','credential_budget','enclosing_scope_credentials'],
+        'effects':'none','submission':False,'source_attachment':False,
+    }))
+else:
+    assert operation=='read'
+    parser=argparse.ArgumentParser(allow_abbrev=False)
+    for name in ('repo','number','endpoint','expected-principal','credential-command','budget'):
+        parser.add_argument('--'+name,required=True)
+    parser.add_argument('--contained-worker',action='store_true',required=True)
+    args=parser.parse_args(sys.argv[3:])
+    value=json.loads(path.read_text())
+    assert args.repo=='example/project' and int(args.number)==42
+    assert args.endpoint==value['scope']['endpoint']
+    assert args.expected_principal==value['scope']['principal_id']
+    assert json.loads(args.credential_command)==[sys.executable,'-I','-m','fleet_manager']
+    assert float(args.budget)>0
+    print(json.dumps(value))
+"""
+
 _EMBEDDED = """
 import asyncio,sys
 from pathlib import Path
@@ -41,8 +73,10 @@ asyncio.run(main())
 """
 
 
+@pytest.mark.parametrize("workspace_enabled", [False, True])
 def test_installed_host_process_register_observe_reconnect_restart_and_ack(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    workspace_enabled: bool,
 ) -> None:
     # The existing Fleet fixture owns issuer, policy and TLS; do not add a fake Gateway.
     root = Path(__file__).resolve().parents[3]
@@ -56,6 +90,12 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
         status = state / "service-status.json"
         calls = tmp_path / "native-calls"
         proof, access = tmp_path / "service.pem", tmp_path / "access"
+        evidence_path = tmp_path / "workspace-evidence.json"
+        generation_id = ""
+        cursor: dict[str, int] = {}
+        workspace_calls = ""
+        evidence: dict[str, Any] = {}
+        scope: dict[str, Any] = {}
         snapshot = {
             "schema": "agent-worktrees.pr-snapshot", "version": 1,
             "repo": "example/project", "pr": 1, "provider": "github",
@@ -143,6 +183,46 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                 }],
                 "interval": 1, "operation_seconds": 60, "drain_timeout": 5,
             }
+            if workspace_enabled:
+                from agent_pull_requests.native_read import PROFILE
+                from agent_pull_requests.owner_read import PRINCIPAL_SEMANTICS
+                evidence = json.loads((
+                    root / "plugins/agent-pull-requests/docs/review-evidence.example.json"
+                ).read_text())
+                evidence["sections"]["pull_request"]["data"]["createdBy"] = {"id": "author-id"}
+                template = evidence["sections"]["pull_request"]
+                for name in ("discussions", "reviewers", "policies"):
+                    evidence["sections"][name] = {
+                        key: value for key, value in template.items() if key != "data"
+                    } | {"data": []}
+                evidence["acquisition"] = {
+                    "source": PROFILE, "effects": "none", "principal_semantics": PRINCIPAL_SEMANTICS,
+                    "principal_source": "provider_connection_data", "snapshot_atomic": False,
+                    "duration_ms": 1, "credential_identity_checks": 2, "omissions": [],
+                }
+                scope = {name: value for name, value in evidence["scope"].items() if name != "number"}
+                script = tmp_path / "workspace-native.py"
+                script.write_text(_WORKSPACE_NATIVE)
+                config["workspaces"] = {
+                    "bindings": [{
+                        "principal": "caller-a", "target": "project",
+                        "command": [sys.executable, "-I", str(script), str(evidence_path)],
+                        "scope": scope,
+                    }],
+                    "cache_bytes": 4 * 1024 * 1024, "cache_generations": 20,
+                }
+
+            def save_evidence(offset: int) -> None:
+                for section in evidence["sections"].values():
+                    for field, delta in (("observed_from", 0), ("observed_to", 1)):
+                        section[field] = datetime.fromtimestamp(
+                            observed_at + offset + delta, timezone.utc,
+                        ).isoformat()
+                evidence_path.write_text(json.dumps(evidence))
+
+            observed_at = int(time.time()) - 20
+            if workspace_enabled:
+                save_evidence(0)
             path.write_text(json.dumps(config))
             assert (await command("provision", "--config", str(path)))[0] == 0
             assert (await command("provision", "--config", str(path)))[0] == 1
@@ -177,6 +257,45 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                         await asyncio.sleep(0.05)
                     raise AssertionError(f"{operation} remained busy")
 
+                async def workspace(
+                    operation: str, payload: dict[str, Any],
+                ) -> dict[str, Any]:
+                    from agent_pull_requests import workspace_cli
+                    from agent_pull_requests.watch_replay_binding import ReplayBinding
+                    from agent_pull_requests.workspace_client import WorkspaceClient
+                    from agent_pull_requests.workspace_tools import WorkspaceTools
+                    from fleet_manager.gateway_service_caller import ServiceCaller
+
+                    async def caller_access() -> str:
+                        rig.h.clock.value = int(time.time())
+                        return cast(str, rig.access("caller-a", 3))
+
+                    client = WorkspaceClient(
+                        ServiceCaller(
+                            gateway_origin=rig.origin, gateway_ca=rig.ca,
+                            access_token_callback=caller_access,
+                            proof_key=rig.h.keys[3].get_op_key("sign"),
+                        ),
+                        route_prefix="/api",
+                        binding=ReplayBinding(
+                            "fleet-a", "gateway-a", "service-a", "installation-a",
+                            "caller-a", "project", "dispatch-a", "account-a", "example/project",
+                        ),
+                        scope=scope,
+                    )
+                    request = tmp_path / "workspace-request.json"
+                    request.write_text(json.dumps(payload))
+                    arguments = ["workspace", operation]
+                    if operation != "capabilities":
+                        arguments += ["--request", str(request)]
+                    code = await asyncio.to_thread(
+                        workspace_cli.main, arguments,
+                        host=cast(Any, WorkspaceTools)(client),
+                    )
+                    output = capsys.readouterr()
+                    assert code == 0, output.err
+                    return cast(dict[str, Any], json.loads(output.out))
+
                 original = {
                     "request_id": "original", "issued_at": time.time(),
                     "number": 1, "until": ["merged"],
@@ -192,6 +311,49 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                 event = pending["events"][0]
                 assert event["registration_id"] == receipt["registration_id"]
                 assert not event["timed_out"]
+                if workspace_enabled:
+                    capabilities = await workspace("capabilities", {})
+                    assert "submit" not in capabilities["operations"]
+                    assert capabilities["backend_contract"]["read_acquisition"] == PROFILE
+                    initial = (await workspace("load", {
+                        "number": 42, "expected_current": None, "budget_seconds": 10,
+                    }))["result"]
+                    generation_id = initial["descriptor"]["id"]
+                    cursor = initial["conversation"]["cursor"]
+                    assert cursor == {"epoch": 1, "sequence": 1}
+                    materialized = await workspace("materialize", {
+                        "number": 42, "generation_id": generation_id,
+                    })
+                    assert materialized["sections"]["pull_request"]["data"]["title"] == "Synthetic example"
+                    before_read = (state / "watch-replay.json").read_bytes()
+                    page = (await workspace("events", {
+                        "number": 42, "after": None, "limit": 16,
+                    }))["result"]
+                    assert page["high_water"] == cursor
+                    assert (state / "watch-replay.json").read_bytes() == before_read
+                    evidence["sections"]["discussions"]["data"] = [{
+                        "id": 8, "status": "active",
+                        "comments": [{"id": 1, "content": "Same-head dialogue", "author": {"id": "author-id"}}],
+                    }]
+                    save_evidence(2)
+                    synced = (await workspace("sync", {
+                        "number": 42, "expected_current": generation_id,
+                        "previous_id": generation_id, "budget_seconds": 10,
+                    }))["result"]
+                    assert synced["conversation"]["cursor"] == {"epoch": 1, "sequence": 2}
+                    assert synced["comparison"]["changed_sections"] == ["discussions"]
+                    generation_id = synced["descriptor"]["id"]
+                    save_evidence(4)
+                    unchanged = (await workspace("sync", {
+                        "number": 42, "expected_current": generation_id,
+                        "previous_id": generation_id, "budget_seconds": 10,
+                    }))["result"]
+                    assert unchanged["conversation"]["status"] == "unchanged"
+                    assert unchanged["conversation"]["cursor"] == synced["conversation"]["cursor"]
+                    generation_id = unchanged["descriptor"]["id"]
+                    cursor = unchanged["conversation"]["cursor"]
+                    workspace_calls = evidence_path.with_suffix(".calls").read_text()
+                    assert workspace_calls.splitlines() == ["capabilities", "read", "read", "read"]
                 settled_reads = calls.read_text()
                 assert settled_reads.splitlines() and set(settled_reads.splitlines()) == {"read"}
                 persisted = (state / "watch-replay.json").read_bytes()
@@ -227,6 +389,18 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                 # A stale predecessor snapshot can pass briefly; require actual attachment too.
                 await eventually(lambda: "service-a" in rig.state.channels, timeout=10)
                 assert await send("pending") == pending
+                if workspace_enabled:
+                    retained = (await workspace("events", {
+                        "number": 42, "after": cursor, "limit": 16,
+                    }))["result"]
+                    assert retained["high_water"] == cursor and retained["events"] == []
+                    materialized = await workspace("materialize", {
+                        "number": 42, "generation_id": generation_id,
+                    })
+                    assert materialized["sections"]["discussions"]["data"][0]["comments"][0][
+                        "content"
+                    ] == "Same-head dialogue"
+                    assert evidence_path.with_suffix(".calls").read_text() == workspace_calls
                 completion = {
                     "request_id": original["request_id"], "issued_at": original["issued_at"],
                     "registration_id": receipt["registration_id"], "event_id": event["event_id"],

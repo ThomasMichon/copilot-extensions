@@ -54,6 +54,8 @@ param(
 
     [string]$InstallDir,
     [string]$InstallSource,
+    [ValidateScript({ -not [double]::IsNaN($_) -and -not [double]::IsInfinity($_) -and $_ -gt 0 })]
+    [double]$InputTimeout = 600,
     [Parameter(DontShow)][string]$RuntimeSourceDescriptor,
     [string]$BootstrapPython,
     [Parameter(DontShow)][switch]$ProvisionMissingRuntime,
@@ -79,6 +81,9 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
 if (-not $env:AGENT_WORKTREES_INSTALL_DEADLINE_SEC -and -not $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC) { $env:AGENT_WORKTREES_INSTALL_DEADLINE_SEC = '900' }
 if ($InstallSource -and $Action -notin @('install', 'update', 'provision', 'repair')) {
     throw '-InstallSource selects only installation, update, provisioning or independent repair.'
+}
+if ($PSBoundParameters.ContainsKey('InputTimeout') -and -not $InstallSource) {
+    throw '-InputTimeout requires -InstallSource.'
 }
 
 function Resolve-InstallerProjectName {
@@ -374,6 +379,9 @@ print(json.dumps(sys.executable, ensure_ascii=True))
         if ($ProjectName) { $driverArguments += @('--project-name', $ProjectName) }
         if ($BootstrapPython) { $driverArguments += @('--bootstrap-python', $BootstrapPython) }
         if ($InstallSource) { $driverArguments += @('--install-source', $InstallSource) }
+        if ($PSBoundParameters.ContainsKey('InputTimeout')) {
+            $driverArguments += @('--input-timeout', $InputTimeout.ToString([Globalization.CultureInfo]::InvariantCulture))
+        }
         if ($RuntimeSourceDescriptor) { $driverArguments += @('--source-descriptor', $RuntimeSourceDescriptor) }
         if ($Owner) { $driverArguments += @('--owner', $Owner) }
         if ($Force) { $driverArguments += '--force' }
@@ -3068,6 +3076,9 @@ function Deploy-PythonRuntime {
     $runtimeInputs = if ($Action -in @('repair', 'dev', 'dev-release')) { $RuntimeInputPlugin } else { $PluginDir.ToString() }
     if ($Owner) { $modeArgs += @('--owner', $Owner) }
     if ($InstallSource) { $modeArgs += @('--install-source', $InstallSource) }
+    if ($InstallSource) {
+        $modeArgs += @('--input-timeout', $InputTimeout.ToString([Globalization.CultureInfo]::InvariantCulture))
+    }
     if ($Action -ne 'dev-release') {
         $scope = if ($Action -in @('install', 'update')) { 'wrappers' } else { 'resolvers' }
         $frontend = @{shell='ps1'; executable=(Get-Process -Id $PID).Path; scope=$scope} |

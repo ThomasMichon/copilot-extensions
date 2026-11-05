@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent_worktrees import config, pr_cli, pr_config, pr_read_context, pr_watch, related, repos
+from agent_worktrees import config, pr_cli, pr_config, pr_read_context, pr_related_binding, pr_watch, related, repos
 from agent_worktrees.pr_snapshot import PRSnapshot
 
 
@@ -94,6 +94,92 @@ def test_one_shot_snapshot_has_no_mutating_or_durable_claimant_requirement(monke
     monkeypatch.setattr(pr_watch, "build_fetch", lambda *args, **kwargs: lambda: PRSnapshot(head_sha="head"))
     assert pr_cli.cmd_pr_watch_dispatch(["snapshot", "owner/repository", "7", "--json"]) == 0
     assert "agent-worktrees.pr-snapshot" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("verb", ["snapshot", "status", "threads"])
+def test_one_shot_read_reuses_discovery_but_next_read_reacquires(monkeypatch, capsys, verb):
+    from agent_worktrees import config_cache, pr_thread_report, providers
+
+    discoveries = []
+    endpoints = []
+    endpoint = "https://forge.example/first"
+
+    def discover():
+        discoveries.append(endpoint)
+        return {"target": {"provider": "azure-devops", "api_base": endpoint,
+                           "repository": "project/repository"}}
+
+    def load(path=None):
+        pr_related_binding.control_plane_pr_map()
+        return SimpleNamespace(repo_name="caller", default_repo=object(), repos={})
+
+    def fetch(prcfg, *args, **kwargs):
+        endpoints.append(prcfg.api_base)
+        return lambda: PRSnapshot(head_sha="head")
+
+    monkeypatch.setattr(config, "_control_plane_related_pr_map", discover)
+    monkeypatch.setattr(pr_read_context, "load_read_config", load)
+    monkeypatch.setattr(pr_config, "_resolve_repo_remote", lambda *args: "")
+    monkeypatch.setattr(repos, "list_repos", lambda: [])
+    monkeypatch.setattr(pr_watch, "build_fetch", fetch)
+    monkeypatch.setattr(providers, "get_provider", lambda name: object())
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *args: None)
+
+    def threads(*args, api_base="", **kwargs):
+        endpoints.append(api_base)
+        return {"supported": True, "threads": []}
+
+    monkeypatch.setattr(pr_thread_report, "thread_report", threads)
+    # An enclosing resident cache must not supply a prior read's policy.
+    with config_cache.ConfigCacheSession().scope():
+        pr_related_binding.control_plane_pr_map()
+        discoveries.clear()
+        for endpoint in ("https://forge.example/second", "https://forge.example/third"):
+            assert pr_cli.cmd_pr_watch_dispatch([verb, "project/repository", "7", "--json"]) == 0
+    assert discoveries == endpoints == ["https://forge.example/second", "https://forge.example/third"]
+    capsys.readouterr()
+
+
+def test_read_discovery_scope_is_released_after_failure(monkeypatch):
+    from agent_worktrees import config_cache
+
+    calls = []
+
+    def discover():
+        calls.append(True)
+        return {}
+
+    def fail(path=None):
+        pr_related_binding.control_plane_pr_map()
+        raise RuntimeError("read failed")
+
+    monkeypatch.setattr(config, "_control_plane_related_pr_map", discover)
+    monkeypatch.setattr(pr_read_context, "load_read_config", fail)
+    with config_cache.ConfigCacheSession().scope():
+        pr_related_binding.control_plane_pr_map()
+        with pytest.raises(RuntimeError, match="read failed"):
+            pr_cli.cmd_pr_watch_dispatch(["snapshot", "project/repository", "7"])
+        pr_related_binding.control_plane_pr_map()
+    assert len(calls) == 2
+    pr_related_binding.control_plane_pr_map()
+    assert len(calls) == 3
+
+
+def test_wait_does_not_acquire_a_read_cache(monkeypatch):
+    calls = []
+
+    def discover():
+        calls.append(True)
+        return {}
+
+    def wait(argv):
+        pr_related_binding.control_plane_pr_map()
+        pr_related_binding.control_plane_pr_map()
+        return 124
+
+    monkeypatch.setattr(config, "_control_plane_related_pr_map", discover)
+    assert pr_read_context.scoped_read_dispatch(wait)(["wait"]) == 124
+    assert len(calls) == 2
 
 
 def test_foreground_only_wait_cannot_be_unbounded(monkeypatch):

@@ -1106,7 +1106,7 @@ def _knowledge_owner(api, monkeypatch):
     api.stub("pr_publication_config", PublicationChecksConfig=SimpleNamespace,
              parse_publication_checks=lambda value: value, parse_string_tuple=tuple)
     api.stub("pr_publication_labels", PublicationOrigin=SimpleNamespace, parse_origin=lambda value: value)
-    api.stub("pr_related_binding", parse_repository=lambda value: value)
+    api.load("pr_related_binding")
     api.stub("config_cache", ConfigCacheSession=SimpleNamespace,
              cached_load_config_scope=lambda: None, memoize_in_scope=lambda fn, *a, **k: fn(*a, **k))
     calls = []

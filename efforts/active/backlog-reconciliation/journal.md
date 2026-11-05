@@ -3,6 +3,12 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-04 - Scoped selector repair retains genuine hosted delivery](<journal/2026/11.04 hosted-selector-refresh-contracts.md>)
+
+- [2026-11-04 - Bridge spelling and watchdog PID retain separate acceptance](<journal/2026/11.04 bridge-process-identity-contracts.md>)
+
+- [2026-11-04 - Native compatibility credits one finite completed consumer](<journal/2026/11.04 native-komodo-compatibility-contracts.md>)
+
 - [2026-11-04 - Cold fixture prerequisites retain separate test-control-plane custody](<journal/2026/11.04 cold-fixture-control-plane-contracts.md>)
 
 - [2026-11-04 - Named provider failures and current check-series evidence](<journal/2026/11.04 provider-check-evidence-contracts.md>)
