@@ -231,6 +231,39 @@ checkpoint nor author eligibility, holds, requirements or source/resource custod
 
 ### Phase 2 - Continuing reconciliation
 
+The twelve-contract transport/custody/hygiene research delta merged in #10578
+after genuine exact-head approval with no active findings and green required
+checks. All seventeen actual merged bodies equal the reviewed head; the
+[delivery journal](<journal/2026/11.04 hygiene-disposition-contracts.md>)
+records the finalized retained child and continuing parent gate. Two equal
+complete 19:27 PST metadata-only scans remain 1,009 whole open, 280 above
+729, with no arrivals, departures or new campaign closure credit.
+Continue the independent next twelve-contract publication and graph research;
+no original acceptance, older-claim release or installed change follows.
+
+The [foreign-worktree/mux incidents](foreign-worktree-mux-incident-cohort.md),
+[teardown/finalized WIP](teardown-finalized-wip-cohort.md) and
+[merge/readiness](merge-reconciliation-readiness-cohort.md) studies preserve
+six originals through twenty-four whole texts and eighteen relations:
+fifteen noncompletion comparisons and three protected/excluded relations.
+Direct inherited custody, finite versus whole-incident proof, optional
+design outcomes, all six runtime triage rows and original reporting
+alternatives remain intact. All six originals remain OPEN.
+
+A finite [#3638 reporting-source follow-through](merge-reconciliation-readiness-cohort.md#finite-3638-reporting-source-follow-through)
+credits exact-head safe-exception guidance and current status/watch propagation.
+It does not establish every original actual-configured reporting lane, execute
+regressions or add a new native/ACK prerequisite; the original remains OPEN.
+
+The [build/warning prerequisites](build-warning-prerequisites-cohort.md),
+[hosting/config activation](hosting-config-activation-cohort.md) and
+[raw-SSH admission](raw-ssh-admission-cohort.md) studies preserve six
+originals through nineteen whole texts and eighteen relations: seventeen
+noncompletion comparisons and one protected exclusion. Missing original
+scope/custody, the original broad-enough warning prerequisite, accepted
+hosting modes, independent config gates, persistent policy and retained
+author repair remain distinct. All six originals remain OPEN.
+
 The thirteen-contract cutover/recovery/update research delta merged in #10573
 after genuine current-head approval, resolved feedback and green required
 checks. All seventeen actual merged bodies equal the reviewed head; the
@@ -1057,6 +1090,23 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [incident](foreign-worktree-mux-incident-cohort.md),
+[teardown/WIP](teardown-finalized-wip-cohort.md) and
+[merge/readiness](merge-reconciliation-readiness-cohort.md) cores preserve
+actual causal uncertainty, final-OPEN keeper custody, independent narrow
+watchdog qualification, shared-core OR separate-executor decisions, complete
+runtime cleanup-path coverage and correction OR explanatory-note acceptance.
+Latest bounded native source credit is not left falsely pending, nor
+generalized into whole incident, runtime, receiver or parent completion.
+
+The [build/warning](build-warning-prerequisites-cohort.md),
+[hosting/config](hosting-config-activation-cohort.md) and
+[raw-SSH admission](raw-ssh-admission-cohort.md) cores preserve original
+alternatives and accepted refinements, invalid-input refusal, shared scope
+and incumbent custody. Completed-work messages/descriptions do not recover
+missing requirements, prove broad adoption or turn a local candidate with
+blocked test preparation into executed tests or whole acceptance.
 
 The [handoff](handoff-resolution-contention-cohort.md),
 [reclamation](terminal-reclamation-boundaries-cohort.md) and
