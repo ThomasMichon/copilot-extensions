@@ -1,0 +1,13 @@
+{
+  "comment": "Prepare missing enabled payloads through native acquisition while preserving activation and strict current declarations",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "libs/plugin-activation",
+      "type": "patch"
+    }
+  ]
+}

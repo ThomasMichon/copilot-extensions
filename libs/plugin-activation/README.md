@@ -181,6 +181,20 @@ semantics; one checkout does not disable a provider for unrelated projects.
 Indeterminate explicit-checkout settings cannot authorize global fallback;
 reconciliation still retains prior evidence instead of declaring removal.
 
+`current_declarations(home=Path(user_home), project_root=Path(repo))` exposes
+that explicit user/current-checkout declaration stack without resolving
+payloads or registered projects. It reuses the strict readers and returns
+effective enablement, marketplace definitions and their relative-path bases,
+scan authority and findings. An indeterminate read is not permission to use a
+partial user fallback. This is declaration evidence only, not installed
+inventory, source verification, execution trust or mutation authority.
+`declared_payload_roots(declarations, home=Path(user_home))` resolves that
+effective stack through the existing root validators, using each marketplace's
+recorded base. Authored directory sources never fall back to an old installed
+copy. A missing root is explicit absence; malformed or indeterminate ownership
+refuses resolution. Callers still qualify source identity and choose readiness
+or acquisition policy separately.
+
 Callers locating one sibling may also pass `plugin_names=("customizing-copilot",)`.
 Only requested names incur source resolution, but all matching marketplace
 identities remain visible so ambiguity is never resolved by choosing the first.

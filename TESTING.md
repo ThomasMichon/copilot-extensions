@@ -18,6 +18,24 @@ separate; no production launch, binding, runtime or cleanup policy changes.
 Use the bounded host runner on an explicitly enrolled tmux host. Required
 unit-only CI is unchanged.
 
+Worktrees' opt-in `--test-file tests/test_plugin_preparation.py --test-file
+tests/native/test_plugin_preparation_native.py --allow-explicit-tiers` packet
+checks strict enabled-payload selection, stale inputs, source conflicts and
+partial results. The initial two native cases run the real CLI and
+activation-preservation process boundary with a finite synthetic acquisition
+child. Those cases do not install
+real plugins or qualify provider authentication, runtime/service readiness or
+cold-machine onboarding. The native file stays outside default required CI.
+With `NATIVE_COPILOT_TEST_EXE` explicitly selecting an existing native executable,
+its additional three-profile consumer case uses private homes/caches and an
+anonymous loopback Smart HTTP Git fixture. It proves real payload acquisition
+from a nondefault source ref for a pre-trusted repository or user-declared source,
+and preserves refusal for
+an untrusted repository-only source without granting trust. The fixture first
+qualifies shallow Git transport independently. It disables client updates and
+uses no provider credentials or model session; trust establishment, cold-machine
+construction and live credential/relay acceptance remain separate.
+
 Manager's opt-in `--test-file tests/native/test_companion_app_tmux.py
 --test-file tests/native/test_companion_pane_tmux.py --allow-explicit-tiers`
 packet distinguishes the original observer-stub pane test from the actual

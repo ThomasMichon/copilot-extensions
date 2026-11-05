@@ -5380,7 +5380,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'pr-nudge': ('pr_state_cli', 'cmd_pr_nudge'),
     'pr-ready': ('pr_state_cli', 'cmd_pr_ready'),
     'pr-status': ('pr_state_cli', 'cmd_pr_status'),
-    'pre-launch': ('update_cli', 'cmd_pre_launch'),
+    'pre-launch': ('update_cli', 'cmd_pre_launch'), 'prepare-plugin-payloads': ('plugin_preparation', 'command'),
     'launch-update': ('update_launch_cli', 'cmd_launch_update'),
     'push-changes': ('finalize_cli', 'cmd_push_changes'),
     'reap-sessions': ('reap_cli', 'cmd_reap_sessions'),
@@ -5608,7 +5608,7 @@ def _load_full_command_surface() -> None:
     global sweep_managed_worktrees
     global sync_one, terminal_conclusion, update_cli, worktree_ops_cli, cmd_resolve_handoff_successor, handoff_cancel_cli
     from . import (
-        claims_cli,
+        claims_cli, plugin_preparation,
         cleanup_gc_cli,
         context_cli,
         copilot_cli,
@@ -6105,7 +6105,7 @@ def _load_full_command_surface() -> None:
         "picker-bootstrap": cmd_picker_bootstrap,
         "picker-paths": cmd_picker_paths,
         "picker-reconcile-local": cmd_picker_reconcile_local,
-        "pre-launch": cmd_pre_launch,
+        "pre-launch": cmd_pre_launch, "prepare-plugin-payloads": plugin_preparation.command,
         "launch-update": update_launch_cli.cmd_launch_update,
         "repair-stale-anchor": cmd_repair_stale_anchor,
         "stage-update": update_cli.cmd_stage_request,

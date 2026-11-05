@@ -63,16 +63,16 @@ def _resolve_environment(*args, **kwargs):
 
 def add_parsers(sub) -> None:
     from .update_launch_cli import add_parsers as add_launch_parsers
+    from .plugin_preparation import add_parsers as add_payload_parsers
 
     add_launch_parsers(sub)
+    add_payload_parsers(sub)
     p = sub.add_parser("update", help="Re-deploy from repo", allow_abbrev=False)
     mode = p.add_mutually_exclusive_group()
     mode.add_argument("--detach", action="store_true", help="Submit a durable update request without waiting")
     mode.add_argument("--wait", action="store_true", help="Observe the durable update through completion (default)")
-    mode.add_argument(
-        "--supervised-debug", action="store_true",
-        help="Execute in the foreground under the same exclusive update authority",
-    )
+    mode.add_argument("--supervised-debug", action="store_true",
+                      help="Execute in the foreground under the same exclusive update authority")
     mode.add_argument("--request-status", metavar="ID", help="Read a durable update request without installing")
     mode.add_argument("--recovery-status", action="store_true", help="Read restart-confirmed settlement availability")
     mode.add_argument(
