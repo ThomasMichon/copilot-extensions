@@ -162,24 +162,29 @@ class ReplayStore:
     def _validate_owner(self, document: dict) -> None:
         version = document.get("version")
         names = {"schema", "version", "namespace", "service", "replay", "reviews", "capacities"}
-        if version == 3:
+        if version in (3, 4):
             names.add("conversations")
+        if version == 4:
+            names.add("attention")
         if (
             set(document) != names
             or document["schema"] != OWNER_SCHEMA or type(document["version"]) is not int
-            or version not in (2, 3) or document["namespace"] != self.namespace
+            or version not in (2, 3, 4) or document["namespace"] != self.namespace
             or document["service"] != (self.service_identity.document() if self.service_identity else None)
         ):
             raise ReplayStoreInvalid("review owner storage binding mismatch")
         capacities = document["capacities"]
         capacity_names = {"replay_bytes", "review_bytes", "receipt_bytes"}
-        if version == 3:
+        if version in (3, 4):
             capacity_names.add("conversation_bytes")
+        if version == 4:
+            capacity_names.add("attention_bytes")
         if not isinstance(capacities, dict) or set(capacities) != capacity_names:
             raise ReplayStoreInvalid("invalid owner capacity declaration")
         if any(type(value) is not int or value <= 0 for value in capacities.values()) or (
             capacities["replay_bytes"] + capacities["review_bytes"]
-            + capacities.get("conversation_bytes", 0) > MAX_OWNER_BYTES - 4096
+            + capacities.get("conversation_bytes", 0)
+            + capacities.get("attention_bytes", 0) > MAX_OWNER_BYTES - 4096
             or capacities["receipt_bytes"] < 4096
         ):
             raise ReplayStoreInvalid("invalid owner capacity limits")
@@ -189,7 +194,7 @@ class ReplayStore:
         review_intent.validate_operations(
             document["reviews"], receipt_bytes=capacities["receipt_bytes"], review_bytes=capacities["review_bytes"],
         )
-        if version == 3:
+        if version in (3, 4):
             from .conversation_journal import ConversationJournal
             if not isinstance(document["conversations"], dict):
                 raise ReplayStoreInvalid("persisted conversation journal must be an object")
@@ -202,6 +207,19 @@ class ReplayStore:
                 or len(review_intent.encoded(document["conversations"])) > capacities["conversation_bytes"]
             ):
                 raise ReplayStoreInvalid("conversation journal exceeds its namespace or capacity")
+        if version == 4:
+            from .attention_state import AttentionState
+            if not isinstance(document["attention"], dict):
+                raise ReplayStoreInvalid("persisted attention state must be an object")
+            try:
+                attention = AttentionState(document["attention"])
+            except ValueError:
+                raise ReplayStoreInvalid("invalid persisted attention state") from None
+            if (
+                any(row["facts"]["key"]["namespace"] != self.namespace for row in attention.records)
+                or len(review_intent.encoded(document["attention"])) > capacities["attention_bytes"]
+            ):
+                raise ReplayStoreInvalid("attention state exceeds its namespace or capacity")
 
     def adopt_review_operations(
         self, *, lifecycle_checkpoint: Callable[[], None], expires_at: int,

@@ -288,7 +288,7 @@ _Operator-required outcome; agent-recommended slices and validation._
   the existing finite exporter, cache and journal; thin watch metadata alone is not full
   workspace acquisition. Operational configuration, installed/provider/shadow
   qualification and the remaining P1/P2 acceptance remain separate gates.
-  The next review-first [durable attention contract](durable-attention-slice.md)
+  The [durable attention contract](durable-attention-slice.md), merged in #10633,
   separates explicit owner-layout expansion, actual observation/feedback
   integration and the optional authenticated reader; it is not implemented
   by the inert projection or conversation ACK.
@@ -929,6 +929,28 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-04 - Expand the existing attention data owner after contract review
+
+- #10633 merged as `ededd50e1ac49abac458a2ba3f0f5d4c1a494dd0`.
+  The owner-authored Comment verdict contained one Low documentation-impact
+  finding, addressed in the PR description and resolved before merge. No
+  Medium/High finding remained; refreshed actual CI passed. No dummy source
+  commit or extra approval round was needed for the description-only repair.
+- Re-read the canonical gate and admitted attention contract. A1 now expands
+  the existing v3 complete-envelope owner explicitly to v4, preserving replay,
+  journal and confirmed/unknown review operations under its existing lock and
+  atomic transaction. Bounded attention data references do not grant feedback
+  authority; this slice adds no ingest or handled-write operation.
+- Default provisioning and v2/v3 consumers remain unchanged. Internal
+  conversation transactions preserve v4, while its existing v3 serving
+  descriptor refuses the expanded layout instead of misreporting support.
+  The source data foundation is not a serving-volume migration or running queue.
+- Focused adoption/journal/projection controls and coupled replay/review/
+  workspace consumers pass with verified cleanup, as does the standalone
+  default/composed-host packet. A2 actual acquisition/confirmed-feedback
+  integration, A3 negotiated service/CLI reading and all parent retention,
+  provider, shared-intake, Dispatch and operational gates remain open.
 
 ### 2026-11-04 - Continue from composed-host qualification to durable attention
 
