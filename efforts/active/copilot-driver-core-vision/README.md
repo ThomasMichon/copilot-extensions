@@ -158,3 +158,8 @@ documentation consistency and CRLF-aware whitespace passed. The revised
 Driver vision and affected hosting/client bodies were checked against the
 request. No plugin payload, runtime, manifest or dependency changed, so runtime
 tests and a plugin changefile are not part of this documentation-only slice.
+
+The parent fabric's idle reclamation rule follows the same mode-specific
+contract: CLI detach/disconnect is not expiry, and ACP disconnect does not
+bypass configured idle grace or pending work. Orphan collection remains
+separate from authorized provider lifecycle retirement and claim settlement.
