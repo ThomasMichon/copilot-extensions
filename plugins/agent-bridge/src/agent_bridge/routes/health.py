@@ -20,7 +20,7 @@ from ..hosting_admission_cli import HOSTING_CAPABILITY, HOSTING_CAPABILITY_VERSI
 from ..self_retire import slot_descriptor
 from ..live_keyed_receipt import CAPABILITY as LIVE_KEYED_RECEIPT_CAPABILITY
 from ..live_exact_notify import CAPABILITY as LIVE_EXACT_NOTIFY_CAPABILITY
-from ..session_observation_contract import CURRENT_REQUESTS, HISTORY, OBSERVATIONS
+from ..session_observation_contract import CURRENT_REQUESTS, HISTORY, OBSERVATIONS, TOOL_STATISTICS
 from ..owner_membership import CAPABILITY as OWNER_MEMBERSHIP
 
 router = APIRouter()
@@ -57,6 +57,7 @@ async def health(request: Request) -> dict:
             OBSERVATIONS: 1,
             HISTORY: 1,
             CURRENT_REQUESTS: 1,
+            TOOL_STATISTICS: 1,
             OWNER_MEMBERSHIP: 1,
         },
         "drain_contract": {"minimum": DRAIN_CONTRACT_VERSION, "maximum": DRAIN_CONTRACT_VERSION},

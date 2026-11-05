@@ -252,6 +252,32 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [eight obligation/preview/staging contracts](finite-obligation-preview-staging-contracts.md)
+retain 25 whole texts and twenty-four ranked relationships.
+All eight stay OPEN; actual merged staging source is positively credited
+without treating historical OPEN metadata or an invalid artifact admission
+as completion evidence. Exact obligation OR settlement, original installed
+gates, prose-bearing attribution and accepted one-writer custody remain.
+The [journal](<journal/2026/11.05 finite-obligation-preview-staging-contracts.md>)
+preserves four protected originals, one protected description and all custodians.
+
+The eleven-contract checkpoint is actually delivered in #10709 after genuine
+exact-head approval, no active findings, all resolved threads and nine complete
+successful/skipped checks before normal managed merge.
+All eight actual merged/current blobs equal the approved head.
+Only the reused publication child finalized, retained; the
+[delivery journal](<journal/2026/11.05 finite-recovery-reclamation-callback-contracts.md>)
+records all five valuable review corrections, including the reported 14 GB
+checkout and unspecified filesystem.
+Two equal complete 04:26 PST metadata-only scans remain at 1,010 whole open:
+735 creator-eligible, 275 excluded, 672 original-cohort and 338 inflow.
+There are no arrivals, departures or new credit; dispositions remain 777
+and the parent stays Active, 281 issues above 729.
+The next eight whole contracts/twenty-four comparisons are integrated for
+reviewed publication; eleven further contracts/thirty-three comparisons
+and six following contracts/eighteen comparisons are also integrated.
+Protected whole evidence and all source/resource custodians remain.
+
 The six-contract checkpoint is actually delivered in #10708 after genuine
 exact-head approval, no active findings or threads and ten complete
 successful/skipped checks before normal managed merge.
@@ -1807,6 +1833,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [obligation/preview/staging study](finite-obligation-preview-staging-contracts.md)
+separates nineteen whole-message, four reused whole-description and one
+protected relation. Fresh actual merged staging/source/review/CI evidence
+corrects historical missing-fix claims; the invalid whole native artifact is
+excluded without retry. No comparison supplies receiving consent, installed
+acceptance, claim release or a new completion judgment.
 
 The [recovery/reclamation/callback study](finite-recovery-reclamation-callback-contracts.md)
 separates twenty-five whole-message, one fresh whole-description, five reused

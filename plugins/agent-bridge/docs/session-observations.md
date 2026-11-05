@@ -11,7 +11,7 @@ The owning payload CLI exposes:
 
 ```text
 agent-bridge --project example observe-session SESSION \
-  --worktree-id FULL_WORKTREE_ID --contract-version 1 --json [--follow] [--after POSITION] [--current-requests]
+  --worktree-id FULL_WORKTREE_ID --contract-version 1 --json [--follow] [--after POSITION] [--current-requests] [--tool-statistics]
 agent-bridge --project example session-observation-history SESSION \
   --worktree-id FULL_WORKTREE_ID --contract-version 1 --json [--before POSITION] [--limit 64]
 ```
@@ -145,7 +145,7 @@ Older readers may ignore them; newer readers must retain a generic occurrence
 label when a supported older provider or rollback lacks them. The original v1
 frame, parser, capability and identity/continuity contracts are unchanged.
 
-### Owner-internal tool-start projection
+### Optional owner-qualified tool-start statistics
 
 EventLog also maintains a fixed-size, content-free projection while appending,
 hydrating, rebuilding or restoring its existing native records. Its internal
@@ -163,9 +163,37 @@ zero only for that range. Rebuild resets the projection. Statistics can become
 visible before SQLite persistence, like the underlying events, without blocking
 source delivery on a projection failure.
 
-This is an internal source primitive only. It adds no CLI option, HTTP field or
-capability and changes no legacy response. Negotiated provider expansion and
-Manager consumption remain pending in the
+The executing CLI declares `bridge-session-tool-statistics-v1`, version 1,
+in its existing `version --contracts-json` response. The actual running daemon
+advertises the same capability through `/health`. The opt-in
+`observe-session --tool-statistics` verifies daemon support before sending
+`tool_statistics=true`. Missing, malformed or unsupported support refuses that
+optional invocation before opening the event route. Callers may independently
+omit statistics while retaining supported `--current-requests` and ordinary
+observations. The old forms remain supported with no scheduled retirement;
+neither package versions nor staged payloads establish live support.
+
+Absent or `tool_statistics=false` preserves the old response exactly. History
+rejects the parameter, including false. Opted-in snapshots and deltas carry a
+bounded `tool_statistics` object before the event-tail byte budget is allocated:
+`version`, `availability`, fixed `reason`, `basis`, `coverage`, `durability`,
+`start_occurrences`, `observed_records`, `floor`, `head` and `contiguous`.
+`basis` is always `native-tool-start-record-occurrences`; `coverage` remains
+`partial` and `durability` remains `unknown`. Observed counters and range IDs
+are exact integers from 0 to 2^53-1, not booleans or rounded numbers.
+Unknown statistics have null counters, range and contiguity with an explicit
+empty/unqualified, source-mismatch or unavailable reason.
+
+The enclosing source binds journal continuity and hosting/session identity.
+Observed statistics match that frame's atomic retained floor/head, not its
+delivered event position: a paged delta can report a native head newer than its
+last entry. Captured tails and earlier gaps retain their actual range and
+contiguity. Repeated reads do not count again. The same held reader delivers
+qualification changes without appending events or advancing its cursor;
+heartbeats contain no statistics. No history scan, additional actor, permanent
+worker or persistence owner is added.
+
+Manager consumption and joined presentation validation remain pending in the
 [statistics implementation contract](../../../efforts/active/mux-companion-manual-cutover-diagnostics/sidecar-tool-statistics.md).
 
 ## Optional current input and permissions

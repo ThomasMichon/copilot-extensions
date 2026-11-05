@@ -172,6 +172,16 @@ owner separately includes those source controls without changing the generation,
 historical HTTP-51 evidence or required unit-only CI. Manager and installed/native
 acceptance remain separate.
 
+The same bounded observation/transport packet also checks optional
+`bridge-session-tool-statistics-v1` provider expansion: exact range counters,
+unknown versus qualified zero, captured gaps, an append after the atomic cut,
+page-independent native heads, duplicate delivery, malformed counter/coverage
+claims, independent current-request rollback and the actual parser/ASGI join.
+A 5,000-record source projects only the selected two event records. HTTP-52's
+owning capture includes these explicit controls and the new semantic owner
+modules, without refreshing older generations or claiming consumer/native
+acceptance.
+
 The manual `installation-context-acceptance.yml` selector `wheel_inputs`
 includes copied-application bootstrap acceptance in the existing Linux,
 Windows and macOS source-profile jobs. The bounded canonical contained packet

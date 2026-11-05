@@ -211,11 +211,19 @@ def frame(
     # incarnation below. Rebuild during either step is a gap, never a mixed page.
     identity = known.identity(known.log.continuity_id)
     boundary = read_position(token, identity) if token is not None else None
-    continuity, floor, head, events = known.log.snapshot_observation(
-        after=boundary if not request.history else None,
-        before=boundary if request.history else None,
-        limit=request.limit,
-    )
+    statistics = None
+    if request.tool_statistics:
+        if request.history:
+            raise ObservationError("invalid-request", "tool statistics are live observations only")
+        continuity, floor, head, events, statistics = (
+            known.log.snapshot_observation_with_statistics(after=boundary, limit=request.limit)
+        )
+    else:
+        continuity, floor, head, events = known.log.snapshot_observation(
+            after=boundary if not request.history else None,
+            before=boundary if request.history else None,
+            limit=request.limit,
+        )
     source = known.identity(continuity)
     if source != identity:
         raise ObservationError("source-changed", "event history changed during the read")
@@ -261,6 +269,10 @@ def frame(
         from .session_current_requests import snapshot
 
         body["current_request_state"] = snapshot(known)
+    if statistics is not None:
+        from .session_tool_statistics import project
+
+        body["tool_statistics"] = project(statistics, source, body["retained"])
     candidates = events if is_delta else list(reversed(events))
     accepted: list[dict[str, Any]] = []
     for event in candidates:

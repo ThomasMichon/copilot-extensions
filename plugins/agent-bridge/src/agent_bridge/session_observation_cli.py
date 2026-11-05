@@ -14,6 +14,7 @@ from .session_observation_contract import (
     MAX_BODY,
     MAX_FRAME,
     OBSERVATIONS,
+    TOOL_STATISTICS,
     ObservationError,
     ReadRequest,
     decode,
@@ -78,7 +79,10 @@ def read(client: Any, request: ReadRequest) -> ObservationStream:
     """Negotiate with the actual daemon, then open only the dedicated read route."""
     capability = HISTORY if request.history else OBSERVATIONS
     capabilities = client.health().get("capabilities")
-    for required in (capability, *([CURRENT_REQUESTS] if request.current_requests else [])):
+    for required in (
+        capability, *([CURRENT_REQUESTS] if request.current_requests else []),
+        *([TOOL_STATISTICS] if request.tool_statistics else []),
+    ):
         if (
             not isinstance(capabilities, dict)
             or type(capabilities.get(required)) is not int
@@ -101,6 +105,8 @@ def read(client: Any, request: ReadRequest) -> ObservationStream:
         query["follow"] = "true" if request.follow else "false"
         if request.current_requests:
             query["current_requests"] = "true"
+        if request.tool_statistics:
+            query["tool_statistics"] = "true"
         if request.position is not None:
             query["after"] = request.position
     route = "session-observation-history" if request.history else "session-observations"
@@ -124,6 +130,8 @@ def _cmd(args: argparse.Namespace) -> None:
         pairs.append(("follow", "true" if args.follow else "false"))
         if getattr(args, "current_requests", False):
             pairs.append(("current_requests", "true"))
+        if getattr(args, "tool_statistics", False):
+            pairs.append(("tool_statistics", "true"))
     try:
         request = ReadRequest.parse(args.session_id, pairs, history=history)
         with read(core._get_client(ensure=False), request) as stream:
@@ -173,6 +181,7 @@ def register_commands(sub: argparse._SubParsersAction) -> None:
         if command == "observe-session":
             parser.add_argument("--follow", action="store_true")
             parser.add_argument("--current-requests", action="store_true")
+            parser.add_argument("--tool-statistics", action="store_true")
             parser.add_argument("--after", dest="position")
         else:
             parser.add_argument("--before", dest="position")

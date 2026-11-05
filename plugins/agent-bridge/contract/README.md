@@ -35,6 +35,15 @@ to 60 cases. It requires bounded optional agent labels, explicit malformed/
 oversized omissions, unchanged repeated entries and unchanged partial/unknown
 qualifiers. Earlier portfolio cases and protocol generations are retained.
 
+The independently optional `bridge-session-tool-statistics-v1` expansion adds
+31 explicit cases, bringing the portfolio to 91. These qualify source-range
+counters independently of delivered page ends, empty/zero/unavailable state,
+captured gaps, the atomic snapshot boundary, bounded work over 5,000 records,
+strict counter/coverage parsing, actual CLI/ASGI joins and independent
+current-request rollback. The counter and its optional wire projection are
+semantic sources. HTTP generation 52, prior feature floors, the independent
+input vector and historical evidence remain unchanged.
+
 Membership transcript cases use a virtual private-reader clock so host scheduling
 does not replace their expected snapshots with legitimate budget gaps. Separate
 probes exercise deadline expiry and actual SQLite VM exhaustion. The production

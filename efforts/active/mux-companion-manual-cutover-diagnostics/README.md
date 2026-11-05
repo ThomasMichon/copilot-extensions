@@ -538,8 +538,11 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       whole-S2 qualification.
       The [owner-qualified statistics follow-up](sidecar-tool-statistics.md)
       admits a source-range count of reported tool-start occurrences.
-      Plan #10704 is merged; implementation remains pending. It keeps unique-call totals,
-      session-lifetime activity and current concurrency unknown.
+      Plan #10704 and internal owner projection #10707 are merged.
+      The latter qualifies bounded construction/lifecycle statistics and
+      atomic native-range reads without changing the observation wire.
+      Optional provider/CLI and Manager consumption remain pending; unique-call
+      totals, session-lifetime activity and current concurrency remain unknown.
       The [known-output presentation follow-up](sidecar-output-presentation.md)
       addresses actual message/thought bursts that still overwhelm normal
       work rows. Plan #10689 and implementation #10698 are merged.
@@ -634,6 +637,7 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+- [2026-11-05 - Internal owner-qualified tool-start projection](journal/2026/11.05-sidecar-tool-statistics-owner.md)
 - [2026-11-05 - Reviewed owner-qualified tool-observation plan](journal/2026/11.05-sidecar-tool-statistics-plan.md)
 - [2026-11-05 - Bounded output groups and stable short-canvas navigation](journal/2026/11.05-sidecar-output-groups.md)
 - [2026-11-05 - Reviewed bounded source-output presentation amendment](journal/2026/11.05-sidecar-output-plan.md)

@@ -422,6 +422,9 @@ def test_executing_cli_disclosure_matches_actual_parser(
             "bridge-session-current-requests-v1": {
                 "version": 1, "capabilities": ["observe-session-current-requests"],
             },
+            "bridge-session-tool-statistics-v1": {
+                "version": 1, "capabilities": ["observe-session-tool-statistics"],
+            },
         },
     }
     assert boundary.calls == []
