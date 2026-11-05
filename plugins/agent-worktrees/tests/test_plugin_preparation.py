@@ -92,6 +92,25 @@ def test_stale_plan_refuses_before_acquisition(selected, monkeypatch):
         preparation.prepare(repo, plan["planDigest"], home=home)
 
 
+@pytest.mark.parametrize("changed", ["project", "home"])
+def test_plan_cannot_be_applied_to_another_target(selected, monkeypatch, changed):
+    home, repo, settings = selected
+    target_home, target_repo = home, repo
+    if changed == "project":
+        write(home / ".copilot" / "settings.json", json.loads(settings.read_text()))
+        settings.unlink()
+        target_repo = repo.parent / "other-project"
+        target_repo.mkdir()
+    else:
+        target_home = home.parent / "other-home"
+        target_home.mkdir()
+    plan = preparation.observe(repo, home=home)
+    monkeypatch.setenv("COPILOT_HOME", str(target_home / ".copilot"))
+    monkeypatch.setattr(update_acquisition, "acquire_missing", lambda *a, **k: pytest.fail("another target acquired"))
+    with pytest.raises(preparation.PreparationError, match="plan changed"):
+        preparation.prepare(target_repo, plan["planDigest"], home=target_home)
+
+
 def test_changed_selection_retains_completed_outcomes_without_next_action(selected, monkeypatch):
     home, repo, settings = selected
     calls = []

@@ -33,7 +33,7 @@ def _digest(value: object) -> str:
 
 def observe(project: Path, *, home: Path | None = None) -> dict:
     """Availability is source-qualified; no acquisition or self-provisioning."""
-    home = home or Path.home()
+    home = (home or Path.home()).resolve()
     native_home = os.environ.get("COPILOT_HOME")
     if native_home and Path(native_home).resolve() != (home / ".copilot").resolve():
         raise PreparationError("Native Copilot home differs from the selected inventory owner.")
@@ -80,6 +80,8 @@ def observe(project: Path, *, home: Path | None = None) -> dict:
     if current != declared:
         raise PreparationError("Plugin declarations changed during observation.")
     selection = {
+        "projectRoot": str(project),
+        "copilotHome": str(home / ".copilot"),
         "enabled": declared.settings.enabled,
         "marketplaces": declared.settings.marketplaces,
         "bases": {name: str(base) for name, base in declared.marketplace_bases.items()},
@@ -96,6 +98,7 @@ def observe(project: Path, *, home: Path | None = None) -> dict:
 
 def prepare(project: Path, expected_digest: str, *, home: Path | None = None) -> dict:
     """Acquire missing payloads only; readiness/installation stay with their owners."""
+    home = (home or Path.home()).resolve()
     project = project.resolve(strict=True)
     initial = observe(project, home=home)
     if not expected_digest or initial["planDigest"] != expected_digest:
@@ -115,7 +118,7 @@ def prepare(project: Path, expected_digest: str, *, home: Path | None = None) ->
 
     try:
         if initial["activationPending"]:
-            with activation_custody((home or Path.home()) / ".copilot"):
+            with activation_custody(home / ".copilot"):
                 pass
             result = revalidate()
         for source in sorted(missing):
@@ -136,7 +139,7 @@ def prepare(project: Path, expected_digest: str, *, home: Path | None = None) ->
 
             status = update_acquisition.acquire_missing(
                 name, marketplace, copilot, cwd=project, revalidate=still_missing,
-                home=(home or Path.home()) / ".copilot",
+                home=home / ".copilot",
             )
             outcomes.append({"source": source, "status": status})
             result = revalidate()
