@@ -42,6 +42,25 @@ def test_actual_lazy_cli_capabilities_and_registered_reservation(owner, monkeypa
     assert tracking.load_record(path).resources[0].producer == result["producer"]
 
 
+def test_capabilities_bind_executing_build_not_mutable_payload(owner, monkeypatch, tmp_path):
+    from agent_worktrees import _build_info, runtime_identity
+
+    root = tmp_path / "selected-installation"
+    monkeypatch.setattr(cli.cfg, "install_dir", lambda: root)
+    monkeypatch.setattr(runtime_identity, "PROCESS_GENERATION", "1" * 32)
+    monkeypatch.setitem(_build_info.BUILD_INFO, "runtime_generation", "2" * 32)
+    with output.capture_json_output() as captured:
+        assert main.main(["resource-relationship", "capabilities", "--json"]) == 0
+    result = json.loads(captured.getvalue())
+    assert result["writer_identity"] == {
+        "installation_root": str(root), "runtime_generation": "1" * 32,
+    }
+    monkeypatch.setattr(runtime_identity, "PROCESS_GENERATION", None)
+    with output.capture_json_output() as captured:
+        assert main.main(["resource-relationship", "capabilities", "--json"]) == 0
+    assert json.loads(captured.getvalue())["writer_identity"]["runtime_generation"] is None
+
+
 @pytest.mark.parametrize("raw", [
     b"[]", b"{} {}", b'{"request_id":"one","request_id":"two"}',
     b'{"value":"\xff"}', b"x" * (producer.MAX_INPUT_BYTES + 1),

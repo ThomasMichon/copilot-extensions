@@ -36,7 +36,11 @@ an existing protected claim and nonce through delegated registration and
 succession, and routing controls refuse a retired legacy owner or missing
 same-cell peer without substituting a global owner. These controls do not
 qualify a running selection. Bridge's current health capabilities do not yet
-certify preservation or coherent selection.
+certify preservation by the selected serializer. Its additive
+`worktree_record_delegation: 1` declaration now covers coherent selection and
+reports the selected installation root through existing health. The actual
+Bridge slot and the delegated executing Worktrees build must still be observed
+and matched independently.
 Session-lock files and Bridge's own database are separate storage boundaries;
 their presence is not evidence about the Worktrees record serializer.
 

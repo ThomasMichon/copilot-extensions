@@ -6,7 +6,7 @@ import uuid
 from pathlib import Path
 
 from . import claims_cli, config as cfg, output, resource_producer as producer
-from . import resource_relationship as relationship, tracking, tracking_write
+from . import resource_relationship as relationship, runtime_identity, tracking, tracking_write
 from .resource_producer_cli import read_input
 
 
@@ -85,6 +85,10 @@ def cmd_resource_relationship(args) -> int:
                 "resident_inspect": 1,
                 "writer_scope": "executing-process",
                 "writer_contract": relationship.writer_contract(),
+                "writer_identity": {
+                    "installation_root": str(cfg.install_dir()),
+                    "runtime_generation": runtime_identity.PROCESS_GENERATION,
+                },
                 "max_ref_bytes": producer.MAX_REF_BYTES, "max_input_bytes": producer.MAX_INPUT_BYTES,
             })
             return 0

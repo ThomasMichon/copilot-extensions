@@ -7,6 +7,11 @@ Logger, Agent Index, Agent Machines, Agent Worktrees, and Agent Pull Requests.
 byte-identical copies alongside each consumer's `_installation_context.py`;
 `tools/sync-installation-context.py` owns those validator bytes. Neither
 bootstrap imports a validator through an unvalidated payload pointer.
+Repeated in-process owner observations retain the packaged validator by its
+canonical source path, with serialized first load and a fork-reset load lock.
+Only code is retained: every observation still revalidates current installation,
+namespace and governance receipts. Peer validators selected from independently
+updated payloads are loaded fresh.
 Supported peers are `agent-worktrees`, `agent-bridge`, `agent-codespaces`,
 `agent-containers`, `agent-dispatch`, `agent-ssh`, `agent-machines`, and
 `agent-pull-requests` -- each a canonical

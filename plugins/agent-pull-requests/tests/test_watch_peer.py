@@ -129,3 +129,47 @@ def test_changed_snapshot_peer_code_refuses_before_execution(peer_slot, tmp_path
     assert not marker.exists()
     assert not installation.state_root.exists()
     assert not installation.run_root.exists()
+
+
+@pytest.mark.timeout(90)
+@pytest.mark.parametrize("damage", ["receipt", "snapshot"])
+def test_repeated_prefix_retains_one_launcher_and_rechecks_current_owner(peer_slot, damage):
+    script = _PREFIX.replace(
+        "print(json.dumps(cli._agent_worktrees_prefix()))",
+        """
+import gc, os
+from agent_pull_requests import watch_invocation
+registrations = []
+register = getattr(os, "register_at_fork", None)
+if register is not None:
+    def remember(**kwargs):
+        registrations.append(kwargs)
+        register(**kwargs)
+    os.register_at_fork = remember
+prefixes = [cli._agent_worktrees_prefix() for _ in range(32)]
+gc.collect()
+assert all(prefix == prefixes[0] for prefix in prefixes)
+assert len(watch_invocation._peer_launchers) == 1
+assert len(registrations) == (1 if register is not None else 0)
+path = (
+    Path(installation.evidence()["snapshotsRoot"]) / runtime.snapshot_id
+    / "src" / "agent_pull_requests" / "_peer_launch.py"
+)
+assert not list(path.parent.rglob("__pycache__"))
+""" + (
+            "installation.receipt.write_text('{}', encoding='utf-8')\n"
+            if damage == "receipt" else
+            "path.write_text('raise AssertionError(\"changed launcher executed\")', encoding='utf-8')\n"
+        ) + """
+try:
+    cli._agent_worktrees_prefix()
+except (PermissionError, ValueError):
+    pass
+else:
+    raise AssertionError("cached launcher bypassed current owner validation")
+print(json.dumps({"polls": len(prefixes), "loads": len(watch_invocation._peer_launchers)}))
+""",
+    )
+    result = _probe(peer_slot, script=script)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"polls": 32, "loads": 1}
