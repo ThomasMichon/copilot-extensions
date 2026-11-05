@@ -214,7 +214,7 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, lay
         "import json, sys\nfrom pathlib import Path\n"
         "assert sys.argv[1:] == ['state-root', '--configuration', '--json']\n"
         "report = json.loads(Path(__file__).with_name('report.json').read_text())\n"
-        "assert Path.cwd() == Path(report['context']['base_root'])\n"
+        "assert Path.cwd().is_relative_to(Path(report['context']['base_root']))\n"
         "print(json.dumps(report))\n",
         encoding="utf-8",
     )
@@ -236,6 +236,9 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, lay
         ):
             env.pop(name)
     env["AGENT_VAULT_CONFIG"] = str(home / "absent-global.json")
+    caller = project / "local" if layout == "service-cwd" else project
+    if caller != project:
+        caller.mkdir()
     reader = (
         "import json, sys\nfrom pathlib import Path\n"
         "from agent_vault.configuration import runtime_enabled\n"
@@ -267,7 +270,10 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, lay
             "service.main()\n"
         )
     for enabled in (True, False, None, "invalid"):
-        config_path = knowledge / ".agent-vault.json"
+        config_path = (
+            caller / ".agent-vault.json" if layout == "service-cwd"
+            else knowledge / ".agent-vault.json"
+        )
         if enabled is None:
             config_path.unlink()
         else:
@@ -275,7 +281,7 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, lay
                 "enabled": enabled, "group": "portable-group",
             }), encoding="utf-8")
         result = subprocess.run(
-            [str(python), "-I", "-B", "-c", reader, str(project), str(environments["agent-vault"])],
+            [str(python), "-I", "-B", "-c", reader, str(caller), str(environments["agent-vault"])],
             cwd=slots["agent-vault"].parent.parent if layout == "service-cwd" else staging,
             env=env, capture_output=True, text=True, timeout=20,
             **no_window_kwargs(),

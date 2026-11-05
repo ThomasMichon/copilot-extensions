@@ -67,9 +67,14 @@ Relative native configuration-file selectors resolve against that invoking
 project, even after the installer self-stages in HOME. The Windows no-task
 start fallback also executes the CLI from the preserved project.
 Residents retain a separate, owner-resolved configuration source through
-`agent_vault.service --configuration-root`. The launcher captures the native
-owner's stable base before switching to the runtime state directory; generated
+`agent_vault.service --configuration-root`. The launcher qualifies and retains
+the caller's native discovery directory before switching to state cwd; generated
 Scheduled Task and systemd launchers persist that explicit source too.
+This keeps worktree/subdirectory configuration distinct from the native owner's
+base. Persistent launchers also retain the selected absolute `AGENT_VAULT_CONFIG`
+path. Windows discovery capture uses ASCII JSON for Unicode-safe transport;
+the dynamic Task launcher probes the selected runtime's argument support and
+does not pass the new option to retained older parsers.
 Resident reads re-query the native owner from that source rather than treating
 the state directory as a repository. The option does not change process cwd,
 database custody, activation precedence or strict owner/configuration refusals.

@@ -221,7 +221,8 @@ def test_vendored_service_imports_its_own_package_from_runtime_cwd(
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Actual Windows service launcher template")
-def test_generated_task_launcher_routes_late_imports_outside_the_slot(tmp_path):
+@pytest.mark.parametrize("supports_context", [False, True])
+def test_generated_task_launcher_routes_late_imports_outside_the_slot(tmp_path, supports_context):
     root = tmp_path / "vault home"
     slot = root / "versions/1.0.0"
     venv.EnvBuilder(with_pip=False).create(slot)
@@ -231,10 +232,13 @@ def test_generated_task_launcher_routes_late_imports_outside_the_slot(tmp_path):
         package.mkdir()
         (package / "__init__.py").write_text("", encoding="utf-8")
     (site / "zdd/private_peer.py").write_text("VALUE = 42\n", encoding="utf-8")
+    if supports_context:
+        (site / "agent_vault/service_arguments.py").write_text("", encoding="utf-8")
     (site / "agent_vault/service.py").write_text(
-        "import json,sys\nfrom zdd import private_peer\n"
+        "import json,os,sys\nfrom zdd import private_peer\n"
         "print(json.dumps({'args':sys.argv[1:],'cache':sys.pycache_prefix,"
-        "'cached':private_peer.__cached__,'value':private_peer.VALUE}))\n",
+        "'cached':private_peer.__cached__,'value':private_peer.VALUE,"
+        "'config':os.environ.get('AGENT_VAULT_CONFIG')}))\n",
         encoding="utf-8",
     )
     source = (Path(__file__).resolve().parents[1] / "scripts/install.ps1").read_text(encoding="utf-8")
@@ -250,6 +254,7 @@ def test_generated_task_launcher_routes_late_imports_outside_the_slot(tmp_path):
         "TaskName": "FixtureVault", "installationId": "", "portDirective": "",
         "TaskLauncher": root / "service.ps1", "LinkPython": slot / "Scripts/python.exe",
         "serviceConfigurationRoot": tmp_path / "configuration",
+        "serviceConfigurationPath": tmp_path / "selected.json",
     }
     harness = tmp_path / "publish-service.ps1"
     harness.write_text(
@@ -275,10 +280,12 @@ def test_generated_task_launcher_routes_late_imports_outside_the_slot(tmp_path):
         assert result.returncode == 0, result.stderr
         observed = json.loads(result.stdout)
         assert observed["args"] == [
-            "--foreground", "--persistent", "--configuration-root",
-            str(tmp_path / "configuration"), "--cache-probe",
+            "--foreground", "--persistent",
+            *(["--configuration-root", str(tmp_path / "configuration")] if supports_context else []),
+            "--cache-probe",
         ]
         assert observed["value"] == 42
+        assert observed["config"] == str(tmp_path / "selected.json")
         assert {path: path.read_bytes() for path in slot.rglob("*") if path.is_file()} == before
         _cache_args(["-X", "pycache_prefix=" + observed["cache"]], root)
         cached = Path(observed["cached"])
@@ -317,7 +324,7 @@ def test_relative_home_override_is_passed_resolved(monkeypatch, tmp_path):
     assert seen["env_overrides"][config.HOME_ENV] == str(root)
 
 
-def test_service_launch_captures_native_base_before_changing_cwd(tmp_path, monkeypatch):
+def test_service_launch_captures_qualified_discovery_before_changing_cwd(tmp_path, monkeypatch):
     base = tmp_path / "base"
     caller = base / "worktree"
     caller.mkdir(parents=True)
@@ -335,7 +342,17 @@ def test_service_launch_captures_native_base_before_changing_cwd(tmp_path, monke
     monkeypatch.setattr(launch, "spawn_daemon", lambda argv, **kwargs: seen.update(argv=argv, **kwargs))
     launch.spawn_service(["--foreground"])
     assert seen["cwd"] == home
-    assert seen["argv"][-2:] == ["--configuration-root", str(base)]
+    assert seen["argv"][-2:] == ["--configuration-root", str(caller)]
+
+
+def test_service_snapshot_preserves_relative_selected_config_and_unicode_caller(tmp_path, monkeypatch):
+    root = tmp_path / "configuration-\u03bb"
+    root.mkdir()
+    monkeypatch.setattr(configuration, "owner_report", lambda root: None)
+    monkeypatch.setenv(config.CONFIG_ENV, "selected.json")
+    assert configuration.service_configuration_snapshot(str(root)) == {
+        "root": str(root), "config": str(root / "selected.json"),
+    }
 
 
 @pytest.mark.parametrize("root", ["relative", "absent"])

@@ -15,17 +15,30 @@ FIELDS = {"vault", "group", "enabled"}
 
 
 def service_configuration_root(cwd: str | None = None) -> str:
-    """Capture a native owner's stable base before a resident changes cwd."""
+    """Qualify the native discovery directory before a resident changes cwd."""
     from .config import configuration_root
 
     root = Path(configuration_root(cwd))
     if not root.is_absolute() or not root.is_dir():
         raise ConfigurationError("service configuration root must be an existing absolute directory")
     report = owner_report(root)
-    selected = context_from_owner(report)["base_root"] if report is not None else str(root)
+    if report is not None:
+        context_from_owner(report)
+    selected = str(root)
     if any(ord(character) < 32 for character in selected):
         raise ConfigurationError("service configuration root contains control characters")
     return selected
+
+
+def service_configuration_snapshot(cwd: str | None = None) -> dict[str, str]:
+    from .config import _global_config_path
+
+    root = service_configuration_root(cwd)
+    selected = _global_config_path()
+    path = str(Path(root, selected).absolute())
+    if any(ord(character) < 32 for character in path):
+        raise ConfigurationError("service configuration path contains control characters")
+    return {"root": root, "config": path}
 
 
 def _legacy_report(root: Path) -> dict | None:
