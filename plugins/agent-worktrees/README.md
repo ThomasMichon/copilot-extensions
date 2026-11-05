@@ -960,6 +960,9 @@ The existing guard family accepts legacy single-call events and native
 `toolCalls[]` batches under one composed deadline. Direct-write classification
 recognizes structured edit paths and freeform `apply_patch` add, update, delete
 and move directives; edited content and quoted path data do not become targets.
+The current command owner evaluates batches before selecting a legacy monitor
+transport, so an older healthy monitor cannot silently accept an unknown batch.
+Legacy single-call transport remains unchanged.
 These are cooperative first-write reminders, not exhaustive interception of
 arbitrary process writes or a security boundary.
 
@@ -971,6 +974,8 @@ existing delegation rule. An unavailable supplemental posture is reported as
 partial, not used to erase independently confirmed delegated roots. Current
 policy switches and scoped, expiring break-glass grants remain live on every
 decision; a grant for one target never exempts another target in the same call.
+Mixed modes compose by priority: a warning or ask for one target cannot hide a
+denial for another. Every guard reads grants from the same selected registry.
 
 Session registration defaults to the hook's 1.5-second request budget with
 zero daemon boot-wait. Explicit `bind-session` selects the existing normal

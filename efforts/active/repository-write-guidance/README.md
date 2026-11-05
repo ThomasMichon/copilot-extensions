@@ -201,3 +201,25 @@ gap, with no new sandbox, process interception, service, or security guarantee.
   the authorized live scope is the current host and its owned disposable
   repositories, not allocation or repair elsewhere. Installer replacement,
   release inclusion and installed adoption remain independent gates.
+
+### 2026-11-05 - Review corrections
+- Required unit CI passed, but the source guard rejected the installer at
+  1,710 lines against its 1,708-line ceiling. Extracted the new registry-write
+  completion into the existing projects-registry owner without changing the
+  baseline or behavior. Its 22 focused tests and native fixture refresh passed.
+- The first implementation review identified five actual gaps: a weaker
+  target mode could hide a denial; a healthy older monitor could suppress
+  native-batch fallback; a supplemental subdirectory could poison the map;
+  three installation inventories omitted the shared helper; and two grant
+  readers still used the legacy home.
+- Corrected priority across every target/segment with one identity cache,
+  evaluated batches through the current command owner before legacy transport,
+  rejected mismatched supplemental roots before publication, completed all
+  four installation paths, and aligned every guard's selected grant store.
+- Fourteen initial review controls passed, including fresh installed-bin
+  imports through all four actual publication paths. A new composed test
+  initially disabled the shared master switch by mistake; correcting it to
+  disable only cross-repo evaluation yielded 244 passing guard tests.
+- The earlier five native controls and unit packet retain their original
+  source-generation qualification. Fresh published-head CI/review and
+  impact-selected native revalidation remain required before completion.

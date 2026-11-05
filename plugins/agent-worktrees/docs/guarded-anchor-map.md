@@ -131,6 +131,9 @@ explicitly declared delegated target still makes its caller view unavailable.
 Older maps without posture fields remain readable. Worktree reminders apply
 to the registered anchor, not its linked worktrees; delegation continues to
 cover linked targets by repository identity.
+Supplemental registrations must resolve to repository roots. A registration
+pointing at a subdirectory becomes a partial-posture error before publication,
+without poisoning independently confirmed delegated roots.
 
 Git identity uses bounded filesystem metadata reads, including ordinary `.git`
 directories, relative/absolute gitdir pointers, linked worktree `commondir`,
@@ -159,6 +162,9 @@ reminders honor that owner's mode and kill switch. A scoped grant
 removes only its matching repository from the current decision; other targets
 in the same patch or batch are still checked. Denial names the required
 workflow and the existing time-bounded `allow-edits` recovery route.
+All guard readers and the grant writer use that selected registry. Mixed
+live modes evaluate denials before asks and warnings across all targets and
+shell segments, reusing the same event-local identity observations.
 
 The composed command policy accepts both legacy single-call events and native
 `toolCalls[]` batches with one shared deadline. Direct-write targets include
@@ -166,6 +172,9 @@ structured path aliases and native freeform patch add/update/delete/move
 directives. Patch contents are not scanned for paths. Unknown or malformed
 forms retain the existing fail-open behavior; supported target extraction
 does not claim exhaustive shell/process interception.
+The current command owner evaluates native batches locally before legacy
+monitor transport selection; older healthy monitors never receive an envelope
+they cannot classify. Existing single-call transport remains compatible.
 
 ## Observation and deployment limits
 
