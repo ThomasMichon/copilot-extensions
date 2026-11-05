@@ -218,6 +218,42 @@ contract.
 
 ## Journal
 
+### 2026-11-05 - Preserve each native cleanup retry operation
+
+Appending sibling errors to a primary OwnedCleanupError's `cleanup_resources`
+changed the resource tuple sealed by its existing retry operation. The original
+`retry_cleanup()` correctly refused that altered tuple before invoking its
+callback. Two registered retryable-error controls reproduce this refusal,
+including the case where one original cleanup callback must fail once.
+
+Request settlement now retains additional original errors in the primary's
+request-specific `request_native_cleanup_errors` tuple. Each original exception,
+native handle, resource tuple and retry operation remains unchanged. The current
+custodian explicitly retries the primary and each retained sibling separately;
+settling one error never claims that another is settled. A failed original
+callback remains observable and retryable while its sibling can recover.
+The controls invoke both actual retry callbacks and their settlement callbacks,
+verify unchanged original resources and ensure successful recovery is idempotent.
+Cleanup precedence over permission denial and cancellation is unchanged.
+
+The focused expected-red packet records two failures at the existing resource
+fence in 9.93 seconds, 76.56 seconds including preparation and cleanup. The
+complete native-custody and checkpoint modules then pass 33 controls with no
+skips: 142.41 seconds of tests, 209.23 seconds including preparation and cleanup.
+The original 180-second subsuite and 600-second aggregate bounds are unchanged.
+Private receipts retain exact commands, streams, JUnit, source/index bindings,
+and bounded user-PATH type/hash/prefix observations before and after each run.
+Both runs retain matching source and registry observations with no reported
+cleanup uncertainty. No automatic retry or rollback was performed.
+
+This source correction neither changes Procutil's retry fence nor introduces a
+generic recovery policy owner. No source hashes or module baselines are refreshed.
+The earlier persistent PATH drift remains unattributed and its prior value is
+unknown. All nine outstanding Plan items and eleven outstanding Validation
+items, independent exact-head review, required CI, source-unit coverage and
+installed/live-adopter acceptance remain open. Publication and integration are
+separate from this local candidate.
+
 ### 2026-11-05 - Descriptor-safe source preparation qualification
 
 Discovery and preparation descriptors can execute getters during dynamic method

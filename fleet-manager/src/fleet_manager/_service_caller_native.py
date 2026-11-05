@@ -79,15 +79,11 @@ class RequestNativeScope:
             cleanup = {id(error): error for error in errors if isinstance(error, OwnedCleanupError)}
             if cleanup:
                 primary, *others = cleanup.values()
-                retained = list(getattr(primary, "cleanup_resources", ()))
+                retained = list(getattr(primary, "request_native_cleanup_errors", ()))
                 for error in others:
-                    if not any(
-                        type(resource) is tuple and len(resource) == 2
-                        and resource[0] == "request-native-cleanup" and resource[1] is error
-                        for resource in retained
-                    ):
-                        retained.append(("request-native-cleanup", error))
-                primary.cleanup_resources = tuple(retained)
+                    if not any(existing is error for existing in retained):
+                        retained.append(error)
+                primary.request_native_cleanup_errors = tuple(retained)
                 raise primary
             denied = next((error for error in errors if isinstance(error, PermissionError)), None)
             if denied is not None:

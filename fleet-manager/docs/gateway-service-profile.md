@@ -333,8 +333,11 @@ cooperate with the existing owner rather than asserting a completion flag.
 Settlement reconciles every registered producer before choosing an exception.
 An original `OwnedCleanupError` takes precedence over permission denial or
 cancellation; additional original cleanup errors remain retained in its
-`cleanup_resources` as `("request-native-cleanup", error)` entries. Existing
-process, Job and capture handles are preserved for the current custodian.
+`request_native_cleanup_errors` tuple. Each original error's `cleanup_resources`
+and retry operation remain unchanged, preserving its process, Job and capture
+handles. The current custodian retries each original error separately through
+`retry_cleanup(deadline=...)`; settling the primary does not settle its siblings.
+An unsuccessful retry retains that original error and its recovery operation.
 
 ## Routes, streams and explicit limits
 

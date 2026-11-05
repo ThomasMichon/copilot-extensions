@@ -28,11 +28,68 @@ def test_native_request_reconciles_every_cleanup_failure_before_owner_denial(env
     with pytest.raises(OwnedCleanupError) as observed:
         asyncio.run(scope.join())
     primary = observed.value
-    retained = [primary] + [
-        error for kind, error in primary.cleanup_resources if kind == "request-native-cleanup"
-    ]
+    retained = [primary, *primary.request_native_cleanup_errors]
     assert {id(error) for error in retained} == {id(first), id(second)}
     assert {id(error.process) for error in retained} == {id(first_handle), id(second_handle)}
+
+
+@pytest.mark.parametrize("fail_first_retry", [False, True])
+def test_native_request_preserves_retryable_cleanups(environment, fail_first_retry):
+    from concurrent.futures import Future
+    import time
+    from agent_procutil.owned_process import OwnedCleanupError
+    from fleet_manager._service_caller_native import RequestNativeScope
+    handles = (object(), object())
+    resources = {handle: (("native-handle", handle),) for handle in handles}
+    attempts = {handle: 0 for handle in handles}
+    settled, notified = set(), []
+    failure = RuntimeError("original cleanup remains unconfirmed")
+    pending = {handles[0]} if fail_first_retry else set()
+    def retry(handle):
+        def cleanup(deadline):
+            assert deadline > time.monotonic()
+            attempts[handle] += 1
+            if handle in pending:
+                pending.remove(handle)
+                raise failure
+            settled.add(handle)
+        return cleanup
+    errors = [
+        OwnedCleanupError(
+            handle, cleanup_resources=resources[handle], cleanup_retry=retry(handle),
+            on_settled=lambda handle=handle: notified.append(handle),
+        )
+        for handle in handles
+    ]
+    scope = RequestNativeScope()
+    for error in (PermissionError("source ownership lost"), *errors):
+        future = Future()
+        future.set_exception(error)
+        scope.register(future)
+    with pytest.raises(OwnedCleanupError) as observed:
+        asyncio.run(scope.join())
+    primary = observed.value
+    retained = [primary, *primary.request_native_cleanup_errors]
+    assert {id(error) for error in retained} == {id(error) for error in errors}
+    failures = []
+    for error in retained:
+        try:
+            error.retry_cleanup(deadline=time.monotonic() + 2)
+        except RuntimeError as caught:
+            if caught is not failure:
+                raise
+            assert fail_first_retry and error is errors[0]
+            failures.append(error)
+    assert all(attempts[handle] == 1 for handle in handles)
+    assert failures == ([errors[0]] if fail_first_retry else [])
+    for error in failures:
+        error.retry_cleanup(deadline=time.monotonic() + 2)
+    assert settled == set(handles) and set(notified) == set(handles) and len(notified) == 2
+    for error in retained:
+        assert error.cleanup_resources is resources[error.process]
+        error.retry_cleanup(deadline=time.monotonic() + 2)
+    assert sum(attempts.values()) == 2 + int(fail_first_retry)
+    assert len(notified) == 2
 
 
 @pytest.mark.parametrize("cleanup_failure", [False, True])
