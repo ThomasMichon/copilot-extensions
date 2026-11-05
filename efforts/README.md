@@ -19,6 +19,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Relay Token Store Concurrency](active/relay-token-store-concurrency/README.md) | Draft; reviewed source plan before synthetic reproduction and repair | #10591; preserves relay/connection owners, JSON compatibility and scope gates; no live credentials or rollout |
 | [Managed Session Activation](active/managed-session-activation/README.md) | Draft; reviewed admission plan before implementation | #10564; global availability is not managed-session membership, no installed rollout |
 | [Installer Upgrade Recovery](active/installer-upgrade-recovery/README.md) | Draft; priority source/upgrade-acceptance workstream, reviewed plan before implementation | #10377; latest explicit entry must recover affected prior footprints; existing entry, sequencing, construction and lifecycle owners retained; no rollout |
 | [Copilot CLI Live Controls](active/copilot-cli-live-controls/README.md) | Active; native controls qualified, implementation review and release pending | #10149; preserves native updater, active sessions and isolated execution controls |
