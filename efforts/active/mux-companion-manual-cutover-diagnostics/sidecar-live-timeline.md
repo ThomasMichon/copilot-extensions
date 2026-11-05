@@ -490,6 +490,10 @@ publication and installed support retain their separate qualification.
   #10199 delivers qualified resident-executed saves and native index intake;
   direct fallback, pre-intake death and unsupported/legacy writers retain
   partial or unknown coverage rather than universal mutation capture.
+  The [maintenance-aware resident recovery amendment](resident-recovery.md)
+  records the operator's selected next approach: check maintenance, briefly
+  retry and use ordinary CLI wake behavior rather than adding offline capture
+  storage. Passive Sidecar reads remain no-wake.
 - [x] Deliver bounded immutable process-local committed-save evidence and
   lock-safe optional notification delivery. #10131 supplies this primitive;
   resident/native index intake and cross-process delivery remain in the
@@ -593,11 +597,12 @@ publication and installed support retain their separate qualification.
   original popup/Relay qualification.
   #10670 adds the private POSIX popup/app-input controls; installed/native
   Windows and complementary Relay qualification remain separate.
-  The explicitly selected `test_companion_joined_tmux.py` packet additionally
-  joins the private Worktrees/Agenda/Bridge source owners through an attached
-  native client, including sparse full/narrow views and live history/count
-  separation. Its fixture discovery, carrier and geometry-observation boundaries
-  do not qualify installed behavior, pixels or frame performance.
+  #10723 additionally qualifies the private Worktrees/Agenda/Bridge source
+  owners through an attached native client, including sparse full/narrow views
+  and live history/count separation. Its
+  [source readback](journal/2026/11.05-sidecar-native-owner-composition.md)
+  retains fixture discovery, carrier and geometry-observation boundaries rather
+  than qualifying installed behavior, pixels or frame performance.
 - [ ] Qualify current pane/PID preservation, focus, resize, observer exit,
   mode guides and the separately owned permanent Claims chrome.
 - [ ] Record performance/retention/coverage and source versus installed/native
@@ -631,6 +636,13 @@ is inferred from these presentation checks.
   independent approval, green CI, merge and full parent/contract readback.
 
 ## Validation Plan
+
+- [x] Qualify the isolated POSIX attached-client/private-three-owner composition,
+  sparse full/narrow views, independently paged history, live purpose/count
+  updates while browsing, Follow-live and exact pane/reader retirement.
+  #10723's nine-case native packet and explicit geometry/fixture boundaries
+  close this finite source/native-client criterion, not the combined S5 or
+  original parent/Windows/installed/performance gates.
 
 - [x] Sparse presentation: actual healthy three-owner full/narrow app controls,
   separately degraded and collapsed-error comparisons, literal diagnostics,

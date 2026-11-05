@@ -70,6 +70,10 @@ consume a baton or retire a session.
 
 ### Current Step 7 source approval
 
+The [local resident recovery amendment](resident-recovery.md) captures the
+operator's maintenance-check/backoff/normal-CLI direction. It changes the next
+source approach, not the no-rollout or passive-reader effect boundaries.
+
 The operator authorized continuing the implementation plan and starting source
 work when ready. [Step 7](sidecar-live-timeline.md) captures the exact request,
 strict pre-compaction warning definition and retained scope. Its plan/vision
@@ -548,6 +552,11 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       Its actual large-range/default-window and ordinary/narrow controls
       close only the bounded statistics amendment. Unique-call totals,
       session-lifetime activity and current concurrency remain unknown.
+      #10723 qualifies the sparse source application through an attached tmux
+      client with the actual private Worktrees/Agenda/Bridge owners, independent
+      history, live purpose/count updates and exact reader/pane retirement.
+      Its current-context RPC research establishes no qualified PRE relationship;
+      original source/native/manual/Relay and installed gates remain open.
       The [known-output presentation follow-up](sidecar-output-presentation.md)
       addresses actual message/thought bursts that still overwhelm normal
       work rows. Plan #10689 and implementation #10698 are merged.
@@ -642,6 +651,7 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+- [2026-11-05 - Native three-owner composition and retained PRE boundary](journal/2026/11.05-sidecar-native-owner-composition.md)
 - [2026-11-05 - Current-context RPC is not pre-compaction evidence](journal/2026/11.05-sidecar-context-metadata-boundary.md)
 - [2026-11-05 - Manager owner-qualified statistics and sparse labels](journal/2026/11.05-sidecar-tool-statistics-manager.md)
 - [2026-11-05 - Optional owner-qualified tool-statistics provider](journal/2026/11.05-sidecar-tool-statistics-provider.md)
