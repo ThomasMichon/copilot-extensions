@@ -265,7 +265,7 @@ retry. Parent Plan/Validation and all existing custodians remain unchanged.
 The [Chat/hosted continuity](chat-graduation-hosted-continuity-cohort.md),
 [SSH root/finite forward](ssh-root-finite-forward-cohort.md) and
 [installer-copy synchronization](installer-policy-copy-sync-cohort.md) studies
-preserve five whole originals through 54 texts/85,512 characters and fifteen
+preserve five whole originals through 52 texts/85,512 characters and fifteen
 ranked relations. Actual merged descriptions credit hosted delivery/continuity
 and supersede the finite-forward leaf's historical unmerged observation.
 Its whole Active effort retains closeout duties; the root-repair operational
