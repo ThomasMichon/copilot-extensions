@@ -37,8 +37,9 @@ remaining service/client migration or its existing consumer acceptance.
 ## #78 - Name materialized output from configuration identity
 
 The finite naming contract prefers the configured `id`, falls back to the
-configuration filename stem only when `id` is absent, and preserves an explicit
-output override. The duplicate-notice diagnostic is optional and must not
+configuration filename stem only when `id` is absent, and gives an explicit
+output override precedence. Preserve rename stability and existing safe naming.
+The duplicate-notice diagnostic is optional and must not
 change effects. Resource/overlay UUID identity is a separate concern.
 
 The ranked source-signal instance-UUID/Manager-readback correction does not

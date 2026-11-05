@@ -14,8 +14,9 @@ reused finite proof. Their exact distinctions remain in the
 
 ## #841 - Retain bounded, non-sensitive mint/repair failure state
 
-Preserve a bounded last-mint/repair failure visible through status **AND/OR**
-health, with privacy and optional best-effort behavior intact. Existing logs,
+Preserve a non-sensitive last-mint/repair failure of at most 200 characters
+visible through status **OR** health/diagnostics, with optional best-effort
+behavior intact. Existing logs,
 retries or configuration inventory alone do not satisfy that retained state;
 a diagnostic failure must not make an otherwise optional operation fail.
 No live credential access or repair effect is authorized by this study.

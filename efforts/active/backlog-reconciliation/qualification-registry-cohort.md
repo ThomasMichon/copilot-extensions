@@ -16,9 +16,11 @@ evidence levels in the [candidate graph](graph/completed-work-candidates.json).
 
 Credit #690/#694/#704 hardening, the F1E result and shell parity at their
 original scopes. Actual model-credit accounting, abort/INCONCLUSIVE behavior,
-solo equivalence, native lanes and the accepted downstream F3 owner's
-unfinished duties remain. A wrapper, source fixture or unrelated resource
-limit is not their execution.
+solo equivalence and native lanes remain. Downstream F3-E still needs an
+explicitly accepted named owner for a specific assembled harness, an empty
+knowledge repository and a real end-to-end task with zero manual setup.
+A downstream home is not an established owner. A wrapper, source fixture
+or unrelated resource limit is not execution of these obligations.
 
 Preserve all seven direct #1192 acceptance rows: generic SSH/Docker/provider
 operation, retained-container restart, fresh sessions, protected environment
