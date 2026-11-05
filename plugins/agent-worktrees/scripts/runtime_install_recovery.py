@@ -422,16 +422,30 @@ def run_guarded(binding, primitive, command, *, timeout: float, **arguments) -> 
                         runtime,
                         deadline=deadline,
                     )
-                    print(
-                        "Previous command binding restored after contained failure."
-                        if restored
-                        else (
-                            "Command lifecycle remains pending; "
-                            "predecessor restoration could not be proved."
-                        ),
-                        file=sys.stderr,
-                        flush=True,
-                    )
+                    if restored:
+                        message = "Previous command binding restored after contained failure."
+                    else:
+                        try:
+                            state = binding.resolve_command_binding(primitive, **arguments)
+                        except (OSError, ValueError, RuntimeError):
+                            state = {}
+                        if state.get("status") == "selected":
+                            message = (
+                                "A command binding is selected despite the failure; "
+                                "reconcile the runtime before retrying. "
+                                "Predecessor restoration was not proved."
+                            )
+                        elif state.get("reason") == "legacy-lifecycle-incomplete":
+                            message = (
+                                "Command lifecycle is incomplete; "
+                                "predecessor restoration could not be proved."
+                            )
+                        else:
+                            message = (
+                                "Command binding could not be resolved; "
+                                "predecessor restoration could not be proved."
+                            )
+                    print(message, file=sys.stderr, flush=True)
                 elif (
                     binding.resolve_command_binding(primitive, **arguments).get("status")
                     != "selected"

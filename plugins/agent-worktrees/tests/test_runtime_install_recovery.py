@@ -387,6 +387,67 @@ def test_prelaunch_retention_failure_restores_without_starting_a_child(
     assert _resolve(fixture)["status"] == "selected"
 
 
+def test_failed_postcheck_reports_a_selected_binding_without_claiming_rollback(
+    recovery_fixture, monkeypatch, capsys,
+):
+    fixture, module, runtime, _state, _previous = recovery_fixture
+    binding, primitive, arguments = fixture["binding"], fixture["primitive"], fixture["arguments"]
+    lifecycle = binding._load_lifecycle()
+    monkeypatch.setattr(module, "_supports_job", lambda: True)
+    monkeypatch.setattr(module, "runtime", runtime)
+
+    @contextmanager
+    def retain(*_args, **_kwargs):
+        yield
+
+    runtime.retention_lease = retain
+
+    def committed(*_args, **_kwargs):
+        binding.write_legacy_manifest(
+            primitive, {"schema_version": 3, "service": "agent-worktrees"}, **arguments,
+        )
+        return 7
+
+    monkeypatch.setattr(lifecycle, "run_lifecycle", committed)
+    assert module.run_guarded(binding, primitive, [sys.executable], timeout=10, **arguments) == 7
+    assert _resolve(fixture)["status"] == "selected"
+    message = capsys.readouterr().err
+    assert "selected" in message and "reconcil" in message and "remains pending" not in message
+
+
+@pytest.mark.parametrize("outcome", ["incomplete", "unresolved", "error"])
+def test_failed_recovery_reports_the_actual_binding_state(
+    recovery_fixture, monkeypatch, capsys, outcome,
+):
+    fixture, module, runtime, _state, _previous = recovery_fixture
+    binding, primitive, arguments = fixture["binding"], fixture["primitive"], fixture["arguments"]
+    lifecycle = binding._load_lifecycle()
+    monkeypatch.setattr(module, "_supports_job", lambda: True)
+    monkeypatch.setattr(module, "runtime", runtime)
+
+    @contextmanager
+    def retain(*_args, **_kwargs):
+        yield
+
+    def restore(*_args, **_kwargs):
+        if outcome != "incomplete":
+            def resolve(*_args, **_kwargs):
+                if outcome == "error":
+                    raise OSError("unavailable")
+                return {"status": "blocked", "reason": "installation-invalid"}
+
+            monkeypatch.setattr(binding, "resolve_command_binding", resolve)
+        return False
+
+    runtime.retention_lease = retain
+    monkeypatch.setattr(module, "_restore", restore)
+    monkeypatch.setattr(lifecycle, "run_lifecycle", lambda *_args, **_kwargs: 7)
+    assert module.run_guarded(binding, primitive, [sys.executable], timeout=10, **arguments) == 7
+    message = capsys.readouterr().err
+    assert ("incomplete" if outcome == "incomplete" else "could not be resolved") in message
+    assert "restoration could not be proved" in message and "restored" not in message
+
+
 @pytest.mark.parametrize("outcome", ["success", "failure"])
 def test_guarded_lifecycle_preserves_fresh_install_behavior(binding_fixture, monkeypatch, outcome):
     fixture = binding_fixture

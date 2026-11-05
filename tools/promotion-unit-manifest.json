@@ -4785,7 +4785,7 @@
         "plugins/agent-worktrees/scripts/runtime_install.py": "d698742eb9badc125f61eed1ebc875aa6090ca1b4650d3b271081392d06b718e",
         "plugins/agent-worktrees/scripts/runtime_install_governance.py": "f25e0e0bd910e4e487e9f62b9f7fd830cf15af3d12c70fb920c83867e98d7e6f",
         "plugins/agent-worktrees/scripts/runtime_install_publication.py": "21289cffe3f50f42a88ecccaccc2671d96a3bb66faec6dadf860f9387bff8d9b",
-        "plugins/agent-worktrees/scripts/runtime_install_recovery.py": "0baf0ed223ad057147e805f7cf14133b7a7b11ececb1fd1583437370388fbf65",
+        "plugins/agent-worktrees/scripts/runtime_install_recovery.py": "7311abdf4de7d6645a0a9ccbc393e1aa08f7adedce46411192f07749f2a4f00f",
         "plugins/agent-worktrees/scripts/runtime_install_recheck.py": "f5bef178a1e72f8123ea2e4e6031464c1e743c51fbe4c1d68e4518cfd89b9054",
         "plugins/agent-worktrees/scripts/runtime_install_source.py": "ece00ac358f54b9c072d8b46baff5e5c772159117f97c7103c44ec2bddd031ea",
         "libs/installer-engine/installer_marker_environment.py": "c37a35e60538a60c417852bdb00047a96a6717a0e6a2dc46ead24900233e73eb",
