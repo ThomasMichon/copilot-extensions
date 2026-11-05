@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import subprocess
 import sys
 import time
@@ -65,22 +66,25 @@ def test_actual_hook_finishes_after_all_native_callers_are_lost(
         (native_root / "owner-diagnostics.log").write_text(text, encoding="utf-8")
         return text
 
+    def owner_alive(owner):
+        if os.name == "nt":
+            return owner.poll() is None
+        from agent_procutil._caller_owned import _pidfd_exited
+
+        return not _pidfd_exited(owner)
+
     def completed(log, owner):
         progress = foundation_status(root=root)
         if progress is not None:
             assert progress.state not in {"failed", "interrupted"}, diagnostic()
         receipt = ordinary_receipt(log)
         if receipt is None:
-            if os.name == "nt":
-                alive = owner.poll() is None
-            else:
-                from agent_procutil._caller_owned import _pidfd_exited
-
-                alive = not _pidfd_exited(owner)
-            assert alive, "Acknowledged owner exited without an ordinary receipt\n" + diagnostic()
+            assert owner_alive(owner), "Acknowledged owner exited without an ordinary receipt\n" + diagnostic()
             return False
         result = status(receipt, root=root)
         assert result.state not in {"failed", "interrupted"}, diagnostic()
+        if result.state != "completed":
+            assert owner_alive(owner), "Acknowledged owner exited before ordinary completion\n" + diagnostic()
         return result.state == "completed"
 
     try:
@@ -108,6 +112,18 @@ def test_actual_hook_finishes_after_all_native_callers_are_lost(
                 key: os.environ[key]
                 for key in ("RUNNER_TEMP", "GITHUB_ACTIONS", "RUNNER_ENVIRONMENT")
             })
+            if sys.platform == "linux":
+                from agent_procutil.linux_daemon_scope import caller_unit
+
+                if caller_unit() is not None:
+                    runner = shutil.which("systemd-run")
+                    assert runner, "native caller cleanup unit requires the real systemd-run"
+                    (area / "native-tools/systemd-run").symlink_to(runner)
+                for key in ("XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"):
+                    if key in os.environ:
+                        environment[key] = os.environ[key]
+                    else:
+                        environment.pop(key, None)
             environment = lane.consumer_environment(environment, lifecycle)
             if os.name == "nt":
                 from windows_normal_process_lifetime import qualify

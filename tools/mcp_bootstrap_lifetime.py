@@ -52,7 +52,7 @@ def consumer_environment(environment, lifecycle):
                 "UV_PYTHON_PREFERENCE", "UV_PYTHON_DOWNLOADS", "UV_NO_PROGRESS",
                 "BOOTSTRAP_KILLSWITCH_STATE_FILE", "COPILOT_EXTENSIONS_DAEMON_PYTHON",
                 "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME",
-                "XDG_RUNTIME_DIR", "TMPDIR", "PSMODULEANALYSISCACHEPATH",
+                "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "TMPDIR", "PSMODULEANALYSISCACHEPATH",
             }
         },
     }

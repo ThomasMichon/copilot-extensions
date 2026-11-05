@@ -2565,6 +2565,12 @@ tails are retained before completion waits and at teardown; Linux's signal
 timeout permits normal finally/cleanup diagnostics within the unchanged item
 deadline.
 
+When the Linux host has a systemd caller unit, the native fixture retains the
+real `systemd-run` prerequisite and the host's configured runtime/bus inputs
+without exposing host Python as a product prerequisite. It does not install a
+user manager or substitute inherited lifetime when the native scope is
+unavailable. The normal cold contained fixture remains unchanged.
+
 Native qualification is credited only from the exact candidate's successful
 platform results, not from local refusal tests or this lane's presence. The
 900-second item, 1080-second step and 35-minute portfolio bounds remain intact.

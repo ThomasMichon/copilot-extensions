@@ -38,11 +38,15 @@ def test_consumer_map_keeps_only_fixture_inputs_and_its_lease(tmp_path):
         "RUNNER_TEMP": str(tmp_path), "HOME": str(tmp_path / "profile"),
         "PATH": "fixture-tools", "GITHUB_TOKEN": "fixture-never-forwarded",
         "AGENT_MCP_PINNED_CONTEXT": "foreign", "UV_CACHE_DIR": str(tmp_path / "cache"),
+        "XDG_RUNTIME_DIR": str(tmp_path / "native-runtime"),
+        "DBUS_SESSION_BUS_ADDRESS": "unix:path=fixture-native-bus",
     }, {"COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT": "fixture-lease"})
     assert "GITHUB_TOKEN" not in result and "AGENT_MCP_PINNED_CONTEXT" not in result
     assert result["COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT"] == "fixture-lease"
     assert result["HOME"] == str(tmp_path / "profile") and result["PATH"] == "fixture-tools"
     assert result["UV_CACHE_DIR"] == str(tmp_path / "cache")
+    assert result["XDG_RUNTIME_DIR"] == str(tmp_path / "native-runtime")
+    assert result["DBUS_SESSION_BUS_ADDRESS"] == "unix:path=fixture-native-bus"
 
 
 def test_cli_without_explicit_consent_does_not_create_fixture(tmp_path):

@@ -1312,3 +1312,38 @@ not substituted for that audit. The existing CI workflow's explicit manual
 dispatch audits all declarations and can qualify the hosted metadata lane
 without changing a manifest or trust setting. Exact-head native results,
 required CI/review, merge and release remain open.
+
+Exact-head full manual CI `42029890331` at `c3a3024c1c64` passes, including
+all 548 live dependency declarations with zero violations, source guards and
+eligible units. That hosted result does not claim the local npm TLS problem
+was repaired. Native run `42029879542` still fails both platforms; its functional
+packets pass, while native lifetime acceptance remains open.
+
+Windows' generic controls qualify two normal cycles and the restrictive outer
+negative, with both caller Jobs closed, bounded controls retired and independent
+daemons surviving. The desktop witness observes zero new windows/foreground
+changes. The actual MCP owner then fails nested native admission. Source tracing
+finds that disposable PowerShell shell custody always creates a restrictive
+expiry Job, unlike the Python guard. The correction retains kill-on-close and
+normal contained-mode prohibition, permitting breakaway only in the existing
+explicitly non-contained mode. No caller Job limit, native nonmembership check,
+external restriction or fallback policy is changed. Thirty-eight focused
+custody/protocol tests pass, and a real contained Windows original-shell-loss
+case still retires the exact helper and bounded child.
+
+The canonical lifecycle archive is regenerated through its owner tool for all
+consumers; an additional changefile names the four archive consumers not covered
+by the existing eleven-consumer changefile. The MCP producer digest is refreshed
+without a footprint contract-revision change.
+
+Linux's retained diagnostics now show both cold callers coalesced to one
+ordinary pending request, followed by worker-launch refusal. The restricted
+native PATH omits the real `systemd-run` required under the host's cleanup unit,
+and replaces native runtime inputs with the cold profile's directory. The
+explicit hosted fixture now preserves that prerequisite and configured runtime/
+bus inputs, without exposing product Python or installing a user manager.
+An unavailable real scope remains a failure. An exited acknowledged owner with
+an accepted-but-incomplete request also fails promptly rather than consuming
+the whole item deadline. The prior Linux signal-timeout cleanup settles both
+original lifecycle records; Windows retains four settled records plus one
+`launch-outcome-unknown` hold. Neither historical hold is modified or waived.
