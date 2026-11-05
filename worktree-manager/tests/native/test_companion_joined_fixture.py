@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 from pathlib import Path
+import subprocess
 import sys
 from types import SimpleNamespace
 
 import pytest
 
+from agent_procutil import no_window_kwargs
+from test_companion_bridge_codec import OWNER
+from test_companion_bridge_session_source import semantic_peer as semantic_peer
 from test_companion_joined_tmux import source_entrypoint
 from test_companion_joined_psmux import live_reader_pids
 from worktree_manager import agenda_transport, companion_bridge_source, mux_companion
@@ -93,3 +98,22 @@ def test_native_reader_selection_includes_actual_agenda_command_and_rejects_reus
         pid_alive=lambda pid: pid != 6, process_start_time=lambda pid: 100 + pid,
     )
     assert live_reader_pids(trace, requests, locks) == {1, 2, 3}
+
+
+def test_private_bridge_membership_cli_completes_before_client_composition(
+    semantic_peer: dict, tmp_path: Path,
+) -> None:
+    result = subprocess.run(
+        [
+            *companion_bridge_source.bridge_command(str(tmp_path)),
+            "observe-owner", "--owner-ref", OWNER, "--contract-version", "1", "--json",
+        ],
+        env=dict(os.environ, AGENT_BRIDGE_NO_SELFPROVISION="1"),
+        capture_output=True, encoding="utf-8", timeout=15, **no_window_kwargs(),
+    )
+    diagnostic = semantic_peer["diagnostic"]
+    assert result.returncode == 0, (
+        result.stdout, result.stderr,
+        diagnostic.read_text(encoding="utf-8") if diagnostic.exists() else None,
+    )
+    assert json.loads(result.stdout)["kind"] == "snapshot"
