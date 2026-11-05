@@ -231,6 +231,21 @@ checkpoint nor author eligibility, holds, requirements or source/resource custod
 
 ### Phase 2 - Continuing reconciliation
 
+The [lifetime-control](lifetime-control-cohort.md),
+[finalization/recovery](finalization-recovery-cohort.md) and
+[repository-authority](repository-authority-cohort.md) studies retain eleven
+whole admitted originals and all refinements, thirty-one bounded noncompletion
+comparisons, two withheld descriptions and one closed metadata-only exclusion.
+Explicit canonical KEEP, exact owner acceptance, original alternatives and
+all inherited custody remain; no source or receiving state is completed.
+
+The three preceding core studies merged in #10531; the
+[dated delivery journal](<journal/2026/11.04 standalone-declaration-contracts.md>)
+records the verified outcome and continuing gate. The complete 16:11 PST
+census remains 1,006 whole open, 277 above 729. Continue the weighted graph
+and independently qualified source outcomes; documentary delivery does not
+resume a held lane or satisfy the parent checkpoint.
+
 The supervisor/qualification nine-document delta merged in #10527; the
 [dated delivery journal](<journal/2026/11.04 qualification-cache-contracts.md>)
 records its verified scope and continuing gate. Two equal complete 15:47 PST
@@ -914,6 +929,15 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The three [lifetime](lifetime-control-cohort.md),
+[recovery](finalization-recovery-cohort.md) and
+[authority](repository-authority-cohort.md) cores preserve all thirty-six whole
+texts and explicit source conditions. Thirty-one message/description
+comparisons are not whole completion; protected candidates and closed metadata
+receive no source retry or credit. Existing direct keeper intake and historical
+folds are retained, not repeated. Every parent/receiver check, exact claim,
+native/installed tier and source/resource custodian remains unchanged.
 
 The [standalone-declaration study](standalone-declaration-cohort.md) preserves
 all thirteen whole source texts, exact scoped incumbent ACK conditions and
