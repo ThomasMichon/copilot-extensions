@@ -218,6 +218,27 @@ contract.
 
 ## Journal
 
+### 2026-11-05 - Qualify service request bindings without invoking getters
+- A request property returning the stock bound method could execute before a
+  source operation was reserved, leaving its work outside native custody.
+  Source qualification now inspects the binding statically in the workspace
+  client, initial caller binding and captured native request wrapper. The
+  selected stock function is bound directly rather than through a getter.
+- Four focused regressions reproduced unsafe construction, qualification and
+  native-entry behavior, including a non-property descriptor. They also retain
+  explicit metadata getter behavior and late stock bound-method copies.
+- The complete affected native-custody/checkpoint packet passes 37 cases with
+  no skips: 131.65 seconds of tests and 203.30 seconds including preparation and
+  cleanup. The 180-second subsuite and 600-second aggregate bounds are unchanged.
+  Source/index and persistent user-PATH observations were unchanged during both
+  the failing regression run and the passing packet.
+- Source admission still verifies 590 sources without a hash refresh. The
+  interrupted typing run for the superseded candidate is not qualification;
+  final typing, fresh review and required CI remain gates. All nine open Plan
+  items and eleven Validation items remain open. No installed owner, serving,
+  acquisition or rollout qualification is claimed, and the earlier unexplained
+  PATH change remains unresolved.
+
 ### 2026-11-05 - Preserve each native cleanup retry operation
 
 Appending sibling errors to a primary OwnedCleanupError's `cleanup_resources`

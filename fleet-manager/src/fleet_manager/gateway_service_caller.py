@@ -80,13 +80,15 @@ class ServiceCaller:
 
     def _bind_source_request(self):
         from .credential_references import ServiceCredentials
+        from inspect import getattr_static
         from types import MethodType
         callback = self._access
-        if type(self) is not ServiceCaller or "request" in self.__dict__:
+        if (
+            type(self) is not ServiceCaller or "request" in self.__dict__
+            or getattr_static(self, "request", None) is not _SOURCE_REQUEST_IMPLEMENTATION
+        ):
             return None
-        request_method = self.request
-        if type(request_method) is not MethodType or request_method.__func__ is not _SOURCE_REQUEST_IMPLEMENTATION:
-            return None
+        request_method = _SOURCE_REQUEST_IMPLEMENTATION.__get__(self, ServiceCaller)
         credentials = callback.__self__ if type(callback) is MethodType else None
         if not self._machine and not (
             type(credentials) is ServiceCredentials
@@ -96,9 +98,12 @@ class ServiceCaller:
 
         async def request(submit, *args, **kwargs):
             check(self._access is callback, "source-credential-binding-changed", 409)
-            current = self.request
-            check(type(current) is MethodType and current.__func__ is request_method.__func__
-                  and current.__self__ is self, "source-request-binding-changed", 409)
+            current = getattr_static(self, "request", None)
+            check(
+                current is request_method.__func__ and "request" not in self.__dict__
+                or type(current) is MethodType and current.__func__ is request_method.__func__
+                and current.__self__ is self, "source-request-binding-changed", 409,
+            )
             reader = None if self._machine else callback
             with native_admission(submit), source_credential(self, reader):
                 return await request_method(*args, **kwargs)

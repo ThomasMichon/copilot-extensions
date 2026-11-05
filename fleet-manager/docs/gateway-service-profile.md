@@ -330,6 +330,8 @@ native admission internally, without another executor or lifecycle. The
 credential-reference reader uses this admission in source scope; its ordinary
 non-source invocation remains compatible. Opaque native producers must
 cooperate with the existing owner rather than asserting a completion flag.
+Source qualification inspects the request binding statically; a property or
+descriptor getter is not invoked to establish support or admit native work.
 Settlement reconciles every registered producer before choosing an exception.
 An original `OwnedCleanupError` takes precedence over permission denial or
 cancellation; additional original cleanup errors remain retained in its

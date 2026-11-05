@@ -424,6 +424,102 @@ def test_native_descriptor_getters_are_metadata_only_before_source_reservation(
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("boundary,shape", [
+    ("construction", "property"), ("qualification", "property"),
+    ("request", "property"), ("qualification", "descriptor"),
+])
+def test_service_request_getters_refuse_source_before_admission(
+    environment, integration, tools, execution_pool, monkeypatch, boundary, shape,
+):
+    from contextlib import contextmanager
+    from agent_worktrees.async_review_source import AsyncReviewSource
+    from fleet_manager import gateway_service_caller as caller_module
+    from fleet_manager.credential_references import ServiceCredentials
+    from fleet_manager.gateway_service_channel import TransportError
+    from agent_pull_requests.workspace_client import WorkspaceClient
+    from agent_pull_requests.workspace_tools import WorkspaceTools, WorkspaceToolUnavailable
+    native_host, _, _ = tools
+    _, existing, _, _, _, _ = integration
+    _, _, initial, _, _, _ = environment
+    credentials = ServiceCredentials(None, Path(__file__).resolve())
+    caller = caller_module.ServiceCaller(
+        gateway_origin="https://127.0.0.1:443", proof_key=None,
+        access_token_callback=credentials.access_token,
+    )
+    selected = caller.request
+    getters, reservations, admissions = [], [], []
+    explicit_metadata = [False]
+    metadata_error = RuntimeError("explicit metadata reached the selected getter")
+    admission_error = RuntimeError("selected native admission reached")
+
+    def get(instance):
+        assert instance is caller
+        getters.append(True)
+        if explicit_metadata[0]:
+            raise metadata_error
+        return selected
+
+    class Dynamic:
+        def __get__(self, instance, owner=None):
+            return self if instance is None else get(instance)
+
+    descriptor = property(get) if shape == "property" else Dynamic()
+    if boundary == "construction":
+        monkeypatch.setattr(caller_module.ServiceCaller, "request", descriptor)
+    client = WorkspaceClient(
+        caller, route_prefix="", binding=existing._binding, scope=initial["scope"],
+    )
+    if boundary != "construction":
+        monkeypatch.setattr(caller_module.ServiceCaller, "request", descriptor)
+    owner = AsyncReviewSource(native_host.source_owner, executor=execution_pool)
+    host = WorkspaceTools(client, source_owner=owner)
+
+    def reserve(*args, **kwargs):
+        reservations.append(True)
+        raise AssertionError("unqualified request reserved source work")
+
+    @contextmanager
+    def native_admission(submit):
+        admissions.append(True)
+        raise admission_error
+        yield
+
+    monkeypatch.setattr(owner, "operation", reserve)
+    monkeypatch.setattr(caller_module, "native_admission", native_admission)
+
+    async def scenario():
+        try:
+            if boundary == "request":
+                with pytest.raises(TransportError, match="source-request-binding-changed"):
+                    await client._source_request[1](None, "POST", "/example")
+            else:
+                with pytest.raises(WorkspaceToolUnavailable, match="preparation_binding_unsupported"):
+                    await host.invoke("source", {
+                        "number": 42, "generation_id": initial["id"], "budget_seconds": 60,
+                    })
+            assert not getters and not reservations and not admissions
+            assert owner.status()["pending"] == 0
+            explicit_metadata[0] = True
+            with pytest.raises(RuntimeError) as metadata:
+                await client.capabilities()
+            assert metadata.value is metadata_error and getters == [True]
+            monkeypatch.setattr(caller_module.ServiceCaller, "request", selected.__func__)
+            if client._source_request is None:
+                client_for_copy = WorkspaceClient(
+                    caller, route_prefix="", binding=existing._binding, scope=initial["scope"],
+                )
+            else:
+                client_for_copy = client
+            monkeypatch.setattr(caller, "request", selected)
+            assert client_for_copy.preparation_contract()["version"] == 2
+            with pytest.raises(RuntimeError) as admitted:
+                await client_for_copy._source_request[1](None, "POST", "/example")
+            assert admitted.value is admission_error and admissions == [True]
+        finally:
+            await owner.drain(timeout=2)
+    asyncio.run(scenario())
+
+
 def test_stock_instance_method_copies_keep_actual_async_source(
     environment, tools, execution_pool, monkeypatch,
 ):

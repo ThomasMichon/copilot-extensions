@@ -141,15 +141,13 @@ class WorkspaceClient:
         return {"schema": "agent-pull-requests.client-preparation", "version": version, "io": "loop-with-prepare"}
 
     def _source_supported(self):
-        from types import MethodType
         if (
             self._source_request is None or self._caller._access is not self._source_request[0]
             or self._read_admission is not None or not _stock_preparation(self, _SOURCE_PREPARATION_METHODS)
         ):
             return False
-        current = self._caller.request
         selected = self._source_request[2]
-        return type(current) is MethodType and current.__func__ is selected.__func__ and current.__self__ is self._caller
+        return _stock_preparation(self._caller, (("request", selected.__func__),))
 
     async def materialize(self, number, generation_id, *, prepare=None, checkpoint=None):
         def source_binding():
