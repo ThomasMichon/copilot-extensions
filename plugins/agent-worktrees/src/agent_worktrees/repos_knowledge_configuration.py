@@ -19,7 +19,7 @@ from .repos_configuration_sources import ConfigurationError
 def owner_script(project: str) -> Path:
     config = cfg.load_project_config(project, include_control_plane_related_pr=False)
     report = resolve_active_plugins(
-        home=Path.home(), project_root=Path(config.default_repo.anchor),
+        home=cfg._home(), project_root=Path(config.default_repo.anchor),
         plugin_names=("harness-knowledge",),
     )
     owners = list(report.active.values())
@@ -27,7 +27,10 @@ def owner_script(project: str) -> Path:
         raise ConfigurationError(
             "binding-owner-unavailable", "Enable and prepare one qualified harness-knowledge owner.",
         )
-    root = owners[0].root.resolve(strict=True)
+    selected = owners[0].root_for_scope("project:current") or owners[0].root_for_scope("global")
+    if selected is None:
+        raise ConfigurationError("binding-owner-unavailable", "The binding owner has no selected activation scope.")
+    root = selected.resolve(strict=True)
     script = (root / "skills" / "binding-knowledge" / "scripts" / "bind_knowledge.py").resolve(strict=True)
     if not script.is_file() or not script.is_relative_to(root):
         raise ConfigurationError("binding-owner-unavailable", "The selected binding payload is unavailable.")

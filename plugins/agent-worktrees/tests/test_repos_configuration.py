@@ -197,6 +197,61 @@ def test_missing_binding_owner_catalog_exposes_visible_recovery_without_writes(n
     assert tree(native) == before
 
 
+@pytest.mark.parametrize("selection", ["project-installed", "global-installed", "sandbox-missing"])
+def test_binding_owner_uses_selected_home_and_project_activation(native, monkeypatch, selection):
+    from agent_worktrees import repos_knowledge_configuration as binding
+
+    host = native / "host-home"
+    project = native / "repository"
+    monkeypatch.setenv("HOME", str(host))
+    monkeypatch.setenv("USERPROFILE", str(host))
+    monkeypatch.setattr(binding.cfg, "load_project_config", lambda *_args, **_kwargs: SimpleNamespace(
+        default_repo=SimpleNamespace(anchor=str(project)),
+    ))
+
+    def write(path, value):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(value), encoding="utf-8")
+
+    def payload(root):
+        write(root / "plugin.json", {"name": "harness-knowledge"})
+        script = root / "skills" / "binding-knowledge" / "scripts" / "bind_knowledge.py"
+        script.parent.mkdir(parents=True)
+        script.write_text("# Selected payload fixture\n", encoding="utf-8")
+        return script.resolve()
+
+    enabled = {"enabledPlugins": {"harness-knowledge@binding-source": True}}
+    payload(host / ".copilot" / "installed-plugins" / "binding-source" / "harness-knowledge")
+    write(host / ".copilot" / "settings.json", enabled)
+    expected = None
+    if selection != "sandbox-missing":
+        expected = payload(native / ".copilot" / "installed-plugins" / "binding-source" / "harness-knowledge")
+        write(native / ".copilot" / "settings.json", enabled)
+    if selection == "project-installed":
+        market = native / "global-marketplace"
+        payload(market / "payload")
+        write(market / ".claude-plugin" / "marketplace.json", {
+            "name": "binding-source", "plugins": [{"name": "harness-knowledge", "source": "./payload"}],
+        })
+        write(native / ".copilot" / "settings.json", {**enabled, "extraKnownMarketplaces": {
+            "binding-source": {"source": {"source": "directory", "path": str(market)}},
+        }})
+        write(project / ".github" / "copilot" / "settings.json", {**enabled, "extraKnownMarketplaces": {
+            "binding-source": {"source": {"source": "github", "repo": "example/marketplace"}},
+        }})
+        observed = binding.resolve_active_plugins(
+            home=native, project_root=project, plugin_names=("harness-knowledge",),
+        ).active["harness-knowledge@binding-source"]
+        assert observed.root == (market / "payload").resolve()
+        assert observed.root_for_scope("project:current") == expected.parents[3]
+    before = tree(native)
+    if expected is None:
+        assert binding.owner_status("sample") == "unavailable"
+    else:
+        assert binding.owner_script("sample") == expected
+    assert tree(native) == before
+
+
 def test_old_binding_owner_is_not_invoked_for_apply(native, monkeypatch):
     from agent_procutil import owned_process
     from agent_worktrees import repos_knowledge_configuration as binding

@@ -293,6 +293,16 @@ Python 3.10 checks passed for Linux and Windows targets; F/E9, module,
 documentation and install-contract guards passed. Fresh review and CI remain
 required before source merge.
 
+The next review confirmed those High findings resolved and identified two
+activation-selection errors. The native adapter now uses its selected home
+and prefers the current-project activation root over the global fallback.
+Eight focused native binding controls passed, including real activation with
+distinct `AGENT_HOME` and process home, a project-installed owner against a
+globally selected directory copy, global sandbox fallback, and refusal to borrow
+a host-only owner. The affected complete native UI flow passed again; F/E9
+passed. The earlier 104/82 binding/composition and Manager controls remain
+separate qualified source evidence, not newly repeated runs.
+
 Fresh-store configuration uses actual Git roots and native APIs but pre-provided
 native packages. Cold installer/Python-3.9/fresh-terminal, installed desktop,
 live-provider and rollout lanes were not exercised: this source slice has no

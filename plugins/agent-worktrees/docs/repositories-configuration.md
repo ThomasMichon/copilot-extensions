@@ -96,6 +96,8 @@ knowledge repository** is offered on eligible canonical knowledge/worktree
 registrations. It delegates to the enabled, selected `harness-knowledge`
 payload. An unavailable payload or unresolved native composition leaves the
 action unavailable; browsing never installs it or starts authentication.
+Payload activation uses the native selected home, including `AGENT_HOME`, and
+prefers the current project's selected root before the global fallback.
 When binding is required but its payload is unavailable, the section's visible
 banner directs the user to enable and prepare its qualified owner.
 
