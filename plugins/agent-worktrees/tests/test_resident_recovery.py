@@ -30,7 +30,7 @@ def notice(root: Path, status: str = "active") -> None:
     }))
 
 
-@pytest.mark.parametrize("kind", ["notice", "marker", "invalid", "oversized", "directory"])
+@pytest.mark.parametrize("kind", ["notice", "marker", "invalid", "oversized", "directory", "unreadable"])
 def test_maintenance_holds_before_backoff_wake_or_fallback(private_recovery, monkeypatch, kind):
     root = private_recovery
     if kind == "notice":
@@ -39,6 +39,11 @@ def test_maintenance_holds_before_backoff_wake_or_fallback(private_recovery, mon
         (root / "maintenance").touch()
     elif kind == "directory":
         (root / "maintenance.json").mkdir()
+    elif kind == "unreadable":
+        notice(root)
+        def unreadable(*args, **kwargs):
+            raise PermissionError("fixture notice cannot be read")
+        monkeypatch.setattr(Path, "open", unreadable)
     else:
         (root / "maintenance.json").write_text("?" * (16385 if kind == "oversized" else 1))
     effects = []
@@ -257,6 +262,29 @@ def test_wsl_recovery_needs_only_os_profile_not_guest_registration(tmp_path, mon
     root.mkdir()
     notice(root)
     assert recovery.wake_allowed() is False
+
+
+@pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX passwd profile isolation")
+def test_shared_home_isolation_covers_canonical_profile(_isolate_agent_worktrees_home):
+    root = _isolate_agent_worktrees_home / ".copilot-extensions"
+    root.mkdir()
+    notice(root)
+    with pytest.raises(recovery.ResidentRecoveryHeld, match="active"):
+        recovery.require_wake_allowed()
+
+
+@pytest.mark.parametrize("command", ["embody", "handoff-cutover"])
+def test_implicit_json_cli_maintenance_refusal(command, monkeypatch, capfd):
+    from agent_worktrees import __main__ as cli
+
+    def held(args):
+        raise recovery.ResidentRecoveryHeld("active maintenance")
+
+    monkeypatch.setitem(cli.COMMAND_MAP, command, held)
+    assert cli._dispatch_lazy(command, [command]) == 1
+    captured = capfd.readouterr()
+    assert "maintenance" in json.loads(captured.out)["error"]
+    assert not captured.err
 
 
 @pytest.mark.parametrize("json_output", [False, True])

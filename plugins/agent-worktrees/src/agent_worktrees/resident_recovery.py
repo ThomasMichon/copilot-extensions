@@ -33,7 +33,10 @@ def dispatch_lazy(command: str, args_list: list[str], **options: object) -> int:
     except ResidentRecoveryHeld as error:
         return refuse_recovery(error, json_output=(
             "--json" in args_list
-            or command in {"conclude-session", "link-succession", "resolve-handoff-successor"}
+            or command in {
+                "conclude-session", "link-succession", "resolve-handoff-successor",
+                "embody", "handoff-cutover",
+            }
         ))
 
 

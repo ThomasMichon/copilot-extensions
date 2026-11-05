@@ -267,9 +267,26 @@ def _isolate_agent_worktrees_home(tmp_path_factory):
     # ``repos.py`` and several helpers call ``Path.home()`` directly, so the env
     # vars alone are not enough -- patch the resolver on the class too.
     pathlib.Path.home = classmethod(lambda cls: fake_home)
+    uses_pwd = os.name != "nt"
+    if uses_pwd:
+        import pwd
+
+        saved_getpwuid = pwd.getpwuid
+
+        def isolated_getpwuid(uid):
+            account = saved_getpwuid(uid)
+            if uid == os.getuid():
+                fields = list(account)
+                fields[5] = str(fake_home)
+                return pwd.struct_passwd(fields)
+            return account
+
+        pwd.getpwuid = isolated_getpwuid
     try:
         yield fake_home
     finally:
+        if uses_pwd:
+            pwd.getpwuid = saved_getpwuid
         if saved_path_home is not None:
             pathlib.Path.home = saved_path_home
         else:  # pragma: no cover - defensive; home is defined on Path in CPython

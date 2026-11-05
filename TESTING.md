@@ -10,7 +10,10 @@ controls exercise parsed write refusal envelopes, including lifecycle commands'
 default JSON. Recovery needs the canonical OS profile, not WSL registration,
 and compatible live publishers retain their bounded readiness wait. A private
 resident server executes the actual canonical claim transaction and publishes
-its captured persisted-mutation evidence. These are isolated source controls,
+its captured persisted-mutation evidence. Additional
+`--test-file tests/test_handoff_cutover.py` controls retain the pane/process
+result and retirement event when maintenance refuses subsequent ledger repair;
+the shared test home also isolates the canonical passwd lookup. These are isolated source controls,
 not an installed daemon wake, rollout or complete history guarantee; required
 unit-only CI admission remains separate.
 
