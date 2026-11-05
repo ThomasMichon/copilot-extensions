@@ -212,7 +212,7 @@ def _wait_current(request: dict, *, recover: bool) -> dict:
             result = _resident(request)
         except (_ResidentRetryable, TimeoutError):
             pass
-        except (ConnectionError, FileNotFoundError):
+        except ConnectionError:
             from . import status_monitor_runtime as monitor
 
             now = time.monotonic()

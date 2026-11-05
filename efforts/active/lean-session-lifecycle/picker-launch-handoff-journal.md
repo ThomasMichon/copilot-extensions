@@ -833,3 +833,16 @@ its saved installed-update, launch and handoff obligations.
   contained native packet passes 145 cases with ordinary cleanup; no latency,
   transport or cancellation budget changed. Repeat exact-head external and
   source-review gates for this revision rather than reuse the prior result.
+- Subsequent review found that a missing control-token file followed the
+  absent-endpoint retry path indefinitely. Missing routes already report a
+  connection error, so the waiting reader now lets the credential-file failure
+  reach the existing JSON error boundary without restarting the live owner.
+  The bounded internal reader remains unchanged. Actual CLI credential-file
+  controls cover JSON, one-shot stream and follow output without synthesizing
+  a credential or emitting successful rows. The contained native client/feed
+  packet passes 148 cases with ordinary cleanup; source review, exact-head
+  external qualification and installed acceptance remain pending.
+- Documentation-impact review: the existing CLI and engine contracts already
+  distinguish retryable startup from terminal authentication failures. This
+  correction restores that documented boundary; no new option, protocol or
+  reader contract is introduced.

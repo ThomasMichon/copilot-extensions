@@ -121,6 +121,39 @@ def test_json_list_emits_terminal_reader_errors_as_json(monkeypatch, capfd, fail
     assert captured.err == ""
 
 
+@pytest.mark.parametrize("stream,follow", [(False, False), (True, False), (False, True)])
+def test_json_list_missing_control_token_fails_without_recovery(
+    tmp_path, monkeypatch, capfd, stream, follow,
+):
+    token = tmp_path / "missing-token"
+    monkeypatch.setattr(client.cfg, "install_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        client, "resident_endpoint", lambda _: SimpleNamespace(base_url="http://127.0.0.1:1"),
+    )
+    monkeypatch.setattr(control, "control_token_path", lambda _: token)
+    monkeypatch.setattr(client.cfg, "project_name", lambda: "project")
+    monkeypatch.setattr(list_cli.list_cache, "note_demand", lambda *a, **k: None)
+    monkeypatch.setattr(list_cli, "_status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(client.time, "sleep", lambda _: pytest.fail("retried a missing credential"))
+    monkeypatch.setattr(
+        client.monitor, "_ensure_status_monitor", lambda: pytest.fail("restarted a live owner"),
+    )
+    assert list_cli.cmd_list(argparse.Namespace(
+        json=True, stream=stream, follow=follow, tracking_status="all", all=True,
+        include_other_platforms=True,
+    )) == 1
+    captured = capfd.readouterr()
+    result = json.loads(captured.out)
+    message = result["error"]["message"] if follow else result["error"]
+    assert token.name in message
+    assert "worktrees" not in result
+    if follow:
+        assert result["type"] == "error"
+        assert result["error"]["retry"] is False
+    assert not token.exists()
+    assert captured.err == ""
+
+
 def test_waiting_read_retries_transport_timeout_without_restarting_live_owner(monkeypatch):
     ready = {"projection": {"quality": "current"}, "worktrees": []}
     replies = iter([TimeoutError("slow live owner"), ready])
