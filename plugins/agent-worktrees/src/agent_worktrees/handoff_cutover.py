@@ -34,6 +34,7 @@ from lazy_cli_dispatch import self_override as _self_override
 
 import yaml
 
+from .resident_recovery import ResidentRecoveryHeld
 from . import (
     activity,
     config as cfg,
@@ -776,7 +777,7 @@ def _settle_predecessor_session_claim(wt_id: str | None, session_id: str) -> dic
                 "disposition": obligations.AT_REST, "skip_if_released": True,
             },
         )
-    except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError) as exc:
+    except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError, ResidentRecoveryHeld) as exc:
         return {"error": "unconfirmed", "message": f"Session-claim settlement unconfirmed: {exc}"}
 
 
@@ -804,7 +805,7 @@ def _conclude_retired_predecessor(wt_id: str | None, session_id: str) -> dict | 
                 "only_if_active": True,
             },
         )
-    except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError) as exc:
+    except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError, ResidentRecoveryHeld) as exc:
         return {"error": "unconfirmed", "message": f"Session conclusion unconfirmed: {exc}"}
 
 

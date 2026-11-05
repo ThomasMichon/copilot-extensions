@@ -205,7 +205,7 @@ def resolve(args, work: Callable[[], int]) -> int:
     directory = cfg.tracking_dir()
     try:
         _append(directory, attempt_id, operation_id, "resolution-requested")
-    except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome):
+    except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome, tracking_write.ResidentRecoveryHeld):
         return output._json_error("Launch receipt is unconfirmed; no resolution started", exit_code=3)
     outcome_attempted = False
     try:
@@ -261,7 +261,7 @@ def resolve(args, work: Callable[[], int]) -> int:
         if not outcome_attempted:
             try:
                 _append(directory, attempt_id, operation_id, "unknown")
-            except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome):
+            except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome, tracking_write.ResidentRecoveryHeld):
                 print("Could not retain the unknown launch outcome.", file=sys.stderr)
         print("Launch resolution outcome is unconfirmed; inspect the saved attempt before retrying.", file=sys.stderr)
         return output._json_error("Launch resolution outcome is unconfirmed", exit_code=3)

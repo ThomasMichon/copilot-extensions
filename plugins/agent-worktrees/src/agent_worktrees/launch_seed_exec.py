@@ -591,7 +591,7 @@ def _launch(
     if receipt:
         try:
             launch_seed_state.finish(record_path, receipt)
-        except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome, KeyboardInterrupt) as exc:
+        except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome, tracking_write.ResidentRecoveryHeld, KeyboardInterrupt) as exc:
             cleanup_failed = True
             print(
                 f"Copilot started, but staged-seed cleanup is unconfirmed: {exc}. "
@@ -641,7 +641,7 @@ def main() -> int:
             native_resume_session=args.native_resume_session,
             correlation=correlation,
         )
-    except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
+    except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome, tracking_write.ResidentRecoveryHeld) as exc:
         print(f"Could not hand off staged launch prompt: {exc}", file=sys.stderr)
         return 3
 

@@ -780,7 +780,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     try:
         with step("Preparing launch prompt", worktree_id=worktree_id):
             staged_seed = seed_for_attempt(yaml_path, record, state.args, verdict=verdict)
-    except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
+    except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome, tracking_write.ResidentRecoveryHeld) as exc:
         return output._json_error(f"Could not stage launch prompt: {exc}", exit_code=3)
     launch_preflight = _preflight_launch(config, state.args, record.worktree_path)
     if launch_preflight.error:

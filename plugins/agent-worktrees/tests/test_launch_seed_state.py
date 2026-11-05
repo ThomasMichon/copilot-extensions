@@ -658,27 +658,31 @@ def test_legacy_new_seed_migrates_without_two_owners(tmp_path):
     assert state.pending(path) == seed
 
 
-@pytest.mark.parametrize("interrupted", [False, True])
-def test_uncertain_cleanup_retains_handoff_without_resubmission(tmp_path, monkeypatch, capsys, interrupted):
+@pytest.mark.parametrize("failure", [
+    KeyboardInterrupt, tracking_write.AmbiguousWriteOutcome, tracking_write.ResidentRecoveryHeld,
+])
+@pytest.mark.parametrize("child_result", [0, 7])
+def test_uncertain_cleanup_retains_handoff_without_resubmission(
+    tmp_path, monkeypatch, capsys, failure, child_result,
+):
     path = _record(tmp_path)
     seed = state.stage(path, kind="resume", text="next turn")
-    calls = []
+    calls, waits = [], []
     real_popen = launch_seed_exec.subprocess.Popen
 
     def spawn(argv, **kwargs):
         if argv[0] != "copilot":
             return real_popen(argv, **kwargs)
         calls.append(argv)
-        return SimpleNamespace(wait=lambda: 0)
+        return SimpleNamespace(wait=lambda: waits.append(True) or child_result)
 
     monkeypatch.setattr(launch_seed_exec.subprocess, "Popen", spawn)
     monkeypatch.setattr(
         state, "finish",
-        lambda *a, **k: (_ for _ in ()).throw(
-            KeyboardInterrupt() if interrupted else tracking_write.AmbiguousWriteOutcome("late ack"),
-        ),
+        lambda *a, **k: (_ for _ in ()).throw(failure("late ack")),
     )
-    assert launch_seed_exec.launch(path, ["copilot"], invoke=True, seed_id=seed.seed_id) == 3
+    assert launch_seed_exec.launch(path, ["copilot"], invoke=True, seed_id=seed.seed_id) == (child_result or 3)
+    assert waits == [True]
     assert state.peek(path).text == seed.text and state.peek(path).handoff_id
     assert "cleanup is unconfirmed" in capsys.readouterr().err
     assert launch_seed_exec.launch(path, ["copilot"], invoke=True, seed_id=seed.seed_id) == 3

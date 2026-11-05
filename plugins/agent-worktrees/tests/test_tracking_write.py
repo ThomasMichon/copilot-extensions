@@ -64,10 +64,10 @@ def test_boot_distinguishes_live_incompatible_publisher_from_startup(monkeypatch
         assert result == {"via": "direct"} and fallbacks == [True]
         assert boots == sends == [] and clock == [0.0]
     elif owner == "arrives-incompatible":
-        assert result == {"via": "direct"} and fallbacks == boots == [True]
+        assert result == {"via": "direct"} and fallbacks == [True] and boots == []
         assert sends == [] and clock == [0.1]
     else:
-        assert result == {"via": "resident"} and boots == sends == [True]
+        assert result == {"via": "resident"} and sends == [True] and boots == []
         assert fallbacks == [] and clock == [0.1]
 
 

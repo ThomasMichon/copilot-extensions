@@ -100,14 +100,33 @@ def test_native_setup_owner_gets_exact_resolution_correlation_without_outer_wait
     assert "agent_worktrees.launch_seed_exec" not in result
 
 
-def test_initial_receipt_is_required_before_effects(receipts, monkeypatch):
-    monkeypatch.setattr(attempts, "_append", lambda *a, **kw: (_ for _ in ()).throw(OSError("private")))
+@pytest.mark.parametrize("failure", [OSError, tracking_write.ResidentRecoveryHeld])
+def test_initial_receipt_is_required_before_effects(receipts, monkeypatch, failure):
+    monkeypatch.setattr(attempts, "_append", lambda *a, **kw: (_ for _ in ()).throw(failure("private")))
     with output.capture_json_output() as captured:
         assert attempts.resolve(
             argparse.Namespace(launch_attempt_id=uuid4().hex), lambda: pytest.fail("effect"),
         ) == 3
     assert "no resolution started" in captured.getvalue()
     assert "private" not in captured.getvalue()
+
+
+def test_held_unknown_receipt_does_not_repeat_completed_resolution(receipts, monkeypatch, capsys):
+    append = attempts._append
+    calls = []
+    def held_unknown(*args, **kwargs):
+        if args[3] == "unknown":
+            raise tracking_write.ResidentRecoveryHeld("active maintenance")
+        return append(*args, **kwargs)
+    def work():
+        calls.append("allocation")
+        raise ValueError("unconfirmed allocation response")
+    monkeypatch.setattr(attempts, "_append", held_unknown)
+    with output.capture_json_output() as captured:
+        assert attempts.resolve(argparse.Namespace(launch_attempt_id=uuid4().hex), work) == 3
+    assert calls == ["allocation"]
+    assert json.loads(captured.getvalue())["error"] == "Launch resolution outcome is unconfirmed"
+    assert "Could not retain the unknown launch outcome" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("failure", [OSError("private fixture"), KeyboardInterrupt()])
