@@ -28,3 +28,18 @@ for module in (agent_procutil.owned_process, installer_dependency_policy,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_payload_toolkit_shell_assets_are_executable_in_git():
+    repo = Path(__file__).resolve().parents[3]
+    result = subprocess.run(
+        ["git", "-C", str(repo), "ls-files", "--stage", "--",
+         "plugins/agent-worktrees/scripts/_runtime_admission"],
+        check=True, capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    shell_modes = [
+        line.split(" ", 1)[0] for line in result.stdout.splitlines()
+        if line.partition("\t")[2].endswith(".sh")
+    ]
+    assert shell_modes and all(mode == "100755" for mode in shell_modes)
