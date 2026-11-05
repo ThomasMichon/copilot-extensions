@@ -18,7 +18,13 @@ import json
 import logging
 import secrets
 import threading
+import time
+from contextlib import contextmanager
 from typing import Any
+
+from credential_relay.token_store import read_token_store, retry_token_store_io
+from dropin_registry import atomic_write_text
+from single_instance_lease import OperationLock, OperationLockedError
 
 from .config import RUNTIME_DIR
 
@@ -32,17 +38,39 @@ _lock = threading.Lock()
 
 
 def _read_tokens() -> dict[str, Any]:
-    try:
-        return json.loads(_TOKENS_FILE.read_text(encoding="utf-8")) or {}
-    except (OSError, json.JSONDecodeError):
-        return {}
+    return read_token_store(_TOKENS_FILE)
 
 
 def _write_tokens(data: dict[str, Any]) -> None:
-    _TOKENS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = _TOKENS_FILE.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(data), encoding="utf-8")
-    tmp.replace(_TOKENS_FILE)
+    retry_token_store_io(lambda: atomic_write_text(_TOKENS_FILE, json.dumps(data)))
+
+
+@contextmanager
+def _transaction():
+    with _lock:
+        _TOKENS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        lock = OperationLock(_TOKENS_FILE.with_suffix(".json.lock").resolve())
+        deadline = time.monotonic() + 5.0
+        while True:
+            try:
+                retry_token_store_io(lock.acquire)
+                break
+            except OperationLockedError:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("relay token store is busy") from None
+                time.sleep(min(0.02, remaining))
+        try:
+            yield
+        finally:
+            lock.release()
+
+
+def _validation_tokens() -> dict[str, Any]:
+    try:
+        return _read_tokens()
+    except (OSError, ValueError, UnicodeError):
+        return {}
 
 
 def _token_value(entry: Any) -> str:
@@ -60,7 +88,7 @@ def validate(token: str) -> bool:
         return False
     return any(
         secrets.compare_digest(token, _token_value(entry))
-        for entry in _read_tokens().values()
+        for entry in _validation_tokens().values()
     )
 
 
@@ -88,7 +116,7 @@ def authorize_azure(token: str, action: str, fields: dict[str, str]) -> bool:
 
     requested = fields.get("scope") or fields.get("resource") or ""
     normalized = requested.removesuffix("/.default").rstrip("/")
-    for entry in _read_tokens().values():
+    for entry in _validation_tokens().values():
         if not secrets.compare_digest(token, _token_value(entry)):
             continue
         if not isinstance(entry, dict):
@@ -115,7 +143,7 @@ def token_for(
     policy :func:`authorize_azure` enforces; they are refreshed on each call so
     a re-mint with updated config re-scopes an existing token.
     """
-    with _lock:
+    with _transaction():
         tokens = _read_tokens()
         raw_entry = tokens.get(codespace)
         entry = raw_entry if isinstance(raw_entry, dict) else {}
@@ -136,7 +164,7 @@ def token_for(
 
 def revoke(codespace: str) -> None:
     """Discard a codespace's relay token (e.g. when it is deleted)."""
-    with _lock:
+    with _transaction():
         tokens = _read_tokens()
         if tokens.pop(codespace, None) is not None:
             _write_tokens(tokens)

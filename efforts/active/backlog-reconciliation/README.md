@@ -245,6 +245,33 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The eleven-contract lifecycle/compatibility delta merged in #10598 after
+genuine exact-head approval with no active findings and green required checks.
+All seventeen actual merged bodies equal the reviewed head; its publication
+child is finalized and retained, with only that parent-child claim settled.
+The [delivery journal](<journal/2026/11.04 ownership-observation-dead-route-contracts.md>)
+records two equal complete 20:57 PST metadata-only scans: 1,007 whole open,
+278 above 729, with no identity changes or new closure credit. Continue the
+next six-contract study and independent finite source verification; this
+publication releases no older source/resource custody or parent acceptance.
+
+The [machine identity/routing](machine-identity-routing-cohort.md),
+[instruction source/delivery](instruction-source-delivery-cohort.md) and
+[Windows transaction](windows-transaction-denial-cohort.md) studies preserve
+six complete originals through twenty-seven whole texts/51,718 characters.
+Fifteen whole-message and two whole-description comparisons are not completion;
+one protected message is excluded before rendering. Credit actual matching/
+design progress, the adopted no-attestation direct-copy contract and scoped
+released repairs without erasing current reservations, actual assigned delivery,
+finite source verification or undiagnosed native transaction conditions.
+
+Independent [finite reader verification](instruction-source-delivery-cohort.md)
+now confirms #9350's merged/current activation and raw-copy resolution, nine
+focused regression definitions and successful final-head CI. The separate
+source-resolution effort remains Draft under its existing owner, with refined
+acceptance and closeout unrecorded. Credit the code correction without closing
+that original, marking the foreign effort Done or adding broader native gates.
+
 The eleven-contract indexing/lifecycle research delta merged in #10592 after
 genuine exact-head approval with no active findings and green required checks.
 All seventeen actual merged bodies equal the reviewed head; the
@@ -1228,6 +1255,19 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [machine identity](machine-identity-routing-cohort.md) core preserves actual
+remaining adapter inventory and Index's literal override, optional topology,
+one-snapshot and real-error controls without repeating the landed prerequisite
+as missing. The [instruction delivery](instruction-source-delivery-cohort.md)
+core follows later raw-copy/selection decisions and distinguishes bounded
+released claim slices from whole assigned consumer/native/rollout acceptance.
+Its finite reader code correction is independently verified; the separate
+Draft source-owner effort reconciliation and closeout remain unrecorded.
+The [transaction denial](windows-transaction-denial-cohort.md) core retains
+unknown causes, strict same-provider success and recurrence-triggered evidence,
+not new retry authority or repair inferred from passes. All six originals and
+their actual source/resource custodians remain unchanged.
 
 The [ownership/dead-route](ownership-observation-dead-route-cohort.md) core
 separates PRESENT unknown ownership from absence and records #9283's actual

@@ -254,9 +254,17 @@ event and Enter expands it; mouse selection is highlighted. Home browses the
 oldest loaded event and requests bounded older history. End/Follow returns
 selection to the live bottom. These controls do not change application focus
 or Escape behavior.
-Up/PageUp also request older history at the loaded top when content is too short
-to scroll. While browsing, live appends preserve the padded event/screen-row
-anchor rather than shifting it as bottom padding shrinks.
+Up/PageUp and an unmodified upward mouse wheel also request older history at
+the loaded top when content is too short to scroll. Modified horizontal wheel
+gestures retain Textual's default handling. While browsing, live appends preserve
+the padded event/screen-row anchor rather than shifting it as bottom padding shrinks.
+Immutable event references are validated once when their event is constructed,
+not rebuilt during paint or repeated index scans. The bounded height index
+reuses unchanged heading/detail geometry only when text width and actual text
+match. Clock labels, width, lane overflow, expansion and loaded relationship
+details therefore invalidate the relevant geometry. Index/merge bookkeeping
+still visits the bounded loaded window; only requested display rows become
+strips, and no whole logical source history is materialized.
 Timeline adapters receive independent request-local stop events. Teardown waits
 for their bounded cleanup, including a naturally completed read already being
 finalized, without canceling adapter tasks or discarding their handles. Cleanup

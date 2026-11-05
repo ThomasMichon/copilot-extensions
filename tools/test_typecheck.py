@@ -1,11 +1,17 @@
 """Focused inventory and actual-checker controls for the local typecheck front door."""
 from __future__ import annotations
 
+from dataclasses import replace
+import importlib.machinery
 import json
+import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
+from types import SimpleNamespace
+from typing import Callable, cast
 
 import pytest
 
@@ -102,6 +108,664 @@ def test_manifest_rejects_duplicate_keys_and_path_escape(tmp_path: Path) -> None
     }), encoding="utf-8")
     with pytest.raises(typecheck.TypecheckError, match="repository-relative path"):
         typecheck.load_projects(tmp_path)
+
+
+def test_additional_versions_preserve_minimum_defaults_and_physical_ownership(tmp_path: Path) -> None:
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    row: dict[str, object] = {
+        "name": "sample", "include": ["sample.py"], "exclude": [], "level": "strict",
+    }
+    manifest = {
+        "version": 1, "python_version": "3.10", "platforms": ["linux", "win32"],
+        "requirements": "requirements.txt", "projects": [row],
+    }
+    path = tools / "typecheck-projects.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    default = typecheck.load_projects(tmp_path)
+    assert default == (typecheck.Project(
+        "sample", ("sample.py",), (), "strict", "3.10", ("linux", "win32"), "requirements.txt",
+    ),)
+    row["additional_python_versions"] = []
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    assert typecheck.load_projects(tmp_path) == default
+    row["additional_python_versions"] = ["3.11"]
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    matrix = typecheck.load_projects(tmp_path)
+    assert matrix[0].python_version == default[0].python_version
+    assert matrix[0].additional_python_versions == ("3.11",)
+    assert tuple(typecheck.inventory(("sample.py",), matrix)) == ("sample.py",)
+
+
+@pytest.mark.parametrize("additional", [
+    None, "3.11", [3.11], [""], ["3.11.0"], ["4.0"], ["3.011"],
+    ["3.10"], ["3.9"], ["3.11", "3.11"],
+])
+def test_manifest_rejects_invalid_additional_version_policy(tmp_path: Path, additional: object) -> None:
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    (tools / "typecheck-projects.json").write_text(json.dumps({
+        "version": 1, "python_version": "3.10", "platforms": ["linux", "win32"],
+        "requirements": "requirements.txt",
+        "projects": [{
+            "name": "sample", "include": ["sample.py"], "exclude": [], "level": "strict",
+            "additional_python_versions": additional,
+        }],
+    }), encoding="utf-8")
+    with pytest.raises(typecheck.TypecheckError):
+        typecheck.load_projects(tmp_path)
+
+
+def test_optional_constructor_positions_and_combined_manifest(tmp_path: Path) -> None:
+    for name in ("tools", "helpers"):
+        (tmp_path / name).mkdir()
+    item = typecheck.Project(
+        "sample", ("sample.py",), (), "strict", "3.10", ("linux", "win32"),
+        "requirements.txt", ("3.11",), import_roots=("helpers",),
+    )
+    (tmp_path / "tools/typecheck-projects.json").write_text(json.dumps({
+        "version": 1, "python_version": "3.10", "platforms": ["linux", "win32"],
+        "requirements": "requirements.txt", "projects": [{
+            "name": "sample", "include": ["sample.py"], "exclude": [], "level": "strict",
+            "additional_python_versions": ["3.11"], "import_roots": ["helpers"],
+        }],
+    }), encoding="utf-8")
+    assert typecheck.load_projects(tmp_path) == (item,)
+    assert not item.owns("helpers/contract.py")
+    assert project().additional_python_versions == () and project().import_roots == ()
+
+
+@pytest.mark.parametrize("mutate", [False, True])
+def test_combined_matrix_preserves_import_custody_and_failure_collection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutate: bool,
+) -> None:
+    (tmp_path / "helpers").mkdir()
+    helper = tmp_path / "helpers/contract.py"
+    helper.write_text("value: int = 1\n", encoding="utf-8")
+    (tmp_path / ".typecheck-prepared").write_text("test-context\n", encoding="utf-8")
+    item = replace(
+        project(), additional_python_versions=("3.11",), platforms=("linux", "win32"),
+        import_roots=("helpers",),
+    )
+    lease = Lease()
+    calls: list[tuple[str, str]] = []
+
+    def environment_path(
+        _root: Path, _project: typecheck.Project, *, captured_lock: bytes | None = None,
+    ) -> tuple[Path, str]:
+        return tmp_path, "test-context"
+
+    def environment_python(_path: Path) -> Path:
+        return Path(sys.executable)
+
+    def acquire(_wait: float, _path: Path) -> Lease:
+        return lease
+
+    def run(
+        argv: list[str], _root: Path, *, env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        assert argv[argv.index("--cache-dir") + 1] == os.devnull
+        assert env is not None and str(tmp_path / "helpers") in env["MYPYPATH"]
+        calls.append((argv[argv.index("--python-version") + 1], argv[argv.index("--platform") + 1]))
+        if mutate and len(calls) == 3:
+            helper.write_text("value: str = 'wrong'\n", encoding="utf-8")
+        return subprocess.CompletedProcess(argv, 7 if len(calls) == 1 else 0, "", "")
+
+    monkeypatch.setattr(typecheck, "environment_path", environment_path)
+    monkeypatch.setattr(typecheck, "environment_python", environment_python)
+    monkeypatch.setattr(typecheck, "acquire_environment", acquire)
+    monkeypatch.setattr(typecheck, "_run", run)
+    if mutate:
+        with pytest.raises(typecheck.TypecheckError, match="inputs changed"):
+            typecheck.check_project(
+                tmp_path, item, ("sample.py",), all_paths=("sample.py", "helpers/contract.py"),
+            )
+        assert calls == [("3.10", "linux"), ("3.10", "win32"), ("3.11", "linux")]
+    else:
+        assert typecheck.check_project(
+            tmp_path, item, ("sample.py",), all_paths=("sample.py", "helpers/contract.py"),
+        ) == 7
+        assert calls == [("3.10", "linux"), ("3.10", "win32"), ("3.11", "linux"), ("3.11", "win32")]
+    assert lease.released
+    assert not (tmp_path / "typecheck-targets.txt").exists()
+    assert not (tmp_path / "typecheck-mypy.ini").exists()
+
+
+def _matrix_git(root: Path, *arguments: str) -> str:
+    result = typecheck._run(["git", *arguments], root, env=typecheck.git_environment())
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
+
+
+@pytest.mark.parametrize(("additional", "regression"), [
+    (False, "3.11"), (True, "none"), (True, "3.10"), (True, "3.11"),
+])
+def test_real_source_and_frozen_candidate_frontdoors_enforce_version_matrix(
+    tmp_path: Path, additional: bool, regression: str,
+) -> None:
+    """Only test-interpreter selection is adapted; policy, Git transport and MyPy are real."""
+    from tools import promote_release as promotion
+    from tools import promotion_frozen_candidate as frozen
+
+    policy = next(item for item in typecheck.load_projects() if item.name == "lib-versioned-runtime")
+    root = tmp_path / "source"
+    root.mkdir()
+    closure = [
+        "tools/typecheck.py", "tools/_admission_protocol.py", "tools/cache_directory_paths.py",
+        "tools/typecheck_source_views.py", "tools/native_test_paths.py", "tools/typecheck-requirements.txt",
+        *(
+            "libs/installer-engine/" + name
+            for name in (
+                "installer_dependency_policy.py", "installer_dependency_config.py",
+                "installer_dependency_arguments.py", "installer_retained_content.py",
+            )
+        ),
+        *(
+            path.relative_to(typecheck.ROOT).as_posix()
+            for path in (typecheck.ROOT / "libs/single-instance-lease/src").rglob("*.py")
+        ),
+    ]
+    for name in closure:
+        target = root / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(typecheck.ROOT / name, target)
+    row: dict[str, object] = {
+        "name": "sample", "include": ["sample.py"], "exclude": [], "level": "strict",
+    }
+    if additional:
+        row["additional_python_versions"] = list(policy.additional_python_versions)
+    (root / "tools/typecheck-projects.json").write_text(json.dumps({
+        "version": 1, "python_version": policy.python_version if additional else "3.10",
+        "platforms": ["linux", "win32"],
+        "requirements": "tools/typecheck-requirements.txt", "projects": [
+            row, {"name": "tooling", "include": ["tools", "libs"], "exclude": [], "level": "pending"},
+        ],
+    }), encoding="utf-8")
+    (root / ".gitignore").write_text(".test-venvs/\n__pycache__/\n", encoding="utf-8")
+    source = (
+        "import sys\nfrom pathlib import Path\nfrom typing import TYPE_CHECKING\n"
+        "def read_project(payload: Path) -> dict[str, object]:\n"
+        "    if sys.version_info < (3, 11) and TYPE_CHECKING:\n"
+        "        raise ModuleNotFoundError(\"No module named 'tomllib'\", name='tomllib')\n"
+        "    else:\n"
+        "        import tomllib\n"
+        + ("        wrong: int = 'bad'\n" if regression == "3.11" else "")
+        + "        return tomllib.loads(payload.read_text(encoding='utf-8'))\n"
+        + ("if sys.version_info < (3, 11):\n    wrong_minimum: int = 'bad'\n" if regression == "3.10" else "")
+    )
+    (root / "sample.py").write_text(source, encoding="utf-8")
+    _matrix_git(root, "init")
+    _matrix_git(root, "config", "core.autocrlf", "false")
+    _matrix_git(root, "config", "user.name", "Example")
+    _matrix_git(root, "config", "user.email", "example@example.com")
+    _matrix_git(root, "add", ".")
+    _matrix_git(root, "-c", "commit.gpgsign=false", "commit", "-m", "Synthetic base")
+    main_before = _matrix_git(root, "rev-parse", "HEAD")
+    _matrix_git(root, "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "Synthetic source")
+    dev_sha = _matrix_git(root, "rev-parse", "HEAD")
+    content_tree = _matrix_git(root, "rev-parse", "HEAD^{tree}")
+    prepared_at = "2026-01-02T03:04:05Z"
+    state = root / promotion.PIPELINE_STATE_PATH
+    state.parent.mkdir(parents=True, exist_ok=True)
+    state.write_text(json.dumps({"last_promotion": {
+        "dev_head": dev_sha, "main_before": main_before, "promoted_at": prepared_at,
+    }}), encoding="utf-8")
+    _matrix_git(root, "add", promotion.PIPELINE_STATE_PATH)
+    tree = _matrix_git(root, "write-tree")
+    candidate_sha = _matrix_git(root, "commit-tree", tree, "-p", main_before, "-m", "Synthetic candidate")
+    transport = tmp_path / "frozen"
+    frozen.export_candidate(
+        transport, repo=root, report={
+            "dev_head": dev_sha, "main_before": main_before, "commit": candidate_sha,
+        }, content_tree=content_tree, prepared_at=prepared_at,
+    )
+    record = frozen.import_candidate(
+        transport, repo=root, dev_sha=dev_sha, main_before=main_before, candidate_sha=candidate_sha,
+    )
+    candidate = tmp_path / "candidate"
+    _matrix_git(root, "worktree", "add", "--detach", str(candidate), candidate_sha)
+    bootstrap = (
+        "import sys\nfrom pathlib import Path\nsys.path.insert(0,sys.argv[1])\n"
+        "from tools import typecheck\n"
+        "typecheck.environment_python = lambda path: Path(sys.executable)\n"
+        "raise SystemExit(typecheck.main([sys.argv[2]]))\n"
+    )
+    expected = int(regression == "3.10" or (additional and regression == "3.11"))
+    for checkout in (root, candidate):
+        item = typecheck.load_projects(checkout)[0]
+        environment, digest = typecheck.environment_path(checkout, item)
+        environment.mkdir(parents=True)
+        (environment / ".typecheck-prepared").write_text(digest + "\n", encoding="utf-8")
+        for action in ("--prepare", "--enforced"):
+            result = typecheck._run(
+                [sys.executable, "-I", "-B", "-c", bootstrap, str(checkout), action], checkout,
+            )
+            assert result.returncode == (0 if action == "--prepare" else expected), result.stdout + result.stderr
+            if action == "--prepare":
+                continue
+            versions = ("3.10", "3.11") if additional else ("3.10",)
+            for version in versions:
+                for platform in ("linux", "win32"):
+                    label = f"[strict] sample (Python {version}, {platform},"
+                    segment = result.stdout.split(label, 1)[1].split("[strict] sample", 1)[0]
+                    assert (": error:" in segment) == (regression == version)
+                    assert (environment / "mypy-cache/sample" / platform / version).is_dir()
+            assert result.stdout.count("[strict] sample (Python ") == len(versions) * 2
+        if checkout == root:
+            (root / "tools/typecheck-projects.json").write_text("{}", encoding="utf-8")
+            (root / "sample.py").write_text("changed: int = 0\n", encoding="utf-8")
+    assert frozen.import_candidate(
+        transport, repo=root, dev_sha=dev_sha, main_before=main_before, candidate_sha=candidate_sha,
+    ) == record
+    assert (candidate / "sample.py").read_text(encoding="utf-8") == source
+    assert (candidate / "tools/typecheck.py").read_bytes() == (typecheck.ROOT / "tools/typecheck.py").read_bytes()
+
+
+@pytest.mark.parametrize("roots", [None, [], ["helpers", "other"]])
+def test_manifest_optional_import_roots_preserve_old_defaults(tmp_path: Path, roots: object) -> None:
+    """Only explicit per-project directories extend the seven-field constructor."""
+    for name in ("tools", "helpers", "other"):
+        (tmp_path / name).mkdir()
+    row: dict[str, object] = {
+        "name": "sample", "include": ["sample.py"], "exclude": [], "level": "pending",
+    }
+    if roots is not None:
+        row["import_roots"] = roots
+    (tmp_path / "tools/typecheck-projects.json").write_text(json.dumps({
+        "version": 1, "python_version": "3.10", "platforms": ["linux"],
+        "requirements": "requirements.txt", "projects": [row],
+    }), encoding="utf-8")
+    item, = typecheck.load_projects(tmp_path)
+    assert item == replace(project(level="pending"), import_roots=("helpers", "other") if roots else ())
+    assert project().import_roots == ()
+    assert not item.owns("helpers/contract.py")
+
+
+@pytest.mark.parametrize("field, roots", [
+    ("import_roots", None), ("import_roots", "helpers"), ("import_roots", [1]), ("import_roots", [""]),
+    ("import_roots", ["helpers", "helpers"]), ("import_roots", ["../helpers"]),
+    ("import_roots", ["/helpers"]), ("import_roots", ["helpers\\nested"]),
+    ("import_roots", ["missing"]), ("import_roots", ["sample.py"]),
+    ("unknown_import_roots", []),
+])
+def test_manifest_refuses_invalid_import_roots(tmp_path: Path, field: str, roots: object) -> None:
+    """Metadata cannot add arbitrary checker arguments or unresolved directories."""
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "helpers").mkdir()
+    (tmp_path / "sample.py").write_text("value: int = 1\n", encoding="utf-8")
+    (tmp_path / "tools/typecheck-projects.json").write_text(json.dumps({
+        "version": 1, "python_version": "3.10", "platforms": ["linux"],
+        "requirements": "requirements.txt", "projects": [{
+            "name": "sample", "include": ["sample.py"], "exclude": [], "level": "pending",
+            field: roots,
+        }],
+    }), encoding="utf-8")
+    with pytest.raises(typecheck.TypecheckError):
+        typecheck.load_projects(tmp_path)
+
+
+@pytest.mark.parametrize("location", ["repository", "directory"])
+def test_import_roots_refuse_native_path_list_separators(
+    tmp_path: Path, location: str,
+) -> None:
+    root = tmp_path / ("repo" + os.pathsep + "split" if location == "repository" else "repo")
+    relative = "helpers" + os.pathsep + "split" if location == "directory" else "helpers"
+    (root / "tools").mkdir(parents=True)
+    (root / relative).mkdir()
+    (root / "sample.py").write_text("value: int = 1\n", encoding="utf-8")
+    (root / "requirements.txt").write_text("", encoding="utf-8")
+    (root / relative / "contract.py").write_text("value: int = 1\n", encoding="utf-8")
+    (root / "tools/typecheck-projects.json").write_text(json.dumps({
+        "version": 1, "python_version": "3.10", "platforms": ["linux"],
+        "requirements": "requirements.txt", "projects": [{
+            "name": "sample", "include": ["sample.py"], "exclude": [], "level": "pending",
+            "import_roots": [relative],
+        }],
+    }), encoding="utf-8")
+    message = (
+        "repository-relative path" if os.pathsep == ":" and location == "directory"
+        else "native path-list separator"
+    )
+    with pytest.raises(typecheck.TypecheckError, match=message):
+        typecheck.load_projects(root)
+    with pytest.raises(typecheck.TypecheckError, match=message):
+        typecheck._import_directory(root, relative)
+
+
+@pytest.mark.parametrize("component", ["src", "view"])
+@pytest.mark.parametrize("explicit", [False, True])
+def test_final_search_components_use_native_separator_guard(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, component: str, explicit: bool,
+) -> None:
+    root = tmp_path / "source"
+    (root / "helpers").mkdir(parents=True)
+    (root / "helpers/contract.py").write_text("value: int = 1\n", encoding="utf-8")
+    (root / "sample.py").write_text("value: int = 1\n", encoding="utf-8")
+    (root / "requirements.txt").write_text("", encoding="utf-8")
+    environment = tmp_path / "environment"
+    environment.mkdir()
+    (environment / ".typecheck-prepared").write_text("test-context\n", encoding="utf-8")
+    lease = Lease()
+    paths = ["sample.py", "helpers/contract.py"]
+    name = "sample"
+    if component == "src":
+        extra = "provider" + os.pathsep + "split/src/extra.py"
+        (root / extra).parent.mkdir(parents=True)
+        (root / extra).write_text("value: int = 1\n", encoding="utf-8")
+        paths.append(extra)
+    else:
+        name += os.pathsep + "split"
+        (root / "tools").mkdir()
+        (root / "tools/typecheck-projects.json").write_text(json.dumps({
+            "version": 1, "python_version": "3.10", "platforms": ["linux"],
+            "requirements": "requirements.txt", "projects": [{
+                "name": name, "include": ["sample.py"], "exclude": [], "level": "pending",
+                "import_roots": ["helpers"],
+            }],
+        }), encoding="utf-8")
+        with pytest.raises(typecheck.TypecheckError, match="Invalid project name"):
+            typecheck.load_projects(root)
+        for source in (typecheck.ROOT / "libs/installation-context").glob("*.py"):
+            relative = "libs/installation-context/" + source.name
+            (root / relative).parent.mkdir(parents=True, exist_ok=True)
+            (root / relative).write_bytes(source.read_bytes())
+            paths.append(relative)
+    item = replace(project(name=name), import_roots=("helpers",) if explicit else ())
+    output = environment.parent / ("source-views-" + environment.name) / name / "installation_context.py"
+    calls: list[str] = []
+
+    def environment_path(
+        _root: Path, _project: typecheck.Project, *, captured_lock: bytes | None = None,
+    ) -> tuple[Path, str]:
+        return environment, "test-context"
+
+    def acquire(_wait: float, _path: Path) -> Lease:
+        return lease
+
+    def run(
+        argv: list[str], _root: Path, *, env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        assert env is not None
+        expected = sorted({str(root), str(root / "libs/installer-engine"), *(
+            [str((root / paths[-1]).parent)] if component == "src" else []
+        )})
+        if component == "view":
+            expected.insert(0, str(output.parent))
+            assert output.is_file()
+        assert env["MYPYPATH"] == os.pathsep.join(expected)
+        calls.append(env["MYPYPATH"])
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(typecheck, "environment_path", environment_path)
+    monkeypatch.setattr(typecheck, "environment_python", lambda _path: Path(sys.executable))
+    monkeypatch.setattr(typecheck, "acquire_environment", acquire)
+    monkeypatch.setattr(typecheck, "_run", run)
+    if explicit:
+        with pytest.raises(typecheck.TypecheckError, match="native path-list separator"):
+            typecheck.check_project(root, item, ("sample.py",), all_paths=tuple(paths))
+        assert not calls
+    else:
+        assert typecheck.check_project(root, item, ("sample.py",), all_paths=tuple(paths)) == 0
+        assert len(calls) == 1
+    assert lease.released
+    assert not output.exists()
+    assert not (environment / "typecheck-targets.txt").exists()
+    assert not (environment / "typecheck-mypy.ini").exists()
+
+
+@pytest.mark.parametrize("foreign", [False, True])
+def test_import_directory_refuses_redirected_roots(
+    tmp_path: Path, native_file_symlink: Callable[..., None], foreign: bool,
+) -> None:
+    """Neither an internal alias nor a foreign source becomes the declared root."""
+    root = tmp_path / "source"
+    root.mkdir()
+    target = tmp_path / "foreign" if foreign else root / "real"
+    target.mkdir()
+    native_file_symlink(root / "helpers", target, target_is_directory=True)
+    with pytest.raises(typecheck.TypecheckError, match="ordinary repository directory"):
+        typecheck._import_directory(root, "helpers")
+
+
+@pytest.mark.parametrize("roots, inventoried, expected", [
+    ((), (), 0),
+    (("helpers", "other"), ("helpers/contract.py", "other/contract.py"), 0),
+    (("helpers",), (), 2),
+])
+def test_import_roots_are_ordered_project_local_and_lease_cleaned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    roots: tuple[str, ...], inventoried: tuple[str, ...], expected: int,
+) -> None:
+    """Custody units inspect delivery, not actual MyPy contract enforcement."""
+    for name in ("helpers", "other"):
+        (tmp_path / name).mkdir()
+    for name in inventoried:
+        (tmp_path / name).write_text("value: int = 1\n", encoding="utf-8")
+    (tmp_path / ".typecheck-prepared").write_text("test-context\n", encoding="utf-8")
+    lease = Lease()
+    calls: list[list[str]] = []
+    item = replace(project(level="pending"), import_roots=roots)
+
+    def environment_path(
+        _root: Path, _project: typecheck.Project, *, captured_lock: bytes | None = None,
+    ) -> tuple[Path, str]:
+        return tmp_path, "test-context"
+
+    def environment_python(_path: Path) -> Path:
+        return Path(sys.executable)
+
+    def acquire(_wait: float, _path: Path) -> Lease:
+        return lease
+
+    def run(
+        argv: list[str], _root: Path, *, env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        assert env is not None and "PYTHONPATH" not in env and "PYTHONHOME" not in env
+        baseline = sorted([str(tmp_path), str(tmp_path / "libs/installer-engine")])
+        assert env["MYPYPATH"].split(os.pathsep) == baseline + [str(tmp_path / name) for name in roots]
+        assert (tmp_path / "typecheck-targets.txt").read_text(encoding="utf-8") == "sample.py\n"
+        assert argv[argv.index("--follow-imports") + 1] == "silent"
+        assert argv[argv.index("--cache-dir") + 1] == (
+            os.devnull if roots else str(tmp_path / "mypy-cache/sample/linux/3.10")
+        )
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setenv("MYPYPATH", str(tmp_path / "foreign"))
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path / "foreign"))
+    monkeypatch.setenv("PYTHONHOME", str(tmp_path / "foreign"))
+    monkeypatch.setattr(typecheck, "environment_path", environment_path)
+    monkeypatch.setattr(typecheck, "environment_python", environment_python)
+    monkeypatch.setattr(typecheck, "acquire_environment", acquire)
+    monkeypatch.setattr(typecheck, "_run", run)
+    if expected:
+        with pytest.raises(typecheck.TypecheckError, match="no inventoried Python source"):
+            typecheck.check_project(tmp_path, item, ("sample.py",), all_paths=("sample.py",))
+        assert not calls
+    else:
+        assert typecheck.check_project(
+            tmp_path, item, ("sample.py",), all_paths=("sample.py", *inventoried),
+        ) == expected
+        assert len(calls) == 1
+    assert lease.released and item.level == "pending"
+    assert not (tmp_path / "typecheck-targets.txt").exists()
+    assert not (tmp_path / "typecheck-mypy.ini").exists()
+
+
+def test_import_inputs_accept_owned_wip_and_namespace_members_only(tmp_path: Path) -> None:
+    """Namespace packages need no initializer; non-module fixture paths stay data."""
+    namespace = tmp_path / "helpers/contracts"
+    namespace.mkdir(parents=True)
+    member = "helpers/contracts/model.py"
+    (tmp_path / member).write_text("value: int = 1\n", encoding="utf-8")
+    fixtures = tmp_path / "helpers/negative-cases"
+    fixtures.mkdir()
+    (fixtures / "shadow.pyi").write_text("invalid fixture\n", encoding="utf-8")
+    (tmp_path / "helpers/not.a.module.pyi").write_text("invalid fixture\n", encoding="utf-8")
+    captured = typecheck._import_inputs(tmp_path, ("helpers",), (member,))
+    assert [name for name, _identity, _content in captured.files] == [member]
+    captured.verify(tmp_path)
+    added = "helpers/contracts/working.py"
+    (tmp_path / added).write_text("value: int = 2\n", encoding="utf-8")
+    updated = typecheck._import_inputs(tmp_path, ("helpers",), (member, added))
+    assert len(updated.files) == 2
+
+
+@pytest.mark.parametrize("suffix", [".PYI", ".PyI"])
+def test_import_inputs_follow_native_stub_extension_aliases(tmp_path: Path, suffix: str) -> None:
+    """A native lowercase lookup must not bypass the first-party stub refusal."""
+    helpers = tmp_path / "helpers"
+    helpers.mkdir()
+    (helpers / "contract.py").write_text("value: int = 1\n", encoding="utf-8")
+    shadow = helpers / ("contract" + suffix)
+    shadow.write_text("value: str\n", encoding="utf-8")
+    lookup = helpers / "contract.pyi"
+    aliases = os.name == "nt" and lookup.is_file() and lookup.samefile(shadow)
+    if aliases:
+        with pytest.raises(typecheck.TypecheckError, match="stubs cannot substitute"):
+            typecheck._import_inputs(tmp_path, ("helpers",), ("helpers/contract.py",))
+    else:
+        captured = typecheck._import_inputs(tmp_path, ("helpers",), ("helpers/contract.py",))
+        assert [name for name, _identity, _content in captured.files] == ["helpers/contract.py"]
+
+
+@pytest.mark.parametrize("suffix", [".PY", ".Py"])
+def test_import_inputs_preserve_native_owned_source_extension_aliases(
+    tmp_path: Path, suffix: str,
+) -> None:
+    """FileFinder proves the native source spelling without executing its body."""
+    helpers = tmp_path / "helpers"
+    helpers.mkdir()
+    source = helpers / ("contract" + suffix)
+    source.write_text("raise AssertionError('not executed')\n", encoding="utf-8")
+    finder = importlib.machinery.FileFinder(
+        str(helpers),
+        (importlib.machinery.SourceFileLoader, importlib.machinery.SOURCE_SUFFIXES),
+    )
+    spec = finder.find_spec("contract")
+    if spec is not None:
+        assert os.name == "nt"
+        assert (helpers / "contract.py").samefile(source)
+        captured = typecheck._import_inputs(tmp_path, ("helpers",), ("helpers/contract.py",))
+        assert [name for name, _identity, _content in captured.files] == ["helpers/contract.py"]
+        captured.verify(tmp_path)
+    else:
+        assert typecheck._import_suffix(source) == suffix
+
+
+@pytest.mark.parametrize("change", ["bytes", "missing", "added", "stub", "replacement", "root"])
+def test_import_input_snapshot_refuses_member_and_root_changes(tmp_path: Path, change: str) -> None:
+    """Accepted identities, bytes and reachable membership remain analysis inputs."""
+    helpers = tmp_path / "helpers"
+    helpers.mkdir()
+    member = helpers / "contract.py"
+    member.write_text("value: int = 1\n", encoding="utf-8")
+    captured = typecheck._import_inputs(tmp_path, ("helpers",), ("helpers/contract.py",))
+    if change == "bytes":
+        member.write_text("value: int = 2\n", encoding="utf-8")
+    elif change == "missing":
+        member.unlink()
+    elif change == "added":
+        (helpers / "extra.py").write_text("value: int = 1\n", encoding="utf-8")
+    elif change == "stub":
+        (helpers / "contract.pyi").write_text("value: str\n", encoding="utf-8")
+    elif change == "replacement":
+        member.rename(helpers / "original.txt")
+        member.write_text("value: int = 1\n", encoding="utf-8")
+    else:
+        helpers.rename(tmp_path / "original")
+        helpers.mkdir()
+        member.write_text("value: int = 1\n", encoding="utf-8")
+    with pytest.raises(typecheck.TypecheckError):
+        captured.verify(tmp_path)
+
+
+@pytest.mark.parametrize("directory", [False, True])
+def test_import_inputs_refuse_indirect_members(
+    tmp_path: Path, native_file_symlink: Callable[..., None], directory: bool,
+) -> None:
+    """An importable alias cannot redirect namespace traversal or source bytes."""
+    helpers = tmp_path / "helpers"
+    helpers.mkdir()
+    (helpers / "contract.py").write_text("value: int = 1\n", encoding="utf-8")
+    target = tmp_path / "foreign"
+    target.mkdir()
+    (target / "contract.py").write_text("value: str = 'foreign'\n", encoding="utf-8")
+    native_file_symlink(
+        helpers / ("alias" if directory else "alias.py"),
+        target if directory else target / "contract.py", target_is_directory=directory,
+    )
+    with pytest.raises(typecheck.TypecheckError, match="ordinary repository"):
+        typecheck._import_inputs(tmp_path, ("helpers",), ("helpers/contract.py",))
+
+
+@pytest.mark.parametrize("mode, attributes", [(stat.S_IFREG, 0x400), (stat.S_IFIFO, 0)])
+def test_import_inputs_refuse_nonordinary_files_before_reading(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: int, attributes: int,
+) -> None:
+    """The Windows reparse attribute is independent of the apparent file mode."""
+    def lstat(_path: Path) -> os.stat_result:
+        return cast(os.stat_result, SimpleNamespace(
+            st_mode=mode, st_file_attributes=attributes, st_dev=1, st_ino=2,
+        ))
+
+    monkeypatch.setattr(Path, "lstat", lstat)
+    with pytest.raises(typecheck.TypecheckError, match="ordinary repository file"):
+        typecheck._import_identity(tmp_path / "contract.py")
+
+
+@pytest.mark.parametrize("outcome", ["success", "failure", "timeout", "cleanup"])
+def test_import_input_drift_is_refused_and_settles_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
+    """Neither a failed checker nor late cleanup can credit changed helper inputs."""
+    helpers = tmp_path / "helpers"
+    helpers.mkdir()
+    member = helpers / "contract.py"
+    member.write_text("value: int = 1\n", encoding="utf-8")
+    (tmp_path / ".typecheck-prepared").write_text("test-context\n", encoding="utf-8")
+    lease = Lease()
+    unlink = Path.unlink
+
+    def environment_path(
+        _root: Path, _project: typecheck.Project, *, captured_lock: bytes | None = None,
+    ) -> tuple[Path, str]:
+        return tmp_path, "test-context"
+
+    def environment_python(_path: Path) -> Path:
+        return Path(sys.executable)
+
+    def acquire(_wait: float, _path: Path) -> Lease:
+        return lease
+
+    def cleanup(path: Path, missing_ok: bool = False) -> None:
+        unlink(path, missing_ok=missing_ok)
+        if path.name == "typecheck-mypy.ini":
+            member.write_text("value: int = 2\n", encoding="utf-8")
+
+    def run(
+        argv: list[str], _root: Path, *, env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        if outcome != "cleanup":
+            member.write_text("value: int = 2\n", encoding="utf-8")
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(argv, 120)
+        return subprocess.CompletedProcess(argv, int(outcome == "failure"), "", "")
+
+    monkeypatch.setattr(typecheck, "environment_path", environment_path)
+    monkeypatch.setattr(typecheck, "environment_python", environment_python)
+    monkeypatch.setattr(typecheck, "acquire_environment", acquire)
+    monkeypatch.setattr(typecheck, "_run", run)
+    if outcome == "cleanup":
+        monkeypatch.setattr(Path, "unlink", cleanup)
+    with pytest.raises(typecheck.TypecheckError, match="inputs changed"):
+        typecheck.check_project(
+            tmp_path, replace(project(), import_roots=("helpers",)), ("sample.py",),
+            all_paths=("sample.py", "helpers/contract.py"),
+        )
+    assert lease.released
+    assert not (tmp_path / "typecheck-targets.txt").exists()
+    assert not (tmp_path / "typecheck-mypy.ini").exists()
 
 
 def test_git_comparison_and_physical_inventory_cover_developer_edits(tmp_path: Path) -> None:
@@ -204,6 +868,8 @@ def test_pending_probe_never_certifies_admission(
     monkeypatch.setattr(typecheck, "python_paths", python_paths)
     monkeypatch.setattr(typecheck, "check_project", check_project)
     assert typecheck.main(["--all"]) == 1
+    assert "do not certify admission" in capsys.readouterr().err
+    assert typecheck.main(["sample"]) == 1
     assert "do not certify admission" in capsys.readouterr().err
     assert typecheck.main(["--inventory", "--require-complete"]) == 2
 
@@ -493,6 +1159,137 @@ def test_actual_mypy_rejects_type_regressions(
         root, project(level=level), (filename,), all_paths=(filename,),
     ) != 0
     assert expected in capsys.readouterr().out
+    assert lease.released
+    assert not (environment / "typecheck-targets.txt").exists()
+    assert not (environment / "typecheck-mypy.ini").exists()
+
+
+@pytest.mark.parametrize("platform", ["linux", "win32"])
+@pytest.mark.parametrize("case, diagnostic", [
+    ("positive", ""), ("argument", "[arg-type]"), ("return", "[assignment]"),
+    ("missing-root", "[import-not-found]"), ("missing-helper", "[import-not-found]"),
+    ("missing-type", "[attr-defined]"), ("foreign", "[arg-type]"), ("mutation", "[arg-type]"),
+])
+def test_actual_mypy_real_import_root_consumed_contracts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    platform: str, case: str, diagnostic: str,
+) -> None:
+    """Actual MyPy must consume real helper types on either analysis target."""
+    root = tmp_path / "source"
+    helpers = root / "helpers"
+    helpers.mkdir(parents=True)
+    helper = "def accept(value: int) -> int:\n    return 1\n"
+    (helpers / "present.py").write_text("value: int = 1\n", encoding="utf-8")
+    if case != "missing-helper":
+        (helpers / "helper_contract.py").write_text(helper, encoding="utf-8")
+    argument = "'wrong'" if case in {"argument", "foreign"} else "1"
+    result_type = "str" if case == "return" else "int"
+    source = f"from helper_contract import accept\nresult: {result_type} = accept({argument})\n"
+    if case == "missing-type":
+        source = "from helper_contract import Missing\nresult: Missing\n"
+    (root / "sample.py").write_text(source, encoding="utf-8")
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    (foreign / "helper_contract.py").write_text(
+        "def accept(value: str) -> int:\n    return 1\n", encoding="utf-8",
+    )
+    monkeypatch.setenv("MYPYPATH", str(foreign))
+    monkeypatch.setenv("PYTHONPATH", str(foreign))
+    environment = tmp_path / "environment"
+    environment.mkdir()
+    (environment / ".typecheck-prepared").write_text("test-context\n", encoding="utf-8")
+    lease = Lease()
+
+    def environment_path(
+        _root: Path, _project: typecheck.Project, *, captured_lock: bytes | None = None,
+    ) -> tuple[Path, str]:
+        return environment, "test-context"
+
+    def environment_python(_path: Path) -> Path:
+        return Path(sys.executable)
+
+    def acquire(_wait: float, _path: Path) -> Lease:
+        return lease
+
+    monkeypatch.setattr(typecheck, "environment_path", environment_path)
+    monkeypatch.setattr(typecheck, "environment_python", environment_python)
+    monkeypatch.setattr(typecheck, "acquire_environment", acquire)
+    item = replace(
+        project(), platforms=(platform,), import_roots=() if case == "missing-root" else ("helpers",),
+    )
+    paths = ("sample.py", "helpers/present.py", *(
+        ("helpers/helper_contract.py",) if case != "missing-helper" else ()
+    ))
+    if case == "mutation":
+        assert typecheck.check_project(root, item, ("sample.py",), all_paths=paths) == 0
+        capsys.readouterr()
+        contract = helpers / "helper_contract.py"
+        before = contract.stat()
+        contract.write_text(helper.replace("value: int", "value: str"), encoding="utf-8")
+        os.utime(contract, ns=(before.st_atime_ns, before.st_mtime_ns))
+    assert typecheck.check_project(root, item, ("sample.py",), all_paths=paths) == int(bool(diagnostic))
+    output = capsys.readouterr().out
+    assert diagnostic in output
+    assert "1 physical files, 1 targets" in output
+    assert lease.released
+    assert not (environment / "typecheck-targets.txt").exists()
+    assert not (environment / "typecheck-mypy.ini").exists()
+
+
+@pytest.mark.parametrize("platform", ["linux", "win32"])
+@pytest.mark.parametrize("regression", [False, True])
+def test_actual_mypy_combines_import_roots_and_additional_versions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    platform: str, regression: bool,
+) -> None:
+    root = tmp_path / "source"
+    helpers = root / "helpers"
+    helpers.mkdir(parents=True)
+    modern_type = "str" if regression else "int"
+    (helpers / "contract.py").write_text(
+        "import sys\n"
+        "if sys.version_info >= (3, 11):\n"
+        f"    def accept(value: {modern_type}) -> {modern_type}:\n        return value\n"
+        "else:\n"
+        "    def accept(value: int) -> int:\n        return value\n",
+        encoding="utf-8",
+    )
+    (root / "sample.py").write_text(
+        "from contract import accept\nresult: int = accept(1)\n", encoding="utf-8",
+    )
+    environment = tmp_path / "environment"
+    environment.mkdir()
+    (environment / ".typecheck-prepared").write_text("test-context\n", encoding="utf-8")
+    lease = Lease()
+
+    def environment_path(
+        _root: Path, _project: typecheck.Project, *, captured_lock: bytes | None = None,
+    ) -> tuple[Path, str]:
+        return environment, "test-context"
+
+    def environment_python(_path: Path) -> Path:
+        return Path(sys.executable)
+
+    def acquire(_wait: float, _path: Path) -> Lease:
+        return lease
+
+    monkeypatch.setattr(typecheck, "environment_path", environment_path)
+    monkeypatch.setattr(typecheck, "environment_python", environment_python)
+    monkeypatch.setattr(typecheck, "acquire_environment", acquire)
+    item = replace(
+        project(), platforms=(platform,), additional_python_versions=("3.11",),
+        import_roots=("helpers",),
+    )
+    assert typecheck.check_project(
+        root, item, ("sample.py",), all_paths=("sample.py", "helpers/contract.py"),
+    ) == int(regression)
+    output = capsys.readouterr().out
+    minimum, modern = output.split(f"[strict] sample (Python 3.11, {platform},", 1)
+    assert "Success: no issues found" in minimum and ": error:" not in minimum
+    if regression:
+        assert "[arg-type]" in modern and "[assignment]" in modern
+    else:
+        assert "Success: no issues found" in modern
     assert lease.released
     assert not (environment / "typecheck-targets.txt").exists()
     assert not (environment / "typecheck-mypy.ini").exists()
