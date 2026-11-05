@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve machine topology from registered anchors instead of linked worktree copies.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}
