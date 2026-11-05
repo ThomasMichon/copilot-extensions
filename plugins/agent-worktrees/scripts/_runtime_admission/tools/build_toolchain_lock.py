@@ -40,7 +40,7 @@ from artifact_source_build import read_build_system_requires  # noqa: E402
 from governed_feed_trust import (  # noqa: E402
     _GOVERNED_FEED_DEFAULT_INDEX_ENV_VARS,  # noqa: F401 -- re-exported for test/caller use
     _PUBLIC_PYPI_HOSTS,  # noqa: F401 -- re-exported for test/caller use
-    _TRUSTED_INDEX_HOSTS_ENV_VAR,
+    _TRUSTED_INDEX_HOSTS_ENV_VAR,  # noqa: F401 -- legacy import compatibility
     ArtifactBuildError,
     _credential_free_index_identity,  # noqa: F401 -- re-exported for test/caller use
     _effective_default_index_url,  # noqa: F401 -- re-exported for test/caller use
@@ -606,13 +606,12 @@ def resolve_toolchain_lock(
     validated = (public.provenance["index"], None) if public else _validated_trusted_index_url(env)
     if validated is None:
         raise ArtifactBuildError(
-            "no affirmatively trusted governed package feed is configured "
+            "no non-public HTTPS default governed package feed is configured "
             "on this machine (checked uv's effective default index -- "
             "UV_DEFAULT_INDEX/UV_INDEX_URL, a project-level uv.toml/"
             "pyproject.toml's [tool.uv], or the user-level or "
             "system-level uv.toml's (e.g. %PROGRAMDATA%, /etc/uv, "
-            "/etc/xdg/uv) index-url / [[index]] default=true -- against "
-            f"the explicit trust policy in {_TRUSTED_INDEX_HOSTS_ENV_VAR}) "
+            "/etc/xdg/uv) index-url / [[index]] default=true) "
             "-- refusing to install the build toolchain, which would "
             "otherwise silently resolve setuptools/wheel/packaging from "
             "an unverified index"

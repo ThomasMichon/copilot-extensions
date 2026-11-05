@@ -324,7 +324,7 @@ def _profile_feed(
     from installer_native_feed import capture_native_feed_inputs
     trusted = _validated_trusted_index_url(transaction.environment)
     if trusted is None:
-        raise ProfileError("native profile acquisition needs an affirmatively trusted governed feed")
+        raise ProfileError("native profile acquisition needs a configured non-public HTTPS feed")
     policy = {
         "policyId": "sha256:" + _opaque_index_identity(json.dumps({
             "source": selected.identity.document(), "index": trusted,

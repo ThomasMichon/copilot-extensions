@@ -1,0 +1,9 @@
+{
+  "comment": "Keep the packaged admission toolkit synchronized with explicitly configured HTTPS feed selection.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
