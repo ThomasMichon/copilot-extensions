@@ -3,6 +3,18 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-04 - Two whole anchor/capture and scoped observation contracts](<journal/2026/11.04 anchor-observation-boundaries-contracts.md>)
+
+- [2026-11-04 - Two release-tail and four-signature container-startup contracts](<journal/2026/11.04 reservation-container-startup-contracts.md>)
+
+- [2026-11-04 - Two exact-owner steering and optional abandon-guard contracts](<journal/2026/11.04 steering-abandon-guards-contracts.md>)
+
+- [2026-11-04 - Two delivered-obligation and independent adopter closeout contracts](<journal/2026/11.04 obligation-adopter-closeout-contracts.md>)
+
+- [2026-11-04 - Two exact-worker progress and continuous readiness contracts](<journal/2026/11.04 progress-readiness-telemetry-contracts.md>)
+
+- [2026-11-04 - One two-case goal and cleanup reconciliation contract](<journal/2026/11.04 goal-cleanup-reconciliation-contract.md>)
+
 - [2026-11-04 - Two attributable merge and actual-policy readiness contracts](<journal/2026/11.04 merge-reconciliation-readiness-contracts.md>)
 
 - [2026-11-04 - Two optional teardown and post-finalization runtime contracts](<journal/2026/11.04 teardown-finalized-wip-contracts.md>)
