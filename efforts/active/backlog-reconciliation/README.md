@@ -252,6 +252,44 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The eleven-contract checkpoint is actually delivered in #10649 after
+current-head approval, no active review issues, one resolved thread and
+nine complete successful/skipped checks. All eleven actual merged blobs
+equal the approved head. Only its publication child finalized, retained.
+The [delivery journal](<journal/2026/11.04 independent-ungrouped-contracts.md>)
+records two equal complete 23:58 PST scans: 1,010 whole open, 281 above
+729; 735 creator-eligible, 275 excluded, 672 original-cohort and 338 inflow.
+The one excluded arrival is metadata-only, with no departures or new
+closure credit; verified campaign dispositions remain 777. The canonical
+Request, Plan and Validation completion gates remain open. Next deliver
+the twenty following independently researched contracts through normal review,
+preserving their partial source credit, whole-description protection and owners.
+
+The following ten whole contracts retain the [artifact write boundary](session-artifact-write-cohort.md),
+[ordinary delivery/conformance](guidance-delivery-conformance-cohort.md),
+[three POSIX defects](posix-ordering-path-descriptor-cohort.md),
+[interactive/command budgets](codespace-interactive-command-budget-cohort.md),
+[activation convention](family-activation-convention-cohort.md) and
+[parked Phase 10 acceptance](phase10-runtime-acceptance-cohort.md).
+The [shared journal](<journal/2026/11.04 guidance-platform-state-contracts.md>)
+records all 45 whole texts and thirty ranked relations. Actual merged
+trailing-path repair is partial credit, not an absent fix or whole acceptance.
+The matching configuration description remains wholly protected after complete
+pagination; all ten issues remain OPEN without new execution or custody effects.
+
+The ten following ungrouped contracts retain four research relationships:
+[attributable invocation](attributable-invocation-cohort.md),
+[first-use/framing consumers](first-use-framing-cohort.md),
+[literal venues/performance](literal-venue-performance-cohort.md) and
+[generation/attempt recovery](generation-attempt-recovery-cohort.md).
+The [shared journal](<journal/2026/11.04 attributable-consumer-contracts.md>)
+retains 43 whole texts, thirty ranked relations and corrected current
+first-use consumer observations. All ten remain OPEN. The initially
+changed-metadata original was freshly qualified but its entire current text
+inherits protection before rendering; it and the other protected original
+receive no old/partial/alternative-source retry. No receiving, native, cleanup
+or custody effects follow.
+
 The eleven admitted ungrouped outcomes are integrated as five research
 relationships: [transport/materialization](local-transport-materialization-cohort.md),
 [finite prose/state](finite-prose-state-cohort.md),
