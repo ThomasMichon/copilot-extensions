@@ -78,7 +78,7 @@ def refresh_attached_clients(
     instead."""
     if current.get("native_session_incarnation"):
         native = mux_discovery.confirm_native_session(
-            current, connected_only=False, timeout_s=timeout_s,
+            current, connected_only=False, timeout_s=timeout_s, require_worktree_path=False,
         )
         if not native.get("applied"):
             if native.get("reason") == "session-absent":

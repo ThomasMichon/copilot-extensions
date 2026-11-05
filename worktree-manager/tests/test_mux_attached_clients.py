@@ -356,7 +356,7 @@ def test_observer_retires_absence_without_any_render_request(
     ))
     mux_attached_clients.AttachedClientObserver().observe(registry)
     assert len(probes) == 1
-    assert probes[0][0][1] == "list-sessions" and probes[0][1]["timeout"] <= 1.0
+    assert probes[0][0][1:3] == ["list-panes", "-a"] and probes[0][1]["timeout"] <= 1.0
     assert not registry.has_any_live()
     assert len(published) == 1 and not published[0]["live"]
 

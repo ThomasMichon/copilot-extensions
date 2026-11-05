@@ -107,7 +107,9 @@ def status_fence_failure(entry: dict, payload: dict, *, registry=None) -> dict |
     ):
         return {"applied": False, "reason": "stale-mapping"}
     if entry.get("native_session_incarnation"):
-        confirmed = confirm_native_session(entry, connected_only=False)
+        confirmed = confirm_native_session(
+            entry, connected_only=False, require_worktree_path=False,
+        )
         if not confirmed.get("applied"):
             if confirmed.get("reason") == "session-absent" and registry is not None:
                 return retire_missing_mapping(registry, entry)
@@ -180,6 +182,7 @@ def _is_empty_tmux_listing(binary: str, result: subprocess.CompletedProcess[str]
 
 def confirm_native_session(
     payload: dict, *, connected_only: bool, timeout_s: float = 2.0,
+    require_worktree_path: bool = True,
 ) -> dict:
     """A failed enumeration remains unknown and cannot mutate a stored fence."""
     name = payload["mux_session"]
@@ -188,8 +191,8 @@ def confirm_native_session(
         return {"applied": False, "reason": "session-unconfirmed"}
     try:
         probe = run_mux_child(
-            [payload["mux_bin"], "list-sessions", "-F",
-             "#{session_name}\t#{session_attached}\t#{session_id}:#{session_created}\t#{session_path}"],
+            [payload["mux_bin"], "list-panes", "-a", "-F",
+             "#{session_name}\t#{session_attached}\t#{session_id}:#{session_created}\t#{pane_current_path}"],
             capture_output=True, text=True, timeout=timeout_s, **no_window_kwargs(),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -207,7 +210,7 @@ def confirm_native_session(
         return {"applied": False, "reason": "session-unconfirmed"}
     rows = [line.split("\t", 3) for line in probe.stdout.splitlines() if line.strip()]
     if any(
-        len(row) != 4 or not row[0] or not row[1].isdecimal() or not row[3]
+        len(row) != 4 or not row[0] or not row[1].isdecimal()
         or not _valid_native_incarnation(row[2])
         for row in rows
     ):
@@ -215,13 +218,15 @@ def confirm_native_session(
     matches = [row for row in rows if row[0] == name]
     if not matches:
         return {"applied": False, "reason": "session-absent"}
-    if len(matches) != 1 or len(matches[0]) != 4:
+    if len({(row[1], row[2]) for row in matches}) != 1:
         return {"applied": False, "reason": "session-unconfirmed"}
-    _, count, incarnation, path = matches[0]
+    _, count, incarnation, _ = matches[0]
     if incarnation != payload["session_incarnation"]:
         return {"applied": False, "reason": "stale-incarnation"}
-    if not path or os.path.normcase(os.path.realpath(path)) != os.path.normcase(
-        os.path.realpath(payload["worktree_path"])
+    expected_path = os.path.normcase(os.path.realpath(payload["worktree_path"]))
+    if require_worktree_path and not any(
+        row[3] and os.path.normcase(os.path.realpath(row[3])) == expected_path
+        for row in matches
     ):
         return {"applied": False, "reason": "unattributed-path"}
     if not count.isdecimal() or (connected_only and int(count) <= 0):

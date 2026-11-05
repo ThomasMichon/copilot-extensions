@@ -1,0 +1,9 @@
+{
+  "comment": "Confirm connected mux recovery using pane directories and consistent native session identities.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
