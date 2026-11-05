@@ -139,8 +139,8 @@ def test_actual_payload_reader_uses_bundled_sdk_without_site_packages(tmp_path):
     assert json.loads(result.stdout)["state"] == "configured"
 
 
-@pytest.mark.parametrize("retained_sdk", [True, False])
-def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, retained_sdk):
+@pytest.mark.parametrize("layout", ["retained", "application", "deployed"])
+def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, layout):
     import venv
 
     import agent_procutil
@@ -157,11 +157,14 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, ret
         for name in ("agent-vault", "agent-worktrees")
     }
     packages = {}
+    environments = {}
     for name, slot in slots.items():
-        venv.EnvBuilder(with_pip=False).create(slot)
+        environment = slot / ".venv" if name == "agent-vault" and layout == "application" else slot
+        environments[name] = environment
+        venv.EnvBuilder(with_pip=False).create(environment)
         packages[name] = (
-            slot / "Lib" / "site-packages" if os.name == "nt"
-            else next((slot / "lib").glob("python*/site-packages"))
+            environment / "Lib" / "site-packages" if os.name == "nt"
+            else next((environment / "lib").glob("python*/site-packages"))
         )
         (slot / ".install-complete.json").write_text(json.dumps({
             "version": "1.0.0", "completed_at": "2026-01-01T00:00:00Z", "pid": 1,
@@ -176,7 +179,7 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, ret
             Path(package.__file__).parent, packages["agent-vault"] / package.__name__,
             ignore=shutil.ignore_patterns("__pycache__"),
         )
-    if retained_sdk:
+    if layout != "deployed":
         bootstrap = slots["agent-vault"] / ".runtime-bootstrap"
         bootstrap.mkdir()
         for source in (PLUGIN / "scripts").glob("versioned_runtime*.py"):
@@ -206,7 +209,7 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, ret
         },
     }
     (owner / "report.json").write_text(json.dumps(report), encoding="utf-8")
-    python = slots["agent-vault"] / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python = environments["agent-vault"] / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     env = _clean_env({"HOME": str(home), "USERPROFILE": str(home)})
     for name in tuple(env):
         if name.startswith(("AGENT_VAULT", "VAULT_")) or name in (
@@ -233,7 +236,7 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, ret
                 "enabled": enabled, "group": "portable-group",
             }), encoding="utf-8")
         result = subprocess.run(
-            [str(python), "-I", "-B", "-c", reader, str(project), str(slots["agent-vault"])],
+            [str(python), "-I", "-B", "-c", reader, str(project), str(environments["agent-vault"])],
             cwd=staging, env=env, capture_output=True, text=True, timeout=20,
             **no_window_kwargs(),
         )

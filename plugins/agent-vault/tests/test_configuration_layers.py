@@ -182,8 +182,9 @@ def test_native_unready_legacy_owner_preserves_vault_defaults(tmp_path, monkeypa
 @pytest.mark.parametrize("enabled,owner_code", [
     (True, 0), (False, 0), (None, 0), ("invalid", 0), (True, 126),
 ])
+@pytest.mark.parametrize("application", [False, True])
 def test_installed_reader_uses_retained_sdk_for_qualified_activation(
-    tmp_path, monkeypatch, capsys, enabled, owner_code,
+    tmp_path, monkeypatch, capsys, enabled, owner_code, application,
 ):
     import shutil
     import subprocess
@@ -211,9 +212,10 @@ def test_installed_reader_uses_retained_sdk_for_qualified_activation(
         bootstrap / "versioned_runtime.py", "_vault_installed_fixture_runtime",
     )
     sdk.mark_complete(peer, "1.0.0")
-    installed = slot / "Lib" / "site-packages" / "agent_vault" / "configuration.py"
+    environment = slot / ".venv" if application else slot
+    installed = environment / "Lib" / "site-packages" / "agent_vault" / "configuration.py"
     monkeypatch.setattr(configuration, "__file__", str(installed))
-    monkeypatch.setattr(sys, "prefix", str(slot))
+    monkeypatch.setattr(sys, "prefix", str(environment))
     monkeypatch.setattr(Path, "home", lambda: home)
     staging = tmp_path / "installer-stage"
     staging.mkdir()

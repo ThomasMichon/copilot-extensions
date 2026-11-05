@@ -26,7 +26,10 @@ def _legacy_report(root: Path) -> dict | None:
         raise _peer_launch.ContextRefused("legacy configuration owner has installation-cell ownership")
     # Installed wheels have no payload scripts; construction retains this SDK
     # beside the selected interpreter for read-only runtime resolution.
-    path = Path(sys.prefix) / ".runtime-bootstrap" / "versioned_runtime.py"
+    slot = Path(sys.prefix)
+    if slot.name == ".venv":
+        slot = slot.parent
+    path = slot / ".runtime-bootstrap" / "versioned_runtime.py"
     if not path.is_file() or path.is_symlink():
         path = own_root / "scripts" / "versioned_runtime.py"
     if not path.is_file():
