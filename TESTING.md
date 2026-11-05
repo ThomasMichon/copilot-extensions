@@ -96,8 +96,15 @@ provenance, changed scope/placement refusal and exact temporary-member cleanup.
 Failed or uncertain exports retain their evidence. A native Linux pidfd witness
 requires an export timeout to settle its console descendant. Process commands
 and collection copying share the caller's absolute execution budget.
-This explicit library packet does not enable a sync tick, change ordinary
-accounting or qualify native Windows, installed collection or remote archival.
+The same native fixture also exercises actual filesystem policy loading and
+the default-off existing sync tick, collecting both retained stores across two
+passes while preserving ordinary missing-source failure. The separate
+`--test-file tests/test_worktree_state_tick.py --test-file tests/test_aggregate.py
+--test-file tests/test_sync.py --test-file tests/test_sync_protection.py` packet
+checks shared budgets, fair deferrals, independent failures, cursor refusal and
+unchanged default-off/dry-run/accounting/protection behavior. No packet enables
+installed collection or qualifies native Windows, whole-pass/remote-filesystem
+latency or remote archival.
 The preservation cases exercise actually eligible old sessions and a verified
 ordinary archive containing no worktree collection; neither justifies erasing
 marked nested evidence.

@@ -2418,6 +2418,22 @@ class TestGitHubProvider:
 
 
 class TestAzureDevOpsProvider:
+    @pytest.mark.parametrize("observed", [False, True, None, "true"])
+    @pytest.mark.parametrize("lookup", [False, True])
+    def test_pull_reads_retain_only_observed_boolean_draft(self, monkeypatch, observed, lookup):
+        from agent_worktrees.providers import azure_devops as azure
+
+        payload = {"pullRequestId": 7, "status": "active", "isDraft": observed}
+        if lookup:
+            payload = [payload]
+        monkeypatch.setattr(azure, "run_cli", lambda *args, **kw: _proc(stdout=json.dumps(payload)))
+        provider = azure.AzureDevOpsProvider()
+        read = provider.find_pull_by_head if lookup else provider.get_pull
+        pull = read(
+            "project/repo", "topic" if lookup else 7, api_base="https://dev.azure.com/example",
+        )
+        assert pull.draft is (observed if type(observed) is bool else None)
+
     def test_publish_source_marker_creates_thread(self, monkeypatch):
         from agent_worktrees.providers import azure_devops
 
@@ -2589,13 +2605,20 @@ class TestEnsureCliReady:
 class _FakeProvider:
     name: str = "gitea"
     captured: dict | None = None
+    observed_draft: bool | None = None
+    creates: int = 0
+
+    def authority_endpoint(self, api_base=""):
+        return api_base
 
     def create_pull(self, scope, *, token=None):
+        self.creates += 1
         self.captured = {"scope": scope, "token": token}
-        return PullResult(url="https://h/gitea/ext/pulls/99", number=99, state="open")
+        return PullResult(url="https://h/gitea/ext/pulls/99", number=99, state="open",
+                          draft=self.observed_draft)
 
     def get_pull(self, repo, number, *, api_base="", token=None):
-        return PullResult(url="", number=number)
+        return PullResult(url="", number=number, draft=self.observed_draft)
 
     def remove_label(self, repo, number, label, *, api_base="", token=None):
         return ""
@@ -3024,19 +3047,34 @@ class TestCreatePRAutoOpen:
             and codename_mod.is_valid_handle(non_string_codename)
         )
 
-    def test_auto_open_draft_marks_scope_draft(self, pr_repo, monkeypatch):
+    @pytest.mark.parametrize("observed", [None, False, True])
+    def test_auto_open_draft_marks_scope_draft(self, pr_repo, monkeypatch, observed):
         config, wid, _wt, _ = pr_repo
         config = self._enable_open(config)
         monkeypatch.setenv("EXT_TOKEN", "tok")
-        fake = _FakeProvider()
+        fake = _FakeProvider(observed_draft=observed)
         monkeypatch.setattr("agent_worktrees.providers.get_provider", lambda name: fake)
 
         res = pr_ops.create_pr(wid, config, title="Add feature", draft=True)
         assert res["success"] is True
-        assert res["draft"] is True
+        assert res["draft"] is (True if observed is None else observed)
         # Native draft: the scope carries draft=True (no do-not-merge label).
         assert fake.captured["scope"].draft is True
         assert pr_ops.HOLD_LABEL not in fake.captured["scope"].labels
+
+    @pytest.mark.parametrize("open_pr", [None, False])
+    def test_retry_retains_observed_draft_without_opening_again(self, pr_repo, monkeypatch, open_pr):
+        config, wid, wt, _ = pr_repo
+        config = self._enable_open(config)
+        monkeypatch.setenv("EXT_TOKEN", "tok")
+        fake = _FakeProvider(observed_draft=True)
+        monkeypatch.setattr("agent_worktrees.providers.get_provider", lambda name: fake)
+        first = pr_ops.create_pr(wid, config, title="Add feature", draft=True)
+        assert first["draft"] is True
+        git_ops.git("checkout", first["branch"], cwd=wt)
+        retry = pr_ops.create_pr(wid, config, title="Add feature", open_pr=open_pr)
+        assert retry["success"] and retry["number"] == first["number"]
+        assert retry["draft"] is True and fake.creates == 1
 
     def test_auto_open_hold_is_deprecated_alias_for_draft(self, pr_repo, monkeypatch):
         # --hold is retained as a deprecated alias for --draft.

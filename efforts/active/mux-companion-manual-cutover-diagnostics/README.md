@@ -479,8 +479,10 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       Worktrees owner. #10495 delivers Efforts-owned contributor provenance from
       the same verified export cut. #10500 delivers Logger's optional complete
       provenance retention and fresh local readback. #10503 delivers explicit
-      passive exact-repository Worktrees/Efforts provider discovery; automatic
-      export/collection orchestration and existing-tick integration remain open.
+      passive exact-repository Worktrees/Efforts provider discovery. #10512
+      delivers explicit policy-first managed export/collection composition with
+      finite owner commands and fresh local readback; automatic collection and
+      existing-tick integration remain open.
       Current answerability/PRE qualification, archival/rescue, native durability and
       whole S2-S5 and original root gates remain open.
 
@@ -559,6 +561,7 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+- [2026-11-04 - Explicit managed export composed; existing-tick integration next](journal/2026/11.04-sidecar-managed-export-composition.md)
 - [2026-11-04 - Passive archival providers merged; existing-tick orchestration next](journal/2026/11.04-sidecar-logger-provider-discovery.md)
 - [2026-11-04 - Logger contributors merged; selected-provider orchestration next](journal/2026/11.04-sidecar-logger-contributors.md)
 - [2026-11-04 - Export contributors merged; Logger integration remains open](journal/2026/11.04-sidecar-export-contributors.md)

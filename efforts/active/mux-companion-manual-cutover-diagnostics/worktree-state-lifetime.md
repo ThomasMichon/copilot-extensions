@@ -10,7 +10,8 @@ consumer source merged in #10251; D4's explicit collection/readback library
 merged in #10447; passive project retained-inventory source merged in #10488;
 Efforts export-contributor provenance merged in #10495; Logger's optional
 provenance collection/readback consumer merged in #10500; explicit passive
-exact-repository provider discovery merged in #10503.**
+exact-repository provider discovery merged in #10503; explicit policy-first
+managed export/collection composition merged in #10512.**
 Native durability and complete D4-D5 remain open.
 No source merge performs a live data move,
 export, collection, cleanup or rollout. The
@@ -58,7 +59,9 @@ collection/readback library without coercing canonical session references.
 #10503 adds explicit passive discovery of the actual admitted repository's
 retained inventory and effective Efforts export provider, preserving lossless
 owner identity separately from the older aggregate-policy identity.
-Automatic export/collection, existing-tick orchestration and legacy rescue
+#10512 composes policy-first managed export, actual accepted-revision selection,
+complete contributor retention and fresh local readback with finite owner commands.
+Automatic collection, existing-tick orchestration and legacy rescue
 remain unfinished integrations.
 
 Existing cleanup can remove a checkout while retaining a lifecycle tombstone.
@@ -191,15 +194,23 @@ not consequences of a reviewed design.
   fencing. #10488 supplies negotiated owner project inventory, including
   descriptors without canonical records. #10495 supplies complete owner-derived
   contributor provenance; #10500 supplies its explicit Logger library consumer.
-  #10503 supplies explicit passive selected-provider discovery. Automatic
-  export/collection and existing-tick orchestration remain open.
-  See the [provider readback](journal/2026/11.04-sidecar-logger-provider-discovery.md).
+  #10503 supplies explicit passive selected-provider discovery. #10512 composes
+  explicit policy-first managed export/collection and fresh local readback.
+  Automatic collection and existing-tick orchestration remain open.
+  See the [composition readback](journal/2026/11.04-sidecar-managed-export-composition.md).
 - [ ] D5. Qualify legacy rescue and the separation of checkout removal from data
   reclamation. Actual relocation, collection, deletion and rollout need their
   own concrete authorization and evidence.
 
 ## Validation Plan
 
+- [x] Qualify explicit policy-first managed export/collection through actual
+  selected owners: admission before staging/export, unchanged source bytes,
+  actual revision, complete provenance, fresh placement/readback, finite shared
+  process/copy budgets and exact temporary cleanup with retained failure evidence.
+  #10512 qualifies 224 isolated source/process controls, including retired
+  placement and native Linux descendant timeout. This is not scheduled/installed
+  collection, native Windows qualification or remote archive acknowledgment.
 - [x] Qualify explicit passive Logger provider selection at the actual admitted
   checkout, complete retained-store discovery, strict actual capabilities,
   effective Efforts activation, lossless origin identity and foreign-source

@@ -152,6 +152,16 @@ def admit_repository_collection(
     cfg: Config, target: Target, plan: ResolvedPlan, repository: str,
 ) -> Path:
     """Admit a repository before exporting any revision or creating staging."""
+    root = select_repository_collection(cfg, target, plan, repository)
+    if root is None:
+        raise WorktreeStateError("admitted collection destination differs from the active target")
+    return root
+
+
+def select_repository_collection(
+    cfg: Config, target: Target, plan: ResolvedPlan, repository: str,
+) -> Path | None:
+    """Apply admission, selecting only repositories assigned to this destination."""
     repository = canonical_repository_identity(repository)
     if plan.mode != ExecutionMode.ENFORCE or not plan.authorized or plan.passive:
         raise WorktreeStateError("worktree collection requires a nonpassive authorized enforce plan")
@@ -191,13 +201,14 @@ def admit_repository_collection(
     claim = matches[0]
     if (
         not claim.resource.ready or claim.resource.kind != "filesystem"
-        or claim.resource.canonical_identity != destination
         or not Path(claim.resource.identity.strip()).is_absolute()
-        or _native_root(Path(claim.resource.identity.strip())) != root
     ):
-        raise WorktreeStateError("admitted collection destination differs from the active target")
+        raise WorktreeStateError("collection claim requires a ready absolute filesystem destination")
+    claimed_root = _native_root(Path(claim.resource.identity.strip()))
     if any(value is not None for value in (
         claim.profile, claim.landing, claim.retention, claim.mutation,
     )):
         raise WorktreeStateError("collection claim has unsupported content or mutation policy")
+    if claim.resource.canonical_identity != destination or claimed_root != root:
+        return None
     return root

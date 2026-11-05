@@ -413,6 +413,13 @@ def resolve_tenant(
     if block.get("future_schema"):
         roles = [r for r in roles if r in VALID_ROLES]
 
+    if "worktree_state" in sync:
+        sync.pop("worktree_state")
+        advisories.append(
+            "committed sync.worktree_state ignored; collection opt-in belongs "
+            "in the machine-local tenant supplement"
+        )
+
     # (4) uncommitted machine-local supplement (transport + secrets).
     supplement = _machine_supplement(home, tenant_id)
     if isinstance(supplement.get("sync"), dict):
