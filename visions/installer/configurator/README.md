@@ -4,7 +4,7 @@
   plugin-owned backstage panels it hosts.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-11-02
+- **Last revised:** 2026-11-04
 - **Reality docs:** [Manager configuration](../../../worktree-manager/docs/configuration.md),
   [plugin contribution contract](../../../worktree-manager/docs/plugin-contribution-contract.md)
 
@@ -85,6 +85,12 @@ plugins. Distinguish known, installed and enabled components, delivered payload,
 selected runtime and actually observed running versions, with attributable
 sources and explicit unknown, missing and platform-policy outcomes.
 
+Make each application's health and required readiness understandable alongside
+its versions. Installed files, a selected runtime and a healthy running consumer
+are different facts. A required failure or unavailable observation cannot appear
+healthy, while intentionally inactive optional capabilities do not become
+mandatory services merely to make the page green.
+
 Offer explicitly confirmed updates for individual components through their
 existing installation authority. A selected plugin update never silently
 updates Manager or unrelated plugins, or substitutes forced reinstallation.
@@ -102,6 +108,36 @@ distinguishable from explicit user or agent updates throughout execution.
 Disabling automation never disables those explicit updates or their normal
 single-writer/re-entrancy protection. Allowing automatic updates does not
 silently enroll a recurring worker or clear another owner's independent hold.
+
+### authentication-and-onboarding-readiness
+
+Provide a standing Authentication section for the selected harness's required
+provider and account readiness. Show nonsecret status, the capability needing
+access and an actionable route to the owning browser or native authentication
+flow. Preserve valid authorization instead of prompting redundantly; make
+expired, missing, denied and unobservable states explicit.
+
+A first-run entry can direct an operator here and to application health without
+creating a second authentication or installation workflow. Manager remains a
+stateless presenter of domain-owned credentials, transactions and readiness.
+An optional credential service is not required for every native provider flow,
+and no credential material is copied into Configuration or synchronized settings.
+
+### knowledge-selection-and-portable-defaults
+
+When a selected harness declares a knowledge-repository prerequisite, present
+its status and the owning setup action before normal task creation. Offer
+account-qualified existing repositories, an adopter-supplied conventional
+candidate and explicitly confirmed creation, preserving usable existing bindings
+and supported advanced or local-only choices.
+
+An operator may use a supported personal synchronization location to carry a
+nonsecret preferred knowledge selection across machines. The preference names
+repository identities, not host paths, credentials or executable instructions.
+It supplies a suggestion for an unconfigured machine, not authority to replace
+an existing local binding, access another account or create a repository.
+Unavailable, stale or conflicting preferences remain legible and recoverable
+through ordinary selection; no cloud-storage provider becomes mandatory.
 
 ### related-repositories-and-venues
 
