@@ -131,6 +131,22 @@ records with partial sampled coverage, not fabricated creation, claim or binding
 events. A timestamp refresh or heartbeat is not a timeline milestone.
 See the [owning source contract](../plugins/agent-worktrees/docs/worktree-observations.md).
 
+Timeline keeps the purpose, compact source/input qualification and bottom-anchored
+work canvas visible. Expand **Evidence** for exact source IDs, qualifications,
+effort reference, diagnostics and the Bridge feed selector; **Creation** expands
+the owner's supplied creation context there. Preparation failures remain visible
+in the compact indicator even before a source token exists. Ordinary membership
+pauses retain evidence as inactive, not as invented source errors; actual errors
+and head fences remain intact. Navigation failures also remain visible outside
+the collapsed evidence area.
+
+Collapsed rows show local clocks and literal summaries, with a date at each
+local-day boundary. A `~` clock is observation time, not an occurrence claim;
+`--:--` is unknown. Enter expands the exact timestamp, actor, event kind and
+evidence qualification. Actor columns do not infer relationships or concurrency.
+The stable scrollbar gutter is excluded from line wrapping so narrow scrollable
+views do not silently clip text under the scrollbar.
+
 Qualified native entries retain their actual mutation kind, saved-record fence,
 captured head and unknown actor; sampled changes do not acquire those semantics.
 An owner entry can fit its wire bound while exceeding a display field. The

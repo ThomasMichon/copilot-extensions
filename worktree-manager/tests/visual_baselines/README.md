@@ -19,8 +19,20 @@ detail while showing an explicit retention-gap diagnostic and unavailable source
 The purpose, source qualifications, selection, details, controls and unread
 count are compared as rendered, not reconstructed from DTOs.
 
+The sparse presentation keeps purpose, compact qualification and work rows in
+view, while the collapsed **Evidence** area retains exact diagnostics and
+selection controls. The session-gap comparison explicitly opens Evidence;
+ordinary session selection pauses membership without manufacturing a failure.
+`companion-full.svg` and `companion-narrow.svg` additionally compare the
+production app's chrome at 110 x 40 and 60 x 24 cells. `companion-fault.svg`
+keeps a genuine preparation-failure indicator and navigation-failure message
+visible while Evidence is collapsed; `companion-evidence.svg` opens the bounded
+details. These four use fixed synthetic observations and reject owner reads,
+not actual provider integration. All deterministic comparisons use an explicit
+UTC display zone; the ordinary presenter uses the machine's local zone.
+
 These are rendered fixture screens, not native tmux/PSMux screenshots,
-installed-runtime evidence or a complete Companion-app baseline. Only remote
+installed-runtime evidence or complete application acceptance. Only remote
 font-loading declarations and blank-line indentation are omitted; text, styles,
 coordinates, clipping and geometry are retained. SVG viewers use their available monospace font.
 The regression compares SVG rendering instructions, not browser-rasterized
@@ -70,3 +82,10 @@ and its explicit Refresh recovery. Its full-app captures use actual private
 owner processes and live timestamps; they are progress evidence, not goldens.
 The stable gap comparison above instead uses deterministic synthetic records
 with the production source-error and summary renderers.
+Its healthy/full and healthy/narrow captures now use a separate ordinary
+three-owner scenario with contemporary synthetic clocks, observed local waiter
+coverage and deliberately unknown root CLI attention. It checks keyboard
+selection through Evidence, collapsed error-free source admission, at least
+half the terminal height available to the work canvas and exact reader retirement.
+It is a healthy integration demonstration, not a negative fixture presented as
+normal operation or an installed/native qualification.

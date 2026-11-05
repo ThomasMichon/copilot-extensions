@@ -18,10 +18,10 @@ from textual.geometry import Size
 from textual.message import Message
 from textual.scroll_view import ScrollView
 from textual.strip import Strip
-from textual.widgets import Button, Static
+from textual.widgets import Button, Collapsible, Select, Static
 
 from .companion_timeline_contract import (
-    Availability, EventRef, HistoryPage, LiveDelta, MAX_STRIP_CACHE_BYTES, OVERSCAN_LINES,
+    Availability, EventRef, HistoryPage, LiveDelta, MAX_STRIP_CACHE_BYTES, OVERSCAN_LINES, Provider,
     SourcePosition, SourceToken, TimelineGap, TimelineSnapshot, ViewportAnchor, aware_time,
 )
 from .companion_timeline_layout import TimelineLayout, display_text, wrap_lines
@@ -30,7 +30,7 @@ from .companion_timeline_model import TimelineWindow, WindowResult
 
 class SubwayTimeline(ScrollView, can_focus=True):
     DEFAULT_CSS = """
-    SubwayTimeline { height: 1fr; overflow-x: hidden; overflow-y: auto; }
+    SubwayTimeline { height: 1fr; overflow-x: hidden; overflow-y: auto; scrollbar-gutter: stable; }
     """
     BINDINGS = [
         ("end", "follow_live", "Follow live"),
@@ -112,7 +112,7 @@ class SubwayTimeline(ScrollView, can_focus=True):
         self._select_event(anchor.event if anchor is not None else None)
 
     def _reflow(self, anchor: ViewportAnchor | None) -> None:
-        self.layout_index.rebuild(self.window, self.size.width or 1, now=self._clock)
+        self.layout_index.rebuild(self.window, self.scrollable_content_region.width or 1, now=self._clock)
         anchor_row = None
         screen_row = 0
         if anchor is not None and not self.window.follow_live:
@@ -128,7 +128,7 @@ class SubwayTimeline(ScrollView, can_focus=True):
         self._programmatic = True
         try:
             self.virtual_size = Size(
-                max(1, self.size.width), max(self.size.height, self.layout_index.height + self._padding),
+                max(1, self.scrollable_content_region.width), max(self.size.height, self.layout_index.height + self._padding),
             )
             if self.window.follow_live:
                 self.scroll_end(animate=False, immediate=True, x_axis=False)
@@ -182,6 +182,9 @@ class SubwayTimeline(ScrollView, can_focus=True):
 
     def source_error(self, token: SourceToken, message: str) -> WindowResult:
         return self._change(lambda: self.window.source_error(token, message))
+
+    def pause_source(self, token: SourceToken) -> WindowResult:
+        return self._change(lambda: self.window.pause_source(token))
 
     def set_cached_time(self, now: datetime) -> None:
         """Update labels from a caller-owned cached clock, never from source polling."""
@@ -298,12 +301,12 @@ class SubwayTimeline(ScrollView, can_focus=True):
 
     def render_line(self, y: int) -> Strip:
         index = int(self.scroll_offset.y) + y
-        key = self._layout_generation, index, self.size.width
+        key = self._layout_generation, index, self.scrollable_content_region.width
         cached = self._cache.get(key)
         if cached is not None:
             self._cache.move_to_end(key)
             return cached[0]
-        width = max(1, self.size.width)
+        width = max(1, self.scrollable_content_region.width)
         row = self.layout_index.row(index - self._padding, self.window)
         if row is None:
             if not self.window.events and y == max(0, self.size.height - 1):
@@ -327,29 +330,53 @@ class CompanionTimelinePanel(Vertical):
 
     DEFAULT_CSS = """
     CompanionTimelinePanel { height: 1fr; }
-    CompanionTimelinePanel .timeline-context { height: auto; max-height: 3; }
-    CompanionTimelinePanel .timeline-state { height: auto; max-height: 2; }
+    CompanionTimelinePanel .timeline-context { height: auto; max-height: 2; text-style: bold; }
+    CompanionTimelinePanel .timeline-health { height: auto; max-height: 2; color: #b2b2b2; }
+    CompanionTimelinePanel .timeline-state { height: auto; }
     CompanionTimelinePanel .timeline-creation { height: auto; max-height: 8; }
-    CompanionTimelinePanel .timeline-buttons { height: 3; }
+    CompanionTimelinePanel .timeline-evidence {
+        height: auto; max-height: 50%; overflow-y: auto;
+        margin: 0; padding: 0; border: none;
+    }
+    CompanionTimelinePanel .timeline-evidence Contents { padding: 0 1; }
+    CompanionTimelinePanel .timeline-buttons { height: 1; }
+    CompanionTimelinePanel .timeline-buttons Button {
+        height: 1; min-width: 6; width: auto; border: none; padding: 0 1;
+    }
+    CompanionTimelinePanel .timeline-unread { width: 1fr; text-align: right; }
+    CompanionTimelinePanel #timeline-current-compact { height: auto; max-height: 2; }
     """
 
     def __init__(
         self, window: TimelineWindow | None = None, *, name: str | None = None,
-        id: str | None = None, classes: str | None = None,
+        id: str | None = None, classes: str | None = None, source_controls: bool = False,
     ) -> None:
         super().__init__(name=name, id=id, classes=classes)
         self.window = window if window is not None else TimelineWindow()
         self.creation_expanded = False
+        self.source_controls = source_controls
+        self._provider_notices: dict[Provider, tuple[str, bool]] = {}
 
     def compose(self) -> ComposeResult:
         yield Static(classes="timeline-context")
-        yield Static(classes="timeline-state")
-        yield Static(classes="timeline-creation")
+        yield Static(classes="timeline-health")
+        if self.source_controls:
+            yield Static(id="timeline-current-compact")
+        with Collapsible(title="Evidence", collapsed=True, classes="timeline-evidence"):
+            yield Static(classes="timeline-effort")
+            yield Static(classes="timeline-state")
+            yield Static(classes="timeline-creation")
+            if self.source_controls:
+                yield Static("Rich Agenda: awaiting selected owner publication", id="timeline-agenda-status")
+                yield Static("Bridge: awaiting selected owner", id="timeline-bridge-status")
+                yield Static(id="timeline-current-input")
+                yield Select([("Bridge feed: membership (discover delegates)", "membership")],
+                             value="membership", allow_blank=False, id="bridge-feed")
         yield SubwayTimeline(self.window)
         with Horizontal(classes="timeline-buttons"):
             yield Button("Follow live", name="follow", classes="timeline-follow")
             yield Button("Older", name="older", classes="timeline-older", disabled=True)
-            yield Button("Creation context", name="creation")
+            yield Button("Creation", name="creation")
             yield Button("Reconcile source", name="reconcile", classes="timeline-reconcile", disabled=True)
             yield Static(classes="timeline-unread")
 
@@ -377,6 +404,8 @@ class CompanionTimelinePanel(Vertical):
         anchor, offset = self.capture_viewport() if viewport is None else viewport
         selected = timeline.selected
         self.window = window
+        if not window.sources:
+            self._provider_notices.clear()
         timeline.window = window
         timeline._anchor_character_offset = offset
         timeline.selected = selected if selected is not None and window.event(selected) is not None else None
@@ -401,17 +430,28 @@ class CompanionTimelinePanel(Vertical):
     def source_error(self, token: SourceToken, message: str) -> WindowResult:
         return self.query_one(SubwayTimeline).source_error(token, message)
 
+    def pause_source(self, token: SourceToken) -> WindowResult:
+        return self.query_one(SubwayTimeline).pause_source(token)
+
     def set_cached_time(self, now: datetime) -> None:
         self.query_one(SubwayTimeline).set_cached_time(now)
 
     def set_demand_visible(self, visible: bool) -> None:
         self.query_one(SubwayTimeline).set_demand_visible(visible)
 
+    def provider_notice(self, provider: Provider, message: str | None, *, failed: bool = False) -> None:
+        """Retain typed preparation failures even before a source token can bind."""
+        if message is None:
+            self._provider_notices.pop(provider, None)
+        else:
+            self._provider_notices[provider] = (message[:2048], failed)
+        self._update_context()
+
     def _update_context(self) -> None:
         purpose, effort, creation = self.window.context()
         heading = Text("Purpose: " + display_text((purpose or "unknown")[:240]))
-        heading.append("\nEffort: " + display_text(effort or "unknown"))
         self.query_one(".timeline-context", Static).update(heading)
+        self.query_one(".timeline-effort", Static).update(Text("Effort: " + display_text(effort or "unknown")))
         status = "; ".join(
             f"{key[:40]}: {state.availability.value}/{state.completeness.value}"
             for key, state in self.window.sources.items()
@@ -422,6 +462,29 @@ class CompanionTimelinePanel(Vertical):
             status += f"; {self.window.evicted} display rows evicted; source history not erased"
         for gap in self.window.source_gaps.values():
             status += f"\nHistory gap: {gap.reason}; floor {gap.floor.cursor}; {gap.reconcile}: {gap.details}"
+        health = ["History gap"] if self.window.source_gaps else []
+        if not self.window.last_result.applied:
+            health.append(self.window.last_result.code.value.replace("-", " "))
+        providers = tuple(Provider) if self.source_controls else tuple(dict.fromkeys(
+            state.token.identity.provider for state in self.window.sources.values()
+        ))
+        for provider in providers:
+            states = [state for state in self.window.sources.values() if state.token.identity.provider is provider]
+            notice = self._provider_notices.get(provider)
+            labels = list(dict.fromkeys(
+                "retained" if state.availability is Availability.UNKNOWN and state.snapshot is not None
+                else state.availability.value.replace("-", " ")
+                for state in states
+            ))
+            label = ("error" if notice[1] else "loading") if notice else " / ".join(labels) or "unknown"
+            health.append(f"{provider.value.title()}: {label}")
+        if any(state.completeness.value != "complete" for state in self.window.sources.values()):
+            health.append("history partial")
+        for provider, (message, failed) in self._provider_notices.items():
+            status += f"\n{provider.value} {'unavailable' if failed else 'preparing'}: {message}"
+            if provider not in providers:
+                health.append(f"{provider.value.title()}: {'error' if failed else 'unknown'}")
+        self.query_one(".timeline-health", Static).update(Text(" | ".join(health) or "History unknown"))
         self.query_one(".timeline-state", Static).update(Text(display_text(status)))
         context = self.query_one(".timeline-creation", Static)
         context.display = self.creation_expanded
@@ -448,6 +511,8 @@ class CompanionTimelinePanel(Vertical):
             timeline.action_request_history()
         elif event.button.name == "creation":
             self.creation_expanded = not self.creation_expanded
+            if self.creation_expanded:
+                self.query_one(Collapsible).collapsed = False
             self._update_context()
         elif event.button.name == "reconcile":
             timeline.action_reconcile_source()

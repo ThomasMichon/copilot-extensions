@@ -5,7 +5,7 @@ from __future__ import annotations
 from bisect import bisect_right
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, tzinfo
 
 from rich.cells import cell_len
 
@@ -74,17 +74,17 @@ class TimelineLayout:
         self._starts: tuple[int, ...] = ()
         self._refs: dict[EventRef, EventBlock] = {}
         self.materialized_rows = 0
+        self.timezone: tzinfo | None = None
 
-    @staticmethod
-    def _time(event: TimelineEvent, now: datetime | None) -> str:
+    def _time(self, event: TimelineEvent, now: datetime | None, *, include_date: bool = False) -> str:
         stamp = event.occurred_at or event.observed_at
         if stamp is None:
-            return "time unknown"
-        qualifier = "" if event.occurred_at is not None else "observed "
-        value = qualifier + stamp.isoformat(timespec="seconds")
+            return "--:--"
+        qualifier = "" if event.occurred_at is not None else "~"
+        value = qualifier + stamp.astimezone(self.timezone).strftime("%Y-%m-%d %H:%M" if include_date else "%H:%M")
         if now is not None:
             age = max(0, int((now - stamp).total_seconds()))
-            value += f" ({age}s)"
+            value += f" ({age // 60}m)"
         return value
 
     @staticmethod
@@ -99,6 +99,9 @@ class TimelineLayout:
     @staticmethod
     def _details(event: TimelineEvent, window: TimelineWindow) -> str:
         lines = [
+            f"Time: {event.occurred_at or event.observed_at or 'unknown'}"
+            + (" (observed, not occurrence)" if event.occurred_at is None else ""),
+            f"Kind: {event.kind.value}; actor: {event.actor.label}",
             f"Evidence: {event.evidence_kind.value}; durability: {event.durability.value}",
             f"Actor: {event.actor.kind.value}; qualification: {event.actor.qualification.value}",
             f"Position: {event.position.cursor}",
@@ -135,12 +138,15 @@ class TimelineLayout:
         self.text_width = max(1, self.width - self.prefix_width)
         blocks = []
         start = 0
+        previous_day = None
         for event in window.events:
             previous = self._refs.get(event.ref) if previous_width == self.text_width else None
+            stamp = event.occurred_at or event.observed_at
+            day = stamp.astimezone(self.timezone).date() if stamp is not None else None
             heading = (
-                f"{self._time(event, now)} | {event.kind.value} | "
-                f"{event.actor.label}: {event.summary}"
+                f"{self._time(event, now, include_date=day != previous_day)}  {event.summary}"
             )
+            previous_day = day
             if window.lane(event) == MAX_LANES - 1:
                 heading = "Other actors (overflow lane) | " + heading
             heading_rows, heading_clipped = (
@@ -234,6 +240,6 @@ class TimelineLayout:
             value = f"[{row.lane}] "
             return value[:self.prefix_width]
         return "".join(
-            ("● " if row.heading else "│ ") if lane == row.lane else "· "
+            ("● " if row.heading else "│ ") if lane == row.lane else "  "
             for lane in range(self._lane_count)
         )

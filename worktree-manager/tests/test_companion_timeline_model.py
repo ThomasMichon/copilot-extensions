@@ -13,6 +13,42 @@ from worktree_manager.companion_timeline_model import ResultCode, TimelineWindow
 from _companion_timeline_fixtures import event, position, snapshot, token
 
 
+def test_reader_pause_retains_history_without_fabricating_an_error_or_live_facts():
+    source = token()
+    model = TimelineWindow()
+    model.bind(source)
+    rows = (event(source, 0),)
+    model.apply_snapshot(snapshot(source, rows))
+    state = model.sources[source.identity.source_key]
+    model.request_history(source, state.before)
+    previous_result, proofs = model.last_result, dict(model._proofs)
+    assert model.pause_source(source).applied
+    paused = model.sources[source.identity.source_key]
+    assert paused.availability is Availability.UNKNOWN and paused.requested_before is None
+    assert paused.position == state.position and paused.snapshot == state.snapshot
+    assert model.events == rows and model._proofs == proofs
+    assert model.last_result == previous_result
+    assert not model.apply_delta(LiveDelta(
+        source, position(source, "live-0"), position(source, "live-1"), (),
+    )).applied
+
+
+@pytest.mark.parametrize("availability", [Availability.UNAVAILABLE, Availability.HEAD_CHANGED])
+def test_reader_pause_cannot_clear_a_real_error_or_known_head_change(availability):
+    source = token()
+    model = TimelineWindow()
+    model.bind(source)
+    model.apply_snapshot(snapshot(source, (event(source, 0),)))
+    if availability is Availability.HEAD_CHANGED:
+        model.apply_snapshot(replace(snapshot(source, ()), availability=availability))
+    model.source_error(source, "actual owner read failed")
+    previous = model.last_result
+    assert model.pause_source(source).applied
+    assert model.sources[source.identity.source_key].availability is availability
+    assert model.last_result == previous and previous.code is ResultCode.SOURCE_ERROR
+    assert not model.pause_source(replace(source, request_epoch=1)).applied
+
+
 def test_read_failure_cannot_downgrade_known_head_invalidation():
     source = token()
     model = TimelineWindow()

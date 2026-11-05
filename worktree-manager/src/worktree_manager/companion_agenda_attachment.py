@@ -378,6 +378,7 @@ class AgendaTimelineAttachment:
                     result = self.panel.apply_snapshot(snapshot)
                 if not result.applied:
                     raise TimelineSourceError(result.reason)
+                self.panel.provider_notice(Provider.AGENDA, None)
                 self.status(
                     f"Rich Agenda: accepted operations through revision {reader.codec.revision(pages[-1]['cursor'])}; "
                     "partial history, caller-reported actors; not execution authority"
@@ -396,6 +397,7 @@ class AgendaTimelineAttachment:
                 raise self._cleanup_failure
             except (TimelineSourceError, TimelineContractError, OSError, ValueError, ec.EngineError) as error:
                 if not self._stop.is_set() and version == self._version:
+                    self.panel.provider_notice(Provider.AGENDA, str(error), failed=True)
                     self._failure(str(error))
 
     def history(self, message: SubwayTimeline.HistoryRequested) -> None:

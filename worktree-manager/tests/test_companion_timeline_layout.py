@@ -25,6 +25,29 @@ def test_wide_combining_and_literal_controls_wrap_by_cells():
     assert list(wrap_lines("界", 1))[0][0] == "?"
 
 
+def test_sparse_heading_keeps_exact_clock_actor_and_qualification_in_details() -> None:
+    source = token()
+    model = TimelineWindow()
+    model.bind(source)
+    item = event(source, 0, summary="Check the accepted design")
+    model.apply_snapshot(snapshot(source, (item,)))
+    layout = TimelineLayout()
+    layout.rebuild(model, 80)
+    block = layout.blocks[0]
+    assert block.heading_rows == 1
+    assert item.summary in block.heading_text
+    assert item.kind.value not in block.heading_text
+    assert item.actor.label not in block.heading_text
+    assert item.observed_at.isoformat() not in block.heading_text
+    assert block.heading_text.startswith("~")
+    model.toggle_expansion(item.ref)
+    layout.rebuild(model, 80)
+    details = layout.blocks[0].detail_text
+    assert str(item.observed_at) in details and "observed, not occurrence" in details
+    assert item.kind.value in details and item.actor.label in details
+    assert item.actor.qualification.value in details
+
+
 def test_height_index_materializes_requested_rows_only_and_detail_bounds():
     source = token()
     model = TimelineWindow()

@@ -9,7 +9,7 @@ import pytest
 from textual.app import App, ComposeResult
 from textual import events
 from textual.message_pump import MessagePump
-from textual.widgets import Button, Static
+from textual.widgets import Button, Collapsible, Static
 
 from worktree_manager.companion_timeline_contract import (
     Availability, Completeness, HistoryPage, LiveDelta, MAX_STRIP_CACHE_BYTES, SourceToken,
@@ -77,7 +77,12 @@ def test_live_bottom_short_padding_and_sticky_context():
             assert timeline.virtual_size.height == timeline.size.height
             assert "Recorded event 0" in strip_text(timeline, timeline.size.height - 1)
             assert "Purpose:" in str(app.query_one(".timeline-context", Static).content)
-            assert "efforts/active/example/README.md" in str(app.query_one(".timeline-context", Static).content)
+            assert app.query_one(Collapsible).collapsed
+            assert "efforts/active/example/README.md" in str(app.query_one(".timeline-effort", Static).content)
+            assert timeline.size.height >= 24
+            await pilot.click("CollapsibleTitle")
+            await pilot.pause()
+            assert not app.query_one(Collapsible).collapsed
             await pilot.press("escape")
         assert not app.is_running
 
@@ -316,7 +321,7 @@ def test_render_is_lazy_literal_bounded_and_has_no_io(monkeypatch):
                 patch.setattr("os.scandir", forbidden)
                 patch.setattr(TimelineWindow, "lane_count", property(forbidden_lane_count))
                 for y in range(timeline.size.height):
-                    assert timeline.render_line(y).cell_length == timeline.size.width
+                    assert timeline.render_line(y).cell_length == timeline.scrollable_content_region.width
             assert timeline.layout_index.materialized_rows <= timeline.size.height + 8
             assert timeline.cache_bytes <= MAX_STRIP_CACHE_BYTES
             rendered = "\n".join(strip_text(timeline, y) for y in range(timeline.size.height))
@@ -373,12 +378,31 @@ def test_unobserved_source_clears_sticky_current_context(availability: Availabil
             assert panel.apply_snapshot(invalidated).applied
             await pilot.pause()
             content = str(panel.query_one(".timeline-context", Static).content)
-            assert "Purpose: unknown" in content and "Effort: unknown" in content
+            assert "Purpose: unknown" in content
+            assert "Effort: unknown" in str(panel.query_one(".timeline-effort", Static).content)
             assert "Complete the accepted assignment." not in content
             assert "efforts/active/example/README.md" not in content
             creation = str(panel.query_one(".timeline-creation", Static).content)
             assert "Creation context unknown." in creation
             assert "Original source and scope" not in creation
+
+    asyncio.run(check())
+
+
+def test_unbound_provider_error_stays_visible_when_evidence_is_collapsed() -> None:
+    async def check() -> None:
+        app = TimelineApp(TimelineWindow())
+        async with app.run_test(size=(60, 24)) as pilot:
+            panel = app.query_one(CompanionTimelinePanel)
+            from worktree_manager.companion_timeline_contract import Provider
+            panel.provider_notice(Provider.WORKTREES, "unsupported provider capability", failed=True)
+            await pilot.pause()
+            assert app.query_one(Collapsible).collapsed
+            assert "Worktrees: error" in str(app.query_one(".timeline-health", Static).content)
+            assert "unsupported provider capability" in str(app.query_one(".timeline-state", Static).content)
+            assert app.query_one(SubwayTimeline).size.height >= 16
+            panel.provider_notice(Provider.WORKTREES, None)
+            assert "error" not in str(app.query_one(".timeline-health", Static).content)
 
     asyncio.run(check())
 

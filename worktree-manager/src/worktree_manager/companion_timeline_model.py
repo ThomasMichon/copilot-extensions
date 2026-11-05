@@ -434,6 +434,20 @@ class TimelineWindow:
         self.revision += 1
         return self._result(False, ResultCode.SOURCE_ERROR, message)
 
+    def pause_source(self, token: SourceToken) -> WindowResult:
+        """Retain history without claiming an inactive reader failed or is current."""
+        state = self._source(token)
+        if state is None:
+            return self._result(False, ResultCode.STALE_TOKEN, "Pause belongs to a retired source.")
+        self.sources[token.identity.source_key] = replace(
+            state, availability=(
+                Availability.UNKNOWN if state.availability is Availability.OBSERVED
+                else state.availability
+            ), requested_before=None,
+        )
+        self.revision += 1
+        return WindowResult(True, ResultCode.APPLIED, "Reader paused; retained evidence is not current.")
+
     def apply_delta(self, delta: LiveDelta) -> WindowResult:
         state = self._source(delta.token)
         if state is None:

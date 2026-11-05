@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+from datetime import timezone
 from pathlib import Path
 import re
 from collections.abc import Callable
@@ -11,14 +12,16 @@ from collections.abc import Callable
 import pytest
 from rich.text import Text
 from textual.app import App, ComposeResult
-from textual.widgets import Select, Static
+from textual import events
+from textual.widgets import Collapsible, Select, Static, TabbedContent
 
 from worktree_manager.companion_timeline_contract import (
     ActorKind, Durability, LiveDelta, Provider, TimelineKind,
 )
 from worktree_manager.companion_timeline_model import TimelineWindow
 from worktree_manager.companion_timeline_widget import CompanionTimelinePanel, SubwayTimeline
-from worktree_manager.companion_summary import bridge_status
+from worktree_manager.companion_summary import bridge_status, current_input_text
+from worktree_manager.mux_companion import MuxCompanionApp, _CompanionData
 from worktree_manager.companion_bridge_current_requests import CurrentRequestState, decode_current_requests
 from _companion_timeline_fixtures import event, position, snapshot, token
 
@@ -41,18 +44,23 @@ class VisualApp(App[None]):
         self.theme = "textual-dark"
 
     def compose(self) -> ComposeResult:
+        yield CompanionTimelinePanel(self.window, source_controls=self.session)
+
+    def on_mount(self) -> None:
         if self.session:
-            yield Static(bridge_status(
+            self.query_one("#timeline-bridge-status", Static).update(bridge_status(
                 self.window, self.bridge_message or
                 "selected session: partial retained events; answerability unknown; membership discovery paused",
             ))
-            yield Select([
+            control = self.query_one(Select)
+            control.set_options([
                 ("Bridge feed: membership (discover delegates)", "membership"),
                 ("Session: helper-example (owned; reported link)", "session"),
-            ], value="session", allow_blank=False)
+            ])
+            control.value = "session"
         if self.current is not None:
-            yield Static(Text(self.current.summary()))
-        yield CompanionTimelinePanel(self.window)
+            self.query_one("#timeline-current-input", Static).update(Text(self.current.summary()))
+            self.query_one("#timeline-current-compact", Static).update(current_input_text(self.current))
 
 
 def visual_window() -> TimelineWindow:
@@ -113,7 +121,7 @@ def test_timeline_visual(
         session = state in {"session", "session-gap"} or state.startswith("current-")
         if session:
             membership = window.sources["bridge"].token
-            assert not window.source_error(membership, "Reader paused; retained evidence only.").applied
+            assert window.pause_source(membership).applied
             selected = replace(membership, identity=replace(membership.identity, source_key="bridge-session-example"))
             assert window.bind(selected).applied
             rows = (
@@ -132,6 +140,8 @@ def test_timeline_visual(
         )
         async with app.run_test(size=(100, 32)) as pilot:
             timeline = app.query_one(SubwayTimeline)
+            timeline.layout_index.timezone = timezone.utc
+            timeline._reflow(timeline.capture_anchor())
             timeline.focus()
             await pilot.pause()
             if state == "browsing":
@@ -156,6 +166,7 @@ def test_timeline_visual(
                     assert not timeline.source_error(
                         selected, gap_message,
                     ).applied
+                    app.query_one(Collapsible).collapsed = False
                     await pilot.pause()
             return offline_svg(app.export_screenshot())
 
@@ -163,5 +174,75 @@ def test_timeline_visual(
     record_property("sidecar-state", state)
     record_property("sidecar-svg", svg)
     baseline = BASELINES / f"timeline-{state}.svg"
+    assert baseline.is_file(), f"Review the JUnit sidecar-svg capture before adding {baseline.name}"
+    assert svg == baseline.read_text(encoding="utf-8")
+
+
+class FullVisualApp(MuxCompanionApp):
+    """Production chrome with fixed synthetic observations, not an owner integration."""
+
+    def on_mount(self, event: events.Mount) -> None:
+        event.prevent_default()
+        self._timeline_attachment.begin_close()
+        self._data = _CompanionData(
+            worktree={"id": "sample-work", "repo": "example", "branch": "worktree/sample", "state": "active"},
+            attention={"availability": "observed", "rest": "busy", "session_id": "sample-head",
+                       "reported_at": None}, attention_error=None,
+        )
+        self._loading = False
+        self._refresh_view(reload=False)
+        self._timeline_panel.replace_window(visual_window())
+        self.query_one("#timeline-agenda-status", Static).update("Rich Agenda: fixed synthetic operations")
+        self.query_one("#timeline-bridge-status", Static).update("Bridge: fixed synthetic membership evidence")
+        self.query_one("#views", TabbedContent).active = "timeline-tab"
+
+
+@pytest.mark.parametrize("state,size", [
+    ("full", (110, 40)), ("narrow", (60, 24)), ("fault", (60, 24)), ("evidence", (110, 40)),
+])
+def test_full_companion_visual(
+    state: str, size: tuple[int, int], record_property: Callable[[str, object], None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = []
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        calls.append((args, kwargs))
+        raise AssertionError("fixed presentation fixture attempted an owner read")
+
+    monkeypatch.setattr("worktree_manager.mux_companion._load_current_worktree", forbidden)
+    monkeypatch.setattr("worktree_manager.engine_client.run_json", forbidden)
+
+    async def capture() -> str:
+        app = FullVisualApp()
+        app.theme = "textual-dark"
+        async with app.run_test(size=size) as pilot:
+            await pilot.pause()
+            timeline = app.query_one(SubwayTimeline)
+            timeline.layout_index.timezone = timezone.utc
+            timeline._reflow(timeline.capture_anchor())
+            timeline.focus()
+            if state == "fault":
+                app._timeline_panel.provider_notice(Provider.WORKTREES, "Provider capability unavailable", failed=True)
+                app._action_message = Text("View switch failed: exact fixture failure")
+                app._refresh_view(reload=False)
+            if state == "evidence":
+                await pilot.click("CollapsibleTitle")
+            await pilot.pause()
+            assert not app.query_one("#status").display
+            assert timeline.size.height >= (10 if state == "fault" else 12 if state == "evidence" else size[1] // 2)
+            assert app.query_one(Collapsible).collapsed == (state != "evidence")
+            if state == "fault":
+                assert app.query_one("#timeline-action").region.height > 0
+                assert "Worktrees: error" in str(app.query_one(".timeline-health", Static).content)
+            assert app.screen.scroll_offset.y == 0
+            assert app.query_one("#footer-row").region.bottom <= size[1] - 1
+            assert not calls
+            return offline_svg(app.export_screenshot())
+
+    svg = asyncio.run(capture())
+    record_property("sidecar-state", "companion-" + state)
+    record_property("sidecar-svg", svg)
+    baseline = BASELINES / f"companion-{state}.svg"
     assert baseline.is_file(), f"Review the JUnit sidecar-svg capture before adding {baseline.name}"
     assert svg == baseline.read_text(encoding="utf-8")

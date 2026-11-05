@@ -6,9 +6,6 @@ import asyncio
 from collections.abc import Callable
 from typing import Any, Protocol
 
-from rich.text import Text
-from textual.widgets import Static
-
 from .agenda_contract import AgendaUnavailable
 from .companion_timeline_contract import (
     Availability, Completeness, HistoryPage, LiveDelta, MAX_WINDOW_BYTES, Provider, SourceToken,
@@ -93,12 +90,9 @@ class TimelineAttachment:
         )
         for selected in tokens:
             self.panel.source_error(selected, message)
+        self.panel.provider_notice(self.provider, message, failed=True)
         if self._status is not None:
             self._status(message)
-        if not tokens and self._status is None:
-            self.panel.query_one(".timeline-state", Static).update(Text(
-                "Timeline unavailable; history unknown. " + message,
-            ))
 
     @property
     def closed(self) -> bool:
@@ -193,8 +187,7 @@ class TimelineAttachment:
                 )
                 if self._status is not None:
                     self._status(getattr(source, "preparing_message", "loading selected owner observations"))
-                else:
-                    self.panel.query_one(".timeline-state", Static).update(Text("Loading selected owner observations."))
+                self.panel.provider_notice(self.provider, "Loading selected owner observations.")
                 initial = await source.prepare(revision, stop=stop)
                 if revision != self._revision or stop.is_set() or not self._renderable():
                     return
@@ -228,6 +221,7 @@ class TimelineAttachment:
                 result = self.panel.bind_source(initial.token)
                 if not result.applied:
                     raise TimelineSourceError(result.reason)
+                self.panel.provider_notice(self.provider, None)
 
                 def current() -> bool:
                     return (
