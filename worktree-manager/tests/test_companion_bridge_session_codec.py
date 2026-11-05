@@ -328,3 +328,85 @@ def test_invalid_utf8_reported_name_remains_an_explicit_wire_source_error(semant
     semantic.log.append("subagent_started", {"agent_display_name": "Compare\ud800options"})
     with pytest.raises(TimelineContractError, match="invalid UTF-8 text"):
         semantic.codec().decode(semantic.frame())
+
+
+def test_actual_reported_agents_have_distinct_stable_lanes_without_inferred_parentage(semantic) -> None:
+    from agent_bridge.acp_subagents import SubagentAttribution
+
+    attribution = SubagentAttribution(
+        semantic.log.append, lambda: True, lambda: "native-session",
+    )
+    semantic.log.append("tool_call_start", {"tool_call_id": "root-call", "title": "Plan work"})
+    for agent in ("child", "helper-b"):
+        attribution.handle_raw_event({
+            "sessionId": "native-session", "type": "subagent.started", "agentId": agent,
+            "data": {"agentDisplayName": "Compare options", "toolCallId": "launch-" + agent},
+        })
+    attribution.handle_raw_event({
+        "sessionId": "native-session", "type": "tool.execution_start", "agentId": "child",
+        "data": {"toolCallId": "child-call"},
+    })
+    semantic.log.append("tool_call_start", {
+        "tool_call_id": "child-call", "title": "Inspect changes",
+        **attribution.tool_call_fields(SimpleNamespace(tool_call_id="child-call", field_meta=None)),
+    })
+    codec, window = semantic.codec(), TimelineWindow()
+    frame = codec.decode(semantic.frame())
+    token = codec.token(frame, 1)
+    snapshot = codec.snapshot(frame, token)
+    root, first, second, tool = snapshot.events
+    assert root.actor.actor_id == "bridge-session:child"
+    assert first.actor.actor_id == "subagent:child"
+    assert second.actor.actor_id == "subagent:helper-b"
+    assert first.actor.label == second.actor.label == "Compare options"
+    assert all(event.actor.kind.value == "subagent" for event in (first, second, tool))
+    assert all(event.actor.qualification.value == "reported" for event in snapshot.events)
+    assert all(event.actor.reported_state is None for event in snapshot.events)
+    assert first.relations == second.relations == tool.relations == ()
+    assert json.loads(first.data_json)["details"]["parent_tool_call_id"] == "launch-child"
+    assert window.bind(token).applied and window.apply_snapshot(snapshot).applied
+    assert len({window.lane(event) for event in (root, first, second)}) == 3
+    assert window.lane(tool) == window.lane(first)
+    layout = TimelineLayout()
+    layout.rebuild(window, 120)
+    rows = [layout.row(block.start, window) for block in layout.blocks[:3]]
+    assert all(row is not None for row in rows)
+    assert len({layout.prefix(row, window) for row in rows}) == 3
+    replay = semantic.codec()
+    same = replay.decode(semantic.frame())
+    assert replay.events(same, token) == snapshot.events
+    lanes = {event.ref: window.lane(event) for event in snapshot.events}
+    attribution.handle_raw_event({
+        "sessionId": "native-session", "type": "subagent.completed", "agentId": "child", "data": {},
+    })
+    live = codec.decode(semantic.frame(position=frame["position"]))
+    completed, = codec.events(live, token)
+    assert completed.actor.actor_id == first.actor.actor_id
+    assert completed.actor.reported_state is None and not completed.relations
+    assert window.apply_delta(LiveDelta(
+        token, codec.position(token, live["base_position"]),
+        codec.position(token, live["position"]), (completed,),
+    )).applied
+    assert window.lane(completed) == window.lane(first)
+    assert {event.ref: window.lane(event) for event in snapshot.events} == lanes
+
+
+@pytest.mark.parametrize("kind,details", [
+    ("subagent_started", {"agent_display_name": "A name without identity"}),
+    ("subagent_completed", {"agent_id": ""}),
+    ("subagent_failed", {"agent_id": "bad\x00identity"}),
+    ("tool_call_start", {"agent_id": "bad\nidentity"}),
+    ("tool_call_update", {"agent_id": "\u754c" * 512}),
+    ("unknown_kind", {"agent_id": "helper", "agent_display_name": "Do not infer actor type"}),
+])
+def test_absent_invalid_or_unqualified_actor_metadata_stays_with_reporter(
+    semantic, kind: str, details: dict,
+) -> None:
+    semantic.log.append(kind, details)
+    codec = semantic.codec()
+    frame = codec.decode(semantic.frame())
+    event = codec.events(frame, codec.token(frame, 1))[0]
+    assert event.actor.kind.value == "bridge-session"
+    assert event.actor.actor_id == "bridge-session:child"
+    assert event.actor.label == "child" and event.actor.reported_state is None
+    assert frame["coverage"] == "partial" and frame["current_requests"] == "unknown"
