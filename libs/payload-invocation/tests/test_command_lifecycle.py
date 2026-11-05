@@ -216,6 +216,39 @@ def test_command_binding_pending_failure_keeps_owner_and_never_selects(binding_f
     assert all(after[path] == value for path, value in before.items() if path != ".")
 
 
+def test_worktrees_source_admission_requires_a_reserved_live_lifecycle(
+    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = binding_fixture
+    binding, primitive = fixture["binding"], fixture["primitive"]
+    for key, value in fixture["environment"].items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", raising=False)
+    monkeypatch.setitem(sys.modules, "command_binding", binding)
+    path = ROOT / "plugins/agent-worktrees/scripts/runtime_install_governance.py"
+    governance_module = _load(path, "_worktrees_source_governance")
+    governance = object.__new__(governance_module.Governance)
+    governance.context = ""
+    governance.root = fixture["legacy"]
+    governance.payload = fixture["payload"]
+    governance.project_root = None
+    governance.binding_options = {}
+    governance.helper = primitive
+    governance.recheck = lambda: None
+    lifecycle = binding._load_lifecycle()
+
+    with pytest.raises(governance_module.InstallationRefused, match="retained command lifecycle"):
+        governance.require_owned_lifecycle()
+    with lifecycle.legacy_lifecycle(binding._rules(), primitive, reserve=False, **fixture["arguments"]):
+        with pytest.raises(governance_module.InstallationRefused, match="pending lifecycle reservation"):
+            governance.require_owned_lifecycle()
+    with lifecycle.legacy_lifecycle(binding._rules(), primitive, **fixture["arguments"]):
+        governance.require_owned_lifecycle()
+        governance.require_owned_lifecycle(require_pending=False)
+    with pytest.raises(governance_module.InstallationRefused, match="retained command lifecycle"):
+        governance.require_owned_lifecycle()
+
+
 def test_command_binding_same_owner_retries_pending_and_completes(binding_fixture: dict) -> None:
     binding = binding_fixture["binding"]
     # Use the binding's loader so publication and admission share their context.

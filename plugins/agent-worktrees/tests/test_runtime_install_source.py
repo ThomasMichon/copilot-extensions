@@ -14,6 +14,7 @@ import pytest
 @pytest.mark.parametrize("outcome", [
     "accepted", "revoked", "foreign-owner", "artifact",
     "foreign-lock", "foreign-profile", "local-packages", "foreign-native",
+    "no-lifecycle", "lost-lifecycle",
 ])
 def test_source_adapter_retains_live_owner_through_native_install(tmp_path, monkeypatch, outcome):
     scripts = Path(__file__).resolve().parents[1] / "scripts"
@@ -91,6 +92,19 @@ def test_source_adapter_retains_live_owner_through_native_install(tmp_path, monk
         runtime_source=SimpleNamespace(manifest_fields=lambda _identity: {"identity": "selected"}),
     )
 
+    lifecycle_checks = []
+
+    def require_lifecycle(**_kwargs):
+        lifecycle_checks.append(True)
+        if outcome == "no-lifecycle":
+            raise ValueError("whole-operation lifecycle is missing")
+        if outcome == "lost-lifecycle" and len(lifecycle_checks) == 4:
+            raise ValueError("whole-operation lifecycle was lost")
+
+    native.Governance = lambda *_args, **_kwargs: SimpleNamespace(
+        require_owned_lifecycle=require_lifecycle,
+    )
+
     def install(actual_root, actual_source, **options):
         assert held == [True] and actual_root == root and actual_source == prepared
         assert options["payload"] == payload and options["wheel_inputs"] is wheels
@@ -125,7 +139,7 @@ def test_source_adapter_retains_live_owner_through_native_install(tmp_path, monk
     }
     if outcome in (
         "foreign-owner", "artifact", "foreign-lock", "foreign-profile",
-        "local-packages", "foreign-native",
+        "local-packages", "foreign-native", "no-lifecycle",
     ):
         with pytest.raises(ValueError):
             module.install_source_runtime(plan, **arguments)
@@ -134,6 +148,10 @@ def test_source_adapter_retains_live_owner_through_native_install(tmp_path, monk
         with pytest.raises(ValueError, match="source policy revoked"):
             module.install_source_runtime(plan, **arguments)
         assert events == ["verify", "verify", "helpers", "verify", "released"]
+    elif outcome == "lost-lifecycle":
+        with pytest.raises(ValueError, match="lifecycle was lost"):
+            module.install_source_runtime(plan, **arguments)
+        assert events == ["verify", "verify", "helpers", "released"]
     else:
         result = module.install_source_runtime(plan, **arguments)
         assert result["runtime_version"] == source.runtime_version

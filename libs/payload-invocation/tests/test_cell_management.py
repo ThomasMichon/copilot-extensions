@@ -49,6 +49,37 @@ def test_management_lease_borrows_exact_existing_locks(binding_fixture: dict, st
     assert all(not lock.path.exists() for lock in locks)
 
 
+def test_worktrees_source_admission_requires_live_cell_publication_custody(
+    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from test_command_binding import ROOT, _load
+
+    primitive = binding_fixture["primitive"]
+    root, arguments = _cell(binding_fixture, {})
+    for key, value in binding_fixture["environment"].items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.delenv(primitive.RUNTIME_PUBLICATION_ENV, raising=False)
+    module = _load(
+        ROOT / "plugins/agent-worktrees/scripts/runtime_install_governance.py",
+        "_worktrees_cell_source_governance",
+    )
+    governance = object.__new__(module.Governance)
+    governance.context = str(arguments["context"])
+    governance.payload = arguments["payload_root"]
+    governance.root = root
+    governance.durable_home = arguments["durable_home"]
+    governance.helper = primitive
+    governance.recheck = lambda: None
+    with pytest.raises(module.InstallationRefused, match="retained publication lifecycle"):
+        governance.require_owned_lifecycle()
+    with primitive.runtime_publication_lease(**arguments) as patch:
+        for key, value in patch.items():
+            monkeypatch.setenv(key, value)
+        governance.require_owned_lifecycle()
+    with pytest.raises(primitive.InstallationContextError):
+        governance.require_owned_lifecycle()
+
+
 @pytest.mark.parametrize("state", ["missing", "standalone", "managed"])
 def test_management_retains_active_cell_when_mode_policy_is_disabled(
     binding_fixture: dict, state: str,

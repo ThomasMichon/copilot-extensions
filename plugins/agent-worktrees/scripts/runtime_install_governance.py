@@ -133,6 +133,35 @@ class Governance:
         ):
             raise InstallationRefused("Installation receipt changed during construction")
 
+    def require_owned_lifecycle(self, *, require_pending: bool = True) -> None:
+        """Require the existing whole-operation owner, not a phase-local lock."""
+        self.recheck()
+        if self.context:
+            if not os.environ.get(self.helper.RUNTIME_PUBLICATION_ENV):
+                raise InstallationRefused("Source construction requires a retained publication lifecycle")
+            locks = self.helper.borrow_runtime_publication(
+                legacy_root=Path.home() / ".agent-worktrees", payload_root=self.payload,
+                plugin_id="agent-worktrees", durable_home=self.durable_home, context=self.context,
+            )
+            for lock in locks:
+                lock.assert_owned()
+            return
+        import command_binding as binding
+
+        arguments = {
+            "payload_root": self.payload, "plugin_id": "agent-worktrees",
+            "legacy_root": self.root, "project_root": self.project_root, **self.binding_options,
+        }
+        lifecycle = binding._load_lifecycle()
+        lease = lifecycle.borrowed_lease(binding._rules(), self.helper, **arguments)
+        if lease is None:
+            raise InstallationRefused("Source construction requires a retained command lifecycle")
+        lease.assert_owned()
+        if require_pending and lifecycle.incumbent_manifest(
+            binding._rules(), self.helper, arguments,
+        ).get("commandLifecycle") != {"version": 1, "state": "pending", "owner": lease.owner}:
+            raise InstallationRefused("Source construction requires the pending lifecycle reservation")
+
     def signature(self) -> dict:
         state, receipt = self.initial
         return {

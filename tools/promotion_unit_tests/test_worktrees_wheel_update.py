@@ -189,7 +189,9 @@ def test_source_wheel_profile_requires_its_live_owner(outcome):
         assert events == (["verified"] if outcome == "revoked" else [])
 
 
-@pytest.mark.parametrize("outcome", ["owned", "revoked", "foreign-native", "foreign-lock", "artifact"])
+@pytest.mark.parametrize("outcome", [
+    "owned", "revoked", "foreign-native", "foreign-lock", "artifact", "lost-lifecycle",
+])
 def test_source_adapter_rechecks_the_retained_owner(outcome, monkeypatch):
     scripts = ROOT / "plugins" / "agent-worktrees" / "scripts"
     identity = SimpleNamespace(plugin="agent-worktrees", document=lambda: {"source": "selected"})
@@ -242,6 +244,16 @@ def test_source_adapter_rechecks_the_retained_owner(outcome, monkeypatch):
     native.__file__ = str(scripts / ("foreign.py" if outcome == "foreign-native" else "runtime_install.py"))
     native.engine = engine
     native.runtime_source = SimpleNamespace(manifest_fields=lambda _identity: {"source": "selected"})
+    checks = []
+
+    def require_lifecycle(**_kwargs):
+        checks.append(True)
+        if outcome == "lost-lifecycle" and len(checks) == 4:
+            raise ValueError("lifecycle lost")
+
+    native.Governance = lambda *_args, **_kwargs: SimpleNamespace(
+        require_owned_lifecycle=require_lifecycle,
+    )
 
     def install(_root, _payload, **options):
         assert options["wheel_inputs"] is wheels
@@ -271,6 +283,56 @@ def test_source_adapter_rechecks_the_retained_owner(outcome, monkeypatch):
         assert adapter.install_source_runtime(plan, **arguments)["runtime_version"] == "selected"
         assert events == ["verify", "verify", "helpers", "verify", "selector", "verify"]
     assert not held
+
+
+@pytest.mark.parametrize("outcome", [
+    "missing", "unreserved", "reserved", "complete", "cell-missing", "cell-borrowed", "cell-lost",
+])
+def test_source_governance_requires_whole_operation_custody(outcome, monkeypatch):
+    scripts = ROOT / "plugins" / "agent-worktrees" / "scripts"
+    spec = importlib.util.spec_from_file_location(
+        "_worktrees_source_governance_unit", scripts / "runtime_install_governance.py",
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    governance = object.__new__(module.Governance)
+    governance.context = "cell" if outcome.startswith("cell-") else ""
+    governance.payload, governance.root = ROOT, ROOT
+    governance.project_root, governance.binding_options = None, {}
+    governance.durable_home = ROOT
+    governance.recheck = lambda: None
+    owner = {"identity": "selected"}
+    lease = SimpleNamespace(owner=owner, assert_owned=lambda: None)
+    state = "complete" if outcome == "complete" else "pending"
+    lifecycle = SimpleNamespace(
+        borrowed_lease=lambda *_args, **_kwargs: None if outcome == "missing" else lease,
+        incumbent_manifest=lambda *_args: {} if outcome == "unreserved" else {
+            "commandLifecycle": {"version": 1, "state": state, "owner": owner},
+        },
+    )
+    binding = SimpleNamespace(_load_lifecycle=lambda: lifecycle, _rules=lambda: None)
+    monkeypatch.setitem(sys.modules, "command_binding", binding)
+
+    def borrow(**_kwargs):
+        if outcome == "cell-lost":
+            raise ValueError("cell lease lost")
+        return (SimpleNamespace(assert_owned=lambda: None),)
+
+    governance.helper = SimpleNamespace(
+        RUNTIME_PUBLICATION_ENV="TEST_SOURCE_CELL_LEASE", borrow_runtime_publication=borrow,
+    )
+    if outcome in ("cell-borrowed", "cell-lost"):
+        monkeypatch.setenv("TEST_SOURCE_CELL_LEASE", "held")
+    else:
+        monkeypatch.delenv("TEST_SOURCE_CELL_LEASE", raising=False)
+    if outcome in ("reserved", "cell-borrowed"):
+        governance.require_owned_lifecycle()
+    else:
+        with pytest.raises((module.InstallationRefused, ValueError)):
+            governance.require_owned_lifecycle()
+    if outcome == "complete":
+        governance.require_owned_lifecycle(require_pending=False)
 
 
 @pytest.mark.parametrize("fault", ["", "target", "helper", "inside-runtime", "probe"])

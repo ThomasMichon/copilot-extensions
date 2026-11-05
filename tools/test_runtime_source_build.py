@@ -603,6 +603,7 @@ def test_worktrees_native_constructor_consumes_the_live_source_owner(
 
     monkeypatch.setattr(native, "Governance", lambda requested, selected: SimpleNamespace(
         root=requested, payload=selected, held=held, signature=lambda: {}, recheck=lambda: None,
+        require_owned_lifecycle=lambda **_kwargs: None,
     ))
     monkeypatch.setattr(native.runtime_source, "publish_source_snapshot", lambda selected, *_args: selected)
     real_candidate = native.engine.numbered_candidate

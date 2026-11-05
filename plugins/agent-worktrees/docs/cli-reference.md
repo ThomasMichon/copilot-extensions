@@ -1619,10 +1619,12 @@ selects or downloads a bundle automatically.
 The internal `runtime_install_source.install_source_runtime` adapter can pass
 the source builder's nested wheel binding directly to the native constructor
 while retaining the independently configured source and feed owner in the same
-process. It requires the selected base interpreter and rechecks that owner
-before construction and both publication boundaries. It does not turn a
-prepared packet into authority, connect ordinary updates, or resolve the
-pending-reservation rollback case.
+process. It requires the selected base interpreter and a live whole-operation
+command or cell-publication lease (including the pending legacy reservation),
+and rechecks both that lease and the source owner before construction and
+both publication boundaries. It does not turn a prepared packet into
+authority, connect ordinary updates, or resolve the pending-reservation
+rollback case.
 
 Omitting the option retains ordinary marketplace runtime delivery.
 This suite-only input cannot combine with target/authentication/inspection or

@@ -38,9 +38,17 @@ def install_source_runtime(plan, *, frontend=None, **options):
     payload = Path(installation["payload_root"]).resolve(strict=True)
     descriptor = installation.get("source_descriptor")
     deadline = options["deadline"]
+    governance = native.Governance(
+        root, payload, **({"source_descriptor": descriptor} if descriptor is not None else {}),
+    )
+    governance.require_owned_lifecycle()
     selected_options = {**options, "uv": str(uv), "python": python}
     with retain_source_runtime_inputs(plan, **selected_options) as source:
-        source.verify()
+        def verify():
+            governance.require_owned_lifecycle()
+            source.verify()
+
+        verify()
         receipt = source.wheels.receipt()
         binding = receipt["binding"]
         locked = binding.get("source_lock")
@@ -82,7 +90,8 @@ def install_source_runtime(plan, *, frontend=None, **options):
             wait_timeout=remaining, child_timeout=remaining,
             expected_source_identity=identity, frontend=frontend, wheel_inputs=source.wheels,
             source_descriptor=descriptor, expected_wheel_selection=selection,
-            _before_publish=source.verify,
+            _before_publish=verify,
         )
+        governance.require_owned_lifecycle(require_pending=False)
         source.verify()
         return result
