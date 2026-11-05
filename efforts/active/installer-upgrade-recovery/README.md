@@ -857,3 +857,22 @@ startup reconciles losing their worker with an SSH session; it is a candidate,
 not a claim or source change. Current source and overlapping ownership must
 be reconciled before selecting any migration, preserving the Python-free
 budget hook, source/action policy and existing execution owner.
+
+### 2026-11-05 - Bounded MCP first-use prerequisite proposed
+
+Broader first-use/bootstrap and matching-source reconciliation retains #9026's
+Dispatch recipe, #9448's first-foundation work, #7758's ordinary admission/
+recovery/coalescing owner and #4195's broader hook-spawn scope. The narrow
+[public scope note](https://github.com/ThomasMichon/copilot-extensions/issues/10499#issuecomment-6647379317)
+selects MCP's fixed `stamp`/`provision` prerequisite, not the whole five-plugin
+migration or live queue repair.
+
+The [MCP proposal](../source-managed-runtime-installs/mcp-first-use.md) extends
+the existing finite recipe roster through its canonical foundation and queue.
+Its actual initializer is `init`; borrowing another plugin's installer front
+or service flags would not preserve that contract. Review and merge the plan
+before source implementation, then qualify actual materialized native
+Windows/Linux construction, installed consumers and original-caller loss.
+Ordinary bootstrap adoption follows separately. No production code, runtime,
+queue, service or host state is changed by this proposal, and the parent
+remains Active.
