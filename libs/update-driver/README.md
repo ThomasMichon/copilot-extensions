@@ -837,6 +837,11 @@ retains the exact source/project and own context before running frozen inputs;
 it supplies no service or force override. Unsupported actions, selected
 snapshots, cells/custom roots, managed deployment, no-self/pinned and nested
 inputs refuse rather than fall back to another installer.
+Provision first invokes the frozen payload's canonical `Ensure-Uv`/`ensure_uv`
+helper under the same queue custody, then supplies its selected tool on PATH
+to the actual initializer. Acquisition failure stops before init; deferred
+stamp does not acquire UV. This avoids the legacy initializer's unavailable-UV
+fallthrough without adding another downloader or changing its constructor.
 Windows native lifetime admission retains the setup-owned Python prerequisite;
 absence is not permission to download another interpreter or reuse a compiled
 fallback. The manual `mcp-recipes` portfolio separates admission, materialized

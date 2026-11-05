@@ -918,3 +918,28 @@ larger test deadline would repair production construction. Preserve the actual
 failure and existing foundation owner; run the explicit Windows/Linux recipe
 portfolio against the candidate before merge. No constructor, queue, recovery
 policy or process deadline was changed to obtain a passing result.
+
+### 2026-11-05 - Hosted MCP cold path exposes missing UV handoff
+
+Draft #10574 published the actual candidate, not an accepted native result.
+Explicit run `41959758429` at `53b83d549022286da0abca0a26232ae808256af5`
+passed all admission/protocol/refusal and materialized stamp/prerequisite
+steps on Windows and Ubuntu. Both cold cases completed foundation and stamp,
+then failed during provision because the legacy MCP initializer lacked UV
+while its dependency-policy helper still required it. This is a real
+acquisition handoff gap, separate from the earlier local foundation timeout.
+
+Two focused regressions fail before the correction; the deferred-stamp
+negative control already passes. The recipe now invokes the frozen payload's
+existing canonical UV acquisition helper only for provision, supplies the
+selected tool on PATH and stops before init on acquisition failure. The actual
+MCP initializer, constructor, foundation, queue and deadlines are unchanged.
+All three queue/native-process controls pass in 43.39 seconds of pytest
+(74.31 seconds including preparation and cleanup). Eleven retained fixed
+first-use controls also pass in 66.24 seconds (108.98 total) on the first
+published head.
+
+The revised candidate still needs actual Windows/Linux cold construction,
+installed consumers and failed-candidate preservation, plus current-head CI
+and review. The draft stays held. Parent and ordinary publisher adoption,
+original-caller Job loss and affected-host recovery gates remain open.

@@ -2253,6 +2253,10 @@ stamp and Windows missing-setup-Python refusal use a separate 180-second item
 packet; cold construction/installed consumers use the existing 900-second item
 and 1080-second group envelope. Process, memory and 2 GiB storage caps remain
 unchanged; no matrix is added to required unit-only CI.
+Three queue/native-process controls separately verify canonical UV handoff for
+provision, acquisition failure before init and acquisition-free deferred stamp.
+Only their acquisition helper and installer bodies are synthetic; the cold
+materialized case retains actual acquisition and construction.
 
 The cold case retains the runner's containment, setup-provided Python
 prerequisite, private foundation/queue and actual MCP initializer. It loses the

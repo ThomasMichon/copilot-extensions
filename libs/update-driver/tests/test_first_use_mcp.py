@@ -106,6 +106,71 @@ def test_mcp_native_admits_own_recipe_before_source_comparison(owning_mcp, area,
     assert not root.exists() and not installation.exists()
 
 
+@pytest.mark.parametrize(("action", "acquisition_succeeds"), [
+    ("stamp", True), ("provision", True), ("provision", False),
+])
+def test_mcp_acquires_canonical_uv_only_for_provision(
+    owning_mcp, area, monkeypatch, action, acquisition_succeeds,
+):
+    from test_first_use_vault import cold_environment
+
+    payload, installation, project = owning_mcp
+    environment = cold_environment(installation, project, area, python_prerequisite=True)
+    for key, value in environment.items():
+        monkeypatch.setenv(key, value)
+    scripts = payload / "scripts"
+    (scripts / "installer-engine.ps1").write_text(
+        "function Ensure-Uv {\nparam([string]$InstallRoot)\n"
+        "[IO.File]::WriteAllText((Join-Path $InstallRoot 'uv-root'), $InstallRoot)\n"
+        + ("throw 'fixture acquisition failed'\n" if not acquisition_succeeds else
+           "$tool = Join-Path $InstallRoot 'tool'\n"
+           "[void][IO.Directory]::CreateDirectory($tool)\n"
+           "$uv = Join-Path $tool 'uv.cmd'\n"
+           "[IO.File]::WriteAllText($uv, \"@echo fixture-uv`r`n\")\n"
+           "return $uv\n")
+        + "}\n", encoding="utf-8",
+    )
+    (scripts / "installer-engine.sh").write_text(
+        "ensure_uv() {\nprintf '%s' \"$1\" >\"$1/uv-root\"\n"
+        + ("printf 'fixture acquisition failed\\n' >&2; return 37\n" if not acquisition_succeeds else
+           "mkdir -p \"$1/tool\"\n"
+           "printf '#!/bin/sh\\necho fixture-uv\\n' >\"$1/tool/uv\"\n"
+           "chmod 700 \"$1/tool/uv\"\nprintf '%s\\n' \"$1/tool/uv\"\n")
+        + "}\n", encoding="utf-8",
+    )
+    (scripts / "init.ps1").write_text(
+        "param([string]$Action,[string]$InstallDir)\n$ErrorActionPreference = 'Stop'\n"
+        "[IO.File]::WriteAllText((Join-Path $InstallDir 'init-entered'), $Action)\n"
+        "if ($Action -eq 'provision') {\n"
+        "  $used = & uv --version\n"
+        "  [IO.File]::WriteAllText((Join-Path $InstallDir 'used-uv'), \"$used\")\n}\n"
+        "exit 0\n", encoding="utf-8",
+    )
+    (scripts / "init.sh").write_text(
+        '#!/usr/bin/env bash\nset -eu\n'
+        'printf "%s" "$1" >"$3/init-entered"\n'
+        'if [[ "$1" == provision ]]; then uv --version >"$3/used-uv"; fi\n',
+        encoding="utf-8",
+    )
+    root = area / "queue"
+    request = provision.enqueue(payload, installation, project, root=root, installer_action=action)
+    drain(root=root)
+    result = status(request.id, root=root)
+    assert result.state == "completed", result.log_path.read_text()
+    if action == "stamp":
+        assert result.exit_code == 0, result.log_path.read_text()
+        assert not (installation / "uv-root").exists()
+    else:
+        assert (installation / "uv-root").read_text() == str(installation)
+        if acquisition_succeeds:
+            assert result.exit_code == 0, result.log_path.read_text()
+            assert (installation / "used-uv").read_text().strip() == "fixture-uv"
+        else:
+            assert result.exit_code != 0
+            assert "fixture acquisition failed" in result.log_path.read_text()
+            assert not (installation / "init-entered").exists()
+
+
 @pytest.mark.parametrize("native", [False, True])
 @pytest.mark.parametrize("reason", [
     "installer", "dispatcher", "copy", "custom-root", "cell", "managed", "no-self",

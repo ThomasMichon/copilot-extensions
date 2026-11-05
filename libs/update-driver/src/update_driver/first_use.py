@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import importlib.util
 import json
 import os
@@ -553,6 +554,28 @@ def _run_installer(
             installer_action, "-InstallDir", str(runtime_root),
             *(("-NoService",) if client_only else ()),
         ]
+        if plugin_id == "agent-mcp" and installer_action == "provision":
+            data = base64.b64encode(json.dumps({
+                "payload": str(payload), "runtime": str(runtime_root),
+            }).encode("utf-8")).decode("ascii")
+            command = """
+$ErrorActionPreference = 'Stop'
+$c = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__CONFIG__')) | ConvertFrom-Json
+function Write-Ok([string]$Text) { [Console]::Out.WriteLine($Text) }
+function Write-Step([string]$Text) { [Console]::Out.WriteLine($Text) }
+function Write-Fail([string]$Text) { [Console]::Error.WriteLine($Text) }
+. (Join-Path $c.payload 'scripts\\installer-engine.ps1')
+$uv = Ensure-Uv -InstallRoot $c.runtime
+if (-not $uv) { throw 'Canonical MCP UV acquisition failed.' }
+$env:PATH = [IO.Path]::GetDirectoryName($uv) + ';' + $env:PATH
+& (Join-Path $c.payload 'scripts\\init.ps1') provision -InstallDir $c.runtime
+exit $LASTEXITCODE
+""".replace("__CONFIG__", data)
+            argv = [
+                str(shell), "-NoLogo", "-NoProfile", "-NonInteractive",
+                "-ExecutionPolicy", "Bypass", "-EncodedCommand",
+                base64.b64encode(command.encode("utf-16-le")).decode("ascii"),
+            ]
     elif sys.platform.startswith("linux"):
         shell = shutil.which("bash")
         if shell is None:
@@ -562,6 +585,18 @@ def _run_installer(
             installer_action, "--install-dir", str(runtime_root),
             *(("--no-service",) if client_only else ()),
         ]
+        if plugin_id == "agent-mcp" and installer_action == "provision":
+            command = """
+set -eu
+_step() { printf '%s\\n' "$*" >&2; }
+_ok() { printf '%s\\n' "$*" >&2; }
+_fail() { printf '%s\\n' "$*" >&2; }
+source "$1/scripts/installer-engine.sh"
+uv="$(ensure_uv "$2")" || exit "$?"
+export PATH="$(dirname -- "$uv"):$PATH"
+exec "$BASH" "$1/scripts/init.sh" provision --install-dir "$2"
+"""
+            argv = [shell, "-c", command, "mcp-first-use", str(payload), str(runtime_root)]
     else:
         raise ProvisionError("native plugin provision execution is not qualified on this platform")
     if plugin_id == "agent-logger":
