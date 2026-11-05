@@ -73,6 +73,10 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     old_cli, old_provider = tmp_path / "old-current-cli", tmp_path / "old-current-provider"
     declaration_override, reject_flag = tmp_path / "cli-declaration.json", tmp_path / "reject-current-flag"
     refusal_version = tmp_path / "refusal-version.json"
+    old_statistics_cli = tmp_path / "old-statistics-cli"
+    old_statistics_provider = tmp_path / "old-statistics-provider"
+    reject_statistics = tmp_path / "reject-statistics-flag"
+    invocations = tmp_path / "invocations.jsonl"
     owner_loop = asyncio.new_event_loop()
     owner_thread = Thread(target=owner_loop.run_forever)
     owner_thread.start()
@@ -153,6 +157,7 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     script.write_text(
         f"#!{sys.executable} -I\n"
         "import argparse,json,os,socket,sys,types\n"
+        f"with open({str(invocations)!r},'a') as log: log.write(json.dumps(sys.argv[1:])+'\\n')\n"
         f"sys.path[:0]={[str(path) for path in paths]!r}\n"
         "core=types.ModuleType('agent_bridge.__main__')\n"
         "sys.modules['agent_bridge.__main__']=core\n"
@@ -166,7 +171,9 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         f"**({{}} if os.path.exists({str(unsupported)!r}) else "
         "{'bridge-session-observations-v1':1,'bridge-session-observation-history-v1':1}),"
         f"**({{}} if os.path.exists({str(old_provider)!r}) else "
-        "{'bridge-session-current-requests-v1':1})}}\n"
+        "{'bridge-session-current-requests-v1':1}),"
+        f"**({{}} if os.path.exists({str(old_statistics_provider)!r}) else "
+        "{'bridge-session-tool-statistics-v1':1})}}\n"
         "    def _stream_sse(self,path,*,request_timeout,stream_factory):\n"
         f"        peer=socket.create_connection(('127.0.0.1',{listener.getsockname()[1]}),timeout=2)\n"
         "        peer.settimeout(15)\n"
@@ -190,12 +197,15 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "def version(args):\n"
         "    body=cli_contracts()\n"
         f"    if os.path.exists({str(old_cli)!r}): body['contracts'].pop('bridge-session-current-requests-v1')\n"
+        f"    if os.path.exists({str(old_statistics_cli)!r}): body['contracts'].pop('bridge-session-tool-statistics-v1')\n"
         f"    if os.path.exists({str(declaration_override)!r}): body=json.load(open({str(declaration_override)!r}))\n"
         "    print(json.dumps(body,indent=2))\n"
         "ver=sub.add_parser('version'); ver.add_argument('--contracts-json',action='store_true')\n"
         "ver.set_defaults(func=version)\n"
         f"if os.path.exists({str(reject_flag)!r}) and '--current-requests' in sys.argv:\n"
         "    parser.error('unrecognized arguments: --current-requests')\n"
+        f"if os.path.exists({str(reject_statistics)!r}) and '--tool-statistics' in sys.argv:\n"
+        "    parser.error('unrecognized arguments: --tool-statistics')\n"
         "args=parser.parse_args()\n"
         f"if args.command=='observe-session' and args.current_requests and os.path.exists({str(refusal_version)!r}):\n"
         "    print(json.dumps({'schema':'bridge-session-observations-v1',"
@@ -215,6 +225,8 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "owner_loop": owner_loop, "old_cli": old_cli, "old_provider": old_provider,
         "declaration_override": declaration_override, "reject_flag": reject_flag,
         "refusal_version": refusal_version,
+        "old_statistics_cli": old_statistics_cli, "old_statistics_provider": old_statistics_provider,
+        "reject_statistics": reject_statistics, "invocations": invocations,
         "failures": failures,
     }
     try:
