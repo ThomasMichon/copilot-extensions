@@ -564,13 +564,13 @@ def _resolve(p: str, cwd: str) -> str:
 
 # --- Break-glass (persisted allow-edits.json) ---------------------------------
 
-def active_break_glass(repo_name: str, home: Path) -> bool:
+def active_break_glass(repo_name: str, home: Path, *, registry_root: Path | None = None) -> bool:
     """Honor a persisted ``allow-edits`` grant for the repo (epoch-ms)."""
     if not repo_name:
         return False
     try:
         data = json.loads(
-            (home / ".agent-worktrees" / "allow-edits.json").read_text("utf-8"))
+            ((registry_root or home / ".agent-worktrees") / "allow-edits.json").read_text("utf-8"))
         g = (data.get("grants") or {}).get(repo_name)
         return bool(g) and float(g.get("expires_at_ms", 0)) > time.time() * 1000
     except (OSError, ValueError, TypeError, KeyError):
@@ -957,11 +957,12 @@ def decide(payload: dict, *, env=None, home=None,
         return None  # reads / everything else: fast allow
 
     cwd = str(payload.get("cwd") or "")
+    override = env.get("AGENT_HOME", "").strip()
+    legacy_home = Path(os.path.abspath(override)) if override else home
+    registry_root = resolve_registry_root(
+        legacy_root=legacy_home / ".agent-worktrees", environment=env,
+    )
     if anchors is None:
-        registry_root = resolve_registry_root(
-            legacy_root=home / ".agent-worktrees",
-            environment=env,
-        )
         anchors = load_worktree_anchors(registry_root)
     if not anchors:
         return None
@@ -972,7 +973,7 @@ def decide(payload: dict, *, env=None, home=None,
         hit = evaluate(tool, args, cwd, anchors)
         if hit is None:
             return None
-        if not active_break_glass(hit.get("name", ""), home):
+        if not active_break_glass(hit.get("name", ""), home, registry_root=registry_root):
             return _hit_to_output(hit, mode)
         anchors = [row for row in anchors if row.get("name") != hit.get("name")]
     return None

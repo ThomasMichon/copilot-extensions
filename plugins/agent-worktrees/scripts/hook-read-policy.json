@@ -2,9 +2,9 @@
   "schema": "agent-worktrees.native-read-policy",
   "version": 1,
   "guards": {
-    "statelessness_guard.py": "4770f20b699224e82554604c37f88822d2c6203a4931ea80f9478e462035f10c",
-    "cross_repo_guard.py": "fbbdab9f7cd6958b2940511c5fa5056cb2cc058df7ed66a15516265c565cf1e9",
-    "anchor_write_guard.py": "684e943573805fbfb86251e2260e85e7d8cdcdfb84e6c9a3f0b5688919d5bf3e",
+    "statelessness_guard.py": "b126e1ef0fc96d93476b8b25ae471b3e14034d0a31184f88ef958b0f1255f02b",
+    "cross_repo_guard.py": "7be8f494ff74c1abe92c3fc01a7830b12abd225eb6812715646fd884d5f6f83f",
+    "anchor_write_guard.py": "43b34807a331a3d1c944494f73b67692d6909aa89241878a2ac56edf9ae0195b",
     "pr_supersede_guard.py": "405514834a48658e8006ee226d838a4305a70eff0d539ab274670c21013bf140"
   }
 }

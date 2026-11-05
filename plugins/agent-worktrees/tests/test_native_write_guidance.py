@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -77,3 +79,79 @@ def test_unknown_batch_shape_reports_unavailable_without_a_deny(tmp_path, monkey
     )
     assert "permissionDecision" not in result
     assert "native tool batch is invalid" in result["additionalContext"]
+
+
+def test_native_batch_does_not_accept_empty_legacy_monitor_decision(tmp_path, monkeypatch):
+    client, forms, guard = (load(name) for name in ("hook_client", "tool_call_forms", "cross_repo_guard"))
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    target = tmp_path / "target"
+    target.mkdir()
+    roots = [{"name": "target", "path": str(target), "delegate": "agent-bridge"}]
+    calls = []
+
+    def monitor(*args):
+        calls.append(args)
+        return {}
+
+    def sibling(name):
+        if name == "tool_call_forms.py":
+            return forms
+        if name == "cross_repo_guard.py":
+            return SimpleNamespace(decide=lambda event, *, home, deadline: guard.decide(
+                event, env={}, home=home, guarded_roots=roots,
+            ))
+        return SimpleNamespace(decide=lambda *a, **k: None, needs_observations=lambda *a: False)
+
+    monkeypatch.setattr(client, "_request", monitor)
+    monkeypatch.setattr(client, "_load_sibling", sibling)
+    event = {"cwd": str(tmp_path), "toolCalls": [{
+        "name": "apply_patch", "args": (
+            f"*** Begin Patch\n*** Update File: {target / 'source.py'}\n*** End Patch\n"
+        ),
+    }]}
+    assert client.decide("preToolUse", event, home=tmp_path)["permissionDecision"] == "deny"
+    assert calls == []
+    assert client.decide("preToolUse", {
+        "cwd": str(tmp_path), "toolName": "edit", "toolArgs": {"path": "source.py"},
+    }, home=tmp_path) == {}
+    assert len(calls) == 1
+
+
+def test_composed_guards_consume_selected_grant_and_revocation(tmp_path, monkeypatch):
+    from agent_worktrees import allow_edits
+
+    policy = load("hook_pre_policy")
+    client = load("hook_client")
+    root = tmp_path / "harness"
+    (root / ".git").mkdir(parents=True)
+    (root / ".agent-worktrees").mkdir()
+    (root / ".agent-worktrees" / "config.yaml").write_text("stateless: true\n")
+    selected_home = tmp_path / "selected"
+    registry = selected_home / ".agent-worktrees"
+    registry.mkdir(parents=True)
+    (registry / "repos.yaml").write_text(
+        "repos:\n  harness:\n    class: worktree\n"
+        + f"    {'windows' if os.name == 'nt' else 'linux'}: {json.dumps(str(root))}\n"
+    )
+    monkeypatch.setenv("AGENT_HOME", str(selected_home))
+    monkeypatch.delenv("CROSS_REPO_GUARD", raising=False)
+    monkeypatch.setenv("CROSS_REPO_GUARD_MODE", "off")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    for key in ("ANCHOR_WRITE_GUARD", "ANCHOR_WRITE_GUARD_MODE", "AGENT_WORKTREES_STATELESS_GUARD"):
+        monkeypatch.delenv(key, raising=False)
+    event = {"cwd": str(root), "toolName": "apply_patch", "toolArgs": (
+        f"*** Begin Patch\n*** Add File: {root / 'efforts' / 'note.md'}\n*** End Patch\n"
+    )}
+
+    def decide():
+        return policy.decide(
+            event, home=tmp_path, load_sibling=client._load_sibling,
+            merge_decisions=client._merge_pre_decisions, budget_seconds=25,
+        )
+
+    assert decide()["permissionDecision"] == "deny"
+    allow_edits.grant("harness", "isolated composed consumer validation", 10)
+    assert decide().get("permissionDecision") is None
+    assert not (tmp_path / ".agent-worktrees" / "allow-edits.json").exists()
+    assert allow_edits.revoke("harness")
+    assert decide()["permissionDecision"] == "deny"

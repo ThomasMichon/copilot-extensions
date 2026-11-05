@@ -106,7 +106,7 @@ def _posture_rows(registry, reader) -> tuple[list[dict], list[str]]:
             unavailable.append(name)
             continue
         identity = reader.repository_identity(path)
-        if identity is None:
+        if identity is None or identity["root"] != reader.canonical(path):
             unavailable.append(name)
             continue
         rows.append({

@@ -1526,14 +1526,8 @@ def write_projects_registry(registry: dict, path: Path | None = None) -> None:
                 else:
                     lines.append(f"    {k}: {_format_yaml_value(v)}")
         lines.append("")
-    from .pr_authority import write_registry
-    content = "\n".join(lines) + "\n"
-    if path == projects_yaml_path():
-        from .guarded_anchors import managed_write
-
-        managed_write(lambda: write_registry(path, content))
-    else:
-        write_registry(path, content)
+    from .projects_registry import write_projects_document
+    write_projects_document(path, "\n".join(lines) + "\n", managed=path == projects_yaml_path())
 
 
 def require_project_hosting(project: str, repo_dir: Path | str | None = None) -> None:

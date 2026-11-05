@@ -146,6 +146,34 @@ def test_grant_for_first_patch_target_does_not_allow_second_repo(tmp_path, guard
     assert "'other'" in decision["permissionDecisionReason"]
 
 
+@pytest.mark.parametrize("tool", ["apply_patch", "powershell"])
+@pytest.mark.parametrize("weak_mode", ["warn", "ask"])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_strongest_target_policy_wins_across_target_order(tmp_path, guarded, tool, weak_mode, reverse):
+    other = tmp_path / "read-only"
+    other.mkdir()
+    roots = [
+        {**guarded[0], "delegate": "none", "posture": "worktree"},
+        {**guarded[0], "name": "read-only", "path": str(other),
+         "delegate": "none", "posture": "reference"},
+    ]
+    paths = [Path(roots[0]["path"]) / "one.py", other / "two.py"]
+    if reverse:
+        paths.reverse()
+    args = (
+        "*** Begin Patch\n" + "".join(f"*** Update File: {path}\n" for path in paths)
+        + "*** End Patch\n"
+        if tool == "apply_patch" else
+        {"command": "; ".join(f'Set-Content "{path}" "value"' for path in paths)}
+    )
+    decision = guard.decide(
+        {"toolName": tool, "cwd": str(tmp_path), "toolArgs": args},
+        env={"ANCHOR_WRITE_GUARD_MODE": weak_mode}, home=tmp_path, guarded_roots=roots,
+    )
+    assert decision["permissionDecision"] == "deny"
+    assert "'read-only'" in decision["permissionDecisionReason"]
+
+
 @pytest.mark.parametrize(("posture", "phrase"), [
     ("reference", "read-only"), ("worktree", "linked worktree"),
     ("elevated", "elevated execution venue"),

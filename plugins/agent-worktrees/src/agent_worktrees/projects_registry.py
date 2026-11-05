@@ -89,3 +89,15 @@ def parse_projects_registry(path: Path) -> dict:
 
 
 _ORIGINAL_PROJECTS_PARSER = parse_projects_registry
+
+
+def write_projects_document(path: Path, content: str, *, managed: bool) -> None:
+    """Refresh prepared guard facts only for the selected project registry."""
+    from .pr_authority import write_registry
+
+    if managed:
+        from .guarded_anchors import managed_write
+
+        managed_write(lambda: write_registry(path, content))
+    else:
+        write_registry(path, content)

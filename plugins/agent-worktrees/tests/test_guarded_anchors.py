@@ -989,6 +989,24 @@ def test_project_posture_changes_refresh_prepared_facts(producer, monkeypatch):
     assert next(row for row in after.postures if row["name"] == "second")["elevated"]
 
 
+def test_supplemental_subdirectory_does_not_poison_confirmed_roots(producer, monkeypatch):
+    from agent_worktrees import repos
+
+    p = producer
+    nested = p.callers[1] / "subdirectory"
+    nested.mkdir()
+    p.registry.repos["second"].repo_class = "reference"
+    original = repos.registered_entry_root
+    monkeypatch.setattr(repos, "registered_entry_root", lambda entry: (
+        nested if entry.name == "second" else original(entry)
+    ))
+    p.module.refresh(p.callers, registry_root=p.root)
+    result = p.reader.read_map(p.callers[0], p.root)
+    assert result.status == "ready" and result.roots[0]["name"] == "target"
+    assert result.posture_errors == ["second"]
+    assert not any(row["name"] == "second" for row in result.postures)
+
+
 @pytest.mark.parametrize("consumer", ["hook", "withdraw", "refresh"])
 def test_nonregular_map_is_rejected_by_every_reader(producer, monkeypatch, consumer):
     p = producer

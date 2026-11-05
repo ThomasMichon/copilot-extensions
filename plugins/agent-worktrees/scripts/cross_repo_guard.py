@@ -365,7 +365,8 @@ def _posture_mode(row: dict, env, default: str) -> str:
 
 # --- Core evaluation ----------------------------------------------------------
 
-def _shell_hit(cmd: str, cwd: str, guarded: list[dict], *, tool: str = "shell") -> dict | None:
+def _shell_hit(cmd: str, cwd: str, guarded: list[dict], *, tool: str = "shell",
+               identity_cache: dict | None = None) -> dict | None:
     """Return a guarded-repo hit for a shell command that WRITES into a guarded
     repo, or None. Fires only on a real write target (redirect target /
     command-position write verb argument / git mutation via ``-C <repo>`` or the
@@ -374,7 +375,7 @@ def _shell_hit(cmd: str, cwd: str, guarded: list[dict], *, tool: str = "shell") 
     if not _shell_may_write(cmd, tool):
         return None
     eff_cwd = cwd
-    identity_cache = {}
+    identity_cache = identity_cache if identity_cache is not None else {}
     for seg in _SHELL_SEP.split(cmd):
         seg_hay = os.path.normcase(seg.replace("/", os.sep)) if _IS_WIN else seg
         eff = _effective_seg(seg)
@@ -406,12 +407,13 @@ def _shell_hit(cmd: str, cwd: str, guarded: list[dict], *, tool: str = "shell") 
     return None
 
 
-def evaluate(tool: str, args: dict, cwd: str, guarded: list[dict]) -> dict | None:
+def evaluate(tool: str, args: dict, cwd: str, guarded: list[dict],
+             *, identity_cache: dict | None = None) -> dict | None:
     """Return the guarded repo hit (with a ``reason``), or None to allow."""
     if not guarded or _guard_map is None:
         return None
     if tool in WRITE_TOOLS:
-        identity_cache = {}
+        identity_cache = identity_cache if identity_cache is not None else {}
         for raw in write_targets(tool, args):
             abs_path = _resolve(raw, cwd)
             for g in guarded:
@@ -423,7 +425,7 @@ def evaluate(tool: str, args: dict, cwd: str, guarded: list[dict]) -> dict | Non
         cmd = _pick(args, CMD_ARG_KEYS)
         if not cmd:
             return None
-        return _shell_hit(cmd, cwd, guarded, tool=tool)
+        return _shell_hit(cmd, cwd, guarded, tool=tool, identity_cache=identity_cache)
     return None
 
 
@@ -487,15 +489,16 @@ def decide(payload: dict, *, env=None, home=None,
             if row.get("delegate") != "none" or row.get("posture")
             or row.get("elevated") and not elevated
         ]
-    guarded = [row for row in guarded if _posture_mode(row, env, mode) != "off"]
-
-    while guarded:
-        hit = evaluate(tool, args, cwd, guarded)
-        if hit is None:
-            return None
-        if not active_break_glass(hit.get("name", ""), home, registry_root=selected_root):
-            return _hit_to_output(hit, _posture_mode(hit, env, mode))
-        guarded = [row for row in guarded if row.get("name") != hit.get("name")]
+    identity_cache = {}
+    for decision_mode in ("deny", "ask", "warn"):
+        candidates = [row for row in guarded if _posture_mode(row, env, mode) == decision_mode]
+        while candidates:
+            hit = evaluate(tool, args, cwd, candidates, identity_cache=identity_cache)
+            if hit is None:
+                break
+            if not active_break_glass(hit.get("name", ""), home, registry_root=selected_root):
+                return _hit_to_output(hit, decision_mode)
+            candidates = [row for row in candidates if row.get("name") != hit.get("name")]
     return None
 
 
