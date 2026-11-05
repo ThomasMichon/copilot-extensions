@@ -14,6 +14,20 @@ from . import _peer_launch
 FIELDS = {"vault", "group", "enabled"}
 
 
+def service_configuration_root(cwd: str | None = None) -> str:
+    """Capture a native owner's stable base before a resident changes cwd."""
+    from .config import configuration_root
+
+    root = Path(configuration_root(cwd))
+    if not root.is_absolute() or not root.is_dir():
+        raise ConfigurationError("service configuration root must be an existing absolute directory")
+    report = owner_report(root)
+    selected = context_from_owner(report)["base_root"] if report is not None else str(root)
+    if any(ord(character) < 32 for character in selected):
+        raise ConfigurationError("service configuration root contains control characters")
+    return selected
+
+
 def _legacy_report(root: Path) -> dict | None:
     from .config import home_dir
 
@@ -119,7 +133,9 @@ def _ordinary(raw: dict) -> dict:
 
 
 def compose_preferences(cwd, repo_data: dict, global_data: dict, ext_data: dict) -> dict | None:
-    report = owner_report(Path(cwd or os.getcwd()).resolve())
+    from .config import configuration_root
+
+    report = owner_report(Path(configuration_root(cwd)).resolve())
     if report is None:
         return None
     context = context_from_owner(report)
@@ -174,8 +190,9 @@ def compose_preferences(cwd, repo_data: dict, global_data: dict, ext_data: dict)
 
 def runtime_enabled(cwd: str | None = None) -> bool:
     """Resolve explicit runtime opt-in without loading extensions or a backend."""
-    from .config import _discover_repo_config, _validate_config_data, load_global_config
+    from .config import _discover_repo_config, _validate_config_data, configuration_root, load_global_config
 
+    cwd = configuration_root(cwd)
     _, repository = _discover_repo_config(cwd, strict=True)
     machine = load_global_config(strict=True)
     _validate_config_data(repository, "repository vault configuration")

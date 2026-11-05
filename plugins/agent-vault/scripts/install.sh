@@ -844,6 +844,13 @@ _install_service() {
         )" || handoff_json=""
     fi
 
+    service_configuration_root="$("$LINK_PYTHON" -I -c \
+        'import sys; from agent_vault.configuration import service_configuration_root; print(service_configuration_root(sys.argv[1]))' \
+        "${COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT:-$PWD}")" || return 1
+    service_configuration_root="${service_configuration_root//\\/\\\\}"
+    service_configuration_root="${service_configuration_root//\"/\\\"}"
+    service_configuration_root="${service_configuration_root//%/%%}"
+    service_configuration_root="${service_configuration_root//\$/\$\$}"
     if ! cat > "$unit_tmp" << EOF
 [Unit]
 Description=agent-vault -- local KeePassXC-backed secret store
@@ -864,7 +871,7 @@ Environment=AGENT_VAULT_SYSTEMD_UNIT=$SYSTEMD_UNIT
 Environment=AGENT_VAULT_TASK_NAME=AgentVault${SERVICE_SUFFIX:+-$SERVICE_SUFFIX}
 Environment=AGENT_VAULT_INSTALLATION_ID=$INSTALLATION_ID
 $PORT_ENV_LINE
-ExecStart=$LINK_PYTHON -X "pycache_prefix=$INSTALL_DIR/cache/python/unsealed-\${INVOCATION_ID}" -m agent_vault.service --foreground --persistent --handoff-stdin
+ExecStart=$LINK_PYTHON -X "pycache_prefix=$INSTALL_DIR/cache/python/unsealed-\${INVOCATION_ID}" -m agent_vault.service --foreground --persistent --handoff-stdin --configuration-root "$service_configuration_root"
 Restart=on-failure
 RestartSec=5
 WorkingDirectory=$INSTALL_DIR

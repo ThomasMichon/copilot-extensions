@@ -139,7 +139,7 @@ def test_actual_payload_reader_uses_bundled_sdk_without_site_packages(tmp_path):
     assert json.loads(result.stdout)["state"] == "configured"
 
 
-@pytest.mark.parametrize("layout", ["retained", "application", "deployed", "mixed-owner"])
+@pytest.mark.parametrize("layout", ["retained", "application", "deployed", "mixed-owner", "service-cwd"])
 def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, layout):
     import venv
 
@@ -176,13 +176,27 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, lay
         (slot.parent.parent / "current-version").write_text("1.0.0", encoding="utf-8")
     installed = packages["agent-vault"] / "agent_vault"
     installed.mkdir()
-    for name in ("__init__.py", "config.py", "configuration.py", "_peer_launch.py"):
+    for name in ("__init__.py", "config.py", "configuration.py", "configuration_scope.py", "_peer_launch.py"):
         shutil.copyfile(PLUGIN / "src" / "agent_vault" / name, installed / name)
+    if layout == "service-cwd":
+        shutil.copytree(
+            PLUGIN / "src" / "agent_vault", installed, dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("__pycache__"),
+        )
     for package in (agent_procutil, configuration_context, configuration_layers):
         shutil.copytree(
             Path(package.__file__).parent, packages["agent-vault"] / package.__name__,
             ignore=shutil.ignore_patterns("__pycache__"),
         )
+    if layout == "service-cwd":
+        import importlib
+
+        for name in ("zdd", "single_instance_lease", "update_driver"):
+            package = importlib.import_module(name)
+            shutil.copytree(
+                Path(package.__file__).parent, packages["agent-vault"] / name,
+                ignore=shutil.ignore_patterns("__pycache__"),
+            )
     if layout not in ("deployed", "mixed-owner"):
         bootstrap = slots["agent-vault"] / ".runtime-bootstrap"
         bootstrap.mkdir()
@@ -231,6 +245,27 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, lay
         "selected = resolve_context(sys.argv[1], strict=True)\n"
         "print(json.dumps({'enabled': enabled, 'group': selected.group}))\n"
     )
+    if layout == "service-cwd":
+        reader = (
+            "import json, os, sys\nfrom pathlib import Path\n"
+            "from agent_vault import service, config, configuration, launch\n"
+            "state = Path.cwd()\nproject = sys.argv[1]\n"
+            "captured = {}\n"
+            "def capture(argv, **kwargs):\n"
+            " captured.update(argv=argv, **kwargs)\n"
+            "launch.spawn_daemon = capture\n"
+            "os.chdir(project)\n"
+            "launch.spawn_service(['--foreground'])\n"
+            "assert captured['cwd'] == state\n"
+            "os.chdir(state)\n"
+            "def probe(args):\n"
+            " assert Path.cwd() == state\n"
+            " selected = config.resolve_context(strict=True)\n"
+            " print(json.dumps({'enabled':configuration.runtime_enabled(), 'group':selected.group}))\n"
+            "service._run_resident = probe\n"
+            "sys.argv = ['agent_vault.service', *captured['argv'][6:]]\n"
+            "service.main()\n"
+        )
     for enabled in (True, False, None, "invalid"):
         config_path = knowledge / ".agent-vault.json"
         if enabled is None:
@@ -241,12 +276,16 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, lay
             }), encoding="utf-8")
         result = subprocess.run(
             [str(python), "-I", "-B", "-c", reader, str(project), str(environments["agent-vault"])],
-            cwd=staging, env=env, capture_output=True, text=True, timeout=20,
+            cwd=slots["agent-vault"].parent.parent if layout == "service-cwd" else staging,
+            env=env, capture_output=True, text=True, timeout=20,
             **no_window_kwargs(),
         )
         if enabled == "invalid":
             assert result.returncode != 0
             assert "enabled must be a boolean" in result.stderr
+        elif layout == "service-cwd" and enabled is not True:
+            assert result.returncode == 2, result.stdout + result.stderr
+            assert "inactive" in result.stderr
         else:
             assert result.returncode == 0, result.stdout + result.stderr
             assert json.loads(result.stdout) == {

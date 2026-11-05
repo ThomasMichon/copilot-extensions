@@ -1,0 +1,9 @@
+{
+  "comment": "Carry owner-resolved configuration sources across Vault service launches and persistent registrations without changing state cwd.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

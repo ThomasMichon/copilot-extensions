@@ -1031,6 +1031,16 @@ function Register-AgentVaultTask {
     # the junction, dotfiles #637); $LinkPython is only the last-resort fallback
     # for a host where the resolver hasn't been deployed yet.
     New-Item -ItemType Directory -Force -Path $RunDir, (Join-Path $InstallDir 'logs') | Out-Null
+    $configurationProject = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
+        $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT
+    } else { (Get-Location).ProviderPath }
+    $serviceConfigurationRoot = & $LinkPython -I -c `
+        'import sys; from agent_vault.configuration import service_configuration_root; print(service_configuration_root(sys.argv[1]))' `
+        $configurationProject
+    if ($LASTEXITCODE -ne 0 -or -not $serviceConfigurationRoot) {
+        throw 'Vault service configuration context could not be captured'
+    }
+    $serviceConfigurationRoot = ([string]$serviceConfigurationRoot).Trim()
     $portDirective = if ($installationId) {
         "`$env:AGENT_VAULT_PORT = '0'"
     } else {
@@ -1061,7 +1071,7 @@ if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and -not `$_pyt
         '\\?\UNC\' + `$_pythonCache.Substring(2)
     } else { '\\?\' + `$_pythonCache }
 }
-& `$_py -X "pycache_prefix=`$_pythonCache" -m agent_vault.service --foreground --persistent @args
+& `$_py -X "pycache_prefix=`$_pythonCache" -m agent_vault.service --foreground --persistent --configuration-root '$($serviceConfigurationRoot -replace "'","''")' @args
 exit `$LASTEXITCODE
 "@, $utf8NoBom)
     $action = New-ScheduledTaskAction `

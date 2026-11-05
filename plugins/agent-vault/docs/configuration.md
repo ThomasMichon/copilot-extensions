@@ -66,6 +66,16 @@ Installer re-execution retains the invoking project through the existing
 Relative native configuration-file selectors resolve against that invoking
 project, even after the installer self-stages in HOME. The Windows no-task
 start fallback also executes the CLI from the preserved project.
+Residents retain a separate, owner-resolved configuration source through
+`agent_vault.service --configuration-root`. The launcher captures the native
+owner's stable base before switching to the runtime state directory; generated
+Scheduled Task and systemd launchers persist that explicit source too.
+Resident reads re-query the native owner from that source rather than treating
+the state directory as a repository. The option does not change process cwd,
+database custody, activation precedence or strict owner/configuration refusals.
+The source is not an activation snapshot: a newly launched resident rechecks
+current opt-in before service admission, including revocation after its caller's
+check. Read-only ping and explicit stop/export controls retain their own gates.
 Activation accepts the selected completed runtime's interpreter and uses
 ambient Python discovery only for a cold payload. This does not bypass the
 canonical installation-context owner's independent bootstrap prerequisites;
