@@ -71,12 +71,27 @@ omitted, remaining architectural intent retained:
 > endpoint either way, with the port reservation, process info, session info etc
 > available to a caller.
 
+Follow-on operator direction, captured separately from current source scope:
+
+> After you update the vision, I'm going to have you make and drive and
+> implementation effort to do the necessary refactoring. Your goal will be that
+> worktree-manager's launch-sessoon flow, agent-worktrees embody/copilot,
+> agent-bridge create/resume, etc. all use the new agent-remote-driver core (which
+> we could rename to agent-driver). Following the session-host model, these
+> processes remain alive so long as their copilot processes need to be. For CLI
+> that's until the user closes it, and for ACP that's until stopped by their
+> callers or a duration after the agent goes idle without pending background
+> tasks, agents, or schedules.
+
 ## Scope Approvals
 
 Source vision revision and normal issue/PR publication only. No extraction,
 installation, runtime replacement, guest activation, endpoint/control claim,
 session migration, broadcast, shutdown or default-mode change is authorized
-by this effort. Review of the plan is not rollout permission.
+by this effort. The follow-on direction specifies the next refactoring
+objective; implementation is not started by this vision slice. A possible
+`agent-driver` rename remains a later naming choice, not a package rename here.
+Review of the plan is not rollout permission.
 
 ## Plan
 
@@ -117,6 +132,13 @@ Measure package size and cold/warm delivery-to-ready time rather than assuming
 quick installation from a file-copy receipt. Runtime implementation must
 select actual supported protocol contracts and migration adapters before
 effectful consumer changes.
+
+The follow-on caller-convergence matrix covers Manager launch-session,
+Worktrees embody/copilot and Bridge create/resume, proving each consumes the
+same core. Lifetime controls must cover user-closed CLI sessions with no
+automatic idle expiry, caller-stopped ACP sessions, ACP idle grace with and
+without pending tasks/agents/schedules, and caller loss without premature
+child retirement. The maintenance wind-down budget is not this ACP idle policy.
 
 ## Journal
 

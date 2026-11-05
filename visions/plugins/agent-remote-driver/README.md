@@ -117,6 +117,25 @@ The same conversation and execution remain reachable after a caller or
 presentation disconnect. Headed sessions can be observed and reattached at
 the terminal while programmatic control continues through the broker.
 
+### canonical-caller-convergence
+
+Manager's session launch, Worktrees' embodiment and Copilot entrypoints, and
+Bridge's creation and resume flows all consume this core. They do not retain
+parallel Session Host or Copilot mux implementations behind those operations.
+Standalone and remote callers use the same execution authority.
+
+### mode-appropriate-session-lifetime
+
+Driver and Session Host processes remain alive for as long as their Copilot
+execution needs them. Interactive CLI sessions remain live until closed by
+the user; an idle foreground or detached terminal does not expire them.
+Explicitly authorized owner retirement remains a distinct lifecycle action.
+
+ACP execution can end when stopped by its caller, or after a configured idle
+duration with no pending background tasks, agents or schedules. Ordinary
+caller disconnect does not itself mean stopped, and foreground idle alone
+cannot trigger this automatic retirement while background work remains.
+
 ### preserved-native-restoration
 
 An explicitly selected stopped conversation can be restored without replacing
@@ -137,6 +156,13 @@ Other native or third-party hosting providers remain independent peers.
 The target-owned execution survives loss of the installing/launching caller
 and closure of that caller's cleanup boundary. A running process observed
 before caller cleanup is not proof of durable launch.
+
+### idle-expiration-preserves-pending-work
+
+ACP idle expiration observes the hosted runtime's pending-work state, including
+background tasks, agents and schedules. The idle allowance does not silently
+cancel that work or invent an empty pending set from unavailable evidence.
+Interactive CLI lifetime is not governed by the ACP idle-expiration policy.
 
 ### one-conversation-one-controller
 
