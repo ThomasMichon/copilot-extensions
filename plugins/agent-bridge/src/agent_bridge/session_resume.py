@@ -159,7 +159,7 @@ class _SessionResumeMixin:
         require_resume_owner(self, session, acquisition_launch, drain=drain, allow_recreate=allow_recreate)
         from .hosting_policy import require_session_hosting
 
-        hosting_fence = await require_session_hosting(self, session, operation="resume")
+        hosting_fence = await require_session_hosting(self, session, operation="resume", activate=True)
         return await self._resume_session_admitted(
             session_id, permission_callback, drain=drain, allow_recreate=allow_recreate,
             owner_native_resume=owner_native_resume, hosting_fence=hosting_fence,

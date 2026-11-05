@@ -143,9 +143,14 @@ name is not activation authority. The read-only resolver protocol and
 actual receiving target, not the namespace's spelling, determine support.
 CodeSpace readiness alone does not wake a stopped target. After the typed
 no-wake refusal, an explicitly activating launch may consume the provider's
-version-1 `activation: start` declaration and call that same owner's existing
+version-1 `activation: start` declaration and call that same owner's
 `start` operation for the exact resolved name. It then repeats fresh admission;
 an available but denied repository never enters the activation branch.
+Explicit resume can make this same typed transition during initial admission,
+before provider refresh. It retains the original stop fence, resolves the exact
+retained venue through its current provider and checks that fence before and
+after activation. Fresh policy at the retained execution checkout must then
+pass before recovery begins. A newer stop or a changed venue still refuses.
 Opaque commands and unknown resolver protocols still refuse before effects;
 invalid cross-repo requests are rejected before admission work.
 
@@ -186,7 +191,10 @@ meaning and explicit-context refusal.
 
 The shared `repository_policy.receiving` entry supplies this explicit receiver;
 the original legacy probe is unchanged. Binary and text-only provider transports
-carry the same archive, with bounded base64 encoding for the latter.
+carry the same archive, with bounded base64 encoding for the latter. Direct
+Docker uses binary stdin; driver-backed containers use base64 text through
+`runtime-proxy exec -i`, which forwards stdin through the driver's existing
+`input_text` contract without changing the selected instance or user.
 
 Provider declarations are additive and selected before use. A CodeSpace's
 `portable_receiving_policy` version `1` includes its unguarded `acp_command`

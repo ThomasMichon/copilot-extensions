@@ -23,7 +23,9 @@ def _require_workspace(workspace: str) -> None:
         raise AgentHostingError("Repository hosting requires an absolute guest execution checkout")
 
 
-def _policy_check(workspace: str, operation: str, metadata: dict) -> tuple[str, bytes | None]:
+def _policy_check(
+    workspace: str, operation: str, metadata: dict, *, text_transport: bool = False,
+) -> tuple[str, bytes | None]:
     _require_workspace(workspace)
     declaration = metadata.get("portable_receiving_policy")
     if declaration is None:
@@ -41,7 +43,9 @@ def _policy_check(workspace: str, operation: str, metadata: dict) -> tuple[str, 
         raise AgentHostingError("Unsupported portable receiving policy declaration")
     from .portable_policy import guest_policy_check
 
-    return guest_policy_check(workspace, operation)
+    return guest_policy_check(
+        workspace, operation, **({"text_transport": True} if text_transport else {}),
+    )
 
 
 def _answer(rc: int, output: str, error: str, *, portable: bool = True) -> dict[str, Any]:
@@ -219,7 +223,9 @@ async def _container_policy(target: SpawnTarget, operation: str) -> dict[str, An
         if rc:
             raise AgentHostingError(f"Container execution checkout unavailable: {error.decode(errors='replace')}")
         workspace = parse_execution_checkout(output.decode())
-    command, payload = await asyncio.to_thread(_policy_check, workspace, operation, metadata)
+    command, payload = await asyncio.to_thread(
+        _policy_check, workspace, operation, metadata, text_transport=bool(venue.get("driver")),
+    )
     rc, output, error = await _run_provider(
         [*runtime, "exec", *(["-i"] if payload is not None else []),
          "-u", user, instance, "bash", "-lc", command],

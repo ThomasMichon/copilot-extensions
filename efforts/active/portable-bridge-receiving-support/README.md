@@ -216,3 +216,32 @@ implementation. The exact support closure follows the consumer trace and tests.
   ACP peer, not native Copilot or installed/external acceptance. Publish and
   merge this ACP slice next; mux composition, compatibility closeout and the
   umbrella issue remain open. No runtime rollout or guest upgrade.
+
+### 2026-11-05 - ACP review and admission corrections
+
+- Opened #10692 for the ACP slice, without closing the umbrella issue. Required
+  CI rejected three changed source bindings that had not been re-admitted.
+  Corrected those bindings and positively admitted the seven pure context
+  cases with explicit parameter IDs, their source closure and coverage targets.
+  The complete Windows-native unit packet passed 4,146 cases in 255.031 seconds;
+  its distinct profile is local qualification, not PR-CI or promotion evidence.
+- The first review identified three consumer gaps: the advertised provider
+  `start` command was missing, runtime-proxy dropped stdin, and initial resume
+  admission refused a stopped CodeSpace before it could reach activation.
+  Added provider-owned activation, base64 forwarding through the actual proxy
+  and typed initial resume activation under the original stop fence.
+- Added real parser/dispatch, proxy/driver/isolated-reader and resume-level
+  regressions rather than only testing successful mocked provider commands.
+  Validation and renewed review are in progress. This PR is not merged or
+  deployed; ACP publication, mux composition and the remaining acceptance
+  controls stay open.
+- Review-fix validation passes: 91 CodeSpace parser/provider cases, 107
+  container cases with nine platform-specific skips, and the 136 unchanged
+  Bridge cases plus all six new stopped-resume controls. The latter use the
+  real namespace parser and initial resume entry, retaining the same durable
+  conversation. Corrected stale test doubles and two Windows-incompatible
+  fixtures encountered by these packets instead of skipping their failures.
+- Updated only the changed current `session_resume.py` contract binding and
+  its implementation-only rationale; historical captures and provenance are
+  unchanged. Final committed-source guards, unit admission and renewed
+  review/CI remain required.

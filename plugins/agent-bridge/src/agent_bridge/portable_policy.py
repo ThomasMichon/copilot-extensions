@@ -28,9 +28,13 @@ def policy_sources() -> tuple[tuple[str, bytes], ...]:
         return tuple((name, archive.read(name)) for name in sorted(archive.namelist()))
 
 
-def guest_policy_check(workspace: str, operation: str) -> tuple[str, bytes]:
+def guest_policy_check(
+    workspace: str, operation: str, *, text_transport: bool = False,
+) -> tuple[str, bytes]:
     """Prepare a fresh read by our selected receiver, independent of guest suite."""
-    return build_receiving_policy_check(workspace, selected_context(), operation)
+    return build_receiving_policy_check(
+        workspace, selected_context(), operation, text_transport=text_transport,
+    )
 
 
 def codespace_receiving_command(metadata: dict) -> str:

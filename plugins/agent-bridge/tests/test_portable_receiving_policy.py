@@ -247,9 +247,10 @@ async def test_only_launch_entry_activates_then_checks_before_staging(
     events: list[str] = []
     running = False
 
-    async def provider_call(arguments):
+    async def provider_call(arguments, **kwargs):
         nonlocal running
         if arguments == ["start", "selected"]:
+            assert kwargs == {"timeout": 240}
             events.append("activate")
             running = True
             if denied:
@@ -327,6 +328,90 @@ async def test_available_policy_denial_is_not_a_stopped_venue_activation(monkeyp
         await resolver.resolve_async("codespace:selected", activate=True)
     provider.ensure_ready.assert_not_awaited()
     assert not any(call.args[0][0] == "start" for call in provider._run.await_args_list)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["allow", "deny", "stop-before", "stop-during", "retarget", "legacy"])
+async def test_stopped_codespace_resume_activates_under_original_stop_fence(
+    repo: Path, session_manager, monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
+    from agent_bridge.cold_outages import ColdRecoveryStoppedError
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.session_manager import Session
+    from agent_bridge.spawn_target import SpawnTarget
+
+    metadata = {
+        "name": "selected", "workspace_folder": "/actual",
+        "portable_receiving_policy": {"version": 1, "activation": "start", "acp_command": "copilot"},
+    }
+    session = Session(
+        "existing", "existing", SpawnTarget(type="command", codespace=metadata, cwd="/actual"),
+        "codespace:selected",
+    )
+    session.status = SessionStatus.STOPPED
+    session.acp_session_id = "retained-conversation"
+    session_manager._sessions[session.session_id] = session
+    owner = AgentResolver({}, {})
+    provider = CliNamespaceResolver("codespace", "agent-codespaces")
+    owner.register_namespace_resolver(provider)
+    session_manager._resolver = owner
+    events = []
+    running = False
+
+    async def provider_call(arguments, **kwargs):
+        nonlocal running
+        if arguments == ["start", "selected"]:
+            assert kwargs == {"timeout": 240}
+            events.append("activate")
+            running = True
+            if outcome == "deny":
+                _policy(repo, "expose_agent: false\n", overlay=True)
+            if outcome == "stop-during":
+                session._stop_notices += 1
+            return 0, "", ""
+        assert arguments[:2] == ["namespace-resolve", "selected"]
+        current = {**metadata, "name": "another" if outcome == "retarget" else "selected"}
+        if outcome == "legacy":
+            current.pop("portable_receiving_policy")
+        return 0, json.dumps({
+            "type": "command", "spawn_command": ["provider"], "codespace": current,
+        }), ""
+
+    async def gate(_target):
+        events.append("launch-policy")
+        if outcome == "stop-before":
+            session._stop_notices += 1
+
+    async def read(_command, **_kwargs):
+        from repository_policy import require_agent_hosting
+
+        events.append("policy")
+        answer = require_agent_hosting(repo, marketplace_id="selected-source")
+        return 0, json.dumps({**answer.to_dict(), "allowed": True}), ""
+
+    guest = SimpleNamespace(
+        is_running=AsyncMock(side_effect=lambda: running), run=read, close=AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.CodeSpaceTransport", lambda *_a, **_k: guest,
+    )
+    monkeypatch.setattr("agent_bridge.venue_launch_policy.gate_raw_codespace_spawn", gate)
+    provider._run = AsyncMock(side_effect=provider_call)
+    admitted = AsyncMock(return_value=session)
+    monkeypatch.setattr(session_manager, "_resume_session_admitted", admitted)
+    if outcome == "allow":
+        assert await session_manager.resume_session("existing") is session
+        assert events == ["launch-policy", "activate", "policy"]
+        fence = admitted.await_args.kwargs["hosting_fence"]
+        assert fence.session is session and fence.stop_notices == 0
+    else:
+        expected = ColdRecoveryStoppedError if outcome.startswith("stop-") else AgentHostingError
+        with pytest.raises(expected):
+            await session_manager.resume_session("existing")
+        admitted.assert_not_awaited()
+        assert ("activate" in events) is (outcome in ("deny", "stop-during"))
+    assert session.status is SessionStatus.STOPPED
+    assert session.acp_session_id == "retained-conversation"
 
 
 @pytest.mark.asyncio

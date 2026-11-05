@@ -174,9 +174,14 @@ before plugin preparation.
 
 `namespace-resolve` additionally declares `portable_receiving_policy` version
 `1`, with the provider's raw `acp_command` for Bridge's enforcing Session Host.
-Its `activation: start` field names the existing owner operation for an
+Its `activation: start` field names the provider-owned operation for an
 explicitly admitted stopped-target launch; ordinary `ensure_ready` only
 reports connectability and does not wake the venue.
+`agent-codespaces start <exact-name>` checks the registered launch policy,
+selects the venue's owning account, requests activation and waits for
+`Available`. A known owner's unavailable credentials refuse rather than
+fall back to ambient authentication. This operation does not provision guest
+tools, project credentials, stage plugins or launch a worker.
 The ordinary ACP/spawn command retains its guest-owner policy guard for prior
 callers and direct launches. Bridge selects the additive declaration only for
 its host-owned portable receiver; it never strips a shell guard or treats a

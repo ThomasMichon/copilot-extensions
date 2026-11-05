@@ -445,8 +445,9 @@ async def test_supported_container_checks_actual_instance_user_and_guest_before_
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("portable", [False, True])
 async def test_driver_backed_container_checks_through_provider_runtime_proxy(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, portable: bool,
 ) -> None:
     calls = []
     instance = "0123456789ab"
@@ -458,9 +459,19 @@ async def test_driver_backed_container_checks_through_provider_runtime_proxy(
         argv = argv[4:]
         if argv[0] == "inspect":
             return 0, json.dumps([{"Id": instance, "State": {"Running": True}}]).encode(), b""
-        assert argv[:6] == ["exec", "-u", "worker", instance, "bash", "-lc"]
-        assert "cd -- /actual" in argv[-1] and "agent-policy check" in argv[-1]
-        assert "input_bytes" not in kwargs
+        assert argv[:-1] == [
+            "exec", *(["-i"] if portable else []), "-u", "worker", instance, "bash", "-lc",
+        ]
+        assert "cd -- /actual" in argv[-1]
+        if portable:
+            import io
+            import zipfile
+
+            assert "python3 -I -S" in argv[-1] and "base64" in argv[-1]
+            with zipfile.ZipFile(io.BytesIO(base64.b64decode(kwargs["input_bytes"], validate=True))) as archive:
+                assert "repository_policy/receiving.py" in archive.namelist()
+        else:
+            assert "agent-policy check" in argv[-1] and "input_bytes" not in kwargs
         return 0, json.dumps({
             "version": 1, "allowed": True, "repository": "/actual",
             "expose_agent": None, "sources": [], "denied_by": [],
@@ -473,6 +484,7 @@ async def test_driver_backed_container_checks_through_provider_runtime_proxy(
         venue={"instance_id": instance, "target_id": "container:member", "driver": "example-driver",
                "provider": "agent-containers", "fleet": "example"},
         spawn_command=["provider", "exec", "--stdio", "member"],
+        container={"portable_receiving_policy": {"version": 1}} if portable else None,
     )
     monkeypatch.setattr("agent_bridge.provider_hosting._provider_command", lambda metadata: ["provider"])
     await hosting_policy.require_target_hosting(target)

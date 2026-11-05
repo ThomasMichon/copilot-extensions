@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -66,14 +67,47 @@ class SessionHostingFence:
 
 async def require_session_hosting(
     manager: SessionManager, session: Session, *, operation: str,
-    fence: SessionHostingFence | None = None,
+    fence: SessionHostingFence | None = None, activate: bool = False,
 ) -> SessionHostingFence:
     """Admit without absorbing a newer stop into the operation's authority."""
     fence = fence if fence is not None else SessionHostingFence.capture(manager, session)
     if session.target.type != "remote-acp":
-        await require_target_hosting(session.target, operation=operation)
+        from .provider_hosting import CodeSpaceNotRunning
+
+        try:
+            await require_target_hosting(session.target, operation=operation)
+        except CodeSpaceNotRunning:
+            if not activate:
+                raise
+            await _activate_resume_codespace(manager, session, fence)
+            await require_target_hosting(session.target, operation=operation)
     fence.require_current(manager)
     return fence
+
+
+async def _activate_resume_codespace(
+    manager: SessionManager, session: Session, fence: SessionHostingFence,
+) -> None:
+    from .agent_registry_namespace import CliNamespaceResolver
+    from .models import SessionStatus
+
+    metadata = session.target.codespace or {}
+    name = metadata.get("name")
+    owner = manager._resolver
+    provider = owner._namespace_resolvers.get("codespace") if owner is not None else None
+    if (
+        owner is None or session.status != SessionStatus.STOPPED or not isinstance(name, str) or not name
+        or not isinstance(provider, CliNamespaceResolver)
+    ):
+        raise AgentHostingError("Stopped CodeSpace resume requires its exact namespace owner")
+    fence.require_current(manager)
+    candidate = await owner._call_resolver(provider, name, extra_plugins=[], repo=None)
+    if (candidate.codespace or {}).get("name") != name:
+        raise AgentHostingError("CodeSpace resume provider selected another receiving venue")
+    await _activate_provider_target(
+        provider, candidate, check_current=lambda: fence.require_current(manager),
+    )
+    fence.require_current(manager)
 
 
 def marketplace_id() -> str:
@@ -284,46 +318,56 @@ async def require_namespace_hosting(
     if target.type == "session":
         return target
     if activate and (target.codespace or target.container):
-        from .portable_policy import codespace_receiving_command, selected_context
-        from .provider_hosting import CodeSpaceNotRunning
-        from .venue_launch_policy import gate_raw_codespace_spawn
-
-        metadata = target.codespace or target.container
-        receiving_name = metadata.get("name")
-        if (
-            not isinstance(receiving_name, str) or not receiving_name.strip()
-            or receiving_name != receiving_name.strip() or "\0" in receiving_name
-        ):
-            raise AgentHostingError("Portable activation requires an exact receiving venue")
-        await asyncio.to_thread(selected_context)
-        if target.codespace:
-            codespace_receiving_command(metadata)
-        await gate_raw_codespace_spawn(target)
-        if target.codespace:
-            try:
-                await require_target_hosting(target, operation="namespace readiness")
-            except CodeSpaceNotRunning as exc:
-                declaration = metadata.get("portable_receiving_policy")
-                if (
-                    not isinstance(declaration, dict)
-                    or type(declaration.get("version")) is not int or declaration["version"] != 1
-                    or declaration.get("activation") != "start"
-                ):
-                    raise AgentHostingError(
-                        "Selected CodeSpace provider cannot admit activation; "
-                        "activate it through its venue owner before launch"
-                    ) from exc
-                result = await resolver._run(["start", receiving_name])
-                if result is None or result[0]:
-                    raise AgentHostingError(
-                        "CodeSpace owner activation failed: "
-                        + ((result[2] or result[1]).strip() if result else "unsupported provider")
-                    ) from exc
+        await _activate_provider_target(resolver, target)
         # Only a launch entry may ask the venue owner to activate before a
         # fresh read. Resolution checks again before staging or child creation.
         return None
     await require_target_hosting(target, operation="namespace readiness")
     return None
+
+
+async def _activate_provider_target(
+    resolver: Any, target: SpawnTarget, *, check_current: Callable[[], None] | None = None,
+) -> None:
+    from .portable_policy import codespace_receiving_command, selected_context
+    from .provider_hosting import CodeSpaceNotRunning
+    from .venue_launch_policy import gate_raw_codespace_spawn
+
+    metadata = target.codespace or target.container or {}
+    name = metadata.get("name")
+    if (
+        not isinstance(name, str) or not name.strip()
+        or name != name.strip() or "\0" in name
+    ):
+        raise AgentHostingError("Portable activation requires an exact receiving venue")
+    await asyncio.to_thread(selected_context)
+    if target.codespace:
+        codespace_receiving_command(metadata)
+    await gate_raw_codespace_spawn(target)
+    if target.codespace:
+        try:
+            await require_target_hosting(target, operation="namespace readiness")
+        except CodeSpaceNotRunning as exc:
+            declaration = metadata.get("portable_receiving_policy")
+            if (
+                not isinstance(declaration, dict)
+                or type(declaration.get("version")) is not int or declaration["version"] != 1
+                or declaration.get("activation") != "start"
+            ):
+                raise AgentHostingError(
+                    "Selected CodeSpace provider cannot admit activation; "
+                    "activate it through its venue owner before launch"
+                ) from exc
+            if check_current is not None:
+                check_current()
+            result = await resolver._run(["start", name], timeout=240)
+            if check_current is not None:
+                check_current()
+            if result is None or result[0]:
+                raise AgentHostingError(
+                    "CodeSpace owner activation failed: "
+                    + ((result[2] or result[1]).strip() if result else "unsupported provider")
+                ) from exc
 
 
 async def resolve_namespace_with_plugins(

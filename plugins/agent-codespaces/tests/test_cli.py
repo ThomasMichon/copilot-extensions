@@ -32,6 +32,53 @@ def test_relay_listening_detects_open_and_closed_ports():
 
 
 class TestCLI:
+    @pytest.mark.parametrize("outcome", ["started", "owner-unavailable", "refused", "api-failed", "timeout"])
+    def test_start_dispatches_to_owning_account_without_guest_provisioning(
+        self, monkeypatch, capsys, outcome,
+    ):
+        from agent_codespaces import __main__ as cli, activation_cli, lifecycle
+
+        calls = []
+        monkeypatch.setattr(cli, "validate_context", lambda: None)
+        monkeypatch.setattr(cli, "_gh_binary_available", lambda: True)
+        monkeypatch.setattr(
+            activation_cli.launch_policy, "refused_exit_code",
+            lambda name: 79 if outcome == "refused" else None,
+        )
+        monkeypatch.setattr(lifecycle, "list_codespaces", lambda: [types.SimpleNamespace(
+            name="selected", state="Shutdown", account="owner",
+        )])
+        monkeypatch.setattr(
+            activation_cli.gh_account, "token_for_account",
+            lambda account: None if outcome == "owner-unavailable" else "fixture-token",
+        )
+
+        def run(argv, **kwargs):
+            calls.append(("start", argv, kwargs))
+            return types.SimpleNamespace(
+                returncode=1 if outcome == "api-failed" else 0, stderr="activation unavailable",
+            )
+
+        def wait(name, **kwargs):
+            calls.append(("wait", name, kwargs))
+            return outcome != "timeout"
+
+        monkeypatch.setattr(activation_cli.subprocess, "run", run)
+        monkeypatch.setattr(lifecycle, "wait_for_available", wait)
+        assert main(["start", "selected"]) == (0 if outcome == "started" else 79 if outcome == "refused" else 1)
+        if outcome in ("owner-unavailable", "refused"):
+            assert calls == []
+        else:
+            assert calls[0][1] == [
+                "gh", "api", "--method", "POST", "/user/codespaces/selected/start",
+            ]
+            assert calls[0][2]["env"]["GH_TOKEN"] == "fixture-token"
+            assert "GITHUB_TOKEN" not in calls[0][2]["env"]
+            if outcome == "api-failed":
+                assert len(calls) == 1
+            else:
+                assert calls[1] == ("wait", "selected", {"timeout": 180, "interval": 2})
+
     def test_no_args_shows_help(self, capsys):
         rc = main([])
         assert rc == 1
@@ -872,9 +919,10 @@ class TestNamespaceSeams:
     def test_plugin_plan_forwards_explicit_controller_roots(self, capsys):
         seen = {}
 
-        def plan(repo, config, *, repo_roots):
+        def plan(repo, config, *, repo_roots, sources):
             seen["repo"] = repo
             seen["roots"] = repo_roots
+            seen["sources"] = sources
             return {"plugins": []}
 
         with (
@@ -885,7 +933,9 @@ class TestNamespaceSeams:
                 "plugin-plan", "synthetic", "--repo", "example/project",
                 "--plugin-root", "controller with spaces", "--plugin-root", "secondary",
             ]) == 0
-        assert seen == {"repo": "example/project", "roots": ["controller with spaces", "secondary"]}
+        assert seen == {
+            "repo": "example/project", "roots": ["controller with spaces", "secondary"], "sources": [],
+        }
         assert '"plugins": []' in capsys.readouterr().out
 
     def test_namespace_resolve_not_found_exit3(self, capsys):

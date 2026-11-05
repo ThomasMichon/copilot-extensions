@@ -55,6 +55,13 @@ checks the selected portable policy receiver through isolated Python, existing
 provider stdin transports and the actual shipped Session Host bundle. It
 covers sparse/incompatible guest-suite fixtures, selected overlay denial,
 malformed/unreadable policy, late denial and no-wake versus launch activation.
+Resume-level Shutdown controls retain the original stop fence across provider
+activation, including a newer stop, changed venue, provider rollback and a
+fresh denial after activation. CodeSpaces' `tests/test_cli.py` exercises the
+actual `start` parser/dispatch with owner-authentication, launch-policy and API
+boundaries substituted. Containers' `tests/test_runtime_drivers.py` sends the
+base64 archive through the real runtime-proxy, external-driver process and
+isolated canonical reader, proving both allow and deny without Docker.
 A real bundled Host drives a mock ACP peer through one prompt and reconnects
 to the same child/conversation. These are source/private-process controls,
 not native Copilot, installed services, live remote transports or muxed-mode
