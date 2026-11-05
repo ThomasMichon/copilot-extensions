@@ -3,6 +3,18 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-04 - Two existing-queue selection and long-slot contracts](<journal/2026/11.04 queue-selection-contracts.md>)
+
+- [2026-11-04 - One incremental-pipeline planning and consumer contract](<journal/2026/11.04 incremental-pipeline-contract.md>)
+
+- [2026-11-04 - Three Windows required-runtime and inherited update contracts](<journal/2026/11.04 windows-update-contracts.md>)
+
+- [2026-11-04 - Three bounded landing and cold-consumer portfolio contracts](<journal/2026/11.04 bounded-portfolio-contracts.md>)
+
+- [2026-11-04 - Two exact conversation and allocation recovery contracts](<journal/2026/11.04 exact-recovery-contracts.md>)
+
+- [2026-11-04 - Two cutover, context and RESTORE contracts](<journal/2026/11.04 cutover-restore-contracts.md>)
+
 - [2026-11-04 - Three installer liveness and copied-bootstrap contracts](<journal/2026/11.04 installer-liveness-contracts.md>)
 
 - [2026-11-04 - Three CI causality, budget and diagnosis contracts](<journal/2026/11.04 ci-causality-contracts.md>)
