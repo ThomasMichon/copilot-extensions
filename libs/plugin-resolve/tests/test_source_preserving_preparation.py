@@ -11,7 +11,7 @@ import pytest
 
 from plugin_resolve.preparation import prepare
 from plugin_resolve.reflection import build_plan
-from plugin_resolve.registration import atomic_json
+from plugin_resolve.registration import _installation_home, atomic_json
 from plugin_resolve.settings import read_repo_settings
 from test_plugin_preparation import init_checkout, local_plan
 
@@ -231,7 +231,10 @@ def test_native_git_namespace_and_controller_local_source_are_both_preserved(tmp
     alias = next(source for source in settings.enabled if source.startswith("sample@"))
     assert alias != "sample@local"
     assert settings.marketplaces[alias.split("@")[1]]["source"]["source"] == "directory"
-    assert "installation" in Path(first["native@local"]).parts
+    home = _installation_home(
+        target / ".git" / "copilot-venue-plugins" / "marketplaces", "native@local", definition,
+    )
+    assert Path(first["native@local"]) == home / "installed-plugins" / "local" / "native"
     if mode == "reference":
         assert first["sample@local"] == str(controller / ".ai" / "sample")
     else:
