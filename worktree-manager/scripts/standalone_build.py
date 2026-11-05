@@ -1,10 +1,11 @@
 """Deliver canonical runtime resources in independently buildable distributions."""
 
 from pathlib import Path
+import os
+import re
+import shutil
 import stat
 
-from setuptools.command.build_py import build_py
-from setuptools.command.sdist import sdist
 
 HELPER_NAME = "_standalone_runtime_build.py"
 RUNTIME_RESOURCES = {
@@ -49,9 +50,11 @@ def application_resources(project, package):
     }
 
 
-def ordinary_file(path):
+def ordinary_file(path, checked=None):
     """Reject linked build inputs, including linked parent directories."""
     for entry in (*reversed(path.parents), path):
+        if checked is not None and entry != path and entry in checked:
+            continue
         try:
             info = entry.lstat()
         except FileNotFoundError:
@@ -63,15 +66,17 @@ def ordinary_file(path):
             raise RuntimeError("runtime resource build input must not be linked")
         if entry != path and not stat.S_ISDIR(info.st_mode):
             raise RuntimeError("runtime resource build input ancestor must be a directory")
+        if checked is not None and entry != path:
+            checked.add(entry)
     if not stat.S_ISREG(info.st_mode):
         raise RuntimeError("runtime resource build input must be a regular file")
     return True
 
 
-def select_bytes(paths, label, *, optional_paths=()):
+def select_bytes(paths, label, *, optional_paths=(), checked=None):
     candidates = []
     for path in paths:
-        if not ordinary_file(path):
+        if not ordinary_file(path, checked):
             raise RuntimeError(
                 f"{label} is missing; build from the full release checkout or its complete sdist"
             )
@@ -80,15 +85,111 @@ def select_bytes(paths, label, *, optional_paths=()):
         raise RuntimeError(
             f"{label} is missing; build from the full release checkout or its complete sdist"
         )
-    candidates.extend(path.read_bytes() for path in optional_paths if ordinary_file(path))
+    candidates.extend(path.read_bytes() for path in optional_paths if ordinary_file(path, checked))
     if any(data != candidates[0] for data in candidates[1:]):
         raise RuntimeError(f"included {label} differs from the canonical source")
     return candidates[0]
 
 
+def embedded_projects(project):
+    """Select the explicitly declared first-party build inputs, never runtime packages."""
+    import tomllib
+    from packaging.requirements import Requirement
+    from packaging.utils import canonicalize_name
+
+    project = Path(project).absolute()
+    data = tomllib.loads(select_bytes([project / "pyproject.toml"], "project metadata").decode())
+    groups = data.get("dependency-groups", {})
+    if not isinstance(groups, dict):
+        raise RuntimeError("dependency groups must be a table")
+    declarations = groups.get("first-party-core", [])
+    if not isinstance(declarations, list) or any(not isinstance(value, str) for value in declarations):
+        raise RuntimeError("first-party-core must be a flat requirement list")
+    sources = data.get("tool", {}).get("uv", {}).get("sources", {})
+    if not isinstance(sources, dict):
+        raise RuntimeError("first-party source mappings must be a table")
+    selected = {}
+    for text in declarations:
+        requirement = Requirement(text)
+        name = canonicalize_name(requirement.name)
+        source = sources.get(name)
+        if requirement.url or not isinstance(source, dict) or set(source) - {"path", "editable"}:
+            raise RuntimeError("first-party core needs an ordinary declared source")
+        if name in selected or not isinstance(source.get("path"), str):
+            raise RuntimeError("ambiguous first-party core source")
+        parts = Path(source["path"]).parts
+        if (
+            Path(source["path"]).is_absolute()
+            or not (len(parts) == 3 and parts[:2] == ("..", "libs")
+                    or len(parts) == 2 and parts[0] == "libs")
+            or ("editable" in source and not isinstance(source["editable"], bool))
+        ):
+            raise RuntimeError("first-party core must use the declared library source layout")
+        canonical = project / source["path"]
+        included = project / "_first_party" / name
+        directory = canonical if os.path.lexists(canonical) else included
+        metadata = tomllib.loads(select_bytes(
+            [directory / "pyproject.toml"], "first-party metadata",
+        ).decode())
+        if canonicalize_name(metadata["project"]["name"]) != name:
+            raise RuntimeError("first-party source distribution identity differs")
+        if not requirement.specifier.contains(metadata["project"]["version"], prereleases=True):
+            raise RuntimeError("first-party source version differs")
+        if metadata.get("tool", {}).get("setuptools", {}).get("packages", {}) != {
+            "find": {"where": ["src"]},
+        }:
+            raise RuntimeError("first-party core requires the declared src package finder")
+        selected[name] = (directory, metadata)
+    return selected
+
+
+def embedded_members(project):
+    """Bind embedded Python, declared package data and notices to their original bytes."""
+    members = {}
+    checked = set()
+    for directory, data in embedded_projects(project).values():
+        base = directory / "src"
+        roots = [path for path in base.iterdir() if (path / "__init__.py").is_file()]
+        if len(roots) != 1:
+            raise RuntimeError("first-party core requires one ordinary import root")
+        files = {path.relative_to(base).as_posix(): path for path in base.rglob("*.py")}
+        patterns = data.get("tool", {}).get("setuptools", {}).get("package-data", {})
+        if not isinstance(patterns, dict):
+            raise RuntimeError("first-party package data must be a table")
+        for package, values in patterns.items():
+            if not isinstance(package, str) or not re.fullmatch(
+                r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*", package,
+            ) or not isinstance(values, list) or any(
+                not isinstance(value, str) or "\\" in value or ".." in value.split("/")
+                or value.startswith("/") for value in values
+            ):
+                raise RuntimeError("invalid first-party package data")
+            package_root = base.joinpath(*package.split("."))
+            if package_root != roots[0] and not package_root.is_relative_to(roots[0]):
+                raise RuntimeError("foreign first-party package data")
+            files.update({
+                path.relative_to(base).as_posix(): path
+                for pattern in values for path in package_root.glob(pattern) if path.is_file()
+            })
+        files[roots[0].name + "/LICENSE"] = directory / "LICENSE"
+        for name, path in files.items():
+            if name in members or not ordinary_file(path, checked):
+                raise RuntimeError("missing or conflicting first-party member")
+            members[name] = path
+    return members
+
+
 def commands(project, package, canonical_directory=None, *, companion_resources=None):
     """Bind one package's hooks; generated sdist resources are not source mirrors."""
+    from setuptools import find_packages
+    from setuptools.command.build_py import build_py
+    from setuptools.command.egg_info import egg_info
+    from setuptools.command.install_lib import install_lib
+    from setuptools.command.sdist import sdist
+
     project = Path(project).absolute()
+    embedded = embedded_projects(project) if package == "worktree_manager" else {}
+    members = embedded_members(project) if embedded else {}
     resources = {
         name: Path("src") / package / destination
         for name, destination in RUNTIME_RESOURCES.items()
@@ -122,6 +223,49 @@ def commands(project, package, canonical_directory=None, *, companion_resources=
         )
 
     class BuildPy(build_py):
+        def finalize_options(self):
+            if embedded:
+                distribution = self.distribution
+                packages = set(distribution.packages or [])
+                mapping = dict(distribution.package_dir or {"": "src"})
+                package_data = dict(distribution.package_data or {})
+                for name, (directory, data) in embedded.items():
+                    source = directory / "src"
+                    discovered = find_packages(where=str(source))
+                    if packages.intersection(discovered):
+                        raise RuntimeError("embedded import package collides with application")
+                    packages.update(discovered)
+                    for selected in discovered:
+                        mapping[selected] = os.path.relpath(
+                            source.joinpath(*selected.split(".")), project,
+                        )
+                    package_data.update(data.get("tool", {}).get("setuptools", {}).get("package-data", {}))
+                distribution.packages = sorted(packages)
+                distribution.package_dir = mapping
+                distribution.package_data = package_data
+            super().finalize_options()
+
+        def build_packages(self):
+            if not embedded:
+                return super().build_packages()
+            from concurrent.futures import ThreadPoolExecutor
+
+            modules = []
+            for selected in self.packages:
+                directory = self.get_package_dir(selected)
+                modules.extend(self.find_package_modules(selected, directory))
+                self.mkpath(os.path.join(self.build_lib, *selected.split(".")))
+            if not modules:
+                return
+
+            def copy_module(item):
+                selected, module, source = item
+                return self.build_module(module, source, selected)
+
+            with ThreadPoolExecutor(max_workers=min(4, len(modules))) as pool:
+                for _result in pool.map(copy_module, modules):
+                    pass
+
         def run(self):
             primitives, _ = inputs()
             super().run()
@@ -129,6 +273,11 @@ def commands(project, package, canonical_directory=None, *, companion_resources=
                 destination = Path(self.build_lib) / package / name
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_bytes(data)
+            for name, source in members.items():
+                if name.endswith("/LICENSE"):
+                    destination = Path(self.build_lib) / name
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    destination.write_bytes(select_bytes([source], "embedded first-party notice"))
 
         def get_outputs(self, include_bytecode=1):
             outputs = super().get_outputs(include_bytecode)
@@ -137,16 +286,84 @@ def commands(project, package, canonical_directory=None, *, companion_resources=
                 name = str(Path(self.build_lib) / package / filename)
                 if name not in outputs:
                     outputs.append(name)
+            outputs.extend(
+                str(Path(self.build_lib) / name) for name in members
+                if str(Path(self.build_lib) / name) not in outputs
+            )
             return outputs
 
     class BuildSdist(sdist):
         def make_release_tree(self, base_dir, files):
             primitives, helper = inputs()
-            super().make_release_tree(base_dir, files)
+            local = [
+                name for name in files
+                if Path(name).parts[0] != "_first_party"
+                and (project / name).resolve().is_relative_to(project.resolve())
+            ]
+            super().make_release_tree(base_dir, local)
             for name, data in primitives.items():
                 destination = Path(base_dir) / "src" / package / name
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_bytes(data)
             (Path(base_dir) / HELPER_NAME).write_bytes(helper)
+            checked = set()
 
-    return {"build_py": BuildPy, "sdist": BuildSdist}
+            def copy_input(source, destination):
+                select_bytes([Path(source)], "first-party sdist input", checked=checked)
+                return shutil.copy2(source, destination, follow_symlinks=False)
+
+            ignore = shutil.ignore_patterns(
+                "__pycache__", "*.egg-info", "build", "dist", ".venv", ".pytest_cache",
+            )
+            for name, (directory, _metadata) in embedded.items():
+                destination = Path(base_dir) / "_first_party" / name
+                for parent, directories, _files in os.walk(directory, followlinks=False):
+                    excluded = ignore(parent, directories)
+                    directories[:] = [child for child in directories if child not in excluded]
+                    for child in directories:
+                        info = (Path(parent) / child).lstat()
+                        if stat.S_ISLNK(info.st_mode) or (
+                            getattr(info, "st_file_attributes", 0)
+                            & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+                        ):
+                            raise RuntimeError("first-party sdist input must not be linked")
+                shutil.copytree(
+                    directory, destination,
+                    dirs_exist_ok=True,
+                    copy_function=copy_input,
+                    ignore=ignore,
+                )
+
+    class EggInfo(egg_info):
+        def run(self):
+            if embedded:
+                self.get_finalized_command("build_py")
+            super().run()
+
+    class InstallLib(install_lib):
+        def install(self):
+            if not embedded or self.dry_run or self.get_exclusions() or not os.path.isdir(self.build_dir):
+                return super().install()
+            from concurrent.futures import ThreadPoolExecutor
+
+            files = []
+            for parent, directories, names in os.walk(self.build_dir):
+                directories[:] = [name for name in directories if not name.startswith(".nfs")]
+                destination = Path(self.install_dir) / Path(parent).relative_to(self.build_dir)
+                self.mkpath(str(destination))
+                files.extend(
+                    (str(Path(parent) / name), str(destination / name))
+                    for name in names if not name.startswith(".nfs")
+                )
+            if not files:
+                return []
+
+            def copy_member(item):
+                return self.copy_file(*item)[0]
+
+            with ThreadPoolExecutor(max_workers=min(4, len(files))) as pool:
+                return list(pool.map(copy_member, files))
+
+    return {
+        "build_py": BuildPy, "sdist": BuildSdist, "egg_info": EggInfo, "install_lib": InstallLib,
+    }

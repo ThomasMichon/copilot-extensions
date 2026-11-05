@@ -10,6 +10,7 @@ import shutil
 import sys
 import zipfile
 import os
+import runpy
 import venv
 
 import pytest
@@ -36,6 +37,251 @@ LOCK = builder.ToolchainLock(Path("."), {
 def test_existing_core_standalone_roots_have_explicit_artifact_identities(component):
     assert component in standalone.COMPONENTS
     assert standalone.COMPONENTS[component] in STANDALONE_CONSUMERS
+
+
+def test_manager_embedded_metadata_covers_the_canonical_third_party_projection(tmp_path):
+    import re
+    import tomllib
+    import bundle_lock
+    from packaging.requirements import Requirement
+    from packaging.specifiers import SpecifierSet
+    from packaging.utils import canonicalize_name
+
+    helper = runpy.run_path(str(ROOT / "libs/versioned-runtime/standalone_build.py"))
+    manager = ROOT / "worktree-manager"
+    selected = helper["embedded_projects"](manager)
+    assert len(selected) == 14
+    for source in [manager, *(directory for directory, _data in selected.values())]:
+        target = tmp_path / source.relative_to(ROOT) / "pyproject.toml"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        text = (source / "pyproject.toml").read_text(encoding="utf-8")
+        # This fixture compares declarations, not the existing local-wheel/feed policy.
+        if source == manager:
+            text = re.sub(r"(?m)^dbus-next = .*\n", "", text)
+        target.write_text(text, encoding="utf-8")
+    data = tomllib.loads((manager / "pyproject.toml").read_text(encoding="utf-8"))
+    projected, ranges = bundle_lock.collect_inputs(
+        tmp_path, root_names=(data["project"]["name"],),
+    )
+
+    def key(text):
+        requirement = Requirement(text)
+        return (
+            canonicalize_name(requirement.name), frozenset(requirement.extras),
+            requirement.specifier, str(requirement.marker) if requirement.marker else None,
+        )
+
+    assert {key(text) for text in projected["core"]} == {
+        key(text) for text in data["project"]["dependencies"]
+    }
+    assert "pyyaml>=6.0.3" in data["project"]["dependencies"]
+    for version in ("3.10", "3.11", "3.12", "3.13", "3.14", "4"):
+        assert SpecifierSet(ranges["core"]).contains(version) == SpecifierSet(
+            data["project"]["requires-python"],
+        ).contains(version)
+    with pytest.raises((bundle_lock.InputError, OSError), match="dbus"):
+        bundle_lock.collect_inputs(ROOT, root_names=(data["project"]["name"],))
+
+
+def _embedded_source(tmp_path):
+    source = _source(tmp_path, "worktree-manager")
+    library = tmp_path / "libs/agent-procutil"
+    (library / "src/agent_procutil").mkdir(parents=True)
+    (library / "src/agent_procutil/__init__.py").write_bytes(b"VALUE = 1\n")
+    (library / "tests").mkdir()
+    (library / "tests/test_retained.py").write_bytes(b"# retained source identity member\n")
+    (library / "README.md").write_bytes(b"retained documentation\n")
+    (library / "LICENSE").write_bytes(b"MIT\n")
+    (library / "pyproject.toml").write_text(
+        '[project]\nname = "agent-procutil"\nversion = "1.0"\n'
+        '[tool.setuptools.packages.find]\nwhere = ["src"]\n', encoding="utf-8",
+    )
+    with (source / "pyproject.toml").open("a", encoding="utf-8") as stream:
+        stream.write(
+            '\n[dependency-groups]\nfirst-party-core = ["agent-procutil"]\n'
+            '[tool.uv.sources]\nagent-procutil = {path = "../libs/agent-procutil", editable = true}\n'
+        )
+    return source, library
+
+
+def test_embedded_sources_remain_complete_build_resources_not_installed_distributions(tmp_path, monkeypatch):
+    source, library = _embedded_source(tmp_path)
+    monkeypatch.setattr(builder, "resolve_vendored_libs", lambda _source: [("agent-procutil", library)])
+    selected, installed, resources = standalone.source_closure("worktree-manager", tmp_path, builder)
+    assert selected == source and installed == []
+    assert library in resources
+    assert (library / "tests/test_retained.py").read_bytes() == b"# retained source identity member\n"
+    assert (library / "README.md").read_bytes() == b"retained documentation\n"
+    monkeypatch.setattr(builder, "resolve_vendored_libs", lambda _source: [])
+    with pytest.raises(builder.ArtifactBuildError, match="differs from source closure"):
+        standalone.source_closure("worktree-manager", tmp_path, builder)
+
+
+@pytest.mark.parametrize("linked", [None, "file", "directory"])
+def test_embedded_sdist_preserves_full_inputs_and_refuses_links(
+    tmp_path, monkeypatch, native_file_symlink, linked,
+):
+    from setuptools import Distribution
+
+    source, library = _embedded_source(tmp_path)
+    if linked == "file":
+        target = tmp_path / "foreign.md"
+        target.write_bytes(b"synthetic foreign content\n")
+        native_file_symlink(library / "tests/link.md", target)
+    elif linked == "directory":
+        target = tmp_path / "foreign"
+        target.mkdir()
+        native_file_symlink(library / "docs", target, target_is_directory=True)
+    helpers = runpy.run_path(str(ROOT / "libs/versioned-runtime/standalone_build.py"))
+    classes = helpers["commands"](
+        source, "worktree_manager", tmp_path / "libs/versioned-runtime",
+    )
+    distribution = Distribution({
+        "name": "manager-fixture", "version": "1.0", "packages": ["worktree_manager"],
+        "package_dir": {"": "src"}, "cmdclass": classes,
+    })
+    distribution.script_name = "setup.py"
+    command = classes["sdist"](distribution)
+    command.ensure_finalized()
+    monkeypatch.chdir(source)
+    destination = tmp_path / "sdist"
+    files = ["pyproject.toml", "setup.py", "src/worktree_manager/__init__.py"]
+    if linked:
+        with pytest.raises(RuntimeError, match="must not be linked"):
+            command.make_release_tree(str(destination), files)
+    else:
+        command.make_release_tree(str(destination), files)
+        copied = destination / "_first_party/agent-procutil"
+        assert (copied / "tests/test_retained.py").read_bytes() == b"# retained source identity member\n"
+        assert (copied / "README.md").read_bytes() == b"retained documentation\n"
+        assert (copied / "LICENSE").read_bytes() == b"MIT\n"
+        assert (destination / helpers["HELPER_NAME"]).read_bytes() == (
+            ROOT / "libs/versioned-runtime/standalone_build.py"
+        ).read_bytes()
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_embedded_package_copy_is_bounded_and_settled_before_return(tmp_path, monkeypatch, fail):
+    import threading
+    import time
+    from setuptools import Distribution
+
+    source, _library = _embedded_source(tmp_path)
+    helpers = runpy.run_path(str(ROOT / "libs/versioned-runtime/standalone_build.py"))
+    classes = helpers["commands"](source, "worktree_manager", tmp_path / "libs/versioned-runtime")
+    distribution = Distribution({
+        "name": "manager-fixture", "version": "1.0", "packages": ["worktree_manager"],
+        "package_dir": {"": "src"}, "cmdclass": classes,
+    })
+    command = classes["build_py"](distribution)
+    command.ensure_finalized()
+    command.build_lib = str(tmp_path / "output")
+    monkeypatch.setattr(command, "find_package_modules", lambda package, _path: [
+        (package, str(index), "synthetic.py") for index in range(4)
+    ])
+    lock, entered = threading.Lock(), threading.Event()
+    active, completed, peak = [], [], [0]
+
+    def copy(module, _path, package):
+        with lock:
+            active.append((package, module))
+            peak[0] = max(peak[0], len(active))
+            if len(active) >= 2:
+                entered.set()
+        try:
+            assert entered.wait(5)
+            time.sleep(0.01)
+            if fail and module == "0":
+                raise RuntimeError("controlled package copy failure")
+        finally:
+            with lock:
+                active.remove((package, module))
+                completed.append((package, module))
+
+    monkeypatch.setattr(command, "build_module", copy)
+    if fail:
+        with pytest.raises(RuntimeError, match="controlled package copy failure"):
+            command.build_packages()
+    else:
+        command.build_packages()
+    assert 1 < peak[0] <= 4
+    assert not active
+    assert 1 <= len(completed) <= 8 if fail else len(completed) == 8
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_embedded_install_copy_preserves_standard_files_and_settles_failure(tmp_path, monkeypatch, fail):
+    import threading
+    import time
+    from setuptools import Distribution
+
+    source, _library = _embedded_source(tmp_path)
+    helpers = runpy.run_path(str(ROOT / "libs/versioned-runtime/standalone_build.py"))
+    classes = helpers["commands"](source, "worktree_manager", tmp_path / "libs/versioned-runtime")
+    distribution = Distribution({"name": "manager-fixture", "version": "1.0", "cmdclass": classes})
+    command = classes["install_lib"](distribution)
+    command.ensure_finalized()
+    command.build_dir = str(tmp_path / "build-output")
+    command.install_dir = str(tmp_path / "wheel-output")
+    incoming = Path(command.build_dir) / "pkg"
+    incoming.mkdir(parents=True)
+    for name in ("module.py", "data.json", ".nfs-temporary"):
+        (incoming / name).write_bytes(name.encode())
+        os.utime(incoming / name, (1_000_000_000, 1_000_000_000))
+    original = command.copy_file
+    lock, active = threading.Lock(), []
+
+    def copy(source, destination):
+        with lock:
+            active.append(source)
+        try:
+            time.sleep(0.01)
+            if fail and source.endswith("module.py"):
+                raise RuntimeError("controlled install copy failure")
+            return original(source, destination)
+        finally:
+            with lock:
+                active.remove(source)
+
+    monkeypatch.setattr(command, "copy_file", copy)
+    if fail:
+        with pytest.raises(RuntimeError, match="controlled install copy failure"):
+            command.install()
+    else:
+        outputs = command.install()
+        assert {Path(name).name for name in outputs} == {"module.py", "data.json"}
+        for name in ("module.py", "data.json"):
+            copied = Path(command.install_dir) / "pkg" / name
+            assert copied.read_bytes() == (incoming / name).read_bytes()
+            assert copied.stat().st_mtime == (incoming / name).stat().st_mtime
+        assert not (Path(command.install_dir) / "pkg/.nfs-temporary").exists()
+    assert not active
+
+
+@pytest.mark.parametrize("mode", ["legacy", "namespace", "dry-run"])
+def test_nonembedded_and_special_install_paths_keep_the_stock_owner(tmp_path, monkeypatch, mode):
+    from setuptools import Distribution
+    from setuptools.command.install_lib import install_lib
+
+    if mode == "legacy":
+        source = _source(tmp_path, "fleet-manager")
+        package = "fleet_manager"
+    else:
+        source, _library = _embedded_source(tmp_path)
+        package = "worktree_manager"
+    helpers = runpy.run_path(str(ROOT / "libs/versioned-runtime/standalone_build.py"))
+    classes = helpers["commands"](source, package, tmp_path / "libs/versioned-runtime")
+    command = classes["install_lib"](Distribution({"name": "fixture", "version": "1.0"}))
+    command.ensure_finalized()
+    command.build_dir = str(tmp_path / "build-output")
+    Path(command.build_dir).mkdir()
+    marker = ["stock-owner"]
+    monkeypatch.setattr(install_lib, "install", lambda _self: marker)
+    if mode == "namespace":
+        monkeypatch.setattr(command, "get_exclusions", lambda: {"excluded"})
+    elif mode == "dry-run":
+        command.dry_run = True
+    assert command.install() is marker
 
 
 def _source(root, component):
@@ -231,9 +477,21 @@ def test_operational_assets_survive_wheel_and_source_distribution(tmp_path, rela
     shutil.copytree(
         ROOT / relative, project,
         ignore=shutil.ignore_patterns(
-            "__pycache__", "*.egg-info", ".venv", ".test-runs", "build", "dist",
+            "__pycache__", "*.egg-info", ".venv", ".test-runs", "build", "dist", "tests", "docs",
         ),
     )
+    embedded = {}
+    if package == "worktree_manager":
+        helper = runpy.run_path(str(ROOT / "libs/versioned-runtime/standalone_build.py"))
+        for name, (directory, _metadata) in helper["embedded_projects"](ROOT / relative).items():
+            shutil.copytree(
+                directory, project / "_first_party" / name,
+                ignore=shutil.ignore_patterns(
+                    "__pycache__", "*.egg-info", "build", "dist", ".venv", ".pytest_cache",
+                    "tests", "docs",
+                ),
+            )
+        embedded = helper["embedded_members"](project)
     expected = {
         name: path.read_bytes()
         for name, path in __import__("plugin_runtime_resources").application_resources(
@@ -241,6 +499,7 @@ def test_operational_assets_survive_wheel_and_source_distribution(tmp_path, rela
         ).items()
     }
     assert expected
+    expected.update({name: path.read_bytes() for name, path in embedded.items()})
     before = {path: path.read_bytes() for path in project.rglob("*.py")}
     archives = tmp_path / "archives"
     archives.mkdir()
@@ -259,6 +518,22 @@ def test_operational_assets_survive_wheel_and_source_distribution(tmp_path, rela
     with zipfile.ZipFile(wheel) as archive:
         assert {name: archive.read(name) for name in expected} == expected
         assert not any("/payload/" in name for name in archive.namelist())
+        if embedded:
+            from email.parser import BytesParser
+            from artifact_source_build import validate_runtime_metadata
+            import tomllib
+
+            infos = {name.split("/")[0] for name in archive.namelist() if ".dist-info/" in name}
+            assert len(infos) == 1
+            info = next(iter(infos))
+            metadata = BytesParser().parsebytes(archive.read(info + "/METADATA"))
+            validate_runtime_metadata(
+                tomllib.loads((ROOT / relative / "pyproject.toml").read_text())["project"], metadata,
+            )
+            assert not any(value.startswith("agent-") for value in metadata.get_all("Requires-Dist", []))
+            assert "pyyaml>=6.0.3" in metadata.get_all("Requires-Dist", [])
+            record = archive.read(info + "/RECORD").decode()
+            assert all(name in record for name in embedded)
     assert all(path.read_bytes() == value for path, value in before.items())
     unpacked = tmp_path / "sdist"
     source_archives = [path for path in archives.iterdir() if path != wheel]
@@ -302,6 +577,14 @@ def test_operational_assets_survive_wheel_and_source_distribution(tmp_path, rela
             "assert owner._expected_control_plane_provider_manifest()['provider']=='worktree-manager'; "
             "launcher=relocated_launch._relocated_launch_script(); assert launcher.is_file(); "
             "assert '_runtime_assets' in str(launcher)"
+            "; from worktree_manager import engine_origin; "
+            "from agent_procutil.owned_process import OwnedCleanupError; "
+            "assert engine_origin.OwnedCleanupError is OwnedCleanupError; "
+            "from update_driver import core; from single_instance_lease.operation import OperationLock; "
+            "assert core.OperationLock is OperationLock; "
+            "from importlib.metadata import distributions; "
+            "installed={item.metadata['Name'] for item in distributions()}; "
+            "assert installed == {'copilot-extensions-worktree-manager'}"
         )
     else:
         bootstrap = slot / ".runtime-bootstrap"

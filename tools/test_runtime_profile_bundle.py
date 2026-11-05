@@ -123,6 +123,71 @@ def test_existing_output_is_never_replaced(tmp_path, inputs):
     assert output.read_bytes() == b"existing artifact"
 
 
+@pytest.mark.parametrize("embedded,separate,reverse,layout", [
+    (True, True, False, "ordinary"), (True, True, True, "ordinary"),
+    (False, True, False, "ordinary"), (True, False, False, "ordinary"),
+    (True, True, False, "windows-case"), (True, True, False, "purelib"),
+])
+def test_manager_embedded_file_ownership_is_checked_before_transport(
+    tmp_path, inputs, embedded, separate, reverse, layout,
+):
+    record, _paths = inputs
+    if layout == "windows-case":
+        record["target"]["environment"].update(
+            os_name="nt", sys_platform="win32", platform_system="Windows",
+        )
+    names = ["copilot_extensions_worktree_manager", *(["agent_procutil"] if separate else [])]
+    paths = {}
+    record["roots"] = []
+    record["wheels"] = []
+    for name in names:
+        distribution = name.replace("_", "-")
+        metadata = f"Metadata-Version: 2.4\nName: {distribution}\nVersion: 1.0\n\n".encode()
+        member = {
+            "ordinary": "agent_procutil/__init__.py",
+            "windows-case": "Agent_Procutil/__init__.py",
+            "purelib": f"{name}-1.0.data/purelib/agent_procutil/__init__.py",
+        }[layout]
+        extra = (
+            {member: b"VALUE = 1\n"}
+            if embedded and name != "agent_procutil" else {}
+        )
+        path = tmp_path / f"{name}-1.0-py3-none-any.whl"
+        path.write_bytes(wheel_bytes(
+            name=name, prefix=f"{name}-1.0.dist-info/", metadata=metadata, extra=extra,
+        ))
+        paths[path.name] = path
+        record["roots"].append(distribution + "==1.0")
+        record["wheels"].append({
+            "name": distribution, "version": "1.0", "filename": path.name,
+            "sha256": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest(),
+            "requires_python": "", "provides_extras": [], "selected_extras": [],
+            "requires_dist": [],
+        })
+    if reverse:
+        record["wheels"].reverse()
+    output = tmp_path / "owned-profile.zip"
+    if embedded and separate:
+        with pytest.raises(ProfileError, match="ownership collision"):
+            build(record, paths, output)
+        assert not output.exists()
+    else:
+        assert build(record, paths, output)["size"] > 0
+
+
+def test_manager_admission_does_not_change_other_application_profiles(tmp_path, inputs):
+    record, paths = inputs
+    root = record["wheels"][0]
+    path = paths[root["filename"]]
+    path.write_bytes(wheel_bytes(
+        name="demo_pkg", prefix="demo_pkg-1.0.dist-info/",
+        metadata=b"Metadata-Version: 2.4\nName: demo-pkg\nVersion: 1.0\nRequires-Dist: helper==1.0\n\n",
+        extra={"helper/__init__.py": b"VALUE = 1\n"},
+    ))
+    root["sha256"] = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    assert build(record, paths, tmp_path / "unchanged-profile.zip")["size"] > 0
+
+
 @pytest.mark.parametrize("options", [
     {"max_bundle_bytes": 1}, {"max_total_bytes": 1},
     {"max_snapshot_bytes": 1}, {"max_unpacked_bytes": 1},

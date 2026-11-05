@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=68", "packaging>=25.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.uv]
@@ -17,7 +17,6 @@ authors = [{ name = "Thomas Michon" }]
 # now so the packaging/venv is validated against the real dependency, even
 # though the Phase 0 skeleton does not yet import it.
 dependencies = [
-    "agent-process-telemetry",
     "textual>=8.2.8",
     # Read the installer-owned catalog (data/plugins.toml). tomllib is stdlib on
     # 3.11+; tomli backports it for 3.10.
@@ -30,59 +29,22 @@ dependencies = [
     "websocket-client>=1.8.0",
     # Optional-at-runtime native Linux shutdown notification/FD transport.
     "dbus-next==0.2.3 ; sys_platform == 'linux'",
-    # Resolve a repo's own committed Copilot/Claude plugin config so AHP
-    # sessions can replicate it (client-contributed plugins), the same way
-    # agent-bridge stages a repo's plugin stack for a standalone launch.
-    "agent-plugin-resolve",
-    # Shared Windows-headless / detached process-spawn kwargs (module
-    # ``agent_procutil``). This is a `uv`-editable canonical reference
-    # (vendor-pointer-generalization effort, Phase 1): `path` escapes this
-    # plugin's own root and resolves live to `libs/agent-procutil`, so this
-    # `dev`-branch checkout has nothing to keep manually in sync -- only a
-    # real `main`-branch release (tools/materialize_main.py) ever gets a
-    # real local copy. Used by the production Picker's SSH/maintenance/task
-    # subprocess spawns (copilot-extensions#3359).
-    "agent-procutil",
-    # Resilient scan authority, entry decisions, and bounded warning tracking
-    # for filesystem registries (module ``dropin_registry``). Used by the
-    # production Picker's pivot-registry scan/materialization
-    # (copilot-extensions#3359).
-    "agent-dropin-registry",
-    # Effective global-or-adopted-project plugin eligibility and
-    # identity-verified roots for attributed registry entries (module
-    # ``plugin_activation``). Used by the production Picker's pivot-registry
-    # scan/materialization (copilot-extensions#3359).
-    "agent-plugin-activation",
-    # Coalesce/refcount/idle-exit daemon wire protocol + client (module
-    # ``work_coalescing_singleton``). Used by the Manager mux-companion
-    # daemon (``mux_daemon.py``, Phase 3b Sub-slice 3 Step 2) to serve
-    # ``mux-status-v1`` requests from agent-worktrees, mirroring
-    # ``agent_worktrees.mux_link``'s own use of the same shared library.
-    "agent-work-coalescing-singleton",
-    # Zero-downtime active/passive cutover primitives (routing table +
-    # orchestrator). This is a `uv`-editable canonical reference on `dev`
-    # (shared with the runtime plugins), and only a materialized `main`
-    # payload carries the real local vendored tree. Used by the resident
-    # mux-daemon update path.
-    "agent-zdd",
-    # Shared POSIX login-shell command wrapping for remote SSH exec (module
-    # ``remote_login_shell``, copilot-extensions#5207).
-    "agent-remote-login-shell",
-    # Shared machines.yaml registry parsing, canonicalized local-machine
-    # identity, and local-vs-SSH transport resolution (module
-    # ``machine_transport``). Used by the production Picker's
-    # local-vs-remote dispatch decisions (data_local.is_local/data_ssh.is_local).
-    "agent-machine-transport",
-    "agent-ssh-manager",
-    # Shared update-run telemetry: JSONL events, folded status file, and the
-    # update exit-code table (module ``update_telemetry``). Used by
-    # ``worktree-manager update``, which owns the run the engine joins.
-    "agent-update-telemetry",
-    "agent-update-driver",
-    "agent-worktree-identity",
+    # Preserve the embedded libraries' ordinary external constraints.
+    "pyyaml>=6.0",
+    "pyyaml>=6.0.3",
+]
+
+[dependency-groups]
+first-party-core = [
+    "agent-process-telemetry", "agent-plugin-resolve", "agent-procutil",
+    "agent-dropin-registry", "agent-plugin-activation", "agent-work-coalescing-singleton",
+    "agent-zdd", "agent-remote-login-shell", "agent-machine-transport", "agent-ssh-manager",
+    "agent-update-telemetry", "agent-update-driver", "agent-worktree-identity",
+    "agent-single-instance-lease",
 ]
 
 [tool.uv.sources]
+agent-single-instance-lease = { path = "../libs/single-instance-lease", editable = true }
 agent-ssh-manager = { path = "../libs/ssh-manager", editable = true }
 agent-process-telemetry = { path = "../libs/process-telemetry", editable = true }
 # TODO: REMOVE ON 2026-10-28 OR LATER, once native UV accepts dbus-next==0.2.3

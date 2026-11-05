@@ -59,7 +59,24 @@ def source_closure(component: str, root: Path, builder) -> tuple[Path, list, tup
             raise ArtifactBuildError("standalone source/resource is missing, linked or outside candidate")
     if not (source / "pyproject.toml").is_file():
         raise ArtifactBuildError("standalone project metadata is missing")
-    return source, builder.resolve_vendored_libs(source), resources
+    dependencies = builder.resolve_vendored_libs(source)
+    if component == "worktree-manager":
+        from artifact_source_build import validate_static_build
+
+        data = validate_static_build(source, trusted_setup=(TRUSTED_ROOT / COMPONENTS[component] / "setup.py").read_bytes())
+        if data.get("dependency-groups", {}).get("first-party-core"):
+            import runpy
+
+            declared = runpy.run_path(str(
+                TRUSTED_ROOT / "libs/versioned-runtime/standalone_build.py",
+            ))["embedded_projects"](source)
+            if {directory.resolve() for directory, _data in declared.values()} != {
+                directory.resolve() for _name, directory in dependencies
+            }:
+                raise ArtifactBuildError("embedded first-party declaration differs from source closure")
+            resources += tuple(directory for _name, directory in dependencies)
+            dependencies = []
+    return source, dependencies, resources
 
 
 def injected_resources(component: str, root: Path) -> dict[str, Path]:
@@ -120,6 +137,12 @@ def injected_resources(component: str, root: Path) -> dict[str, Path]:
     elif component == "worktree-manager":
         from plugin_runtime_resources import application_resources
         result.update(application_resources(root / COMPONENTS[component], "worktree_manager"))
+        import runpy
+
+        embedded = runpy.run_path(str(trusted))["embedded_members"](root / COMPONENTS[component])
+        if result.keys() & embedded.keys():
+            raise ArtifactBuildError("embedded first-party members collide with application resources")
+        result.update(embedded)
     source = root / COMPONENTS[component]
     included_helper = source / "_standalone_runtime_build.py"
     optional = [(included_helper, trusted), *(

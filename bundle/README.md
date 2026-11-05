@@ -40,6 +40,20 @@ emitting inputs. Proven-inactive edges are omitted before source lookup;
 applicable markers/extras remain in the output, and rendered target facts are
 attributed under `[tool.bundle-inputs.target-environment]`.
 
+The optional `root_names` argument selects exact canonical runtime distribution
+names through the shared inventory, not arbitrary library roots. A subset records
+its selected names under `[tool.bundle-inputs].root-names`; it is not the complete
+portfolio core selection. Explicit environment groups must contain every selected
+root. Omitting both selectors preserves the ordinary three-environment projection.
+
+The same traversal also follows a project's flat standard
+`[dependency-groups].first-party-core` requirements as first-party build inputs.
+Those entries must name canonical first-party projects; their runtime requirements,
+selected extras, markers and Python ranges contribute to the ordinary third-party
+projection. Other dependency groups, including development tools, are not runtime
+roots. This projection does not itself embed code, change wheel metadata or admit
+an installed distribution set.
+
 For example, from a Python process whose own target facts are intended:
 
 ```python

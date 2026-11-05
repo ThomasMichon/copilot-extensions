@@ -6,7 +6,8 @@ import json
 import time
 from typing import TYPE_CHECKING, BinaryIO, Mapping
 
-from runtime_wheel_inspection import PromotionArtifactError, inspect_wheel
+from runtime_wheel_inspection import PromotionArtifactError, inspect_wheel_facts
+from runtime_wheel_inspection import inspect_wheel as inspect_wheel
 from installer_wheel_inputs import WheelLimits, _check_deadline
 from packaging.utils import canonicalize_name
 from runtime_profile import ProfileError, RuntimeProfile, validate_profile
@@ -107,6 +108,11 @@ def _verified_profile_wheels(
         remaining_archive = max_archive_bytes
         remaining_unpacked = max_unpacked_bytes
         distributions = []
+        owners = {}
+        manager = "copilot-extensions-worktree-manager"
+        check_ownership = any(
+            canonicalize_name(wheel["name"]) == manager for wheel in expected.values()
+        )
         for filename, wheel in expected.items():
             archive = archives[filename]
             archive_limit = min(
@@ -118,11 +124,28 @@ def _verified_profile_wheels(
             if remaining_unpacked <= 0:
                 raise ProfileError("wheel members exceed the supplied byte budget")
             archive.seek(0)
-            metadata, unpacked = inspect_wheel(
+            facts = inspect_wheel_facts(
                 archive, wheel, max_unpacked_bytes=remaining_unpacked,
                 max_archive_bytes=archive_limit,
                 max_metadata_bytes=max_metadata_bytes, limits=limits, deadline=deadline,
             )
+            metadata, unpacked = facts.metadata, facts.unpacked_size
+            for member in facts.member_hashes if check_ownership else ():
+                _check_deadline(deadline)
+                if member.startswith(facts.prefix):
+                    continue
+                parts = member.split("/")
+                if len(parts) > 2 and parts[0].endswith(".data") and parts[1] in {"purelib", "platlib"}:
+                    member = "/".join(parts[2:])
+                key = member.casefold() if record["target"]["environment"]["os_name"] == "nt" else member
+                previous = owners.get(key)
+                if previous is not None and manager in {
+                    canonicalize_name(previous), canonicalize_name(wheel["name"]),
+                }:
+                    raise ProfileError(
+                        f"wheel payload ownership collision: {member} belongs to {previous} and {wheel['name']}"
+                    )
+                owners[key] = wheel["name"]
             requires_python = metadata.get_all("Requires-Python", [])
             if (
                 requires_python != ([wheel["requires_python"]] if wheel["requires_python"] else [])
