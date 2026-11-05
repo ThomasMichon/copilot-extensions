@@ -334,7 +334,7 @@
       "r:plugins/agent-bridge/spikes/stale-daemon-reap/repro.py::_spawn_stand_in::Popen": 1,
       "t:clean-room/scenarios/agent-bridge-concurrent-flip/fixtures/version_flip_probe.py::_spawn_flippers::Popen": 1,
       "t:clean-room/scenarios/agent-bridge-cutover/fixtures/cutover_probe.py::check_abrupt_kill_recovery::Popen": 2,
-      "r:plugins/agent-worktrees/bin/agent-worktrees-update-entry.ps1::<script>::Process.Start": 1,
+      "r:plugins/agent-worktrees/bin/agent-worktrees-update-entry.ps1::<script>::Process.Start": 2,
       "r:worktree-manager/bin/launch-session.ps1::<script>::Start-Process": 2,
       "r:worktree-manager/bin/manager-runtime.ps1::<script>::Process.Start": 1,
       "r:worktree-manager/bin/pane-wrapper.ps1::<script>::Start-Process": 1,
