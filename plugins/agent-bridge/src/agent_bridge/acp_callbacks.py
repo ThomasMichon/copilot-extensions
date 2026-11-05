@@ -31,14 +31,16 @@ class _BridgeClientImpl(Client):
     ) -> RequestPermissionResponse:
         if self._owner._remote_transport is not None:
             return await self._owner._remote_permission(options, session_id, tool_call, kwargs)
-        return await self._owner._handle_permission_request(options, tool_call)
+        return await self._owner._handle_permission_request(
+            options, tool_call, producer=self, session_id=session_id,
+        )
 
     async def create_elicitation(
         self, message: str, mode: Any, **kwargs: Any,
     ) -> AcceptElicitationResponse | DeclineElicitationResponse | CancelElicitationResponse:
         if self._owner._remote_transport is not None:
             return await self._owner._remote_elicitation(message, mode, kwargs)
-        return await self._owner._handle_elicitation(message, mode)
+        return await self._owner._handle_elicitation(message, mode, producer=self)
 
     async def complete_elicitation(self, elicitation_id: str, **kwargs: Any) -> None:
         if self._owner._remote_transport is not None:

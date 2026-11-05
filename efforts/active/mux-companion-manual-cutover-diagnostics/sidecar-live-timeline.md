@@ -422,9 +422,10 @@ publication and installed support retain their separate qualification.
   consumer; known-session event/history and installed adoption remain separate.
 - [ ] Expose actual pending/cleared input and permission evidence without answer
   or control authority.
-  The [live-request amendment](sidecar-current-requests.md) proposes the bounded
+  The [live-request amendment](sidecar-current-requests.md), reviewed in #10545,
+  specifies the bounded
   producer snapshot, optional version-skew-safe wire and existing-reader
-  consumer. Review/merge precedes implementation; retained request history
+  consumer. Source implementation remains open; retained request history
   remains separately qualified and unsupported sources stay unknown.
 - [ ] Deliver qualified pre-compaction evidence from a supported source adapter;
   retain direct start counts/attempt/target metadata but keep unknown until

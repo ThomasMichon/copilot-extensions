@@ -4,7 +4,7 @@ Parent: [Step 7, S3](sidecar-live-timeline.md#s3---bridge-relationships-and-prob
 Shared boundary: [Sidecar observation contract](sidecar-observation-contract.md).
 Canonical effort: [README.md](README.md).
 
-**Status: proposed source amendment; no runtime support claimed.** This is the
+**Status: reviewed source amendment in #10545; no runtime support claimed.** This is the
 coordinator's implementation proposal within the accepted input-observability
 scope, not a new operator request or rollout grant. It targets the existing
 [compaction-and-input-observability](../../../visions/mux-companion/README.md#compaction-and-input-observability)
@@ -63,6 +63,16 @@ Qualification requires the exact admitted session, its currently attached client
 live connection and supported local transport. A host-mode relay, remote client,
 represented registration, missing/replaced client, disconnected transport or
 terminal session remains unknown until its own producer is qualified.
+The source helper binds successful connection initialization to the actual SDK
+callback object and owned process, then separately admits the ACP session.
+Replacing that connection creates a new observation incarnation. Pending or late
+callbacks from the former producer, or waiters from a prior session-admission
+epoch, cannot become current merely because the same client object reconnects.
+The existing permission answer slot can be overwritten or reset while an earlier
+callback still awaits. If weak producer admissions exceed the bounded candidates
+actually found in the owner maps, coverage is partial (`waiter-coverage`), never
+complete absence. The helper does not create another answer inventory or settle
+those callbacks; their actual completion removes that coverage limitation.
 
 Each waiter occurrence has a producer-owned opaque identity scoped to that
 client incarnation. A repeated tool-call ID must produce a different occurrence;
@@ -151,5 +161,11 @@ Manager consumer seams:
 
 Use bounded isolated tests and the existing test portfolio; no native/effectful
 matrix enters required unit-only CI. Source qualification is not installed
-or native-client acceptance. Review and merge this amendment before implementing
-the new wire form, then record the actual closed source items under S3.
+or native-client acceptance. #10545 merged as
+`d4340930de9179f8e83a9726a3a873689f7b2114`, satisfying review before new wire
+implementation. Record the actual closed source items under S3 as they land.
+
+The bounded producer helper and actual callback/Future controls are the first
+implementation slice. No optional HTTP block, CLI flag, capability advertisement
+or Manager display is implemented by that helper alone; existing external reads
+still report current requests unknown.

@@ -1,5 +1,16 @@
 # Testing copilot-extensions
 
+Bridge's opt-in `--test-file tests/test_acp_current_requests.py
+--test-file tests/test_acp_client.py --test-file tests/test_attention_current.py
+--test-file tests/test_attention_wait.py --allow-explicit-tiers` packet checks
+actual local callback/Future lifetime, bounded candidate/output counts, privacy,
+manual-versus-forwarded/automatic permission, connection/process/session
+replacement and failed initialization. Delayed old callbacks never qualify as
+the new producer; overlapping/reset permission slots remain partial until their
+omitted callbacks settle. Completion invalidations do not append history. It starts
+no SDK/model actor and does not qualify optional wire, Manager, installed or
+native-client behavior; required unit-only CI is unchanged.
+
 Efforts' optional `--test-file tests/test_agenda_export_contributors.py
 --test-file tests/test_agenda_export.py --test-file tests/test_agenda_export_cli.py
 --allow-explicit-tiers` packet checks complete verified contributor provenance,
@@ -2874,6 +2885,10 @@ budgets, and peer settlement plus private-input cleanup after a digest failure.
 Pure worker-ceiling, budget and orchestration controls live in
 `tools/promotion_unit_tests/test_wheel_acquisition_budget.py`; its executor
 boundary is synthetic and does not qualify real overlap or native settlement.
+The retained-wheel controls exercise a real local-TLS metadata pass without a
+wheel download, exact-byte and storage limits, first-owner refusals, link
+trust, custody mutation and deadlines. Actor-free controls separately cover
+the selected-file decision; neither test approves a profile or runs an update.
 A simulated pre-header reset followed by a real local-TLS request exercises the
 bounded retry; pure controls cover shared budgets, deadline, peer cancellation
 and redirect credential isolation.
