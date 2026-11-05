@@ -12,6 +12,7 @@ from agent_procutil import no_window_kwargs
 
 from agent_worktrees import sessions, status_monitor_runtime
 from agent_worktrees.mux_list_result import (
+    confirmed_has_session,
     is_empty_tmux_listing,
     parse_monitor_sessions,
     parse_session_counts,
@@ -68,6 +69,64 @@ def test_monitor_and_liveness_agree_on_healthy_absence(
     )
     assert status_monitor_runtime._monitor_list_sessions("/usr/bin/tmux") == {}
     assert sessions._list_mux_sessions() == {}
+
+
+@pytest.mark.parametrize("message", [NO_SERVER, NO_SOCKET])
+def test_strict_presence_recognizes_absence_at_subprocess_boundary(
+    monkeypatch: pytest.MonkeyPatch, message: str,
+) -> None:
+    monkeypatch.setattr(sessions.platform, "system", lambda: "Linux")
+    calls = []
+
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 1, b"", (message + "\n").encode())
+
+    monkeypatch.setattr(subprocess, "run", run)
+    assert sessions.has_mux_session("fixture", strict=True, timeout=0.25) is False
+    command, kwargs = calls[0]
+    assert command == ["tmux", "has-session", "-t", "=wt-fixture"]
+    assert kwargs["timeout"] == 0.25
+    assert kwargs["capture_output"] is True
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("message", [
+    "error connecting to /tmp/example (Permission denied)",
+    "error connecting to /tmp/example (Connection refused)",
+    NO_SOCKET + "\nunknown failure",
+    "",
+])
+def test_strict_presence_keeps_unavailable_probes_unknown(
+    monkeypatch: pytest.MonkeyPatch, message: str,
+) -> None:
+    monkeypatch.setattr(sessions.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(command, 1, b"", message.encode()),
+    )
+    with pytest.raises(RuntimeError, match="unavailable"):
+        sessions.has_mux_session("fixture", strict=True, timeout=0.25)
+
+
+@pytest.mark.parametrize("code,message,absent", [
+    (1, b"", True),
+    (2, b"", False),
+    (1, b"access denied", False),
+])
+def test_strict_psmux_presence_uses_its_known_empty_absence_result(
+    monkeypatch: pytest.MonkeyPatch, code: int, message: bytes, absent: bool,
+) -> None:
+    monkeypatch.setattr(sessions.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(command, code, b"", message),
+    )
+    if absent:
+        assert sessions.has_mux_session("fixture", strict=True, timeout=0.25) is False
+    else:
+        with pytest.raises(RuntimeError, match="unavailable"):
+            sessions.has_mux_session("fixture", strict=True, timeout=0.25)
 
 
 @pytest.mark.parametrize(
@@ -139,6 +198,11 @@ def test_real_missing_socket_probe_does_not_start_a_server(tmp_path: Path) -> No
         **no_window_kwargs(),
     )
     assert is_empty_tmux_listing(binary, result), result.stderr
+    presence = subprocess.run(
+        [binary, "-S", socket.name, "has-session", "-t", "=wt-fixture"],
+        capture_output=True, text=True, cwd=tmp_path, timeout=5, **no_window_kwargs(),
+    )
+    assert confirmed_has_session("wt-fixture", presence) is False
     assert not socket.exists()
 
 

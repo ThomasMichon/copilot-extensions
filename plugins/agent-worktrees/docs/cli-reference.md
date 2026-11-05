@@ -507,6 +507,7 @@ Windows PSMux new-session creation removes inherited mux-nesting selectors from
 the creation client's environment, matching an independent Manager launch.
 The caller's environment and existing-session/new-window routing are unchanged.
 
+For newly created worktree sessions (not `--anchor` or existing-mux joins),
 `embody --verify-timeout <seconds>` checks mux presence, not native startup or
 prompt acceptance. Expired verification returns `ok: false`, `mux_verified: false`
 and exit 3; an unavailable probe instead keeps `mux_verified: null` with an

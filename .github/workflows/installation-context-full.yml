@@ -39,6 +39,7 @@ on:
           - promotion-controls
           - coverage-selection
           - pane-argv
+          - generic-mux
           - manager-uninstall
           - komodo-recovery
           - manager-suite
@@ -1374,6 +1375,45 @@ jobs:
           --test-file tests/test_windows_bootstrap_reconcile_lifecycle.py
           --test-file tests/test_bootstrap_check_reconcile_always_on.py
           --timeout 300 --plugin-timeout 360 --test-timeout 60
+
+  generic-mux-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'generic-mux'
+    name: Generic PSMux 3.3.8 creation (isolated session)
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Prepare preferred disposable PSMux
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP 'generic-mux-psmux'
+          $null = New-Item -ItemType Directory -Path $root
+          $archive = Join-Path $root 'psmux.zip'
+          Invoke-WebRequest -Uri 'https://github.com/psmux/psmux/releases/download/v3.3.8/psmux-v3.3.8-windows-x64.zip' -OutFile $archive
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne '1ad127ba937194a890b933a73d9b023e297bd73dc742abd841bf159984c2effe') {
+            throw 'Pinned PSMux archive digest mismatch'
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath $root
+          $binaries = @(Get-ChildItem -LiteralPath $root -Filter psmux.exe -Recurse -File)
+          if ($binaries.Count -ne 1) { throw 'Expected exactly one pinned PSMux binary' }
+          "PSMUX_TEST_BIN=$($binaries[0].FullName)" >> $env:GITHUB_ENV
+      - name: Qualify generic creation and truthful verification
+        env:
+          PSMUX_FILE_LAUNCH_E2E: "1"
+          UV_PYTHON: "3.12"
+          EXPECTED_SOURCE: ${{ github.sha }}
+        run: |
+          python -c "import os,subprocess; actual=subprocess.check_output(['git','rev-parse','HEAD'],creationflags=subprocess.CREATE_NO_WINDOW,text=True).strip(); assert actual == os.environ['EXPECTED_SOURCE']; print('Source:',actual)"
+          python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_generic_mux_startup.py --test-file tests/test_empty_mux_listing.py --test-file tests/test_mux_creation_admission.py --test-file tests/test_embody.py --allow-explicit-tiers
 
   pane-argv-windows:
     if: github.event_name == 'workflow_dispatch' && (inputs.portfolio == 'pane-argv' || inputs.portfolio == 'mux-companion')

@@ -1404,7 +1404,7 @@ def has_mux_session(
         result = subprocess.run(cmd, capture_output=True, timeout=timeout, **no_window_kwargs())
         if strict:
             from .mux_list_result import confirmed_has_session
-            return confirmed_has_session(sess_name, result)
+            return confirmed_has_session(sess_name, result, binary=cmd[0])
         return result.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         if strict:

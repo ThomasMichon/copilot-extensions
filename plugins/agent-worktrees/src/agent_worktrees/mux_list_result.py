@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import PureWindowsPath
 from subprocess import CompletedProcess
 
 
@@ -30,6 +31,7 @@ def _attached_count(value: str) -> int:
 
 def confirmed_has_session(
     session_name: str, result: CompletedProcess[str] | CompletedProcess[bytes],
+    *, binary: str | None = None,
 ) -> bool:
     if result.returncode == 0:
         return True
@@ -40,6 +42,11 @@ def confirmed_has_session(
     if result.returncode == 1 and not (result.stdout or "").strip() and (
         message in {f"can't find session: {session_name}", f"session not found: {session_name}"}
         or re.fullmatch(r"no server running(?: on [^\r\n]+)?", message)
+        or re.fullmatch(r"error connecting to [^\r\n]+ \(No such file or directory\)", message)
+        or (
+            binary is not None and PureWindowsPath(binary).stem.casefold() == "psmux"
+            and not message
+        )
     ):
         return False
     raise RuntimeError("Mux presence probe is unavailable; absence is unconfirmed")
