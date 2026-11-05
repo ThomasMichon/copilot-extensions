@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import shlex
 from typing import TYPE_CHECKING, Any
@@ -12,24 +13,48 @@ if TYPE_CHECKING:
     from .spawn_target import SpawnTarget
 
 
-def guest_command(workspace: str, operation: str) -> str:
-    """Invoke the guest's own owner; caller installation/environment is not authority."""
+class CodeSpaceNotRunning(AgentHostingError):
+    """A read-only check cannot inspect this exact receiving CodeSpace."""
+
+
+def _require_workspace(workspace: str) -> None:
+    """Require the actual POSIX execution path before quoting a guest command."""
     if not isinstance(workspace, str) or not workspace.startswith("/") or "\0" in workspace:
         raise AgentHostingError("Repository hosting requires an absolute guest execution checkout")
-    return (
-        f"cd -- {shlex.quote(workspace)} && "
-        'WORKTREES=$(command -v agent-worktrees) && test -f "$WORKTREES" && '
-        '"$WORKTREES" agent-policy check --path "$PWD" '
-        f"--operation {shlex.quote(operation)} --json"
+
+
+def _policy_check(
+    workspace: str, operation: str, metadata: dict, *, text_transport: bool = False,
+) -> tuple[str, bytes | None]:
+    _require_workspace(workspace)
+    declaration = metadata.get("portable_receiving_policy")
+    if declaration is None:
+        return (
+            f"cd -- {shlex.quote(workspace)} && "
+            'WORKTREES=$(command -v agent-worktrees) && test -f "$WORKTREES" && '
+            '"$WORKTREES" agent-policy check --path "$PWD" '
+            f"--operation {shlex.quote(operation)} --json",
+            None,
+        )
+    if (
+        not isinstance(declaration, dict)
+        or type(declaration.get("version")) is not int or declaration["version"] != 1
+    ):
+        raise AgentHostingError("Unsupported portable receiving policy declaration")
+    from .portable_policy import guest_policy_check
+
+    return guest_policy_check(
+        workspace, operation, **({"text_transport": True} if text_transport else {}),
     )
 
 
-def _answer(rc: int, output: str, error: str) -> dict[str, Any]:
+def _answer(rc: int, output: str, error: str, *, portable: bool = True) -> dict[str, Any]:
     from .hosting_policy import validate_policy_result
 
     if rc:
         raise AgentHostingError(
-            "Guest repository hosting refused or receiver unsupported: "
+            ("Guest repository hosting refused or receiver unsupported: " if portable else
+             "Selected provider has no portable receiving handoff; legacy receiver refused or unsupported: ")
             + (error.strip() or output.strip() or f"exit {rc}")
         )
     try:
@@ -72,7 +97,7 @@ async def _codespace_policy(
     transport = CodeSpaceTransport(name, metadata.get("repo") or "")
     try:
         if not await transport.is_running():
-            raise AgentHostingError(
+            raise CodeSpaceNotRunning(
                 "Cannot inspect repository hosting policy without waking the CodeSpace; "
                 "make the source checkout inspectable before managed agent launch"
             )
@@ -94,8 +119,11 @@ async def _codespace_policy(
             if rc:
                 raise AgentHostingError(f"Guest execution checkout is unavailable: {error or output}")
             workspace = parse_execution_checkout(output)
-        command = guest_command(workspace, operation)
-        return _answer(*await transport.run(f"bash -lc {shlex.quote(command)}", timeout=90))
+        command, payload = await asyncio.to_thread(_policy_check, workspace, operation, metadata)
+        return _answer(*await transport.run(
+            f"bash -lc {shlex.quote(command)}", timeout=90,
+            **({"input_bytes": payload} if payload is not None else {}),
+        ), portable=payload is not None)
     finally:
         await transport.close()
 
@@ -181,7 +209,7 @@ async def _container_policy(target: SpawnTarget, operation: str) -> dict[str, An
         raise AgentHostingError("Container hosting check requires the provider's execution user")
     if not isinstance(workspace, str):
         raise AgentHostingError("Container receiver did not resolve an execution checkout")
-    guest_command(workspace, operation)
+    _require_workspace(workspace)
     prefix = [*runtime, "exec", "-u", user, instance, "bash", "-lc"]
     if target.worktree_id and not target.explicit_cwd:
         from plugin_resolve.reflection import parse_execution_checkout
@@ -195,5 +223,12 @@ async def _container_policy(target: SpawnTarget, operation: str) -> dict[str, An
         if rc:
             raise AgentHostingError(f"Container execution checkout unavailable: {error.decode(errors='replace')}")
         workspace = parse_execution_checkout(output.decode())
-    rc, output, error = await _run_provider([*prefix, guest_command(workspace, operation)], timeout=90)
-    return _answer(rc, output.decode(), error.decode())
+    command, payload = await asyncio.to_thread(
+        _policy_check, workspace, operation, metadata, text_transport=bool(venue.get("driver")),
+    )
+    rc, output, error = await _run_provider(
+        [*runtime, "exec", *(["-i"] if payload is not None else []),
+         "-u", user, instance, "bash", "-lc", command],
+        timeout=90, **({"input_bytes": payload} if payload is not None else {}),
+    )
+    return _answer(rc, output.decode(), error.decode(), portable=payload is not None)

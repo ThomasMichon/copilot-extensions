@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -15,7 +16,7 @@ from repository_policy import AgentHostingError, require_agent_hosting, validate
 if TYPE_CHECKING:
     from ssh_manager import CommandResult
 
-    from .agent_registry_namespace import NamespaceResolver
+    from .agent_registry_namespace import CliNamespaceResolver, NamespaceResolver
     from .agent_registry_resolver import AgentResolver
     from .spawn_target import SpawnTarget
     from .session_manager import Session, SessionManager
@@ -66,14 +67,107 @@ class SessionHostingFence:
 
 async def require_session_hosting(
     manager: SessionManager, session: Session, *, operation: str,
-    fence: SessionHostingFence | None = None,
+    fence: SessionHostingFence | None = None, activate: bool = False,
 ) -> SessionHostingFence:
     """Admit without absorbing a newer stop into the operation's authority."""
     fence = fence if fence is not None else SessionHostingFence.capture(manager, session)
     if session.target.type != "remote-acp":
-        await require_target_hosting(session.target, operation=operation)
+        from .provider_hosting import CodeSpaceNotRunning
+
+        target = session.target
+        selection = None
+        if activate and target.codespace and target.codespace.get("portable_receiving_policy") is None:
+            selection = await _resume_codespace_selection(manager, session, fence, allow_missing=True)
+            if selection is not None:
+                target = _retained_receiving_target(target, selection[1])
+        try:
+            if target is not session.target:
+                fence.require_current(manager)
+                await _require_retained_codespace_checkout(target)
+                fence.require_current(manager)
+            await require_target_hosting(target, operation=operation)
+        except CodeSpaceNotRunning:
+            if not activate:
+                raise
+            selection = selection or await _resume_codespace_selection(manager, session, fence)
+            assert selection is not None
+            provider, candidate = selection
+            target = _retained_receiving_target(session.target, candidate)
+            await _activate_provider_target(
+                provider, candidate, check_current=lambda: fence.require_current(manager),
+                retained_target=target,
+            )
+            fence.require_current(manager)
+            await _require_retained_codespace_checkout(target)
+            fence.require_current(manager)
+            await require_target_hosting(target, operation=operation)
+        if target is not session.target:
+            fence.require_current(manager)
+            session.target = target
     fence.require_current(manager)
     return fence
+
+
+async def _resume_codespace_selection(
+    manager: SessionManager, session: Session, fence: SessionHostingFence, *,
+    allow_missing: bool = False,
+) -> tuple[CliNamespaceResolver, SpawnTarget] | None:
+    from .agent_registry_namespace import CliNamespaceResolver
+    from .models import SessionStatus
+
+    metadata = session.target.codespace or {}
+    name = metadata.get("name")
+    owner = manager._resolver
+    namespaces = getattr(owner, "_namespace_resolvers", {})
+    provider = namespaces.get("codespace")
+    if (
+        owner is None or session.status != SessionStatus.STOPPED or not isinstance(name, str) or not name
+        or not isinstance(provider, CliNamespaceResolver)
+    ):
+        if allow_missing:
+            return None
+        raise AgentHostingError("Stopped CodeSpace resume requires its exact namespace owner")
+    fence.require_current(manager)
+    requested_repo = metadata.get("requested_repo") or metadata.get("repo")
+    repo_remote = metadata.get("repo_remote")
+    if any(value is not None and (
+        not isinstance(value, str) or not value.strip() or "\0" in value
+    ) for value in (requested_repo, repo_remote)):
+        raise AgentHostingError("Retained CodeSpace repository selection is invalid")
+    candidate = await owner._call_resolver(
+        provider, name, extra_plugins=[], repo=requested_repo, repo_remote=repo_remote,
+    )
+    if (candidate.codespace or {}).get("name") != name:
+        raise AgentHostingError("CodeSpace resume provider selected another receiving venue")
+    fence.require_current(manager)
+    return provider, candidate
+
+
+def _retained_receiving_target(retained: SpawnTarget, candidate: SpawnTarget) -> SpawnTarget:
+    metadata = retained.codespace or {}
+    negotiated = dict(metadata)
+    negotiated.pop("portable_receiving_policy", None)
+    if "portable_receiving_policy" in (candidate.codespace or {}):
+        negotiated["portable_receiving_policy"] = candidate.codespace["portable_receiving_policy"]
+    return replace(retained, codespace=negotiated)
+
+
+async def _require_retained_codespace_checkout(target: SpawnTarget) -> None:
+    metadata = target.codespace or {}
+    if target.explicit_cwd or not target.worktree_id:
+        from .session_host.codespace_transport import CodeSpaceTransport, resolve_execution_workspace
+
+        transport = CodeSpaceTransport(metadata["name"], metadata.get("repo") or "")
+        try:
+            if not await transport.is_running():
+                from .provider_hosting import CodeSpaceNotRunning
+
+                raise CodeSpaceNotRunning("Cannot validate the retained checkout without waking the CodeSpace")
+            workspace = await resolve_execution_workspace(dict(metadata), transport)
+        finally:
+            await transport.close()
+        if workspace != (target.cwd or metadata.get("workspace_folder")):
+            raise AgentHostingError("CodeSpace resume provider changed the retained execution checkout")
 
 
 def marketplace_id() -> str:
@@ -261,6 +355,7 @@ def require_local_target_hosting(target: SpawnTarget, *, operation: str = "launc
 async def require_namespace_hosting(
     owner: AgentResolver, prefix: str, name: str, *,
     repo: str | None = None, repo_remote: str | None = None,
+    activate: bool = False,
 ) -> SpawnTarget | None:
     """Admit readiness, or return an inspection-only session reference."""
     import inspect
@@ -282,8 +377,71 @@ async def require_namespace_hosting(
     )
     if target.type == "session":
         return target
+    if activate and target.codespace:
+        await _activate_provider_target(resolver, target)
+        # Only a launch entry may ask the venue owner to activate before a
+        # fresh read. Resolution checks again before staging or child creation.
+        return None
     await require_target_hosting(target, operation="namespace readiness")
     return None
+
+
+async def _activate_provider_target(
+    resolver: Any, target: SpawnTarget, *, check_current: Callable[[], None] | None = None,
+    retained_target: SpawnTarget | None = None,
+) -> None:
+    from .portable_policy import codespace_receiving_command, selected_context
+    from .provider_hosting import CodeSpaceNotRunning
+    from .venue_launch_policy import gate_raw_codespace_spawn
+
+    metadata = target.codespace or {}
+    name = metadata.get("name")
+    if (
+        not isinstance(name, str) or not name.strip()
+        or name != name.strip() or "\0" in name
+    ):
+        raise AgentHostingError("Portable activation requires an exact receiving venue")
+    await asyncio.to_thread(selected_context)
+    if target.codespace:
+        codespace_receiving_command(metadata)
+    await gate_raw_codespace_spawn(target)
+    if target.codespace:
+        try:
+            if retained_target is not None:
+                await _require_retained_codespace_checkout(retained_target)
+            await require_target_hosting(retained_target or target, operation="namespace readiness")
+        except CodeSpaceNotRunning as exc:
+            declaration = metadata.get("portable_receiving_policy")
+            if (
+                not isinstance(declaration, dict)
+                or type(declaration.get("version")) is not int or declaration["version"] != 1
+                or declaration.get("activation") != "start"
+            ):
+                raise AgentHostingError(
+                    "Selected CodeSpace provider cannot admit activation; "
+                    "activate it through its venue owner before launch"
+                ) from exc
+            if check_current is not None:
+                check_current()
+            activation = asyncio.create_task(resolver._run(["start", name], timeout=240))
+            try:
+                result = await asyncio.shield(activation)
+            except asyncio.CancelledError:
+                # The provider's native call can outlive cancellation of its thread join.
+                while not activation.done():
+                    try:
+                        await asyncio.shield(activation)
+                    except asyncio.CancelledError:
+                        continue
+                activation.result()
+                raise
+            if check_current is not None:
+                check_current()
+            if result is None or result[0]:
+                raise AgentHostingError(
+                    "CodeSpace owner activation failed: "
+                    + ((result[2] or result[1]).strip() if result else "unsupported provider")
+                ) from exc
 
 
 async def resolve_namespace_with_plugins(

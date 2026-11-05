@@ -33,6 +33,7 @@ async def _run_provider(
     *,
     timeout: float,
     cwd: str | None = None,
+    input_bytes: bytes | None = None,
 ) -> tuple[int, bytes, bytes]:
     from ..transport import _wrap_batch_for_windows
 
@@ -40,7 +41,7 @@ async def _run_provider(
     command = _wrap_batch_for_windows(list(command), env)
     proc = await asyncio.create_subprocess_exec(
         *command,
-        stdin=asyncio.subprocess.DEVNULL,
+        stdin=asyncio.subprocess.PIPE if input_bytes is not None else asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         creationflags=no_window_flags(),
@@ -49,7 +50,8 @@ async def _run_provider(
         **({"cwd": cwd} if cwd is not None else {}),
     )
     try:
-        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        communicate = proc.communicate(input_bytes) if input_bytes is not None else proc.communicate()
+        out, err = await asyncio.wait_for(communicate, timeout=timeout)
     except (TimeoutError, asyncio.TimeoutError, asyncio.CancelledError) as exc:
         from ..transport import AgentProcess, SpawnTarget
 
@@ -101,6 +103,16 @@ async def prepare_container_session_host(
     if not command or not name:
         raise RuntimeError("trusted container metadata lacks provider command/name")
     command += ["session-host-prepare", name]
+    declaration = target.get("portable_receiving_policy")
+    if declaration is not None:
+        if (
+            not isinstance(declaration, dict)
+            or type(declaration.get("version")) is not int or declaration["version"] != 1
+        ):
+            raise RuntimeError("Unsupported container portable receiving policy declaration")
+        from ..portable_policy import selected_context
+
+        command += ["--repository-policy-context", await asyncio.to_thread(selected_context)]
     expected_instance = target.get("instance_id")
     if expected_instance:
         command += ["--expected-instance", str(expected_instance)]

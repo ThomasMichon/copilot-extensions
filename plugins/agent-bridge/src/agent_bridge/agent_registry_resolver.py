@@ -287,6 +287,7 @@ class AgentResolver(_ProviderDiscoveryMixin, _LocalTransportMixin):
 
     async def resolve_async(
         self, agent_name: str, sender_repo: str | None = None,
+        *, activate: bool = False,
     ) -> SpawnTarget:
         """Resolve an agent name to a SpawnTarget (async path)."""
         from . import agent_registry as compat
@@ -304,7 +305,7 @@ class AgentResolver(_ProviderDiscoveryMixin, _LocalTransportMixin):
                 name,
                 prefix,
             )
-            reference = await self._require_namespace_hosting(prefix, name)
+            reference = await self._require_namespace_hosting(prefix, name, activate=activate)
             if reference is not None:
                 return reference
             await resolver.ensure_ready(name)
@@ -315,7 +316,7 @@ class AgentResolver(_ProviderDiscoveryMixin, _LocalTransportMixin):
             static_name = self.canonical_agent_name(agent_name)
             if static_name:
                 return await self._resolve_bare(static_name)
-            return await self._resolve_venue_bound(repo, venue)
+            return await self._resolve_venue_bound(repo, venue, activate=activate)
 
         candidates = await self._gather_bare_candidates(agent_name)
         if len(candidates) > 1:
@@ -340,9 +341,11 @@ class AgentResolver(_ProviderDiscoveryMixin, _LocalTransportMixin):
                         resolve_name,
                         sender_repo,
                     )
-                    return await self._resolve_venue_bound(sender_repo, resolve_name)
+                    return await self._resolve_venue_bound(sender_repo, resolve_name, activate=activate)
                 return await self._resolve_bare(agent_name)
-            reference = await self._require_namespace_hosting(resolver.prefix, resolve_name)
+            reference = await self._require_namespace_hosting(
+                resolver.prefix, resolve_name, activate=activate,
+            )
             if reference is not None:
                 return reference
             await resolver.ensure_ready(resolve_name)
@@ -358,13 +361,15 @@ class AgentResolver(_ProviderDiscoveryMixin, _LocalTransportMixin):
 
     async def _require_namespace_hosting(
         self, prefix: str, name: str, *, repo: str | None = None, repo_remote: str | None = None,
+        activate: bool = False,
     ) -> SpawnTarget | None:
         return await require_namespace_hosting(
-            self, prefix, name, repo=repo, repo_remote=repo_remote,
+            self, prefix, name, repo=repo, repo_remote=repo_remote, activate=activate,
         )
 
     async def _resolve_venue_bound(
         self, repo: str, venue: str,
+        *, activate: bool = False,
     ) -> SpawnTarget:
         """Resolve ``<repo>@<venue>``: the venue, bound to run ``<repo>``."""
         from . import agent_registry as compat
@@ -375,7 +380,7 @@ class AgentResolver(_ProviderDiscoveryMixin, _LocalTransportMixin):
             prefix, name = ns
             resolver = self._namespace_resolvers[prefix]
             reference = await self._require_namespace_hosting(
-                prefix, name, repo=repo, repo_remote=repo_remote,
+                prefix, name, repo=repo, repo_remote=repo_remote, activate=activate,
             )
             if reference is not None:
                 return reference
@@ -396,7 +401,7 @@ class AgentResolver(_ProviderDiscoveryMixin, _LocalTransportMixin):
                 target = await self._resolve_bare(venue)
                 return self._bind_repo(target, repo, venue)
             reference = await self._require_namespace_hosting(
-                resolver.prefix, resolve_name, repo=repo, repo_remote=repo_remote,
+                resolver.prefix, resolve_name, repo=repo, repo_remote=repo_remote, activate=activate,
             )
             if reference is not None:
                 return reference

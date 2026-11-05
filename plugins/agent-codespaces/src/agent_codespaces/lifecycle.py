@@ -736,6 +736,8 @@ def wait_for_codespace(
     timeout: float = 1200.0,
     interval: float = 10.0,
     on_progress=None,
+    *,
+    account: str | None = None,
 ) -> tuple[WaitOutcome, str]:
     """Patiently poll a CodeSpace until it is usable, fails, or times out.
 
@@ -745,6 +747,8 @@ def wait_for_codespace(
     can distinguish "still provisioning" from "genuinely dead" and never mistake
     a slow boot for a redundant-create trigger.
 
+    Explicit ``account`` pins each read to that owner, never a same-named venue
+    from the merged inventory.
     The default ``timeout`` is generous (20 min) because CodeSpace
     create/provision is finicky; the caller supplies a finite ceiling and (for a
     background wait) an ``on_progress(last_state, remaining_s)`` callback. Transient
@@ -756,18 +760,18 @@ def wait_for_codespace(
     last_state = ""
     while True:
         try:
-            found = None
-            for cs in list_codespaces():
-                if cs.name == name:
-                    found = cs
-                    break
-            if found is not None:
-                last_state = found.state
-                bucket = classify_state(found.state)
+            if account is not None:
+                exists, state = get_codespace_status(name, account=account)
+            else:
+                found = next((cs for cs in list_codespaces() if cs.name == name), None)
+                exists, state = found is not None, found.state if found is not None else None
+            if exists and state is not None:
+                last_state = state
+                bucket = classify_state(state)
                 if bucket == "available":
-                    return WaitOutcome.AVAILABLE, found.state
+                    return WaitOutcome.AVAILABLE, state
                 if bucket == "failed":
-                    return WaitOutcome.FAILED, found.state
+                    return WaitOutcome.FAILED, state
             else:
                 last_state = "not-listed"
         except RuntimeError as exc:
@@ -779,7 +783,10 @@ def wait_for_codespace(
         time.sleep(interval)
 
 
-def wait_for_available(name: str, timeout: float = 300.0, interval: float = 10.0) -> bool:
+def wait_for_available(
+    name: str, timeout: float = 300.0, interval: float = 10.0, *,
+    account: str | None = None,
+) -> bool:
     """Poll until a CodeSpace reaches the ``Available`` state.
 
     Returns True once Available, or False on timeout OR a terminal-failed state.
@@ -787,7 +794,8 @@ def wait_for_available(name: str, timeout: float = 300.0, interval: float = 10.0
     also fails fast on genuinely-dead states instead of waiting out the timeout).
     Used after ``create_codespace`` before provisioning over SSH.
     """
-    outcome, _ = wait_for_codespace(name, timeout=timeout, interval=interval)
+    kwargs = {"account": account} if account is not None else {}
+    outcome, _ = wait_for_codespace(name, timeout=timeout, interval=interval, **kwargs)
     return outcome == WaitOutcome.AVAILABLE
 
 

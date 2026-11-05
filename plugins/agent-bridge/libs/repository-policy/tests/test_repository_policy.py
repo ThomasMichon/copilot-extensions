@@ -263,3 +263,43 @@ def test_fresh_guest_reader_cannot_downgrade_explicit_installation_context(tmp_p
     answer = json.loads(result.stdout)
     assert answer["code"] == "repository-agent-exposure-invalid"
     assert "context" in answer["error"]
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("process")
+@pytest.mark.parametrize("text_transport", [False, True])
+def test_selected_receiver_preserves_overlay_denial_over_binary_and_text_stdin(
+    tmp_path: Path, text_transport: bool,
+) -> None:
+    import json
+    import shlex
+    import subprocess
+    import sys
+
+    from repository_policy.receiving import build_receiving_policy_check
+
+    write(tmp_path, "expose_agent: true\n")
+    write(tmp_path, "expose_agent: false\n",
+          ".copilot-extensions/agent-worktrees/marketplaces/selected/config.yaml")
+    context = json.dumps({
+        "schema": "agent-bridge.receiving-policy", "version": 1, "marketplaceId": "selected",
+    })
+    command, payload = build_receiving_policy_check(
+        "/actual", context, text_transport=text_transport,
+    )
+    argv = shlex.split(command.split(" && ", 1)[1])
+    argv[0], argv[-4] = sys.executable, str(tmp_path)
+    if sys.platform == "win32":
+        flags = subprocess.CREATE_NO_WINDOW
+    else:
+        flags = 0
+    result = subprocess.run(
+        argv, input=payload, capture_output=True, timeout=10,
+        env=dict(os.environ, COPILOT_EXTENSIONS_CONTEXT="unrelated-installed-owner"),
+        creationflags=flags,
+    )
+    assert result.returncode == 3, result.stderr
+    answer = json.loads(result.stdout)
+    assert answer["code"] == "repository-agent-exposure-denied"
+    assert "marketplaces" in answer["error"] and "selected" in answer["error"]

@@ -413,12 +413,13 @@ async def test_supported_container_checks_actual_instance_user_and_guest_before_
     calls = []
     instance = "a" * 64
 
-    async def run(argv, **_kwargs):
+    async def run(argv, **kwargs):
         calls.append(argv)
         if argv[:2] == ["docker", "inspect"]:
             return 0, json.dumps([{"Id": instance, "State": {"Running": True}}]).encode(), b""
-        assert argv[:7] == ["docker", "exec", "-u", "worker", instance, "bash", "-lc"]
-        assert "cd -- /actual" in argv[-1] and "agent-policy check" in argv[-1]
+        assert argv[:8] == ["docker", "exec", "-i", "-u", "worker", instance, "bash", "-lc"]
+        assert "cd -- /actual" in argv[-1] and "python3 -I -S" in argv[-1]
+        assert kwargs["input_bytes"].startswith(b"PK")
         if denied:
             return 3, b"", b"expose_agent: false"
         return 0, json.dumps({
@@ -428,7 +429,10 @@ async def test_supported_container_checks_actual_instance_user_and_guest_before_
 
     monkeypatch.setattr("agent_bridge.session_host.container_transport._run_provider", run)
     target = SpawnTarget(
-        type="command", user="worker", container={"name": "member", "workspace_folder": "/actual"},
+        type="command", user="worker", container={
+            "name": "member", "workspace_folder": "/actual",
+            "portable_receiving_policy": {"version": 1},
+        },
         venue={"instance_id": instance}, spawn_command=["provider", "exec"],
     )
     if denied:
@@ -441,21 +445,33 @@ async def test_supported_container_checks_actual_instance_user_and_guest_before_
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("portable", [False, True])
 async def test_driver_backed_container_checks_through_provider_runtime_proxy(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, portable: bool,
 ) -> None:
     calls = []
     instance = "0123456789ab"
     proxy = ["provider", "runtime-proxy", "--fleet", "example"]
 
-    async def run(argv, **_kwargs):
+    async def run(argv, **kwargs):
         calls.append(argv)
         assert argv[:4] == proxy, "a driver-backed member must not be reached via docker"
         argv = argv[4:]
         if argv[0] == "inspect":
             return 0, json.dumps([{"Id": instance, "State": {"Running": True}}]).encode(), b""
-        assert argv[:6] == ["exec", "-u", "worker", instance, "bash", "-lc"]
-        assert "cd -- /actual" in argv[-1] and "agent-policy check" in argv[-1]
+        assert argv[:-1] == [
+            "exec", *(["-i"] if portable else []), "-u", "worker", instance, "bash", "-lc",
+        ]
+        assert "cd -- /actual" in argv[-1]
+        if portable:
+            import io
+            import zipfile
+
+            assert "python3 -I -S" in argv[-1] and "base64" in argv[-1]
+            with zipfile.ZipFile(io.BytesIO(base64.b64decode(kwargs["input_bytes"], validate=True))) as archive:
+                assert "repository_policy/receiving.py" in archive.namelist()
+        else:
+            assert "agent-policy check" in argv[-1] and "input_bytes" not in kwargs
         return 0, json.dumps({
             "version": 1, "allowed": True, "repository": "/actual",
             "expose_agent": None, "sources": [], "denied_by": [],
@@ -468,6 +484,7 @@ async def test_driver_backed_container_checks_through_provider_runtime_proxy(
         venue={"instance_id": instance, "target_id": "container:member", "driver": "example-driver",
                "provider": "agent-containers", "fleet": "example"},
         spawn_command=["provider", "exec", "--stdio", "member"],
+        container={"portable_receiving_policy": {"version": 1}} if portable else None,
     )
     monkeypatch.setattr("agent_bridge.provider_hosting._provider_command", lambda metadata: ["provider"])
     await hosting_policy.require_target_hosting(target)
@@ -481,8 +498,9 @@ async def test_supported_codespace_checks_guest_and_closes_inspection(
 ) -> None:
     calls = []
 
-    async def run(command, **_kwargs):
+    async def run(command, **kwargs):
         calls.append(command)
+        assert kwargs["input_bytes"].startswith(b"PK")
         if denied:
             return 3, "", "expose_agent: false"
         return 0, json.dumps({
@@ -494,13 +512,16 @@ async def test_supported_codespace_checks_guest_and_closes_inspection(
     monkeypatch.setattr(
         "agent_bridge.session_host.codespace_transport.CodeSpaceTransport", lambda *_a, **_k: guest,
     )
-    target = SpawnTarget(type="command", codespace={"name": "member", "workspace_folder": "/actual"})
+    target = SpawnTarget(type="command", codespace={
+        "name": "member", "workspace_folder": "/actual",
+        "portable_receiving_policy": {"version": 1, "acp_command": "copilot --acp"},
+    })
     if denied:
         with pytest.raises(AgentHostingError, match="expose_agent"):
             await hosting_policy.require_target_hosting(target)
     else:
         await hosting_policy.require_target_hosting(target)
-    assert len(calls) == 1 and "agent-policy check" in calls[0]
+    assert len(calls) == 1 and "python3 -I -S" in calls[0]
     guest.close.assert_awaited_once()
 
 

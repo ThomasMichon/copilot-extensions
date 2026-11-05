@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any
 
@@ -11,6 +13,19 @@ from .session_manager import log
 
 
 class _SessionDrainGateMixin:
+    @contextmanager
+    def start_admission(self) -> Iterator[None]:
+        """Count request-owned preparation before a session exists."""
+        from .session_manager import DaemonDrainingError
+
+        if self.is_draining:
+            raise DaemonDrainingError("session")
+        self._active_acquisitions = getattr(self, "_active_acquisitions", 0) + 1
+        try:
+            yield
+        finally:
+            self._active_acquisitions -= 1
+
     @property
     def is_draining(self) -> bool:
         """True once drain() has begun -- new sessions/turns are refused."""
