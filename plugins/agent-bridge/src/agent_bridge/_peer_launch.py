@@ -12,6 +12,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from types import ModuleType
 from typing import Any, TypedDict, cast
@@ -32,6 +33,17 @@ OWNERS = {
     "agent-logger", "agent-index", "agent-machines", "agent-worktrees", "agent-pull-requests",
     "agent-ssh", "agent-mcp", "agent-vault",
 }
+_packaged_primitives: dict[Path, ModuleType] = {}
+_primitive_lock = threading.Lock()
+
+
+def _reset_primitive_lock() -> None:
+    global _primitive_lock
+    _primitive_lock = threading.Lock()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_primitive_lock)
 
 
 class _NoWindowKwargs(TypedDict, total=False):
@@ -68,6 +80,18 @@ def _load_primitive(path: Path, name: str) -> ModuleType:
     sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _packaged_primitive() -> ModuleType:
+    path = Path(__file__).with_name("_installation_context.py")
+    # Preserve bootstrap-held GLOBALROOT paths rather than resolving the DOS map.
+    key = path.absolute() if path.drive.casefold() == "\\\\?\\globalroot" else path.resolve()
+    with _primitive_lock:
+        module = _packaged_primitives.get(key)
+        if module is None:
+            module = _load_primitive(key, "_owner_installation_context")
+            _packaged_primitives[key] = module
+        return module
 
 
 def _active_context(
@@ -260,10 +284,7 @@ def validate_owner(owner: str, own_root: Path, raw_context: str) -> dict[str, An
         raise ValueError("Explicit context requires a canonical cell install root")
     cell = own_root.parent.parent
     durable = cell.parent.parent
-    primitive = _load_primitive(
-        Path(__file__).with_name("_installation_context.py"),
-        "_owner_installation_context",
-    )
+    primitive = _packaged_primitive()
     declared = None
     pointer = raw_context
     if raw_context.lstrip().startswith("{"):
@@ -295,10 +316,7 @@ def launch(
     own = validate_owner(owner, own_root, raw_context)
     cell = own_root.parent.parent
     durable = cell.parent.parent
-    primitive = _load_primitive(
-        Path(__file__).with_name("_installation_context.py"),
-        "_owner_installation_context",
-    )
+    primitive = _packaged_primitive()
     peer_receipt = Path(own["cellRoot"]) / "plugins" / plugin / "install.json"
     peer = _active_context(primitive, peer_receipt, durable, plugin, cell, {})
     environment = peer_environment(peer, dict(os.environ))

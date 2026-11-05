@@ -84,6 +84,35 @@ Inputs without the option retain their existing response shape and semantics.
 The CLI capability response labels its declaration
 `writer_scope: executing-process`; it does **not** establish support in a
 resident daemon, another installation or every writer sharing the ledger.
+Its additive `writer_identity` contains the selected `installation_root` and
+the executing process's cached installed-build `runtime_generation`. The latter
+is the immutable build UUID, not a package version, a fresh observation ID or
+a mutable payload stamp. Source and legacy builds without that evidence return
+null; consumers must keep their support unqualified rather than invent a
+generation. A changed root or build invalidates the corresponding observation.
+Neither identity nor the serializer declaration alone is assignment admission.
+Nonce-opted transaction successes also include that executing `writer_identity`,
+so resident observations need not substitute the calling CLI's build.
+An older nonce-capable handler may omit this additive observation; missing
+or null build evidence remains unknown support.
+
+Capabilities additionally advertise `expected_writer_identity: true`.
+After negotiating that support, a caller may add `expected_writer_identity`
+alongside its `expected_creation_nonce`. The identity object must contain
+exactly `installation_root` (nonempty string) and `runtime_generation`
+(32 lowercase hexadecimal build characters). The executing handler checks
+both fields against its own installation and cached installed-build identity
+before opening the owner record or probing retirement. Close rechecks after
+provider I/O, including terminal replay. A changed installation, changed build,
+unknown generation or malformed requirement refuses without a relationship
+effect. This is a guard on the existing transaction, not another preflight RPC,
+an authorization receipt or independent writer-cohort admission.
+Baseline inputs and nonce-only inputs remain supported; only nonce-opted
+successes gain the additive executing identity. A source build with unknown
+generation can still serve those baseline operations but cannot satisfy an
+installed-build guard. Older strict handlers reject the new field; callers
+must neither emit it without support nor retry an effect without it.
+
 The resident publishes its own `tracking_write_record_contract` through the
 existing rendezvous alongside `resource_relationship` verb version 2. IPC
 callers requiring incarnation checking must select that verb at `min_version=2`;
@@ -105,6 +134,9 @@ The read leaves record bytes unchanged, including when inspecting an absent
 request with `allow_missing`. It does not reserve a claim or grant assignment
 readiness. The observation applies only to that selection; an assembling owner
 must invalidate it when participants change and retain effect-side nonce checks.
+An inspection carrying `expected_writer_identity` requires verb version 3 and
+confirms the executing identity in the live response. It refuses a prior
+version-2 resident before sending and never substitutes the direct writer.
 Baseline syntax still uses the registered direct handler unchanged. A CLI
 without this optional declaration must not receive the new selector; rollback
 leaves baseline operations available but cannot qualify the resident.
@@ -148,7 +180,8 @@ metadata stays raw and blocking, with an explicit invalid-metadata wire view.
 The registered `resource_relationship` transaction uses the existing logged
 direct RMW path and required sidecar locks, with provider I/O outside the lock
 and exact revalidation afterward. Its version-1 baseline remains supported;
-version 2 additionally checks the optional expected incarnation. Existing generic claim verb version 3
+version 2 additionally checks the optional expected incarnation, and version 3
+checks the optional executing-writer requirement. Existing generic claim verb version 3
 already preserves/refuses all explicitly present producer metadata; its wire
 shape is unchanged. This is not qualification of arbitrary old full-record
 writers: upgrade/qualify every participating writer before activating retained

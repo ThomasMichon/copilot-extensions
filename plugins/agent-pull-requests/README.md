@@ -355,6 +355,10 @@ executed as an alternative. Native observation is passed through the existing
 passive owner and writer adapter, so it shares their state root, writer lease,
 quiescence and activation boundaries. Legacy commands retain their explicit
 attributed executable path.
+Repeated prefix construction retains the launcher module by immutable snapshot
+path with serialized first load and a fork-reset load lock. Current invocation,
+receipt and snapshot checks still run for every prefix, including cached code.
+No bytecode is written into the snapshot.
 
 Native snapshot children and their callbacks retain owned containment through
 completion, timeout and cancellation. Windows uses a strict kill-on-close Job;

@@ -34,6 +34,8 @@ AFFECTED = (
         "cli_mode_models.py", "cli_mode_provider.py", "db_inbox_custody.py",
         "live_inbox_models.py", "plugin_readiness.py", "routes/live_startup_controls.py",
         "receiving_cli.py", "receiving_bundle.py", "receiving_mux.py",
+        "session_lifecycle_cli.py",
+        "_peer_launch.py",
     )),
     "plugins/agent-bridge/extensions/agent-bridge/metadata.mjs",
     "plugins/agent-bridge/extensions/agent-bridge/retained-delivery.mjs",
@@ -50,6 +52,7 @@ EXTRA_PATHS = (
     "plugins/agent-bridge/tests/test_plugin_readiness.py",
     "plugins/agent-bridge/tests/test_receiving_bundle.py",
     "plugins/agent-bridge/tests/test_portable_mux_joined.py",
+    "plugins/agent-bridge/tests/test_worktree_writer_observation.py",
     "plugins/agent-bridge/tests/fixtures/portable-mux-sdk.mjs",
     "plugins/agent-bridge/launch-wrapper-assets.json",
     "plugins/agent-bridge/packaged-assets.json",
@@ -95,6 +98,9 @@ PROBES = {
     "test_readonly_poll_never_claims_or_expires_mutation_controls": 1,
     "test_bridge_provider_receiver_and_extensions_share_one_conversation": 2,
     "test_provider_owner_uses_the_actual_client_interface": 1,
+    "test_health_observes_canonical_writer_selection_without_launch": 5,
+    "test_repeated_health_reuses_real_resolver_but_refreshes_selected_slot": 1,
+    "test_repeated_health_retains_packaged_validator_but_rechecks_cell_receipts": 1,
 }
 TEST = retained.TEST
 CAPABILITY_VERSIONS = {
@@ -102,6 +108,7 @@ CAPABILITY_VERSIONS = {
     "bridge-session-current-requests-v1": 1,
     "bridge-session-tool-statistics-v1": 1,
     "portable_mux": 1, "portable_inbox": 1, "readonly_plugin_controls": 1,
+    "worktree_record_delegation": 1,
 }
 SPEC = common.EvidenceSpec(
     GENERATION, INPUT, PRIMARY, FAMILY, AFFECTED, EXTRA_PATHS, PROBES,

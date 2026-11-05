@@ -25,7 +25,8 @@ def _input(operation: str, payload: object) -> dict:
     }
     if not isinstance(operation, str) or operation not in keys:
         raise ValueError("unsupported relationship operation")
-    if not isinstance(payload, dict) or set(payload) - {"expected_creation_nonce"} not in keys[operation]:
+    optional = {"expected_creation_nonce", "expected_writer_identity"}
+    if not isinstance(payload, dict) or set(payload) - optional not in keys[operation]:
         raise ValueError(f"{operation}: invalid relationship input fields")
     producer.canonical_json(payload)
     if "expected_creation_nonce" in payload and (
@@ -33,6 +34,11 @@ def _input(operation: str, payload: object) -> dict:
         or not payload["expected_creation_nonce"].strip()
     ):
         raise ValueError("relationship expected_creation_nonce must be a nonempty string")
+    if "expected_writer_identity" in payload and (
+        not relationship.valid_writer_identity(payload["expected_writer_identity"])
+        or "expected_creation_nonce" not in payload
+    ):
+        raise ValueError("relationship expected_writer_identity requires an installed build and expected_creation_nonce")
     if "token" in payload and not producer.is_valid_token(payload["token"]):
         raise ValueError("invalid relationship token")
     if "request_id" in payload and not relationship.valid_request_id(payload["request_id"]):
@@ -51,6 +57,10 @@ def _input(operation: str, payload: object) -> dict:
 
 
 def _owner(args, path, payload, *, mutable):
+    if "expected_writer_identity" in payload and (
+        relationship.writer_identity() != payload["expected_writer_identity"]
+    ):
+        raise ValueError("relationship executing writer does not match expected_writer_identity")
     record, owner = _owned_record(args, path, mutable=mutable)
     if "expected_creation_nonce" in payload and (
         record.creation_nonce != payload["expected_creation_nonce"]
@@ -65,6 +75,7 @@ def _incarnation(record, payload):
     return {
         "creation_nonce": record.creation_nonce,
         "writer_contract": relationship.writer_contract(),
+        "writer_identity": relationship.writer_identity(),
     }
 
 
@@ -229,4 +240,4 @@ def apply_resource_relationship(args: dict) -> dict:
         }
 
 
-tracking_write.register_verb("resource_relationship", apply_resource_relationship, version=2)
+tracking_write.register_verb("resource_relationship", apply_resource_relationship, version=3)

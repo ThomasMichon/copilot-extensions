@@ -108,6 +108,121 @@ def test_close_and_terminal_replay_keep_exact_incarnation(owner, monkeypatch):
     assert call(path, "close", payload) == closed and path.read_bytes() == before
 
 
+@pytest.fixture
+def installed_writer(monkeypatch, tmp_path):
+    from agent_worktrees import config, runtime_identity
+
+    root = tmp_path / "selected-installation"
+    monkeypatch.setattr(config, "install_dir", lambda: root)
+    monkeypatch.setattr(runtime_identity, "PROCESS_GENERATION", "1" * 32)
+    return {"installation_root": str(root), "runtime_generation": "1" * 32}
+
+
+def test_guarded_writer_preserves_exact_relationship_through_replay_and_close(owner, installed_writer, monkeypatch):
+    path, _ = owner
+
+    def guarded(payload):
+        return {**expected(path, payload), "expected_writer_identity": installed_writer}
+
+    payload = guarded({
+        "kind": "bridge", "namespace": "example", "request_id": "guarded", "recovery": {},
+    })
+    pending = call(path, "reserve", payload)
+    assert pending.get("ok"), pending
+    assert pending["writer_identity"] == installed_writer
+    before = path.read_bytes()
+    assert call(path, "reserve", payload) == pending and path.read_bytes() == before
+    bound = call(path, "bind", guarded({"token": pending["token"], "identity": {"native_id": "one"}}))
+    assert bound["phase"] == "bound" and bound["token"] == pending["token"]
+    assert call(path, "inspect", guarded({"token": pending["token"]})) == bound
+    monkeypatch.setattr(claim_providers, "resolve_claim_status", retired)
+    closed = call(path, "close", guarded({"token": pending["token"]}))
+    assert closed["phase"] == "closed" and closed["writer_identity"] == installed_writer
+    before = path.read_bytes()
+    assert call(path, "close", guarded({"token": pending["token"]})) == closed
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("operation,payload", [
+    ("reserve", {"kind": "bridge", "namespace": "example", "request_id": "new", "recovery": {}}),
+    ("inspect", {"request_id": "missing", "allow_missing": True}),
+    ("bind", {"identity": {"native_id": "one"}}),
+    ("close", {}),
+])
+@pytest.mark.parametrize("change", ["installation", "build", "unknown"])
+def test_changed_executing_writer_refuses_before_record_access_or_probe(
+    owner, installed_writer, monkeypatch, tmp_path, operation, payload, change,
+):
+    from agent_worktrees import config, runtime_identity, tracking_relationship_write
+
+    path, _ = owner
+    pending = reserve(path)
+    if operation in {"bind", "close"}:
+        payload = {**payload, "token": pending["token"]}
+    payload = {**expected(path, payload), "expected_writer_identity": installed_writer}
+    if change == "installation":
+        monkeypatch.setattr(config, "install_dir", lambda: tmp_path / "other-installation")
+    else:
+        monkeypatch.setattr(runtime_identity, "PROCESS_GENERATION", None if change == "unknown" else "2" * 32)
+    monkeypatch.setattr(tracking_relationship_write, "_owned_record", lambda *a, **k: pytest.fail("unadmitted writer loaded record"))
+    monkeypatch.setattr(claim_providers, "resolve_claim_status", lambda ref: pytest.fail("unadmitted writer probed"))
+    before = path.read_bytes()
+    result = call(path, operation, payload)
+    assert result.get("error") and "expected_writer_identity" in result["message"]
+    assert "ok" not in result and "absent" not in result
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("identity", [
+    None, {}, True, {"installation_root": "root", "runtime_generation": None},
+    {"installation_root": "", "runtime_generation": "1" * 32},
+    {"installation_root": "root", "runtime_generation": "package-version"},
+    {"installation_root": "root", "runtime_generation": 1},
+    {"installation_root": "root", "runtime_generation": "1" * 32, "extra": True},
+])
+def test_malformed_writer_guard_is_not_a_legacy_request(owner, identity):
+    path, _ = owner
+    before = path.read_bytes()
+    result = call(path, "inspect", {
+        **expected(path, {"request_id": "missing", "allow_missing": True}),
+        "expected_writer_identity": identity,
+    })
+    assert result.get("error") and "expected_writer_identity" in result["message"]
+    assert path.read_bytes() == before
+
+
+def test_writer_guard_requires_original_nonce_and_does_not_disable_baseline(owner, installed_writer, monkeypatch):
+    from agent_worktrees import runtime_identity
+
+    path, _ = owner
+    payload = {"request_id": "missing", "allow_missing": True}
+    before = path.read_bytes()
+    assert call(path, "inspect", {**payload, "expected_writer_identity": installed_writer}).get("error")
+    monkeypatch.setattr(runtime_identity, "PROCESS_GENERATION", None)
+    assert call(path, "inspect", payload)["absent"] is True
+    observed = call(path, "inspect", expected(path, payload))
+    assert observed["absent"] is True and observed["writer_identity"]["runtime_generation"] is None
+    assert path.read_bytes() == before
+
+
+def test_close_rechecks_writer_after_external_probe(owner, installed_writer, monkeypatch, tmp_path):
+    from agent_worktrees import config
+
+    path, _ = owner
+    pending = reserve(path)
+    payload = {**expected(path, {"token": pending["token"]}), "expected_writer_identity": installed_writer}
+    before = path.read_bytes()
+
+    def change_selection(ref):
+        monkeypatch.setattr(config, "install_dir", lambda: tmp_path / "replacement-installation")
+        return retired(ref)
+
+    monkeypatch.setattr(claim_providers, "resolve_claim_status", change_selection)
+    result = call(path, "close", payload)
+    assert result.get("error") and "expected_writer_identity" in result["message"]
+    assert path.read_bytes() == before and tracking.load_record(path).resources[0].is_unsettled
+
+
 def test_generic_serializer_preserves_backfill_and_refuses_a_reused_record(owner):
     path, _ = owner
     stale = tracking.load_record(path)
