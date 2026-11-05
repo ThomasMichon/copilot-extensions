@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from .connect import ConnectTracker
 from .models import SessionStatus
+from .session_host.codespace_transport import codespace_session_operation
 from .session_manager import (
     _append_plugin_dirs,
     _container_remote_child_argv,
@@ -550,7 +551,7 @@ class _SessionHostRecoveryMixin:
                         recovered += 1
                 elif status == "dead":
                     self._release_container_lock(session.session_id)
-                    self._release_codespace_lock(session.session_id)
+                    self._release_unprotected_codespace_lock(session.session_id)
                     self._set_container_launch_pending(
                         session.session_id,
                         False,
@@ -572,7 +573,7 @@ class _SessionHostRecoveryMixin:
                     self._remote_recovery_inconclusive.add(session.session_id)
                 elif status == "missing":
                     self._release_container_lock(session.session_id)
-                    self._release_codespace_lock(session.session_id)
+                    self._release_unprotected_codespace_lock(session.session_id)
                     self._set_container_launch_pending(
                         session.session_id,
                         False,
@@ -703,6 +704,7 @@ class _SessionHostRecoveryMixin:
             )
         return attached
 
+    @codespace_session_operation
     async def _resume_via_new_remote_host(
         self,
         session: Session,
@@ -839,7 +841,7 @@ class _SessionHostRecoveryMixin:
             affinity_id=getattr(session, "caller_id", None),
         )
         from .relay_state import get_live_relay_port
-        from .session_host.codespace_transport import build_codespace_spawner
+        from .session_host.codespace_transport import build_codespace_spawner, codespace_provider_call
         from .session_host.spawner import RemoteSpawnCleanupPendingError
 
         # Same-machine mirror of the container lock reclaim above
@@ -849,10 +851,10 @@ class _SessionHostRecoveryMixin:
         self._acquire_codespace_lock(session.session_id, cs_target["name"])
         try:
             core = _core()
-            relay_prelude, relay_port = core._resolve_relay_launch_env(
-                cs_target["name"],
-                get_live_relay_port(),
-            )
+            async with codespace_provider_call(
+                core._resolve_relay_launch_env, cs_target["name"], get_live_relay_port(),
+            ) as (relay_prelude, relay_port):
+                pass
             spawner = build_codespace_spawner(
                 cs_target["name"],
                 cs_target.get("repo") or "",
@@ -897,7 +899,10 @@ class _SessionHostRecoveryMixin:
             if isinstance(exc, RemoteSpawnCleanupPendingError):
                 self._set_container_launch_pending(session.session_id, True)
             elif not already_held:
-                self._release_codespace_lock(session.session_id)
+                from .session_manager import _codespace_claim_key
+
+                if _codespace_claim_key(session.target) is None:
+                    self._release_codespace_lock(session.session_id)
             raise
 
     async def _codespace_host_available(

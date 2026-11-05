@@ -1,0 +1,238 @@
+# Responsive Codespace Admission
+
+- **Slug:** `responsive-codespace-admission`
+- **Repo:** copilot-extensions
+- **Branch(es):** sequential managed plan and implementation PRs
+- **Created:** 2026-11-04
+- **Status:** Done
+- **Vision:** [agent-codespaces](../../../../visions/plugins/agent-codespaces/README.md) - reliable authenticated access; [agent-bridge](../../../../visions/plugins/agent-bridge/README.md) - session continuity
+- **Umbrella issue:** #10601
+
+## Guiding Intent
+
+Slow Codespaces claim and relay operations must not stop Bridge from serving
+health or unrelated clients. Cancellation must retain custody of the original
+provider attempt until its result and any required cleanup are reconciled.
+Required authenticated preparation must not silently launch without its relay.
+
+## Participants
+
+| Participant | Role in this effort | Reached via |
+|-------------|---------------------|-------------|
+| Source owner | Trace, implementation, synthetic consumer tests and PR stewardship | Managed source worktree |
+
+## Coordination
+
+One owner and sequential PRs. #8051 retains composed communication/process
+budgets, #3194 retains full hydration/reconnect/cancellation acceptance, and
+#6467 retains supervisor ownership. This slice changes the existing Codespace
+admission path, not their broader contracts or the container runtime driver.
+Do not resume another owner's live attempt or duplicate its worker.
+
+## Context
+
+The synchronous `codespace_launch_ownership` context calls a provider subprocess
+from async startup. Its rollback and asynchronous teardown also call synchronous
+release. Fresh start and recovery synchronously resolve `relay-launch-env`,
+which has a 15-second deadline and an auth-light fallback. These operations
+can block unrelated serving until their own subprocess deadlines expire.
+
+#10597 repaired token-store transactions and offloaded relay authorization
+callbacks. That does not repair these separate launch/claim operations.
+The [completed token-store effort](../04%20relay-token-store-concurrency/README.md)
+records only its own finite source acceptance.
+
+## Request
+
+Public-safe bounded scope from #10601: keep Codespace claim admission,
+rollback/release and relay-environment resolution off the async serving loop,
+preserve original attempt/session/TargetLock and claim identity across
+cancellation, and fail explicitly when required relay resolution fails.
+Do not increase watchdog grace, abandon an unobserved provider thread, or
+replay an uncertain create/prompt.
+
+## Scope Approvals
+
+Source changes, synthetic caller-contained tests and normal issue/PR publication.
+No live claim takeover, retained task replay, credential inspection/export,
+service restart, deployment, external venue provisioning or SSO authorization.
+A reviewed plan does not authorize those effects.
+
+## Plan
+
+### Phase 1 - Ownership and consumer trace
+- [x] Trace fresh start, cold recovery and finalization claim/relay calls, including compatibility callers and tests.
+- [x] Name admission, result-persistence and cleanup ordering before changing async boundaries; preserve unknown outcomes and existing claim receipts.
+
+### Phase 2 - Responsive operations
+- [x] Await slow provider operations off-loop while retaining and reconciling the exact original attempt before cancellation can release custody.
+- [x] Keep local state/receipt mutations on their owning execution context; repeated cancellation must not abandon cleanup or create a second provider attempt.
+- [x] Offload rollback/release and recovery resolution too; retain TargetLock/claim identity when release cannot be confirmed.
+- [x] Distinguish provider failure from an explicitly disabled relay. Preserve supported relay opt-out; do not turn an unavailable required provider into an authenticated-looking launch.
+- [x] Use the existing operation budgets or an explicitly named bounded provider budget; do not mask serving starvation by changing watchdog grace.
+
+### Phase 3 - Delivery
+- [x] Update affected tests, runtime/contract documentation, source registry and changefiles without rebaselining historical evidence.
+- [x] Pass targeted tests and required source gates, then steward review, CI and merge. Record promotion separately from installed acceptance.
+
+## Validation Plan
+
+- [x] Slow claim admission leaves an actual local health consumer responsive; watchdog does not request replacement solely from that wait.
+- [x] Cancellation before/during/after provider success reconciles one attempt and its exact persisted identity, without remote create/prompt replay.
+- [x] Repeated cancellation during rollback cannot orphan the provider or falsely release TargetLock/claim custody.
+- [x] Confirmed release settles receipt/lock; failed, timed-out or uncertain release preserves them and reports the real cause.
+- [x] Fresh start, compatible recovery/resume and teardown retain normal behavior; provider conflict/skipped/coordination refusal remain distinct.
+- [x] Relay failure is explicit before authenticated plugin preparation; valid disabled-relay output and legacy-compatible JSON remain supported.
+- [x] Real caller-contained synthetic provider processes exercise the async boundary, not just mocked timer helpers; all children and fixture listeners settle.
+- [x] Record focused unit, local consumer, first-touch and external-venue tiers honestly; no live service/credential/venue effects are authorized by this source effort.
+- [x] Resolve every Plan/Validation item before marking Done or transfer a residual to a named tracked objective.
+
+## Proposal
+
+Convert the owning operation, not just one call site. A naive `to_thread`
+can leave a successful claim arriving after its cancelled caller has released
+the local lock. The implementation must await/reconcile the bounded original
+operation, persist its result, and complete or retain cleanup custody before
+propagating cancellation. This does not require a second coordinator or a new
+daemon. Review the plan before implementation.
+
+## Journal
+
+### 2026-11-04 - Planning
+
+- Reserved #10601 after distinguishing the synchronous Bridge serving boundary
+  from #8051's composed timeout/progress contract and existing lifecycle owners.
+- Token-store implementation #10597 is merged; it is a separate completed
+  source slice, not proof this admission path or a live installation is healthy.
+- Request, intent and plan compared against the bounded source scope; private
+  motivating systems and reports remain outside this public effort.
+
+### 2026-11-04 - Implementation and consumer validation
+
+- Plan #10607 merged before runtime edits. Traced fresh start, cold recovery,
+  launch rollback, parity finalization and ordinary teardown.
+- One shielded, bounded original provider call settles before cancellation
+  propagation. Claim receipts and cleanup/lock decisions remain on the owning
+  loop; repeated cancellation does not detach a worker thread or replay a call.
+- Reused the existing contained provider runner (claim/release 30 seconds,
+  relay 15 seconds) and active provider command selection before legacy PATH.
+  The shared container-claim helper retains its exit semantics under the same
+  contained runner; no container dispatch route or runtime driver was added.
+- Relay errors now stop preparation; existing successful two-field JSON and
+  explicit empty/null opt-out remain compatible. Ordinary teardown no longer
+  drops a durable claim receipt on unconfirmed release.
+- Focused integrated source packet: 260 passed, one platform skip, 418
+  deselected. Includes actual synthetic provider processes, the real local
+  health route and watchdog, cancellation during claim and rollback, failed
+  release retention, persisted teardown identity and cold recovery.
+- Two existing launch-policy controls reached the availability provider before
+  their intended policy boundary. They now use the existing isolated hosting
+  fixture, without changing production hosting enforcement.
+- Follow-up focused controls: four passed for acquired-claim cleanup despite an
+  admission opt-out and contained provider timeout/tree retirement; nine passed
+  for parity finalization and cancellation-safe teardown of both current and
+  legacy targets. The success case caught and repaired missing legacy `venue`
+  metadata before publication, and proves no duplicate release from finalization.
+- Ruff, install contract (13 plugins), documentation consistency (23 plugins)
+  and current-source Bridge contract checks (2 contracts, 1005 fixtures) passed.
+  Only current-source registry digests changed; historical captures are intact.
+- Validation tiers: focused unit/compatibility and real local consumer checks
+  passed. The private synthetic provider starts from fresh temporary state;
+  no installer/provisioning code changed, so a fresh-machine installer lane was
+  not run. Native Linux/macOS, installed services and live external venues were
+  not qualified; the effort authorizes no live provisioning or credential effects.
+- Review/CI/merge and final validation reconciliation remain open.
+  No live service, credential, SSO, claim or external-venue effects were taken.
+
+### 2026-11-04 - Review corrections
+
+- #10622's first review identified ownership gaps around the newly asynchronous
+  boundary: end during admission, HostRecord reap unlocking before release,
+  concurrent releases, and the provider inheriting an admission-disable flag.
+  Corrected the class with one per-session guard across admission, recovery,
+  end and parity finalization; receipt rechecks prevent a delayed second release.
+- Retained the local Codespace lock while guarded remote reaping completes.
+  Release filters the admission-only flag from a copied child environment,
+  rather than trusting a provider's successful no-op exit.
+- Moved parity finalization to its existing parity mixin; the startup module
+  is below the size cap without raising a baseline. No new coordinator,
+  launcher or service was introduced.
+- Added overlap regressions for end-during-claim, simultaneous end,
+  end/finalization, HostRecord-backed pending/failed release and a real synthetic
+  provider's disabled-admission no-op. The first run passed 247 controls and
+  skipped one platform case; 12 recovery fixtures lacked the new session lock.
+  Correcting that shared fixture passed its full 48-case controller packet.
+  Final combined revalidation passed 273 tests with one platform skip. A
+  follow-up nine-case packet also passed implicit forward cleanup while a
+  guarded release is pending. Ruff, install, docs and current-source contract
+  gates passed. Required CI, renewed review and merge remain open.
+
+### 2026-11-04 - Final custody review corrections
+
+- The renewed review confirmed the original findings resolved and identified
+  three remaining races. Implicit forward/reap cleanup now preserves a durable
+  claim receipt after the operation guard exits, including failed release.
+  Dead/missing authority recovery uses that same custody-aware path; failed
+  replacement also retains its newly reacquired lock for an existing claim.
+- Stop waits for Codespace admission using lifecycle-before-ownership ordering,
+  matching resume. Fresh Codespace startup does not acquire the lifecycle lock;
+  origin-owned SSH startup is a mutually exclusive target path.
+- Added late real-reap, overlapping authority recovery and claim/relay-stop
+  controls. The claim lifecycle packet passed 31 cases; the broader admission
+  packet passed 224 with one platform skip, and Host/owned-workspace stop and
+  recovery compatibility passed 188 cases. Ruff, install, documentation and
+  current-source contract gates passed. Historical captures remain unchanged.
+- Required exact-head CI and a renewed passing review remain open. No installed
+  service, live claim, credential, external venue or rollout effects were taken.
+
+### 2026-11-04 - Restart and cancellation reconciliation
+
+- The next review identified missing target-level exclusion after restart,
+  resumable state after successful cancelled release, metadata rehydration
+  during admission, and STARTING rows after cancelled start/resume. Two
+  carried-over findings already had corrections; replied with their commit and
+  regression anchors rather than changing the same code again.
+- Claim-bearing teardown and guarded recovery/finalization reacquire the
+  existing target-level lock. Metadata refresh observes ownership use.
+  Successful release persists terminal state and completes local teardown
+  before propagating cancellation. Fresh cancellation persists FAILED;
+  ordinary/recreate resume cancellation persists STOPPED before awaited cleanup.
+  Neither retries a provider operation or replaces the conversation.
+- Public-entry-point controls overlap both restart orderings of same-owner
+  alias admission, merge rehydration, repeated cancellation during start and
+  resume, and successful cancelled end followed by attempted resume.
+  The focused claim packet passed 37 cases; the full selected admission,
+  transport, session, resume ladder/ownership, host-claim and parity packet
+  passed 338 cases. Exact-head source gates, review and CI are refreshed before
+  merge; no live deployment acceptance is implied.
+
+### 2026-11-05 - Deferred cancellation closes the remaining consumers
+
+- Corrected provider failure after recorded cancellation: the settled failure
+  becomes the cancellation's cause, not a new resume-retry opportunity.
+  The resume regression makes a hypothetical second provider call succeed;
+  it proves that no such retry or worker launch occurs.
+- Removed parity finalization's duplicate provider-release path. It now reuses
+  ordinary cancellation-safe terminal teardown, with failed release retaining
+  its explicit unsuccessful cleanup result and custody. Repeated-cancellation
+  controls cover both confirmed and unconfirmed release.
+- Four carried-over stop/recovery/metadata/resume findings were already fixed
+  and covered. Replied with exact commit/test anchors and resolved those
+  threads; the two new findings still require the corrected-head review.
+- Focused packet: 46 passed. Integrated admission, transport, session, resume,
+  host-claim and parity packet: 341 passed. Required source gates, exact-head CI
+  and renewed review are checked before merge. No rollout or live acceptance.
+
+### 2026-11-05 - Source completion
+
+- #10622 received a fresh approving review with no active findings on
+  `c2071605fdb754325080025081e9c22b10a7fb30`, passed the actual required
+  exact-head CI summary and merged as
+  `7c58f5cb113cfd19d7486455bf8d52a9f08a84a0`.
+- All Plan and Validation Plan items are resolved for this finite source
+  scope. Architecture documentation carries the current behavior. No native
+  platform skip or unexercised live venue is counted as a pass.
+- Promotion remains the normal #3336 release-pipeline responsibility.
+  Installed rollout, external credentials and broader connection acceptance
+  remain separately authorized work, not an outcome of this source merge.
+  #10636 owns the next reviewed portable receiving-support proposal.

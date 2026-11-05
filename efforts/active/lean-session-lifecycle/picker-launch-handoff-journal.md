@@ -846,3 +846,95 @@ its saved installed-update, launch and handoff obligations.
   distinguish retryable startup from terminal authentication failures. This
   correction restores that documented boundary; no new option, protocol or
   reader contract is introduced.
+
+### 2026-11-05 - Blocking reader source merged
+
+- #10562 merged as `ff44a10389f0b735a8ead7ad41e34e3ceb95047d`.
+  Copilot's exact-head review at
+  `3e225109c0e76f8b84bfc95f965f02a372310e1f` reports no open issues.
+  Its outstanding request for native evidence is satisfied by completed
+  portfolio `41977196082`: both Linux and Windows jobs select the actual
+  client/feed packet, including caller-timeout cleanup, and pass.
+- The final metadata-triggered required CI run `41977742135` passes before
+  the managed merge. All review threads are resolved. No test, job or
+  transport deadline was widened.
+- Re-read the parent and mini-effort after merge. No installed, updater,
+  launch, singleton or handoff gate closes from this source result. Observe
+  actual promotion and the separately authorized normal updater, then prove
+  the installed reader before returning to the saved parent qualification.
+
+### 2026-11-05 - Released reader; installed adoption still blocked
+
+- Promotion `41981509607` succeeds. Main's release receipt names Dev snapshot
+  `594895e3672637b3347dd645d960f24b070a7cb5`; its merge base with #10562's
+  merge is that exact merge. This proves release inclusion independently of
+  the workflow controller's own head commit.
+- The full Dev checker passes on a successor with unchanged executable inputs.
+  An earlier six-minute checker timeout remains recorded on #9807; the
+  successful control does not claim a source fix for timing capacity.
+- The selected `1.24.473-dev1` consumer answers a normal JSON point read with
+  current quality, but actual loaded-module inspection shows no waiting-reader
+  implementation. A proposed isolated cold check therefore stops at its
+  source-identity assertion before creating a fixture. Warm availability and
+  package numbers do not establish installed adoption.
+- An explicitly approved release of one interrupted queue guard preserves its
+  failed history and does not replay it. A fresh normal target update is
+  accepted, but an older queued native provision first rejects changed
+  admission inputs and leaves a different unsettled fence. The target remains
+  pending; the prior approval is not blanket authority for further releases.
+  No installed source is patched or retained service stopped.
+- Preserve the saved parent continuation and all installed, whole-update,
+  launch, singleton and handoff gates while reconciling the exact queue owner
+  and required recovery scope.
+
+### 2026-11-05 - Installed blocking-reader prerequisite qualified
+
+- The existing normal updater adopts and serves `1.24.475-dev1` while its
+  broader operation continues. Loaded client and feed modules exactly match
+  released source blobs `26bab9d85f2da1374f930a6e02888a94aace91f8` and
+  `6dacba43e1f199e29e1446993ffaf24573156690`. Authenticated health confirms
+  the same selected serving slot and ready publication.
+- An actual catalog CLI invocation returns current JSON, one selected row
+  and no availability warning in 13.215 seconds. Its publication generation
+  matches the authenticated resident health. This is measured invocation
+  latency, not an overall CLI deadline or a performance guarantee.
+- Isolated checks execute the installed CLI handler against a real
+  authenticated test endpoint, substituting only fixture-owned startup and
+  routing inputs. JSON and one-shot stream wait 1.059 and 1.140 seconds for
+  delayed publication, emit nothing early and start exactly one private
+  owner. Missing-credential construction returns a terminal JSON error
+  without creating a token or restarting an owner. All fixture threads and
+  endpoints close; no production daemon is stopped.
+- A separate installed-interpreter process demonstrably enters the unready
+  handler, emits no stdout and remains waiting until its real four-second
+  caller-owned timeout. The canonical process owner settles that scope before
+  returning the timeout. The fixture uses the existing JSON capture helper:
+  ordinary stdout redirection alone does not capture the CLI's real-output
+  boundary and supplied no valid output evidence in an initial probe.
+- These controls close the blocking-reader prerequisite only and restore the
+  saved Manager-reader/installed-set continuation. They do not prove a
+  production-daemon cold restart, whole-update success, launch parity,
+  singleton shape or handoff completion.
+- The broader update is still running after a CodeSpaces dependency-cache
+  lock timeout; component progress is not whole-set completion. The separate
+  target request remains queued. An additional request falls outside the
+  explicitly bounded queue-recovery pass, so further guard repair stops;
+  the active installer and pending requests are preserved.
+
+### 2026-11-05 - Installed native Manager reader qualified
+
+- The original Manager-only request completed successfully; no duplicate is
+  submitted. Existing normal updates now select `0.6.291-dev1`. Its loaded
+  reader and native-observation modules exactly match #10514's reviewed
+  source blobs `c91408541ff41541de8038b041ef41a939f09379` and
+  `15ab8c229adede13cb37f9ebfaebb2492bcff228`.
+- Two actual installed reads with a 35-second pause both verify the active
+  selected daemon as ready, at the selected version and with the same native
+  process birth identity. They take 3.359 and 3.578 seconds, with subprocess
+  execution forbidden throughout the reads and zero attempted probes. No
+  daemon is drained, stopped, replaced or otherwise mutated by the checks.
+- This resolves the original diagnostic timeout/ownership-reader prerequisite
+  and restores the original installed-set/full-update return. It is not a
+  process-count or latency guarantee, a concurrent-launch singleton proof,
+  or whole-update completion. The broader active installer, pending target
+  request and all remaining parent Plan/Validation items remain open.

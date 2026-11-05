@@ -12,6 +12,7 @@ from .session_manager import (
     RemoteHostRecoveryPendingError,
     Session,
     SessionBusyError,
+    _REQUEST_OVERRIDES_KEY,
     _cleanup_worktree,
     _codespace_claim_key,
     _container_claim_key,
@@ -251,10 +252,14 @@ class _SessionLifecycleMixin:
             self._db.request_cold_recovery_stop(session_id)
             session.background_recovery_enabled = False
 
-        # Serialize with in-flight reattach/resume (same lock resume_session
-        # uses): otherwise a reattach begun before this stop could land a
-        # live client after stop already persisted dormancy (review of #3058).
-        async with session._lifecycle_lock:
+        # Resume takes lifecycle before Codespace ownership. Fresh Codespace
+        # admission takes only ownership; owned SSH startup is a disjoint path.
+        async with contextlib.AsyncExitStack() as locks:
+            await locks.enter_async_context(session._lifecycle_lock)
+            if self._is_codespace_target(session.target):
+                await locks.enter_async_context(session._codespace_ownership_lock)
+                if self._sessions.get(session_id) is not session:
+                    return
             require_automatic_reap()
             await self._quiesce_session(
                 session, cancel_turn=cancel_turn,
@@ -325,6 +330,23 @@ class _SessionLifecycleMixin:
             await self.end_session(session_id, force=force)
 
     async def end_session(self, session_id: str, *, force: bool = False) -> None:
+        """Serialize Codespace deletion with the original admission/release."""
+        session_id = self._resolve_ref(session_id) or session_id
+        session = self._sessions.get(session_id)
+        if session is None:
+            raise KeyError(f"Session {session_id} not found")
+        if self._is_codespace_target(session.target):
+            async with session._codespace_ownership_lock:
+                if self._sessions.get(session_id) is not session:
+                    return
+                claim_key = _codespace_claim_key(session.target)
+                if claim_key is not None:
+                    self._acquire_codespace_lock(session_id, claim_key[0])
+                await self._end_session_owned(session_id, force=force)
+        else:
+            await self._end_session_owned(session_id, force=force)
+
+    async def _end_session_owned(self, session_id: str, *, force: bool = False) -> None:
         """End a session -- shut down client and clean up all state.
 
         Removes the session for a **local**-boundary session unconditionally
@@ -520,19 +542,43 @@ class _SessionLifecycleMixin:
         ):
             self._release_container_lock(session_id)
 
+        cancellation = None
+        claim_key = _codespace_claim_key(session.target)
+        if claim_key is not None:
+            from .session_host.codespace_transport import codespace_provider_call
+            core = _core()
+            try:
+                async with codespace_provider_call(
+                    core._release_codespace_claim, *claim_key,
+                ) as released:
+                    if released is not True:
+                        self._mark_session_failed(session, trigger="codespace_release_unconfirmed")
+                        raise RemoteHostRecoveryPendingError(
+                            "CodeSpace claim release is unconfirmed; retained session "
+                            f"{session_id}, claim receipt and TargetLock"
+                        )
+                    # A successfully released session must never resume, even
+                    # if deferred cancellation interrupts the remaining cleanup.
+                    session.status = SessionStatus.ENDED
+                    self._db.update_session_status(
+                        session_id, SessionStatus.ENDED.value, time.time(),
+                    )
+                    if session.target.venue is None:
+                        session.target.venue = {}
+                    session.target.venue.setdefault(
+                        _REQUEST_OVERRIDES_KEY, {},
+                    )["codespace_claim"] = None
+                    self._db.update_session_target(
+                        session_id, session.target.to_json(), session.target.cwd,
+                    )
+                    self._release_codespace_lock(session_id)
+            except asyncio.CancelledError as exc:
+                if session.status != SessionStatus.ENDED:
+                    raise
+                cancellation = exc
         session.status = SessionStatus.ENDED
         with contextlib.suppress(Exception):
             self._clear_pending_queue(session, reason="ended")
-        # #897: release the exclusive CodeSpace claim this session held, so the
-        # box is immediately re-dispatchable by another worktree instead of
-        # waiting for the liveness/TTL sweep. Best-effort and idempotent (the
-        # CLI only releases a claim this owner actually holds). Keyed off the
-        # persisted target, so it is correct even after a daemon restart.
-        with contextlib.suppress(Exception):
-            claim_key = _codespace_claim_key(session.target)
-            if claim_key is not None:
-                core = _core()
-                core._release_codespace_claim(*claim_key)
         # codespace-venue-pool Phase 2b: same release, container-keyed.
         with contextlib.suppress(Exception):
             claim_key = _container_claim_key(session.target)
@@ -554,5 +600,7 @@ class _SessionLifecycleMixin:
             self._db.delete_session(session_id)
         self._sessions.pop(session_id, None)
         log.info("Session %s (%s) ended and cleaned up", session_id, session.name)
+        if cancellation is not None:
+            raise cancellation
 
     # -- Context-aware in-place handoff --------------------------------------

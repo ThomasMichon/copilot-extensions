@@ -630,7 +630,17 @@ class _SessionHostConnectionMixin:
             with contextlib.suppress(Exception):
                 await fwd.cancel()
         self._release_container_lock(session_id)
-        self._release_codespace_lock(session_id)
+        self._release_unprotected_codespace_lock(session_id)
+
+    def _release_unprotected_codespace_lock(self, session_id: str) -> None:
+        from .session_manager import _codespace_claim_key
+
+        session = self._sessions.get(session_id)
+        if session is None or (
+            not session._codespace_ownership_lock.locked()
+            and _codespace_claim_key(session.target) is None
+        ):
+            self._release_codespace_lock(session_id)
 
     async def _reattach_one(
         self,
@@ -868,7 +878,7 @@ class _SessionHostConnectionMixin:
                     proc.kill()
         if release_container_lock:
             self._release_container_lock(session_id)
-            self._release_codespace_lock(session_id)
+            self._release_unprotected_codespace_lock(session_id)
 
     def _kill_relays_sync(self, session_id: str) -> None:
         """Best-effort synchronous teardown of relay supervisors.
@@ -982,5 +992,6 @@ class _SessionHostConnectionMixin:
             if confirmed_dead:
                 self._set_container_launch_pending(rec.session_id, False)
                 self._release_container_lock(rec.session_id)
-                self._release_codespace_lock(rec.session_id)
+                # Admission/teardown still owns the claim after the host dies.
+                self._release_unprotected_codespace_lock(rec.session_id)
         return confirmed_dead

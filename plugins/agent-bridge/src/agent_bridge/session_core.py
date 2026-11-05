@@ -638,6 +638,7 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
             or session._handoff_in_progress
             or session.subscriber_count > 0
             or session._lifecycle_lock.locked()
+            or session._codespace_ownership_lock.locked()
             or session._turn_start_lock.locked()
             or session._prompt_task is not None and not session._prompt_task.done()
         )

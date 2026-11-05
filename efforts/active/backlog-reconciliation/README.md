@@ -252,6 +252,51 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [eight conditional native/read contracts](conditional-native-read-authority-contracts.md)
+retain exact installed-version authority, solo/native specimens, complete
+direct title/slice intake, both guard gaps, leased capture, canonical tri-state
+and trust reads, and the explicit second-consumer demand gate. Twenty-four
+ranked relationships establish no complete fix or receiving transfer; all
+eight stay OPEN. Four separate whole originals remain protected before
+rendering. This is research integration, not execution or a new census.
+
+The eleven-contract checkpoint is actually delivered in #10663, with genuine
+current-head approval, no review issues/threads and ten complete successful/
+skipped checks. All seven actual merged blobs equal the approved head;
+only its publication child finalized, retained. The
+[delivery journal](<journal/2026/11.05 independent-owner-policy-contracts.md>)
+records two equal complete 00:28 PST scans: 1,012 whole open, 283 above
+729; 737 creator-eligible, 275 excluded, 672 original-cohort and 340 inflow.
+There are no arrivals or departures and no new campaign credit; verified
+dispositions remain 777. The parent stays Active. Eight following whole
+originals and twenty-four ranked relationships are read; preserve their
+literal native, tri-state, title and conditional-demand gates. Four whole
+originals are protected before rendering, including a changed current original.
+
+The [eleven owner/policy contracts](independent-owner-policy-contracts.md)
+retain whole discovery, service lifecycle, interpreter hygiene, supervisor
+settings, generated ownership, venue, audience, retained-job, inference,
+latency and abandoned-session outcomes. Their thirty-three ranked relations
+establish no complete fix or receiving transfer; all eleven remain OPEN.
+Current hoister proof reuse and prospective protection of a previously read
+configuration message preserve actual evidence and custody boundaries.
+This is research integration, not another census or parent completion.
+
+The twenty-contract checkpoint is actually delivered in #10654 after
+genuine exact-head approval, no review issues/threads and nine complete
+successful/skipped checks. All seventeen actual merged blobs equal the
+approved head; only its publication child finalized, retained.
+The [delivery journal](<journal/2026/11.04 guidance-platform-state-contracts.md>)
+records two equal complete 00:09 PST scans: 1,012 whole open, 283 above
+729; 737 creator-eligible, 275 excluded, 672 original-cohort and 340 inflow.
+Three eligible arrivals and one external departure remain metadata-only,
+with no campaign credit; verified dispositions remain 777. The parent
+Plan/Validation gate remains open. Next integrate eleven following whole
+contracts and thirty-three ranked relations, preserving current proof reuse,
+claims, explicit supervisor mapping and conversation-custody requirements.
+The changed full-harness original is protected before rendering, not
+silently admitted through stale or partial material.
+
 The eleven-contract checkpoint is actually delivered in #10649 after
 current-head approval, no active review issues, one resolved thread and
 nine complete successful/skipped checks. All eleven actual merged blobs

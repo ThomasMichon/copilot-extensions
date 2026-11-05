@@ -5,6 +5,20 @@ Method: [weighted semantic consolidation](semantic-density-consolidation.md).
 
 ## Result and coverage
 
+The [eight conditional native/read contracts](conditional-native-read-authority-contracts.md)
+integrate twenty-four ranked relationships while retaining literal native
+specimens, direct inherited intake, tri-state/trust reads and a conditional
+second-consumer gate. All eight stay OPEN; the
+[journal](<journal/2026/11.05 conditional-native-read-authority-contracts.md>)
+keeps source, native, receiving and completion evidence distinct.
+
+The [eleven owner/policy contracts](independent-owner-policy-contracts.md)
+integrate the next thirty-three ranked relationships without conflating
+similar implementation vocabulary with complete acceptance. All eleven stay
+OPEN; protected providers, retained proof reuse and existing owners survive.
+The [research journal](<journal/2026/11.05 independent-owner-policy-contracts.md>)
+records the unchanged campaign credit and census boundary.
+
 The first measured graph covers the **1,021-issue source snapshot**:
 720 qualified issue descriptions and all 3,197 original/discussion texts,
 301 metadata-only nodes, and one counted-but-nonclustering coordination
