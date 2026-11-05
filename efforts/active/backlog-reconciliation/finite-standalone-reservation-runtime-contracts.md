@@ -204,14 +204,16 @@ No fleet allocation, native session, installation, cache sweep or claim change r
 
 ## Disposition and next work
 
-Eight originals stay OPEN; #8876 is independently CLOSED as completed.
-Verified campaign dispositions increase from 777 to 778.
-Two equal complete 05:08 PST metadata-only scans show 1,009 whole open:
-734 creator-eligible, 275 excluded, 672 original-cohort and 337 inflow.
-#8876 is the only departure; there are no arrivals or unrelated departures.
-The queue remains 280 above the fixed 729 checkpoint, including excluded
+Seven originals stay OPEN; #8352 and #8876 are independently CLOSED as completed.
+Verified campaign dispositions are 779.
+Two equal complete 05:28 PST metadata-only scans show 1,008 whole open:
+733 creator-eligible, 275 excluded, 672 original-cohort and 336 inflow.
+#8352 is the only departure since the preceding #8876 census;
+there are no arrivals or unrelated departures.
+The queue remains 279 above the fixed 729 checkpoint, including excluded
 records and inflow. Coverage and candidate ranking are not completion.
 
-Continue the existing trusted-image source/child-plan assessment where
-admissible, then the remaining graph delta, current custody and accepted
-receiving objectives. The parent stays Active.
+Continue the remaining weighted-graph supply and freshly qualified changed
+originals, preserving current custody and accepted receiving objectives.
+The trusted-image assessment is complete and must not be repeated as pending
+work. The parent stays Active.

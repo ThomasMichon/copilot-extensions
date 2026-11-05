@@ -270,8 +270,10 @@ Only the reused publication child finalized, retained; the
 [delivery journal](<journal/2026/11.05 finite-release-stamp-inventory-contracts.md>)
 records the result. All six originals stay OPEN, without new completion
 or receiving-transfer credit. The next publication is the nine-contract
-standalone/reservation/runtime study and its independent finite source
-assessment. The parent stays Active; its Plan and Validation remain open.
+standalone/reservation/runtime study, including both separately audited
+finite source completions. Subsequent research follows the remaining weighted
+graph and freshly admitted current contracts.
+The parent stays Active; its Plan and Validation remain open.
 
 The eleven-contract checkpoint is actually delivered in #10715 after genuine
 exact-head approval, no active findings, all eight resolved threads and nine
