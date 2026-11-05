@@ -42,6 +42,13 @@ database selectors, environment variables and plugin visibility do not imply
 opt-in. Strings, numbers and null are not booleans. Malformed files, unsafe
 portable overrides, unresolved bindings and wrong-cell reports refuse rather
 than silently returning inactive.
+Installed readers resolve the optional legacy configuration owner with the
+selected interpreter's retained `.runtime-bootstrap` SDK or the installer's
+deployed read-only `bin/resolve-runtime.*` helper when no SDK is retained.
+For application-style slots, the retained SDK is beside the `.venv`, not inside it.
+They do not require a source-checkout or payload-relative scripts directory.
+The same completion-gated owner lookup therefore applies to payload activation
+and provisioned readiness/client reads.
 Reader failures retain their exception class and up to four function/line
 locations, without exception text, configuration values or source paths.
 Windows activation errors also retain the reader's exit code and readiness

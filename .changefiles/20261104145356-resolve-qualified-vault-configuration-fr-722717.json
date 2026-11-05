@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve qualified Vault configuration from installed runtime helpers without source-layout dependencies.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}
