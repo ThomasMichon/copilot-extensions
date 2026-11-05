@@ -4501,7 +4501,7 @@
         "tools/promotion_source_alias.py": "efefb7b81cc8993fb0d296ca3e9c0590064e55d548fe3c87c598cab86247c88a",
         "tools/promotion_source_archive.py": "08abe573855702001c05834b426cd2861863ab10ef323c06bf2f6a546bafa67c",
         "tools/promotion_unit_contract.py": "6bf107a30ef30529086eebf005186cd0fe0201a0affbf12ea6f5e4f1674401ca",
-        "tools/promotion_unit_effects.py": "d8c7858cfe67d6b6c5da788b467871ea4db2e9b2f5a0df72e56af248d1d7bba7",
+        "tools/promotion_unit_effects.py": "c87200943adbfce085d3328bc385bce95bf6f0a4610554f6f3b2c1452becab6d",
         "tools/promotion_unit_packet.py": "b4203f0eded0108e5471b760c8f391b21149a0eed765189ecf6c91a58e126a10",
         "tools/promotion_unit_tests/fixtures/bridge_resume_parser_v0.py": "66723445ed476c265b03dac68af604b85f709dcda1e55ad42e045df29b1586bd",
         "tools/promotion_unit_tests/test_activation_preservation.py": "15f3535d663d7d23fd0f118a0ded4a93f6fd91271e0c3ea5f918365852938d26",
