@@ -649,3 +649,10 @@ implementation. The exact support closure follows the consumer trace and tests.
   findings and no discussion threads. It explicitly retains the unqualified
   native/installed tiers. Updated-head review and required CI remain open;
   this is not source-effort or parent completion.
+
+- Completed the historical-closure inventory against canonical history plus
+  the candidate tree, with the new capture commit absent. Of 1,986 distinct
+  recorded blobs, four additional HTTP-51 documentation/probe blobs were
+  missing after retaining the README. Preserved all four exact captured
+  byte sequences together rather than iterating on first-error reports.
+  Complete canonical-history validation remains the next acceptance check.
