@@ -212,6 +212,9 @@ def test_completed_installed_owner_precedes_path(installation):
         str(installation[0]),
     ]
     which.assert_not_called()
+    prefix, root = lifecycle._agent_worktrees_selection()
+    assert prefix == lifecycle._agent_worktrees_launch_prefix()
+    assert root == peer
 
 
 @pytest.mark.asyncio
@@ -271,7 +274,7 @@ def test_cell_service_uses_validated_own_context_not_path(
     launch = Mock(return_value=["validated-peer"])
     monkeypatch.setattr(lifecycle._peer_launch, "validate_owner", validated)
     monkeypatch.setattr(lifecycle._peer_launch, "launch_prefix", launch)
-    assert lifecycle._agent_worktrees_launch_prefix() == ["validated-peer"]
+    assert lifecycle._agent_worktrees_selection() == (["validated-peer"], peer)
     validated.assert_called_once_with("agent-bridge", cell_own, context)
     launch.assert_called_once_with("agent-bridge", cell_own, context, "agent-worktrees")
     which.assert_not_called()

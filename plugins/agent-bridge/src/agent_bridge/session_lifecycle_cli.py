@@ -216,17 +216,25 @@ def _agent_bridge_installation_context() -> str:
 
 
 def _agent_worktrees_launch_prefix(*, allow_path_fallback: bool = True) -> list[str] | None:
+    selection = _agent_worktrees_selection(allow_path_fallback=allow_path_fallback)
+    return selection[0] if selection else None
+
+
+def _agent_worktrees_selection(
+    *, allow_path_fallback: bool = True,
+) -> tuple[list[str], Path | None] | None:
+    """Resolve execution and observation together; PATH has no attributable root."""
     core = _core()
     explicit_context = _agent_bridge_installation_context()
     own_root = _agent_bridge_owner_root()
     if not explicit_context:
         prefix = _legacy_worktrees_launch_prefix(own_root)
         if prefix:
-            return prefix
+            return prefix, Path.home() / ".agent-worktrees"  # marketplace-isolation: allow legacy-compatibility
         if not allow_path_fallback:
             return None
         exe = shutil.which("agent-worktrees")  # marketplace-isolation: allow legacy-compatibility
-        return [exe] if exe else None
+        return ([exe], None) if exe else None
     try:
         own = core._peer_launch.validate_owner("agent-bridge", _agent_bridge_owner_root(), explicit_context)
     except (OSError, ValueError, ImportError) as error:
@@ -235,7 +243,8 @@ def _agent_worktrees_launch_prefix(*, allow_path_fallback: bool = True) -> list[
     if not peer_root.exists() and not peer_root.is_symlink():
         return None
     try:
-        return core._peer_launch.launch_prefix("agent-bridge", Path(own["pluginRoot"]), explicit_context, "agent-worktrees")
+        prefix = core._peer_launch.launch_prefix("agent-bridge", Path(own["pluginRoot"]), explicit_context, "agent-worktrees")
+        return (prefix, peer_root) if prefix else None
     except (OSError, ValueError, ImportError) as error:
         raise core._peer_launch.ContextRefused(f"same-cell agent-worktrees resolution failed: {error}") from error
 

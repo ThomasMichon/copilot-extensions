@@ -122,6 +122,10 @@ from test_receiving_bundle import (
     test_provider_owner_uses_the_actual_client_interface
     as test_provider_owner_uses_the_actual_client_interface,
 )
+from test_worktree_writer_observation import (
+    test_health_observes_canonical_writer_selection_without_launch
+    as test_health_observes_canonical_writer_selection_without_launch,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -163,6 +167,8 @@ def test_http51_capture_actual_observations(
     observed["portable_capabilities"] = {
         key: health["capabilities"][key] for key in vector["expected"]["portable_capabilities"]
     }
+    observed["worktree_record_delegation"] = health["capabilities"]["worktree_record_delegation"]
+    assert set(health["worktree_record_writer"]) == {"installation_root"}
     args, _ = _command(native_send, monkeypatch, api=api)
     args.func(args)
     receipt = json.loads(capsys.readouterr().out)

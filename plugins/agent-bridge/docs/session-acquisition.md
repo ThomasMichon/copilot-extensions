@@ -316,6 +316,25 @@ resident preserves a protected relationship and workspace nonce. Governed
 assignment still requires independent qualification of the actual participants;
 legacy lineage success alone grants no admission or cleanup authority.
 
+The existing `/health` response additionally advertises
+`capabilities.worktree_record_delegation: 1` and a `worktree_record_writer`
+object with `installation_root`. Observation and execution share the canonical
+selection resolver. A validated same-cell or completed legacy runtime reports
+its selected root; unavailable/refused selection and the unattributable legacy
+PATH compatibility path report null. Ordinary health does not execute Worktrees,
+bootstrap a runtime or negotiate a serializer. Selection work runs off the
+HTTP event loop.
+
+This declaration covers coherent acquisition/lineage delegation, not support in
+the selected Worktrees build. An assembling owner must independently observe that
+executing writer's root, build generation and serializer contract. Bridge's
+existing `slot.pid`, `slot.role` and `slot.active.generation` identify the serving
+selection; only the active process is relevant, and its generation is the
+existing routing counter, not a new build UUID. A changed slot or delegated
+root invalidates that observation. Older receivers omit these additive fields;
+they keep baseline health/acquisition behavior but cannot satisfy this optional
+qualification. No ordinary caller is activated by this provider expansion.
+
 Worktree identity preflight reads the exact current tracking record with
 `record --worktree-id <id> --json`, avoiding global transcript scans
 and cached full-list results. Only tracking identity, path and lifecycle state

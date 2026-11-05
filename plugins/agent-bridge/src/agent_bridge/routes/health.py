@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Request
 from ssh_manager import get_default_manager
 
@@ -25,6 +27,8 @@ from ..live_keyed_receipt import CAPABILITY as LIVE_KEYED_RECEIPT_CAPABILITY
 from ..live_exact_notify import CAPABILITY as LIVE_EXACT_NOTIFY_CAPABILITY
 from ..session_observation_contract import CURRENT_REQUESTS, HISTORY, OBSERVATIONS, TOOL_STATISTICS
 from ..owner_membership import CAPABILITY as OWNER_MEMBERSHIP
+from ..session_lifecycle_cli import _agent_worktrees_selection
+from .._peer_launch import ContextRefused
 
 router = APIRouter()
 
@@ -65,6 +69,7 @@ async def health(request: Request) -> dict:
             PORTABLE_MUX_CAPABILITY: 1,
             READONLY_PLUGIN_CONTROLS_CAPABILITY: 1,
             PORTABLE_INBOX_CAPABILITY: 1,
+            "worktree_record_delegation": 1,
         },
         "drain_contract": {"minimum": DRAIN_CONTRACT_VERSION, "maximum": DRAIN_CONTRACT_VERSION},
         "ssh_carriers": get_default_manager().carrier_diagnostics(),
@@ -77,6 +82,13 @@ async def health(request: Request) -> dict:
         config_dir(),
         self_retire_status=getattr(request.app.state, "self_retire_status", None),
     )
+    try:
+        selection = await asyncio.to_thread(_agent_worktrees_selection)
+    except (ContextRefused, OSError, ValueError, ImportError):
+        selection = None
+    body["worktree_record_writer"] = {
+        "installation_root": str(selection[1]) if selection and selection[1] else None,
+    }
     readiness_error = getattr(request.app.state, "readiness_error", None)
     if readiness_error:
         body["readiness_error"] = readiness_error
