@@ -222,6 +222,20 @@ checkpoint nor author eligibility, holds, requirements or source/resource custod
 
 ## Plan
 
+The [ownership/dead-route study](ownership-observation-dead-route-cohort.md)
+credits #5904's earlier atomic publication repair while retaining present-unknown
+cleanup refusal. Separate actual reviewed/current/promoted source verification
+supports #9283's finite completed closure, not any ranked-message shortcut or
+repair/source custody release.
+
+The [cleanup/recovery](cleanup-recovery-evidence-cohort.md) and
+[architecture/launch](deploy-architecture-launch-compatibility-cohort.md)
+studies retain four independent OPEN outcomes, credited prior implementation,
+unknown native Git-wait cause, finite applicability decision and real
+mixed-version parser/second-hop acceptance. Six originals span seventeen whole
+texts/44,054 characters; fourteen message comparisons, two protected relations
+and two unchanged invalid-scope relations are not eighteen completion findings.
+
 ### Phase 1 - Baseline and reviewed charter
 
 - [x] Enumerate all scoped open issues with pagination and fix the 50% threshold.
@@ -230,6 +244,30 @@ checkpoint nor author eligibility, holds, requirements or source/resource custod
 - [x] Preserve the initial cohort and oldest-first cursor in structured session state.
 
 ### Phase 2 - Continuing reconciliation
+
+The eleven-contract indexing/lifecycle research delta merged in #10592 after
+genuine exact-head approval with no active findings and green required checks.
+All seventeen actual merged bodies equal the reviewed head; the
+[delivery journal](<journal/2026/11.04 bridge-replacement-recovery-contracts.md>)
+records the finalized retained child and continuing parent gate. Two equal
+complete 20:34 PST metadata-only scans show 1,009 whole open, 280 above
+729: one eligible arrival remains metadata-only, with no departure or new
+campaign closure credit. Continue the next five-contract graph study and
+independent publication; no original acceptance, older-claim release or
+installed change follows.
+
+The [async transports](async-transport-cleanup-cohort.md) and
+[installer integration/provenance](install-integration-provenance-cohort.md)
+studies preserve four originals through eight whole texts and twelve
+noncompletion comparisons. Credit already-verified process/consumer outcomes,
+HOME relocation and declared draft work without replacing transport lifetime,
+explicit integration or truthful Git-provenance acceptance and repair custody.
+
+The [monitor restart study](monitor-restart-exclusivity-cohort.md) preserves
+one original through two whole texts and three noncompletion comparisons;
+its paired original is wholly withheld before rendering. Credit truthful
+spawn-failure reporting without completing the original three-race protocol,
+failure recovery, reader distinctions or accepted phase/owner sequence.
 
 The [branch/membership](branch-membership-boundaries-cohort.md),
 [supervision/native lifetime](supervision-native-lifetime-cohort.md) and
@@ -1190,6 +1228,36 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [ownership/dead-route](ownership-observation-dead-route-cohort.md) core
+separates PRESENT unknown ownership from absence and records #9283's actual
+finite source completion independently of its three nonmatching ranked messages.
+All eleven runtime/test blobs, seven regressions, complete review/CI and actual
+promoted runtime equality were checked; no new native run, rollout or source
+custody release follows. The complete 2026-11-04 20:40:47 PST census remains
+1,007 whole open, 278 above 729 including inflow/excluded records.
+
+The [cleanup/recovery](cleanup-recovery-evidence-cohort.md) core preserves
+attempt-all/error/custody fidelity and cleanup-only audited eligibility,
+including unresolved Git-wait cause and actual selected adoption. The
+[architecture/launch](deploy-architecture-launch-compatibility-cohort.md) core
+retains the finite architecture alternatives and supported mixed-version
+parser/hop controls without forcing every-adopter rollout or reviving an old
+discussion reservation. Five of the six originals remain OPEN.
+
+The [async cleanup](async-transport-cleanup-cohort.md) core distinguishes
+pre-loop resource settlement from already-verified process cleanup and
+durable Owner/worker lifetime. The
+[integration/provenance](install-integration-provenance-cohort.md) core
+preserves authorized integration, source-route reachability, actual Git
+classification/error alternatives and the explicitly claimed TLS-blocked
+first-install repair, without new shared native or rollout gates.
+
+The [monitor restart](monitor-restart-exclusivity-cohort.md) core keeps failed
+termination, concurrent-owner metadata and true-exit/PID-reuse controls
+distinct from cold-start protection, truthful spawn errors and native
+process independence. Original platform exemptions and sequential owner
+handoff remain; no live restart or withheld-neighbor retry is implied.
 
 The [branch/membership](branch-membership-boundaries-cohort.md) core preserves
 generic Worktrees AND CodeSpaces characterization, fetched-head OR tracking

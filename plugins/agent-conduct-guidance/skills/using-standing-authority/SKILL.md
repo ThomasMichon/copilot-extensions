@@ -31,6 +31,18 @@ designated issue/PR publication need no extra generic permission question when
 the charter covers them. Diagnose a concrete failure read-only before choosing
 a remedy; a slow review is not a failure. Preserve stricter applicable gates.
 
+Maintaining an agent-owned PR is part of that delivery. Rebase onto the target
+branch and resolve understood in-scope conflicts, restore verified source
+attribution and `Co-authored-by` marks, reconcile squash-merge history and
+bookkeeping without losing work, and fix actionable CI findings and rerun the
+affected checks after correction without asking again. Use supported repository
+owner workflows; confirm actual prior merge/content state before reconciliation.
+Preserve authored content and other owners' work, required review and CI,
+explicit holds and revision limits. Unknown prior effects need reconciliation,
+not replay. Ask for intent-changing conflicts or missing authority for
+destructive discard, deployment, access changes or unrelated service repair;
+ordinary PR maintenance does not waive those boundaries.
+
 ## 2. Qualify the effect scope proportionately
 
 Before an effect outside ordinary charter work, obtain only the facts needed to

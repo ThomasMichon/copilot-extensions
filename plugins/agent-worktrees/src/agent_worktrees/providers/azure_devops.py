@@ -416,6 +416,7 @@ class AzureDevOpsProvider:
             merged=merged,
             head_sha=head_sha,
             base_ref=base_ref,
+            base_sha=str((data.get("lastMergeTargetCommit") or {}).get("commitId") or ""),
             updated_at=str(data.get("closedDate", "") or ""),
             reviews=self._reviews_from_show(data),
             author=author,

@@ -591,7 +591,7 @@ class GiteaProvider:
             pr_state=str(pr.get("state", "")) or "open",
             merged=bool(pr.get("merged", False)),
             head_sha=str((pr.get("head") or {}).get("sha", "")),
-            base_ref=str((pr.get("base") or {}).get("ref", "")),
+            base_ref=str((pr.get("base") or {}).get("ref", "")), base_sha=str((pr.get("base") or {}).get("sha") or ""),
             updated_at=str(pr.get("updated_at", "") or ""),
             reviews=self._all_review_objs(repo, number, api_base, token),
             author=str((pr.get("user") or {}).get("login", "")),

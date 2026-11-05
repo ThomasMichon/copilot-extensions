@@ -1645,6 +1645,18 @@ This catches a policy added after planning. Healthy runtimes need no
 publication permission to remain selected. Uninstall is a separate action,
 not runtime publication.
 
+Apply remains best-effort across independent plugins. Its JSON summary and
+optional status file retain the terminal plan's `diagnostics` and unperformed
+`skipped` actions (including `copilot-unavailable`). Either makes the apply result
+unsuccessful: exit 1 and status `ok: false`, even when no installer ran or every
+executed installer succeeded. A diagnostic resolved by a later pass is not a
+terminal failure. After successful final-pass actions, outstanding diagnostics
+are rechecked read-only, without another apply pass or planning-cache write.
+Successful apply is only a reconciliation-phase result, not
+proof of complete repository dependency, service-health or authentication readiness.
+An empty later plan does not clear a skipped payload action; successful execution
+of that action does.
+
 `reconcile-plugins --check-update` remains a read-only compatibility probe with one runtime
 action on JSON stdin. It returns
 `{"allowed": true, "diagnostics": []}` with exit 0, or `allowed: false`

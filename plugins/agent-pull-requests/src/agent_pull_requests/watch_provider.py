@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import re
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -77,6 +78,11 @@ def decode_snapshot(data: object, repo: str, number: int) -> PRSnapshot:
         )
     ):
         raise ValueError("invalid native snapshot details")
+    if "base_sha" in data and (
+        not isinstance(data["base_sha"], str)
+        or data["base_sha"] and re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", data["base_sha"]) is None
+    ):
+        raise ValueError("invalid native snapshot target identity")
     if observation is not None:
         if (
             not isinstance(observation, dict)
@@ -114,7 +120,7 @@ def decode_snapshot(data: object, repo: str, number: int) -> PRSnapshot:
             field: copy.deepcopy(data[field])
             for field in (
                 "schema", "version", "repo", "pr", "provider", "pr_state", "merged",
-                "head_sha", "base_ref", "mergeable", "checks_state", "title", "draft",
+                "head_sha", "base_ref", "base_sha", "mergeable", "checks_state", "title", "draft",
                 "observation",
                 "reviews",
                 "api_base", "author", "cursor", "checks_complete", "check_failures",

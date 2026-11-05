@@ -1,5 +1,25 @@
 # Testing copilot-extensions
 
+Manager's opt-in `--test-file tests/test_companion_joined_lifecycle.py
+--test-file tests/test_companion_bridge_source.py
+--test-file tests/test_companion_bridge_session_source.py
+--test-file tests/test_companion_bridge_session_reconcile.py
+--test-file tests/test_companion_current_requests.py
+--test-file tests/test_companion_visual.py --allow-explicit-tiers` packet joins
+the actual private Worktrees resident, managed Agenda publisher, selected Bridge
+route/CLI and Textual app. Slow backward pages overlap live events, committed
+purpose/agenda updates and actual waiter clearing while the browsing viewport,
+selection and focus remain fixed. Separate cases retire an outstanding page on
+hide or selected-head loss, or expire its actual requested retention boundary
+and recover through explicit Refresh. Birth-qualified owning processes and exact
+subscriber cleanup are checked. The selected Bridge page remains byte-bounded;
+the tests do not assume that a requested 64-entry maximum yields 64 rows.
+Full-app JUnit properties retain browsing, gap and reconciled progress screens;
+the separate visual packet compares eight curated SVGs, including retained
+history after a source gap. These are isolated POSIX source/private-process
+controls, not installed, native-client or performance qualification. No new
+effectful cases enter required unit-only CI.
+
 Manager's opt-in `--test-file tests/test_companion_current_requests.py
 --test-file tests/test_companion_bridge_session_source.py
 --test-file tests/test_companion_bridge_session_codec.py
@@ -13,8 +33,9 @@ It checks empty-history live input, unchanged event cursors during state-only
 updates and paging, selected executable/provider rollback, malformed declarations,
 no retry after an unknown invocation, independent revision qualification and
 owned retirement. Four full-app progress renders are retained as JUnit properties.
-The separate visual packet compares seven curated SVGs, including pending,
-cleared, partial and unknown input alongside retained historical requests.
+The separate visual packet compares eight curated SVGs, including pending,
+cleared, partial and unknown input alongside retained historical requests and
+an explicit retained-history gap.
 These are source fixtures, not SDK/model actors or installed/native acceptance.
 The CLI-pipe fixture cases are explicitly POSIX-only; importing their fixture
 does not imply native Windows support. Separate finite-document controls remain

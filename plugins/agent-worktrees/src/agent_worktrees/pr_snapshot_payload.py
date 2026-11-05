@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import re
 
 from .pr_contract import Baseline
 from .pr_snapshot import PRSnapshot
@@ -14,6 +15,10 @@ def snapshot_payload(snapshot: PRSnapshot, repo: str, number: int, provider: str
         "provider": provider, "api_base": api_base, "repo": repo, "pr": number,
         "pr_state": snapshot.pr_state, "merged": snapshot.merged,
         "head_sha": snapshot.head_sha, "base_ref": snapshot.base_ref,
+        "base_sha": (
+            snapshot.base_sha if isinstance(snapshot.base_sha, str)
+            and re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", snapshot.base_sha) else ""
+        ),
         "mergeable": snapshot.mergeable, "checks_state": snapshot.checks_state,
         "checks_complete": snapshot.checks_complete,
         "check_failures": [asdict(failure) for failure in snapshot.check_failures],
