@@ -6,17 +6,17 @@ import uuid
 from pathlib import Path
 
 from . import claims_cli, config as cfg, output, resource_producer as producer
-from . import resource_relationship as relationship, runtime_identity, tracking, tracking_write
+from . import resource_relationship as relationship, tracking, tracking_write
 from .resource_producer_cli import read_input
 
 
-def _resident_selection() -> tuple[Path, tuple[str, int, str], str, str]:
+def _resident_selection(*, min_version: int = 2) -> tuple[Path, tuple[str, int, str], str, str]:
     from . import locks, status_monitor_runtime
 
     path = status_monitor_runtime._monitor_lock_path()
     data = locks.read_lock(path)
     endpoint = tracking_write.endpoint_from_rendezvous(
-        data, verb="resource_relationship", min_version=2,
+        data, verb="resource_relationship", min_version=min_version,
     )
     generation = data.get("tracking_write_generation") if isinstance(data, dict) else None
     runtime = data.get("runtime_generation") if isinstance(data, dict) else None
@@ -35,7 +35,8 @@ def _inspect_resident(args: dict) -> dict:
     nonce = payload.get("expected_creation_nonce")
     if nonce is None:
         raise ValueError("resident-only inspection requires expected_creation_nonce")
-    selection = _resident_selection()
+    min_version = 3 if "expected_writer_identity" in payload else 2
+    selection = _resident_selection(min_version=min_version)
     _, endpoint, generation, runtime = selection
     try:
         result = tracking_write.wcs_client.request(
@@ -46,7 +47,7 @@ def _inspect_resident(args: dict) -> dict:
         )
     except tracking_write.wcs_client.DaemonUnavailable as exc:
         raise ValueError(f"resident-only inspection unavailable: {exc}") from exc
-    if _resident_selection() != selection:
+    if _resident_selection(min_version=min_version) != selection:
         raise ValueError("selected resident changed during relationship inspection")
     if result.get("error"):
         return result
@@ -58,6 +59,8 @@ def _inspect_resident(args: dict) -> dict:
         or result.get("ok") is not True or result.get("owner") != args["owner_ref"]
         or result.get(identity_field) != payload[identity_field]
         or result.get("creation_nonce") != nonce
+        or ("expected_writer_identity" in payload
+            and result.get("writer_identity") != payload["expected_writer_identity"])
         or not isinstance(contract, dict)
         or any(
             type(contract.get(key)) is not type(value) or contract[key] != value
@@ -82,13 +85,11 @@ def cmd_resource_relationship(args) -> int:
                 "handoff": False, "ref_encoding": "namespace:l1.base64url",
                 "inspect_absence": True,
                 "expected_creation_nonce": True,
+                "expected_writer_identity": True,
                 "resident_inspect": 1,
                 "writer_scope": "executing-process",
                 "writer_contract": relationship.writer_contract(),
-                "writer_identity": {
-                    "installation_root": str(cfg.install_dir()),
-                    "runtime_generation": runtime_identity.PROCESS_GENERATION,
-                },
+                "writer_identity": relationship.writer_identity(),
                 "max_ref_bytes": producer.MAX_REF_BYTES, "max_input_bytes": producer.MAX_INPUT_BYTES,
             })
             return 0

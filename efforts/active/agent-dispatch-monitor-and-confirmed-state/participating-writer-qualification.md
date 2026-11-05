@@ -96,6 +96,10 @@ mandatory. Unknown responses retain the same assignment and claim.
       owners, then construct the conditional assignment writer with real
       independent admission. A copied rendezvous, substituted direct response,
       newer payload or changed selection must not satisfy it.
+      Provider observation source is implemented; conditional admission and
+      changed-selection invalidation remain open. The next provider-first
+      slice adds an optional executing-identity requirement to the existing
+      locked relationship transaction; its tests are not cohort admission.
 - [ ] Integrate ordinary preparation/advancement consumers only after their
       selected providers are qualified. Preserve original queue, reservation,
       creation nonce, relationship, task/worktree/native binding and all answers
