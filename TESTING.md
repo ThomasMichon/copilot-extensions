@@ -2436,6 +2436,9 @@ pixels, native-frame or input-ready performance measurements.
 `test_companion_joined_fixture.py` deterministically checks that this observer
 retries only Windows sharing/lock violations on a later tick without advancing
 its published value; other permission failures remain visible errors.
+Its private Bridge prerequisite also requires an actual owning membership-route
+heartbeat after the snapshot, so a one-frame carrier that starves healthy
+readers cannot masquerade as native integration failure.
 The older PSMux 3.3.5 baseline has exhibited immediate session exits and later
 CLI/directory loss in this fixture. Those observations remain an unqualified
 stability gap under #8811, not a reason to skip a failed test or claim that

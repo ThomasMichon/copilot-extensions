@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from threading import Event
 from types import SimpleNamespace
 
 import pytest
@@ -117,3 +118,11 @@ def test_private_bridge_membership_cli_completes_before_client_composition(
         diagnostic.read_text(encoding="utf-8") if diagnostic.exists() else None,
     )
     assert json.loads(result.stdout)["kind"] == "snapshot"
+    stream = companion_bridge_source.MembershipCommands(
+        OWNER, cwd=str(tmp_path), project_root=str(tmp_path),
+    ).frames(Event(), follow=True)
+    try:
+        assert next(stream)["kind"] == "snapshot"
+        assert next(stream)["kind"] == "heartbeat"
+    finally:
+        stream.close()

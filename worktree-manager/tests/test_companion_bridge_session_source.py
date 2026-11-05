@@ -44,6 +44,7 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     membership = importlib.import_module("agent_bridge.owner_membership")
     wire = importlib.import_module("agent_bridge.session_observation_contract")
     routes = importlib.import_module("agent_bridge.routes.session_observations")
+    membership_routes = importlib.import_module("agent_bridge.routes.owner_membership")
     db = db_module.Database(tmp_path / "bridge.sqlite3")
     db.create_session(
         "child", "fixture", None, str(tmp_path), "local", "starting", 1.0,
@@ -96,17 +97,14 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                     with lock:
                         counts["held"] += 1
                         counts["max_held"] = max(counts["max_held"], counts["held"])
-                if url.path.endswith("/owner-observations"):
+                membership_read = url.path.endswith("/owner-observations")
+                if membership_read:
                     assert query["owner_ref"] == OWNER
-                    body = membership.source_for(manager, OWNER).frame(OWNER, query.get("after"))
-                    peer.sendall(wire.sse(body))
-                    while held and not stop.wait(0.05):
-                        if select.select([peer], [], [], 0)[0] and not peer.recv(1, socket.MSG_PEEK):
-                            return
-                    return
-                history = "/session-observation-history/" in url.path
-                read = wire.ReadRequest.parse(url.path.rsplit("/", 1)[-1], pairs, history=history)
-                if history:
+                    read = membership_routes.OwnerRead.parse(pairs)
+                else:
+                    history = "/session-observation-history/" in url.path
+                    read = wire.ReadRequest.parse(url.path.rsplit("/", 1)[-1], pairs, history=history)
+                if not membership_read and history:
                     history_entered.set()
                     while block_history.is_set() and not stop.wait(0.05):
                         if select.select([peer], [], [], 0)[0] and not peer.recv(1, socket.MSG_PEEK):
@@ -122,7 +120,10 @@ def semantic_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                             return True
 
                     request = SimpleNamespace(app=SimpleNamespace(state=state), is_disconnected=disconnected)
-                    stream = routes.observations(request, read)
+                    stream = (
+                        membership_routes.stream(request, read) if membership_read
+                        else routes.observations(request, read)
+                    )
                     try:
                         async for chunk in stream:
                             await asyncio.to_thread(peer.sendall, chunk)
