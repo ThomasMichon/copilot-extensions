@@ -994,6 +994,18 @@ reuse/admission behavior is not an exception to the fresh-default revision.
   This prerequisite does not fix #10499's legacy bootstrap launch by itself;
   ordinary publishers, other plugins, cells/custom roots, live queue recovery,
   backend connections and rollout remain separate.
+- [ ] **Agent-recommended bounded bootstrap adoption:** route MCP's legacy
+  first stamp and drift `provision` through the qualified init-backed recipes,
+  packaged foundation and original ordinary queue. Preserve MCP's actual
+  source-aware selected/completed readiness, originating project, own controls,
+  native participant custody and independent guidance. The
+  [bounded proposal](mcp-bootstrap.md) requires actual hook deadline/output,
+  installed configuration/consumer preservation and genuine caller-Job/group
+  loss through the existing native lifetime lane; contained caller-process exit
+  is not that proof. Retain Windows' setup-provided Python prerequisite.
+  Remove direct installer/reconcile/PID-reap ownership only after the proposal
+  clears review; commands, explicit installers, other migrations, live queue
+  recovery, backend effects and rollout remain separate.
 - [ ] Establish the standalone execution foundation before plugin provisioning without requiring an existing Python runtime, Manager or another plugin.
 - [ ] Migrate first-use publishers onto that foundation, retaining the canonical installer, publication admission, healthy dispatch and precise skew/recovery outcomes.
 - [ ] Qualify foundation genesis, caller loss, concurrent cold callers, failed construction, upgrade and subsequent first-use requests on native supported platforms.
@@ -1450,6 +1462,12 @@ operator-requested I/O-only refusal boundary.
 - [ ] **Background ownership:** default-off enrollment accepts explicit user or trusted-setup consent, current-user Windows Autorun requires no UAC registration, the worker survives its setup caller without visible consoles, and only the selected owner performs suite updates.
 - [ ] **Worker upgrade:** native replacement preserves durable in-flight request/operation identity across graceful or cold recovery, prevents concurrent scheduling or duplicate unsafe effects, and reports actual readiness or a recovery outcome when the successor fails.
 - [ ] **Execution driver:** concurrent ordinary callers observe one durable operation, caller exit preserves it, distinct explicit selections stay distinct, interrupted execution remains explicit, and supervised debugging cannot overlap the same transaction authority.
+- [ ] **Bounded MCP bootstrap adoption:** resolve the
+  [direct native validation](mcp-bootstrap.md#validation-plan), including actual
+  hook deadline/output, selected-source readiness, preserved installed
+  configuration and production submitting-Job/group loss with every outer
+  cleanup boundary retained. Recipe-only or contained process-loss evidence
+  does not close this item or #10499's remaining plugin/recovery scope.
 - [ ] **Setup adoption:** approved consuming-harness setup finishes with verified enrollment or a precise activation/readiness blocker; unrelated repository discovery cannot enroll maintenance and external-controller ownership cannot overlap Manager.
 - [ ] **Management continuity:** Manager and the selected service runtimes can use distinct clean merged-source selections; the management tools remain usable for update and supported recovery.
 - [x] **Clean-room:** a structured Tier-P report proves fresh Linux installation and real service use; report the exact source and serving identities.

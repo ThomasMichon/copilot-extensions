@@ -1127,3 +1127,25 @@ affected-host acceptance. The parent remains Active. The next stretch
 reconciles current MCP bootstrap ownership and the existing production-lifetime
 qualification lane before selecting any ordinary-publisher adoption; no new
 source claim or live recovery operation is established by this release record.
+
+### 2026-11-05 - MCP ordinary bootstrap slice selected for review
+
+Current #10499 and the matching open MCP/bootstrap/lifetime PRs were inspected
+before selecting U14. No MCP bootstrap adoption PR was present. The bounded
+claim is [comment 6652903046](https://github.com/ThomasMichon/copilot-extensions/issues/10499#issuecomment-6652903046);
+existing Dispatch, first-foundation, ordinary recovery/coalescing, whole-hook
+and MCP construction/application/publication/lifetime owners retain their scope.
+
+The ROOT's [MCP bootstrap proposal](../source-managed-runtime-installs/mcp-bootstrap.md)
+routes only legacy first stamp and drift provision through the released recipe
+and original queue. It preserves MCP's actual init and selected-source readiness,
+Windows' setup-provided Python prerequisite, automatic controls and independent
+guidance. Review and actual proposal merge precede implementation.
+
+The direct validation requires real hook deadline/output, installed configuration
+and consumers, and genuine production submitting-Job/group loss through the
+existing native lifetime owner with all outer cleanup boundaries retained.
+U12's contained caller-process-loss evidence is not substituted. No production
+hook was run, no source implementation or native acceptance is claimed, and no
+shared installation, queue, credential, service or rollout effect is authorized.
+The parent remains Active; the next gate is review of this bounded proposal.
