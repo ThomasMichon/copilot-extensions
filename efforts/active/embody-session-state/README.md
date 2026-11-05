@@ -139,6 +139,15 @@ validation documentation. Existing visions need no intent amendment.
 - Owning CLI/validation docs and the mandatory patch changefile are ready.
   Remaining gate: published-head CI/review, merge, then source closeout.
 
+### 2026-11-05 - Review corrections
+
+- Corrected canonical mux-name confirmation for dotted target IDs, unavailable
+  YAML registration evidence and anchor failure identity/effect retention.
+- Added six focused regressions, including invalidation of a sampled binding
+  after a post-census read failure. Revised packet: 150 passed; F/E9 lint passed.
+- Shortened the verification docstring to retain the existing CLI module cap.
+  Review and CI remain publication gates; no runtime or scope change.
+
 ### 2026-11-05 - Implementation gate
 
 - Proposal #10746 merged after approval on its current head and required CI.

@@ -7,6 +7,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from yaml import YAMLError
 
 from agent_worktrees import __main__ as main
 from agent_worktrees import embody_receipt as receipt, handoff_cli, output
@@ -164,6 +165,78 @@ def test_head_replacement_cannot_reuse_a_previously_sampled_binding(native, monk
     assert receipt._observe(result, bindings)["session_reason"] == "head-changed"
     native.record = _record("original")
     assert not receipt._observe(result, bindings)["session_verified"]
+
+
+def test_dotted_target_is_confirmed_by_its_canonical_mux_name(native, capfd, monkeypatch):
+    native.record = _record("original")
+    canonical = receipt.sessions.mux_session_name("host.local-linux-1")
+    binding = {**native.binding, "worktree_id": "host_local-linux-1", "session_name": canonical}
+    monkeypatch.setattr(receipt.sessions, "mux_binding_for_session", lambda *a, **k: binding)
+    _, result = _run(capfd, worktree_id="host.local-linux-1", session=canonical)
+    assert result["session_verified"] and result["state"] == "live"
+    assert result["native_process"]["worktree_id"] == "host.local-linux-1"
+
+
+@pytest.mark.parametrize("read_failure", [1, 2])
+def test_yaml_failure_after_launch_preserves_an_unknown_receipt(native, capfd, monkeypatch, read_failure):
+    native.record = _record("original")
+    reads = [0]
+    def load(_):
+        reads[0] += 1
+        if reads[0] == read_failure:
+            raise YAMLError("malformed fixture record")
+        return native.record
+    monkeypatch.setattr(receipt.tracking, "load_record", load)
+    rc, result = _run(capfd)
+    assert rc == 0 and result["worktree_id"] == "example" and result["created"]
+    assert result["state"] == "unknown" and not result["session_verified"]
+    assert result["session_reason"] == "registration-unavailable"
+
+
+def test_yaml_failure_invalidates_the_uncorroborated_sample(native, monkeypatch):
+    native.record = _record("original")
+    reads = [0]
+    def load(_):
+        reads[0] += 1
+        if reads[0] == 2:
+            raise YAMLError("malformed fixture record")
+        return native.record
+    monkeypatch.setattr(receipt.tracking, "load_record", load)
+    result = {"worktree_id": "example", "session": "wt-example", "created": False}
+    bindings = {}
+    assert not receipt._observe(result, bindings)["session_verified"]
+    assert not receipt._observe(result, bindings)["session_verified"]
+    assert native.bindings == 1
+
+
+@pytest.mark.parametrize("accepted", [False, True])
+def test_anchor_errors_retain_resolved_identity_and_launch_effects(native, capfd, monkeypatch, tmp_path, accepted):
+    from agent_worktrees import agent_policy
+    config = SimpleNamespace(repo_name="example", default_repo=SimpleNamespace(anchor=str(tmp_path)))
+    monkeypatch.setattr(receipt.cfg, "load_config", lambda: config)
+    monkeypatch.setattr(main, "_preflight_launch", lambda *a: main.LaunchPreflight())
+    monkeypatch.setattr(main, "_build_launch_cmd", lambda *a, **k: ["fixture-cli"])
+    monkeypatch.setattr(main, "_build_env", lambda *a, **k: {})
+    monkeypatch.setattr(main, "_repo_session_env", lambda *a: {})
+    monkeypatch.setattr(receipt.sessions, "has_mux_session", lambda *a: False)
+    launched = [False]
+    def launch(*a):
+        launched[0] = True
+        return {"ok": accepted, "created": True, "new_pane": "%1", "error": "unconfirmed"}
+    def policy(*a):
+        if accepted and launched[0]:
+            return output._json_error("fixture policy refusal after creation", 3)
+        return None
+    monkeypatch.setattr(receipt.sessions, "mux_new_session", launch)
+    monkeypatch.setattr(agent_policy, "json_refusal", policy)
+    rc = handoff_cli.cmd_embody(argparse.Namespace(anchor=True))
+    result = json.loads(capfd.readouterr().out)
+    assert rc == (3 if accepted else 4) and result["ok"] is False
+    assert result["worktree_id"] == "anchor-example" and result["session"] == "wt-anchor-example"
+    assert result["launch_attempted"] is True
+    assert result["launch_action"] == ("create" if accepted else "attempted")
+    if accepted:
+        assert result["created"] is True and result["new_pane"] == "%1"
 
 
 def test_launch_failure_retains_resolved_target_without_claiming_no_effects(native, capfd):

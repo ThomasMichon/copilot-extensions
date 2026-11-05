@@ -8,6 +8,8 @@ import math
 import subprocess
 import time
 
+from yaml import YAMLError
+
 from . import config as cfg, output, session_liveness, sessions, tracking
 
 
@@ -56,7 +58,7 @@ def _observe(result: dict, bindings: dict) -> dict:
         if not binding:
             return {**observation, "session_reason": "mux-binding-unconfirmed"}
         if (
-            binding.get("worktree_id") != wt_id
+            binding.get("session_name") != sessions.mux_session_name(wt_id)
             or binding.get("session_name") != result.get("session")
             or (result.get("created") and binding.get("pane_id") != pane)
         ):
@@ -67,8 +69,11 @@ def _observe(result: dict, bindings: dict) -> dict:
             bindings[key] = None
             return {**observation, "session_reason": "head-changed"}
         return {**observation, "state": "live", "session_verified": True,
-                "session_reason": "native-mux-binding", "native_process": binding}
-    except (OSError, ValueError, AttributeError, RuntimeError, subprocess.SubprocessError):
+                "session_reason": "native-mux-binding",
+                "native_process": {**binding, "worktree_id": wt_id}}
+    except (OSError, ValueError, AttributeError, RuntimeError, subprocess.SubprocessError, YAMLError):
+        for key in bindings:
+            bindings[key] = None
         return observation
 
 

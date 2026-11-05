@@ -228,8 +228,7 @@ def _cmd_embody(args: argparse.Namespace, target: dict) -> int:
     Ordinary live embodiment never injects text; only the explicit
     ``--deliver-pending-seed`` startup callback settles staged New text.
 
-    Verification: ``agent-bridge live-sessions?worktree_id=<id>`` reports
-    registration. ``--verify-timeout`` waits for mux existence, not native proof.
+    Verification: mux-only via ``--verify-timeout``; native state via the receipt.
     """
     make_new = getattr(args, "new", False)
     raw_id = getattr(args, "worktree_id", None)
@@ -287,9 +286,7 @@ def _cmd_embody(args: argparse.Namespace, target: dict) -> int:
             return refusal
 
     if anchor_mode:
-        target["anchor"] = True
-        target["work_dir"] = str(config.default_repo.anchor)
-        return _cmd_embody_anchor(args, config)
+        return _cmd_embody_anchor(args, config, target)
 
     # Resolve target worktree id + path (creating a fresh worktree for --new).
     if make_new:
@@ -592,7 +589,7 @@ def _cmd_embody(args: argparse.Namespace, target: dict) -> int:
     )
 
 
-def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
+def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config, target: dict | None = None) -> int:
     """The ``--anchor`` half of :func:`cmd_embody`: create-or-resume a
     detached mux+Copilot session directly in the active project's anchor
     checkout, with no worktree involved at all.
@@ -633,6 +630,8 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
         )
     deferred = {}
     wt_id = f"anchor-{repo_name}"
+    target = target if target is not None else {}
+    target.update(anchor=True, worktree_id=wt_id, work_dir=work_dir, session=sessions.mux_session_name(wt_id))
     seed = getattr(args, "seed", None)
 
     already = sessions.has_mux_session(wt_id)
@@ -713,12 +712,14 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
             deferred = bridge_seed_delivery.claim(args)
         except ValueError as exc:
             return output._json_error(str(exc), exit_code=3)
+    target["launch_attempted"] = True
     result = sessions.mux_new_session(wt_id, work_dir, launch_cmd, env)
     if not result.get("ok"):
         return output._json_error(
             f"failed to create session wt-{wt_id}: {result.get('error')}",
             exit_code=4,
         )
+    target.update(created=result.get("created", True), new_pane=result.get("new_pane"))
     if result.get("created") is False:
         output._json_output({
             "ok": True, "worktree_id": wt_id, "anchor": True, **deferred,
