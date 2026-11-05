@@ -45,7 +45,8 @@ qualifies installed runtime, native Windows, ACP or whole-hook throughput.
 
 The manual `windows-coverage-rotation.yml` selector `post_tool_fallback=true`
 runs only Worktrees' post-tool shell, status/bind reminder, late-guidance and
-guard-publication consumers plus ordinary pre/post-hook idle-retention controls
+guard-publication consumers plus ordinary pre/post-hook idle-retention and
+late-demand/idle-drain and interruption-safe retirement controls
 through the canonical hardened Linux container. Supply `ref`
 to select a published candidate; execution records its immutable checkout,
 selector, container profile and actual result. It cannot be combined with

@@ -4466,6 +4466,8 @@ def test_guarded_undrain_reuses_native_routing_custody_in_actual_monitor(tmp_pat
 
 @pytest.mark.parametrize("late", ["demand", "retirement", "route"])
 def test_idle_exit_rechecks_new_conditions_after_acquiring_cutover_guard(tmp_path, monkeypatch, late):
+    from zdd import lifecycle
+
     from agent_worktrees import monitor_roots, self_retire, status_monitor_cutover as smc
     from agent_worktrees import runtime_monitor_retirements as retirements
     from agent_worktrees.status_monitor_handover import MonitorHandover
@@ -4477,6 +4479,7 @@ def test_idle_exit_rechecks_new_conditions_after_acquiring_cutover_guard(tmp_pat
     monkeypatch.setattr(m, "_load_hook_client_module", lambda: None)
     monkeypatch.setattr(smc, "publish_route", lambda *a, **k: None)
     monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
+    monkeypatch.setattr(smc, "routing_dir", lambda: tmp_path / "routing")
     monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: state["generation"])
     monkeypatch.setattr(self_retire, "is_superseded", lambda *a, **k: False)
     monkeypatch.setattr("agent_worktrees.runtime_monitor_identity.publish_lock", lambda *a, **k: True)
@@ -4531,10 +4534,19 @@ def test_idle_exit_rechecks_new_conditions_after_acquiring_cutover_guard(tmp_pat
     monkeypatch.setattr(m.status_monitor_cli, "_wake_interruptible_wait", wait)
     assert m.cmd_status_monitor(argparse.Namespace(interval=1)) == 0
     assert state["acquired"] and state["released"]
+    exits = [event for event in lifecycle.read_events(tmp_path / "routing")
+             if event["action"] == "monitor-exit"]
+    assert [event["detail"]["phase"] for event in exits] == ["cleanup-begin", "cleanup-complete"]
+    assert all(event["detail"]["reason"] == "shutdown-requested" for event in exits)
+    checks = exits[0]["detail"]["last_idle_eligibility"]
+    blocker = {"demand": "picker", "retirement": "retirement", "route": "active-route"}[late]
+    assert list(checks)[-1] == blocker and checks[blocker] is False
 
 
 @pytest.mark.parametrize("kind", ["preToolUse", "postToolUse"])
 def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, monkeypatch, kind):
+    from zdd import lifecycle
+
     from agent_worktrees import hook_ipc, monitor_roots, self_retire, status_monitor_cutover as smc
     from agent_worktrees import runtime_monitor_retirements as retirements
     from agent_worktrees.status_monitor_handover import MonitorHandover
@@ -4548,6 +4560,7 @@ def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, mo
     monkeypatch.setattr(m.git_ops, "_windows_observation", lambda: False)
     monkeypatch.setattr(smc, "publish_route", lambda *a, **k: None)
     monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
+    monkeypatch.setattr(smc, "routing_dir", lambda: tmp_path / "routing")
     monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: 42)
     monkeypatch.setattr(self_retire, "is_superseded", lambda *a, **k: False)
     monkeypatch.setattr("agent_worktrees.runtime_monitor_identity.publish_lock", lambda *a, **k: True)
@@ -4625,6 +4638,8 @@ def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, mo
 
     def wait(event, interval):
         assert time.monotonic() < deadline, "monitor did not reach true idle expiry"
+        assert not [event for event in lifecycle.read_events(tmp_path / "routing")
+                    if event["action"] == "monitor-exit"], "hot sweeps must not write exit diagnostics"
         if len(sweeps) > clock["advanced"]:
             clock["advanced"] = len(sweeps)
             clock["now"] += 30
@@ -4637,16 +4652,25 @@ def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, mo
     assert m.cmd_status_monitor(argparse.Namespace(interval=1)) == 0
     assert replies == [True, True]
     assert sweeps == list(range(0, 271, 30))
+    exits = [event for event in lifecycle.read_events(tmp_path / "routing")
+             if event["action"] == "monitor-exit"]
+    assert [event["detail"]["phase"] for event in exits] == ["cleanup-begin", "cleanup-complete"]
+    assert all(event["detail"]["reason"] == "idle-no-demand" for event in exits)
+    checks = exits[0]["detail"]["last_idle_eligibility"]
+    assert list(checks)[-1] == "recent-tool-hook" and all(checks.values())
 
 
-def test_idle_exit_releases_installer_guard_while_late_accepted_read_drains(tmp_path, monkeypatch):
+@pytest.mark.parametrize("reopen", [None, "undrain", "promote"])
+def test_idle_exit_releases_installer_guard_while_late_accepted_read_drains(tmp_path, monkeypatch, reopen):
+    from zdd import lifecycle
+
     from agent_worktrees import monitor_roots, self_retire, status_monitor_cutover as smc
     from agent_worktrees import runtime_monitor_retirements as retirements
     from agent_worktrees.worktrees_runtime import WorktreesRuntime
 
     directory = tmp_path / "status-monitor-routing"
     accepted, finish = threading.Event(), threading.Event()
-    state = {"closed": False, "waits": 0, "guard_available": False}
+    state = {"closed": False, "waits": 0, "guard_available": False, "reopened": False, "superseded": False}
     servers, clients, results = [], [], []
     monkeypatch.setattr(m, "_monitor_lock_path", lambda: tmp_path / "status-monitor.lock")
     monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
@@ -4655,7 +4679,7 @@ def test_idle_exit_releases_installer_guard_while_late_accepted_read_drains(tmp_
     monkeypatch.setattr(smc, "publish_route", lambda *a, **k: None)
     monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
     monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: 42)
-    monkeypatch.setattr(self_retire, "is_superseded", lambda *a, **k: False)
+    monkeypatch.setattr(self_retire, "is_superseded", lambda *a, **k: state["superseded"])
     monkeypatch.setattr("agent_worktrees.runtime_monitor_identity.publish_lock", lambda *a, **k: True)
     monkeypatch.setattr(m.status_monitor_cli, "sweep_mux_pane_args", lambda: None)
     monkeypatch.setattr(m, "_monitor_sweep", lambda *a, **k: 0)
@@ -4719,12 +4743,23 @@ def test_idle_exit_releases_installer_guard_while_late_accepted_read_drains(tmp_
                 finish.set()
             clients[0].join(timeout=2)
             assert not clients[0].is_alive()
+            if reopen:
+                expected = {"draining": False} if reopen == "undrain" else {"adopted": True}
+                assert servers[0].handle(reopen, {}) == expected
+                assert servers[0].handle("health", {})["status"] == "ready"
+                state.update(reopened=True, superseded=True)
 
     monkeypatch.setattr(m.status_monitor_cli, "_wake_interruptible_wait", wait)
     try:
         assert m.cmd_status_monitor(argparse.Namespace(interval=1)) == 0
         assert state["guard_available"]
         assert results == [{"ok": True}]
+        exits = [event for event in lifecycle.read_events(directory)
+                 if event["action"] == "monitor-exit"]
+        assert [event["detail"]["phase"] for event in exits] == ["cleanup-begin", "cleanup-complete"]
+        expected_reason = "superseded-route" if reopen else "idle-no-demand"
+        assert all(event["detail"]["reason"] == expected_reason for event in exits)
+        assert state["reopened"] is bool(reopen)
     finally:
         finish.set()
         for thread in clients:
@@ -4795,6 +4830,8 @@ def test_status_monitor_keeps_repository_map_available_until_handoff_is_ready(tm
 def test_status_monitor_shutdown_cannot_recover_or_promote_admission(
     tmp_path, monkeypatch, shutdown_mode,
 ):
+    from zdd import lifecycle
+
     from agent_worktrees import self_retire, status_monitor_cutover as smc
     from agent_worktrees.worktrees_runtime import WorktreesRuntime
 
@@ -4814,6 +4851,16 @@ def test_status_monitor_shutdown_cannot_recover_or_promote_admission(
     )
     handles = []
     activations = []
+    closed = []
+    original_interrupt = KeyboardInterrupt("original monitor interruption")
+    record = lifecycle.record
+
+    def interrupt_exit_log(directory, action, **kwargs):
+        if action == "monitor-exit":
+            raise KeyboardInterrupt("diagnostic interruption")
+        return record(directory, action, **kwargs)
+
+    monkeypatch.setattr(lifecycle, "record", interrupt_exit_log)
     activate = WorktreesRuntime.activate
 
     def record_activate(owner):
@@ -4835,6 +4882,7 @@ def test_status_monitor_shutdown_cannot_recover_or_promote_admission(
             return int(len(waits) < 2)
 
         def close(self):
+            closed.append(True)
             elected[0] = None
             assert handles[0](
                 "worktrees-read", {"contract_version": 1, "project": "test"},
@@ -4882,7 +4930,7 @@ def test_status_monitor_shutdown_cannot_recover_or_promote_admission(
         waits.append(True)
         time.sleep(.01)
         if shutdown_mode == "interrupted":
-            raise KeyboardInterrupt
+            raise original_interrupt
         assert handles[0]("health", {})["published"] is False
         assert len(activations) == 2
         assert len(sweeps) == 1
@@ -4890,10 +4938,16 @@ def test_status_monitor_shutdown_cannot_recover_or_promote_admission(
 
     monkeypatch.setattr(m.status_monitor_cli, "_wake_interruptible_wait", wait)
     if shutdown_mode == "interrupted":
-        with pytest.raises(KeyboardInterrupt):
+        with pytest.raises(KeyboardInterrupt) as caught:
             m.cmd_status_monitor(argparse.Namespace(interval=2, passive=True))
+        assert caught.value is original_interrupt
+        assert closed == [True]
         return
-    assert m.cmd_status_monitor(argparse.Namespace(interval=2, passive=True)) == 0
+    try:
+        assert m.cmd_status_monitor(argparse.Namespace(interval=2, passive=True)) == 0
+    except KeyboardInterrupt:
+        pytest.fail("diagnostic interruption bypassed mandatory monitor retirement")
+    assert closed == [True]
     assert len(waits) == 2
     assert len(activations) == 2
 

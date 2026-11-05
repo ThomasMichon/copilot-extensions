@@ -106,3 +106,105 @@ def test_rejected_or_uncompleted_requests_do_not_retain_hook_demand(api, case):
 
     api.dispatch(change)
     assert not api.owner.has_recent_hook_demand()
+
+
+@pytest.fixture
+def exit_api(monkeypatch):
+    events = []
+
+    def record(directory, action, **kwargs):
+        events.append({"action": action, **kwargs})
+        return events[-1]
+
+    lifecycle = SimpleNamespace(record=record, BEGIN="begin", OK="ok", FAIL="fail")
+    monkeypatch.setitem(sys.modules, "zdd", SimpleNamespace(lifecycle=lifecycle))
+    source = SOURCE.with_name("status_monitor_drain.py")
+    spec = importlib.util.spec_from_file_location("promotion_monitor_exit", source)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return SimpleNamespace(
+        module=module, trace=module.MonitorExitTrace(Path("unused"), 12345), events=events,
+    )
+
+
+def test_idle_diagnostics_preserve_short_circuit_and_do_not_write_during_checks(exit_api):
+    trace = exit_api.trace
+    probes = []
+
+    def probe(name, clear):
+        probes.append(name)
+        return clear
+
+    assert not (
+        trace.begin_idle()
+        and trace.check("active-route", probe("route", True))
+        and trace.check("picker", probe("picker", False))
+        and trace.check("list", probe("must-not-run", True))
+    )
+    assert probes == ["route", "picker"] and exit_api.events == []
+    with trace.retiring("shutdown-requested", None):
+        assert len(exit_api.events) == 1
+    assert [event["detail"] for event in exit_api.events] == [
+        {"phase": phase, "reason": "shutdown-requested",
+         "last_idle_eligibility": {"active-route": True, "picker": False}}
+        for phase in ("cleanup-begin", "cleanup-complete")
+    ]
+
+
+@pytest.mark.parametrize(
+    "error", [RuntimeError("private message"), KeyboardInterrupt()], ids=["error", "interrupt"],
+)
+def test_retirement_diagnostics_preserve_original_error_without_recording_it(exit_api, error):
+    with pytest.raises(type(error)) as raised:
+        with exit_api.trace.retiring("idle-no-demand", error):
+            raise error
+    assert raised.value is error
+    assert [event["outcome"] for event in exit_api.events] == ["begin", "fail"]
+    reason = "interrupted" if isinstance(error, KeyboardInterrupt) else "loop-error"
+    assert exit_api.events[-1]["detail"] == {
+        "phase": "cleanup-failed", "reason": reason, "last_idle_eligibility": {},
+    }
+
+
+def test_idle_diagnostics_clear_prior_observation_and_filter_unknown_labels(exit_api):
+    trace = exit_api.trace
+    trace.check("picker", False)
+    trace.begin_idle()
+    assert trace.check("private input", True)
+    with trace.retiring("private reason", None):
+        pass
+    assert exit_api.events[-1]["detail"] == {
+        "phase": "cleanup-complete", "reason": "loop-error", "last_idle_eligibility": {},
+    }
+
+
+def test_unavailable_exit_log_does_not_prevent_retirement(exit_api, monkeypatch):
+    monkeypatch.setattr(exit_api.module.lifecycle, "record", lambda *a, **k: None)
+    completed = []
+    with exit_api.trace.retiring("idle-no-demand", None):
+        completed.append(True)
+    assert completed == [True] and exit_api.events == []
+
+
+@pytest.mark.parametrize("phase", ["cleanup-begin", "cleanup-failed", "cleanup-complete"])
+def test_log_interruption_cannot_skip_cleanup_or_replace_its_error(exit_api, monkeypatch, phase):
+    record = exit_api.module.lifecycle.record
+
+    def interrupt(directory, action, **kwargs):
+        if kwargs["detail"]["phase"] == phase:
+            raise KeyboardInterrupt
+        return record(directory, action, **kwargs)
+
+    monkeypatch.setattr(exit_api.module.lifecycle, "record", interrupt)
+    error = RuntimeError("original retirement error") if phase == "cleanup-failed" else None
+    completed, caught = [], None
+    try:
+        with exit_api.trace.retiring("idle-no-demand", error):
+            completed.append(True)
+            if error is not None:
+                raise error
+    except BaseException as exc:
+        caught = exc
+    assert completed == [True]
+    assert caught is error
