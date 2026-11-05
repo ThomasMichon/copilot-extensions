@@ -49,7 +49,7 @@ def receiver(monkeypatch):
     '{"schema":"agent-bridge.receiving-policy","version":true,"marketplaceId":""}',
     '{"schema":"agent-bridge.receiving-policy","version":2,"marketplaceId":""}',
     '{"schema":"agent-bridge.receiving-policy","version":1,"marketplaceId":null}',
-])
+], ids=["empty", "array", "missing-fields", "boolean-version", "future-version", "null-marketplace"])
 def test_invalid_context_refuses_before_canonical_read(receiver, context):
     module, calls, refused = receiver
     with pytest.raises(refused):
