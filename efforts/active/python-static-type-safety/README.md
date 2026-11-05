@@ -8,8 +8,8 @@
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
 - **Coverage:** [Portfolio tracker and merged lockdown records](coverage.md)
-- **Current slice:** Shared real-import-root and additional-version checker foundation (#10400), with Versioned Runtime (#10331), the Copilot Extensions Harness payload helpers/tests (#10362), and canonical Payload Invocation (#10371) separately pending. Retained effort helpers (#10215), SSH service (#10211), PR service (#10204), Index service (#10206), Credential Relay (#10222), Harness Knowledge (#10185), Context Handoff (#10179), Dispatch service (#10184), Devcontainer (#10183), AI Attribution (#10171), Venue Copilot (#10166), Plugin Resolve (#10141), Plugin Activation (#10108), Machine Transport (#10107), Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
-- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts). Create/reuse later scoped issues as selected. #9177 remains separately owned.
+- **Current slice:** Integrate the merged shared checker prerequisite (#10400 / #10553) with the separately pending Versioned Runtime (#10331), Copilot Extensions Harness payload helpers/tests (#10362), and canonical Payload Invocation (#10371) admissions; qualify real consumer aliases, emitted copies and remaining interpreter/native gates. Retained effort helpers (#10215), SSH service (#10211), PR service (#10204), Index service (#10206), Credential Relay (#10222), Harness Knowledge (#10185), Context Handoff (#10179), Dispatch service (#10184), Devcontainer (#10183), AI Attribution (#10171), Venue Copilot (#10166), Plugin Resolve (#10141), Plugin Activation (#10108), Machine Transport (#10107), Process Telemetry (#10083), Single Instance Lease (#10084), Installer Readiness (#10044), Docker Resource Producer (#10045), faithful checker dependency delivery (#10048), Update Telemetry (#10043) and Work Coalescing Singleton (#10039) are complete.
+- **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts); #10400 (shared real-import-root/additional-version checker prerequisite, merged #10553); #10331, #10362 and #10371 (independent consumer admissions, open). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
 ## Guiding Intent
 
@@ -32,7 +32,7 @@ definition of success.
 
 - **Topology:** Independent per-slice PRs, never a concurrently edited shared staging branch. The lead may integrate non-overlapping test cohorts into one bounded reviewed slice after their isolated validation.
 - **Host (owns PRs):** `lead` owns its PRs and verifies completion of delegated PRs.
-- **Delegates:** The shared checker foundation (#10400), Versioned Runtime (#10331), the Copilot Extensions Harness payload helpers/tests (#10362) and canonical Payload Invocation (#10371) qualify as distinct scopes in their assigned worktrees; retained effort-helper, SSH, PR and Index service admissions have merged. Heavy unit/native qualification is staggered for actual test capacity, not a shared PR merge queue. Each owner receives an explicit bounded qualification and publication assignment; the lead retains integration, shared coverage/global documentation, the effort and full completion judgment. Completed children are finalized only after their merged evidence returns to this tracker.
+- **Delegates:** The shared checker foundation (#10400 / #10553) has merged; Versioned Runtime (#10331), the Copilot Extensions Harness payload helpers/tests (#10362) and canonical Payload Invocation (#10371) remain distinct pending admissions in their assigned worktrees. Retained effort-helper, SSH, PR and Index service admissions have merged. Heavy unit/native qualification is staggered for actual test capacity, not a shared PR merge queue. Each owner receives an explicit bounded qualification and publication assignment; the lead retains integration, shared coverage/global documentation, the effort and full completion judgment. Completed children are finalized only after their merged evidence returns to this tracker.
 - **Handoff:** A merged slice returns to the canonical README, updates its Plan/Validation/Journal, then selects the next unresolved item. A continuation retains #9807, this README, the current slice, live PRs and exactly one next action.
 - Existing contributor PRs are reviewed/coordinated, not superseded. Shared-library changes precede dependent activations; unrelated leaf activations may proceed independently.
 
@@ -145,7 +145,8 @@ rewrite.
 - [x] Expose the faithful composed Installation Context dependency to normal consumer checks without stubs or target reassignment (#10048).
 - [ ] Make executed source fragments statically visible with source-mapped composition or genuine typed modules; qualify every source line and byte-identical copy without suppressing errors.
 - [ ] Resolve tooling module identities, independent package environments, dependency/stub versions and declared interpreter/platform targets.
-- [ ] Persist additional interpreter qualification versions through the existing local/source/candidate checker, preserving the minimum target and default behavior (#10400); Versioned Runtime's own qualification remains #10331.
+- [x] Persist additional interpreter qualification versions through the existing local/source/candidate checker, preserving the minimum target and default behavior (#10400 / merged #10553); Versioned Runtime's own qualification remains #10331.
+- [x] Deliver ordinary real-import-root resolution with source-frozen custody and native `MYPYPATH` separator guards (#10400 / merged #10553), without admitting its pending consumers.
 - [ ] Qualify generated templates and release-materialized copies against the actually checked canonical source, including negative drift controls.
 
 ### Phase 3 - Shared-library ratchet
@@ -211,7 +212,8 @@ rewrite.
 - [ ] Unit controls cover manifest validity, complete file classification, additions/renames, safe selection, monotonic activation and dependency impact.
 - [ ] Reconcile tracker rows and file totals with the authoritative manifest
   and inventory; local proposals and canonical-library locks must not imply
-  complete consumer/copy enforcement.
+  complete consumer/copy enforcement. The 2026-11-05 snapshot reconciles all
+  68 rows; this recurring and final portfolio gate remains open.
 - [x] Actual MyPy subprocess controls prove an incompatible argument/return fails basic mode and missing annotations/bare generics fail strict mode.
 - [ ] Local and CI use identical pinned checker, dependencies, project config and interpreter/platform targets; unknown source/setup errors fail visibly.
 - [x] Changed-scope checks include working-tree edits and affected activated consumers; changes to checker/config/workflows cannot skip enforcement.
@@ -222,7 +224,8 @@ rewrite.
 - [x] PR service preserves all 81 original functions and 114 assertion expressions across both strict targets, actual Python 3.10 installed/native tests and fresh exact-input source CI (#10332).
 - [x] SSH service preserves all 254 original function contracts, 299 assertion expressions and four embedded literals across both strict targets, actual Python 3.10 Linux/Windows qualification and fresh exact-input source CI (#10348).
 - [x] Retained effort helpers preserve all 39 original function contracts and 31 assertion expressions across both strict targets, actual Python 3.11 Linux/Windows controls, composed-source qualification and fresh exact-input source CI (#10360).
-- [ ] Persistent dual-version controls reject a type error confined to the 3.11 TOML branch on both platforms through local/source/candidate entry points (#10400); preserving Versioned Runtime's actual 3.10 behavior and native/copy qualification remains #10331.
+- [x] Shared checker controls preserve default qualification and ordinary import-root/source-frozen custody semantics, including native separator rejection (#10400 / #10553).
+- [ ] Persistent dual-version controls reject a type error confined to the 3.11 TOML branch on both platforms through local/source/candidate entry points (#10400); exact negative-evidence reconciliation remains open despite the merged generic API. Preserving Versioned Runtime's actual 3.10 behavior and native/copy qualification remains #10331.
 - [x] Fresh checker preparation and a credential-free local subprocess check exercise the real developer command without executing product code or collecting tests.
 - [x] Required source gate actually rejects a type regression on activated code.
 - [x] Required exact-candidate release gate rejects a type regression on activated code.
@@ -2713,3 +2716,49 @@ composition prerequisites, and review/validation rules.
   actual interpreter/native and generated-copy qualification, review and
   required CI remain explicit gates. All global Plan/Validation and final
   completion conditions remain Active.
+
+### 2026-11-05 - Shared checker prerequisite merged; portfolio reconciled
+
+- #10553 merged into Dev as `abc0e42784388ddac6d1c5c98103ba699ed2c91e`
+  at 05:18:41 UTC after Copilot approval `5780121302` on exact head
+  `68ca30dc1aec6ce7e8f43e9352a62b4b370f5d35`, green required checks,
+  source attribution, workflow lockdown and resolved threads. Normal
+  role-scoped completion used no CI bypass. #10400 closed only after merge;
+  #9807, #10331, #10362 and #10371 remain open.
+- The delivered prerequisite provides real ordinary import roots, additional
+  qualification-version APIs with unchanged defaults, source-frozen custody
+  and native `MYPYPATH` separator guards. The small ignored-frame audit-event
+  allocation fast path preserves those guards; its microbenchmark is not
+  evidence of the cause of earlier suite deadline failures.
+- Normal uninstrumented local source and frozen-candidate packets on `68ca30d`
+  each pass **4,129 nodes / 12,387 phase reports**, zero effects and
+  **247 measured positive files / 247 required origins**, in **255.859**
+  and **253.140 seconds**, respectively, under unchanged 300-second limits.
+  Source has 588 inputs and 247 targets; candidate has 1,924 inputs and
+  731 declared targets, not 731 measured bodies. The candidate
+  `f50c334bb08bc389e7d0a621bcaef5940c44f900` was prepared at
+  04:35:43 UTC against Main `690b45b7d032502b02710a33782ffdfaa691a61e`.
+- Provider CI runs `41971486501` and `41971500229` instead qualify actual
+  input identity `7153ff00171ec37563e4ce13e745329fe911ebd1`:
+  **4,136 nodes / 12,408 phase reports**, zero effects, in **87.173**
+  and **50.304 seconds**. Independent canonical packet verification and
+  actual merged-Git comparison reconcile all **590 source inputs and
+  248 targets** with `abc0e42`. This is input correspondence, not a
+  relabeling of either packet's original commit or whole tree. Postmerge
+  run `41973210769` succeeds on `abc0e42`, but its unit job is skipped by
+  ordinary push policy and supplies no new postmerge packet.
+- Qualification artifacts are retained with their original index, byte lengths
+  and SHA256 values verified. Earlier failed diagnostics and 900/600/300-second
+  allocation breaches remain historical failures, not positive qualification.
+- The current reviewed Dev snapshot `ff44a10389f0b735a8ead7ad41e34e3ceb95047d`
+  and actual inventory reconcile every row: **40 / 68 strict projects
+  (58.8%)**, **384 / 7,981 physical Python files (4.8%)**, **28 pending,
+  zero basic and zero unclassified paths**. Two additional files belong to
+  existing strict Credential Relay and Dispatch-service scopes; no new
+  consumer project is admitted.
+- Next: integrate canonical consumer aliases, emitted/source correspondence
+  and remaining native/interpreter gates for #10331, #10362 and #10371.
+  The specific 3.11-only TOML negative control still needs exact evidence
+  reconciliation; generic API or import-root controls do not discharge it.
+  Copies and fragment/runtime/POSIX qualification remain independent. This
+  effort stays Active; source merge is neither release nor installed rollout.
