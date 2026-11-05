@@ -222,6 +222,16 @@ checkpoint nor author eligibility, holds, requirements or source/resource custod
 
 ## Plan
 
+The [eight installer/hook/account/recovery contracts](finite-installer-hook-account-recovery-contracts.md)
+retain twenty-four ranked relationships and independently verify #9435
+and #9597's finite source completions through actual current source,
+whole review/CI and audited provider dispositions.
+Six originals remain OPEN; protected installer evidence, exact native
+controls, release/selected-payload and legacy-wake boundaries remain.
+The [journal](<journal/2026/11.05 finite-installer-hook-account-recovery-contracts.md>)
+records 782 verified dispositions and 1,005 whole open, 276 above 729,
+without new installed/native effects or source/resource release.
+
 The [six consumer/index/configuration contracts](finite-consumer-index-configuration-contracts.md)
 retain eighteen ranked relationships, the freshly admitted current mux
 contract and #9286's independently verified finite source completion.
@@ -270,6 +280,17 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 - [x] Preserve the initial cohort and oldest-first cursor in structured session state.
 
 ### Phase 2 - Continuing reconciliation
+
+The six consumer/index/configuration contracts are actually delivered in
+#10721 after genuine exact-head approval, no review threads and nine complete
+successful/skipped check contexts before normal managed merge.
+All eight actual merged/current blobs equal the reviewed head.
+Only the serial publication child finalized, retained; the
+[delivery journal](<journal/2026/11.05 finite-consumer-index-configuration-contracts.md>)
+records the result. The next stretch assesses eight admitted installer,
+hook, account and recovery contracts, including the separately audited
+finite Session Host account-retention completion.
+The parent remains Active; its Plan and Validation stay open.
 
 The nine-contract standalone/reservation/runtime checkpoint is actually
 delivered in #10719 after genuine exact-head approval, its one resolved
