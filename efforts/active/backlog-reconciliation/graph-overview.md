@@ -8,6 +8,15 @@ requirements remain in their issues and actual receiving objectives.
 
 ## Snapshot and boundaries
 
+The [six consumer/index/configuration contracts](finite-consumer-index-configuration-contracts.md)
+retain eighteen ranked relationships, the freshly admitted current mux
+contract and #9286's independently verified finite source completion.
+Five originals remain OPEN; native index/controller/typing/configuration
+acceptance and all incumbent ownership remain separate from similarity.
+The [journal](<journal/2026/11.05 finite-consumer-index-configuration-contracts.md>)
+records 780 verified dispositions and 1,007 whole open, 278 above 729,
+without new native, installed or custody effects.
+
 The [nine standalone/reservation/runtime contracts](finite-standalone-reservation-runtime-contracts.md)
 retain twenty-seven ranked relationships and independently verify #8352's
 finite tested image deliverable through merged #8385 and #8876's source
