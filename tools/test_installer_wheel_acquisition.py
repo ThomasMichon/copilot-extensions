@@ -139,16 +139,183 @@ def worker_procutil():
     return sys.modules[name]
 
 
-def acquire(state, **changes):
-    arguments = {
+def acquisition_arguments(state):
+    return {
         "feeds": (acquisition.WheelFeed(IDENTITY, state["origin"] + "/simple"),),
         "download_origins": (), "cutoffs": {"fixture": datetime(2025, 1, 1, tzinfo=timezone.utc)},
         "policy_id": POLICY, "limits": limits(), "deadline": time.monotonic() + 10,
         "ssl_context": ssl.create_default_context(cafile=str(CERTIFICATE)), "proxies": {},
         "procutil": worker_procutil(),
     }
+
+
+def acquire(state, **changes):
     expected = changes.pop("expected", [EXPECTED])
-    return acquisition.acquire_wheel_inputs(expected, **(arguments | changes))
+    return acquisition.acquire_wheel_inputs(expected, **(acquisition_arguments(state) | changes))
+
+
+@contextmanager
+def retained_wheel(tmp_path):
+    source = tmp_path / FILENAME
+    source.write_bytes(DATA)
+    with acquisition.retain_wheel_inputs(
+        {FILENAME: source}, {FILENAME: EXPECTED["sha256"]},
+        max_wheels=1, max_archive_bytes=4096, max_total_bytes=4096,
+        max_snapshot_bytes=4096, deadline=time.monotonic() + 30,
+    ) as snapshot:
+        yield snapshot
+
+
+def admit_retained(state, snapshot, **changes):
+    expected = changes.pop("expected", [EXPECTED])
+    return acquisition.admit_retained_wheel_inputs(
+        expected, snapshot=snapshot, **(acquisition_arguments(state) | changes),
+    )
+
+
+def test_retained_bytes_are_admitted_by_current_feed_without_wheel_download(feeds, tmp_path):
+    state = feeds()
+    metadata = project(state)
+    with retained_wheel(tmp_path) as snapshot, admit_retained(state, snapshot) as admitted:
+        assert admitted.snapshot.paths == snapshot.paths
+        assert admitted.snapshot.archives[FILENAME] is snapshot.archives[FILENAME]
+        admitted.snapshot.verify()
+        evidence = admitted.evidence()
+        assert evidence["schema"] == "copilot-extensions.retained-wheel-feed-admission"
+        assert evidence["version"] == 1 and evidence["policy_id"] == POLICY
+        assert evidence["metadata_bytes"] == len(metadata)
+        assert evidence["downloaded_wheel_bytes"] == 0
+        assert evidence["retained_wheel_bytes"] == len(DATA)
+        assert evidence["request_count"] == 1
+        assert evidence["temporary_highwater_bytes"] == evidence["control_bytes"] + len(DATA)
+        assert evidence["files"][0]["sha256"] == EXPECTED["sha256"]
+        assert evidence["files"][0]["feed"] == IDENTITY
+        assert b"127.0.0.1" not in admitted.evidence_json
+    assert [path for path, _ in state["requests"]] == ["/simple/fixture/"]
+
+
+def test_retained_byte_identity_and_storage_refusals_precede_network(feeds, tmp_path):
+    state = feeds()
+    project(state)
+    with retained_wheel(tmp_path) as snapshot:
+        for changes in (
+            {"expected": [EXPECTED | {"sha256": "sha256:" + "f" * 64}]},
+            {"limits": limits(max_wheel_bytes=len(DATA) - 1)},
+            {"limits": limits(max_closure_bytes=len(DATA) - 1)},
+            {"limits": limits(max_temporary_bytes=len(DATA))},
+        ):
+            with pytest.raises(acquisition.WheelError), admit_retained(state, snapshot, **changes):
+                pytest.fail("unselected or over-budget bytes were admitted")
+    assert not state["requests"]
+
+
+@pytest.mark.parametrize("entry", [
+    {"yanked": True}, {"withdrawn": True},
+    {"hashes": {"sha256": "f" * 64}},
+    {"url": "http://127.0.0.1:9/file.whl"},
+    {"url": "https://other.invalid/file.whl"},
+])
+def test_retained_bytes_cannot_bypass_feed_policy(feeds, tmp_path, entry):
+    state = feeds()
+    project(state, [listed(**entry)])
+    with retained_wheel(tmp_path) as snapshot:
+        with pytest.raises(acquisition.WheelError), admit_retained(
+            state, snapshot, download_origins=("https://permitted.invalid",),
+        ):
+            pytest.fail("ineligible retained bytes were admitted")
+    assert [path for path, _ in state["requests"]] == ["/simple/fixture/"]
+
+
+def test_first_owning_feed_still_controls_retained_bytes(feeds, tmp_path):
+    first, second = feeds(), feeds()
+    project(first, [listed(yanked=True)])
+    project(second)
+    options = {
+        "feeds": (
+            acquisition.WheelFeed(IDENTITY, first["origin"] + "/simple"),
+            acquisition.WheelFeed("sha256:" + "c" * 64, second["origin"] + "/simple"),
+        ),
+    }
+    with retained_wheel(tmp_path) as snapshot:
+        with pytest.raises(acquisition.AcquisitionUnavailable), admit_retained(first, snapshot, **options):
+            pytest.fail("later feed replaced the first owner's refusal")
+    assert len(first["requests"]) == 1 and not second["requests"]
+
+
+def test_retained_bytes_remain_held_through_admission(feeds, tmp_path):
+    state = feeds()
+    project(state)
+    with pytest.raises((ValueError, PermissionError), match="changed|digest|denied"):
+        with retained_wheel(tmp_path) as snapshot, admit_retained(state, snapshot):
+            path = snapshot.paths[FILENAME]
+            path.chmod(0o600)
+            path.write_bytes(b"changed")
+
+
+def test_retained_admission_deadline_bounds_consumption(feeds, tmp_path, monkeypatch):
+    state = feeds()
+    project(state)
+    deadline = time.monotonic() + 10
+    with retained_wheel(tmp_path) as snapshot:
+        with pytest.raises(acquisition.WheelError, match="deadline"):
+            with admit_retained(state, snapshot, deadline=deadline):
+                monkeypatch.setattr(acquisition.time, "monotonic", lambda: deadline + 1)
+
+
+def test_retained_admission_deadline_interrupts_snapshot_reads(feeds, tmp_path, monkeypatch):
+    state = feeds()
+    project(state)
+    clock = [time.monotonic()]
+    deadline = clock[0] + 10
+    reads = []
+    with retained_wheel(tmp_path) as snapshot:
+        class SlowStream:
+            def __getattr__(self, name):
+                return getattr(snapshot.archives[FILENAME], name)
+
+            def read(self, size):
+                reads.append(size)
+                result = snapshot.archives[FILENAME].read(size)
+                clock[0] = deadline + 1
+                return result
+
+        slow = replace(snapshot, archives={FILENAME: SlowStream()})
+        with monkeypatch.context() as patch:
+            patch.setattr(acquisition.time, "monotonic", lambda: clock[0])
+            with pytest.raises(acquisition.WheelError, match="deadline"):
+                with admit_retained(state, slow, deadline=deadline):
+                    pytest.fail("expired snapshot reached feed admission")
+    assert len(reads) == 1 and not state["requests"]
+
+
+def test_snapshot_deadline_bounds_a_stalled_retained_feed_worker(feeds, tmp_path):
+    state = feeds()
+    metadata = project(state)
+    started, release = threading.Event(), threading.Event()
+
+    def stall(handler):
+        started.set()
+        release.wait(5)
+        try:
+            handler.send_response(200)
+            handler.send_header("Content-Type", "application/vnd.pypi.simple.v1+json")
+            handler.send_header("Content-Length", str(len(metadata)))
+            handler.end_headers()
+            handler.wfile.write(metadata)
+        except OSError:
+            pass
+
+    state["routes"]["/simple/fixture/"] = stall
+    with retained_wheel(tmp_path) as snapshot:
+        shorter = replace(snapshot, _deadline=time.monotonic() + 2)
+        before = time.monotonic()
+        try:
+            with pytest.raises(acquisition.WheelError, match="deadline"):
+                with admit_retained(state, shorter, deadline=time.monotonic() + 10):
+                    pytest.fail("stalled feed outlived snapshot custody")
+        finally:
+            release.set()
+        assert started.is_set() and time.monotonic() - before < 4
 
 
 @pytest.mark.parametrize("certificate", [

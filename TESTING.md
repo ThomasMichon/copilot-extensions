@@ -2874,6 +2874,10 @@ budgets, and peer settlement plus private-input cleanup after a digest failure.
 Pure worker-ceiling, budget and orchestration controls live in
 `tools/promotion_unit_tests/test_wheel_acquisition_budget.py`; its executor
 boundary is synthetic and does not qualify real overlap or native settlement.
+The retained-wheel controls exercise a real local-TLS metadata pass without a
+wheel download, exact-byte and storage limits, first-owner refusals, link
+trust, custody mutation and deadlines. Actor-free controls separately cover
+the selected-file decision; neither test approves a profile or runs an update.
 A simulated pre-header reset followed by a real local-TLS request exercises the
 bounded retry; pure controls cover shared budgets, deadline, peer cancellation
 and redirect credential isolation.
