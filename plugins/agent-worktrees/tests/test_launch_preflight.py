@@ -102,6 +102,115 @@ def _create_args(
     )
 
 
+@pytest.mark.parametrize("configured", [False, True], ids=["unbound", "unresolved"])
+def test_new_authoring_refuses_required_knowledge_before_allocation(
+    tmp_path, monkeypatch, capfd, configured,
+):
+    config = replace(_config(tmp_path), knowledge_repo="knowledge" if configured else None)
+    monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(
+        state_root, "resolve_state_root",
+        lambda *_a, **_k: state_root.StateRoot(
+            None, "knowledge_repo", config.knowledge_repo or "", True, True, False,
+            error="Required knowledge repository is not available",
+        ),
+    )
+    _forbid_create_mutations(monkeypatch)
+
+    rc = m.cmd_resolve(m.build_parser().parse_args(["resolve", "--json", "--new"]))
+
+    captured = capfd.readouterr()
+    assert rc != 0
+    assert "knowledge" in json.loads(captured.out)["error"].lower()
+    assert "Traceback" not in captured.out + captured.err
+    assert not (tmp_path / "worktrees").exists()
+
+
+@pytest.mark.parametrize("arguments", [
+    ["coordination-readiness"], ["resolve", "--json", "--new"],
+    ["resolve", "--new", "--no-mux"],
+])
+def test_unresolved_project_configuration_has_a_controlled_admission_error(
+    monkeypatch, capfd, arguments,
+):
+    from configuration_layers import ConfigurationError
+
+    def unavailable(*_a, **_k):
+        raise ConfigurationError("explicit knowledge binding is unresolved")
+
+    monkeypatch.setattr(m.cfg, "load_config", unavailable)
+    if arguments[0] == "coordination-readiness":
+        result = m.cmd_coordination_readiness_dispatch([])
+    else:
+        result = m.cmd_resolve(m.build_parser().parse_args(arguments))
+    assert result != 0
+    captured = capfd.readouterr()
+    if arguments[0] == "coordination-readiness" or "--json" in arguments:
+        payload = json.loads(captured.out)
+        assert payload["error"] == "explicit knowledge binding is unresolved"
+        assert payload.get("ready") is not True
+    else:
+        assert "explicit knowledge binding is unresolved" in captured.out + captured.err
+
+
+@pytest.mark.parametrize("external", [False, True], ids=["self-hosted", "bound-knowledge"])
+def test_new_authoring_reads_native_readiness_in_the_allocation_source(
+    tmp_path, monkeypatch, external,
+):
+    config = _config(tmp_path)
+    observed = []
+
+    def resolve(config_arg, *, cwd=None):
+        observed.append((config_arg, cwd))
+        return state_root.StateRoot(
+            str(tmp_path), "knowledge_repo" if external else "launch_repo",
+            "knowledge" if external else config.repo_name,
+            external, external, True,
+        )
+
+    monkeypatch.setattr(state_root, "resolve_state_root", resolve)
+    monkeypatch.setattr(
+        state_root, "resolve_config_root",
+        lambda *_a, **_k: state_root.ConfigRoot(
+            str(tmp_path / "local-config"), "machine_local", config.repo_name, external, True,
+        ),
+    )
+
+    result = m._preflight_launch(
+        config, argparse.Namespace(recovery=False), str(tmp_path / "future-worktree"),
+        allocation_source=config.default_repo.anchor,
+    )
+
+    assert result.error is None
+    assert observed == [(config, config.default_repo.anchor)]
+
+
+@pytest.mark.parametrize("recovery", [False, True], ids=["existing-session", "recovery"])
+def test_existing_session_and_recovery_keep_their_knowledge_admission(
+    tmp_path, monkeypatch, recovery,
+):
+    config = _config(tmp_path)
+    worktree = tmp_path / "existing-worktree"
+    worktree.mkdir()
+    monkeypatch.setattr(
+        state_root, "coordination_readiness",
+        lambda *_a, **_k: pytest.fail("Existing-session/recovery preflight acquired a New gate"),
+    )
+    monkeypatch.setattr(
+        state_root, "resolve_config_root",
+        lambda *_a, **_k: state_root.ConfigRoot(
+            str(tmp_path / "local-config"), "machine_local", config.repo_name, False, True,
+        ),
+    )
+
+    result = m._preflight_launch(
+        config, argparse.Namespace(recovery=recovery), str(worktree),
+        **({"allocation_source": config.default_repo.anchor} if recovery else {}),
+    )
+
+    assert result.error is None
+
+
 def _forbid_create_mutations(monkeypatch) -> None:
     def forbidden(*_args, **_kwargs):
         pytest.fail("launch preflight failure reached a create mutation")
@@ -140,7 +249,7 @@ def _stub_successful_create(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         m.tracking,
         "create_new_record",
-        lambda **kwargs: SimpleNamespace(**kwargs),
+        lambda **kwargs: SimpleNamespace(receiving_allocation_present=False, **kwargs),
     )
     monkeypatch.setattr(m.permissions, "clone_permissions", lambda *_a: False)
     monkeypatch.setattr(m.permissions, "ensure_trusted_folder", lambda *_a: False)
@@ -208,7 +317,7 @@ def test_system_create_skips_unsafe_launch_preflight_and_emits_path_only(
     rc = m.cmd_create(_create_args(json_output=json_output, system=True))
 
     captured = capfd.readouterr()
-    assert rc == 0
+    assert rc == 0, (captured.out, captured.err)
     assert "Traceback" not in captured.out + captured.err
     if json_output:
         data = json.loads(captured.out)
@@ -220,6 +329,26 @@ def test_system_create_skips_unsafe_launch_preflight_and_emits_path_only(
         assert "Created system worktree" in captured.out
         assert "Path:" in captured.out
         assert "launch" not in captured.out.lower()
+
+
+def test_source_only_allocation_does_not_acquire_new_authoring_readiness(
+    tmp_path, monkeypatch, capfd,
+):
+    base = _config(tmp_path)
+    config = replace(base, repos={"demo": replace(base.default_repo, stateless=True)})
+    monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(
+        m, "_preflight_launch",
+        lambda *_a, **_k: pytest.fail("Source-only allocation acquired authoring preflight"),
+    )
+    _stub_successful_create(monkeypatch, tmp_path)
+    args = _create_args(json_output=True)
+    args.no_pair = True
+
+    assert m.cmd_create(args) == 0
+    result = json.loads(capfd.readouterr().out)
+    assert result["worktree"]["kind"] == "session"
+    assert "launch" not in result
 
 
 def test_resolve_json_new_preflight_failure_has_zero_mutations(

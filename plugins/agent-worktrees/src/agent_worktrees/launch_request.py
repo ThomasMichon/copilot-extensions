@@ -260,6 +260,11 @@ def execute(config, request: dict, *, identity_mode: IdentityMode = "legacy") ->
     if request["kind"] == "new":
         with contextlib.suppress(FileNotFoundError):
             existing = _read_admission(directory, request_id)
+        if existing is None:
+            from .launch_preflight import LaunchPreflightError, new_knowledge_error
+
+            if error := new_knowledge_error(config, source=config.default_repo.anchor):
+                raise LaunchPreflightError(error)
     if existing is not None:
         timestamp = existing["timestamp"]
         suffix = existing["suffix"]
@@ -324,6 +329,15 @@ def execute(config, request: dict, *, identity_mode: IdentityMode = "legacy") ->
                     "worktree instead of issuing another New request"
                 )
             from .worktree_creation import _create_worktree_core
+            from .launch_preflight import LaunchPreflightError
+            from .resolve_launch_cli import preflight_launch
+
+            preflight = preflight_launch(
+                config, SimpleNamespace(recovery=False), str(work_dir),
+                allocation_source=config.default_repo.anchor,
+            )
+            if preflight.error:
+                raise LaunchPreflightError(preflight.error)
 
             _dispatch("launch_request_creation_start", {
                 "tracking_dir": str(directory), "request_id": request_id,
@@ -335,6 +349,7 @@ def execute(config, request: dict, *, identity_mode: IdentityMode = "legacy") ->
                     "allocation": (receipt["timestamp"], receipt["suffix"]),
                 }),
                 pending_seed=request["text"], pending_seed_id=request_id,
+                launch_preflight=preflight,
             )
             _dispatch("launch_request_creation_finish", {
                 "tracking_dir": str(directory), "request_id": request_id,

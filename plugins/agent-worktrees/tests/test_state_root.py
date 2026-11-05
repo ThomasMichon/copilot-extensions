@@ -1551,7 +1551,7 @@ def test_config_sources_stateless_grafts_knowledge_overlay(fake_checkouts):
     fake_checkouts["citadel-knowledge"] = "/repos/knowledge"
     srcs = sr.config_source_anchors(
         _config("citadel-harness", stateless=True,
-                knowledge_repo="citadel-knowledge"),
+                knowledge_repo="citadel-knowledge", anchor="/repos/harness"),
         base_anchor="/repos/harness",
     )
     assert [(s.anchor, s.origin) for s in srcs] == [

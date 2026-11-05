@@ -6,11 +6,15 @@ import copy
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 
+from single_instance_lease import OperationLockedError
+
 from .attention import Cursor, Interest
 from .attention_state import MAX_INTERESTS
 from .conversation_journal import ConversationJournal, Observation, _meaning
 from .feedback_capture import FeedbackCaptures
+from .generation_cache import CacheUnavailable
 from .review_intent import identifier
+from .review_workspace import _digest, _generation, _instant, build_generation
 from .watch_replay_store import ReplayStore, ReplayStoreInvalid
 from .workspace_conversation import conversation_key, project_generation
 
@@ -45,15 +49,50 @@ class ReviewFeedback:
     def __init__(
         self, owner: ReplayStore, generation: dict, inputs: FeedbackInputs, *,
         expires_at: int, checkpoint: Callable[[], None], position: Cursor | None = None,
+        current_acquisition: Callable[[], tuple[dict, Cursor] | None] | None = None,
     ) -> None:
         if type(inputs) is not FeedbackInputs or inputs.generation_id != generation["id"]:
             raise ValueError("feedback inputs differ from the selected generation")
         if position is not None and type(position) is not Cursor:
             raise ValueError("actual acquisition position required")
+        if current_acquisition is not None and not callable(current_acquisition):
+            raise ValueError("actual current acquisition callback required")
         self.owner, self.generation, self.inputs = owner, copy.deepcopy(generation), inputs
         self.expires_at, self.checkpoint = expires_at, checkpoint
         self.position = position
+        self.current_acquisition = current_acquisition
         self.capture: dict | None = None
+
+    def response_receipt(self, native: object, action: dict) -> dict:
+        """Retain a body-free original version only from the confirmed protected reply."""
+        from .review_executor import _threads
+
+        receipt = copy.deepcopy(native.receipt)
+        response = getattr(native, "response", None)
+        if not native.confirmed or action["kind"] != "comment" or response is None:
+            return receipt
+        try:
+            ids = receipt["platform_ids"]
+            thread = _threads([response])[ids["thread_id"]]
+            if len(thread["comments"]) != 1 or thread["comments"][0]["id"] != ids["comment_id"]:
+                return receipt
+            comment = thread["comments"][0]
+            if (
+                comment.get("content") != action["body"]
+                or (comment.get("author") or {}).get("id") != self.generation["scope"]["principal_id"]
+                or thread.get("isDeleted") or comment.get("isDeleted")
+            ):
+                return receipt
+            for value, fields in (
+                (thread, ("publishedDate", "lastUpdatedDate")),
+                (comment, ("publishedDate", "lastUpdatedDate", "lastContentUpdatedDate")),
+            ):
+                for field in fields:
+                    _instant(value.get(field))
+            ids["thread_state_id"] = _digest(thread)
+        except (KeyError, TypeError, ValueError):
+            pass  # Older/partial providers still retain their native confirmation.
+        return receipt
 
     def _transaction(self, operation: Callable[[dict], dict]) -> dict:
         return self.owner._review_transaction(
@@ -157,7 +196,8 @@ class ReviewFeedback:
         self, operation: dict, *, context_factory: Callable, remaining: Callable[[], float],
     ) -> dict:
         """Read through the real protected owner before atomically recording progress."""
-        from agent_worktrees.providers.azure_owned_review import protected_review_context
+        from agent_worktrees.providers.azure_owned_review import ReviewContextUnavailable, protected_review_context
+        from agent_worktrees.providers.base import ProviderError
         from .review_executor import _expected_discussions, _threads
 
         if self.capture is None:
@@ -186,7 +226,183 @@ class ReviewFeedback:
                 if actual_comments.get(ids["comment_id"]) != expected_comments[ids["comment_id"]]:
                     raise FeedbackUnavailable("confirmed_effect_readback_changed")
             context.check()
-        return self._record_handled(operation)
+        result = self._record_handled(operation)
+        acquisition = None
+        echo = {"status": "unavailable", "reason": "current_acquisition_unavailable"}
+        proven = None
+        # Optional evidence must leave the existing request time to settle/return.
+        reserve = remaining() / 2
+
+        def echo_remaining() -> float:
+            budget = remaining() - reserve
+            if budget <= 0:
+                raise TimeoutError("optional echo budget exhausted")
+            return budget
+
+        try:
+            if self.current_acquisition is not None:
+                acquisition = self.current_acquisition()
+        except PermissionError:
+            raise
+        except (OSError, ValueError, OperationLockedError, CacheUnavailable):
+            pass
+        if acquisition is not None:
+            try:
+                echo_remaining()
+                proven = self._prove_echo(operation, acquisition, context_factory, echo_remaining)
+                if proven is None:
+                    echo = {"status": "not_observed"}
+            except PermissionError:
+                raise
+            except (OSError, TimeoutError, ValueError, FeedbackUnavailable,
+                    ReviewContextUnavailable, ProviderError) as error:
+                echo = {
+                    "status": "unavailable",
+                    "reason": str(error) if isinstance(error, FeedbackUnavailable) else "echo_readback_unavailable",
+                }
+        if proven is not None:
+            try:
+                echo_remaining()
+                echo = self._record_echo(operation, *proven)
+            except PermissionError:
+                raise
+            except (OSError, ValueError, FeedbackUnavailable, OperationLockedError) as error:
+                echo = {
+                    "status": "unavailable",
+                    "reason": str(error) if isinstance(error, FeedbackUnavailable) else "echo_storage_unavailable",
+                }
+        return {**result, "echo": echo}
+
+    def _prove_echo(
+        self, operation: dict, acquisition: tuple[dict, Cursor], context_factory: Callable,
+        remaining: Callable[[], float],
+    ) -> tuple[dict, Cursor] | None:
+        from agent_worktrees.providers.azure_owned_evidence import AdoReadOwner, acquire_owned_evidence
+        from agent_worktrees.providers.azure_owned_review import protected_review_context
+        from .review_executor import _threads
+
+        if type(acquisition) is not tuple or len(acquisition) != 2 or type(acquisition[1]) is not Cursor:
+            raise FeedbackUnavailable("generation_position_unavailable")
+        latest, position = copy.deepcopy(acquisition)
+        _generation(latest, self.generation["scope"])
+        captured = Cursor(**self.capture["cursor"])
+        if position == captured:
+            return None
+        if position.epoch != captured.epoch or position.sequence != captured.sequence + 1:
+            raise FeedbackUnavailable("intermediate_positions_unproven")
+        if (
+            not latest["complete"] or latest["revision"] != self.generation["revision"]
+            or any(not row["complete"] or row["errors"] for row in latest["sections"].values())
+        ):
+            raise FeedbackUnavailable("complete_echo_acquisition_unavailable")
+        for name, section in latest["sections"].items():
+            if name != "discussions" and self._section_meaning(section) != self._section_meaning(
+                self.generation["sections"][name],
+            ):
+                raise FeedbackUnavailable("independent_acquisition_input")
+        expected = _threads(self.generation["sections"]["discussions"]["data"])
+        actual = _threads(latest["sections"]["discussions"]["data"])
+        for action, state in zip(operation["intent"]["actions"], operation["actions"]):
+            ids = state["receipt"]["platform_ids"]
+            if action["kind"] != "comment" or state["receipt"]["origin"] != "response":
+                raise FeedbackUnavailable("action_response_version_unavailable")
+            version = ids.get("thread_state_id")
+            if not isinstance(version, str):
+                raise FeedbackUnavailable("original_response_version_unavailable")
+            thread = actual.get(ids["thread_id"])
+            if thread is None or ids["thread_id"] in expected or _digest(thread) != version:
+                raise FeedbackUnavailable("response_version_changed")
+            expected[ids["thread_id"]] = thread
+        if actual != expected:
+            raise FeedbackUnavailable("independent_discussion_input")
+        scope = operation["intent"]["scope"]
+        with protected_review_context(context_factory, scope, remaining) as context:
+            owner = AdoReadOwner(
+                scope["endpoint"], scope["project_id"] + "/" + scope["repository_id"],
+                scope["project_id"], scope["repository_id"], scope["principal_id"],
+                "protected-feedback-readback", context.check,
+                lambda number, budget, checkpoint: context.reader,
+            )
+            fresh = build_generation(acquire_owned_evidence(
+                owner, scope["number"], budget=remaining(),
+            ))["generation"]
+            context.check()
+        if (
+            not fresh["complete"] or fresh["revision"] != latest["revision"]
+            or any(self._section_meaning(fresh["sections"][name]) != self._section_meaning(section)
+                   for name, section in latest["sections"].items())
+        ):
+            raise FeedbackUnavailable("fresh_echo_readback_changed")
+        return latest, position
+
+    @staticmethod
+    def _section_meaning(section: dict) -> dict:
+        return {key: value for key, value in section.items() if key not in ("observed_from", "observed_to")}
+
+    def _record_echo(self, operation: dict, generation: dict, position: Cursor) -> dict:
+        capture = copy.deepcopy(self.capture)
+        cursor = asdict(position)
+
+        def record(document: dict) -> dict:
+            retained = self.owner._review_operation(
+                document, operation["intent"]["operation_id"], operation["intent"]["scope"],
+            )
+            original = next(
+                (row for row in document["feedback_captures"]["records"]
+                 if row["operation_id"] == capture["operation_id"]), None,
+            )
+            if retained != operation or original != capture:
+                raise FeedbackUnavailable("original_confirmation_changed")
+            journal = ConversationJournal(document["conversations"])._find(
+                conversation_key(operation["intent"]["scope"], self.owner.namespace),
+            )
+            if journal is None or {"epoch": journal["epoch"], "sequence": journal["sequence"]} != cursor:
+                raise FeedbackUnavailable("echo_position_changed")
+            current = Observation.restore(journal["current"])
+            observed = project_generation(generation, self.owner.namespace, current)
+            now = int(self.owner.clock())
+            if (
+                observed is None or not observed.complete or observed.state != "open"
+                or not current.complete or current.state != "open"
+                or _meaning(observed.document()) != _meaning(current.document())
+                or not 0 <= now - observed.observed_from < self.inputs.max_age_seconds
+                or not observed.observed_to <= current.observed_to <= now
+                or not any(event["sequence"] == position.sequence and event["kind"] == "changed"
+                           for event in journal["events"])
+            ):
+                raise FeedbackUnavailable("echo_acquisition_unavailable")
+            scoped = [row for row in document["attention"]["records"] if row["facts"]["key"] == capture["key"]]
+            if any(row["facts"]["observed_at"] > current.observed_to for row in scoped):
+                raise FeedbackUnavailable("newer_acquisition_unavailable")
+            updated = 0
+            for interest in capture["interests"]:
+                row = next(
+                    (row for row in scoped if all(row["interest"][name] == value for name, value in interest.items())),
+                    None,
+                )
+                if row is None or (
+                    row["interest"]["matches"] is not True or not row["facts"]["complete"]
+                    or row["facts"]["cursor"] != cursor
+                    or row["facts"]["candidate"] != capture["candidate"]
+                    or row["facts"]["observed_at"] != current.observed_to
+                ):
+                    raise FeedbackUnavailable("echo_interest_unavailable")
+                handled = row["handled"]
+                if handled is not None and handled["cursor"] == cursor:
+                    continue
+                if (
+                    handled is None or handled["cursor"] != capture["cursor"]
+                    or row["provenance"]["operation_id"] != capture["operation_id"]
+                ):
+                    raise FeedbackUnavailable("original_handled_binding_changed")
+                row["handled"]["cursor"] = copy.deepcopy(cursor)
+                updated += 1
+            return {
+                "status": "covered", "cursor": cursor,
+                "generation_id": generation["id"], "updated": updated,
+            }
+
+        return self._transaction(record)
 
     def _record_handled(self, operation: dict) -> dict:
         capture = copy.deepcopy(self.capture)

@@ -71,6 +71,22 @@ Explicit Picker bootstrap and lifecycle wakes are unchanged.
 
 ### Creation starts from freshly resolved repository state
 
+New authoring preflight first checks the selected repository's native
+coordination readiness. When the repository requires external knowledge,
+an absent or unresolved binding refuses before worktree allocation or source
+preparation; complete the owning knowledge setup and retry. A non-external
+repository does not acquire a knowledge requirement. Source-only allocation,
+existing-session entry and explicit recovery retain their existing admission
+rules. This check is not provider authentication or complete application health.
+Structured New requests check before their first durable admission, so a denied
+request can retain its original identity for retry after readiness is repaired.
+The creation-time preflight also completes before the request is marked started,
+and creation consumes that validated result. A refusal at either read does not
+poison an otherwise unstarted request's fixed allocation.
+Previously admitted request recovery keeps its existing ownership checks.
+If project configuration itself cannot resolve, `coordination-readiness` and
+JSON `resolve` return a nonzero error envelope, not invented readiness facts.
+
 Before creating an ordinary or paired worktree, agent-worktrees fetches the
 configured remote and chooses the fetched remote default branch as the start
 point when available. A clean anchor checked out on its default branch is also

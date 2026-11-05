@@ -51,6 +51,11 @@ def preflight_launch(
         return _core().LaunchPreflight(policy_error=str(exc))
 
     recovery = getattr(args, "recovery", False)
+    if allocation_source is not None and not recovery:
+        from .launch_preflight import new_knowledge_error
+
+        if error := new_knowledge_error(config, source=allocation_source):
+            return _core().LaunchPreflight(policy_error=error)
     repo = config.default_repo
     platform_key = config.platform if config.platform != "wsl" else "linux"
     launch_map = repo.launch_recovery if recovery else repo.launch
