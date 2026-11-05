@@ -27,6 +27,7 @@ def print_help() -> None:
     print("  update --recovery-status|--recover-after-restart [--json]  inspect/settle interrupted work")
     print("  update --recover-for-repair [--json]  authorize queue release without cleanup proof; no install")
     print("  runtime-source show|set|reset|resolve  independent runtime source policy/acquisition; no install")
+    print("  automatic-updates      explicit enrollment, ownership, startup and worker status")
     print("  plugins                list the plugins the installer knows about")
     print("  plugins <name>         show one plugin's prereqs / config / steps")
     print("  plugins --prereqs      the de-duplicated union of all prerequisites")

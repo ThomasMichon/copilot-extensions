@@ -10,7 +10,11 @@ import sys
 from contextlib import contextmanager
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
+
+if TYPE_CHECKING:
+    from update_driver import Request
 
 from .engine_acquisition_budget import TIMEOUT_ENV, acquisition_timeout
 
@@ -25,6 +29,8 @@ _CONTEXT_KEYS = (
     "WORKTREE_MANAGER_ENGINE_CMD",
     "CE_UPDATE_AUTH",
 )
+_UNATTENDED = "CE_UPDATE_UNATTENDED"
+_RUNNER_CONTEXT_KEYS = (*_CONTEXT_KEYS, _UNATTENDED)
 
 
 def handoff_environment(args: list[str]) -> dict[str, str]:
@@ -78,13 +84,14 @@ def parse_options(rest: list[str]) -> tuple[argparse.Namespace, list[str]]:
     mode.add_argument("--recover-after-restart", action="store_true")
     mode.add_argument("--recover-for-repair", action="store_true")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--unattended", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--engine-acquisition-timeout", help=argparse.SUPPRESS)
     options, forwarded = parser.parse_known_args(rest)
-    if "--auth-report" in forwarded and (options.detach or options.supervised_debug):
+    if "--auth-report" in forwarded and (options.detach or options.supervised_debug or options.unattended):
         parser.error("--auth-report cannot select an installation execution mode")
     recovery = options.recovery_status or options.recover_after_restart or options.recover_for_repair
     if (options.request_status or recovery) and (
-        forwarded or options.engine_acquisition_timeout is not None
+        forwarded or options.engine_acquisition_timeout is not None or options.unattended
     ):
         parser.error("request inspection/recovery does not accept installation options")
     if "--auth-report" in forwarded and options.engine_acquisition_timeout is not None:
@@ -104,6 +111,10 @@ def parse_options(rest: list[str]) -> tuple[argparse.Namespace, list[str]]:
     canonical.add_argument("--auth-cwd")
     canonical.add_argument("--auth-non-repository", action="store_true")
     canonical.add_argument("--auth-environment", action="store_true")
+    canonical.add_argument(
+        "--automatic-trigger", choices=("manager", "external", "legacy-agent-machines"),
+    )
+    canonical.add_argument("--controller")
     parsed = canonical.parse_args(forwarded)
     options.auto = parsed.auto
     options.target = parsed.target
@@ -119,6 +130,10 @@ def parse_options(rest: list[str]) -> tuple[argparse.Namespace, list[str]]:
         parsed.recreate_venv, parsed.repair_engine, parsed.auth_report,
     )):
         parser.error("--target cannot be combined with force, repair, auth or module selection")
+    if bool(parsed.controller) != (parsed.automatic_trigger == "external"):
+        parser.error("--controller is required only with --automatic-trigger external")
+    if parsed.automatic_trigger and parsed.auth_report:
+        parser.error("automatic installation triggers cannot select authentication inspection")
     if parsed.repair_engine is not None and forwarded[:1] != ["--repair-engine"]:
         parser.error("bootstrap repair must precede ordinary update arguments")
     if not parsed.auth_report and (
@@ -163,8 +178,24 @@ def request_context() -> dict[str, str]:
     return context
 
 
+def _automatic_arguments(arguments: list[str] | tuple[str, ...]) -> bool:
+    return "--auto" in arguments or any(
+        arg == "--automatic-trigger" or arg.startswith("--automatic-trigger=") for arg in arguments
+    )
+
+
+def _unattended_request(request: Request) -> bool:
+    return (
+        request.spec.backend == "manager"
+        and ("--unattended" in request.spec.argv or _automatic_arguments(request.spec.argv))
+    )
+
+
 @contextmanager
-def _request_environment(context, *, killswitch_path: str | None = None, cwd: str | None = None):
+def _request_environment(
+    context, *, killswitch_path: str | None = None, cwd: str | None = None,
+    unattended: bool = False,
+):
     values = dict(context)
     if values.keys() - set(_CONTEXT_KEYS):
         raise ValueError("update request contains unsupported execution context")
@@ -180,20 +211,29 @@ def _request_environment(context, *, killswitch_path: str | None = None, cwd: st
             if not root.is_absolute():
                 raise ValueError("Manager root cannot resolve against request cwd")
         values["WORKTREE_MANAGER_ROOT"] = str(root)
-    keys = _CONTEXT_KEYS
+    keys = _RUNNER_CONTEXT_KEYS
     if killswitch_path is not None:
         keys = (*keys, "BOOTSTRAP_KILLSWITCH_STATE_FILE")
         if killswitch_path:
             values["BOOTSTRAP_KILLSWITCH_STATE_FILE"] = killswitch_path
-    previous = {key: os.environ[key] for key in keys if key in os.environ}
+    previous = dict(os.environ)
     try:
         for key in keys:
             os.environ.pop(key, None)
         os.environ.update(values)
+        if unattended:
+            from .automatic_updates_process import update_environment
+            from .self_install import default_root
+
+            safe = update_environment(default_root().absolute())
+            # Restore only the request's validated provider/installation selection,
+            # never the executor's ambient credentials or transport overrides.
+            safe.update(values)
+            os.environ.clear()
+            os.environ.update(safe)
         yield
     finally:
-        for key in keys:
-            os.environ.pop(key, None)
+        os.environ.clear()
         os.environ.update(previous)
 
 
@@ -328,7 +368,7 @@ def cmd_update_request(rest: list[str]) -> int:
                     raise driver.StateError("Manager does not own the active update request")
                 with _request_environment(
                     request.spec.context, killswitch_path=request.spec.killswitch_path,
-                    cwd=request.spec.cwd,
+                    cwd=request.spec.cwd, unattended=_unattended_request(request),
                 ), _acquisition_environment(
                     options.engine_acquisition_timeout,
                 ):
@@ -340,26 +380,20 @@ def cmd_update_request(rest: list[str]) -> int:
 
                     return manager._cmd_update(forwarded)
         if options.target is not None and options.target != "worktree-manager":
-            from . import engine_client
             from .runtime_source_config import require_marketplace
 
             require_marketplace()
-            project, arguments = extract_project(forwarded)
-            observer = [
-                "--" + name.replace("_", "-")
-                for name in ("detach", "wait", "supervised_debug", "json")
-                if getattr(options, name)
-            ]
-            with _request_environment(request_context()):
-                return engine_client.run_engine_passthrough(
-                    project, ["update", "--no-manager", *arguments, *observer],
-                    **({"headless": True} if options.detach else {}),
-                )
         project, _args = extract_project(forwarded)
         context = request_context()
         _update_context_directory(context)
         cwd = Path.cwd().resolve()
         arguments = list(forwarded)
+        if _automatic_arguments(arguments) and "--auto" not in arguments:
+            arguments.append("--auto")
+        if options.unattended or (
+            os.environ.get(_UNATTENDED) == "1" and not _automatic_arguments(arguments)
+        ):
+            arguments.append("--unattended")
         budget = options.engine_acquisition_timeout
         if budget is None and options.target is None:
             budget = os.environ.get(TIMEOUT_ENV)
@@ -369,12 +403,12 @@ def cmd_update_request(rest: list[str]) -> int:
         spec = driver.RequestSpec(
             backend="manager", argv=tuple(arguments), project=project or "",
             cwd=str(cwd), source=_source_key(), context=tuple(context.items()),
-            repair=not options.auto,
+            repair="--auto" not in arguments,
         )
         argv, env = driver.runtime_command("worktree_manager", ["update", *arguments])
         request = driver.enqueue(
             spec, runner=driver.TrustedRunner(
-                argv, str(cwd), env=tuple(env.items()), context_keys=_CONTEXT_KEYS,
+                argv, str(cwd), env=tuple(env.items()), context_keys=_RUNNER_CONTEXT_KEYS,
             ),
         )
         print(f"Update request {request.id}; log: {request.log_path}", file=sys.stderr)

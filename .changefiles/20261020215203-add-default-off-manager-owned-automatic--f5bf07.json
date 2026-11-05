@@ -1,0 +1,9 @@
+{
+  "comment": "Add default-off Manager-owned automatic maintenance with explicit setup consent, user startup and safe worker handover",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
