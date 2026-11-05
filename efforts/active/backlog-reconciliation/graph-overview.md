@@ -8,6 +8,16 @@ requirements remain in their issues and actual receiving objectives.
 
 ## Snapshot and boundaries
 
+The [eight installer/hook/account/recovery contracts](finite-installer-hook-account-recovery-contracts.md)
+retain twenty-four ranked relationships and independently verify #9435
+and #9597's finite source completions through actual current source,
+whole review/CI and audited provider dispositions.
+Six originals remain OPEN; protected installer evidence, exact native
+controls, release/selected-payload and legacy-wake boundaries remain.
+The [journal](<journal/2026/11.05 finite-installer-hook-account-recovery-contracts.md>)
+records 782 verified dispositions and 1,005 whole open, 276 above 729,
+without new installed/native effects or source/resource release.
+
 The [six consumer/index/configuration contracts](finite-consumer-index-configuration-contracts.md)
 retain eighteen ranked relationships, the freshly admitted current mux
 contract and #9286's independently verified finite source completion.
