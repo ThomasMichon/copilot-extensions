@@ -403,6 +403,151 @@ def test_install_source_cli_retains_inputs_through_native_owner_return(
     assert not held
 
 
+@pytest.mark.parametrize("changed", [False, True])
+def test_install_source_rechecks_the_updater_wheel_selection(driver, tmp_path, monkeypatch, changed):
+    from types import SimpleNamespace
+    import install_source
+
+    snapshot, plugin = tmp_path / "snapshot", tmp_path / "plugin"
+    identity = SimpleNamespace(package_version="1.0.0")
+    selected = SimpleNamespace(payload=plugin, identity=identity, source_descriptor=None)
+    wheels = object()
+    selection = {
+        "identity": {"runtime_source": {"plugin": "agent-worktrees"}, "runtime_version": "source"},
+        "source_descriptor": {"kind": "github", "canonical": "github:example/repo", "ref": ""},
+        "runtime_version": "source.profile." + "a" * 16,
+        "payload_hash": "b" * 64, "extras": [], "local_packages": ["agent-worktrees"],
+    }
+
+    @contextmanager
+    def inputs(path, component):
+        assert path == snapshot and component == "agent-worktrees"
+        yield selected, wheels
+
+    def install(root, selected_plugin, **options):
+        assert selected_plugin == plugin and options["wheel_inputs"] is wheels
+        assert options["expected_wheel_selection"] == selection
+        return {"runtime_version": selection["runtime_version"]}
+
+    monkeypatch.setattr(install_source, "project_inputs", inputs)
+    monkeypatch.setattr(install_source, "native_selection", lambda *_args: (
+        selection | {"payload_hash": "c" * 64} if changed else selection
+    ))
+    monkeypatch.setattr(driver.runtime_source, "read_source_identity", lambda *a, **kw: identity)
+    monkeypatch.setattr(driver, "install", install)
+    monkeypatch.setenv(
+        "COPILOT_EXTENSIONS_NATIVE_INSTALL_SOURCE_SELECTION",
+        json.dumps(selection, sort_keys=True, separators=(",", ":")),
+    )
+    result = tmp_path / "result.json"
+    arguments = [
+        "--root", str(tmp_path / "root"), "--plugin", str(plugin),
+        "--payload", str(plugin), "--uv", str(tmp_path / "uv"),
+        "--base-python", sys.executable, "--result", str(result),
+        "--install-source", str(snapshot),
+    ]
+    if changed:
+        with pytest.raises(driver.InstallationRefused, match="selection"):
+            driver.main(arguments)
+        assert not result.exists()
+    else:
+        assert driver.main(arguments) == 0
+        assert json.loads(result.read_text())["runtime_version"] == selection["runtime_version"]
+
+
+def test_wheel_selection_without_install_source_refuses_before_install(driver, tmp_path, monkeypatch):
+    monkeypatch.setenv(driver.install_driver.SOURCE_SELECTION_ENV, '{"selection":"fixture"}')
+    monkeypatch.setattr(driver, "install", lambda *args, **kwargs: pytest.fail("unselected wheels reached installation"))
+    result = tmp_path / "result.json"
+    with pytest.raises(SystemExit) as failure:
+        driver.main([
+            "--root", str(tmp_path / "root"), "--plugin", str(tmp_path / "plugin"),
+            "--payload", str(tmp_path / "plugin"), "--uv", str(tmp_path / "uv"),
+            "--base-python", sys.executable, "--result", str(result),
+        ])
+    assert failure.value.code == 2 and not result.exists()
+
+
+@pytest.mark.parametrize("fault", ["hash", "custody"])
+def test_wheel_candidate_refuses_changed_inputs_before_publication(driver, tmp_path, monkeypatch, fault):
+    from types import SimpleNamespace
+    from installer_wheel_snapshot import retain_wheel_inputs
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
+    root, plugin = tmp_path / "runtime", tmp_path / "payload"
+    plugin.mkdir()
+    (plugin / "plugin.json").write_text('{"name":"agent-worktrees","version":"1.0.0"}', encoding="utf-8")
+    (plugin / "pyproject.toml").write_text(
+        '[project]\nname="agent-worktrees"\nversion="1.0.0"\n', encoding="utf-8",
+    )
+    source = driver.runtime_source
+    digest = source.assembly_hash(plugin)
+    identity = source.SourceIdentity(
+        "agent-worktrees", "1.0.0", "a" * 40, "b" * 40, digest,
+        source.runtime_version("1.0.0", "a" * 40, digest),
+    )
+    (plugin / source.SOURCE_FILE).write_text(json.dumps(identity.document()), encoding="utf-8")
+
+    @contextmanager
+    def held(**_kwargs):
+        yield
+
+    @contextmanager
+    def candidate(*_args, **_kwargs):
+        yield SimpleNamespace(payload_hash=("f" if fault == "hash" else "e") * 64)
+
+    monkeypatch.setattr(driver, "Governance", lambda requested, payload: SimpleNamespace(
+        root=requested, payload=payload, held=held,
+    ))
+    monkeypatch.setattr(source, "publish_source_snapshot", lambda *_args: plugin)
+    monkeypatch.setattr(driver.engine, "numbered_candidate", candidate)
+    monkeypatch.setattr(driver.subprocess, "Popen", lambda *args, **kwargs: pytest.fail(
+        "mismatched candidate reached publication",
+    ))
+    archive = tmp_path / "agent_worktrees-1.0.0-py3-none-any.whl"
+    archive.write_bytes(b"wheel fixture")
+    wheel_digest = "sha256:" + hashlib.sha256(archive.read_bytes()).hexdigest()
+    with retain_wheel_inputs(
+        {archive.name: archive}, {archive.name: wheel_digest}, max_wheels=1,
+        max_archive_bytes=1024, max_total_bytes=1024, max_snapshot_bytes=4096,
+        deadline=time.monotonic() + 30,
+    ) as snapshot:
+        profile = {
+            "component": "agent-worktrees", "mode": "source",
+            "release": {
+                "identity": "source:" + identity.source_commit,
+                "sha256": "sha256:" + identity.assembly_hash,
+            },
+        }
+        wheels = driver.engine.WheelInstallInputs(
+            snapshot, json.dumps(profile, sort_keys=True, separators=(",", ":")),
+            (("agent-worktrees", "1.0.0", archive.name, wheel_digest),),
+        )
+        selection = {
+            "identity": source.manifest_fields(identity), "source_descriptor": None,
+            "runtime_version": identity.runtime_version + ".profile." + wheels.receipt()["lock_id"][7:23],
+            "payload_hash": "e" * 64, "extras": [], "local_packages": ["agent-worktrees"],
+        }
+        if fault == "custody":
+            actual_verify = driver.engine.WheelInstallInputs.verify
+            checks = []
+
+            def verify(current):
+                checks.append(True)
+                if len(checks) == 2:
+                    raise ValueError("retained wheel changed")
+                actual_verify(current)
+
+            monkeypatch.setattr(driver.engine.WheelInstallInputs, "verify", verify)
+        error = driver.InstallationRefused if fault == "hash" else ValueError
+        message = "candidate differs" if fault == "hash" else "retained wheel changed"
+        with pytest.raises(error, match=message):
+            driver.install(
+                root, plugin, payload=plugin, uv=tmp_path / "uv", base_python=Path(sys.executable),
+                wheel_inputs=wheels, expected_wheel_selection=selection,
+            )
+
+
 @pytest.mark.skipif(os.name != "nt", reason="native Windows installer argument admission")
 @pytest.mark.parametrize("shell", ["powershell", "pwsh"])
 def test_native_frontend_refuses_source_inputs_for_status_before_touching_installation(

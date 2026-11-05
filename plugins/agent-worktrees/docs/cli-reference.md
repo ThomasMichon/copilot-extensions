@@ -1591,8 +1591,24 @@ the actual target is separate from the original source pin and is revalidated
 before every attempt. Inventory advertises this support through additive
 `runtime_sources.target_contract: {schema: "copilot-extensions.runtime-source-target", version: 1}`.
 An old engine or missing/conflicting owner planner requires tooling upgrade,
-never profile substitution. Queued source records remain exactly `payload` and
-`identity`. Omitting the option retains ordinary marketplace runtime delivery.
+never profile substitution. Version 1 source records remain exactly `payload`
+and `identity`.
+
+The additive `runtime_sources.wheel_contract` advertises version 2 of the same
+packet for an explicitly prepared Worktrees wheel input. Its `agent-worktrees`
+record may add an absolute `install_source` directory; other records retain
+their version 1 shape. Both the installed and prepared Worktrees payloads must
+declare matching `runtime-wheel-source.json` support. The installed owner
+inspects the selected source and wheel profile, computes the exact target and
+construction hash, and rechecks that selection before execution. The native
+installer compares the same selection and candidate hash before publication;
+currentness requires the source, selected slot, interpreter and completion hash
+to agree. A missing or older provider refuses rather than ignoring the wheel
+selection. This explicit packet is not source, profile or feed authorization:
+its caller must retain and recheck those existing authorities through cutover.
+No ordinary update selects or downloads a bundle automatically.
+
+Omitting the option retains ordinary marketplace runtime delivery.
 This suite-only input cannot combine with target/authentication/inspection or
 recovery operations and never delegates to an older Manager. The
 [Manager caller](../../../worktree-manager/README.md#independent-runtime-source-acquisition)

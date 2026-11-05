@@ -49,6 +49,47 @@ def test_packet_preserves_each_payload_and_full_selection(tmp_path):
     assert update_runtime_source.parse_sources(None) is None
 
 
+def test_v2_packet_preserves_explicit_worktrees_wheel_snapshot(tmp_path):
+    data = packet(tmp_path, ("agent-worktrees", "agent-example"))
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    data["version"] = 2
+    data["sources"]["agent-worktrees"]["install_source"] = str(snapshot)
+    selected = update_runtime_source.parse_sources(json.dumps(data))
+    assert selected["agent-worktrees"].install_source == snapshot
+    assert selected["agent-example"].install_source is None
+
+
+@pytest.mark.parametrize("fault", ["v1", "missing", "relative", "foreign", "no-wheel", "unknown", "link"])
+def test_wheel_packet_refuses_ambiguous_or_unowned_selection(tmp_path, fault):
+    data = packet(tmp_path, ("agent-worktrees", "agent-example"))
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    data["version"] = 2
+    data["sources"]["agent-worktrees"]["install_source"] = str(snapshot)
+    if fault == "v1":
+        data["version"] = 1
+    elif fault == "missing":
+        data["sources"]["agent-worktrees"]["install_source"] = str(tmp_path / "absent")
+    elif fault == "relative":
+        data["sources"]["agent-worktrees"]["install_source"] = "relative"
+    elif fault == "foreign":
+        data["sources"]["agent-example"]["install_source"] = str(snapshot)
+    elif fault == "no-wheel":
+        del data["sources"]["agent-worktrees"]["install_source"]
+    elif fault == "link":
+        link = tmp_path / "linked"
+        try:
+            link.symlink_to(snapshot, target_is_directory=True)
+        except OSError:
+            pytest.skip("directory symlink creation unavailable")
+        data["sources"]["agent-worktrees"]["install_source"] = str(link)
+    else:
+        data["sources"]["agent-worktrees"]["extra"] = True
+    with pytest.raises((OSError, ValueError)):
+        update_runtime_source.parse_sources(json.dumps(data))
+
+
 @pytest.mark.parametrize("change", [
     "schema", "version", "boolean-version", "unknown", "empty", "list",
     "unsafe-name", "record", "extra-record", "relative", "missing", "identity",

@@ -587,6 +587,7 @@ def _execute_runtime_step(step: update_runtime_plan.RuntimeUpdateStep) -> str:
                 )
                 command = step.source.lifecycle_argv(
                     step.payload, step.name, step.runtime_root, step.project_root, argv,
+                    target=step.source_target,
                 )
         except (OSError, ValueError, SyntaxError, subprocess.SubprocessError) as error:
             return f"prepared source execution refused: {error}"

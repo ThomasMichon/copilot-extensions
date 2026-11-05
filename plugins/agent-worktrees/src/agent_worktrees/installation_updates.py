@@ -78,7 +78,7 @@ def _target(name, targets):
 
 
 def inventory():
-    from .update_runtime_source import SOURCES_CONTRACT, SOURCES_SCHEMA
+    from .update_runtime_source import SOURCES_CONTRACT, SOURCES_SCHEMA, SOURCES_WHEEL_CONTRACT
     from .update_runtime_target import TARGET_CONTRACT, TARGET_SCHEMA
 
     targets = update_runtime._registered_plugin_targets()
@@ -129,6 +129,7 @@ def inventory():
         "runtime_sources": {
             "schema": SOURCES_SCHEMA, "version": SOURCES_CONTRACT,
             "target_contract": {"schema": TARGET_SCHEMA, "version": TARGET_CONTRACT},
+            "wheel_contract": {"schema": SOURCES_SCHEMA, "version": SOURCES_WHEEL_CONTRACT},
         },
     }
 

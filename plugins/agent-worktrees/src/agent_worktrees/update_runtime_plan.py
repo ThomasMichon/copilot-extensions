@@ -22,10 +22,12 @@ from typing import TYPE_CHECKING
 
 from . import reconcile
 
+WHEEL_SELECTION_ENV = "COPILOT_EXTENSIONS_NATIVE_INSTALL_SOURCE_SELECTION"
+
 if TYPE_CHECKING:
     from .update_runtime import _RegisteredPluginTarget
     from .update_runtime_source import PreparedRuntimeSource
-    from .update_runtime_target import SourceRuntimeTarget
+    from .update_runtime_target import SourceRuntimeTarget, SourceWheelTarget
 
 
 @dataclasses.dataclass(frozen=True)
@@ -43,7 +45,7 @@ class RuntimeUpdateStep:
     fallback_argv: tuple[str, ...] = ()
     deadline_s: int = 0
     source: PreparedRuntimeSource | None = None
-    source_target: SourceRuntimeTarget | None = None
+    source_target: SourceRuntimeTarget | SourceWheelTarget | None = None
     project_root: Path | None = None
 
     def __post_init__(self) -> None:
@@ -103,11 +105,12 @@ def _select_inputs(
     try:
         environment, root = reconcile.runtime_installer_environment(step.name, step.payload)
         environment = dict(environment)
+        environment.pop(WHEEL_SELECTION_ENV, None)
         source_target = None
         if source is not None:
             from . import update_runtime as runtime
             from .update_runtime_source import PIN_ENV
-            from .update_runtime_target import TARGET_ENV, plan_target
+            from .update_runtime_target import TARGET_ENV, SourceWheelTarget, plan_target
 
             environment.pop(PIN_ENV, None)
             environment.pop(TARGET_ENV, None)
@@ -131,7 +134,8 @@ def _select_inputs(
                 project = (project or Path.cwd()).resolve()
             source_target = plan_target(source, step.name, step.payload, root, environment)
             if source_target is not None:
-                environment[TARGET_ENV] = source_target.document
+                key = WHEEL_SELECTION_ENV if isinstance(source_target, SourceWheelTarget) else TARGET_ENV
+                environment[key] = source_target.document
             environment.update({
                 PIN_ENV: source.identity,
                 "COPILOT_PLUGIN_STAGED_FROM": str(step.payload.resolve()),
@@ -490,6 +494,17 @@ def plan_engine(
     shell_prefix, _ = prefix
     argv = [*shell_prefix, "update", "-InstallDir" if platform_name == "windows" else "--install-dir",
             str(root)]
+    if source is not None and source.install_source is not None:
+        from .update_runtime_target import SourceWheelTarget
+
+        if not isinstance(step.source_target, SourceWheelTarget):
+            return dataclasses.replace(step, status="prepared wheel target is unavailable")
+        argv.extend([
+            "-InstallSource" if platform_name == "windows" else "--install-source",
+            str(source.install_source),
+            "-RuntimeSourceDescriptor" if platform_name == "windows" else "--runtime-source-descriptor",
+            json.dumps(step.source_target.source_descriptor, sort_keys=True),
+        ])
     try:
         deadline = max(600, update_cli._installer_timeout("agent-worktrees", environment, plugin_dir))
     except (OSError, ValueError) as error:
