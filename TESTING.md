@@ -1,5 +1,22 @@
 # Testing copilot-extensions
 
+Manager's opt-in `--test-file tests/test_companion_tool_statistics.py
+--test-file tests/test_companion_current_requests.py --test-file
+tests/test_companion_bridge_session_source.py --allow-explicit-tiers` packet
+exercises the optional owner count through the real selected CLI/private route,
+strict codec and Textual app. A 5,201-record source exceeds the latest page and
+default display capacity; ordinary/narrow app controls use a smaller display
+budget to force eviction with two history pages. A separate actual native
+5,202-record burst reaches the widget's default bounded window and evicts rows
+without changing the qualified owner count. Controls cover independent
+old-CLI/provider rollback, one shared declaration, exact prequery refusal versus
+parser failure, malformed counters/ranges, unknown/zero, duplicate admission,
+history separation, rebuild, hide/reopen and one coalesced callback for both
+current projections. Full qualifications remain in Evidence; the compact label
+does not add an extra status paragraph. Fourteen existing SVG baselines remain
+unchanged. These are isolated source/private-process controls, not installed or
+native-performance acceptance; required unit-only CI is unchanged.
+
 Bridge's selected `tests/test_events.py` and `tests/test_live_runtime.py` packet
 checks the internal tool-start range projection across append, SQLite hydration,
 captured tails, rebuild and represented restoration. It covers distinct replay/

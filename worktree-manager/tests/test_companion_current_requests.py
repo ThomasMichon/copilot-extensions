@@ -21,6 +21,7 @@ from worktree_manager.companion_bridge_current_requests import (
     CurrentRequestProjection, decode_current_requests,
 )
 from worktree_manager.companion_bridge_attachment import BridgeTimelineAttachment
+from worktree_manager.companion_bridge_tool_statistics import decode_tool_statistics
 from worktree_manager.companion_timeline_widget import CompanionTimelinePanel
 from worktree_manager.companion_timeline_contract import TimelineContractError
 from worktree_manager.companion_worktree_source import WorktreeTimelineSource
@@ -141,6 +142,12 @@ def test_busy_ui_has_one_queued_current_update_and_retired_callbacks_cannot_revi
         attachment._chosen = member(), "fixture-generation"
         monkeypatch.setattr(attachment, "_renderable", lambda: True)
         reader = attachment._source(selection)
+        statistics = decode_tool_statistics({
+            "version": 1, "availability": "observed", "reason": "native-event-range",
+            "basis": "native-tool-start-record-occurrences", "coverage": "partial",
+            "durability": "unknown", "start_occurrences": 100, "observed_records": 100,
+            "floor": 1, "head": 100, "contiguous": True,
+        }, {"journal_incarnation": "fixture"}, {"floor": 1, "head": 100})
         loop = asyncio.get_running_loop()
         original = loop.call_soon_threadsafe
 
@@ -154,6 +161,8 @@ def test_busy_ui_has_one_queued_current_update_and_retired_callbacks_cannot_revi
             try:
                 for revision in range(1, 101):
                     reader._current(replace(state, revision=revision))
+                    reader._statistics(replace(statistics, head=revision, observed_records=revision,
+                                               start_occurrences=revision))
             except BaseException as error:
                 failures.append(error)
 
@@ -165,10 +174,13 @@ def test_busy_ui_has_one_queued_current_update_and_retired_callbacks_cannot_revi
         assert len(queued) == 1 and not delivered
         await asyncio.sleep(0)
         assert delivered[-1].revision == 100
+        assert attachment.tool_statistics == statistics
         reader._current(replace(state, revision=101))
+        reader._statistics(replace(statistics, head=101, observed_records=101, start_occurrences=101))
         attachment.stop_now()
         await asyncio.sleep(0)
         assert delivered[-1] is None and attachment.current_requests is None
+        assert attachment.tool_statistics is None
 
     asyncio.run(check())
 

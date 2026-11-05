@@ -365,6 +365,7 @@ class CompanionTimelinePanel(Vertical):
     }
     CompanionTimelinePanel .timeline-unread { width: 1fr; text-align: right; }
     CompanionTimelinePanel #timeline-current-compact { height: auto; max-height: 2; }
+    CompanionTimelinePanel #timeline-tool-statistics { display: none; height: auto; }
     """
 
     def __init__(
@@ -390,6 +391,7 @@ class CompanionTimelinePanel(Vertical):
                 yield Static("Rich Agenda: awaiting selected owner publication", id="timeline-agenda-status")
                 yield Static("Bridge: awaiting selected owner", id="timeline-bridge-status")
                 yield Static(id="timeline-current-input")
+                yield Static(id="timeline-tool-statistics")
                 yield Select([("Bridge feed: membership (discover delegates)", "membership")],
                              value="membership", allow_blank=False, id="bridge-feed")
         yield SubwayTimeline(self.window)

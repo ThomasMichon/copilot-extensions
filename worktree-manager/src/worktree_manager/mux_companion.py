@@ -256,7 +256,8 @@ class MuxCompanionApp(App):
     """
 
     CSS = """
-    #timeline-agenda-status, #timeline-bridge-status, #timeline-current-input { height: auto; }
+    #timeline-agenda-status, #timeline-bridge-status,
+    #timeline-current-input, #timeline-tool-statistics { height: auto; }
     #timeline-action { display: none; height: auto; max-height: 2; }
     .timeline-view.has-action #timeline-action { display: block; }
     .timeline-view #status { display: none; }
