@@ -321,3 +321,10 @@ implementation. The exact support closure follows the consumer trace and tests.
   Stopped fixtures retain their typed no-wake refusal. The delayed-provider
   fixture explicitly models this availability read while keeping its real
   subprocess and repeated-cancellation settlement controls.
+- Final source qualification passed all 4,146 admitted units in the distinct
+  Windows-native profile (220.547 seconds), all 40 admitted strict projects on
+  Linux/Windows targets and the current source gates. The separate opt-in
+  Windows test passed two cycles/four real console children from a `pythonw`
+  parent: no observed visible windows, terminal acquisitions or child focus
+  changes, and no remaining fixture descendants. It substitutes `gh --version`
+  for backend requests and does not qualify live activation or native Copilot.

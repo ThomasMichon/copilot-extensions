@@ -82,6 +82,17 @@ available without a current namespace owner. A real admitted-resume control
 pauses provider refresh, records an actual durable stop while lifecycle custody
 is held, then makes the venue Shutdown: refresh cannot activate it, prepare a
 new Host or clear that newer stop.
+CodeSpaces' opt-in Windows desktop check sets
+`CODESPACES_ACTIVATION_WINDOWS_E2E=1` and selects
+`agent-codespaces --test-file tests/native/test_activation_windowless.py
+--allow-explicit-tiers` with the bounded runner. It uses the canonical Manager
+Win32 observer from the full source snapshot and a shared contained Job. Two
+cycles invoke the actual activation helper from base `pythonw.exe`, with four
+real native `gh --version` children replacing identity/start backend requests
+without changing the production capture/headless kwargs. It checks observed
+visible windows, terminal acquisitions, child focus and descendant cleanup.
+Account/state/activation responses are synthetic; no credentials, live venue
+activation, installed service or native Copilot is qualified.
 Containers' `tests/test_runtime_drivers.py` sends the
 base64 archive through the real runtime-proxy, external-driver process and
 isolated canonical reader, proving both allow and deny without Docker.
