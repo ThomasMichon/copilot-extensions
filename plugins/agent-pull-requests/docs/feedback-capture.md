@@ -81,8 +81,63 @@ rolls back a retained effect.
 Current reviewer vote or equal VoteUpdate counts cannot prove an immutable
 vote event. Operations containing a verdict therefore remain explicitly
 tracking-unavailable even when their native receipts are confirmed. Exact
-vote attribution and later interest-specific echo coverage remain B3 work;
-the shared journal never suppresses provider input globally.
+vote attribution remains unavailable; the shared journal never suppresses
+provider input globally.
+
+## Bounded comment-echo reconciliation
+
+The first B3 source leaf supports only new standalone comment threads whose
+confirmed protected response supplied complete native version timestamps.
+`NativeActionOutcome.response` is optional, ephemeral in-process evidence,
+excluded from its representation. The feedback-enabled caller immediately
+normalizes that original response and retains only a `thread_state_id` digest
+in the existing extensible receipt `platform_ids`; it never persists or
+returns the response body. An old caller ignores this additive provider field;
+a new caller with an old provider still confirms native effects and original
+handled progress, but cannot claim version-proven echo coverage. A recovered
+lost response cannot manufacture its original version from current readback.
+
+The trusted direct embedding may supply `feedback_current`, returning a
+generation and the position from its actual successful acquisition.
+`WorkspaceOperations` supplies this from the same existing cache and bounded
+generation-to-position metadata; request JSON cannot override it. A missing
+binding, evicted generation or restarted embedding needs actual reacquisition,
+not equal-content inference. The immutable capture remains the original
+handled position.
+
+Coverage requires exactly one later semantic position in the same epoch.
+Every non-discussion section must match the captured generation, and the
+complete discussion set must differ only by distinct selected new threads
+matching the original response fingerprints. A new context from that same
+existing protected owner uses the finite owner-evidence collector to read all
+sections again, including policies, reviewers and the exact source range.
+Incomplete or differing readback refuses coverage. No new transport,
+credential owner, response ledger or cache is introduced.
+
+Original protected readback and handled persistence finish before optional
+echo lookup/readback. Optional evidence receives only half the then-remaining
+request budget through the existing per-request transport checks, leaving the
+rest for settlement and return. An echo timeout cannot consume the entire
+workspace deadline or erase the already-persisted original baseline.
+The executor's budget is capped by the workspace's original absolute monotonic
+deadline, so validation/cache/setup time before executor entry cannot extend it.
+
+After readback, ReplayStore atomically rechecks the original capture/receipts,
+actual acquired position, complete current journal meaning, retained event,
+freshness, attention watermarks and positively selected captured interests.
+Only those interests may advance their handled cursor to the proven echo.
+Original capture/provenance remains unchanged; other interests retain the
+shared event and pending age. Subsequent independent input starts its actual
+unhandled age. Newer handled progress is never overwritten.
+
+The tracking result distinguishes original `cursor`/`status` from optional
+`echo` coverage. Missing versions, reply/edit/verdict version attribution,
+multiple intervening positions, gaps, reopen, concurrent input and unavailable
+acquisition remain explicitly unavailable. Failure to classify or persist
+echo coverage does not undo original handled progress or resend effects.
+Optional cache lookup contention/unavailability and echo-store lock contention
+also return unavailable echo evidence without discarding the original result.
+This conservative leaf is not B3/A2's full exit or A3 serving adoption.
 
 Adoption adds an 8 MiB default reservation to the existing total owner-byte
 limit and preserves every replay, conversation, attention and review record.

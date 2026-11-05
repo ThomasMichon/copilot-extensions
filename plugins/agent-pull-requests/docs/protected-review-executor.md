@@ -71,6 +71,11 @@ readiness is **not** an unconditional review gate. Existing caller policy checks
 run on current action-relevant inputs; hashes and context objects do not grant
 authority.
 
+An enclosing owner may additionally supply its absolute monotonic
+`enclosing_deadline` in the same clock domain. The executor uses the earlier of
+that deadline and its local duration limit; workspace submission always supplies
+its original request deadline, including setup time before executor entry.
+
 Execution persists selected intent before effects, checks actual current identity/
 revision/discussion and target ownership, durably fences an action as unknown,
 then repeats current-owner and candidate checks after persistence before sending.
@@ -85,6 +90,12 @@ a complete matching action reply: partial or contradictory responses retain IDs
 as unknown, not a fabricated confirmation.
 The store's conservative `confirm=False` disposition keeps all known native IDs
 without upgrading an unverified response into a confirmed effect.
+`NativeActionOutcome` also offers an optional, representation-hidden `response`
+copy only for a confirmed non-late reply. Existing callers can ignore it.
+The optional [feedback composition](feedback-capture.md#bounded-comment-echo-reconciliation)
+uses it for body-free original-version evidence; the raw body is not a receipt
+field or returned execution result. Missing evidence never changes native
+confirmation or permits replay.
 
 Confirmed own receipts may advance only their exactly selected semantic thread/
 comment changes. Unrelated replies, edits, deletion, ownership or status changes

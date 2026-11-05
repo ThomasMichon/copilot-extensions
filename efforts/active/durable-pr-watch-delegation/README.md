@@ -297,7 +297,7 @@ _Operator-required outcome; agent-recommended slices and validation._
   [captured-feedback refinement](captured-attention-feedback.md), merged in
   #10664, defines the remaining pre-effect capture, confirmed retry readback
   and interest-specific echo integration. Its finite B1 storage expansion
-  merged in #10665. The optional protected B2 source seam captures original
+  merged in #10665. The optional protected B2 source seam merged in #10677 captures original
   positions and reconciles confirmed comment/reply/edit readback without
   resends or consuming newer input. Exact vote attribution, B3 echo coverage,
   A2's full exit and negotiated serving remain open.
@@ -938,6 +938,59 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-05 - Qualify the first conservative comment-echo leaf
+
+- The optional native outcome now supplies original confirmed response data
+  ephemerally. The feedback-enabled caller stores only normalized version
+  fingerprints in its existing body-free receipt identities. Old providers
+  and recovered lost responses cannot manufacture missing original versions;
+  old callers retain their existing behavior.
+- The same workspace cache/acquisition-position binding supplies current
+  evidence. Exact distinct comment threads may cover only one contiguous
+  semantic position for their original captured interests after complete
+  protected owner readback and transactional journal/attention rechecks.
+  Other interests still see the event; independent input and pending age
+  remain intact. Immutable captures, native receipts and newer handled
+  progress are preserved.
+- Synthetic controls exercise original-response versions, current/prior
+  peer combinations, all-confirmed retry without resends, protected full
+  metadata/policy readback, mixed input, unavailable acquisition, gaps,
+  intervening round trips, restart, reopen and transaction races.
+  Real cache and replay-lock contention likewise preserve the original result
+  and reconcile optional coverage on retry without resending.
+  Original handled persistence precedes optional echo work, which uses only
+  half the remaining request budget. A workspace-deadline regression proves
+  optional readback timeout preserves the structured result and no-resend retry.
+  The executor is capped by the original enclosing absolute deadline, including
+  delayed entry after setup; its regression reaches the near-deadline boundary.
+  The coupled PR packet passes 317 cases and the native response/exporter
+  packet passes 42, both with bounded cleanup verified. Fatal Ruff,
+  documentation consistency, the install contract and admitted strict service
+  Linux/Windows targets pass; these are not native Windows or live-provider
+  results.
+- Reply/edit version sequences, exact immutable vote attribution, longer
+  event chains and complete B3/A2 acceptance remain open. Negotiated A3
+  serving, broader provider/consumer/retention and installed/shadow acceptance
+  are not supplied by this leaf. No default host, strict wire, provisioner,
+  live provider, retained service or rollout changes.
+
+### 2026-11-05 - Land protected original-position reconciliation
+
+- #10677 actually merged as `fc68de920ebce4ad874c0969d931d895879d5d5c`
+  after exact-head Copilot approval with both findings resolved and all
+  required CI green, including the final PR gate. The managed source
+  worktree is reconciled; both parent plans remain Active.
+- The final 288-case bounded packet qualifies protected synthetic capture,
+  actual acquisition-to-position binding, original receipt recovery and
+  no-resend readback/handled progress. It does not qualify live providers,
+  installed serving, native Windows or echo coverage.
+- Re-read the canonical Plan/Validation and continue the first B3 evidence
+  leaf: original protected response versions and exact interest-specific
+  comment echo classification, preserving other interests and mixed or
+  unproven intermediate input. Missing vote attribution remains unavailable.
+  B3's full exit, A2, A3 and all broader acceptance remain unresolved; no
+  runtime installation, provider effect or production adoption is authorized.
 
 ### 2026-11-05 - Realize protected original-position feedback
 
