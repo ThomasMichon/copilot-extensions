@@ -3,6 +3,18 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-04 - Two reusable hygiene and finite scrub-disposition contracts](<journal/2026/11.04 hygiene-disposition-contracts.md>)
+
+- [2026-11-04 - Two terminal allocation and general reclamation contracts](<journal/2026/11.04 terminal-reclamation-boundaries-contracts.md>)
+
+- [2026-11-04 - Two exact-baton and original contention contracts](<journal/2026/11.04 handoff-resolution-contention-contracts.md>)
+
+- [2026-11-04 - Two Windows activation and persisted child-start diagnostics contracts](<journal/2026/11.04 startup-activation-diagnostics-contracts.md>)
+
+- [2026-11-04 - Two provider-account and read-only prerequisite contracts](<journal/2026/11.04 provider-account-boundaries-contracts.md>)
+
+- [2026-11-04 - Two SSH transport and absolute bind-policy contracts](<journal/2026/11.04 ssh-transport-boundaries-contracts.md>)
+
 - [2026-11-04 - Two existing-queue selection and long-slot contracts](<journal/2026/11.04 queue-selection-contracts.md>)
 
 - [2026-11-04 - One incremental-pipeline planning and consumer contract](<journal/2026/11.04 incremental-pipeline-contract.md>)

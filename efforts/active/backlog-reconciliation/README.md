@@ -231,6 +231,34 @@ checkpoint nor author eligibility, holds, requirements or source/resource custod
 
 ### Phase 2 - Continuing reconciliation
 
+The thirteen-contract cutover/recovery/update research delta merged in #10573
+after genuine current-head approval, resolved feedback and green required
+checks. All seventeen actual merged bodies equal the reviewed head; the
+[delivery journal](<journal/2026/11.04 queue-selection-contracts.md>) retains
+the corrected cold-module and same-claim boundaries. Two equal complete
+19:15 PST metadata-only scans show 1,009 whole open, 280 above 729:
+one eligible metadata-only arrival, no departure or campaign closure credit.
+Continue weighted-graph research and independent publication; no acceptance,
+claim release beyond the finalized publication child, or rollout follows.
+
+The [handoff resolution/contention](handoff-resolution-contention-cohort.md),
+[terminal reclamation](terminal-reclamation-boundaries-cohort.md) and
+[hygiene/disposition](hygiene-disposition-cohort.md) studies preserve six
+whole originals, 23 texts and eighteen relations: sixteen noncompletion
+comparisons and two protected exclusions. Exact existing-baton routing,
+original workload retesting, complete claim/custodian acceptance and
+reusable hygiene versus finite scrub disposition retain their scope and
+owners. All six originals remain OPEN.
+
+The [SSH transport](ssh-transport-boundaries-cohort.md),
+[provider-account](provider-account-boundaries-cohort.md) and
+[activation/diagnostics](startup-activation-diagnostics-cohort.md) studies
+preserve six whole originals, 21 texts and eighteen relations: fifteen
+noncompletion comparisons and three protected exclusions. Inherited finite
+families, absolute bind policy, delivered account/recovery credit and
+remaining provider, native-task and child-output gates retain their
+actual scope and owners. All six originals remain OPEN.
+
 The [Windows update](windows-update-cohort.md),
 [incremental pipeline](incremental-pipeline-cohort.md) and
 [queue selection](queue-selection-cohort.md) studies preserve six whole
@@ -1029,6 +1057,24 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [handoff](handoff-resolution-contention-cohort.md),
+[reclamation](terminal-reclamation-boundaries-cohort.md) and
+[hygiene](hygiene-disposition-cohort.md) cores retain original alternatives,
+cause-preserving failures, loaded-foreground confirmation, all nine general
+claim rows and source-specific complete-custodian acceptance, configured
+current-tree evidence and reviewed disposition. Bounded source credit and
+generated releases do not supply whole acceptance, removal or history-
+rewrite authority; protected sources remain excluded.
+
+The [SSH](ssh-transport-boundaries-cohort.md),
+[account](provider-account-boundaries-cohort.md) and
+[activation](startup-activation-diagnostics-cohort.md) cores retain each
+inherited scope/custody/readback, original policy reconciliation, read-only
+account prerequisite, intended Windows task mode and authoritative bounded
+redacted child diagnostics. Message/description comparisons do not supply
+source, native, receiving or parent acceptance; no authentication, transport
+probe, task repair or session recreation is authorized by this research.
 
 The [Windows](windows-update-cohort.md),
 [incremental](incremental-pipeline-cohort.md) and
