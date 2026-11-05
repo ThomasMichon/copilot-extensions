@@ -19,7 +19,6 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Embody Session State](active/embody-session-state/README.md) | Draft; truthful stdio receipt and optional bounded native-session observation | #10745; preserves launch, prompt, restart and maintenance owners; no rollout |
 | [Portable Bridge Receiving Support](active/portable-bridge-receiving-support/README.md) | Active; ACP source merged, canonical mux/driver composition next | #10636; canonical policy, Session Host, remote-driver and Manager launch composition; existing owners retained, no guest-suite upgrade or rollout |
 | [MCP Session Generation Handover](active/mcp-session-generation-handover/README.md) | Active; incoming-publication correction first, full handover qualification open | #10652/#6389 incoming readiness and fresh execution; #10653 protected retirement; #10486 session-preserving reattachment; existing owners retained |
 | [Installer Upgrade Recovery](active/installer-upgrade-recovery/README.md) | Draft; priority source/upgrade-acceptance workstream, reviewed plan before implementation | #10377; latest explicit entry must recover affected prior footprints; existing entry, sequencing, construction and lifecycle owners retained; no rollout |
@@ -169,6 +168,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Embody Session State](2026/11/05%20embody-session-state/README.md) | Done for source scope; truthful native-state receipts and optional bounded observation merged in #10749 after review and required CI | #10745 retains archive, focus/worktree and issue settlement; normal promotion #3336 and authorized adoption separate, no rollout |
 | [Compatible Packages and Session Resume](2026/11/05%20compatible-packages-and-session-resume/README.md) | Done for source scope; package admission and resume defaults merged in #10673 | #10657; normal release #3336 and authorized adoption separate; no rollout or live shutdown |
 | [Managed Session Activation](2026/11/05%20managed-session-activation/README.md) | Done for source scope; passive admission, scoped positive reuse and automatic consumer gates merged in #10589 after review and required CI | #10564 retains archival-PR, issue, source-worktree and agenda settlement; normal promotion and authorized adoption separate, no installed rollout |
 | [Responsive Codespace Admission](2026/11/05%20responsive-codespace-admission/README.md) | Done for source scope; responsive provider operations, cancellation/restart custody and terminal cleanup merged in #10622 after approval and required CI | #10601; normal promotion #3336 and installed acceptance separate; next source objective #10636, no live effects or rollout |
