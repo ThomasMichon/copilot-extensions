@@ -88,7 +88,8 @@ keyed Bridge messages were observed consumed. A third waiting helper blocked
 sequential restoration despite an interactive original CLI. That report's
 explicitly approved helper stop preserved the CLI/mux; the CLI was already
 working, so no additional prompt or seed outcome was inferred. Retain
-head-of-line blocking across independent restoration attempts, but do not
+the requirement to avoid head-of-line blocking across independent restoration
+attempts, but do not
 execute historical approval. #9395's finite POSIX transport, #9321's copied
 reader and #9543's monitor-restart reporting do not finish the whole consumer
 contract. #6600's execution custody, original intent and uncertain delivery
