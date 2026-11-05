@@ -1388,7 +1388,9 @@ def worktree_id_from_mux_session(
     return index.get(session_name) or session_name[len("wt-"):]
 
 
-def has_mux_session(worktree_id: str, *, strict: bool = False) -> bool:
+def has_mux_session(
+    worktree_id: str, *, strict: bool = False, timeout: float = 5,
+) -> bool:
     """Probe mux presence; strict callers retain unavailable evidence."""
     import subprocess
     from agent_procutil import no_window_kwargs
@@ -1399,10 +1401,10 @@ def has_mux_session(worktree_id: str, *, strict: bool = False) -> bool:
     else:
         cmd = ["tmux", "has-session", "-t", f"={sess_name}"]
     try:
-        result = subprocess.run(cmd, capture_output=True, timeout=5, **no_window_kwargs())
+        result = subprocess.run(cmd, capture_output=True, timeout=timeout, **no_window_kwargs())
         if strict:
             from .mux_list_result import confirmed_has_session
-            return confirmed_has_session(sess_name, result)
+            return confirmed_has_session(sess_name, result, binary=cmd[0])
         return result.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         if strict:

@@ -1,6 +1,7 @@
 """Mux process CWD is independent from the selected pane worktree."""
 
 from pathlib import Path
+import os
 import subprocess
 
 import pytest
@@ -41,6 +42,13 @@ def test_mux_creation_keeps_process_home_separate_from_pane(
                         lambda token: tmp_path / "receipt")
     monkeypatch.setattr(pane_lifecycle, "_wait_for_launch_receipt",
                         lambda *a, **k: (True, "launching"))
+    nesting_keys = (
+        "TMUX", "TMUX_PANE", "PSMUX_SESSION", "PSMUX_TARGET_SESSION",
+        "PSMUX_CLAUDE_TEAMMATE_MODE",
+    )
+    for key in nesting_keys:
+        monkeypatch.setenv(key, "parent-pane")
+    monkeypatch.setenv("FIXTURE_PRESERVED", "two words")
     expected = [
         "psmux", "new-window" if kind.endswith("window") else "new-session",
         "-c", selected, "child", "two words",
@@ -72,4 +80,11 @@ def test_mux_creation_keeps_process_home_separate_from_pane(
     assert directories == [selected]
     assert seen[0][0] == expected
     assert seen[0][1].get("cwd") == (str(home) if system == "Windows" else None)
+    if system == "Windows" and not kind.endswith("window"):
+        environment = seen[0][1]["env"]
+        assert not set(nesting_keys) & environment.keys()
+        assert environment["FIXTURE_PRESERVED"] == "two words"
+    else:
+        assert seen[0][1].get("env") is None
+    assert all(os.environ[key] == "parent-pane" for key in nesting_keys)
     assert Path.cwd() == tmp_path

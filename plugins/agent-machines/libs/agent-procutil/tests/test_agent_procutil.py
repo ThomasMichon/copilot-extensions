@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import nullcontext
 import ctypes
 import os
 from pathlib import Path
@@ -700,8 +701,11 @@ def _access_denied() -> OSError:
 @pytest.fixture()
 def fake_popen(monkeypatch, tmp_path):
     from agent_procutil import daemon, daemon_broker
-    from agent_procutil import _daemon_instance_store
+    from agent_procutil import _daemon_instance_store, _job_scopes
     monkeypatch.setattr(_daemon_instance_store, "bind_process", lambda *_: None)
+    monkeypatch.setattr(
+        _job_scopes, "query_scopes", lambda environment: nullcontext(lambda handle: None),
+    )
     from agent_procutil.daemon_instances import DaemonInstanceSpec
     original = pu.spawn_daemon
 
@@ -738,6 +742,23 @@ def test_spawn_daemon_requires_absolute_cwd(tmp_path, fake_popen, bad):
 def test_spawn_daemon_rejects_missing_cwd(tmp_path, fake_popen):
     with pytest.raises(ValueError, match="does not exist"):
         pu.spawn_daemon(["x"], cwd=tmp_path / "gone", log_path=tmp_path / "d.log")
+    assert fake_popen.calls == []
+
+
+@pytest.mark.parametrize("failure", ["cwd", "log"])
+def test_spawn_daemon_attributes_definite_precreation_failure(tmp_path, fake_popen, failure):
+    log = tmp_path / "host.log"
+    if failure == "log":
+        log.mkdir()
+    with pytest.raises((ValueError, IsADirectoryError, PermissionError)) as caught:
+        pu.spawn_daemon(
+            [sys.executable, "-c", "pass"],
+            cwd=tmp_path / "missing" if failure == "cwd" else tmp_path,
+            log_path=log,
+        )
+    assert caught.value.process_created is False
+    assert caught.value.cleanup_confirmed is True
+    assert caught.value.admission_sent is False
     assert fake_popen.calls == []
 
 

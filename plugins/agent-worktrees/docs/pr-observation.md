@@ -62,6 +62,14 @@ starts a fresh acquisition scope, even inside a resident configuration cache.
 Credentials and provider responses are not cached by that scope. Cursor and
 polling-wait dispatch are unchanged; reduced discovery work does not guarantee
 a successful read within a caller's deadline.
+Canonical explicit `pr-watch snapshot/status/threads <repo> <number>` calls
+without a project override enter that same handler before loading the root
+lifecycle command surface. Explicit-project calls retain the ordinary front
+door and skip only the unrelated deferred command cluster for these reads.
+Implicit targets, aliases, cursor, waits, remediation and subscription commands
+retain their existing dispatch. No credential, provider response or target policy
+is omitted, and the caller's timeout and honest incomplete/error outcomes remain
+unchanged. Startup work reduction is not installed or tail-latency qualification.
 The CLI front door admits `pr-watch snapshot/status/threads` and explicit
 `pr-status --repo ... --pr ...` in that context; tracked status, durable waits
 and publication retain their project/worktree requirements.

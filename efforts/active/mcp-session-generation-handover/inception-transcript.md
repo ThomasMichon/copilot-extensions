@@ -27,3 +27,13 @@ replaced to preserve their sessions. The clarification makes reattachment an
 acceptance requirement. The coordinator's proposed phases, contract analysis,
 tests and legacy adoption handling are marked agent-recommended in the effort;
 they are not additional operator grants.
+
+## 2026-11-04 23:50 - Architecture reconciliation
+
+> Right. File necessary bugs and correct existing efforts to reflect this architecture, which should already be the north-star
+
+The agent-recommended reconciliation applies the existing authoritative-runtime-
+replacement contract: independently qualify and land incoming publication first;
+outgoing recovery/cleanup and full adopted-client reattachment are separate
+outcomes, not incoming prerequisites. Reattachment remains required work; this
+does not substitute old-host draining or close whole-effort validation.

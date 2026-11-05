@@ -262,13 +262,13 @@ if __name__=="__main__":
 
 
 @contextmanager
-def resident_join(root: Path, monkeypatch, *, with_agenda: bool = False):
+def resident_join(root: Path, monkeypatch, *, with_agenda: bool = False, clock_origin: float = 0):
     """Actual record projection -> resident -> owning CLI, with private discovery."""
     with ExitStack() as cleanup:
-        yield from _resident_join(root, monkeypatch, cleanup, with_agenda=with_agenda)
+        yield from _resident_join(root, monkeypatch, cleanup, with_agenda=with_agenda, clock_origin=clock_origin)
 
 
-def _resident_join(root: Path, monkeypatch, cleanup: ExitStack, *, with_agenda: bool):
+def _resident_join(root: Path, monkeypatch, cleanup: ExitStack, *, with_agenda: bool, clock_origin: float):
     import importlib
     import os
     from threading import Event
@@ -336,7 +336,7 @@ def _resident_join(root: Path, monkeypatch, cleanup: ExitStack, *, with_agenda: 
     def project(at: float) -> dict:
         loaded = tracking.load_record(record_path)
         rows = current.materialize(
-            [loaded], serialize=core._worktree_to_dict, observed_at=at,
+            [loaded], serialize=core._worktree_to_dict, observed_at=clock_origin + at,
             state_map={}, mux_map={}, session_ctx=None, bare_orphan_wts=set(), bridge_live_wts=set(),
         )
         assert len(rows) == 1
@@ -357,7 +357,7 @@ def _resident_join(root: Path, monkeypatch, cleanup: ExitStack, *, with_agenda: 
     }
     assert owner.observation_read(selection)["error"]["code"] == "unready"
     first = project(1)
-    owner.publish("example", [first], observed_at=1)
+    owner.publish("example", [first], observed_at=clock_origin + 1)
     actions, streams, stages, failures = [], [], [], []
 
     def mark(name: str) -> None:
@@ -383,7 +383,7 @@ def _resident_join(root: Path, monkeypatch, cleanup: ExitStack, *, with_agenda: 
         loaded.effort_revision += 1
         tracking.save_record(loaded, record_path)
         row = project(at)
-        owner.publish("example", [row], observed_at=at)
+        owner.publish("example", [row], observed_at=clock_origin + at)
         return row
 
     publish("Warmup slice", 2)

@@ -33,10 +33,12 @@ def root_binding(name: str) -> tuple[str, str]:
     return _ROOTS.get(name, (name.upper().replace("-", "_") + "_HOME", "." + name))
 
 
-def install_callbacks(name: str) -> tuple[list[str] | None, list[str] | None]:
+def install_callbacks(name: str, *, extras=()) -> tuple[list[str] | None, list[str] | None]:
     if name == "worktree-manager":
         return [], []
-    if name in {"agent-mcp", "agent-worktrees", "agent-pull-requests-service"}:
+    if name in {"agent-mcp", "agent-worktrees", "agent-pull-requests-service"} or (
+        name == "fleet-manager" and "gateway-host" in extras
+    ):
         return ["__source-setup"], ["__source-start"]
     if name == "agent-logger":
         return ["__source-setup"], []

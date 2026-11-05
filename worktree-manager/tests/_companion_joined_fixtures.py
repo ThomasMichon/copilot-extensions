@@ -19,10 +19,12 @@ from _worktree_timeline_fixtures import resident_join
 
 
 @contextmanager
-def managed_join(root: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, Any]]:
+def managed_join(
+    root: Path, monkeypatch: pytest.MonkeyPatch, *, clock_origin: float = 0,
+) -> Iterator[dict[str, Any]]:
     """Share the existing three-owner setup without replacing its production boundaries."""
     root.mkdir()
-    with resident_join(root, monkeypatch, with_agenda=True) as peer:
+    with resident_join(root, monkeypatch, with_agenda=True, clock_origin=clock_origin) as peer:
         config = importlib.import_module("agent_worktrees.config")
         project_state = importlib.import_module("agent_worktrees.project_state")
         placement = importlib.import_module("agent_worktrees.worktree_data_store")
@@ -77,6 +79,7 @@ def managed_join(root: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[s
                 worktree={**peer["row"], "repo": "example", "path": str(checkout)},
                 sessions=[{"id": "head-a", "is_head": True}],
                 bundle={"facts": {"claims": {"value": {"owner_ref": OWNER}, "confirmed": True}}},
+                attention_error=None,
             )
 
         monkeypatch.setattr(companion, "_load_current_worktree", lambda *args, **kwargs: data())
