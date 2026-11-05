@@ -282,10 +282,12 @@ _Operator-required outcome; agent-recommended slices and validation._
   Existing normalized ADO load/sync acquisition feeds the explicitly enabled
   journal after confirmed cache publication (#10405); native observation and
   standalone-host adoption remain distinct prerequisites.
-  Exact native target-tip metadata merged in #10599. Review the bounded
+  Exact native target-tip metadata merged in #10599. The bounded
   [existing-owner native workspace host](native-workspace-host-slice.md)
-  before its runtime realization; thin watch metadata is not full workspace
-  acquisition or serving adoption.
+  contract merged in #10602. Its optional source adapter composes the existing
+  finite exporter, cache and journal; thin watch metadata alone is not full
+  workspace acquisition. Operational configuration, installed/provider/shadow
+  qualification and the remaining P1/P2 acceptance remain separate gates.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -923,6 +925,27 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-04 - Realize the opt-in native read-only host slice
+
+- The native-host contract merged in #10602 before implementation. Its finite
+  source adapter retains the exact exporter's capabilities and native profile,
+  actual canonical scope/principal checks, partial sections, shared deadline,
+  complete cleanup custody, existing generation CAS and journal transaction.
+- Standalone configuration binds only existing admitted caller/target routes
+  and their typed observation credential owner. Default watch-only hosting is
+  unchanged. Fresh explicit provisioning selects the existing v3/cache layout;
+  serving validates retained state under the writer and never migrates it.
+- The affected source packet passed 21 native-adapter/exporter, 143
+  workspace/journal/replay/lifecycle and 63 standalone cases, with bounded
+  cleanup verified. Strict service typing passes Linux and Windows analysis.
+  Actual process boundaries and the default installed TLS/PoP fixture retain
+  synthetic provider inputs; they do not qualify a live native/provider host.
+- These controls close a source prerequisite, not the full P1/P2/P3 gate.
+  Shared selection/IO, durable attention/handled semantics, coordinated
+  retention, three-provider qualification, installed adoption, container and
+  separately authorized shadow acceptance remain open. No production service,
+  credential, backend mutation or Dispatch authority changes.
 
 ### 2026-11-04 - Recover publication and continue existing-host integration
 

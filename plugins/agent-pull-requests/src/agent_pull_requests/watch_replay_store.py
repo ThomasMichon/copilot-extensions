@@ -358,8 +358,10 @@ class ReplayStore:
             return action
         return self._review_transaction(record, expires_at=expires_at, checkpoint=checkpoint)
 
-    def provision(self) -> None:
+    def provision(self, *, conversations: bool = False) -> None:
         """Explicit first creation; never replace existing or corrupt state."""
+        if type(conversations) is not bool:
+            raise ValueError("explicit fresh conversation layout selection required")
         self.root.mkdir(parents=True, exist_ok=True)
         with self._lock():
             if self.path.exists() or self.path.is_symlink():
@@ -367,7 +369,22 @@ class ReplayStore:
             core = WatchReplay(
                 self.namespace, state=None, commit=lambda _state: None, clock=self.clock,
             )
-            _atomic_write_json(self.path, self._encode(core.snapshot()))
+            document = self._encode(core.snapshot())
+            if conversations:
+                from .conversation_journal import ConversationJournal
+                document = {
+                    "schema": OWNER_SCHEMA, "version": 3, "namespace": self.namespace,
+                    "service": self.service_identity.document() if self.service_identity else None,
+                    "replay": core.snapshot(), "reviews": [],
+                    "conversations": ConversationJournal().snapshot(),
+                    "capacities": {
+                        "replay_bytes": 64 * 1024 * 1024,
+                        "review_bytes": 64 * 1024 * 1024, "receipt_bytes": 4096,
+                        "conversation_bytes": 8 * 1024 * 1024,
+                    },
+                }
+                self._validate_owner(document)
+            _atomic_write_json(self.path, document)
 
     def check_current(self, expires_at: int, checkpoint: Callable[[], None] | None) -> None:
         """Check the embedding owner's current authority, including between reads."""

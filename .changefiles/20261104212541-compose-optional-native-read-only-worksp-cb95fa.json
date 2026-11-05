@@ -1,0 +1,9 @@
+{
+  "comment": "Compose optional native read-only workspaces with the existing standalone host, cache and journal.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

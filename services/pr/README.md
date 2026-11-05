@@ -142,6 +142,92 @@ start. Remote request/replay/ACK payloads and the native callback store are
 unchanged. A supported image update must retain this storage contract as well
 as separately proving writer transfer and data compatibility.
 
+### Optional native read-only workspaces
+
+The [reviewed native-host slice](../../efforts/active/durable-pr-watch-delegation/native-workspace-host-slice.md)
+adds one explicit `workspaces` configuration object. Its absence preserves the
+watch-only configuration and volume. For an already authorized ADO observation
+binding, the launch owner may add:
+
+```json
+{
+  "workspaces": {
+    "bindings": [
+      {
+        "principal": "caller-a",
+        "target": "repository-a",
+        "command": [
+          "/usr/local/bin/python", "-I", "-m",
+          "agent_worktrees.pr_review_evidence_cli"
+        ],
+        "scope": {
+          "provider": "azure-devops",
+          "endpoint": "https://dev.azure.com/example",
+          "project_id": "project-id",
+          "repository_id": "repository-id",
+          "principal_id": "provider-authorized-user-id"
+        }
+      }
+    ],
+    "cache_bytes": 67108864,
+    "cache_generations": 128
+  }
+}
+```
+
+This is a partial configuration example, not a credential or enrollment grant.
+The principal/target must already select an admitted `bindings` entry. Its
+account/repository select the existing observation credential command, which
+must actually return an ADO `observe` binding for that endpoint/repository.
+Canonical project/repository IDs and `connectionData.authorizedUser.id` must
+match actual native evidence. Configuring another principal cannot relabel a
+credential. Endpoint, commands, credentials and state roots are never remote
+request inputs. Unknown/duplicate entries refuse.
+
+The absolute immutable command prefix must select an existing native
+[review-evidence exporter](../../plugins/agent-worktrees/docs/pr-review-evidence.md),
+not a shell/batch shim, another installation or ambient CLI auth. Executing
+capability discovery is shared once per selected host reader; each explicit
+load/sync performs one finite export with the remaining operation budget.
+Missing/incompatible support makes this optional read unavailable, not a
+fallback or a reason to disable legacy watches. Acquisition stays
+`configured_native_provider`, separately advertised as `read_acquisition`;
+it is never relabeled `owner_executed_review_evidence/v1`.
+
+The existing authenticated `/v2/review/<target>/...` route provides load, sync,
+lookup/chunk materialization, inspect and body-free conversation events. No
+write-context factory is configured: submission, feedback/handled writes,
+merge/rebase/CI actions and Dispatch emission remain unavailable.
+Workspace/conversation wire-v1 readers and the strict watch capability response
+remain compatible. An older host rejects this optional configuration rather
+than silently enforcing it; no old command is deprecated.
+
+For this opt-in configuration, **fresh** `provision` selects the existing
+owner-store v3 envelope atomically and creates its bounded `review-cache` child.
+The root must be dedicated and empty. Cache capacity is explicit: 64 KiB..1 GiB
+and 1..10,000 retained generations. A partial provisioning failure retains its
+files and refuses blind reprovisioning. `serve` checks the existing v3 journal
+and cache descriptor under its writer before connecting; it never creates,
+adopts, repairs or downgrades either. Existing watch-only volumes require the
+separately admitted storage/lifecycle migration, not merely this new config.
+Old readers must refuse unsupported layouts without rewriting them.
+
+One request/service deadline covers discovery, export, decoding, cache CAS and
+journal commit. Withdrawal closes the request and prevents subsequent work.
+The existing synchronous native primitive may still need its bounded execution
+and actual cleanup; the original request/drain thread and service writer remain
+held throughout, including retry of an unconfirmed cleanup. A bounded drain
+timeout is not completed child cleanup or proof that a disk commit failed.
+Cache publication and journal commit remain separate: after an ambiguous error,
+lookup/materialize the retained generation and read the journal's existing
+cursor before deciding what remains. Neither a cache conflict nor a lost
+response authorizes an automatic re-read or a new operation identity.
+
+Focused source tests exercise real native/exporter/credential processes and
+the existing Gateway/disk boundary using synthetic provider inputs. Those are
+not installed/live-provider, retained-container or shadow acceptance. Source
+availability does not authorize configuration, provisioning or service rollout.
+
 An ambiguous durable request reconciles its original request/registration/event
 identity; disconnect or revocation is not proof that an in-flight commit failed.
 The native snapshot command retains its existing bounded execution contract.

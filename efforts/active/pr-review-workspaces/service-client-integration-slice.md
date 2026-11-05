@@ -18,8 +18,12 @@ The service embedding owner supplies authorized read bindings and actual pinned
 write-context factories through its current pipeline. Remote request labels,
 stored manifests, callbacks' type names and capability metadata are not grants.
 No arbitrary callback/credential configuration is added to the standalone
-`services/pr` launcher. Its current deployment recipe therefore does not advertise
-workspace support merely because a newer library is installed.
+`services/pr` launcher. Its separately reviewed
+[native read-only host](../durable-pr-watch-delegation/native-workspace-host-slice.md)
+can explicitly select the existing exporter and observation credential owner;
+it does not manufacture protected-owner callbacks or submission authority.
+The default deployment recipe does not advertise workspace support merely because
+a newer library is installed.
 
 The first integration supports finite normalized load, section-aware comparison
 after an explicit full refresh, immutable generation lookup/materialization,
