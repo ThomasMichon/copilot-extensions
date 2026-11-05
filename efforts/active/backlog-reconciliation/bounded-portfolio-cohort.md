@@ -28,9 +28,11 @@ leaving 83.891 seconds. That is aggregate exhaustion, not an individual
 assertion failure.
 
 Preserve the existing selection, item/group/plugin/job caps, cleanup and
-health conditions. Isolating already-selected independent cold modules,
-optionally in a native matrix, is an allowed direction rather than a new
-required implementation. No production timeout or subminute target change
+health conditions. Move the already-selected independent cold modules into
+isolated optional native matrix packets: isolation and scheduling repair
+are required by the original; optional describes the native lane, not
+whether to fix aggregate exhaustion. This study does not implement that
+required change. No production timeout or subminute target change
 follows. #9455 includes this work; inclusion is not whole acceptance.
 
 ## #9568 - Separate consumer, retention and removal scheduling
