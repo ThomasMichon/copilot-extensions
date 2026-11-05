@@ -136,3 +136,9 @@ failure behavior, cache invalidation and mixed payload/runtime paths.
 - Install contract, version/docs consistency, focused Python lint, JavaScript syntax and all 40 admitted strict typing projects passed. The installer declaration generator changed only this plugin's human-output declaration.
 - Fresh temporary-profile checks exercise first-touch behavior without installing anything. Git Bash consumers were exercised on Windows; native Linux/macOS, a live Copilot process and an external venue were not available in this local Windows source lane. SDK transport is an explicit test double around the actual extension and Python policy modules, not installed activation evidence.
 - Implementation review, required CI and canonical completion/archival remain open. No runtime update, service restart or fleet rollout has occurred.
+
+### 2026-11-04 - Required unit-source admission correction
+
+- Required PR CI refused the changed status-monitor source before unit execution because its positively admitted digest still described the prior bytes.
+- Audited the source cohort: only `status_monitor_cli.py` differed from the declared inputs. Refreshed that one binding; node inventory, coverage targets, effect restrictions and execution budgets are unchanged.
+- Replaying the admitted packet in an isolated tooling environment before updating the implementation head. Local Windows-native results are separate from required Linux PR evidence.
