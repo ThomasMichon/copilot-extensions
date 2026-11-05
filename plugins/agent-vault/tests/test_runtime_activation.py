@@ -139,7 +139,7 @@ def test_actual_payload_reader_uses_bundled_sdk_without_site_packages(tmp_path):
     assert json.loads(result.stdout)["state"] == "configured"
 
 
-@pytest.mark.parametrize("layout", ["retained", "application", "deployed"])
+@pytest.mark.parametrize("layout", ["retained", "application", "deployed", "mixed-owner"])
 def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, layout):
     import venv
 
@@ -159,7 +159,11 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, lay
     packages = {}
     environments = {}
     for name, slot in slots.items():
-        environment = slot / ".venv" if name == "agent-vault" and layout == "application" else slot
+        nested = (
+            name == "agent-vault" and layout == "application"
+            or name == "agent-worktrees" and layout == "mixed-owner"
+        )
+        environment = slot / ".venv" if nested else slot
         environments[name] = environment
         venv.EnvBuilder(with_pip=False).create(environment)
         packages[name] = (
@@ -179,7 +183,7 @@ def test_installed_reader_resolves_owner_without_payload_or_source(tmp_path, lay
             Path(package.__file__).parent, packages["agent-vault"] / package.__name__,
             ignore=shutil.ignore_patterns("__pycache__"),
         )
-    if layout != "deployed":
+    if layout not in ("deployed", "mixed-owner"):
         bootstrap = slots["agent-vault"] / ".runtime-bootstrap"
         bootstrap.mkdir()
         for source in (PLUGIN / "scripts").glob("versioned_runtime*.py"):
