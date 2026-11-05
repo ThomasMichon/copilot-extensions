@@ -231,6 +231,35 @@ checkpoint nor author eligibility, holds, requirements or source/resource custod
 
 ### Phase 2 - Continuing reconciliation
 
+The twelve-contract build/hosting/incident research delta merged in #10580
+after genuine exact-head approval with no active findings and green required
+checks. All seventeen actual merged bodies equal the reviewed head; the
+[delivery journal](<journal/2026/11.04 teardown-finalized-wip-contracts.md>)
+records the finalized retained child and continuing parent gate. Two equal
+complete 19:42 PST metadata-only scans remain 1,009 whole open, 280 above
+729, with no arrivals, departures or new campaign closure credit.
+Continue the independent eleven-contract publication and graph research;
+no original acceptance, older-claim release or installed change follows.
+
+The [steering/abandon](steering-abandon-guards-cohort.md),
+[reservation/startup](reservation-container-startup-cohort.md) and
+[anchor/observation](anchor-observation-boundaries-cohort.md) studies preserve
+six originals through twenty-three whole texts and eighteen noncompletion
+relations. Changed #7944 was freshly read without old-text reuse. Preserve
+route alternatives, both optional atomic guards, complete cleanup/startup
+incidents, whole anchor/capture alternatives and current scoped observation
+claims; all six originals remain OPEN.
+
+The [goal/cleanup](goal-cleanup-reconciliation-cohort.md),
+[progress/readiness](progress-readiness-telemetry-cohort.md) and
+[obligation/adopter closeout](obligation-adopter-closeout-cohort.md) studies
+preserve five admitted originals through eighteen whole texts and fifteen
+relations: fourteen noncompletion comparisons and one protected exclusion.
+One related original is wholly withheld before rendering. Existing probe/
+nudge/documentation gains, two distinct recovery cases, continuous telemetry,
+assigned-only closeout and the independent Active adopter audit retain their
+actual scope and custody; all five admitted originals remain OPEN.
+
 The twelve-contract transport/custody/hygiene research delta merged in #10578
 after genuine exact-head approval with no active findings and green required
 checks. All seventeen actual merged bodies equal the reviewed head; the
@@ -1090,6 +1119,23 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [steering/guards](steering-abandon-guards-cohort.md),
+[release/startup](reservation-container-startup-cohort.md) and
+[anchor/observation](anchor-observation-boundaries-cohort.md) cores retain
+stored-versus-applied input, optional atomic guards, exact cleanup identity
+and held tails, four distinct current-path signatures, all six capture rows
+and current R1a/R1b/roster/advisory ownership. A finite static missing-flag
+read is not implementation; scoped gains do not complete native/installed,
+receiver or parent gates, nor impose new all-container qualification.
+
+The [reconciliation](goal-cleanup-reconciliation-cohort.md),
+[progress/readiness](progress-readiness-telemetry-cohort.md) and
+[closeout](obligation-adopter-closeout-cohort.md) cores preserve positive
+death versus unknown, actual-goal acceptance before replay, separate prolonged
+pending-cleanup diagnosis, wake/progress/serving distinctions and exact
+assigned versus released-source custody. Do not invent missing delivered
+documentation, numeric intervals, new native/ACK gates or transfer authority.
 
 The [incident](foreign-worktree-mux-incident-cohort.md),
 [teardown/WIP](teardown-finalized-wip-cohort.md) and
