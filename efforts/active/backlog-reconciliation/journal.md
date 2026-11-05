@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-05 - Ten finite acceptance and closeout contracts](<journal/2026/11.05 finite-acceptance-closeout-contracts.md>)
+
 - [2026-11-05 - Twelve whole consumer and ownership contracts](<journal/2026/11.05 whole-consumer-ownership-contracts.md>)
 
 - [2026-11-05 - Ten live consumer and whole-policy contracts](<journal/2026/11.05 live-consumer-policy-contracts.md>)
