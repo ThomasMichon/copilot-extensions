@@ -70,7 +70,7 @@ real native ownership/context outcome.
 ## Completed-work comparison boundary
 
 One whole immutable message and four actual whole MERGED descriptions provide
-ten bounded noncompletion relations. #10124 implements configuration-gated
+nine bounded noncompletion relations. #10124 implements configuration-gated
 Vault runtime participation, with standalone and custody preservation and
 explicitly no live credential/backend test or rollout. #10113 is its plan;
 #10161 archives that bounded activation source effort and release. An archived
