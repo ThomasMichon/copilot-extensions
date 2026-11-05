@@ -1,0 +1,9 @@
+{
+  "comment": "Propagate native service deployment failures and verify the selected Index serving generation without requiring systemd",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
