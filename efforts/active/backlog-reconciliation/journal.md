@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-05 - Twelve portable lifecycle and independent owner contracts](<journal/2026/11.05 portable-lifecycle-owner-contracts.md>)
+
 - [2026-11-05 - Eight conditional native and read-authority contracts](<journal/2026/11.05 conditional-native-read-authority-contracts.md>)
 
 - [2026-11-05 - Eleven independent owner, policy and observation contracts](<journal/2026/11.05 independent-owner-policy-contracts.md>)
