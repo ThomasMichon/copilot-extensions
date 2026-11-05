@@ -282,6 +282,10 @@ _Operator-required outcome; agent-recommended slices and validation._
   Existing normalized ADO load/sync acquisition feeds the explicitly enabled
   journal after confirmed cache publication (#10405); native observation and
   standalone-host adoption remain distinct prerequisites.
+  Exact native target-tip metadata merged in #10599. Review the bounded
+  [existing-owner native workspace host](native-workspace-host-slice.md)
+  before its runtime realization; thin watch metadata is not full workspace
+  acquisition or serving adoption.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -919,6 +923,26 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-04 - Recover publication and continue existing-host integration
+
+- #10599 merged as `24ce8a9ba2b3fc0d12b206592e63adc65e54b391`
+  after exact-head Copilot approval with no findings and required green CI.
+  The rebased candidate passed 123 native-candidate/ADO/CLI cases and 17
+  decoder/actual-subprocess cases, with cleanup verified.
+- The original managed creation attempt succeeded without local Git,
+  credential or ruleset changes. The selected account had push permission and
+  no effective branch rule prohibited its PR head. GitHub subsequently reported
+  a resolved Git Operations incident consistent with the earlier remote internal
+  errors; it does not establish their request-specific internal root cause.
+- Re-read the parent Plan/Validation and workspace companion after merge.
+  Native metadata alone does not close workspace/principal acquisition or the
+  standalone host. The next reviewed proposal composes the existing finite
+  exporter with the existing service/cache/journal and authenticated route;
+  it does not fabricate a protected-owner callback from configuration.
+- #10408 and #10410 remain open; their broader failing packets are not claimed
+  green. P1/P2, providers, installed adoption, retention, parity and live shadow
+  remain open. No production service or authority changed.
 
 ### 2026-11-04 - Continue native candidate evidence after normalized acquisition
 
