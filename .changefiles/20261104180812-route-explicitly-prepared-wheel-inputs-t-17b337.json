@@ -1,0 +1,9 @@
+{
+  "comment": "Route explicitly prepared wheel inputs through the Worktrees update owner",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

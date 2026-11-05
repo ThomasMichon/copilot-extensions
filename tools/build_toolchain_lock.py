@@ -64,6 +64,7 @@ from public_toolchain_source import (  # noqa: E402
 )
 from seasoned_public_feed import DEFAULT_MIN_AGE_DAYS  # noqa: E402
 from seasoned_uv import DependencyPolicyError, run_uv_install  # noqa: E402
+from installer_marker_environment import MARKER_ENVIRONMENT_QUERY as _MARKER_ENV_QUERY_SCRIPT  # noqa: E402
 
 #: The exact packages a locked build-toolchain venv pins -- every
 #: `pyproject.toml` under `plugins/` and `libs/` uses the same
@@ -283,41 +284,6 @@ def _venv_python_path(venv_dir: Path) -> Path:
     if sys.platform == "win32":
         return venv_dir / "Scripts" / "python.exe"
     return venv_dir / "bin" / "python"
-
-
-#: A stdlib-only script (no third-party imports, since the locked
-#: toolchain venv only ever has `setuptools`/`wheel` installed) that
-#: reports the same keys `packaging.markers.default_environment()` would,
-#: queried by running it THROUGH the locked interpreter itself -- so a
-#: PEP 508 marker evaluates against the actually-locked Python, never
-#: whatever process happens to be running this tool. ``implementation_version``
-#: is deliberately computed from ``sys.implementation.version`` (mirroring
-#: `packaging.markers`' own `format_full_version` helper), NOT
-#: `platform.python_version()` -- they coincide on CPython but diverge on
-#: alternative implementations (e.g. PyPy), where a marker on
-#: `implementation_version` would otherwise silently take the wrong branch.
-_MARKER_ENV_QUERY_SCRIPT = (
-    "import json, os, platform, sys\n"
-    "def _format_full_version(info):\n"
-    "    version = f'{info.major}.{info.minor}.{info.micro}'\n"
-    "    kind = info.releaselevel\n"
-    "    if kind != 'final':\n"
-    "        version += kind[0] + str(info.serial)\n"
-    "    return version\n"
-    "print(json.dumps({\n"
-    "    'implementation_name': sys.implementation.name,\n"
-    "    'implementation_version': _format_full_version(sys.implementation.version),\n"
-    "    'os_name': os.name,\n"
-    "    'platform_machine': platform.machine(),\n"
-    "    'platform_release': platform.release(),\n"
-    "    'platform_system': platform.system(),\n"
-    "    'platform_version': platform.version(),\n"
-    "    'python_full_version': platform.python_version(),\n"
-    "    'platform_python_implementation': platform.python_implementation(),\n"
-    "    'python_version': '.'.join(platform.python_version_tuple()[:2]),\n"
-    "    'sys_platform': sys.platform,\n"
-    "}))\n"
-)
 
 
 def _query_marker_environment(python_exe: Path, *, deadline: float | None = None) -> dict:

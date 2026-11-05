@@ -108,9 +108,14 @@ def test_explicit_native_installation_uses_the_existing_finite_driver(adapter, t
 def test_native_source_installation_retains_selection_through_the_driver(
     adapter, tmp_path, monkeypatch, action,
 ):
+    from agent_worktrees import update_runtime_plan, update_runtime_target
+
+    assert adapter.SOURCE_SELECTION_ENV == update_runtime_plan.WHEEL_SELECTION_ENV
+    assert adapter.SOURCE_SELECTION_ENV == update_runtime_target.WHEEL_SELECTION_ENV
     monkeypatch.setattr(adapter, "_source_digest", lambda payload: "a" * 64)
     monkeypatch.delenv("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", raising=False)
     monkeypatch.delenv("COPILOT_EXTENSIONS_RUNTIME_PUBLICATION", raising=False)
+    monkeypatch.setenv(adapter.SOURCE_SELECTION_ENV, '{"selection":"fixture"}')
     snapshot = tmp_path / "source inputs"
     descriptor = {"kind": "github", "canonical": "github:example/suite", "ref": ""}
     args = _arguments(
@@ -124,6 +129,8 @@ def test_native_source_installation_retains_selection_through_the_driver(
     )
     assert adapter._foreground(args, driver) == 0
     spec, runner = queued[0]
+    assert dict(spec.context)[adapter.SOURCE_SELECTION_ENV] == '{"selection":"fixture"}'
+    assert adapter.SOURCE_SELECTION_ENV in runner.context_keys
     index = spec.argv.index("-InstallSource")
     assert spec.argv[index + 1] == str(snapshot)
     index = runner.argv.index("--install-source")

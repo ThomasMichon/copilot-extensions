@@ -1855,6 +1855,10 @@ new required CI matrix, fleet/role enablement, full portfolio rollout, productio
 data-format compatibility or performance qualification. Companion unit controls
 are Containers' `test_runtime_source_target.py`, Worktrees'
 `test_update_runtime_target.py` and Manager's `test_runtime_source_update.py`.
+Worktrees' prepared wheel-source controls additionally cover packet versioning,
+installed/prepared provider skew, selected profile and completion hashes,
+pre-launch rechecks and native-driver propagation. They do not authenticate a
+bundle or enable automatic selection.
 
 > This is the canonical testing guide. [`AGENTS.md`](AGENTS.md) links here and
 > keeps only a short inline summary; the per-plugin release/versioning rules live

@@ -399,6 +399,28 @@ def _installed_identity(slot: Path) -> dict:
     return json.loads(result.stdout)
 
 
+def _wheel_marker_environment(python: Path) -> dict:
+    from installer_marker_environment import MARKER_ENVIRONMENT_QUERY
+
+    try:
+        environment = {key: value for key, value in os.environ.items()
+                       if key.upper() not in {"PYTHONPATH", "PYTHONHOME"}}
+        result = subprocess.run(
+            [str(python), "-I", "-S", "-B", "-c", MARKER_ENVIRONMENT_QUERY],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8",
+            timeout=30, check=False, env=environment,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        if result.returncode or len(result.stdout) > 16384:
+            raise ValueError("invalid interpreter response")
+        observed = json.loads(result.stdout)
+        if not isinstance(observed, dict):
+            raise ValueError("invalid interpreter response")
+        return observed
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        raise InstallationRefused("Wheel target interpreter probe failed") from error
+
+
 @install_driver.owned
 def install(
     root: Path, plugin: Path, *, payload: Path, uv: Path, base_python: Path,
@@ -409,6 +431,7 @@ def install(
     wheel_inputs: engine.WheelInstallInputs | None = None,
     repair: bool = False,
     source_descriptor: dict | None = None,
+    expected_wheel_selection: dict | None = None,
 ) -> dict:
     if base_python.resolve(strict=True) != Path(sys.executable).resolve():
         raise InstallationRefused("The lifecycle driver must run under the selected base interpreter")
@@ -429,6 +452,11 @@ def install(
         raise InstallationRefused("Source identity changed after frontend runtime selection")
     version = source_identity.runtime_version if source_identity is not None else package_version
     wheel_options = {}
+    wheel_environment = None
+    if expected_wheel_selection is not None and (
+        not isinstance(expected_wheel_selection, dict) or wheel_inputs is None
+    ):
+        raise InstallationRefused("Expected wheel selection requires retained wheel inputs")
     if wheel_inputs is not None:
         if source_identity is None or not isinstance(wheel_inputs, engine.WheelInstallInputs):
             raise InstallationRefused("Closed source wheels require an attributed retained source selection")
@@ -448,6 +476,29 @@ def install(
                 if engine._package_name(package) in receipt["distributions"]
             )),
         }
+        if expected_wheel_selection is not None and (
+            json.dumps(expected_wheel_selection.get("identity"), sort_keys=True)
+            != json.dumps(runtime_source.manifest_fields(source_identity), sort_keys=True)
+            or expected_wheel_selection.get("runtime_version") != version
+            or expected_wheel_selection.get("source_descriptor") != source_descriptor
+            or expected_wheel_selection.get("extras") != []
+            or expected_wheel_selection.get("local_packages") != list(wheel_options["local_packages"])
+            or not isinstance(expected_wheel_selection.get("payload_hash"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", expected_wheel_selection["payload_hash"]) is None
+        ):
+            raise InstallationRefused("Retained wheels differ from the expected source selection")
+        if expected_wheel_selection is not None:
+            target = profile.get("target")
+            wheel_environment = target.get("environment") if isinstance(target, dict) else None
+            if not isinstance(wheel_environment, dict):
+                raise InstallationRefused("Construction interpreter differs from the selected wheel target: missing environment")
+            observed = _wheel_marker_environment(base_python)
+            if observed != wheel_environment:
+                fields = sorted(key for key in observed.keys() | wheel_environment.keys()
+                                if observed.get(key) != wheel_environment.get(key))
+                raise InstallationRefused(
+                    f"Construction interpreter differs from the selected wheel target ({base_python}): {', '.join(fields)}",
+                )
     if repair:
         if wheel_inputs is None:
             raise InstallationRefused("Direct source repair requires complete wheel inputs")
@@ -482,6 +533,17 @@ def install(
                     wait_timeout=wait_timeout, child_timeout=child_timeout,
                     **wheel_options,
                 ))
+                if wheel_inputs is not None:
+                    wheel_inputs.verify()
+                if (
+                    expected_wheel_selection is not None
+                    and candidate.payload_hash != expected_wheel_selection["payload_hash"]
+                ):
+                    raise InstallationRefused("Constructed candidate differs from the expected wheel selection")
+                if wheel_environment is not None:
+                    python = runtime.slot_python(root, candidate.slot.name)
+                    if python is None or _wheel_marker_environment(python) != wheel_environment:
+                        raise InstallationRefused("Candidate interpreter differs from the selected wheel target")
         except engine.HealthRepairRequired:
             if source_identity is None:
                 raise
@@ -491,7 +553,8 @@ def install(
                     wait_timeout=wait_timeout, child_timeout=child_timeout,
                     expected_source_identity=runtime_source.manifest_fields(source_identity),
                     frontend=frontend, recover_adopted_manager=recover_adopted_manager,
-                    wheel_inputs=wheel_inputs, repair=True,
+                    wheel_inputs=wheel_inputs, repair=True, source_descriptor=source_descriptor,
+                    expected_wheel_selection=expected_wheel_selection,
                 )
             import runtime_install_modes as modes
 
@@ -527,7 +590,7 @@ def install(
             if recover_adopted_manager:
                 argv.append("--recover-adopted-manager")
             environment = install_driver.child_environment()
-            for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
+            for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", install_driver.SOURCE_SELECTION_ENV):
                 environment.pop(name, None)
             environment["PYTHONDONTWRITEBYTECODE"] = "1"
             process = subprocess.Popen(
@@ -809,19 +872,27 @@ def main(argv: list[str] | None = None) -> int:
     ) else ("root", "plugin", "payload", "uv", "base_python", "result")
     if any(getattr(arguments, name) is None for name in required):
         parser.error("required arguments: " + ", ".join("--" + name.replace("_", "-") for name in required))
+    expected_selection = os.environ.get(install_driver.SOURCE_SELECTION_ENV)
+    if expected_selection and not arguments.install_source:
+        parser.error("wheel source selection requires --install-source")
     if arguments.install_source:
         if arguments.mode not in ("ordinary", "repair") or any((
             arguments.mode_owner, arguments.settle_slot,
             arguments.inspect_helper_publication, arguments.complete_helper_publication,
         )):
             parser.error("--install-source selects only ordinary installation or independent repair")
-        from install_source import project_inputs
+        from install_source import native_selection, project_inputs
 
         with project_inputs(arguments.install_source, "agent-worktrees") as (selected, wheels):
             if runtime_source.read_source_identity(
                 arguments.plugin, selected.identity.package_version, plugin="agent-worktrees",
             ) != selected.identity:
                 raise InstallationRefused("Invocation payload differs from the selected installation source")
+            wheel_selection = None
+            if expected_selection:
+                wheel_selection = native_selection(selected, wheels)
+                if json.dumps(wheel_selection, sort_keys=True, separators=(",", ":")) != expected_selection:
+                    raise InstallationRefused("Installation wheel selection changed after update planning")
             result = install(
                 arguments.root, selected.payload, payload=arguments.payload,
                 uv=arguments.uv, base_python=arguments.base_python,
@@ -830,6 +901,7 @@ def main(argv: list[str] | None = None) -> int:
                 frontend=arguments.frontend,
                 recover_adopted_manager=arguments.recover_adopted_manager,
                 wheel_inputs=wheels, repair=arguments.mode == "repair",
+                **({"expected_wheel_selection": wheel_selection} if wheel_selection is not None else {}),
                 **({"source_descriptor": selected.source_descriptor}
                    if getattr(selected, "source_descriptor", None) is not None else {}),
             )

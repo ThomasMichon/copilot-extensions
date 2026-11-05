@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
@@ -19,11 +20,12 @@ from .installation_probe import strict_json_object
 
 if TYPE_CHECKING:
     from .update_runtime_plan import RuntimeUpdateStep
-    from .update_runtime_target import SourceRuntimeTarget
+    from .update_runtime_target import SourceRuntimeTarget, SourceWheelTarget
 
 PIN_ENV = "COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN"
 SOURCES_SCHEMA = "copilot-extensions.prepared-runtime-sources"
 SOURCES_CONTRACT = 1
+SOURCES_WHEEL_CONTRACT = 2
 
 
 def parse_sources(raw: str | None) -> dict[str, PreparedRuntimeSource] | None:
@@ -34,21 +36,31 @@ def parse_sources(raw: str | None) -> dict[str, PreparedRuntimeSource] | None:
     if (
         not isinstance(packet, dict) or set(packet) != {"schema", "version", "sources"}
         or packet["schema"] != SOURCES_SCHEMA or type(packet["version"]) is not int
-        or packet["version"] != SOURCES_CONTRACT
+        or packet["version"] not in (SOURCES_CONTRACT, SOURCES_WHEEL_CONTRACT)
         or not isinstance(packet["sources"], dict) or not packet["sources"]
     ):
         raise ValueError("Unsupported prepared-runtime-sources packet")
     sources: dict[str, PreparedRuntimeSource] = {}
     selection: tuple[str, str] | None = None
+    has_wheels = False
     for name, record in packet["sources"].items():
+        keys = set(record) if isinstance(record, dict) else set()
         if (
             not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name)
-            or not isinstance(record, dict) or set(record) != {"payload", "identity"}
+            or not isinstance(record, dict) or not {"payload", "identity"} <= keys
+            or keys - {"payload", "identity", "install_source"}
+            or "install_source" in keys and (
+                packet["version"] != SOURCES_WHEEL_CONTRACT or name != "agent-worktrees"
+                or not isinstance(record["install_source"], str)
+                or not record["install_source"] or not Path(record["install_source"]).is_absolute()
+            )
             or not isinstance(record["payload"], str) or not record["payload"]
             or not Path(record["payload"]).is_absolute()
         ):
             raise ValueError(f"Invalid prepared-runtime-sources entry: {name}")
-        source = PreparedRuntimeSource(Path(record["payload"]), json.dumps(record["identity"]))
+        snapshot = Path(record["install_source"]) if "install_source" in keys else None
+        source = PreparedRuntimeSource(Path(record["payload"]), json.dumps(record["identity"]), snapshot)
+        has_wheels = has_wheels or snapshot is not None
         identity = json.loads(source.identity)["runtime_source"]
         commit, tree = identity.get("source_commit"), identity.get("source_tree")
         if (
@@ -62,6 +74,8 @@ def parse_sources(raw: str | None) -> dict[str, PreparedRuntimeSource] | None:
             raise ValueError("Prepared runtimes must use one exact source commit and tree")
         selection = commit, tree
         sources[name] = source
+    if packet["version"] == SOURCES_WHEEL_CONTRACT and not has_wheels:
+        raise ValueError("Prepared wheel source packet has no wheel selection")
     return sources
 
 
@@ -82,6 +96,7 @@ def check_source_coverage(
 class PreparedRuntimeSource:
     payload: Path
     identity: str
+    install_source: Path | None = None
 
     def __post_init__(self) -> None:
         fields = json.loads(self.identity, object_pairs_hook=strict_json_object)
@@ -99,6 +114,17 @@ class PreparedRuntimeSource:
             raise ValueError("Prepared runtime requires a complete source selection")
         object.__setattr__(self, "payload", self.payload.resolve(strict=True))
         object.__setattr__(self, "identity", json.dumps(fields, sort_keys=True))
+        if self.install_source is not None:
+            path = Path(self.install_source)
+            if not path.is_absolute():
+                raise ValueError("Prepared wheel selection requires an absolute ordinary directory")
+            info = path.lstat()
+            if (
+                not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode)
+                or getattr(info, "st_file_attributes", 0) & 0x400
+            ):
+                raise ValueError("Prepared wheel selection requires an absolute ordinary directory")
+            object.__setattr__(self, "install_source", path.resolve(strict=True))
 
     @property
     def version(self) -> str:
@@ -143,7 +169,7 @@ class PreparedRuntimeSource:
             raise ValueError("Installed payload has no command lifecycle helper")
 
     def deployed_version(
-        self, root: Path, owner: Path, *, target: SourceRuntimeTarget | None = None,
+        self, root: Path, owner: Path, *, target: SourceRuntimeTarget | SourceWheelTarget | None = None,
     ) -> str | None:
         """Only the selected slot and its complete source receipt can be current."""
         path = root / "deploy-manifest.json"
@@ -169,7 +195,13 @@ class PreparedRuntimeSource:
         ):
             return None
         expected_version = target.version if target else self.version
-        if target is not None and manifest.get("runtime_profile") != target.profile:
+        from .update_runtime_target import SourceWheelTarget
+
+        wheel_target = isinstance(target, SourceWheelTarget)
+        if isinstance(target, SourceWheelTarget):
+            if manifest.get("payload_hash") != target.payload_hash:
+                return None
+        elif target is not None and manifest.get("runtime_profile") != target.profile:
             return None
         marker = root / "current-version"
         if marker.is_symlink() or (marker.exists() and not marker.is_file()):
@@ -180,7 +212,7 @@ class PreparedRuntimeSource:
             return None
         if not (
             selected == expected_version
-            or (target is None and re.fullmatch(
+            or ((target is None or wheel_target) and re.fullmatch(
                 re.escape(expected_version) + r"\.repair\.[0-9a-f]{32}", selected,
             ))
         ):
@@ -195,16 +227,34 @@ class PreparedRuntimeSource:
             return None
         hash_arguments: list[str] = []
         if target is not None:
-            from .update_runtime_target import profile_hash
+            if isinstance(target, SourceWheelTarget):
+                digest = target.payload_hash
+            else:
+                from .update_runtime_target import profile_hash
 
-            digest = profile_hash(slot, target, fields["runtime_source"])
+                digest = profile_hash(slot, target, fields["runtime_source"])
             if digest is None:
                 return None
             hash_arguments = ["--expect-hash", digest]
+        command = [
+            sys.executable, "-I", "-B", str(owner / "scripts" / "versioned_runtime.py"),
+            "--root", str(root), "--json", "is-complete", selected, *hash_arguments,
+        ]
+        if isinstance(target, SourceWheelTarget):
+            probe = (
+                "import json,sys; from pathlib import Path; sys.path.insert(0,sys.argv[1]); "
+                "import versioned_runtime as r; root=Path(sys.argv[2]); version=sys.argv[3]; "
+                "ok=r.is_complete(root,version,expect_hash=sys.argv[4]) and "
+                "r.slot_python(root,version) is not None; "
+                "print(json.dumps({'version':version,'complete':ok})); sys.exit(0 if ok else 1)"
+            )
+            command = [
+                sys.executable, "-I", "-B", "-c", probe, str(owner / "scripts"),
+                str(root), selected, target.payload_hash,
+            ]
         try:
             result = subprocess.run(
-                [sys.executable, "-I", "-B", str(owner / "scripts" / "versioned_runtime.py"),
-                 "--root", str(root), "--json", "is-complete", selected, *hash_arguments],
+                command,
                 capture_output=True, text=True, encoding="utf-8", errors="replace",
                 timeout=30, check=False, **no_window_kwargs(),
             )
@@ -230,14 +280,21 @@ class PreparedRuntimeSource:
 
     def lifecycle_argv(
         self, owner: Path, name: str, root: Path, project: Path, argv: tuple[str, ...],
+        *, target: SourceRuntimeTarget | SourceWheelTarget | None = None,
     ) -> list[str]:
+        from .update_runtime_target import SourceWheelTarget
+
         executable = shutil.which(argv[0])
         if executable is None:
             raise ValueError(f"Prepared runtime installer executable not found: {argv[0]}")
-        return [
+        command = [
             sys.executable, "-I", "-B", str(owner / "scripts" / "command_binding.py"),
             "--payload-root", str(owner), "--source-payload-root", str(owner),
             "--plugin-id", name, "--legacy-root", str(root),
             "--project-root", str(project), "--run-lifecycle", "--managed-deployment",
-            "--", os.path.abspath(executable), *argv[1:],
         ]
+        if isinstance(target, SourceWheelTarget):
+            command.extend(["--source-descriptor", json.dumps(
+                target.source_descriptor, sort_keys=True,
+            )])
+        return [*command, "--", os.path.abspath(executable), *argv[1:]]

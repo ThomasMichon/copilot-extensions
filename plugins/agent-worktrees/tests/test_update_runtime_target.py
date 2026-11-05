@@ -245,6 +245,81 @@ def test_installed_planner_response_is_bound_to_root_and_full_source(selected, m
         plan_target(source, "agent-containers", owner, root, {})
 
 
+@pytest.mark.parametrize("fault", [
+    "", "identity", "version", "hash", "extras", "packages", "descriptor",
+    "missing-owner", "missing-source", "provider-skew",
+])
+def test_worktrees_wheel_target_uses_installed_owner_and_exact_selection(tmp_path, monkeypatch, fault):
+    from test_update_runtime_sources import packet
+    from agent_worktrees.update_runtime_source import parse_sources
+
+    data = packet(tmp_path)
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    data["version"] = 2
+    data["sources"]["agent-worktrees"]["install_source"] = str(snapshot)
+    source = parse_sources(json.dumps(data))["agent-worktrees"]
+    owner, root = tmp_path / "owner", tmp_path / "runtime"
+    scripts = owner / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "install_source.py").write_text("# installed owner\n", encoding="utf-8")
+    provider = {
+        "schema": "copilot-extensions.runtime-wheel-source-provider", "version": 1,
+        "selection_env": "COPILOT_EXTENSIONS_NATIVE_INSTALL_SOURCE_SELECTION",
+    }
+    for payload in (owner, source.payload):
+        (payload / "scripts").mkdir(exist_ok=True)
+        (payload / "scripts" / "runtime_install.py").write_text("# wheel-aware installer\n", encoding="utf-8")
+        (payload / "runtime-wheel-source.json").write_text(json.dumps(provider), encoding="utf-8")
+    if fault == "missing-owner":
+        (owner / "runtime-wheel-source.json").unlink()
+    elif fault == "missing-source":
+        (source.payload / "runtime-wheel-source.json").unlink()
+    elif fault == "provider-skew":
+        (source.payload / "runtime-wheel-source.json").write_text(
+            json.dumps(provider | {"version": 2}), encoding="utf-8",
+        )
+    selection = {
+        "identity": json.loads(source.identity),
+        "source_descriptor": {"kind": "github", "canonical": "github:example/repo", "ref": ""},
+        "runtime_version": source.version + ".profile." + "d" * 16,
+        "payload_hash": "e" * 64, "extras": [], "local_packages": ["agent-worktrees"],
+    }
+    if fault == "identity":
+        selection["identity"]["runtime_source"]["source_commit"] = "f" * 40
+    elif fault == "version":
+        selection["runtime_version"] = source.version
+    elif fault == "hash":
+        selection["payload_hash"] = "bad"
+    elif fault == "extras":
+        selection["extras"] = ["unsupported"]
+    elif fault == "packages":
+        selection["local_packages"] = ["another"]
+    elif fault == "descriptor":
+        selection["source_descriptor"] = None
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(returncode=0, stdout=json.dumps(selection), stderr="")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    if fault:
+        with pytest.raises(ValueError, match="selection|support"):
+            plan_target(source, "agent-worktrees", owner, root, {})
+    else:
+        target = plan_target(source, "agent-worktrees", owner, root, {})
+        assert target.version == selection["runtime_version"]
+        assert target.payload_hash == selection["payload_hash"]
+        assert json.loads(target.document) == selection
+    if fault in ("missing-owner", "missing-source", "provider-skew"):
+        assert not calls
+    else:
+        assert len(calls) == 1
+        assert Path(calls[0][3]) == scripts / "install_source.py"
+        assert "--native-inputs" in calls[0] and str(snapshot) in calls[0]
+
+
 def test_execution_rechecks_profile_before_launch_and_on_retry(selected, monkeypatch):
     step = _plan(selected)
     calls = []
