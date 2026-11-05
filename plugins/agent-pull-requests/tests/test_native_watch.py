@@ -139,12 +139,16 @@ def test_native_fetch_is_one_bounded_headless_operation(tmp_path, monkeypatch):
     assert len(seen) == 1
 
 
-def test_native_fetch_crosses_real_cli_process_boundary(tmp_path):
+@pytest.mark.parametrize(("consumer", "delay"), [
+    ("bridge", 0), ("bridge", 20.25), ("frontend", 20.25),
+], ids=["fast-bridge", "slow-bridge", "slow-frontend"])
+def test_native_fetch_crosses_real_cli_process_boundary(tmp_path, consumer, delay):
     value = {**report(), "base_sha": "c" * 40}
     script = tmp_path / "snapshot.py"
     script.write_text(
-        "import json,sys\n"
+        "import json,sys,time\n"
         "assert sys.argv[1:] == ['pr-watch','snapshot','project/repo','7','--json']\n"
+        f"time.sleep({delay})\n"
         f"print({json.dumps(value)!r})\n",
         encoding="utf-8",
     )
@@ -158,9 +162,20 @@ def test_native_fetch_crosses_real_cli_process_boundary(tmp_path):
     )
     if os.name != "nt":
         command.chmod(0o700)
-    fetched = fetch_snapshot("project/repo", 7, str(command))
-    assert fetched.provider == "azure-devops"
-    assert fetched.native_snapshot["base_sha"] == "c" * 40
+    if consumer == "bridge":
+        fetched = fetch_snapshot("project/repo", 7, str(command))
+        assert fetched.provider == "azure-devops"
+        assert fetched.native_snapshot["base_sha"] == "c" * 40
+    else:
+        from agent_pull_requests import native_cli
+
+        code, fetched = native_cli._read(SimpleNamespace(
+            command="status", repo="project/repo", number=7,
+            worktrees_command=str(command),
+        ), [str(command)])
+        assert code == 0
+        assert fetched["provider"] == "azure-devops"
+        assert fetched["base_sha"] == "c" * 40
 
 
 def test_native_fetch_forwards_only_explicit_credential_command(tmp_path):
