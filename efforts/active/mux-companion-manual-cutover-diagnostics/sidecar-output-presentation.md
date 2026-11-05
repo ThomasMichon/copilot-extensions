@@ -4,7 +4,10 @@ Parent: [complete effort](README.md).
 Existing intent: [sparse correction](sidecar-live-timeline.md#operator-correction-after-viewing-progress-captures-2026-11-04).
 Source boundary: [observation contract](sidecar-observation-contract.md).
 
-**Status: proposed source-presentation amendment; review before implementation.**
+**Status: reviewed amendment and bounded source implementation merged;
+installed/native and parent acceptance remain separate.**
+Plan #10689 merged as `e608ec4ba8163eab26f5db56b4b753a200c4cae9` after
+actual current-head independent approval and required green CI.
 This realizes the existing agenda-level/sparse intent without changing source
 history, ownership, runtime policy or any original parent gate.
 
@@ -21,7 +24,7 @@ this low-level output from overwhelming an agenda overview.
 The observation describes that fixture, not a universal page cardinality or
 installed result. Frame byte bounds still govern actual page size.
 
-## Proposed presentation boundary
+## Reviewed presentation boundary
 
 - Treat only explicitly recognized Bridge output occurrences such as
   `agent_message` and `agent_thought` as low-level output. Do not classify from
@@ -54,24 +57,32 @@ installed result. Frame byte bounds still govern actual page size.
 
 ## Plan and validation
 
-- [ ] Review this amendment through the normal PR flow before implementation.
-- [ ] Implement the bounded presentation projection using existing typed
+- [x] Review this amendment through the normal PR flow before implementation.
+  #10689 qualifies plan admission only, not the unchecked source/validation below.
+- [x] Implement the bounded presentation projection using existing typed
   source/renderer seams; preserve legacy/unsupported providers and all views.
-- [ ] Exercise the actual owner-to-codec-to-layout/widget path with long known
+- [x] Exercise the actual owner-to-codec-to-layout/widget path with long known
   output bursts, interleaved meaningful work and multiple reported actors.
   Keep unknown native kinds and literal lookalike prose as negative controls.
-- [ ] Qualify snapshot/live/history splicing, group-boundary prepend/append,
+- [x] Qualify snapshot/live/history splicing, group-boundary prepend/append,
   expansion/collapse, short-content history demand and stable anchors/focus
   at ordinary/narrow widths, including source loss and cancellation.
-- [ ] Retain deterministic visual comparisons and bounded work/resource
+- [x] Retain deterministic visual comparisons and bounded work/resource
   controls. Preserve raw-history integrity and disclose any budget exhaustion;
   required unit-only CI is not expanded into an effectful matrix.
-- [ ] Drive source delivery through independent current-head review, required
+- [x] Drive source delivery through independent current-head review, required
   green CI and actual merge, followed immediately by the full parent and
   original-contract readback. Journal the exact earned source tier.
+  #10698 merged as `0f6de221b4658c2db1408fa0216e35d1d93db5df` after
+  current-head approval and green CI, followed immediately by the full parent,
+  all three original contracts and this amendment.
 
 Owner-qualified accumulated tool statistics remain a separate S2 obligation.
 Telemetry's inferred/bounded tool-state map and ACP's per-turn buffers are not
 substitutes for that source contract or proof of current running concurrency.
 No installed rollout, live Mux binding, head/resource action, answer, SDK/model
 actor, real-data operation or original manual/native acceptance is authorized.
+
+The [source validation journal](journal/2026/11.05-sidecar-output-groups.md)
+records the bounded projection and its earned tier. Every original parent gate
+remains independent.

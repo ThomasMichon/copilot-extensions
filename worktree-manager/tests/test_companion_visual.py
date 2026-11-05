@@ -88,6 +88,39 @@ def visual_window() -> TimelineWindow:
     return window
 
 
+def output_visual_window() -> TimelineWindow:
+    window = TimelineWindow()
+    for provider, number, summary, kind in (
+        (Provider.WORKTREES, 0, "Build and validate the sample assignment", TimelineKind.PURPOSE_CHANGED),
+        (Provider.AGENDA, 1, "Validate the accepted implementation", TimelineKind.AGENDA_TRANSITION),
+        (Provider.BRIDGE, 2, "Tool started: Inspect source", TimelineKind.SOURCE_EVENT),
+    ):
+        source = token(key=provider.value)
+        source = replace(source, identity=replace(source.identity, provider=provider))
+        rows = [replace(event(source, number, summary=summary), kind=kind)]
+        if provider is Provider.BRIDGE:
+            rows.extend(replace(
+                event(source, n, summary="Message output"), kind=TimelineKind.SOURCE_OUTPUT,
+            ) for n in range(3, 23))
+            second = replace(
+                event(source, 23, actor="helper-example", summary="Reported agent start: Compare results"),
+                kind=TimelineKind.CONTRIBUTION_REPORTED,
+            )
+            second = replace(second, actor=replace(second.actor, kind=ActorKind.SUBAGENT))
+            rows.append(second)
+            rows.extend(replace(
+                event(source, n, actor="helper-example", summary="Thought output"),
+                actor=second.actor, kind=TimelineKind.SOURCE_OUTPUT,
+            ) for n in range(24, 44))
+            rows.extend((
+                replace(event(source, 44, summary="Tool completed: Verify results"), actor=second.actor),
+                replace(event(source, 45, summary="Bridge session: future_output"), actor=second.actor),
+            ))
+        assert window.bind(source).applied
+        assert window.apply_snapshot(snapshot(source, tuple(rows))).applied
+    return window
+
+
 def offline_svg(svg: str) -> str:
     # Keep every rendered cell, style and coordinate; omit only remote font loading.
     svg = re.sub(r"    @font-face \{.*?\n    \}\n", "", svg, flags=re.DOTALL)
@@ -181,6 +214,8 @@ def test_timeline_visual(
 class FullVisualApp(MuxCompanionApp):
     """Production chrome with fixed synthetic observations, not an owner integration."""
 
+    output_fixture = False
+
     def on_mount(self, event: events.Mount) -> None:
         event.prevent_default()
         self._timeline_attachment.begin_close()
@@ -191,7 +226,7 @@ class FullVisualApp(MuxCompanionApp):
         )
         self._loading = False
         self._refresh_view(reload=False)
-        self._timeline_panel.replace_window(visual_window())
+        self._timeline_panel.replace_window(output_visual_window() if self.output_fixture else visual_window())
         self.query_one("#timeline-agenda-status", Static).update("Rich Agenda: fixed synthetic operations")
         self.query_one("#timeline-bridge-status", Static).update("Bridge: fixed synthetic membership evidence")
         self.query_one("#views", TabbedContent).active = "timeline-tab"
@@ -199,6 +234,7 @@ class FullVisualApp(MuxCompanionApp):
 
 @pytest.mark.parametrize("state,size", [
     ("full", (110, 40)), ("narrow", (60, 24)), ("fault", (60, 24)), ("evidence", (110, 40)),
+    ("output", (110, 40)), ("output-narrow", (60, 24)),
 ])
 def test_full_companion_visual(
     state: str, size: tuple[int, int], record_property: Callable[[str, object], None],
@@ -215,6 +251,7 @@ def test_full_companion_visual(
 
     async def capture() -> str:
         app = FullVisualApp()
+        app.output_fixture = state.startswith("output")
         app.theme = "textual-dark"
         async with app.run_test(size=size) as pilot:
             await pilot.pause()
@@ -229,6 +266,7 @@ def test_full_companion_visual(
             if state == "evidence":
                 await pilot.click("CollapsibleTitle")
             await pilot.pause()
+            assert timeline.window.follow_live
             assert not app.query_one("#status").display
             assert timeline.size.height >= (10 if state == "fault" else 12 if state == "evidence" else size[1] // 2)
             assert app.query_one(Collapsible).collapsed == (state != "evidence")
@@ -238,6 +276,9 @@ def test_full_companion_visual(
             assert app.screen.scroll_offset.y == 0
             assert app.query_one("#footer-row").region.bottom <= size[1] - 1
             assert not calls
+            if app.output_fixture:
+                assert len(timeline.window.events) == 46 and len(timeline.layout_index.blocks) == 8
+                assert [len(block.members) for block in timeline.layout_index.blocks if block.members] == [20, 20]
             return offline_svg(app.export_screenshot())
 
     svg = asyncio.run(capture())

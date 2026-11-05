@@ -168,6 +168,18 @@ inventing current state or hierarchy. The
 [source readback](journal/2026/11.05-sidecar-reported-actors.md) retains
 authoritative totals, full coverage, native and original parent gates.
 
+#10689 merged as `e608ec4ba8163eab26f5db56b4b753a200c4cae9`, admitting
+the [bounded source-output presentation amendment](sidecar-output-presentation.md)
+before implementation. The [plan readback](journal/2026/11.05-sidecar-output-plan.md)
+retains all source, native and original parent completion gates.
+
+#10698 merged as `0f6de221b4658c2db1408fa0216e35d1d93db5df`, delivering
+bounded known-output groups, raw Evidence, explicit single-page history demand
+and stable group/navigation anchors. The
+[source readback](journal/2026/11.05-sidecar-output-groups.md) records 108
+checks, fourteen rendered comparisons and immediate Follow-live reflow without
+claiming accumulated tool statistics or installed/native acceptance.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than
@@ -462,6 +474,9 @@ publication and installed support retain their separate qualification.
 - [ ] Supply live reported subagent/tool activity and owner-qualified accumulated
   statistics with explicit coverage; preserve unknown current concurrency when
   the native/ACP source does not establish it.
+  The [bounded tool-statistics amendment](sidecar-tool-statistics.md) proposes
+  one source-range occurrence counter, not unique calls or lifetime totals.
+  Provider, compatibility and actual consumer controls precede source closure.
 - [x] Supply rich agenda-history access through its actual owner and an admitted
   locator for supported sources. Test old/missing sources as explicitly
   unavailable/observed-only, not as delivery of rich history.
@@ -571,11 +586,13 @@ is inferred from these presentation checks.
 
 ### Output-noise follow-up - actual source workloads
 
-- [ ] Review and deliver the [bounded output-presentation amendment](sidecar-output-presentation.md).
+- [x] Review and deliver the [bounded output-presentation amendment](sidecar-output-presentation.md).
   Known message/thought chunks must not overwhelm the agenda overview as
   individual normal work rows. Preserve raw history/identity/proofs, explicit
   Evidence, visible work/diagnostics and bounded history/anchor behavior.
   This adds source qualification, not installed/native or parent completion.
+  #10698 closes this bounded source follow-up after actual current-head
+  independent approval, green CI, merge and full parent/contract readback.
 
 ## Validation Plan
 

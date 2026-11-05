@@ -25,6 +25,7 @@ _NO_PROJECT_COMMANDS = {
     "worktree-allocation",
     "reconcile-marketplaces",
     "prepare-plugin-payloads",
+    "trust-repository-configuration",
     "launch-update",
     "picker",
     "doctor",

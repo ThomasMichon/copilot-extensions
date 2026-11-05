@@ -5,6 +5,23 @@ Method: [weighted semantic consolidation](semantic-density-consolidation.md).
 
 ## Result and coverage
 
+The [seven producer/policy/fixture contracts](finite-producer-policy-fixture-contracts.md)
+retain twenty-one ranked relationships without confusing generic claim
+support with actual producer integration, reload with evaluator recovery,
+or repaired fixtures with disposition of a contrary policy expectation.
+Both independently refined effort-driver issues remain OPEN, alongside
+the other five. The
+[journal](<journal/2026/11.05 finite-producer-policy-fixture-contracts.md>)
+keeps reported partials, fresh/reused and protected evidence separate.
+
+The [eleven configured-consumer/recovery contracts](finite-configured-consumer-recovery-contracts.md)
+retain thirty-three ranked relationships and actual later owner progression.
+Released backups and audit capability are credited without erasing finite
+routing, pilot, native or adoption gates; accepted dismissal semantics do not
+settle the explicit alias. All eleven stay OPEN; the
+[journal](<journal/2026/11.05 finite-configured-consumer-recovery-contracts.md>)
+keeps changed-original, fresh/reused and protected evidence separate.
+
 The [twelve finite venue/composition/compatibility contracts](finite-venue-composition-compatibility-contracts.md)
 retain thirty-six ranked relationships without confusing real productive
 preparation, driver fencing, expiry or contract guidance with whole acceptance.

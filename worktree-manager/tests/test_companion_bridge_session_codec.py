@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import asyncio
 import importlib
 import json
 from types import SimpleNamespace
@@ -10,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from worktree_manager.companion_bridge_session_codec import SessionCodec
-from worktree_manager.companion_timeline_contract import LiveDelta, TimelineContractError
+from worktree_manager.companion_timeline_contract import LiveDelta, TimelineContractError, TimelineKind, ViewportAnchor
 from worktree_manager.companion_timeline_layout import TimelineLayout
 from worktree_manager.companion_timeline_model import TimelineWindow
 from worktree_manager.companion_worktree_codec import OwnerReadError
@@ -410,3 +411,166 @@ def test_absent_invalid_or_unqualified_actor_metadata_stays_with_reporter(
     assert event.actor.actor_id == "bridge-session:child"
     assert event.actor.label == "child" and event.actor.reported_state is None
     assert frame["coverage"] == "partial" and frame["current_requests"] == "unknown"
+
+
+@pytest.mark.parametrize("size", [(100, 32), (48, 24)])
+def test_actual_output_burst_widget_history_is_sparse_bounded_and_inspectable(semantic, size) -> None:
+    from worktree_manager.companion_timeline_widget import SubwayTimeline
+    from test_companion_timeline_widget import TimelineApp
+
+    semantic.log.append("tool_call_start", {"tool_call_id": "work", "title": "Inspect source"})
+    for n in range(40):
+        semantic.log.append("agent_message" if n % 2 else "agent_thought", {"text": "omitted output"})
+    semantic.log.append("turn_complete", {})
+    codec, window = semantic.codec(), TimelineWindow()
+    frame = codec.decode(semantic.frame())
+    source = codec.token(frame, 1)
+    observed = codec.snapshot(frame, source)
+    assert len(observed.events) < 42 and observed.before is not None
+    assert window.bind(source).applied and window.apply_snapshot(observed).applied
+    original = tuple(row.content() for row in observed.events)
+
+    async def check() -> None:
+        app = TimelineApp(window)
+        async with app.run_test(size=size) as pilot:
+            timeline = app.query_one(SubwayTimeline)
+            timeline.focus()
+            await pilot.pause()
+            assert len(timeline.layout_index.blocks) == 2
+            group, complete = timeline.layout_index.blocks
+            assert len(group.members) == len(observed.events) - 1
+            assert complete.event.summary == "Turn completed"
+            assert timeline.selected == complete.event.ref
+            assert not app.requests and not timeline.allow_vertical_scroll
+            await pilot.press("up")
+            await pilot.pause()
+            assert len(app.requests) == 1 and not window.follow_live
+            anchor = timeline.capture_anchor()
+            assert anchor is not None and timeline._selected_group
+            history = codec.decode(semantic.frame(history=True, position=frame["next_before"]), history=True)
+            page = codec.page(history, source, observed.before)
+            timeline.set_demand_visible(False)
+            assert not timeline.prepend_page(page).applied
+            timeline.set_demand_visible(True)
+            await pilot.pause()
+            assert len(app.requests) == 1
+            await pilot.press("up")
+            await pilot.pause()
+            assert len(app.requests) == 2
+            anchor = timeline.capture_anchor()
+            assert anchor is not None
+            assert timeline.prepend_page(page).applied
+            await pilot.pause()
+            assert len(window.events) == 42 and len(timeline.layout_index.blocks) == 3
+            assert window.events[0].summary == "Tool started: Inspect source"
+            assert len(timeline.layout_index.blocks[1].members) == 40
+            assert tuple(window.event(row.ref).content() for row in observed.events) == original
+            assert window.sources[source.identity.source_key].position == observed.position
+            row = timeline.layout_index.anchor_row(anchor)
+            assert row is not None
+            assert row + timeline._padding - int(timeline.scroll_offset.y) == anchor.screen_row
+            assert timeline.selected == window.events[1].ref and timeline._selected_group
+            await pilot.press("enter")
+            await pilot.pause()
+            assert len(timeline.layout_index.blocks) == 43
+            assert not window.expanded
+            member = window.events[4]
+            start = timeline.layout_index.anchor_row(ViewportAnchor(member.ref, 0, 0))
+            assert start is not None
+            timeline.scroll_to(y=start + timeline._padding, animate=False, immediate=True)
+            await pilot.pause()
+            assert timeline.selected == member.ref and not timeline._selected_group
+            await pilot.press("enter")
+            await pilot.pause()
+            assert member.ref in window.expanded
+            assert member.position.cursor in timeline.layout_index._refs[member.ref].detail_text
+            assert "content_sha256" in timeline.layout_index._refs[member.ref].detail_text
+            await pilot.press("home")
+            await pilot.pause()
+            group = timeline.layout_index._groups[member.ref]
+            screen_row = group.start + timeline._padding - int(timeline.scroll_offset.y)
+            assert await pilot.click(timeline, offset=(1, screen_row))
+            await pilot.pause()
+            assert len(timeline.layout_index.blocks) == 3
+            assert timeline._selected_group and timeline.selected == window.events[1].ref
+            assert timeline._padding < max(0, timeline.size.height - timeline.layout_index.height)
+            await pilot.press("end")
+            await pilot.pause()
+            assert window.follow_live and not window.unread
+            assert timeline._padding == max(0, timeline.size.height - timeline.layout_index.height)
+            last = timeline.layout_index.row(timeline.layout_index.height - 1, window)
+            assert last is not None
+            assert timeline.layout_index.height - 1 + timeline._padding - int(timeline.scroll_offset.y) == timeline.size.height - 1
+            assert timeline.selected == last.event
+            group = timeline.layout_index._groups[member.ref]
+            screen_row = group.start + timeline._padding - int(timeline.scroll_offset.y)
+            assert await pilot.click(timeline, offset=(timeline.layout_index.prefix_width + 1, screen_row))
+            await pilot.pause()
+            assert timeline._selected_group and not window.follow_live
+            await pilot.resize_terminal(60, 26)
+            assert timeline.has_focus and timeline._selected_group
+            semantic.log.append("agent_message", {"text": "another omitted output"})
+            live = codec.decode(semantic.frame(position=frame["position"]))
+            assert timeline.apply_delta(LiveDelta(
+                source, codec.position(source, live["base_position"]),
+                codec.position(source, live["position"]), codec.events(live, source),
+            )).applied
+            await pilot.pause()
+            assert len(timeline.layout_index.blocks) == 4 and len(app.requests) == 2
+            assert len(window.events) == 43 and len(window._proofs) == 43
+            assert timeline.has_focus and timeline._selected_group and not window.follow_live
+            assert not timeline.source_error(source, "source disconnected").applied
+            assert len(timeline.layout_index.blocks) == 4 and len(app.requests) == 2
+            assert frame["coverage"] == "partial" and frame["current_requests"] == "unknown"
+
+    asyncio.run(check())
+
+
+def test_actual_output_groups_respect_actor_work_and_unknown_diagnostic_boundaries(semantic, monkeypatch) -> None:
+    for kind, details in (
+        ("agent_message", {"agent_id": "a", "agent_display_name": "Shared name"}),
+        ("agent_thought", {"agent_id": "a", "agent_display_name": "Shared name"}),
+        ("agent_message", {"agent_id": "b", "agent_display_name": "Shared name"}),
+        ("tool_call_start", {"agent_id": "b", "title": "agent_message"}),
+        ("agent_message", {"agent_id": "b", "agent_display_name": "Shared name"}),
+        ("future_output", {"title": "agent_message", "agent_id": "b"}),
+        ("agent_message", {}),
+        ("ask_user_request", {"request_id": "input"}),
+        ("permission_request", {"request_id": "permission"}),
+        ("compaction_start", {}),
+        ("agent_thought", {}),
+    ):
+        semantic.log.append(kind, details)
+    codec, window = semantic.codec(), TimelineWindow()
+    frame = codec.decode(semantic.frame())
+    source = codec.token(frame, 1)
+    snapshot = codec.snapshot(frame, source)
+    assert window.bind(source).applied and window.apply_snapshot(snapshot).applied
+    raw = tuple(row.content() for row in window.events)
+    proofs = dict(window._proofs)
+    layout = TimelineLayout()
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("presentation attempted JSON parsing or source I/O")
+
+    with monkeypatch.context() as patch:
+        patch.setattr("json.loads", forbidden)
+        patch.setattr("builtins.open", forbidden)
+        patch.setattr("os.scandir", forbidden)
+        layout.rebuild(window, 80)
+        for n in range(layout.height):
+            assert layout.row(n, window) is not None
+    groups = [block for block in layout.blocks if block.members]
+    assert [len(block.members) for block in groups] == [2, 1, 1, 1, 1]
+    assert groups[0].event.actor.actor_id == "subagent:a"
+    assert groups[1].event.actor.actor_id == groups[2].event.actor.actor_id == "subagent:b"
+    assert groups[0].event.actor.label == groups[1].event.actor.label == "Shared name"
+    assert window.lane(groups[0].event) != window.lane(groups[1].event)
+    separate = [block.event for block in layout.blocks if not block.members]
+    assert [row.kind for row in separate] == [
+        TimelineKind.SOURCE_EVENT, TimelineKind.SOURCE_EVENT, TimelineKind.INPUT_REQUEST,
+        TimelineKind.PERMISSION_REQUEST, TimelineKind.COMPACTION,
+    ]
+    assert separate[1].summary == "Bridge session: future_output"
+    assert tuple(row.content() for row in window.events) == raw and window._proofs == proofs
+    assert all(row.actor.reported_state is None for row in window.events)
