@@ -15,6 +15,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from packaging.tags import sys_tags
 import runtime_feed_configuration as configuration
 import runtime_source_build as builds
 import runtime_source_wheels as completion
@@ -597,6 +598,7 @@ def test_retained_associated_wheels_keep_source_and_feed_owners_live(
     adopter, configured_source, target, feeds, tmp_path, monkeypatch, built_wheels, toolchain,
     with_external,
 ):
+    target = {**target, "tags": [str(tag) for tag in sys_tags()]}
     source = source_with_process_owner(configured_source)
     if with_external:
         manifest = source / "pyproject.toml"
@@ -642,6 +644,7 @@ def test_retained_associated_wheels_keep_source_and_feed_owners_live(
         for name, path in paths.items()
     }
     arguments = options(adopter, target, env)
+    arguments["wheel_limits"] = replace(arguments["wheel_limits"], max_tags=10_000)
     with acquisition.retain_wheel_inputs(
         paths, hashes, max_wheels=8, max_archive_bytes=1 << 20,
         max_total_bytes=4 << 20, max_snapshot_bytes=8 << 20, deadline=arguments["deadline"],
@@ -828,6 +831,8 @@ def test_worktrees_native_constructor_consumes_the_live_source_owner(
     import importlib.util
     from types import SimpleNamespace
 
+    if route == "associated":
+        target = {**target, "tags": [str(tag) for tag in sys_tags()]}
     source_project_path = source_with_process_owner(configured_source)
     worktrees = source_project_path.with_name("agent-worktrees")
     source_project_path.rename(worktrees)
@@ -940,6 +945,8 @@ def test_worktrees_native_constructor_consumes_the_live_source_owner(
         **options(adopter, target, env), "component": "agent-worktrees",
         "deadline": time.monotonic() + 180,
     }
+    if route == "associated":
+        arguments["wheel_limits"] = replace(arguments["wheel_limits"], max_tags=10_000)
     with ExitStack() as stack:
         if route == "associated":
             build_fixture = request.getfixturevalue("built_wheels")

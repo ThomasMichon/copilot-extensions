@@ -266,6 +266,90 @@ def test_source_compile_retains_graph_and_derives_only_local_omissions(tmp_path,
     assert not root.exists()
 
 
+@pytest.mark.parametrize("kind", ["conditional", "optional"])
+def test_source_compile_allows_redundant_root_anchored_local_mapping(tmp_path, monkeypatch, kind):
+    child = source_project(tmp_path / "child", name="fixture-child")
+    peer = source_project(
+        tmp_path / "peer", name="fixture-peer",
+        dependencies=json.dumps("fixture-child; sys_platform == 'win32'") if kind == "conditional" else "",
+        sources='fixture-child={path="../child"}',
+    )
+    if kind == "optional":
+        manifest = peer / "pyproject.toml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8")
+            + '\n[project.optional-dependencies]\nfeature=["fixture-child"]\n',
+            encoding="utf-8",
+        )
+    project = source_project(
+        tmp_path / "root", dependencies='"fixture-child","fixture-peer"',
+        sources='fixture-child={path="../child"}\nfixture-peer={path="../peer"}',
+    )
+    names = ["fixture-child", "fixture-peer"]
+    monkeypatch.setattr(
+        policy.subprocess, "run",
+        lambda command, **options: subprocess.CompletedProcess(command, 0, source_compile_settings(names), ""),
+    )
+    with policy.retain_uv_source_compile(
+        "fixture-uv", [str(project / "pyproject.toml")], env={}, cwd=tmp_path,
+        trusted_source_roots=(tmp_path,), now=NOW,
+    ) as transaction:
+        omissions = [value for option, value in policy._argument_pairs(list(transaction.argv[3:]))
+                     if option == "--no-emit-package"]
+        assert omissions == names
+        assert transaction.sources.keys() == {project, peer, child}
+
+
+@pytest.mark.parametrize("kind", [
+    "unanchored", "conditional-root", "other-local", "registry-override",
+    "constraint-only", "multiple-roots", "ambiguous-root-map",
+])
+def test_source_compile_refuses_unproven_redundant_local_mapping(tmp_path, monkeypatch, kind):
+    source_project(tmp_path / "child", name="fixture-child")
+    source_project(
+        tmp_path / "peer", name="fixture-peer",
+        dependencies=json.dumps("fixture-child; sys_platform == 'win32'"),
+        sources='fixture-child={path="../child"}',
+    )
+    peer_manifest = tmp_path / "peer" / "pyproject.toml"
+    if kind == "other-local":
+        source_project(tmp_path / "other", name="fixture-child")
+        peer_manifest.write_text(peer_manifest.read_text(encoding="utf-8").replace(
+            'path="../child"', 'path="../other"',
+        ), encoding="utf-8")
+    dependencies = '"fixture-peer"'
+    mappings = 'fixture-peer={path="../peer"}'
+    if kind != "unanchored":
+        dependency = "fixture-child; sys_platform == 'win32'" if kind == "conditional-root" else "fixture-child"
+        dependencies += "," + json.dumps(dependency)
+        mappings += '\nfixture-child={path="../child"}'
+    if kind == "registry-override":
+        source_project(
+            tmp_path / "registry-peer", name="fixture-registry-peer",
+            dependencies='"fixture-child"', sources='fixture-child={index="another"}',
+        )
+        dependencies += ',"fixture-registry-peer"'
+        mappings += '\nfixture-registry-peer={path="../registry-peer"}'
+    if kind == "ambiguous-root-map":
+        mappings += '\nfixture_child={path="../child"}'
+    project = source_project(tmp_path / "root", dependencies=dependencies, sources=mappings)
+    arguments = [str(project / "pyproject.toml")]
+    if kind == "constraint-only":
+        arguments = ["--constraint", arguments[0]]
+    elif kind == "multiple-roots":
+        other = source_project(tmp_path / "other-root", name="fixture-other-root")
+        arguments.append(str(other / "pyproject.toml"))
+    monkeypatch.setattr(policy.subprocess, "run", lambda *_args, **_kwargs: pytest.fail(
+        "unproven local omission reached UV",
+    ))
+    with pytest.raises(policy.DependencyPolicyError):
+        with policy.retain_uv_source_compile(
+            "fixture-uv", arguments, env={}, cwd=tmp_path,
+            trusted_source_roots=(tmp_path,), now=NOW,
+        ):
+            pytest.fail("unproven local omission reached export")
+
+
 @pytest.mark.parametrize("omissions", [[], ["fixture-source", "registry-only"], ["wrong-source"]])
 def test_source_compile_refuses_ambient_omission_drift(tmp_path, monkeypatch, omissions):
     source_project(tmp_path / "child", name="fixture-child")
@@ -569,7 +653,7 @@ def test_native_compile_refuses_directory_dependencies_before_export_cleanup(tmp
 @pytest.mark.parametrize("missing_age", [False, True])
 def test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
     tmp_path, monkeypatch, source_kind, missing_age, alias, nested_alias=False, root_anchor=False,
-    source_graph=False, metadata_name_conflict=False, recursive_source=False,
+    source_graph=False, metadata_name_conflict=False, recursive_source=False, redundant_local=False,
 ):
     artifacts = {}
     projects = {}
@@ -648,13 +732,20 @@ def test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
             if recursive_source:
                 source_project(tmp_path / "leaf", name="fixture-leaf", dependencies='"fixture-root>=1"')
                 local = source_project(
-                    local, name="fixture-owned", dependencies='"fixture-leaf"',
+                    local, name="fixture-owned",
+                    dependencies=(
+                        json.dumps("fixture-leaf; sys_platform == 'win32'")
+                        if redundant_local else '"fixture-leaf"'
+                    ),
                     sources='fixture-leaf={path="../leaf"}',
                 )
             project = source_project(
                 project, name="fixture-root" if metadata_name_conflict else "fixture-source",
-                dependencies='"fixture-owned"',
-                sources='fixture-owned={path="../local", editable=true}',
+                dependencies='"fixture-owned","fixture-leaf"' if redundant_local else '"fixture-owned"',
+                sources=(
+                    'fixture-owned={path="../local", editable=true}\nfixture-leaf={path="../leaf"}'
+                    if redundant_local else 'fixture-owned={path="../local", editable=true}'
+                ),
             )
         operand = project / "pyproject.toml"
         roots = (tmp_path,) if source_graph else (project,)
@@ -755,6 +846,13 @@ def test_native_source_compile_retains_recursive_local_mappings(tmp_path, monkey
     test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
         tmp_path, monkeypatch, source_kind="project", missing_age=False, alias=False,
         source_graph=True, recursive_source=True,
+    )
+
+
+def test_native_source_compile_retains_anchored_conditional_local_mapping(tmp_path, monkeypatch):
+    test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
+        tmp_path, monkeypatch, source_kind="project", missing_age=False, alias=False,
+        source_graph=True, recursive_source=True, redundant_local=True,
     )
 
 

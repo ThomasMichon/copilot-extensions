@@ -6,6 +6,7 @@ import hashlib
 import json
 from pathlib import Path, PureWindowsPath
 import subprocess
+import sys
 import time
 from types import SimpleNamespace
 
@@ -160,6 +161,100 @@ def test_native_file_matching_requires_package_marker_to_apply(marker, admitted)
             _wheel_pins(content, target, time.monotonic() + 5, prefer_target_tags=True)
     with pytest.raises(source.ProfileError):
         _wheel_pins(content, target, time.monotonic() + 5)
+
+
+@pytest.mark.parametrize("outcome", ["selected", "foreign-target"])
+def test_native_lock_preference_checks_target_before_resolution(tmp_path, monkeypatch, outcome):
+    import runtime_source_lock as locks
+
+    content = _native_file_lock([
+        ("app-1.0-cp311-cp311-win_amd64.whl", {"sha256": "1" * 64}),
+        ("app-1.0-py3-none-any.whl", {"sha256": "2" * 64}),
+    ])
+    output = tmp_path / "lock.toml"
+    output.write_bytes(content)
+    target = {"environment": dict(_ENVIRONMENT), "tags": ["cp311-cp311-win_amd64", "py3-none-any"]}
+    transaction = SimpleNamespace(argv=("uv", "pip", "compile"), environment={}, cwd=tmp_path)
+    configuration = SimpleNamespace(
+        transaction=transaction, projections=("original", "retained"),
+        record=lambda: {"target": target}, output=output, payload=tmp_path,
+        verify=lambda: None,
+    )
+    events = []
+
+    @contextmanager
+    def retain(*_args, **_kwargs):
+        yield configuration
+
+    def require(actual, projection, tags):
+        events.append("target")
+        assert actual is transaction and projection == "retained" and tags == target["tags"]
+        if outcome == "foreign-target":
+            raise ValueError("foreign target")
+
+    def resolve(*_args, **_kwargs):
+        events.append("resolve")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(locks, "retain_source_configuration", retain)
+    monkeypatch.setattr(locks.subprocess, "run", resolve)
+    monkeypatch.setitem(sys.modules, "core_native_feed_target", SimpleNamespace(require_native_target=require))
+    if outcome == "foreign-target":
+        with pytest.raises(ValueError, match="foreign target"):
+            with locks.retain_source_wheel_lock(
+                None, max_lock_bytes=4096, deadline=time.monotonic() + 5, prefer_target_tags=True,
+            ):
+                pytest.fail("foreign target reached a consumer")
+        assert events == ["target"]
+    else:
+        with locks.retain_source_wheel_lock(
+            None, max_lock_bytes=4096, deadline=time.monotonic() + 5, prefer_target_tags=True,
+        ) as selected:
+            assert selected.record()["files"][0]["filename"] == "app-1.0-cp311-cp311-win_amd64.whl"
+        assert events == ["target", "resolve"]
+
+
+@pytest.mark.parametrize("outcome", [
+    "conditional", "optional", "missing-root", "other-target", "registry-override", "ambiguous-root",
+])
+def test_redundant_local_omission_requires_one_consistent_root(tmp_path, outcome):
+    import installer_dependency_config as config
+
+    root, child, peer, other = (tmp_path / name for name in ("root", "child", "peer", "other"))
+    records = {
+        root: {
+            "project": {"name": "fixture-root", "dependencies": ["fixture-child", "fixture-peer"]},
+            "tool": {"uv": {"sources": {
+                "fixture-child": {"path": "../child"}, "fixture-peer": {"path": "../peer"},
+            }}},
+        },
+        child: {"project": {"name": "fixture-child", "dependencies": []}},
+        peer: {
+            "project": {
+                "name": "fixture-peer",
+                "dependencies": ["fixture-child; sys_platform == 'win32'"] if outcome == "conditional" else [],
+            },
+            "tool": {"uv": {"sources": {"fixture-child": {
+                "path": "../other" if outcome == "other-target" else "../child",
+            }}}},
+        },
+    }
+    if outcome == "registry-override":
+        records[other] = {
+            "project": {"name": "fixture-other", "dependencies": ["fixture-child"]},
+            "tool": {"uv": {"sources": {"fixture-child": {"index": "other"}}}},
+        }
+    if outcome == "ambiguous-root":
+        records[root]["tool"]["uv"]["sources"]["fixture_child"] = {"path": "../child"}
+    arguments = dict(
+        toml=lambda path: records[path.parent], identity=lambda name: name.lower().replace("_", "-"),
+        error_type=ValueError, root_project=None if outcome == "missing-root" else root,
+    )
+    if outcome in ("conditional", "optional"):
+        assert config.source_compile_packages(set(records), **arguments) == ("fixture-child", "fixture-peer")
+    else:
+        with pytest.raises(ValueError):
+            config.source_compile_packages(set(records), **arguments)
 
 
 def _native_exclusion_inputs(tmp_path, monkeypatch):

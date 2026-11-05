@@ -628,9 +628,13 @@ def cutoff_arguments(settings, *, now, operation, min_age, balanced, remote_refe
     return [*result, "--reinstall"] if operation == "install" else result
 
 
-def source_compile_packages(projects, *, toml, identity, error_type):
+def source_compile_packages(projects, *, toml, identity, error_type, root_project=None):
     names = []
     omissions = set()
+    mappings_by_name = {}
+    deferred = []
+    root_required = set()
+    root_mappings = {}
     for path in projects:
         data = toml(path / "pyproject.toml")
         project = data["project"]
@@ -641,14 +645,34 @@ def source_compile_packages(projects, *, toml, identity, error_type):
             if isinstance(requirement, str) and ";" not in requirement and "@" not in requirement
             and (match := re.match(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)", requirement))
         }
-        for name, mapping in data.get("tool", {}).get("uv", {}).get("sources", {}).items():
+        mappings = data.get("tool", {}).get("uv", {}).get("sources", {})
+        if path == root_project:
+            root_required, root_mappings = required, mappings
+        for name, mapping in mappings.items():
+            name = identity(name)
+            mappings_by_name.setdefault(name, []).append((path, mapping))
             if isinstance(mapping, dict) and "path" in mapping:
-                name = identity(name)
                 if name not in required:
-                    raise error_type("source lock export cannot omit a conditional or unselected local dependency")
-                omissions.add(name)
+                    deferred.append((name, (path / mapping["path"]).resolve()))
+                else:
+                    omissions.add(name)
     if not names or len(set(names)) != len(names):
         raise error_type("source lock export needs an unambiguous owned project graph")
+    for name, target in deferred:
+        root_candidates = [mapping for key, mapping in root_mappings.items() if identity(key) == name]
+        root_mapping = root_candidates[0] if len(root_candidates) == 1 else None
+        if (
+            root_project is None or name not in root_required or name not in omissions
+            or not isinstance(root_mapping, dict) or "path" not in root_mapping
+            or (root_project / root_mapping["path"]).resolve() != target
+            or len({path for path, _ in mappings_by_name[name]}) != len(mappings_by_name[name])
+            or any(
+                not isinstance(mapping, dict) or "path" not in mapping
+                or (path / mapping["path"]).resolve() != target
+                for path, mapping in mappings_by_name[name]
+            )
+        ):
+            raise error_type("source lock export cannot omit a conditional or unselected local dependency")
     return tuple(sorted(omissions))
 
 
@@ -658,10 +682,21 @@ def source_compile_arguments(
 ):
     packages = ()
     if operation == "source-compile":
-        _, projects, _, _ = source_inputs(
+        base, projects, _, _ = source_inputs(
             arguments, environment, cwd, roots, operation=operation,
         )
-        packages = source_compile_packages(projects, toml=toml, identity=identity, error_type=error_type)
+        root_projects = {
+            (base / value).resolve().parent
+            for option, value in argument_pairs(arguments)
+            if option in ("", "-r", "--requirement", "--requirements")
+            and Path(value).name == "pyproject.toml"
+            and (base / value).resolve().parent in projects
+        }
+        root_project = next(iter(root_projects)) if len(root_projects) == 1 else None
+        packages = source_compile_packages(
+            projects, toml=toml, identity=identity, error_type=error_type,
+            root_project=root_project,
+        )
     return compile_arguments(
         arguments, argument_pairs=argument_pairs, error_type=error_type, source_packages=packages,
         source_graph=operation == "source-compile",

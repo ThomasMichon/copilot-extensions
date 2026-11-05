@@ -471,16 +471,24 @@ def retain_source_configuration(
 @contextmanager
 def _retain_source_lock(
     plan: InstallationProfilePlan, *, max_lock_bytes: int, deadline: float,
-    wheel_witness: bool = False, **options,
+    wheel_witness: bool = False, prefer_target_tags: bool = False, **options,
 ):
     """Resolve only after the actual source/settings owner has been captured."""
     _check_deadline(deadline)
     if type(max_lock_bytes) is not int or max_lock_bytes <= 0:
         raise ProfileError("source candidate needs a positive lock byte budget")
+    if type(prefer_target_tags) is not bool or (prefer_target_tags and not wheel_witness):
+        raise ProfileError("native target preference requires an exact wheel witness")
     with retain_source_configuration(
         plan, deadline=deadline, wheel_witness=wheel_witness, **options,
     ) as configuration:
         transaction = configuration.transaction
+        if prefer_target_tags:
+            from core_native_feed_target import require_native_target
+
+            require_native_target(
+                transaction, configuration.projections[1], configuration.record()["target"]["tags"],
+            )
         result = subprocess.run(
             list(transaction.argv), env=transaction.environment, cwd=transaction.cwd,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -497,7 +505,13 @@ def _retain_source_lock(
         configuration.verify()
         record = configuration.record()
         native_lock = content if wheel_witness else None
-        files = _wheel_pins(content, record["target"], deadline) if wheel_witness else None
+        files = (
+            _wheel_pins(
+                content, record["target"], deadline,
+                **({"prefer_target_tags": True} if prefer_target_tags else {}),
+            )
+            if wheel_witness else None
+        )
         if files is not None:
             content = "".join(
                 f'{item["name"]}=={item["version"]} --hash={item["sha256"]}\n' for item in files

@@ -2745,7 +2745,10 @@ dependencies without local distributions, and refuse missing upload-age
 evidence without replacing an existing output. Graph and effective-omission
 refusals cover inactive markers/extras and recursive requirements, while native
 controls preserve root-metadata registry pins and recursively mapped local
-dependencies. Context-only argument/environment/ambient project mappings refuse
+dependencies. A real UV control also retains a redundant conditional local
+mapping already anchored by the compiled root; unanchored, conflicting or
+ambiguous alternatives still refuse before resolution. Context-only
+argument/environment/ambient project mappings refuse
 for direct, recursive and project-metadata inputs. Ordinary compile keeps its directory-dependency boundary. These are
 candidate-export controls, not source-origin approval or real-feed admission.
 
@@ -2766,10 +2769,11 @@ unit CI. They do not qualify private-feed policy, wheel admission or deployment.
 The explicit `retain_source_wheel_lock` path additionally consumes native
 `pylock.toml` output, retaining actual filenames/hashes and the compiler's held
 configuration. A native export can contain multiple compatible files; this
-initial path refuses that ambiguity rather than implementing another wheel
-ranking algorithm. Ordinary requirements exports remain unchanged. Real
-multi-wheel and source-only feed controls refuse before acquisition or a
-third-party backend request. Compressed wheel-tag alternatives pass through the
+path remains strict by default. An explicit associated-wheel caller can use
+the existing target-order selector only after the actual native interpreter
+and UV projection match; foreign tag order refuses before resolution. Ordinary
+requirements exports remain unchanged. Source-only feed controls refuse before
+acquisition or a third-party backend request. Compressed wheel-tag alternatives pass through the
 existing bounded canonicalizer before filename parsing; a regression repeats
 each alternative 128 times and asserts the parser receives only one combination.
 
@@ -2778,9 +2782,9 @@ fallback intent with the existing configured-runtime-source acquisition and
 canonical preparation paths. Real local Git repositories exercise exact
 origin/ownership, fetched merged commit/tree, source-policy changes, prepared
 byte changes and cleanup. Manager self-update preferences do not authorize
-runtime source; its default marketplace choice remains unsupported by this
-explicit provider. No artifact index, manifest or caller-provided source receipt
-authenticates these inputs.
+runtime source; the default marketplace choice uses its independently
+authenticated registered-source provider. No artifact index, manifest or
+caller-provided source receipt authenticates these inputs.
 
 `tools/test_runtime_source_feed.py` continues that real source selection through
 native exact-file resolution, the same held native feed configuration and the

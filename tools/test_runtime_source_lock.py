@@ -15,6 +15,7 @@ from types import SimpleNamespace
 import zipfile
 
 from packaging.markers import default_environment
+from packaging.tags import sys_tags
 import pytest
 
 import runtime_profile_policy as planner
@@ -123,7 +124,7 @@ def test_native_source_lock_binds_real_owner_plan_selected_source_and_empty_clos
 @pytest.mark.parametrize("as_extra", [False, True])
 @pytest.mark.parametrize("wheel_witness,multiple", [(False, False), (True, False), (True, True)])
 def test_native_source_lock_binds_nonempty_dated_feed_output(
-    adopter, source, target, tmp_path, as_extra, wheel_witness, multiple,
+    adopter, source, target, tmp_path, as_extra, wheel_witness, multiple, prefer=False,
 ):
     filename = "fixture_registry-1.0-py3-none-any.whl"
     archive = io.BytesIO()
@@ -134,7 +135,13 @@ def test_native_source_lock_binds_nonempty_dated_feed_output(
         wheel.writestr(prefix + "RECORD", "")
     content = archive.getvalue()
     digest = hashlib.sha256(content).hexdigest()
-    filenames = [filename, "fixture_registry-1.0-py2.py3-none-any.whl"] if multiple else [filename]
+    if prefer:
+        target = {**target, "tags": [str(tag) for tag in sys_tags()]}
+    second = (
+        "fixture_registry-1.0-" + target["tags"][0] + ".whl"
+        if prefer else "fixture_registry-1.0-py2.py3-none-any.whl"
+    )
+    filenames = [filename, second] if multiple else [filename]
 
     class Index(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -187,9 +194,10 @@ def test_native_source_lock_binds_nonempty_dated_feed_output(
     )
     environment["UV_CONFIG_FILE"] = str(configuration)
     try:
-        with (pytest.raises(ProfileError, match="one exact wheel") if multiple else nullcontext()), candidate(
+        with (pytest.raises(ProfileError, match="one exact wheel") if multiple and not prefer else nullcontext()), candidate(
             adopter, selected_source, target, tmp_path, env=environment,
             extras=("feature",) if as_extra else (), wheel_witness=wheel_witness,
+            **({"prefer_target_tags": True} if prefer else {}),
         ) as selected:
             assert selected.record()["pins"] == [
                 {"name": "fixture-registry", "version": "1.0", "hashes": ["sha256:" + digest]},
@@ -199,7 +207,8 @@ def test_native_source_lock_binds_nonempty_dated_feed_output(
             assert selected.record()["extras"] == (["feature"] if as_extra else [])
             if wheel_witness:
                 assert selected.record()["files"] == [{
-                    "name": "fixture-registry", "version": "1.0", "filename": filename,
+                    "name": "fixture-registry", "version": "1.0",
+                    "filename": second if prefer else filename,
                     "sha256": "sha256:" + digest,
                 }]
                 assert filename.encode() in selected.native_lock
@@ -209,6 +218,32 @@ def test_native_source_lock_binds_nonempty_dated_feed_output(
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_native_source_lock_prefers_the_actual_interpreters_tags(adopter, source, target, tmp_path):
+    test_native_source_lock_binds_nonempty_dated_feed_output(
+        adopter, source, target, tmp_path, as_extra=False, wheel_witness=True, multiple=True,
+        prefer=True,
+    )
+
+
+def test_preferred_source_lock_refuses_foreign_tag_order_before_resolution(
+    adopter, source, target, tmp_path, monkeypatch,
+):
+    target["tags"] = list(reversed([str(tag) for tag in sys_tags()]))
+    actual = locks.subprocess.run
+
+    def run(argv, *args, **kwargs):
+        if list(argv)[1:3] == ["pip", "compile"] and "--show-settings" not in argv:
+            pytest.fail("foreign native tags reached resolution")
+        return actual(argv, *args, **kwargs)
+
+    monkeypatch.setattr(locks.subprocess, "run", run)
+    with pytest.raises(ValueError, match="target differs"):
+        with candidate(
+            adopter, source, target, tmp_path, wheel_witness=True, prefer_target_tags=True,
+        ):
+            pytest.fail("foreign native tags reached a consumer")
 
 
 @pytest.mark.parametrize("field,value", [
@@ -580,6 +615,7 @@ def test_lock_byte_budget_is_inclusive(adopter, source, target, tmp_path, monkey
 
 @pytest.mark.parametrize("selection", [
     {"max_lock_bytes": 0}, {"max_lock_bytes": True},
+    {"prefer_target_tags": True}, {"prefer_target_tags": "true"},
     {"extras": ("feature_one", "feature-one")}, {"extras": ["feature"]},
     {"component": "../foreign"}, {"python": Path("python")}, {"expected_source": None},
 ])

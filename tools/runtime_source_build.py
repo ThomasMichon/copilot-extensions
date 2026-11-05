@@ -217,6 +217,7 @@ def retain_associated_source_runtime_inputs(
             plan, payload=authenticated.payload, expected_source=authenticated.identity,
             target=target, component=component, uv=uv, python=python, extras=extras, env=env,
             max_lock_bytes=max_lock_bytes, deadline=deadline, installation=installation,
+            prefer_target_tags=True,
         ))
         feed = stack.enter_context(retain_source_feed_inputs(
             plan, locked, installation=installation, deadline=deadline,
