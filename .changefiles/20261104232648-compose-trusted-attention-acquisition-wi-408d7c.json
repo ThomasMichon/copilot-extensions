@@ -1,0 +1,9 @@
+{
+  "comment": "Compose trusted attention acquisition with the existing atomic conversation owner",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

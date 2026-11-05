@@ -27,8 +27,9 @@ Progress belongs to the exact PR/account/namespace/consumer/role. Matching
 candidate/cursor suppresses repeated work, but a new same-head discussion cursor
 or new observation epoch remains actionable. Feedback ahead of observation, or
 a candidate change under an unchanged cursor, is unavailable rather than an
-invented clean baseline. The observation owner must deduplicate self-echoes and
-poll nonevents before allocating a meaningful cursor; this module does not
+invented clean baseline. Acquisition deduplicates poll nonevents. Feedback
+owners must reconcile exact confirmed self-effects per interest without hiding
+the global journal input from other participants; this module does not
 manufacture those guarantees from caller numbers.
 
 `rank` orders at most 4,096 unique PR interests, excludes non-actionable or
@@ -65,7 +66,7 @@ and bounded references to the original operation, generation and receipt
 action/attempt identities. The actual receipts remain in their current owner.
 These are data references, not proof of permission, confirmed feedback or a
 new effect ledger. There is no ingest, feedback-write, selector, automatic
-acquisition or public read operation in this data-only slice.
+acquisition or public read operation in the A1 data-only slice.
 
 `snapshot` requires v4 and never adopts or writes. Malformed/null, duplicate,
 foreign-namespace, invalid-cursor and over-capacity persisted attention refuses
@@ -80,3 +81,40 @@ than misreporting its disk layout; the authenticated reader and its negotiated
 compatibility are A3 work. Do not adopt a serving volume for this source
 foundation. No HTTP/CLI operation, automatic migration, activation, rollback
 rewrite, terminal retention or production deletion is added.
+
+## Trusted acquisition composition
+
+The finite acquisition half of A2 lets the existing `WorkspaceOperations`
+embedding supply an optional `attention_owner` callback. Its typed
+`AttentionInputs` names the exact acquired generation, complete admitted
+interest set and explicit current policy recommendation/completeness flags.
+This is a trusted existing-owner callback, not caller JSON, a selector
+implementation, an assignment or effect permission. Default native read-only
+and watch-only hosts do not supply one and remain unchanged.
+
+After confirmed cache publication, `ConversationStore.observe_workspace`
+commits the normalized observation, actual journal candidate/cursor and
+attention rows in one existing complete-envelope transaction. It requires
+already-adopted v4 when attention inputs are present. A failed cache CAS never
+calls the attention owner or updates either section. Cache publication is
+still a separate commit: a later policy/storage failure leaves that published
+generation intact and requires reconciliation of the same acquisition, not
+replay of a provider effect.
+
+Identical semantic polls refresh observation freshness without resetting
+pending age. Unhandled dialogue retains its first pending age; the first new
+event after an existing handled baseline starts its own age. The original
+baseline/provenance remains unchanged. A genuine reopen clears the old epoch's
+baseline and starts a fresh pending age. Omitted formerly admitted interests
+become selection-unknown, not silently deleted or still positively selected.
+Missing native draft evidence, incomplete policy and unknown path selection
+are unavailable rather than a positive queue decision.
+
+This source composition is not A2's complete exit. It introduces no confirmed
+feedback writer or self-echo suppression, and never derives handled progress
+from a receipt reference or latest journal cursor. Durable capture before
+feedback, race-safe exact confirmed readback and interest-specific echo
+reconciliation remain required. In particular, another participant must still
+see a confirmed comment as new input. The existing v3 serving descriptor still
+refuses v4; A3 must qualify negotiated reading before a serving host can adopt
+this layout. No HTTP/CLI operation or default host enables this source seam.

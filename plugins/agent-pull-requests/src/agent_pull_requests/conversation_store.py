@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from .attention import Cursor, PRKey
+from .attention_acquisition import AttentionInputs, observe_attention
+from .attention_state import AttentionState
 from .conversation_journal import ConversationJournal, Observation, PROTOCOL
 from .watch_replay_store import ReplayStore, ReplayStoreInvalid
 
@@ -131,11 +133,17 @@ class ConversationStore:
         *,
         expires_at: int,
         checkpoint: Callable[[], None] | None = None,
+        attention: AttentionInputs | None = None,
     ) -> dict:
         """Project trusted acquisition under the same journal transaction, not HTTP ingest."""
         from .workspace_conversation import conversation_key, project_generation
 
-        def observe(journal: ConversationJournal) -> dict:
+        def observe(document: dict) -> dict:
+            if document["version"] not in (3, 4):
+                raise ReplayStoreInvalid("conversation journal requires explicit owner adoption")
+            if attention is not None and document["version"] != 4:
+                raise ReplayStoreInvalid("attention requires explicit owner adoption")
+            journal = ConversationJournal(document["conversations"])
             key = conversation_key(generation["scope"], self.owner.namespace)
             record = journal._find(key)
             previous = Observation.restore(record["current"]) if record is not None else None
@@ -145,11 +153,19 @@ class ConversationStore:
             if previous is not None and previous.terminal and not value.complete:
                 return {"status": "unavailable", "reason": "terminal_requires_complete_observation"}
             expected = Cursor(record["epoch"], record["sequence"]) if record else None
-            return journal.observe(
+            result = journal.observe(
                 value, expected=expected,
                 reopen=bool(previous and previous.terminal and value.complete and value.state == "open"),
             )
+            if attention is not None and result["status"] in ("observed", "unchanged"):
+                state = AttentionState(document["attention"])
+                result["attention"] = observe_attention(
+                    state, value, Cursor(**result["cursor"]), generation, attention,
+                )
+                document["attention"] = state.snapshot()
+            document["conversations"] = journal.snapshot()
+            return result
 
-        return self._transaction(
+        return self.owner._review_transaction(
             observe, expires_at=expires_at, checkpoint=checkpoint, persist=True,
         )
