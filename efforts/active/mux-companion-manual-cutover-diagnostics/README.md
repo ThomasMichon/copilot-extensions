@@ -568,6 +568,7 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+- [2026-11-04 - Live-request contract and bounded producer source](journal/2026/11.04-sidecar-live-request-contract.md)
 - [2026-11-04 - Supported local rescue qualified; live request evidence next](journal/2026/11.04-sidecar-rescue-qualification.md)
 - [2026-11-04 - Checkout preservation merged; rescue qualification continues](journal/2026/11.04-sidecar-checkout-preservation.md)
 - [2026-11-04 - Existing-tick collection merged; legacy preservation next](journal/2026/11.04-sidecar-existing-tick-collection.md)

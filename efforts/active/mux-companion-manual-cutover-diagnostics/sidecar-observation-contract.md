@@ -291,9 +291,9 @@ per-delegate subscriptions are not part of this consumer.
 Missing source-recorded timestamps remain explicitly unknown; immutable event
 content does not acquire a different timestamp when another viewer loads it.
 
-The [proposed live-request amendment](sidecar-current-requests.md) defines an
+The [live-request amendment](sidecar-current-requests.md), reviewed in #10545, defines an
 optional producer-owned current input/permission projection on this same held
-reader. Its review precedes new wire syntax. Existing v1 current-request and
+reader. Its implementation remains open. Existing v1 current-request and
 per-entry answerability fields remain unknown; retained events do not establish
 current waiters. Unsupported sources retain the original observation/history
 path with explicit unknown live input.

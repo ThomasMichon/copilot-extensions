@@ -1,0 +1,9 @@
+{
+  "comment": "Add bounded producer-owned local ACP waiter observations without answering selectors",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
