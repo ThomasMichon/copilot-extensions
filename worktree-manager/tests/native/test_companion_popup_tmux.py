@@ -18,8 +18,9 @@ import psutil
 import pytest
 
 from worktree_manager.companion_runtime import companion_shell_command
+from _companion_client_fixture import fixture_engine
 from _manager_process_fixture import synthetic_runtime
-from test_companion_app_tmux import AttachedClient, fixture_engine, retire_fixture
+from test_companion_app_tmux import AttachedClient, retire_fixture
 
 
 pytestmark = pytest.mark.skipif(
