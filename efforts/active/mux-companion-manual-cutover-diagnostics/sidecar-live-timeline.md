@@ -613,7 +613,10 @@ publication and installed support retain their separate qualification.
   than qualifying installed behavior, pixels or frame performance.
   The separate [Windows client packet](journal/2026/11.05-sidecar-windows-client.md)
   uses the actual PSMux/ConPTY client and unmodified app with a synthetic owner.
-  Source controls pass; native Windows execution remains an explicit gate.
+  #10766's reviewed native packet passes 84 cases with zero skips, including
+  actual input/history/resize/return and strict owned cleanup. The initial
+  startup-banner failure remains unexplained; this is not startup-stability,
+  installed, popup/Relay, headed-pixel or native-performance acceptance.
 - [ ] Qualify current pane/PID preservation, focus, resize, observer exit,
   mode guides and the separately owned permanent Claims chrome.
 - [ ] Record performance/retention/coverage and source versus installed/native
@@ -647,6 +650,14 @@ is inferred from these presentation checks.
   independent approval, green CI, merge and full parent/contract readback.
 
 ## Validation Plan
+
+- [x] Qualify the actual private Windows PSMux/ConPTY client over the unmodified
+  Companion with a synthetic wire-valid owner, independent history/live input,
+  resize, Follow-live, Escape and original CLI pane/PID/session preservation.
+  #10766's exact reviewed source passes the 84-case Windows packet with zero
+  skips and mandatory reader/observer/Job/handle cleanup. Retain the earlier
+  failed startup attempt and unknown cause; whole S5, installed, popup/Relay,
+  startup stability and native performance remain open.
 
 - [x] Qualify the isolated POSIX attached-client/private-three-owner composition,
   sparse full/narrow views, independently paged history, live purpose/count

@@ -566,6 +566,12 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       maintenance/no-spawn, warm reuse and exact cleanup controls. This closes
       the finite recovery amendment, not an installed daemon wake, lossless
       legacy history or the whole S2 row.
+      #10766 qualifies the actual private Windows PSMux/ConPTY client over
+      the unmodified app with a synthetic owner: history/live browsing,
+      resize, Follow-live, original CLI identity and exact reader/Job cleanup.
+      Its 84-case native packet has zero skips. The first missing-banner
+      startup failure remains unexplained; this is not startup-stability,
+      installed, popup/Relay, headed-pixel or native-performance acceptance.
       The [known-output presentation follow-up](sidecar-output-presentation.md)
       addresses actual message/thought bursts that still overwhelm normal
       work rows. Plan #10689 and implementation #10698 are merged.
@@ -660,6 +666,7 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+- [2026-11-05 - Actual Windows client qualification and retained startup uncertainty](journal/2026/11.05-sidecar-windows-client.md)
 - [2026-11-05 - Maintenance-aware resident recovery and retained child custody](journal/2026/11.05-sidecar-resident-recovery.md)
 - [2026-11-05 - Native three-owner composition and retained PRE boundary](journal/2026/11.05-sidecar-native-owner-composition.md)
 - [2026-11-05 - Current-context RPC is not pre-compaction evidence](journal/2026/11.05-sidecar-context-metadata-boundary.md)
