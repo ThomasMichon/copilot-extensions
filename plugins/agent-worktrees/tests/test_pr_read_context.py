@@ -27,6 +27,9 @@ def test_front_door_explicit_read_from_neutral_cwd(monkeypatch, tmp_path, capsys
     monkeypatch.setattr(pr_watch, "build_fetch", lambda *args, **kwargs: lambda: PRSnapshot(head_sha="head"))
     monkeypatch.setattr(pr_cli, "require_claimant_worktree",
                         lambda verb: pytest.fail("one-shot read acquired a worktree"))
+    if argv[:1] == ["pr-watch"]:
+        monkeypatch.setattr(main, "_ensure_cluster_loaded",
+                            lambda: pytest.fail("explicit read loaded lifecycle commands"))
     assert main.main(argv) == 0
     assert "agent-worktrees.pr-snapshot" in capsys.readouterr().out
 
@@ -45,8 +48,35 @@ def test_front_door_threads_read_from_neutral_cwd(monkeypatch, tmp_path, capsys)
     monkeypatch.setattr(providers, "account_token_for_slug", lambda *args: None)
     monkeypatch.setattr(pr_thread_report, "thread_report",
                         lambda *args, **kwargs: {"supported": True, "threads": []})
+    monkeypatch.setattr(main, "_ensure_cluster_loaded",
+                        lambda: pytest.fail("explicit threads read loaded lifecycle commands"))
     assert main.main(["pr-watch", "threads", "owner/repository", "7", "--json"]) == 0
     assert '"threads": []' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("arguments", [
+    ["snapshot", "7", "--json"],
+    ["status", "7", "--json"],
+    ["threads", "7", "--json"],
+    ["cursor", "owner/repository", "7"],
+    ["wait", "owner/repository", "7", "--timeout", "1"],
+    ["reply", "owner/repository", "7"],
+    ["subscribe", "owner/repository", "7"],
+])
+def test_other_watch_routes_retain_the_deferred_cluster(monkeypatch, arguments):
+    from agent_worktrees import __main__ as main
+
+    calls = []
+    monkeypatch.setattr(main.front_door_cli, "resolve_invocation_project", lambda *args: True)
+    monkeypatch.setattr(main, "_ensure_cluster_loaded", lambda: calls.append("cluster"))
+
+    def dispatch(argv):
+        assert argv == arguments
+        assert calls == ["cluster"]
+        return 37
+
+    monkeypatch.setattr(pr_cli, "cmd_pr_watch_dispatch", dispatch)
+    assert main.main(["pr-watch", *arguments]) == 37
 
 
 @pytest.mark.parametrize("argv", [
