@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import stat
 import sys
 import tempfile
 from datetime import datetime, timezone
@@ -14,6 +15,11 @@ if TYPE_CHECKING or __package__:
     from .cache_directory_paths import ordinary_cache_root
 else:
     from cache_directory_paths import ordinary_cache_root
+
+
+def _validate_fallback_root(info: os.stat_result, uid: int) -> None:
+    if info.st_uid != uid or stat.S_IMODE(info.st_mode) & 0o077:
+        raise ValueError("default test scratch must be private and owned by the current user")
 
 
 def scratch_root(repo: Path) -> Path:
@@ -33,6 +39,8 @@ def scratch_root(repo: Path) -> Path:
     if scratch.is_relative_to(source):
         raise ValueError("test scratch must be outside the source checkout")
     scratch.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if configured is None and os.name != "nt":
+        _validate_fallback_root(scratch.stat(), os.getuid())
     return scratch
 
 

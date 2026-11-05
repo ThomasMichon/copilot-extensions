@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 import socket
+import stat
 import subprocess
 import sys
 import time
@@ -174,6 +175,7 @@ def test_external_resources_are_source_bound_and_leave_legacy_resources_untouche
         assert not sandbox.is_relative_to(source)
         assert (sandbox / "scratch-owner.json").is_file()
         assert Path(kwargs["env"]["AGENT_SCRATCH_ROOT"]).is_relative_to(sandbox)
+        assert Path(kwargs["env"]["COPILOT_EXTENSIONS_TEST_VENV_ROOT"]) == environment.parent
         assert Path(kwargs["env"]["PYTHONPYCACHEPREFIX"]).is_relative_to(sandbox)
         assert f"cache_dir={sandbox / 'pytest-cache'}" in command
         assert probe(environment) == 3
@@ -274,6 +276,21 @@ def test_os_temporary_alias_is_canonical_but_explicit_alias_is_refused(cache, mo
     monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(alias))
     with pytest.raises(ValueError, match="not ordinary"):
         runner._venv_python("alpha")
+
+
+@pytest.mark.parametrize("owner,mode,accepted", [
+    (42, 0o700, True), (43, 0o700, False), (42, 0o770, False), (42, 0o707, False),
+])
+def test_fallback_root_rejects_foreign_or_shared_metadata(owner, mode, accepted):
+    load_runner("run-plugin-tests.py")
+    import plugin_test_resources as resources
+
+    metadata = os.stat_result((stat.S_IFDIR | mode, 0, 0, 1, owner, 0, 0, 0, 0, 0))
+    if accepted:
+        resources._validate_fallback_root(metadata, 42)
+    else:
+        with pytest.raises(ValueError, match="private and owned"):
+            resources._validate_fallback_root(metadata, 42)
 
 
 @pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="native Unix sockets unavailable")

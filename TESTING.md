@@ -6431,6 +6431,9 @@ aliases are resolved first (including macOS `/var`); explicit linked roots
 remain invalid. Relative, file, linked/reparse,
 or checkout-internal scratch roots fail explicitly, without falling back or
 touching existing checkout-local environments.
+On POSIX, the default per-user directory must also be owned by the current
+user and grant no group/other access; unsafe existing directories are refused,
+never permission-repaired or removed.
 
 A retained `ce-tests-<canonical-checkout-key>/venvs/<platform>/<target>` cache
 keeps different checkouts and targets independent; canonical spellings of the
@@ -7688,6 +7691,11 @@ preparation and test use share one held lease. POSIX venv `bin/python`
 symlinks are invoked as venv launchers, not resolved to the base interpreter.
 An old checkout-local interpreter may still be explicitly selected with
 `--python` for execution, but is never provisioned or migrated implicitly.
+Same-target fixtures use their active interpreter environment. For cross-target
+fixtures, both shared runners explicitly export
+`COPILOT_EXTENSIONS_TEST_VENV_ROOT` naming the prepared platform-level cache.
+This is distinct from sandbox-local `AGENT_SCRATCH_ROOT`: tests never infer the
+other target's prepared interpreter from their disposable child scratch.
 
 Windows standalone cleanup retains extended-length paths and the unchanged
 15-second transient sharing retry. A read-only regular file may have its write

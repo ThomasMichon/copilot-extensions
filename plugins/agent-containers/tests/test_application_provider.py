@@ -4,7 +4,6 @@ import json
 import os
 from pathlib import Path
 import stat
-import sys
 from types import SimpleNamespace
 
 import pytest
@@ -285,7 +284,10 @@ def _real_bridge_classification(command, *, mismatch=False, registry_error=False
     from agent_procutil.owned_process import run_caller_owned
 
     root = Path(__file__).resolve().parents[3]
-    bridge_environment = root / ".test-venvs" / sys.platform / "agent-bridge"
+    prepared = os.environ.get("COPILOT_EXTENSIONS_TEST_VENV_ROOT")
+    if not prepared:
+        pytest.skip("select an explicit prepared environment root for the Bridge consumer")
+    bridge_environment = Path(prepared) / "agent-bridge"
     python = bridge_environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     if not python.is_file():
         pytest.skip("Prepare declared Bridge test dependencies with run-plugin-tests.py agent-bridge --prepare-only")
@@ -321,6 +323,27 @@ def _real_bridge_classification(command, *, mismatch=False, registry_error=False
     assert settled
     assert result.returncode == 0, result.stdout + result.stderr
     return json.loads(result.stdout)
+
+
+def test_bridge_consumer_uses_explicit_prepared_environment(tmp_path, monkeypatch):
+    from agent_procutil import owned_process
+
+    prepared = tmp_path / "prepared"
+    python = prepared / "agent-bridge" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True)
+    python.touch()
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_VENV_ROOT", str(prepared))
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(tmp_path / "unrelated-sandbox"))
+    observed = []
+
+    def run(command, **kwargs):
+        observed.append(command[0])
+        kwargs["on_settled"]()
+        return SimpleNamespace(returncode=0, stdout='{"namespaces":["container"]}', stderr="")
+
+    monkeypatch.setattr(owned_process, "run_caller_owned", run)
+    assert _real_bridge_classification(tmp_path / "command") == {"namespaces": ["container"]}
+    assert observed == [str(python)]
 
 
 def test_application_provider_install_root_is_discovered_by_real_bridge_consumer(

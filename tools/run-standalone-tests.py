@@ -423,6 +423,7 @@ def main(argv: list[str] | None = None) -> int:
             sandbox = Path(temporary.name)
             record_owner(sandbox, REPO, retention="disposable after verified process cleanup")
             env = isolated_environment(os.environ, sandbox)
+            env["COPILOT_EXTENSIONS_TEST_VENV_ROOT"] = str(venv_root(REPO))
             env.pop("AGENT_CHAT_TEST_SUITE", None)
             if chat_suite:
                 env["AGENT_CHAT_TEST_SUITE"] = chat_suite

@@ -585,6 +585,7 @@ def run_plugin(
         )
         tools_path = str(REPO / "tools")
         env["PYTHONPATH"] = tools_path
+        env["COPILOT_EXTENSIONS_TEST_VENV_ROOT"] = str(_venv_root())
         # Ambient profile state must never silently relax an ordinary run.
         env.pop(_CODESPACES_PROFILE_ENV, None)
         if test_profile != "standard":
