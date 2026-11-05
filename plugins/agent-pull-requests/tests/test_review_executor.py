@@ -78,6 +78,7 @@ def environment(tmp_path, monkeypatch, request):
         empty_read = False
         versioned_reply = False
         readback_policies = None
+        on_changes = None
 
         def __init__(self):
             self.pr = copy.deepcopy(evidence["sections"]["pull_request"]["data"])
@@ -120,6 +121,8 @@ def environment(tmp_path, monkeypatch, request):
                 if "/iterations?" in url:
                     return NativeReviewResponse(200, {"value": copy.deepcopy(self.iterations)})
                 if "/changes?" in url:
+                    if self.on_changes is not None:
+                        self.on_changes(self, remaining)
                     return NativeReviewResponse(200, {"changeEntries": [], "nextSkip": 0, "nextTop": 0})
                 if "/threads?" in url:
                     return NativeReviewResponse(200, {"value": copy.deepcopy(self.threads)})

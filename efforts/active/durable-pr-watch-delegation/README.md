@@ -959,7 +959,10 @@ callback an implicit credential store.
   intervening round trips, restart, reopen and transaction races.
   Real cache and replay-lock contention likewise preserve the original result
   and reconcile optional coverage on retry without resending.
-  The coupled PR packet passes 315 cases and the native response/exporter
+  Original handled persistence precedes optional echo work, which uses only
+  half the remaining request budget. A workspace-deadline regression proves
+  optional readback timeout preserves the structured result and no-resend retry.
+  The coupled PR packet passes 316 cases and the native response/exporter
   packet passes 42, both with bounded cleanup verified. Fatal Ruff,
   documentation consistency, the install contract and admitted strict service
   Linux/Windows targets pass; these are not native Windows or live-provider

@@ -108,11 +108,17 @@ handled position.
 Coverage requires exactly one later semantic position in the same epoch.
 Every non-discussion section must match the captured generation, and the
 complete discussion set must differ only by distinct selected new threads
-matching the original response fingerprints. The same pinned protected
-context then uses the existing finite owner-evidence collector to read all
+matching the original response fingerprints. A new context from that same
+existing protected owner uses the finite owner-evidence collector to read all
 sections again, including policies, reviewers and the exact source range.
 Incomplete or differing readback refuses coverage. No new transport,
 credential owner, response ledger or cache is introduced.
+
+Original protected readback and handled persistence finish before optional
+echo lookup/readback. Optional evidence receives only half the then-remaining
+request budget through the existing per-request transport checks, leaving the
+rest for settlement and return. An echo timeout cannot consume the entire
+workspace deadline or erase the already-persisted original baseline.
 
 After readback, ReplayStore atomically rechecks the original capture/receipts,
 actual acquired position, complete current journal meaning, retained event,

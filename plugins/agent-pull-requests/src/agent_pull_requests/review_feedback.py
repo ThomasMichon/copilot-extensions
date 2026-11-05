@@ -204,16 +204,6 @@ class ReviewFeedback:
             raise FeedbackUnavailable("capture_unavailable")
         if any(row["state"] != "confirmed" for row in operation["actions"]):
             return {"status": "pending", "reason": "selected_actions_unconfirmed"}
-        acquisition = None
-        echo = {"status": "unavailable", "reason": "current_acquisition_unavailable"}
-        try:
-            if self.current_acquisition is not None:
-                acquisition = self.current_acquisition()
-        except PermissionError:
-            raise
-        except (OSError, ValueError, OperationLockedError, CacheUnavailable):
-            pass
-        proven = None
         with protected_review_context(context_factory, operation["intent"]["scope"], remaining) as context:
             current = context.read_state()
             self.check_target(current)
@@ -235,23 +225,44 @@ class ReviewFeedback:
                 }
                 if actual_comments.get(ids["comment_id"]) != expected_comments[ids["comment_id"]]:
                     raise FeedbackUnavailable("confirmed_effect_readback_changed")
-            if acquisition is not None:
-                try:
-                    proven = self._prove_echo(operation, acquisition, context, remaining)
-                    if proven is None:
-                        echo = {"status": "not_observed"}
-                except PermissionError:
-                    raise
-                except (OSError, TimeoutError, ValueError, FeedbackUnavailable,
-                        ReviewContextUnavailable, ProviderError) as error:
-                    echo = {
-                        "status": "unavailable",
-                        "reason": str(error) if isinstance(error, FeedbackUnavailable) else "echo_readback_unavailable",
-                    }
             context.check()
         result = self._record_handled(operation)
+        acquisition = None
+        echo = {"status": "unavailable", "reason": "current_acquisition_unavailable"}
+        proven = None
+        # Optional evidence must leave the existing request time to settle/return.
+        reserve = remaining() / 2
+
+        def echo_remaining() -> float:
+            budget = remaining() - reserve
+            if budget <= 0:
+                raise TimeoutError("optional echo budget exhausted")
+            return budget
+
+        try:
+            if self.current_acquisition is not None:
+                acquisition = self.current_acquisition()
+        except PermissionError:
+            raise
+        except (OSError, ValueError, OperationLockedError, CacheUnavailable):
+            pass
+        if acquisition is not None:
+            try:
+                echo_remaining()
+                proven = self._prove_echo(operation, acquisition, context_factory, echo_remaining)
+                if proven is None:
+                    echo = {"status": "not_observed"}
+            except PermissionError:
+                raise
+            except (OSError, TimeoutError, ValueError, FeedbackUnavailable,
+                    ReviewContextUnavailable, ProviderError) as error:
+                echo = {
+                    "status": "unavailable",
+                    "reason": str(error) if isinstance(error, FeedbackUnavailable) else "echo_readback_unavailable",
+                }
         if proven is not None:
             try:
+                echo_remaining()
                 echo = self._record_echo(operation, *proven)
             except PermissionError:
                 raise
@@ -263,10 +274,11 @@ class ReviewFeedback:
         return {**result, "echo": echo}
 
     def _prove_echo(
-        self, operation: dict, acquisition: tuple[dict, Cursor], context: object,
+        self, operation: dict, acquisition: tuple[dict, Cursor], context_factory: Callable,
         remaining: Callable[[], float],
     ) -> tuple[dict, Cursor] | None:
         from agent_worktrees.providers.azure_owned_evidence import AdoReadOwner, acquire_owned_evidence
+        from agent_worktrees.providers.azure_owned_review import protected_review_context
         from .review_executor import _threads
 
         if type(acquisition) is not tuple or len(acquisition) != 2 or type(acquisition[1]) is not Cursor:
@@ -304,15 +316,17 @@ class ReviewFeedback:
         if actual != expected:
             raise FeedbackUnavailable("independent_discussion_input")
         scope = operation["intent"]["scope"]
-        owner = AdoReadOwner(
-            scope["endpoint"], scope["project_id"] + "/" + scope["repository_id"],
-            scope["project_id"], scope["repository_id"], scope["principal_id"],
-            "protected-feedback-readback", context.check,
-            lambda number, budget, checkpoint: context.reader,
-        )
-        fresh = build_generation(acquire_owned_evidence(
-            owner, scope["number"], budget=remaining(),
-        ))["generation"]
+        with protected_review_context(context_factory, scope, remaining) as context:
+            owner = AdoReadOwner(
+                scope["endpoint"], scope["project_id"] + "/" + scope["repository_id"],
+                scope["project_id"], scope["repository_id"], scope["principal_id"],
+                "protected-feedback-readback", context.check,
+                lambda number, budget, checkpoint: context.reader,
+            )
+            fresh = build_generation(acquire_owned_evidence(
+                owner, scope["number"], budget=remaining(),
+            ))["generation"]
+            context.check()
         if (
             not fresh["complete"] or fresh["revision"] != latest["revision"]
             or any(self._section_meaning(fresh["sections"][name]) != self._section_meaning(section)

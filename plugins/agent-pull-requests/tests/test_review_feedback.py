@@ -397,9 +397,9 @@ def test_original_reply_and_owned_edit_use_exact_native_object_readback(
     }
 
 
-@pytest.mark.parametrize("mode", ["normal", "reopen", "unbound", "echo"])
+@pytest.mark.parametrize("mode", ["normal", "reopen", "unbound", "echo", "echo_timeout"])
 def test_workspace_selects_feedback_from_embedding_not_request_json(
-    feedback_environment: tuple, mode: str,
+    feedback_environment: tuple, monkeypatch: pytest.MonkeyPatch, mode: str,
 ) -> None:
     from agent_pull_requests.generation_cache import GenerationCache
     from agent_pull_requests.owner_read import OwnerReadBinding, OwnerReadHandler, PROFILE, PRINCIPAL_SEMANTICS
@@ -442,9 +442,20 @@ def test_workspace_selects_feedback_from_embedding_not_request_json(
         )
 
     operations = make_operations()
-    if mode == "echo":
+    if mode in ("echo", "echo_timeout"):
         backend.versioned_reply = True
         backend.pr["reviewers"] = copy.deepcopy(generation["sections"]["reviewers"]["data"])
+    if mode == "echo_timeout":
+        import agent_pull_requests.workspace_operations as workspace_module
+        monotonic = time.monotonic
+        elapsed = [0.0]
+        clock = lambda: monotonic() + elapsed[0]
+        executor = workspace_module.execute_review
+        monkeypatch.setattr(workspace_module.time, "monotonic", clock)
+        monkeypatch.setattr(
+            workspace_module, "execute_review",
+            lambda *args, **kwargs: executor(*args, **kwargs, clock=clock),
+        )
     payload = {
         "number": selected["scope"]["number"], "intent": selected,
         "source_attachment": attachment, "budget_seconds": 10,
@@ -492,10 +503,38 @@ def test_workspace_selects_feedback_from_embedding_not_request_json(
             "load", {"number": 42, "expected_current": generation["id"], "budget_seconds": 10},
             expires_at=expires, checkpoint=backend.checkpoint,
         )
+    if mode == "echo_timeout":
+        def acquire_echo(current: object) -> None:
+            evidence["sections"]["discussions"]["data"] = copy.deepcopy(backend.threads)
+            for section in evidence["sections"].values():
+                section.update(observed_from="2026-10-30T00:00:10Z", observed_to="2026-10-30T00:00:11Z")
+            value[5][0] = observation_interval(evidence["sections"])[1] + 1
+            operations.execute(
+                "load", {"number": 42, "expected_current": generation["id"], "budget_seconds": 10},
+                expires_at=expires, checkpoint=backend.checkpoint,
+            )
+
+        def exhaust_optional_budget(current: object, remaining: float) -> None:
+            assert document(value)["attention"]["records"][0]["handled"]["cursor"]["sequence"] == 1
+            assert 0 < remaining < 5
+            elapsed[0] += remaining + 0.01
+            backend.on_changes = None
+
+        backend.after_write = acquire_echo
+        backend.on_changes = exhaust_optional_budget
     result = operations.execute("submit", payload, expires_at=expires, checkpoint=backend.checkpoint)
     assert result["result"]["feedback"]["status"] == "handled", result
     assert called[-1] == generation["id"]
     assert result["result"]["feedback"]["cursor"]["epoch"] == (2 if mode == "reopen" else 1)
+    if mode == "echo_timeout":
+        assert result["result"]["status"] == "complete"
+        assert result["result"]["feedback"]["echo"] == {
+            "status": "unavailable", "reason": "echo_readback_unavailable",
+        }
+        assert document(value)["attention"]["records"][0]["handled"]["cursor"]["sequence"] == 1
+        recovered = operations.execute("submit", payload, expires_at=expires, checkpoint=backend.checkpoint)
+        assert recovered["result"]["feedback"]["echo"]["status"] == "covered"
+        assert recovered["result"]["entered_writes"] == 0
     if mode == "echo":
         evidence["sections"]["discussions"]["data"] = copy.deepcopy(backend.threads)
         for section in evidence["sections"].values():
