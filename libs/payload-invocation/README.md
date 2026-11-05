@@ -115,6 +115,10 @@ the bounded index, not executable bundles, and grants neither profile approval
 nor source-fallback authority. Promotion callers retain thin compatibility
 adapters over this same reader. Ordinary installer composition remains separate.
 
+`runtime_profile_delivery` retains a caller-selected delivery and its inspected
+wheel/material inputs using the existing custody owners. It authenticates neither
+the delivery's publisher nor the profile, source or feed policy.
+
 The payload-only native witness authenticates a synthetic Git source, admits
 its synthetic feed closure, builds first-party wheels, constructs and health
 checks an offline runtime, then reuses that same completed generation. It
