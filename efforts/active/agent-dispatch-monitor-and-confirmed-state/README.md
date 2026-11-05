@@ -484,11 +484,12 @@ restoration of historical terminal enums follows.
       and independent/own-native observation without finalization or task release.
       Keep version-1 finalized-closeout meaning unchanged. Consumer negotiation,
       queue advancement and ordinary/native activation remain separate gates.
-- [ ] Land the bounded [internal Dispatch readiness consumer](journal/2026/11.04-consumer-readiness.md):
+- [x] Land the bounded [internal Dispatch readiness consumer](journal/2026/11.04-consumer-readiness.md)
+      in [#10466](https://github.com/ThomasMichon/copilot-extensions/pull/10466),
+      merged as `f011f48f1b` after current-head independent approval and required CI:
       negotiate the selected local Worktrees owner, derive its actual native
       head, retain the original claim/allocation and recheck queue custody after
-      observation. Corrected source passes 128 isolated controls; independent
-      review, required CI and actual merge remain pending. Guarded advancement,
+      observation. Corrected source passes 128 isolated controls. Guarded advancement,
       ordinary caller migration and complete native qualification stay open.
 - [x] Land read-only [task-obligation provider evidence](journal/2026/11.03-task-obligation-provider.md)
       in [#10365](https://github.com/ThomasMichon/copilot-extensions/pull/10365),
