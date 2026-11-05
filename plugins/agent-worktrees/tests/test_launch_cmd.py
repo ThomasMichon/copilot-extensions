@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from agent_procutil.owned_process import run_caller_owned
 from launch_policy_workspace import synthetic_workspace_policy as synthetic_workspace_policy
 
 from agent_worktrees import __main__ as m
@@ -1174,6 +1175,53 @@ def test_default_setup_ps1_supports_hook_and_session_path():
     # --stdio (ACP) mode redirects Write-Host + hook output to stderr
     assert "StdioMode" in text
     assert "[Console]::Error.WriteLine" in text
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows PATH resolution regression")
+@pytest.mark.parametrize("candidates,expected", [
+    (["forwarder", "batch", "WindowsApps", "standalone"], "standalone"),
+    (["standalone", "forwarder"], "standalone"),
+    (["forwarder", "batch"], "forwarder"),
+])
+def test_default_setup_prefers_standalone_over_command_forwarders(tmp_path, candidates, expected):
+    shell = shutil.which("pwsh")
+    if not shell:
+        pytest.skip("pwsh is unavailable")
+    commands = []
+    for candidate in candidates:
+        directory = tmp_path / candidate
+        directory.mkdir()
+        executable = directory / ("copilot.cmd" if candidate == "batch" else "copilot.exe")
+        executable.touch()
+        if candidate == "forwarder":
+            (directory / "copilot").write_text(
+                "#!/bin/sh\n# vscode-copilot-launcher: forwards to another PATH command\n",
+                encoding="utf-8",
+            )
+        commands.append({"Source": str(executable)})
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+    driver = tmp_path / "resolve.ps1"
+    driver.write_text(
+        "param([string]$Source,[string]$CandidateJson)\n"
+        "$tokens=$null; $errors=$null\n"
+        "$tree=[Management.Automation.Language.Parser]::ParseFile($Source,[ref]$tokens,[ref]$errors)\n"
+        "$resolver=$tree.Find({param($node) $node -is "
+        "[Management.Automation.Language.FunctionDefinitionAst] -and "
+        "$node.Name -eq 'Resolve-CopilotApplication'},$true)\n"
+        ". ([scriptblock]::Create($resolver.Extent.Text))\n"
+        "$script:candidates=ConvertFrom-Json -InputObject $CandidateJson\n"
+        "function Get-Command { $script:candidates }\n"
+        "(Resolve-CopilotApplication).Source\n",
+        encoding="utf-8",
+    )
+    result = run_caller_owned(
+        [shell, "-NoProfile", "-File", str(driver),
+         str(scripts / "default-setup.ps1"), json.dumps(commands)],
+        cwd=str(tmp_path), timeout=15, max_stdout_bytes=4096, max_stderr_bytes=4096,
+    )
+    assert result.returncode == 0, result.stderr
+    expected_command = commands[candidates.index(expected)]["Source"]
+    assert result.stdout.strip() == expected_command
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PATH resolution regression")

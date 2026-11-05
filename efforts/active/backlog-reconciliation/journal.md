@@ -3,6 +3,30 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-04 - Two attributable merge and actual-policy readiness contracts](<journal/2026/11.04 merge-reconciliation-readiness-contracts.md>)
+
+- [2026-11-04 - Two optional teardown and post-finalization runtime contracts](<journal/2026/11.04 teardown-finalized-wip-contracts.md>)
+
+- [2026-11-04 - Two foreign-worktree and missing/windowless incident contracts](<journal/2026/11.04 foreign-worktree-mux-incident-contracts.md>)
+
+- [2026-11-04 - Two persistent raw-SSH and non-takeover admission contracts](<journal/2026/11.04 raw-ssh-admission-contracts.md>)
+
+- [2026-11-04 - Two mode-qualified hosting and independent activation contracts](<journal/2026/11.04 hosting-config-activation-contracts.md>)
+
+- [2026-11-04 - Two governed-build and warning-retirement prerequisite contracts](<journal/2026/11.04 build-warning-prerequisites-contracts.md>)
+
+- [2026-11-04 - Two reusable hygiene and finite scrub-disposition contracts](<journal/2026/11.04 hygiene-disposition-contracts.md>)
+
+- [2026-11-04 - Two terminal allocation and general reclamation contracts](<journal/2026/11.04 terminal-reclamation-boundaries-contracts.md>)
+
+- [2026-11-04 - Two exact-baton and original contention contracts](<journal/2026/11.04 handoff-resolution-contention-contracts.md>)
+
+- [2026-11-04 - Two Windows activation and persisted child-start diagnostics contracts](<journal/2026/11.04 startup-activation-diagnostics-contracts.md>)
+
+- [2026-11-04 - Two provider-account and read-only prerequisite contracts](<journal/2026/11.04 provider-account-boundaries-contracts.md>)
+
+- [2026-11-04 - Two SSH transport and absolute bind-policy contracts](<journal/2026/11.04 ssh-transport-boundaries-contracts.md>)
+
 - [2026-11-04 - Two existing-queue selection and long-slot contracts](<journal/2026/11.04 queue-selection-contracts.md>)
 
 - [2026-11-04 - One incremental-pipeline planning and consumer contract](<journal/2026/11.04 incremental-pipeline-contract.md>)
