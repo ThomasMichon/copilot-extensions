@@ -240,7 +240,10 @@ def test_session_end_uses_real_slot_without_path_python(tmp_path, layout, contex
         (workspace / ".git" / folder).mkdir(parents=True)
     (workspace / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
     (root / "projects.yaml").write_text(json.dumps({
-        "projects": {"example": {"anchor": str(workspace)}},
+        "projects": {"example": {}},
+    }))
+    (root / "repos.yaml").write_text(json.dumps({
+        "repos": {"example": {"windows" if os.name == "nt" else "linux": str(workspace)}},
     }))
     legacy = home / ".agent-worktrees/bin"
     legacy.mkdir(parents=True, exist_ok=True)

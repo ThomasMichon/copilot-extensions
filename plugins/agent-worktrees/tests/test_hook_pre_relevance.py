@@ -24,7 +24,11 @@ def _pretool_recovery_fixture(tmp_path, fault):
         (cwd / ".git" / folder).mkdir()
     (cwd / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
     (scripts.parent / "projects.yaml").write_text(
-        "projects:\n  fixture:\n    anchor: " + json.dumps(str(cwd)) + "\n", encoding="utf-8",
+        "projects:\n  fixture: {}\n", encoding="utf-8",
+    )
+    (scripts.parent / "repos.yaml").write_text(
+        json.dumps({"repos": {"fixture": {"windows" if os.name == "nt" else "linux": str(cwd)}}}),
+        encoding="utf-8",
     )
     (cwd / ".agent-worktrees").mkdir()
     (cwd / ".agent-worktrees" / "config.yaml").write_text("stateless: true\n", encoding="utf-8")

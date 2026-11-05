@@ -241,7 +241,10 @@ def test_real_python_post_fallback_preserves_accounting_and_binding(tmp_path):
     registry = tmp_path / ".agent-worktrees"
     registry.mkdir()
     (registry / "projects.yaml").write_text(
-        f"projects:\n  example:\n    anchor: {json.dumps(str(root))}\n"
+        "projects:\n  example: {}\n"
+    )
+    (registry / "repos.yaml").write_text(
+        json.dumps({"repos": {"example": {"windows" if os.name == "nt" else "linux": str(root)}}})
     )
     env = os.environ.copy()
     env.update(

@@ -60,7 +60,11 @@ def test_resident_pre_tool_contract(case, tmp_path):
         (home / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
         (home / ".agent-worktrees").mkdir()
         (home / ".agent-worktrees" / "projects.yaml").write_text(
-            "projects:\n  fixture:\n    anchor: " + json.dumps(str(home)) + "\n", encoding="utf-8",
+            "projects:\n  fixture: {}\n", encoding="utf-8",
+        )
+        (home / ".agent-worktrees" / "repos.yaml").write_text(
+            json.dumps({"repos": {"fixture": {"windows" if os.name == "nt" else "linux": str(home)}}}),
+            encoding="utf-8",
         )
         (home / ".agent-worktrees" / "config.yaml").write_text(
             "default_branch: main\nstateless: true\n", encoding="utf-8"

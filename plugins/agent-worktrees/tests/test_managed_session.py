@@ -382,6 +382,33 @@ def test_wsl_does_not_inherit_linux_only_registration(tmp_path, monkeypatch):
     assert module.admitted(payload, home=tmp_path)
 
 
+@pytest.mark.parametrize("without_yaml", [False, True])
+@pytest.mark.parametrize("platform", ["windows", "linux", "wsl"])
+def test_stale_project_anchor_never_supplies_registry_ownership(
+    tmp_path, monkeypatch, without_yaml, platform,
+):
+    module = load("managed_session")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    if without_yaml:
+        monkeypatch.setitem(sys.modules, "yaml", None)
+    monkeypatch.setattr(module, "detect_platform", lambda: platform)
+    stale, registry = fixture_project(tmp_path)
+    current = fixture_checkout(tmp_path / "current")
+    (registry / "projects.yaml").write_text(json.dumps({
+        "projects": {"example": {"anchor": str(stale)}},
+    }))
+    repos = registry / "repos.yaml"
+    repos.write_text(json.dumps({"repos": {"example": {}}}))
+    payload = {"sessionId": "stale-anchor", "cwd": str(stale)}
+    assert not module.admitted(payload, home=tmp_path)
+    repos.write_text(json.dumps({"repos": {"example": {platform: str(current)}}}))
+    assert not module.admitted(payload, home=tmp_path)
+    assert module.admitted({**payload, "cwd": str(current)}, home=tmp_path)
+    repos.write_text(json.dumps({"repos": {"example": {}}}))
+    assert not module.admitted({**payload, "cwd": str(current)}, home=tmp_path)
+    assert not module.admitted(payload, home=tmp_path)
+
+
 def test_namespaced_anchor_override_uses_canonical_repository_identity(tmp_path, monkeypatch):
     from types import SimpleNamespace
     import test_registry_paths as fixtures

@@ -59,7 +59,7 @@ def _entries(
     """Read YAML with its normal parser, or the owner's generated map shape."""
     text = _read(path) if text is None else text
     fields = fields if fields is not None else (
-        {"anchor"} if section == "projects" else {"windows", "wsl", "linux", "remote"}
+        set() if section == "projects" else {"windows", "wsl", "linux", "remote"}
     )
     try:
         import yaml
@@ -177,7 +177,7 @@ def _config_values(path: Path, name: str, inputs: dict) -> dict:
 
 
 def _anchor_candidates(
-    name: str, project: dict, repo: dict, registry: Path,
+    name: str, repo: dict, registry: Path,
     selected: dict | None, platform: str, inputs: dict,
 ) -> list[str]:
     if selected is None:
@@ -236,11 +236,7 @@ def _anchor_candidates(
     for selected_platform in platforms:
         if selected_platform not in {"windows", "wsl", "linux"}:
             raise ValueError("project platform is unavailable")
-        keys = (selected_platform,)
-        registered = next(
-            (repo[key] for key in keys if isinstance(repo.get(key), str) and repo[key]),
-            project.get("anchor"),
-        )
+        registered = repo.get(selected_platform)
         candidates.append(machine.get("anchor") or registered)
     if "anchor" not in machine:
         candidates.extend(row["anchor"] for row in conditional if row.get("anchor"))
@@ -316,7 +312,7 @@ def inspect(payload: dict, *, home: Path | None = None) -> dict:
             repo = repos.get(name)
             repo = repo if isinstance(repo, dict) else {}
             try:
-                anchors = _anchor_candidates(name, project, repo, registry, selected, platform, result["inputs"])
+                anchors = _anchor_candidates(name, repo, registry, selected, platform, result["inputs"])
             except (OSError, ValueError, TypeError):
                 ownership_inputs.update(result["inputs"])
                 continue

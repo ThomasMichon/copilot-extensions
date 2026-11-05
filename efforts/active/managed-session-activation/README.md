@@ -187,3 +187,9 @@ failure behavior, cache invalidation and mixed payload/runtime paths.
 - The no-PyYAML scalar reader now maps unquoted YAML null forms, including empty values, to `None` while preserving quoted strings. Per-anchor clearing therefore follows the same registry fallback as canonical configuration and JSON null.
 - Registry location selection uses only the requested platform, matching `RepoEntry.local_path()`. WSL does not inherit a Linux-only checkout; an explicit machine anchor remains authoritative.
 - Thirteen targeted and adjacent cases passed, covering null spellings, JSON equivalence, clearing, strict WSL association, explicit override and persistent platform isolation. Lint passes; admitted-unit inputs are unchanged. Fresh review and exact-head CI still gate merge.
+
+### 2026-11-05 - Canonical registry ownership only
+
+- Removed the deprecated `projects.yaml.anchor` fallback, matching the canonical project migration and registry ownership model. Adoption remains required, but a stale project location cannot activate automatic behavior without the current platform's registry path or explicit machine override.
+- Replaced anchor-only command, resident and lifecycle fixtures with canonical adoption plus repository registration. Six new cases cover stale locations on Windows, Linux and WSL with and without PyYAML, including canonical-path repair and cache invalidation after removal.
+- The five-file admission and real-consumer packet passed 265 tests with 26 platform skips in 576.92 seconds including preparation and cleanup, at unchanged budgets. Lint, install contract, generated-reader synchronization and module-size checks pass; admitted-unit inputs are unchanged. Fresh review and required CI remain prerequisites to merge. No installed update or service mutation occurred.
