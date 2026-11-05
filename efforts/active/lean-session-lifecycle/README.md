@@ -149,9 +149,20 @@ continuation.
 - [ ] Resolve all validation items, journal results, and mark this effort Done.
 
 The diagnostic prerequisite in #10514 removes Windows daemon-status probe
-subprocesses without changing cutover authority. Observe its release and
-authorized installed reader before resuming the saved launch/singleton
-qualification. The failed full-update outcome remains an independent open gate.
+subprocesses without changing cutover authority. The installed `0.6.291-dev1`
+reader matches the reviewed modules and verifies the same selected daemon
+across two refresh cycles with subprocess probes forbidden. This qualifies the
+reader prerequisite, not the remaining launch or shared-daemon inventory.
+The failed full-update outcome remains an independent open gate.
+The blocking-reader correction in #10562 subsequently lands the ordinary JSON
+readiness wait and its terminal-error controls. A promoted snapshot includes
+that merge. The normal updater subsequently adopts `1.24.475-dev1`; loaded
+client/feed identities, authenticated serving health, the ordinary JSON CLI,
+isolated delayed-publication controls and caller-owned timeout cleanup qualify
+the blocking-reader prerequisite. Together these restore the saved installed-set
+continuation, not the remaining parent gates. The broader update is still running
+with a component failure, and the separately queued target request remains an
+independent obligation.
 
 ## Validation Plan
 
