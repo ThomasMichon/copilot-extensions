@@ -1,0 +1,9 @@
+{
+  "comment": "Compose explicitly selected Gateway hosting through the existing application installer and TLS lifetime",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

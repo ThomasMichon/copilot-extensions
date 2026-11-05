@@ -92,6 +92,12 @@ class EnrollmentPolicy:
     def nonce(self) -> str:
         return self._proofs.nonce
 
+    def check_floor(self) -> None:
+        """Validate installed startup against the journal without publishing policy."""
+        enrollment_journal.check_floor(
+            self._ledger, gateway=self.gateway, revision=self.revision, fingerprint=self.digest,
+        )
+
     def publication(self, eligible: Callable[[ServiceContext], None] | None = None
                     ) -> tuple[ServiceContext, ServiceVerifier]:
         """Validate then durably accept floors in the same journal transaction."""

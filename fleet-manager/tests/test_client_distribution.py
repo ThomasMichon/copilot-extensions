@@ -150,7 +150,7 @@ def test_wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies
                    and any(requirement.marker.evaluate({**environment, "extra": extra})
                            for environment in environments
                            for extra in ("dev", "release-verification", "construction", "auth", "server",
-                                         "service-gateway", "ssh-client", "komodo-host",
+                                         "service-gateway", "gateway-host", "ssh-client", "komodo-host",
                                          "runtime-authentication"))
                    for requirement in requirements)
         verification = [requirement for requirement in requirements

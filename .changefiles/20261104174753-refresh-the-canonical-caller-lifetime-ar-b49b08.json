@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh the canonical caller lifetime archive after daemon failure attribution",
+  "changes": [
+    {
+      "plugin": "libs/installation-context",
+      "type": "patch"
+    }
+  ]
+}
