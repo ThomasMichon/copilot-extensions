@@ -252,6 +252,52 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The eleven-contract checkpoint is actually delivered in #10690 after genuine
+exact-head approval, no active findings or threads and nine complete
+successful/skipped checks before normal managed merge. All seven actual
+merged/current blobs equal the approved head; only its publication child
+finalized, retained. The
+[delivery journal](<journal/2026/11.05 finite-consumer-upgrade-policy-contracts.md>)
+records two equal complete 02:33 PST scans, unchanged at 1,009 whole open:
+734 creator-eligible, 275 excluded, 672 original-cohort and 337 inflow.
+No arrivals, departures or new credit; dispositions remain 777, 280 issues
+remain above 729 and the parent stays Active. The following eleven whole
+contracts and thirty-three ranked relationships are integrated for reviewed
+delivery, preserving dormant triggers and complete inherited acceptance.
+
+The [eleven finite trigger/identity/anchoring contracts](finite-trigger-identity-anchoring-contracts.md)
+integrate 35 whole texts and thirty-three ranked relationships without
+new completion or receiving-transfer credit. All eleven remain OPEN:
+dormant measured triggers, accepted native residuals, saved configuration,
+native preference authority, all three Logger findings and both complete
+inherited transfers remain explicit. Actual account binding and live-use
+overlays do not prove the missing operation credential or retained lease
+identity. The [journal](<journal/2026/11.05 finite-trigger-identity-anchoring-contracts.md>)
+preserves whole protected evidence and every existing custodian.
+
+The [eleven finite consumer/upgrade/policy contracts](finite-consumer-upgrade-policy-contracts.md)
+integrate 33 whole texts and thirty-three ranked relationships without
+new completion or receiving-transfer credit. All eleven remain OPEN:
+finite native validation, per-name definition ownership, listener cutover,
+addressed configuration and progress producers remain independent.
+Current successor-first publication retains outgoing retirement without
+making it an install veto; author-corrected evidence, finite baseline
+adjudication and optional host observation retain their actual limits.
+The [journal](<journal/2026/11.05 finite-consumer-upgrade-policy-contracts.md>)
+preserves whole protected evidence and every existing custodian.
+
+The eleven-contract checkpoint is actually delivered in #10687 after genuine
+exact-head approval, the blocking finding resolved and complete successful
+required CI before normal managed merge. All seven actual merged/current
+blobs equal the approved head; only its publication child finalized, retained.
+The [delivery journal](<journal/2026/11.05 finite-hosted-reader-lifecycle-contracts.md>)
+records two equal complete 02:15 PST scans: 1,009 whole open, 280 above 729;
+734 creator-eligible, 275 excluded, 672 original-cohort and 337 inflow.
+External #10564 supplies the sole departure and no campaign credit;
+dispositions remain 777 and the parent stays Active. The next eleven whole
+originals and thirty-three ranked relationships are researched for integration,
+with current lifecycle alternatives, finite outcomes and existing custody intact.
+
 The ten-contract checkpoint is actually delivered in #10683 after genuine
 exact-head approval, both review threads resolved and ten complete successful/
 skipped checks before normal managed merge. All seven merged/current blobs

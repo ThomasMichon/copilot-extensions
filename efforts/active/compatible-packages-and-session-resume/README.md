@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent reviewed plan and source PRs against `dev`
 - **Created:** 2026-11-05
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `agent-fabric` / `discover-before-duplicate`, `recover-not-lose`,
   `single-current-session-per-worktree`; `installer` / authoritative runtime replacement
 - **Umbrella issue:** #10657
@@ -73,60 +73,60 @@ window, shutdown policy and recovery custody.
 
 ### Phase 1 - Reviewed contract
 
-- [ ] Land this proposal through normal review before implementation.
-- [ ] Confirm package constraint compatibility and existing launch intent callers.
+- [x] Land this proposal through normal review before implementation.
+- [x] Confirm package constraint compatibility and existing launch intent callers.
 
 ### Phase 2 - Compatible package admission
 
-- [ ] Add a minimum-plus-denylist package contract that preserves acceptable
+- [x] Add a minimum-plus-denylist package contract that preserves acceptable
   installed versions, rejects unknown/incompatible results, retains exact pins,
   and never bypasses process guards.
-- [ ] Keep old engines from silently ignoring a new compatibility declaration;
+- [x] Keep old engines from silently ignoring a new compatibility declaration;
   document manifest compatibility and contributor merge behavior.
 - [ ] Publish focused validation and land the package source change.
 
 ### Phase 3 - Resume-by-default launches
 
-- [ ] Resume the existing head by default for ordinary seeded and unseeded
+- [x] Resume the existing head by default for ordinary seeded and unseeded
   embodiment and attended launch; preserve explicit new-task/fresh intent.
-- [ ] Announce the implicit-seeded-fresh to implicit-resume policy cutover.
+- [x] Announce the implicit-seeded-fresh to implicit-resume policy cutover.
   Migrate automated callers to explicit `--fresh` or `--resume-head` intent
   before relying on the new default; those existing embodiment flags retain
   their meaning across provider upgrade and rollback. Unknown external callers
   are not assumed to have migrated merely because this repository changed.
-- [ ] Keep live embodiment idempotent and report existing mux identity without
+- [x] Keep live embodiment idempotent and report existing mux identity without
   creating a duplicate or injecting another prompt.
-- [ ] Update callers that intentionally require fresh conversations and document
+- [x] Update callers that intentionally require fresh conversations and document
   detached programmatic creation versus current-terminal attachment.
 - [ ] Publish focused validation and land the launch source change.
 
 ### Phase 4 - Maintenance recovery contract and closeout
 
-- [ ] Document advance notice, cooperative checkpoint/drain, approved bounded
+- [x] Document advance notice, cooperative checkpoint/drain, approved bounded
   shutdown, saved original-conversation restoration and status-first recovery.
   Keep operation scope separate from package admission and ordinary launch.
-- [ ] Define the configurable default recovery prompt and distinguish launch,
+- [x] Define the configurable default recovery prompt and distinguish launch,
   prompt delivery and completed reconciliation. Reuse existing primitives.
 - [ ] Record release versus rollout state, resolve all validation items and
   close the finite source effort without implying a host upgrade occurred.
 
 ## Validation Plan
 
-- [ ] Package cases cover floor, denylist, newer/future versions, malformed or
+- [x] Package cases cover floor, denylist, newer/future versions, malformed or
   missing live versions, exact-pin compatibility, conflicts and process deferral.
-- [ ] Exercise the real package resource/CLI consumer with synthetic package-manager
+- [x] Exercise the real package resource/CLI consumer with synthetic package-manager
   responses; no actual host package installation or removal.
-- [ ] Launch cases cover existing head with/without seed, explicit fresh,
+- [x] Launch cases cover existing head with/without seed, explicit fresh,
   new worktree, explicit resume arguments, already-live targets and unknown liveness.
-- [ ] Check intentional fresh callers and literal startup-prompt preservation.
-- [ ] Cover old explicit-intent callers with the new provider, new
+- [x] Check intentional fresh callers and literal startup-prompt preservation.
+- [x] Cover old explicit-intent callers with the new provider, new
   explicit-intent callers with the supported prior provider and provider
   rollback. Record the intentional behavior change for unmigrated implicit
   `--seed` callers rather than claiming backward-compatible defaults.
 - [ ] Run focused runtime tests, required unit/contract checks and touched-source lint.
 - [ ] Record native/clean-room evidence and explicit skipped-lane reasons;
   source fixtures do not qualify installed rollout or disruptive maintenance.
-- [ ] Re-read the operator capture against the original request before publication.
+- [x] Re-read the operator capture against the original request before publication.
 
 ## Proposal
 
@@ -196,3 +196,55 @@ claims, and recover partial/unknown results without blindly replaying actions.
   mixed-version/rollback tests, provider-first package schema fence and
   documentation/contract impact assessments. Preserved the independently
   updated effort-index entry during rebase.
+- Plan #10659 received an approving review and merged with green required CI.
+  Continued in the same source workspace after dropping only the confirmed
+  squash-merged planning commits. Package baseline: 185 passed; launch baseline:
+  107 passed through the contained repository runner.
+- Implemented schema-5 numeric floors, accumulated release exclusions and
+  explicit scoped WinGet pin removal, preserving compatible installed versions
+  and all existing process/maintenance gates. Legacy schemas remain readable.
+  The package handler also refuses an unsatisfiable merged exact pin before
+  probing or mutating through direct resource application.
+- Package validation: 333 passed before the final direct-conflict regression;
+  includes a real isolated package-manager shim lookup/upgrade/idempotence
+  witness. Lint, module-size, install-contract and docs-consistency checks passed.
+  Real host package replacement and full fresh-machine provisioning are not
+  authorized by this source scope; those installed lanes remain unexercised.
+- Package review identified generic detector admission gaps. Exact-entry parsing
+  now preserves complete version suffixes and distinguishes confirmed apt/pip
+  absence from probe failure. The expanded package packet passed 346 tests.
+- Implemented the requested resume default and shared attended/detached flags.
+  Ordinary live embodiment does not consume any startup text. The existing
+  externally-created-pane fallback explicitly opts into staged-New settlement;
+  its new provider/adapter pairing is an announced cutover, not silently
+  claimed compatible with old callbacks. Dispatch explicitly chooses fresh
+  versus continuation, retaining old/new-provider argument meaning.
+- Launch validation: 126 passed; 105 Linux/WSL restart-qualification cases
+  skipped on Windows. Dispatch's explicit-intent packet passed 67; Manager's
+  startup/guard packet passed 87 with four unavailable platform cases skipped.
+  A misplaced new-worktree assertion was corrected before the passing rerun.
+- Recorded the general maintenance-window intent and the existing status-first
+  resume command/default wording. No disruptive executor, host package update,
+  active-session stop, reboot or installed runtime rollout was performed.
+- Final live-no-op audit included anchor joins and dry-run previews: neither
+  now claims Bridge-deferred startup text. The expanded Worktrees packet passed
+  129 tests, with touched-source lint and module-size checks green.
+- Further review covered a false-to-true mux transition during preflight.
+  Bridge claims and native startup staging now occur only after the
+  lifecycle-locked live check. The seed writer acquires its own admission
+  lease; process creation takes admission afterward. A real non-reentrant
+  lease control verifies both boundaries without a running model.
+- Exact tool-list detection now handles a distribution literally named
+  `package`, including verbose output. Package regression total: 349 passed.
+  Ordinary resumed heads also select their saved launch profile rather than
+  allocating a different context; a profile-bound head change refuses before
+  startup-text custody changes. Expanded Worktrees total: 169 passed.
+- Admission-only native setup can advance the head without the outer lifecycle
+  lock. Added a final record/head/liveness/mux revalidation under the acquired
+  admission lease before spawn. Late wins never duplicate a process or replay
+  prepared text; native seed custody is reported unconfirmed. The expanded
+  Worktrees/profile packet passed 255 tests.
+- CI run 42005541498 on the prior source head timed out in the six-minute
+  admitted-type-contract step after successful target output, without type
+  diagnostics. The corrected head must pass fresh required CI; no bypass or
+  untracked flake exemption is assumed.

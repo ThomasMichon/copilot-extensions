@@ -92,10 +92,10 @@ fails. It never guesses machine scoping from package gates.
 
 ## Requirement-package schema
 
-`src\agent_machines\manifest.py` implements schema version `4` and retains read
-compatibility for versions `1`, `2`, and `3`. Required keys are:
+`src\agent_machines\manifest.py` implements schema version `5` and retains read
+compatibility for versions `1` through `4`. Required keys are:
 
-- `schema_version: 1|2|3|4`
+- `schema_version: 1|2|3|4|5`
 - `package: <name>`
 
 Optional keys include `authority`, `gate`, `aliases`, `manage`, `per-machine` /
@@ -112,6 +112,12 @@ under an older schema is rejected so an older runtime cannot silently ignore
 the selection contract. Per-machine overlays remain manage-only: they may
 override or remove a manage-spec authority, but do not introduce per-machine
 package authority, resources, or modules.
+
+Schema version 5 adds package `minimum_version` and `blocked_versions`.
+Older engines reject these packages before restore rather than silently
+ignoring compatibility constraints. Legacy exact-version declarations retain
+their meaning. See [package resources](resources.md#package) for numeric
+comparison, conservative merging and explicit WinGet pin migration.
 
 Authority is rejected on `ensure-absent`,
 `copilot.settings.plugin-tombstones`,

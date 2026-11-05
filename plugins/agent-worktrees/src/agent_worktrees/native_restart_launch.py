@@ -17,6 +17,7 @@ _CONFLICTS = (
     "new", "anchor", "codename", "seed", "fresh", "resume_head", "bridge_acquisition",
     "require_native_admission", "ensure_mux", "recovery", "copilot_args",
     "copilot_process_launcher", "bridge_scope_id", "driver", "profile",
+    "deliver_pending_seed",
 )
 
 

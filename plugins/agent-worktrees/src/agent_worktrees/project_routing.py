@@ -24,6 +24,7 @@ _NO_PROJECT_COMMANDS = {
     "resource-relationship",
     "worktree-allocation",
     "reconcile-marketplaces",
+    "prepare-plugin-payloads",
     "launch-update",
     "picker",
     "doctor",

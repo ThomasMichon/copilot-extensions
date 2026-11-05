@@ -15,7 +15,7 @@ import os
 import subprocess
 import sys
 
-from . import handoff_cli, output, sessions
+from . import embody_resume, handoff_cli, output, sessions
 
 
 def add_copilot_parser(sub) -> None:
@@ -49,15 +49,16 @@ def add_copilot_parser(sub) -> None:
     )
     p.add_argument(
         "--seed", default=None,
-        help="Seed prompt injected as the session's first interactive turn once Copilot is ready",
+        help="Startup prompt for a cold launch; resumes existing history unless --fresh is explicit. "
+        "An already-live session is attached without injecting a prompt.",
     )
+    embody_resume.add_arguments(p.add_mutually_exclusive_group())
     p.add_argument(
         "--seed-ready-timeout", dest="seed_ready_timeout", type=float, default=180.0,
         metavar="SECONDS",
         help=(
-            "Idle window while waiting for Copilot's input prompt before typing "
-            "--seed (default 180); visibly busy/changing panes keep waiting up "
-            "to a hard cap"
+            "Terminal fallback only: idle window before typing --seed "
+            "(default 180); native startup does not scrape an input prompt"
         ),
     )
     p.add_argument(

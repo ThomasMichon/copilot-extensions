@@ -191,6 +191,52 @@ def acquire(
         return status
 
 
+def acquire_missing(
+    name: str, marketplace: str, copilot: str, *, cwd: Path,
+    revalidate: Callable[[], None], copilot_home: Path,
+) -> str:
+    """Install one explicitly selected missing payload, without updating peers."""
+    from . import activation_preservation, installer_run
+
+    copilot_home = copilot_home.resolve()
+    started = monotonic()
+
+    def checked_runner(*args, **kwargs):
+        try:
+            revalidate()
+        except (ValueError, OSError) as error:
+            raise installer_run.InstallerLaunchError(
+                "payload selection changed before acquisition"
+            ) from error
+        return _run_update(*args, **kwargs)
+
+    try:
+        with activation_preservation.activation_custody(home=copilot_home) as custody:
+            remaining = _TOTAL_BUDGET_S - (monotonic() - started)
+            if remaining <= 0:
+                return "payload acquisition budget exhausted"
+            result = _run_install(
+                [copilot, "plugin", "install", f"{name}@{marketplace}"],
+                f"{name}@{marketplace}", cwd=cwd,
+                timeout=min(_ATTEMPT_TIMEOUT_S, remaining), custody=custody,
+                runner=checked_runner,
+                env={**os.environ, "COPILOT_HOME": str(copilot_home)},
+            )
+    except (
+        activation_preservation.PluginStateError, installer_run.InstallerCleanupError,
+        installer_run.InstallerLaunchError, installer_run.InstallerActivityError,
+        subprocess.TimeoutExpired, OSError,
+    ) as error:
+        output.warn(f"{name}: {update_events.bounded(str(error), 200)}")
+        return "payload acquisition failed"
+    if result.returncode:
+        output.warn(update_events.bounded(
+            "\n".join((result.stdout, result.stderr)), 200, tail=True,
+        ))
+        return f"payload install failed (exit {result.returncode})"
+    return "OK (installed)"
+
+
 def _acquire(
     name: str, marketplace: str, copilot: str, *,
     cwd: Path | None, engine: bool, started: float,

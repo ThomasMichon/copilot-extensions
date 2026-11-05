@@ -25,6 +25,8 @@ CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "owner_observation_cli",
     "picker_profiles_cli",
     "picker_reconcile_cli",
+    "plugin_preparation",
+    "pr_author_cli",
     "pr_state_cli",
     "reap_cli",
     "reclaim_cli",

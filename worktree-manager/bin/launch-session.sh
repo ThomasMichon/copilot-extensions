@@ -1201,30 +1201,16 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
                 >/dev/null 2>&1 || true
         }
 
-        # Deliver a worktree's queued `pending_seed` (picker-new-session-
-        # prompt-and-composer Phase A) once this launcher has just created
-        # its FIRST live tmux session for it -- this launcher creates the
-        # pane directly (`tmux new-session` below), so nothing else ever
-        # triggers delivery for a Picker-originated creation.
-        # `agent-worktrees embody --worktree-id` already owns the whole
-        # contract: its "already embodies this worktree" resume branch (now
-        # true, since the session above just started existing) claims
-        # (clears) any pending seed under a race-safe write-guard and types
-        # it into the registry-identified Copilot pane via its own
-        # ready-poll/send-keys path -- this call needs no new
-        # pane-ready-detection logic of its own. A no-op (no pending seed)
-        # costs one cheap venv-python round trip. Dispatched detached
-        # (mirrors _aw_publish_managed_mux_live above): the ready-poll can
-        # legitimately take up to embody's own `--seed-ready-timeout`
-        # (default 180s) for a slow-loading MCP/skill-heavy session, and the
-        # operator's attach below must never wait on it.
+        # The external pane creator explicitly settles only its staged New prompt.
+        # Creation-only: ordinary embody/attach never injects text, and the
+        # potentially slow readiness wait must not block the operator's attach.
         _aw_deliver_pending_seed() {
             local wtid="$1"
             [[ -n "$wtid" ]] || return 0
             [[ -n "$PYTHON" && -x "$PYTHON" ]] || return 0
             local embody_args=(-m agent_worktrees)
             [[ -n "${LAUNCH_PROJECT:-}" ]] && embody_args+=(--project "$LAUNCH_PROJECT")
-            embody_args+=(embody --worktree-id "$wtid" --json)
+            embody_args+=(embody --worktree-id "$wtid" --deliver-pending-seed --json)
             ( "$PYTHON" "${embody_args[@]}" >/dev/null 2>&1 & ) || \
                 setup_log WARN "seed-delivery embody dispatch failed"
         }

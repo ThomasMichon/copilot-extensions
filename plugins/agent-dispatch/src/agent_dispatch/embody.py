@@ -494,8 +494,7 @@ def spawn_embodied_worker(
     cmd += ["embody"]
     if worktree_id:
         cmd += ["--worktree-id", worktree_id]
-        if resume_head:
-            cmd += ["--resume-head"]
+        cmd += ["--resume-head" if resume_head else "--fresh"]
     else:
         cmd += ["--new"]
     cmd += ["--seed", seed, "--driver", driver, "--json"]
