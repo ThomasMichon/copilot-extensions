@@ -149,6 +149,7 @@ def test_targeted_post_tool_scope_never_files_the_shared_portfolio_issue(ref):
         "test_idle_exit_retains_recent_completed_tool_hooks_then_expires",
         "test_idle_exit_rechecks_new_conditions_after_acquiring_cutover_guard",
         "test_idle_exit_releases_installer_guard_while_late_accepted_read_drains",
+        "test_status_monitor_shutdown_cannot_recover_or_promote_admission",
     ):
         assert name in linux["env"]["TEST_SELECTOR"]
     evidence = next(

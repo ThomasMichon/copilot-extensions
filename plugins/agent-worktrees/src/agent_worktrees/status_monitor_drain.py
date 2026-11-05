@@ -49,19 +49,22 @@ class MonitorExitTrace:
 
     @contextmanager
     def retiring(self, reason: str, original_error: BaseException | None) -> Iterator[None]:
-        if original_error is not None:
-            reason = "interrupted" if isinstance(original_error, KeyboardInterrupt) else "loop-error"
-        reason = reason if reason in EXIT_REASONS else "loop-error"
-
         def emit(phase: str, outcome: str) -> None:
-            lifecycle.record(
-                self.directory, "monitor-exit", service="agent-worktrees",
-                port=self.port, outcome=outcome,
-                detail={
-                    "phase": phase, "reason": reason,
-                    "last_idle_eligibility": dict(self.last_idle_eligibility),
-                },
-            )
+            try:
+                cause = reason
+                if original_error is not None:
+                    cause = "interrupted" if isinstance(original_error, KeyboardInterrupt) else "loop-error"
+                lifecycle.record(
+                    self.directory, "monitor-exit", service="agent-worktrees",
+                    port=self.port, outcome=outcome,
+                    detail={
+                        "phase": phase, "reason": cause if cause in EXIT_REASONS else "loop-error",
+                        "last_idle_eligibility": dict(self.last_idle_eligibility),
+                    },
+                )
+            except BaseException:
+                # Diagnostics cannot bypass retirement or replace its original error.
+                pass
 
         emit("cleanup-begin", lifecycle.BEGIN)
         try:

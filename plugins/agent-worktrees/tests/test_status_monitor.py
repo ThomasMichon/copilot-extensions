@@ -4830,6 +4830,8 @@ def test_status_monitor_keeps_repository_map_available_until_handoff_is_ready(tm
 def test_status_monitor_shutdown_cannot_recover_or_promote_admission(
     tmp_path, monkeypatch, shutdown_mode,
 ):
+    from zdd import lifecycle
+
     from agent_worktrees import self_retire, status_monitor_cutover as smc
     from agent_worktrees.worktrees_runtime import WorktreesRuntime
 
@@ -4849,6 +4851,16 @@ def test_status_monitor_shutdown_cannot_recover_or_promote_admission(
     )
     handles = []
     activations = []
+    closed = []
+    original_interrupt = KeyboardInterrupt("original monitor interruption")
+    record = lifecycle.record
+
+    def interrupt_exit_log(directory, action, **kwargs):
+        if action == "monitor-exit":
+            raise KeyboardInterrupt("diagnostic interruption")
+        return record(directory, action, **kwargs)
+
+    monkeypatch.setattr(lifecycle, "record", interrupt_exit_log)
     activate = WorktreesRuntime.activate
 
     def record_activate(owner):
@@ -4870,6 +4882,7 @@ def test_status_monitor_shutdown_cannot_recover_or_promote_admission(
             return int(len(waits) < 2)
 
         def close(self):
+            closed.append(True)
             elected[0] = None
             assert handles[0](
                 "worktrees-read", {"contract_version": 1, "project": "test"},
@@ -4917,7 +4930,7 @@ def test_status_monitor_shutdown_cannot_recover_or_promote_admission(
         waits.append(True)
         time.sleep(.01)
         if shutdown_mode == "interrupted":
-            raise KeyboardInterrupt
+            raise original_interrupt
         assert handles[0]("health", {})["published"] is False
         assert len(activations) == 2
         assert len(sweeps) == 1
@@ -4925,10 +4938,16 @@ def test_status_monitor_shutdown_cannot_recover_or_promote_admission(
 
     monkeypatch.setattr(m.status_monitor_cli, "_wake_interruptible_wait", wait)
     if shutdown_mode == "interrupted":
-        with pytest.raises(KeyboardInterrupt):
+        with pytest.raises(KeyboardInterrupt) as caught:
             m.cmd_status_monitor(argparse.Namespace(interval=2, passive=True))
+        assert caught.value is original_interrupt
+        assert closed == [True]
         return
-    assert m.cmd_status_monitor(argparse.Namespace(interval=2, passive=True)) == 0
+    try:
+        assert m.cmd_status_monitor(argparse.Namespace(interval=2, passive=True)) == 0
+    except KeyboardInterrupt:
+        pytest.fail("diagnostic interruption bypassed mandatory monitor retirement")
+    assert closed == [True]
     assert len(waits) == 2
     assert len(activations) == 2
 

@@ -187,6 +187,8 @@ demand after in-flight work, without changing its grace interval or admission.
 The monitor records no raw request, project, session or exception data, performs
 no extra demand probes, and does not write these diagnostics during ordinary
 sweeps. Log failure remains best-effort and does not change teardown.
+Diagnostic interruptions cannot bypass mandatory cleanup or replace its original
+error, including when a log append raises `KeyboardInterrupt`.
 These records do not start a missing monitor or qualify live hook recovery.
 
 The existing `<runtime-root>/status-monitor-routing/lifecycle.log` gains

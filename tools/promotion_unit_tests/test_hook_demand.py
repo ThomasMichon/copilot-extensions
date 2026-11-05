@@ -185,3 +185,26 @@ def test_unavailable_exit_log_does_not_prevent_retirement(exit_api, monkeypatch)
     with exit_api.trace.retiring("idle-no-demand", None):
         completed.append(True)
     assert completed == [True] and exit_api.events == []
+
+
+@pytest.mark.parametrize("phase", ["cleanup-begin", "cleanup-failed", "cleanup-complete"])
+def test_log_interruption_cannot_skip_cleanup_or_replace_its_error(exit_api, monkeypatch, phase):
+    record = exit_api.module.lifecycle.record
+
+    def interrupt(directory, action, **kwargs):
+        if kwargs["detail"]["phase"] == phase:
+            raise KeyboardInterrupt
+        return record(directory, action, **kwargs)
+
+    monkeypatch.setattr(exit_api.module.lifecycle, "record", interrupt)
+    error = RuntimeError("original retirement error") if phase == "cleanup-failed" else None
+    completed, caught = [], None
+    try:
+        with exit_api.trace.retiring("idle-no-demand", error):
+            completed.append(True)
+            if error is not None:
+                raise error
+    except BaseException as exc:
+        caught = exc
+    assert completed == [True]
+    assert caught is error
