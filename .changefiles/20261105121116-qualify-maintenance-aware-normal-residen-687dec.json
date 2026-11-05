@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify maintenance-aware normal resident startup, canonical mutation intake and exact private process cleanup.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
