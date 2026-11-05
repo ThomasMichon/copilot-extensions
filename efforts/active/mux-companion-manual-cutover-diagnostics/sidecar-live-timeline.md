@@ -426,7 +426,9 @@ publication and installed support retain their separate qualification.
   specifies the bounded
   producer snapshot, optional version-skew-safe wire and existing-reader
   consumer. #10551 delivers the bounded local producer and 161 focused source
-  controls; optional wire and the consumer remain open. Retained request history
+  controls. #10557 delivers the optional provider/CLI wire, exact independent
+  follower retirement, heartbeat lifetime and 59-case source-bound HTTP-52
+  capture; Manager consumption remains open. Retained request history
   remains separately qualified and unsupported sources stay unknown.
 - [ ] Deliver qualified pre-compaction evidence from a supported source adapter;
   retain direct start counts/attempt/target metadata but keep unknown until

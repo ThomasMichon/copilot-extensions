@@ -3,6 +3,18 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-04 - Two operation-account and authorization-journey contracts](<journal/2026/11.04 account-preflight-auth-journey-contracts.md>)
+
+- [2026-11-04 - Two live-messaging and session-tool contracts](<journal/2026/11.04 native-messaging-session-tools-contracts.md>)
+
+- [2026-11-04 - Two owner-safe retirement and readiness-margin contracts](<journal/2026/11.04 retirement-readiness-boundaries-contracts.md>)
+
+- [2026-11-04 - Two owner-scoped cleanup and force-wording contracts](<journal/2026/11.04 runtime-cleanup-force-guidance-contracts.md>)
+
+- [2026-11-04 - Two independent theme-configuration and clean-room CI contracts](<journal/2026/11.04 theme-cleanroom-boundaries-contracts.md>)
+
+- [2026-11-04 - Two current-root and reserved-anchor custody contracts](<journal/2026/11.04 root-anchor-custody-contracts.md>)
+
 - [2026-11-04 - Two whole anchor/capture and scoped observation contracts](<journal/2026/11.04 anchor-observation-boundaries-contracts.md>)
 
 - [2026-11-04 - Two release-tail and four-signature container-startup contracts](<journal/2026/11.04 reservation-container-startup-contracts.md>)

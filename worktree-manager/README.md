@@ -208,6 +208,26 @@ Historical input/resolution events do not prove current pending requests or
 answerability, and compaction starts do not qualify active pre-window capacity.
 No answer, session start, claim release or installed/native acceptance is implied.
 
+For current input, Manager first reads the selected executable's passive
+`version --contracts-json` declaration once per selection. Only a supported CLI
+receives `--current-requests`; that CLI independently negotiates the running
+daemon before sending the optional query. An exact typed unsupported-capability
+refusal before any source read selects ordinary v1 observation with live input
+unknown. An unrecognized invocation, malformed source frame or uncertain
+transport outcome is not retried as a baseline request.
+
+The same reader delivers bounded live waiter state independently of the timeline
+window and history pages, including while an empty log still waits for its first
+real event. State-only revisions do not advance event positions or append rows.
+The selected-session indicator distinguishes observed pending waiters, complete
+local absence at the observation, partial coverage and unknown qualification.
+It never copies questions or answering selectors, claims the whole actor is
+blocked, or submits an answer. Historical request occurrences remain historical.
+Selection/head changes, errors, gaps, hiding and reader retirement invalidate
+the corresponding live display; late old callbacks cannot restore it. Membership
+discovery keeps its existing geometry and does not display a session-specific
+waiter indicator.
+
 Integrity-budget exhaustion does not discard evidence on ordinary reconnect or
 tab reopening. With Timeline visible, explicit Refresh or Reconcile source first
 obtains a fresh owner-qualified snapshot and admits a separate bounded observation

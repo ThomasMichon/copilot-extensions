@@ -331,6 +331,8 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
             cmd = [uv, "pip", "install", "--python", str(py), "-e", spec]
             if name == "agent-index":
                 cmd.extend(["-e", str(REPO / "fleet-manager") + "[auth]"])
+            if name == "worktree-manager":
+                cmd.extend(["-e", str(REPO / "plugins" / "agent-bridge")])
             if name == "agent-dispatch":
                 cmd.extend(["-e", str(REPO / "plugins" / "agent-pull-requests") + "[fleet]"])
                 cmd.extend(["-e", str(REPO / "fleet-manager") + "[service-gateway]"])

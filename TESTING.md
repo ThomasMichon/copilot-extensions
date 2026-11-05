@@ -1,5 +1,26 @@
 # Testing copilot-extensions
 
+Manager's opt-in `--test-file tests/test_companion_current_requests.py
+--test-file tests/test_companion_bridge_session_source.py
+--test-file tests/test_companion_bridge_session_codec.py
+--test-file tests/test_agenda_json_document.py --allow-explicit-tiers` packet
+joins actual parked ACP callbacks, the production observation-route generator,
+the owning CLI and real Textual display through private fixture pipes. Its
+test runner explicitly prepares the Bridge closure and fingerprints its
+transitive local sources outside Manager's production dependency metadata;
+runtime dependencies and installed sibling-runtime boundaries are unchanged.
+It checks empty-history live input, unchanged event cursors during state-only
+updates and paging, selected executable/provider rollback, malformed declarations,
+no retry after an unknown invocation, independent revision qualification and
+owned retirement. Four full-app progress renders are retained as JUnit properties.
+The separate visual packet compares seven curated SVGs, including pending,
+cleared, partial and unknown input alongside retained historical requests.
+These are source fixtures, not SDK/model actors or installed/native acceptance.
+The CLI-pipe fixture cases are explicitly POSIX-only; importing their fixture
+does not imply native Windows support. Separate finite-document controls remain
+portable. Tooling regressions cover test-only preparation, cache invalidation
+and actual Manager-manifest release materialization.
+
 Bridge's opt-in `--test-file tests/test_acp_current_requests.py
 --test-file tests/test_session_observations.py
 --test-file tests/test_session_observation_transport.py

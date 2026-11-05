@@ -94,6 +94,21 @@ def test_payload_fixture_driver_transitive_body_invalidates_cache(graph, monkeyp
     assert runner._dep_fingerprint("payload-invocation") != before
 
 
+def test_manager_bridge_test_closure_tracks_transitive_source_without_a_vendor_pointer(graph, monkeypatch):
+    repo = runner.REPO
+    manager = repo / "worktree-manager"
+    _project(manager, "copilot-extensions-worktree-manager")
+    _project(
+        repo / "plugins" / "agent-bridge", "agent-bridge",
+        'direct = {path = "../../libs/direct"}',
+    )
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: manager)
+    before = runner._dep_fingerprint("worktree-manager")
+    graph[2].write_text("VALUE = 2\n", encoding="utf-8")
+    assert runner._dep_fingerprint("worktree-manager") != before
+    assert "[tool.uv.sources]" not in (manager / "pyproject.toml").read_text()
+
+
 def test_explicit_clean_does_not_prepare_a_busy_environment(graph, monkeypatch, capsys):
     root = runner.VENV_ROOT / "example"
     root.mkdir(parents=True)

@@ -5,7 +5,8 @@ Shared boundary: [Sidecar observation contract](sidecar-observation-contract.md)
 Canonical effort: [README.md](README.md).
 
 **Status: reviewed amendment in #10545; local producer merged in #10551;
-optional provider expansion in progress; no installed support claimed.** This is the
+optional provider/CLI merged in #10557; Manager integration remains open;
+no installed support claimed.** This is the
 coordinator's implementation proposal within the accepted input-observability
 scope, not a new operator request or rollout grant. It targets the existing
 [compaction-and-input-observability](../../../visions/mux-companion/README.md#compaction-and-input-observability)
@@ -187,3 +188,18 @@ verification pass all 59 required probes at published checkpoint
 `2951c5ccb440a7999a5000053236db18fcc08a24`; both contracts and 1,005 fixtures
 validate against the actual PR base. Current-head review and required CI remain
 required before accepting those corrections.
+
+#10557 subsequently merged as `5598928d179c88140596538f720429a8a5b9ebbb`
+after current-head independent approval with no open findings and successful
+required CI. This closes only the optional provider/CLI source prerequisite.
+Manager consumption, rendered attention and every parent acceptance gate remain
+open; the existing single selected reader is the next integration boundary.
+
+The conditional Manager source now consumes that boundary, with independent
+ephemeral current state while history preparation/paging retains its own real
+continuity. Actual callbacks, route/CLI pipes and Textual qualify pending,
+cleared, partial and unknown displays; seven curated SVG comparisons include
+the four new current-input screens. The coupled packet passes 190 cases, and
+the corrected two-case independent-reader readiness/retirement control passes.
+Review, required CI and actual merge remain outstanding. Installed/native
+acceptance and every original parent gate remain open.

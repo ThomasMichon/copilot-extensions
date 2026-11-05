@@ -18,6 +18,19 @@ import materialize_main as mm
 import uv_editable_ref as uer
 
 
+def test_actual_manager_manifest_materializes_without_a_bridge_test_pointer(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    manager = tmp_path / "worktree-manager"
+    manager.mkdir()
+    shutil.copyfile(root / "worktree-manager" / "pyproject.toml", manager / "pyproject.toml")
+    shutil.copytree(root / "worktree-manager" / "vendor", manager / "vendor")
+    log = mm.materialize(tmp_path, canonical_root=root)
+    unresolved = [line for line in log if line.startswith("SKIP")]
+    assert not unresolved, unresolved
+    metadata = tomllib.loads((manager / "pyproject.toml").read_text())
+    assert "agent-bridge" not in metadata["tool"]["uv"]["sources"]
+
+
 @pytest.mark.parametrize(
     "reference",
     [
