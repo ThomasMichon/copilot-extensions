@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import sys
 import sysconfig
+import threading
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +21,33 @@ from zdd import diagnostics
 from . import _installation_context as api
 from .watch_installation import PLUGIN_ID, WatchInstallation
 from .watch_runtime import WatchInstance, WatchRuntime
+
+_peer_launchers: dict[Path, ModuleType] = {}
+_peer_launcher_lock = threading.Lock()
+
+
+def _reset_peer_launcher_lock() -> None:
+    global _peer_launcher_lock
+    _peer_launcher_lock = threading.Lock()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_peer_launcher_lock)
+
+
+def _snapshot_peer_launcher(path: Path) -> ModuleType:
+    if not path.is_file():
+        raise PermissionError("watch same-cell peer launcher is unavailable in its immutable snapshot")
+    key = path.absolute() if path.drive.casefold() == "\\\\?\\globalroot" else path.resolve()
+    with _peer_launcher_lock:
+        module = _peer_launchers.get(key)
+        if module is None:
+            module = ModuleType("watch_peer_launch")
+            module.__file__ = str(key)
+            # Import machinery would write bytecode into the immutable snapshot.
+            exec(compile(key.read_bytes(), str(key), "exec"), module.__dict__)  # noqa: S102
+            _peer_launchers[key] = module
+        return module
 
 
 def _beneath(path: Path, root: Path) -> bool:
@@ -220,3 +248,12 @@ class WatchInvocation:
             str(self.installation.receipt), "agent-worktrees",
         )
         return [prefix[0], "-B", *prefix[1:]]
+
+    def snapshot_peer_prefix(self) -> list[str]:
+        """Retain immutable launcher code, never its current-governance verdict."""
+        self.require_current()
+        path = (
+            Path(self.installation.evidence()["snapshotsRoot"])
+            / self.runtime.snapshot_id / "src" / "agent_pull_requests" / "_peer_launch.py"
+        )
+        return self.peer_prefix(_snapshot_peer_launcher(path))
