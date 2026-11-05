@@ -134,6 +134,27 @@ def test_changed_selection_retains_completed_outcomes_without_next_action(select
     assert (home / ".copilot" / "installed-plugins" / "first" / "sample").is_dir()
 
 
+def test_plan_refuses_retargeted_copilot_home_symlink(selected, monkeypatch):
+    home, repo, _ = selected
+    first, second = home / "first-state", home / "second-state"
+    first.mkdir()
+    second.mkdir()
+    link = home / ".copilot"
+    try:
+        link.symlink_to(first, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"Directory symlinks are unavailable: {error}")
+    plan = preparation.observe(repo, home=home)
+    link.unlink()
+    link.symlink_to(second, target_is_directory=True)
+    monkeypatch.setattr(
+        update_acquisition, "acquire_missing",
+        lambda *a, **k: pytest.fail("retargeted home acquired"),
+    )
+    with pytest.raises(preparation.PreparationError, match="plan changed"):
+        preparation.prepare(repo, plan["planDigest"], home=home)
+
+
 def test_success_without_payload_does_not_establish_availability(selected, monkeypatch):
     home, repo, _ = selected
     monkeypatch.setattr(update_acquisition, "acquire_missing", lambda *a, **k: "OK (installed)")

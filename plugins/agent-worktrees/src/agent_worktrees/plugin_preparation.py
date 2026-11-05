@@ -81,7 +81,7 @@ def observe(project: Path, *, home: Path | None = None) -> dict:
         raise PreparationError("Plugin declarations changed during observation.")
     selection = {
         "projectRoot": str(project),
-        "copilotHome": str(home / ".copilot"),
+        "copilotHome": str((home / ".copilot").resolve()),
         "enabled": declared.settings.enabled,
         "marketplaces": declared.settings.marketplaces,
         "bases": {name: str(base) for name, base in declared.marketplace_bases.items()},

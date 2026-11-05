@@ -223,8 +223,9 @@ agent-worktrees prepare-plugin-payloads --repo <absolute-checkout> --apply --exp
 The read-only form emits `copilot-extensions.plugin-payload-preparation`, version
 `1`, with `planDigest`, qualified per-source `entries` and `payloadsReady`.
 Exit zero from observation means a valid observation, not that payloads are
-available. The plan binds the resolved checkout and Copilot home as well as its
-declarations. Explicit apply requires that exact plan, rechecks declarations and
+available. The plan binds the resolved checkout and physical Copilot home as well as its
+declarations, so retargeting a state-directory symlink or junction invalidates it.
+Explicit apply requires that exact plan, rechecks declarations and
 availability before acquisition, and independently observes the result.
 It exits zero only when all selected payloads are available, two for incomplete
 apply, and one for invalid or stale input.
