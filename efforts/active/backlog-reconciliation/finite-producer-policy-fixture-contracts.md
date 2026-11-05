@@ -86,8 +86,10 @@ The reported fresh-restart stale physical specification/live-error-health
 path remains unproven.
 Retain content-mismatch detection/correction OR ownership-safe error recovery
 as original alternatives, not an invented requirement to implement both.
-Do not delete specifications, kill processes, add poll-time rewrites or bypass
-the declared lifecycle.
+Conditional correction of a detected mismatch during reconciliation remains
+an option; rewriting unchanged specifications on every healthy poll is not
+required. Do not delete live specifications, kill processes or bypass the
+declared lifecycle.
 #10319's actual decline closeout and fresh whole #10098's Picker reload do not
 repair the emitter snapshot path. Whole #10271 stays protected without retry.
 No specification, evaluator, health recovery or process operation runs.
