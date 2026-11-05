@@ -171,9 +171,10 @@ def test_core_status_uses_selected_runtime_without_requiring_global_stub(tmp_pat
 
 
 @pytest.mark.parametrize("marker", ["current-version", "last-known-good"])
-def test_core_status_malformed_marker_bytes_keep_native_fallback(tmp_path, marker):
+@pytest.mark.parametrize("content", [b"\xff", b"1.2.3\x00"])
+def test_core_status_malformed_markers_keep_native_fallback(tmp_path, marker, content):
     root, _ = _selected_core(tmp_path)
-    (root / marker).write_bytes(b"\xff")
+    (root / marker).write_bytes(content)
     assert core_status(home=tmp_path).installed
 
 

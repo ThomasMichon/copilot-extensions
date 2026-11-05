@@ -102,13 +102,14 @@ def _runtime_candidates(root: Path) -> list[Path]:
         if (
             not version
             or version in {".", ".."}
-            or Path(version).name != version
         ):
             return None
         try:
+            if Path(version).name != version:
+                return None
             versions_root = versions.resolve()
             candidate = (versions / version).resolve()
-        except OSError:
+        except (OSError, ValueError):
             return None
         if candidate.parent != versions_root:
             return None
