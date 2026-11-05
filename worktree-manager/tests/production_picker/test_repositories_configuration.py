@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import threading
 import time
 
 from agent_procutil import no_window_kwargs
@@ -410,7 +411,7 @@ def test_worktrees_readiness_is_async_visible_and_never_runs_a_binding(monkeypat
     def read(project, args, **kwargs):
         if args == ["coordination-readiness"]:
             calls.append((project, args, kwargs))
-            return observation
+            return dict(observation)
         return {}
 
     monkeypatch.setattr(engine_client, "run_json", read)
@@ -446,6 +447,52 @@ def test_worktrees_readiness_is_async_visible_and_never_runs_a_binding(monkeypat
             engine._refresh_knowledge_readiness()
             await _wait(pilot, lambda: engine._knowledge_readiness.get("ready") is True)
             assert "KB" not in engine.button_set() and len(calls) == 2
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("next_ready", [False, True])
+def test_readiness_refresh_keeps_button_identity_until_observation_completes(monkeypatch, next_ready):
+    entered, release = threading.Event(), threading.Event()
+    reads = []
+    source = _fixture_source()
+
+    def read():
+        reads.append("read")
+        ready = True
+        if len(reads) > 1:
+            entered.set()
+            if not release.wait(10):
+                raise RuntimeError("readiness fixture release expired")
+            ready = next_ready
+        return {"version": 1, "ready": ready, "code": "ready" if ready else "knowledge_binding_required",
+                "observation": len(reads)}
+
+    source.knowledge_readiness = read
+
+    async def run():
+        app = PickerApp(source, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            engine = app.query_one(PickerScreen)
+            await _wait_for_initial_setup(pilot, engine)
+            await _wait(pilot, lambda: getattr(engine, "_knowledge_readiness", {}).get("ready") is True)
+            engine.sel = ("BTN", 0)
+            engine.btn_idx = engine.button_set().index("SY")
+            engine._sync_focus_to_sel()
+            engine.refresh()
+            await pilot.pause()
+            buttons = engine.button_set()
+            try:
+                engine._refresh_knowledge_readiness()
+                await _wait(pilot, entered.is_set)
+                assert engine.button_set() == buttons and engine.active_button() == "SY"
+                await pilot.press("left", "right")
+                assert engine.active_button() == "SY"
+            finally:
+                release.set()
+            await _wait(pilot, lambda: engine._knowledge_readiness.get("observation") == 2)
+            assert engine.active_button() == ("SY" if next_ready else "N")
+            assert ("KB" in engine.button_set()) is not next_ready
 
     asyncio.run(run())
 

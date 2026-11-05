@@ -1520,7 +1520,8 @@ last selected section. This is browsing only; Apply/confirmation remains
 required for changes. Escape returns to the previous operational view.
 
 Worktrees reads the selected engine's knowledge readiness off the input thread
-in both local and live modes.
+in both local and live modes. The last validated observation and button
+identities remain stable while a refresh is pending.
 Missing required knowledge shows **Configure knowledge**, which navigates to
 the native Repositories section and its confirmed existing-repository binding
 action. An unavailable binding payload shows preparation guidance in the

@@ -319,6 +319,19 @@ other-platform caller-death qualification. Both complete normal binding/New
 flows also passed. F/E9 and the module-size guard passed. A lost caller receipt
 remains an unknown outcome requiring readiness inspection, never a rollback claim.
 
+The subsequent no-open-findings overview requested assessment of refresh focus
+and sequential-probe deadlines. A remaining loading-state race was reproduced
+by source tracing: replacing a ready observation with loading could insert a
+button under the existing cursor. Refresh now retains the last validated
+observation until its replacement arrives. Two gated Textual cases exercise
+keyboard navigation during the held read, then unchanged/withdrawn readiness
+with preserved action identity or safe New selection. A separate native control
+uses a delayed capability probe, contended registration lock and shortened
+test-only aggregate budget: expiry confirms cleanup with no execution after
+the lock is released. Ten native binding controls and all 85 Manager controls
+passed on Windows, with F/E9 and module-size checks. No remote authentication,
+installed acceptance or broader deadline guarantee is inferred.
+
 Fresh-store configuration uses actual Git roots and native APIs but pre-provided
 native packages. Cold installer/Python-3.9/fresh-terminal, installed desktop,
 live-provider and rollout lanes were not exercised: this source slice has no

@@ -12,7 +12,8 @@ class PickerConfigurationMixin:
             return
         generation = self._knowledge_read_generation = object()
         was_ready = getattr(self, "_knowledge_readiness", {}).get("ready") is True
-        self._knowledge_readiness = {"ready": None, "code": "loading"}
+        if not getattr(self, "_knowledge_readiness", None):
+            self._knowledge_readiness = {"ready": None, "code": "loading"}
 
         def done(result):
             if self._knowledge_read_generation is not generation:
@@ -24,7 +25,7 @@ class PickerConfigurationMixin:
                 and result["code"] in {"ready", "knowledge_binding_required", "state_root_resolution_failed"}
                 and result["ready"] == (result["code"] == "ready")
             )
-            self._knowledge_readiness = result if valid else {"ready": None, "code": "unavailable"}
+            self._knowledge_readiness = dict(result) if valid else {"ready": None, "code": "unavailable"}
             if was_ready != (self._knowledge_readiness.get("ready") is True):
                 if self._kind() == "worktrees":
                     self.btn_idx = 0

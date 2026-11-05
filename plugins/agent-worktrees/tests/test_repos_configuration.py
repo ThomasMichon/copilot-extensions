@@ -9,6 +9,7 @@ import subprocess
 import sys
 from types import SimpleNamespace
 import threading
+import time
 
 from agent_procutil import no_window_kwargs
 import pytest
@@ -310,6 +311,63 @@ def test_binding_worker_refuses_a_changed_payload_before_execution(native, monke
     with pytest.raises(ConfigurationError) as caught:
         binding._apply_worker("sample", "knowledge", "a" * 64, str(native / "old-owner.py"))
     assert caught.value.code == "binding-owner-changed"
+
+
+def test_binding_worker_aggregate_deadline_includes_probe_and_registry_wait(native, monkeypatch):
+    from agent_procutil.owned_budget import OwnedExecutionBudget
+    from agent_worktrees import repos_knowledge_configuration as binding
+    from agent_worktrees.repos_registry_transaction import registry_lock
+
+    def write(path, value):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(value), encoding="utf-8")
+
+    project = native / "repository"
+    config = native / ".sample" / "config.yaml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(yaml.safe_dump({
+        "repo_name": "sample", "repos": {"sample": {"anchor": str(project)}},
+    }), encoding="utf-8")
+    (native / ".agent-worktrees" / "projects.yaml").write_text(yaml.safe_dump({
+        "schema_version": 2, "projects": {"sample": {"config_dir": str(config.parent)}},
+    }), encoding="utf-8")
+    payload = native / ".copilot" / "installed-plugins" / "fixture" / "harness-knowledge"
+    write(payload / "plugin.json", {"name": "harness-knowledge"})
+    write(native / ".copilot" / "settings.json", {
+        "enabledPlugins": {"harness-knowledge@fixture": True},
+    })
+    script = payload / "skills" / "binding-knowledge" / "scripts" / "bind_knowledge.py"
+    script.parent.mkdir(parents=True)
+    marker = native / "late-execution"
+    script.write_text(
+        "import json,sys,time\nfrom pathlib import Path\n"
+        "if '--capabilities' in sys.argv:\n"
+        " time.sleep(0.5)\n"
+        " print(json.dumps({'version':1,'existing_binding_configuration':2}))\n"
+        "else:\n"
+        f" Path({str(marker)!r}).touch()\n"
+        " print(json.dumps({'status':'persisted','pointer_committed':True}))\n",
+        encoding="utf-8",
+    )
+    original = OwnedExecutionBudget.from_timeout
+    budgets = []
+
+    def budget(_cls, timeout, *, cleanup_reserve):
+        value = original(6 if timeout == 26 else timeout, cleanup_reserve=cleanup_reserve)
+        if timeout == 26:
+            budgets.append(value)
+        return value
+
+    monkeypatch.setattr(OwnedExecutionBudget, "from_timeout", classmethod(budget))
+    with registry_lock(repos._repos_yaml_path()):
+        with pytest.raises(ConfigurationError) as caught:
+            binding.invoke("sample", "knowledge", "apply", "a" * 64)
+        assert caught.value.code == "binding-owner-failed"
+        assert isinstance(caught.value.__cause__, (subprocess.TimeoutExpired, TimeoutError))
+        assert len(budgets) == 1 and time.monotonic() <= budgets[0].deadline + 0.5
+    time.sleep(0.2)
+    assert not marker.exists()
+    assert yaml.safe_load(config.read_text("utf-8")).get("knowledge_repo") is None
 
 
 def test_incomplete_binding_keeps_committed_receipt_and_reports_failure(native, monkeypatch, capsys):
