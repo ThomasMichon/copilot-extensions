@@ -703,7 +703,7 @@ _versioned_mark_complete() {
         printf '%s\n' 'Payload changed during construction; completion refused' >&2
         return 1
     fi
-    _runtime_construction_complete "$actual_hash"
+    _runtime_construction_complete "$actual_hash" --retain-helpers
 }
 
 _step 'agent-mcp init'

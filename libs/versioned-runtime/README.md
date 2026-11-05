@@ -195,6 +195,11 @@ the caller settles that retention after selection/reconciliation. Failure or
 pipe EOF reclaims only the owned unfinished candidate. Cleanup refusals remain
 errors, and an aborted constructor cannot report success. This is not a daemon
 or an `acquire` command that exits before the build it supposedly protects.
+Callers that need the installed helper bundle request `--retain-helpers` with
+`_runtime_construction_complete` on POSIX, or `-RetainHelpers` with
+`Complete-RuntimeConstruction` on PowerShell. The construction owner retains
+the bundle before publishing completion. Reuse verifies existing helper bytes;
+missing or changed helpers in a completed slot are refused, never patched.
 The POSIX adapter supports stock macOS Bash 3.2 as well as newer Bash. Its
 private channel preserves caller descriptors and chains outer exit cleanup only
 after construction settlement. `INT` and `TERM` terminate through that same

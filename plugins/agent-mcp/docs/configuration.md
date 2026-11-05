@@ -13,6 +13,15 @@ supported. Owner lookup remains read-only, completion-gated and independent of
 ambient command discovery. Delivered projections still require a matching fresh
 Worktrees owner report.
 
+Both native MCP constructors request this bundle before immutable completion.
+A completed generation with missing or changed retained helpers is not repaired
+in place: rebuild through a new admitted generation. Do not clear delivered
+context or substitute an unqualified owner to bypass the missing prerequisite.
+The POSIX regression exercises actual attached construction, a complete private
+environment and explicit/named bridge loading from a real Git worktree. Its
+configuration-owner process returns synthetic qualified fixture data; it does
+not validate a live host installation or an external backend.
+
 [`src/agent_mcp/config.py`](../src/agent_mcp/config.py) owns `_read_file`,
 `resolve_config_path`, `parse_config`, and `validate_config`. Read/validate never
 mints credentials, runs a command, installs, repairs, connects to an upstream or

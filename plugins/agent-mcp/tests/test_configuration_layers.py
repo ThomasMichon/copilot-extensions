@@ -298,10 +298,16 @@ def test_slot_retained_resolver_qualifies_legacy_owner(tmp_path, monkeypatch, ne
         config.load_config(str(selected))
 
 
-def test_fresh_slot_loader_reads_qualified_peer_in_real_subprocess(tmp_path):
+@pytest.mark.parametrize("producer,reference", [
+    ("fixture", "explicit"), ("constructor", "explicit"), ("constructor", "named"),
+])
+def test_fresh_slot_loader_reads_qualified_peer_in_real_subprocess(tmp_path, producer, reference):
     import os
+    import re
+    import shlex
     import shutil
     import subprocess
+    import sys
     import venv
     from pathlib import Path
 
@@ -311,7 +317,23 @@ def test_fresh_slot_loader_reads_qualified_peer_in_real_subprocess(tmp_path):
     home = tmp_path / "home"
     base = tmp_path / "repository"
     knowledge = tmp_path / "knowledge"
-    base.mkdir()
+    if producer == "constructor":
+        shell = "/bin/bash" if sys.platform == "darwin" else shutil.which("bash")
+        if os.name == "nt" or not shell:
+            pytest.skip("POSIX native construction integration")
+        anchor = tmp_path / "anchor"
+        git = ["git", "-c", "core.hooksPath=" + os.devnull, "-c", "commit.gpgsign=false"]
+        subprocess.run([*git, "init", "-q", str(anchor)], check=True)
+        subprocess.run([
+            *git, "-C", str(anchor), "-c", "user.name=Fixture",
+            "-c", "user.email=fixture@example.invalid",
+            "commit", "--allow-empty", "-qm", "Fixture",
+        ], check=True)
+        subprocess.run([*git, "-C", str(anchor), "worktree", "add", "--detach",
+                        str(base), "HEAD"], check=True, capture_output=True)
+        assert (base / ".git").is_file()
+    else:
+        base.mkdir()
     knowledge.mkdir()
     write(knowledge, {"timeout": 43})
     selected = tmp_path / "selected.yaml"
@@ -336,21 +358,72 @@ def test_fresh_slot_loader_reads_qualified_peer_in_real_subprocess(tmp_path):
         return prefix, python, Path(result.stdout.strip())
 
     own = home / ".agent-mcp"
-    slot, python, packages = environment(own)
     _, peer_python, peer_packages = environment(home / ".agent-worktrees")
     import agent_mcp
 
-    for package in (agent_mcp, yaml, configuration_context, configuration_layers):
-        source = Path(package.__file__).parent
-        shutil.copytree(source, packages / source.name, ignore=shutil.ignore_patterns("__pycache__"))
-    bootstrap = slot / ".runtime-bootstrap"
-    bootstrap.mkdir()
     scripts = Path(configuration.__file__).parents[2] / "scripts"
-    for source in scripts.glob("versioned_runtime*.py"):
-        shutil.copy2(source, bootstrap / source.name)
+    sources = [str(Path(p.__file__).parent)
+               for p in (agent_mcp, yaml, configuration_context, configuration_layers)]
+    if producer == "constructor":
+        slot = own / "versions/1.0.0"
+        python = slot / "bin/python"
+        builder = tmp_path / "build-environment.py"
+        builder.write_text(
+            "import shutil, subprocess, sys, venv\nfrom pathlib import Path\n"
+            "slot = Path(sys.argv[1])\n"
+            "venv.EnvBuilder(with_pip=False).create(slot)\n"
+            "python = slot / 'bin/python'\n"
+            "packages = Path(subprocess.check_output([str(python), '-I', '-B', '-c', "
+            "\"import sysconfig; print(sysconfig.get_path('purelib'))\"], text=True).strip())\n"
+            f"for value in {sources!r}:\n"
+            "    source = Path(value)\n"
+            "    shutil.copytree(source, packages / source.name, "
+            "ignore=shutil.ignore_patterns('__pycache__'))\n"
+            "subprocess.run([str(python), '-I', '-B', '-c', 'import agent_mcp'], check=True)\n",
+            encoding="utf-8",
+        )
+        primitive = configuration._peer_launch._load_primitive(
+            scripts / "versioned_runtime.py", "_test_mcp_constructor_runtime",
+        )
+        text = (scripts / "init.sh").read_text(encoding="utf-8")
+        completion = re.search(r"(?ms)^_versioned_mark_complete\(\) \{.*?^\}", text)
+        assert completion is not None
+        digest = "a" * 64
+        script = (
+            "set -euo pipefail\n" + primitive.construction_shell_helpers("sh") + "\n"
+            "_assert_source_runtime() { :; }\n"
+            f"_payload_hash() {{ printf '%s' '{digest}'; }}\n"
+            + completion.group() + "\n"
+            f"_runtime_construction_begin {shlex.quote(sys.executable)} "
+            f"{shlex.quote(str(scripts / 'versioned_runtime.py'))} "
+            f"{shlex.quote(str(own))} 1.0.0 {digest} .venv\n"
+            f"{shlex.quote(sys.executable)} -I -B {shlex.quote(str(builder))} "
+            f"{shlex.quote(str(slot))}\n"
+            "_versioned_mark_complete\n_runtime_construction_finish\n"
+        )
+        build_env = configuration._peer_launch.legacy_peer_environment(dict(os.environ))
+        build_env.update({"HOME": str(home), "USERPROFILE": str(home), "AGENT_MCP_HOME": str(own)})
+        result = subprocess.run(
+            [shell, "-c", script], env=build_env, cwd=base,
+            capture_output=True, text=True, timeout=60,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+    else:
+        slot, python, packages = environment(own)
+        for value in sources:
+            source = Path(value)
+            shutil.copytree(source, packages / source.name, ignore=shutil.ignore_patterns("__pycache__"))
+        bootstrap = slot / ".runtime-bootstrap"
+        bootstrap.mkdir()
+        for source in scripts.glob("versioned_runtime*.py"):
+            shutil.copy2(source, bootstrap / source.name)
+    bootstrap = slot / ".runtime-bootstrap"
     runtime = configuration._peer_launch._load_primitive(
         bootstrap / "versioned_runtime.py", "_test_mcp_subprocess_runtime",
     )
+    if producer == "constructor":
+        assert runtime.is_complete(own, "1.0.0")
+        assert (bootstrap / "runtime_launcher.py").is_file()
     peer = home / ".agent-worktrees"
     runtime.mark_complete(peer, "1.0.0")
     (peer / "current-version").write_text("1.0.0", encoding="utf-8")
@@ -362,21 +435,27 @@ def test_fresh_slot_loader_reads_qualified_peer_in_real_subprocess(tmp_path):
         "from pathlib import Path\n"
         "assert sys.argv[1:] == ['state-root', '--configuration', '--json']\n"
         "assert not set(os.environ) & {'AGENT_CONFIGURATION_CONTEXT', 'AGENT_RT_ROOT', 'GH_TOKEN'}\n"
-        "print(Path(__file__).with_name('report.json').read_text(encoding='utf-8'))\n",
+        "report = json.loads(Path(__file__).with_name('report.json').read_text(encoding='utf-8'))\n"
+        "assert Path.cwd().resolve() == Path(report['context']['base_root']).resolve()\n"
+        "print(json.dumps(report))\n",
         encoding="utf-8",
     )
     (peer_module / "report.json").write_text(json.dumps(report), encoding="utf-8")
     inherited = configuration._peer_launch.legacy_peer_environment(dict(os.environ))
     inherited.update({
         "HOME": str(home), "USERPROFILE": str(home),
+        "AGENT_MCP_HOME": str(own),
         "AGENT_CONFIGURATION_CONTEXT": json.dumps(report),
     })
+    if reference == "named":
+        (own / "bridges").mkdir()
+        shutil.copyfile(selected, own / "bridges/selected.yaml")
     assert peer_python.is_file()
     assert not (own / "scripts").exists()
     result = subprocess.run(
-        [str(python), "-I", "-c",
+        [str(python), "-I", "-B", "-c",
          "import sys; from agent_mcp.config import load_config; print(load_config(sys.argv[1]).timeout)",
-         str(selected)],
+         "selected" if reference == "named" else str(selected)],
         env=inherited, cwd=base, capture_output=True, text=True, timeout=45,
     )
     assert result.returncode == 0, result.stderr
