@@ -10,9 +10,12 @@ import math
 from pathlib import Path
 import re
 import subprocess
+import threading
 import time
+from contextlib import contextmanager
 
 from agent_procutil.owned_process import OutputLimitExceeded, OwnedCleanupError, run_caller_owned
+from agent_procutil.owned_budget import OwnedExecutionBudget
 
 from .git_repository_environment import _NO_HOOKS_PATH, repository_identity_env
 from .git_tree_diff import _path_batches, parse as parse_tree_diff
@@ -51,6 +54,7 @@ def _owned_git(root, checkpoint, deadline, environment, maximum, args,
             cwd=root, env=environment, timeout=remaining,
             max_stdout_bytes=min(maximum, maximum if limit is None else limit),
             max_stderr_bytes=8192, input_text=input_text, binary=True,
+            budget=OwnedExecutionBudget(deadline, min(2.0, remaining / 4)),
         )
     except (OutputLimitExceeded, subprocess.TimeoutExpired):
         raise SourceIncomplete("git_io_budget_exhausted") from None
@@ -82,6 +86,26 @@ class LocalReviewSource:
             raise ValueError("source requires an owner workspace identity, scope and checkpoint")
         self.root, self.workspace_id = root, workspace_id
         self.scope, self.checkpoint = copy.deepcopy(scope), checkpoint
+        self._execution_deadline = None
+        self._async_binding_lock = threading.Lock()
+        self._async_bound = False
+        self._sync_active = 0
+
+    @contextmanager
+    def _sync_access(self):
+        with self._async_binding_lock:
+            if self._async_bound:
+                raise SourceIncomplete("source_async_lifetime_owned")
+            self._sync_active += 1
+        try:
+            yield
+        finally:
+            with self._async_binding_lock:
+                self._sync_active -= 1
+
+    def _deadline(self, budget):
+        deadline = time.monotonic() + budget
+        return min(deadline, self._execution_deadline) if self._execution_deadline is not None else deadline
 
     @staticmethod
     def contract():
@@ -100,6 +124,10 @@ class LocalReviewSource:
         }
 
     def read_retained(self, manifest, path, side, *, budget, max_bytes=1024 * 1024):
+        with self._sync_access():
+            return self._read_retained_owned(manifest, path, side, budget=budget, max_bytes=max_bytes)
+
+    def _read_retained_owned(self, manifest, path, side, *, budget, max_bytes=1024 * 1024):
         self.checkpoint()
         if (
             not isinstance(manifest, dict) or manifest.get("complete") is not True
@@ -136,7 +164,7 @@ class LocalReviewSource:
             raise SourceIncomplete("retained_range_mismatch")
         environment = repository_identity_env()
         environment.update(GIT_NO_LAZY_FETCH="1", GIT_OPTIONAL_LOCKS="0")
-        deadline = time.monotonic() + budget
+        deadline = self._deadline(budget)
 
         def git(*args, **kwargs):
             return _owned_git(self.root, self.checkpoint, deadline, environment,
@@ -215,6 +243,12 @@ class LocalReviewSource:
         return finish(result)
 
     def inspect_and_retain(
+        self, request: dict, **limits,
+    ) -> dict:
+        with self._sync_access():
+            return self._inspect_and_retain_owned(request, **limits)
+
+    def _inspect_and_retain_owned(
         self, request: dict, *, budget: float, max_paths: int = 20000,
         max_blob_bytes: int = 1024 * 1024, max_total_blob_bytes: int = 16 * 1024 * 1024,
         max_output_bytes: int = 8 * 1024 * 1024,
@@ -238,7 +272,7 @@ class LocalReviewSource:
             or len(head) != len(common) or type(iteration) is not int or iteration <= 0
         ):
             raise ValueError("source requires exact head/common object IDs and a positive iteration")
-        start, deadline = time.monotonic(), time.monotonic() + budget
+        start, deadline = time.monotonic(), self._deadline(budget)
         result = {
             "schema": "agent-pull-requests.local-source", "version": 1,
             "scope": copy.deepcopy(self.scope), "revision": copy.deepcopy(revision),

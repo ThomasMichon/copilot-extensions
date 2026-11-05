@@ -4,6 +4,8 @@ import asyncio
 import json
 import ssl
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
@@ -24,6 +26,43 @@ def caller(rig, **options):
         gateway_origin=rig.origin, gateway_ca=rig.ca,
         proof_key=rig.h.keys[3].get_op_key("sign"),
         access_token_callback=options.pop("access_token_callback", access), **options)
+
+
+@pytest.mark.parametrize("cleanup_failure", [False, True])
+def test_registered_native_credentials_join_before_request_cancellation_settles(tmp_path, cleanup_failure):
+    from agent_procutil.owned_process import OwnedCleanupError
+    from fleet_manager._service_caller_native import register_native_future
+    entered, release = threading.Event(), threading.Event()
+    failure = OwnedCleanupError(object())
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        async def scenario():
+            async with running(tmp_path) as rig:
+                def produce():
+                    entered.set()
+                    assert release.wait(10)
+                    if cleanup_failure:
+                        raise failure
+                    return rig.access("caller-a", 3)
+                async def access():
+                    future = pool.submit(produce)
+                    register_native_future(future)
+                    return await asyncio.wrap_future(future)
+                client = caller(rig, access_token_callback=access)
+                task = asyncio.create_task(client.request("GET", "/api"))
+                try:
+                    await eventually(entered.is_set)
+                    task.cancel()
+                    await asyncio.sleep(0)
+                    await asyncio.sleep(0)
+                    assert not task.done() and client._active == 1
+                finally:
+                    release.set()
+                with pytest.raises(OwnedCleanupError if cleanup_failure else asyncio.CancelledError) as observed:
+                    await task
+                if cleanup_failure:
+                    assert observed.value is failure
+                assert client._active == 0 and rig.backends[0].requests == []
+        asyncio.run(scenario())
 
 
 def test_current_credentials_real_tls_method_target_and_opaque_query(tmp_path, monkeypatch):

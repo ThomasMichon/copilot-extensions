@@ -7,8 +7,7 @@ import copy
 from .review_workspace import _generation, _revision, _scope
 
 
-def attach_source(generation: dict, source_owner, **limits) -> dict:
-    """Return a separate envelope; never mutate metadata generations or acquire source."""
+def _selection(generation):
     generation = copy.deepcopy(generation)
     scope = _scope(generation.get("scope"))
     _generation(generation, scope)
@@ -28,22 +27,93 @@ def attach_source(generation: dict, source_owner, **limits) -> dict:
                for key in ("head_sha", "common_sha", "iteration"))
     ):
         result["errors"] = ["source_evidence_incomplete"]
-        return result
-    operation = getattr(source_owner, "inspect_and_retain", None)
+        return result, None
+    return result, {
+        "scope": copy.deepcopy(scope), "revision": copy.deepcopy(revision),
+        "changes": copy.deepcopy(sections["changes"]["data"]),
+    }
+
+
+EXECUTION_CONTRACT = {
+    "schema": "agent-pull-requests.source-execution", "version": 1,
+    "execution": "owned_async", "release": "terminal_drain",
+}
+
+
+def _supported(source_owner):
     contract = getattr(source_owner, "contract", None)
     capability = contract() if callable(contract) else None
-    if not callable(operation) or not isinstance(capability, dict) or type(capability.get("version")) is not int or capability != {
+    if not isinstance(capability, dict) or type(capability.get("version")) is not int or capability != {
         "schema": "agent-pull-requests.local-source-contract", "version": 1,
         "backend_access": False, "fetch": False, "checkout": False,
         "retention": "immutable_git_refs", "resource_owner": "existing_workspace_owner",
     }:
+        return False
+    return True
+
+
+def attach_source(generation: dict, source_owner, **limits) -> dict:
+    """Return a separate envelope over already prepared source; never acquire it."""
+    result, request = _selection(generation)
+    if request is None:
+        return result
+    operation = getattr(source_owner, "inspect_and_retain", None)
+    if not callable(operation) or not _supported(source_owner):
         result["errors"] = ["source_owner_unsupported"]
         return result
-    # This is consistency/capability discovery, not authentication of an owner.
-    source = operation({
-        "scope": copy.deepcopy(scope), "revision": copy.deepcopy(revision),
-        "changes": copy.deepcopy(sections["changes"]["data"]),
-    }, **limits)
+    return _finish(result, operation(request, **limits))
+
+
+async def attach_source_async(generation, source_owner, *, selection=None, operation=None, **limits):
+    from .review_workspace import MAX_GENERATION_BYTES
+    if type(generation) is not bytes or not 0 < len(generation) <= MAX_GENERATION_BYTES:
+        raise ValueError("async_inspection_requires_immutable_generation")
+    if type(selection) is not dict or not isinstance(selection.get("id"), str):
+        raise ValueError("immutable generation selection required")
+    selected_id = selection["id"]
+    scope = selection.get("scope")
+    revision = selection.get("revision")
+    if (
+        type(scope) is not dict or len(scope) != 6
+        or type(revision) is not dict or len(revision) not in (5, 6)
+        or any(type(value) not in (str, int, type(None)) for value in (*scope.values(), *revision.values()))
+    ):
+        raise ValueError("invalid source selection header")
+    timeout_result = {
+        "schema": "agent-pull-requests.source-attachment", "version": 1,
+        "generation_id": selected_id, "scope": dict(scope), "revision": dict(revision),
+        "state": "incomplete", "source": None, "errors": ["deadline_exhausted"],
+        "review_authority": False, "effects": "local_refs_possible",
+        "native_settlement": "unconfirmed",
+    }
+    execution = getattr(source_owner, "execution_contract", None)
+    declared = execution() if callable(execution) else None
+    if (
+        not _supported(source_owner) or declared != EXECUTION_CONTRACT
+        or not isinstance(declared, dict) or type(declared.get("version")) is not int
+        or not callable(getattr(source_owner, "attach", None))
+    ):
+        result = dict(timeout_result, state="unavailable", effects="none", native_settlement="unattempted")
+        result["errors"] = ["source_owner_unsupported"]
+        return result
+
+    def build(snapshot, selected_owner, **selected_limits):
+        from .watch_replay_store import json_object
+        snapshot = json_object(snapshot)
+        if snapshot.get("id") != selected_id:
+            raise ValueError("source generation changed before snapshot")
+        if snapshot.get("scope") != timeout_result["scope"] or snapshot.get("revision") != timeout_result["revision"]:
+            raise ValueError("source generation selection changed")
+        return attach_source(snapshot, selected_owner, **selected_limits)
+
+    if operation is not None:
+        limits.pop("budget")
+        return await operation.attach(generation, build=build, timeout_result=timeout_result, **limits)
+    return await source_owner.attach(generation, build=build, timeout_result=timeout_result, **limits)
+
+
+def _finish(result, source):
+    scope, revision = result["scope"], result["revision"]
     if (
         not isinstance(source, dict) or source.get("schema") != "agent-pull-requests.local-source"
         or type(source.get("version")) is not int or source["version"] != 1

@@ -28,6 +28,11 @@ These are actual finite Git/IO limits, not delegate permissions or read counts.
 Git must support explicit `--no-lazy-fetch`; unsupported Git fails honestly,
 without trying another backend or acquiring missing objects. Prepare exact
 head/common objects through the existing source owner before invoking this API.
+Owned async execution has a separately bound descriptor; see
+[workspace tools](workspace-tools.md). This prepared-only contract never acquires
+credentials or fetches objects. Acquisition remains open under #9535 pending
+actual resource-owner capacity admission. The normal resource owner must drain
+any owned async adapter before releasing its already selected resource.
 There is no checkout, working-tree read, merge, build or dependency restore.
 
 `attach_source` requires complete, consistent PR/iteration/change evidence, not
@@ -68,6 +73,10 @@ Ref IO failure or timeout may leave same-range refs present. The result remains
 incomplete with `effects: local_refs_possible`; retry the same range and verify
 its same deterministic refs, not a new identity or forced replacement. Actual
 owner permission failures and unconfirmed process cleanup propagate unchanged.
+An async caller timeout can return this conservative effect disposition before
+the worker completes, with `source: null` and `native_settlement: unconfirmed`.
+It is not a ready attachment or a cleanup receipt. The existing owner retains
+the work and must terminally drain it before releasing source custody.
 
 Existing generation comparison invalidations still apply: new source
 head/iteration/common evidence cannot relabel a previous source manifest.

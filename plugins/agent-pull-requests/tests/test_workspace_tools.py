@@ -19,6 +19,13 @@ pytestmark = pytest.mark.parametrize("environment", [True], indirect=True)
 
 
 @pytest.fixture
+def execution_pool():
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        yield pool
+
+
+@pytest.fixture
 def tools(environment, integration, tmp_path):
     _, _, _, _, backend, _ = environment
     _, _, native, evidence, _, _ = integration
@@ -310,6 +317,501 @@ def test_overlapping_service_tool_calls_share_capability_negotiation(environment
         values = await asyncio.gather(first, second)
         assert values == [generation, generation]
         assert sum(path.endswith("/capabilities") for path in caller.calls) == 1
+
+    asyncio.run(scenario())
+
+
+def test_owned_async_source_through_actual_tool_and_client_frontdoor(environment, tools, integration, execution_pool):
+    from agent_worktrees.async_review_source import AsyncReviewSource
+    _, _, initial, _, _, _ = environment
+    native_host, _, _ = tools
+    owner = AsyncReviewSource(native_host.source_owner, executor=execution_pool)
+    host = WorkspaceTools(integration[2], source_owner=owner)
+
+    async def scenario():
+        loaded = await host.invoke("load", {
+            "number": 42, "expected_current": initial["id"], "budget_seconds": 60,
+        })
+        identity = loaded["result"]["descriptor"]["id"]
+        definitions = await host.definitions()
+        assert any(value["name"] == "pr_workspace_source_read" for value in definitions)
+        assert not any(value["name"] == "pr_workspace_source_prepare" for value in definitions)
+        assert (await host.capabilities())["source_acquisition"] is False
+        attachment = await dispatch_tool(host, "pr_workspace_source", {"request": {
+            "number": 42, "generation_id": identity, "budget_seconds": 60,
+        }})
+        assert attachment["state"] == "ready"
+        value = await dispatch_tool(host, "pr_workspace_source_read", {"request": {
+            "number": 42, "generation_id": identity, "budget_seconds": 60,
+            "source_attachment": attachment, "path": "/note.txt", "side": "after",
+        }})
+        assert value["content"] == "after"
+        await owner.drain(timeout=2)
+        assert owner.status()["drained"] is True
+
+    asyncio.run(scenario())
+
+
+def test_one_shot_cli_refuses_async_source_binding_without_adopting_another_loop(environment, tools, monkeypatch, capsys, execution_pool):
+    from agent_worktrees.async_review_source import AsyncReviewSource
+    _, _, initial, _, _, _ = environment
+    native_host, git, _ = tools
+    owner = AsyncReviewSource(native_host.source_owner, executor=execution_pool)
+    host = WorkspaceTools(native_host.client, source_owner=owner)
+    for _ in range(2):
+        code, capabilities = invoke_cli(host, "capabilities", {}, monkeypatch, capsys)
+        assert code == 0
+        assert not {"source", "source-read", "source-prepare"} & set(capabilities["operations"])
+    code, loaded = invoke_cli(host, "load", {
+        "number": 42, "expected_current": initial["id"], "budget_seconds": 60,
+    }, monkeypatch, capsys)
+    assert code == 0
+    request = {"number": 42, "generation_id": loaded["result"]["descriptor"]["id"], "budget_seconds": 60}
+    materialize = host.client.materialize
+    reads = []
+
+    def observed(*args):
+        reads.append(args)
+        return materialize(*args)
+
+    monkeypatch.setattr(host.client, "materialize", observed)
+    for _ in range(2):
+        code, generation = invoke_cli(host, "materialize", {
+            "number": 42, "generation_id": request["generation_id"],
+        }, monkeypatch, capsys)
+        assert code == 0 and generation["id"] == request["generation_id"]
+    assert len(reads) == 1
+    for command in ("source", "source-read"):
+        payload = dict(request)
+        if command == "source-read":
+            payload.update(source_attachment={}, path="/note.txt", side="after")
+        code, value = invoke_cli(host, command, payload, monkeypatch, capsys)
+        assert code == 3 and value["effect_completion"] == "not_inferred"
+    assert owner._loop is None and owner.status()["pending"] == 0
+    assert not git("for-each-ref", "refs/agent-pull-requests")
+    with pytest.raises(SystemExit) as removed:
+        cli.main(["workspace", "source-prepare", "--request", "-"], workspace_host=host)
+    assert removed.value.code == 2
+
+
+def test_async_attachment_snapshot_and_response_preparation_run_off_loop(environment, tools, execution_pool, monkeypatch):
+    import threading
+    from agent_worktrees.async_review_source import AsyncReviewSource
+    from agent_worktrees.pr_review_source import SourceIncomplete
+    from agent_pull_requests import source_attachment
+    _, _, initial, _, _, _ = environment
+    native_host, _, _ = tools
+    owner = AsyncReviewSource(native_host.source_owner, executor=execution_pool)
+    entered, release = threading.Event(), threading.Event()
+    copied_on, finished_on = [], []
+    original_finish = source_attachment._finish
+
+    original_selection = source_attachment._selection
+    def selection(snapshot):
+        copied_on.append(threading.get_ident())
+        entered.set()
+        assert release.wait(10)
+        return original_selection(snapshot)
+
+    def finish(*args):
+        finished_on.append(threading.get_ident())
+        return original_finish(*args)
+
+    monkeypatch.setattr(source_attachment, "_finish", finish)
+    monkeypatch.setattr(source_attachment, "_selection", selection)
+
+    async def scenario():
+        loaded = await native_host.invoke("load", {
+            "number": 42, "expected_current": initial["id"], "budget_seconds": 60,
+        })
+        generation = await native_host.invoke("materialize", {
+            "number": 42, "generation_id": loaded["result"]["descriptor"]["id"],
+        })
+        loop_thread = threading.get_ident()
+        from agent_pull_requests.workspace_operations import encoded
+        data = encoded(generation)
+        task = asyncio.create_task(source_attachment.attach_source_async(data, owner, selection=generation, budget=60))
+        try:
+            for _ in range(1000):
+                if entered.is_set():
+                    break
+                await asyncio.sleep(.001)
+            assert entered.is_set()
+            await asyncio.wait_for(asyncio.sleep(.001), timeout=.1)
+            with pytest.raises(SourceIncomplete, match="source_execution_busy"):
+                await source_attachment.attach_source_async(data, owner, selection=generation, budget=60)
+            assert len(copied_on) == 1
+        finally:
+            release.set()
+        assert (await task)["state"] == "ready"
+        assert all(value != loop_thread for value in copied_on + finished_on)
+        await owner.drain(timeout=2)
+
+    asyncio.run(scenario())
+
+
+def test_async_attachment_timeout_retains_uncertain_refs_and_native_drain(environment, tools, execution_pool, monkeypatch):
+    import threading
+    from agent_worktrees import pr_review_source
+    from agent_worktrees.async_review_source import AsyncReviewSource
+    from agent_pull_requests.source_attachment import attach_source_async
+    _, _, initial, _, _, _ = environment
+    native_host, _, _ = tools
+    owner = AsyncReviewSource(native_host.source_owner, executor=execution_pool)
+    entered, release = threading.Event(), threading.Event()
+    original = pr_review_source._owned_git
+
+    def pause(root, checkpoint, deadline, env, maximum, args, **kwargs):
+        if args[0] == "update-ref":
+            entered.set()
+            assert release.wait(15)
+        return original(root, checkpoint, deadline, env, maximum, args, **kwargs)
+
+    monkeypatch.setattr(pr_review_source, "_owned_git", pause)
+
+    async def scenario():
+        loaded = await native_host.invoke("load", {
+            "number": 42, "expected_current": initial["id"], "budget_seconds": 60,
+        })
+        generation = await native_host.invoke("materialize", {
+            "number": 42, "generation_id": loaded["result"]["descriptor"]["id"],
+        })
+        from agent_pull_requests.workspace_operations import encoded
+        task = asyncio.create_task(attach_source_async(encoded(generation), owner, selection=generation, budget=10))
+        try:
+            result = await asyncio.wait_for(task, timeout=12)
+            assert entered.is_set()
+            assert result["generation_id"] == generation["id"] and result["state"] == "incomplete"
+            assert result["effects"] == "local_refs_possible"
+            assert result["native_settlement"] == "unconfirmed"
+            assert owner.status()["pending"] == 1
+            with pytest.raises(TimeoutError):
+                await owner.drain(timeout=.001)
+        finally:
+            release.set()
+            await owner.drain(timeout=5)
+
+    asyncio.run(scenario())
+
+
+def test_queued_valid_manifest_mutation_refuses_unreviewed_revision(environment, tools, integration, execution_pool, monkeypatch):
+    import threading
+    from agent_worktrees.async_review_source import AsyncReviewSource
+    from agent_worktrees._review_source_operation import SourceOperation
+    from agent_worktrees.pr_review_source import LocalReviewSource, SourceIncomplete
+    _, _, initial, _, backend, _ = environment
+    _, _, _, evidence, _, _ = integration
+    native_host, git, root = tools
+    entered, release, queued = threading.Event(), threading.Event(), threading.Event()
+    phase = []
+    original_submit = execution_pool.submit
+    original_execute = SourceOperation.execute
+    original_read = LocalReviewSource._read_retained_owned
+    reads = []
+
+    def occupied():
+        entered.set()
+        assert release.wait(10)
+
+    def submit(*args, **kwargs):
+        future = original_submit(*args, **kwargs)
+        if phase:
+            queued.set()
+        return future
+
+    async def execute(operation, name, *args, **kwargs):
+        if name == "read_retained":
+            original_submit(occupied)
+            for _ in range(1000):
+                if entered.is_set():
+                    break
+                await asyncio.sleep(.001)
+            assert entered.is_set()
+            phase.append("read")
+        return await original_execute(operation, name, *args, **kwargs)
+
+    def read(source, manifest, *args, **kwargs):
+        reads.append(manifest["id"])
+        return original_read(source, manifest, *args, **kwargs)
+
+    monkeypatch.setattr(execution_pool, "submit", submit)
+    monkeypatch.setattr(SourceOperation, "execute", execute)
+    monkeypatch.setattr(LocalReviewSource, "_read_retained_owned", read)
+
+    async def scenario():
+        loaded = await native_host.invoke("load", {
+            "number": 42, "expected_current": initial["id"], "budget_seconds": 60,
+        })
+        old_id = loaded["result"]["descriptor"]["id"]
+        old = await native_host.invoke("source", {"number": 42, "generation_id": old_id, "budget_seconds": 60})
+        (root / "note.txt").write_text("unreviewed second revision", encoding="utf-8")
+        git("add", ".")
+        git("commit", "--quiet", "-m", "synthetic second revision")
+        head = git("rev-parse", "HEAD")
+        latest = max(backend.iterations, key=lambda row: row["id"])
+        latest["sourceRefCommit"]["commitId"] = backend.pr["lastMergeSourceCommit"]["commitId"] = head
+        evidence["sections"]["changes"]["revision"]["head_sha"] = head
+        evidence["sections"]["changes"]["data"][0]["item"]["objectId"] = git("rev-parse", head + ":note.txt")
+        newer = await native_host.invoke("load", {"number": 42, "expected_current": old_id, "budget_seconds": 60})
+        new = await native_host.invoke("source", {
+            "number": 42, "generation_id": newer["result"]["descriptor"]["id"], "budget_seconds": 60,
+        })
+        assert new["state"] == "ready" and new["source"]["revision"] != old["source"]["revision"]
+        owner = AsyncReviewSource(native_host.source_owner, executor=execution_pool)
+        host = WorkspaceTools(native_host.client, source_owner=owner)
+        task = asyncio.create_task(host.invoke("source-read", {
+            "number": 42, "generation_id": old_id, "budget_seconds": 60,
+            "source_attachment": old, "path": "/note.txt", "side": "after",
+        }))
+        try:
+            for _ in range(1000):
+                if queued.is_set():
+                    break
+                await asyncio.sleep(.001)
+            assert queued.is_set()
+            old["source"].clear()
+            old["source"].update(copy.deepcopy(new["source"]))
+            release.set()
+            with pytest.raises(SourceIncomplete, match="source_selection_changed"):
+                await task
+            assert reads == []
+        finally:
+            release.set()
+            await owner.drain(timeout=2)
+
+    asyncio.run(scenario())
+
+
+def test_source_busy_refuses_before_client_io_and_materialization(environment, tools, integration, execution_pool, monkeypatch):
+    import threading
+    from agent_worktrees.async_review_source import AsyncReviewSource
+    from agent_worktrees.pr_review_source import SourceIncomplete
+    from agent_pull_requests import workspace_tools
+    _, _, client, _, _, _ = integration
+    native_host, _, _ = tools
+    _, _, initial, _, _, _ = environment
+    entered, release = threading.Event(), threading.Event()
+    original = workspace_tools._snapshot_generation
+    calls = []
+    original_execute = client.operations.execute
+    def execute(*args, **kwargs):
+        calls.append(args[0])
+        return original_execute(*args, **kwargs)
+    monkeypatch.setattr(client.operations, "execute", execute)
+
+    def blocked(*args):
+        entered.set()
+        assert release.wait(10)
+        return original(*args)
+
+    monkeypatch.setattr(workspace_tools, "_snapshot_generation", blocked)
+    owner = AsyncReviewSource(native_host.source_owner, executor=execution_pool)
+    host = WorkspaceTools(client, source_owner=owner)
+
+    async def scenario():
+        loaded = await native_host.invoke("load", {
+            "number": 42, "expected_current": initial["id"], "budget_seconds": 60,
+        })
+        request = {"number": 42, "generation_id": loaded["result"]["descriptor"]["id"], "budget_seconds": 60}
+        task = asyncio.create_task(host.invoke("source", request))
+        try:
+            for _ in range(5000):
+                if entered.is_set():
+                    break
+                await asyncio.sleep(.001)
+            assert entered.is_set()
+            before = len(calls)
+            with pytest.raises(SourceIncomplete, match="source_execution_busy"):
+                await host.invoke("source", request)
+            assert len(calls) == before
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            with pytest.raises(TimeoutError):
+                await owner.drain(timeout=.001)
+            assert owner.status()["pending"] == 1
+        finally:
+            release.set()
+            await owner.drain(timeout=2)
+        assert not host._generations
+
+    asyncio.run(scenario())
+
+
+def test_unqualified_loop_client_refuses_source_before_pacer_or_admission(environment, tools, integration, execution_pool, monkeypatch):
+    from agent_worktrees.async_review_source import AsyncReviewSource
+    from agent_pull_requests.workspace_tools import WorkspaceToolUnavailable
+    _, client, _, _, caller, _ = integration
+    native_host, _, _ = tools
+    _, _, initial, _, _, _ = environment
+    loops = []
+    original = caller.request
+
+    async def request(*args, **kwargs):
+        loops.append(asyncio.get_running_loop())
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(caller, "request", request)
+    owner = AsyncReviewSource(native_host.source_owner, executor=execution_pool)
+    host = WorkspaceTools(client, source_owner=owner)
+
+    async def scenario():
+        loaded = await native_host.invoke("load", {
+            "number": 42, "expected_current": initial["id"], "budget_seconds": 60,
+        })
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def pace():
+            entered.set()
+            await release.wait()
+
+        client._read_admission = pace
+        await client.capabilities()
+        await client.exchange("lookup", {"number": 42, "generation_id": loaded["result"]["descriptor"]["id"]})
+        loop = asyncio.get_running_loop()
+        before = len(caller.calls)
+        with pytest.raises(WorkspaceToolUnavailable, match="preparation_binding_unsupported"):
+            await asyncio.wait_for(host.invoke("source", {
+                "number": 42, "generation_id": loaded["result"]["descriptor"]["id"], "budget_seconds": .2,
+            }), timeout=2)
+        assert loops and all(value is loop for value in loops)
+        assert len(caller.calls) == before and not entered.is_set() and owner.status()["pending"] == 0
+        release.set()
+        await owner.drain(timeout=2)
+        assert owner.status()["drained"] is True
+
+    asyncio.run(scenario())
+
+
+def test_source_uses_validated_snapshot_not_mutated_client_result(environment, tools, execution_pool, monkeypatch):
+    from agent_worktrees.async_review_source import AsyncReviewSource
+    from agent_pull_requests import workspace_tools
+    _, _, initial, _, _, _ = environment
+    native_host, _, _ = tools
+    original = workspace_tools._snapshot_generation
+
+    def snapshot(generation, *args):
+        validated = original(generation, *args)
+        generation["id"] = "f" * 64
+        generation["revision"]["head_sha"] = "b" * 40
+        return validated
+
+    monkeypatch.setattr(workspace_tools, "_snapshot_generation", snapshot)
+    owner = AsyncReviewSource(native_host.source_owner, executor=execution_pool)
+    host = WorkspaceTools(native_host.client, source_owner=owner)
+
+    async def scenario():
+        loaded = await native_host.invoke("load", {
+            "number": 42, "expected_current": initial["id"], "budget_seconds": 60,
+        })
+        identity = loaded["result"]["descriptor"]["id"]
+        result = await host.invoke("source", {"number": 42, "generation_id": identity, "budget_seconds": 60})
+        assert result["generation_id"] == identity and result["state"] == "ready"
+        assert result["revision"]["head_sha"] != "b" * 40
+        await owner.drain(timeout=2)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("declared,scheduled", [(False, False), (True, False), (True, True), ("legacy", False)])
+def test_delegating_async_client_discovery_matches_preparation_support(
+    environment, tools, integration, execution_pool, declared, scheduled,
+):
+    from agent_worktrees.async_review_source import AsyncReviewSource
+    from agent_pull_requests.workspace_tools import WorkspaceToolUnavailable
+    _, client, _, _, _, _ = integration
+    native_host, _, _ = tools
+    _, _, initial, _, _, _ = environment
+    loops = []
+
+    def returned(coroutine):
+        return asyncio.create_task(coroutine) if scheduled else coroutine
+
+    class Delegate:
+        def ensure_capabilities(self, **kwargs):
+            loops.append(asyncio.get_running_loop())
+            return returned(client.ensure_capabilities(**kwargs))
+
+        def exchange(self, *args, **kwargs):
+            loops.append(asyncio.get_running_loop())
+            return returned(client.exchange(*args, **kwargs))
+
+        def materialize(self, *args, **kwargs):
+            loops.append(asyncio.get_running_loop())
+            return returned(client.materialize(*args, **kwargs))
+
+    if declared:
+        Delegate.preparation_contract = staticmethod(lambda: {
+            **client.preparation_contract(), "version": 1 if declared == "legacy" else 2,
+        })
+    owner = AsyncReviewSource(native_host.source_owner, executor=execution_pool)
+    host = WorkspaceTools(Delegate(), source_owner=owner)
+
+    async def scenario():
+        loaded = await native_host.invoke("load", {
+            "number": 42, "expected_current": initial["id"], "budget_seconds": 60,
+        })
+        capabilities = await host.capabilities()
+        assert "source" not in capabilities["operations"]
+        request = {"number": 42, "generation_id": loaded["result"]["descriptor"]["id"], "budget_seconds": 60}
+        with pytest.raises(WorkspaceToolUnavailable, match="preparation_binding_unsupported"):
+            await host.invoke("source", request)
+        assert loops and all(loop is asyncio.get_running_loop() for loop in loops)
+        await owner.drain(timeout=2)
+
+    asyncio.run(scenario())
+
+
+def test_client_preparation_failure_is_not_relabelled_as_corrupt_metadata(environment, integration):
+    from agent_worktrees.pr_review_source import SourceIncomplete
+    _, client, _, _, _, _ = integration
+    _, _, generation, _, _, _ = environment
+    failure = SourceIncomplete("source_execution_busy")
+
+    async def prepare(*args, **kwargs):
+        raise failure
+
+    async def scenario():
+        await client.capabilities()
+        with pytest.raises(SourceIncomplete) as observed:
+            await client.materialize(42, generation["id"], prepare=prepare)
+        assert observed.value is failure
+
+    asyncio.run(scenario())
+
+
+def test_native_materialization_withdrawal_stops_before_next_chunk(environment, tools, execution_pool, monkeypatch):
+    from agent_worktrees.async_review_source import AsyncReviewSource
+    _, _, initial, _, backend, _ = environment
+    native_host, _, _ = tools
+    backend.pr["description"] = "synthetic metadata " * 2048
+    owner = AsyncReviewSource(native_host.source_owner, executor=execution_pool)
+    original = native_host.client.operations.execute
+    chunks = []
+    active = []
+
+    def execute(name, request, **kwargs):
+        result = original(name, request, **kwargs)
+        if name == "chunk":
+            chunks.append(request["offset"])
+            active[0].cancelled.set()
+        return result
+
+    async def scenario():
+        loaded = await native_host.invoke("load", {
+            "number": 42, "expected_current": initial["id"], "budget_seconds": 60,
+        })
+        assert loaded["result"]["descriptor"]["bytes"] > 8192
+        monkeypatch.setattr(native_host.client.operations, "execute", execute)
+        host = WorkspaceTools(native_host.client, source_owner=owner)
+        async with owner.operation(60) as operation:
+            active.append(operation)
+            with pytest.raises(PermissionError, match="withdrawn"):
+                await host._materialize(42, loaded["result"]["descriptor"]["id"], operation=operation)
+        await owner.drain(timeout=2)
+        assert chunks == [0]
+        assert not host._generations
 
     asyncio.run(scenario())
 

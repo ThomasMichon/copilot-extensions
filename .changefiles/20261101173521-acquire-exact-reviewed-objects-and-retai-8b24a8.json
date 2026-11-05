@@ -1,0 +1,9 @@
+{
+  "comment": "Retain prepared-source async work, admission deadlines and cleanup custody through terminal drain",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

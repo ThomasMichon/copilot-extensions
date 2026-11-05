@@ -7,6 +7,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 import copy
 import hashlib
+from inspect import getattr_static
 import json
 import math
 import threading
@@ -339,21 +340,74 @@ class NativeWorkspaceClient:
     def __init__(self, operations, *, checkpoint, expires_at):
         self.operations, self.checkpoint, self.expires_at = operations, checkpoint, expires_at
 
-    def exchange(self, operation, payload):
+    def preparation_contract(self):
+        return {"schema": "agent-pull-requests.client-preparation",
+                "version": 2 if _native_source_supported(self) else 1, "io": "worker"}
+
+    def exchange(self, operation, payload, *, checkpoint=None):
+        def current():
+            self.checkpoint()
+            if checkpoint is not None:
+                checkpoint()
         return self.operations.execute(
-            operation, payload, expires_at=self.expires_at(), checkpoint=self.checkpoint,
+            operation, payload, expires_at=self.expires_at(),
+            checkpoint=current if checkpoint is not None else self.checkpoint,
         )
 
-    def materialize(self, number, generation_id):
-        descriptor = self.exchange("lookup", {"number": number, "generation_id": generation_id})["result"]["descriptor"]
-        return materialize(descriptor, lambda offset: self.exchange(
-            "chunk", {"number": number, "generation_id": generation_id, "offset": offset},
-        )["result"])
+    def materialize(self, number, generation_id, *, checkpoint=None):
+        if checkpoint is not None:
+            checkpoint()
+            if callable(getattr(getattr(checkpoint, "__self__", None), "_submit_native", None)) and not _native_source_supported(self):
+                raise ValueError("workspace_preparation_binding_unsupported")
+        options = {"checkpoint": checkpoint} if checkpoint is not None else {}
+        descriptor = self.exchange("lookup", {"number": number, "generation_id": generation_id}, **options)["result"]["descriptor"]
+        def chunk(offset):
+            if checkpoint is not None:
+                checkpoint()
+                if callable(getattr(getattr(checkpoint, "__self__", None), "_submit_native", None)) and not _native_source_supported(self):
+                    raise ValueError("workspace_preparation_binding_unsupported")
+            return self.exchange("chunk", {
+                "number": number, "generation_id": generation_id, "offset": offset,
+            }, **options)["result"]
+        return materialize(descriptor, chunk)
 
     @staticmethod
     def attach_source(generation, source_owner, **limits):
         from .source_attachment import attach_source
         return attach_source(generation, source_owner, **limits)
+
+
+def _stock_preparation(client, methods):
+    from types import GetSetDescriptorType, MethodType
+    namespace = getattr_static(type(client), "__dict__", None)
+    if (
+        type(namespace) is not GetSetDescriptorType
+        or namespace.__objclass__ is not type(client) or namespace.__name__ != "__dict__"
+    ):
+        return False
+    own = namespace.__get__(client, type(client))
+    return all(
+        ((bound := getattr_static(client, name, None)) is method and name not in own)
+        or type(bound) is MethodType and bound.__self__ is client and bound.__func__ is method
+        for name, method in methods
+    )
+
+
+_NATIVE_PREPARATION_METHODS = tuple(
+    (name, getattr(NativeWorkspaceClient, name)) for name in ("exchange", "materialize")
+)
+
+
+def _native_source_supported(client):
+    if type(client) is not NativeWorkspaceClient:
+        return False
+    missing = object()
+    discovery = getattr_static(client, "ensure_capabilities", missing)
+    if discovery is not missing and (
+        callable(discovery) or getattr_static(type(discovery), "__get__", missing) is not missing
+    ):
+        return False
+    return _stock_preparation(client, _NATIVE_PREPARATION_METHODS)
 
 
 def materialize(descriptor, read_chunk):
