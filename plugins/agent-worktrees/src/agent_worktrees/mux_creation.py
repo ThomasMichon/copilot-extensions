@@ -76,11 +76,26 @@ def pane_work_dir(work_dir: str) -> str:
     return work_dir
 
 
+def _creation_env(argv: list[str]) -> dict[str, str] | None:
+    if (
+        platform.system() != "Windows" or len(argv) < 2
+        or not is_psmux(argv[0]) or argv[1] != "new-session"
+    ):
+        return None
+    # PSMux can discard a detached child that inherits another pane's nesting.
+    nesting = {
+        "TMUX", "TMUX_PANE", "PSMUX_SESSION", "PSMUX_TARGET_SESSION",
+        "PSMUX_CLAUDE_TEAMMATE_MODE",
+    }
+    return {key: value for key, value in os.environ.items() if key.upper() not in nesting}
+
+
 def run(argv: list[str]) -> subprocess.CompletedProcess[str]:
     """Keep the client launch directory separate from the pane's explicit CWD."""
     return subprocess.run(
         argv, capture_output=True, text=True, timeout=15,
         cwd=str(Path.home()) if platform.system() == "Windows" else None,
+        env=_creation_env(argv),
         **no_window_kwargs(),
     )
 
@@ -103,7 +118,8 @@ def run_session(argv: list[str], session: str, release) -> subprocess.CompletedP
     # A mux server can outlive the client and inherit its output handles.
     # Regular files cannot keep a pipe reader or its interpreter waiting.
     with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr, subprocess.Popen(
-        argv, stdout=stdout, stderr=stderr, cwd=str(Path.home()), **no_window_kwargs(),
+        argv, stdout=stdout, stderr=stderr, cwd=str(Path.home()),
+        env=_creation_env(argv), **no_window_kwargs(),
     ) as child:
         pending = True
         try:

@@ -167,8 +167,14 @@ def test_authoritative_presence_requires_success_or_confirmed_absence():
     for message in (
         b"can't find session: wt-one", b"session not found: wt-one",
         "no server running", "no server running on /synthetic/mux",
+        "error connecting to /synthetic/mux (No such file or directory)",
+        b"error connecting to /synthetic/mux (No such file or directory)",
     ):
         assert mux.confirmed_has_session("wt-one", CompletedProcess([], 1, "", message)) is False
+    for binary in ("psmux", r"C:\Tools\PSMUX.EXE"):
+        assert mux.confirmed_has_session(
+            "wt-one", CompletedProcess([], 1, b"", b""), binary=binary,
+        ) is False
     for result in (
         CompletedProcess([], 1, "", "permission denied"),
         CompletedProcess([], 1, "", "can't find session: wt-other"),
@@ -176,6 +182,14 @@ def test_authoritative_presence_requires_success_or_confirmed_absence():
     ):
         with pytest.raises(RuntimeError, match="absence is unconfirmed"):
             mux.confirmed_has_session("wt-one", result)
+    for binary, result in (
+        ("tmux", CompletedProcess([], 1, b"", b"")),
+        ("psmux", CompletedProcess([], 2, b"", b"")),
+        ("psmux", CompletedProcess([], 1, b"", b"permission denied")),
+        ("psmux", CompletedProcess([], 1, b"partial output", b"")),
+    ):
+        with pytest.raises(RuntimeError, match="absence is unconfirmed"):
+            mux.confirmed_has_session("wt-one", result, binary=binary)
 
 
 @pytest.fixture

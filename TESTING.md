@@ -2031,6 +2031,28 @@ retains its explicit unsupported-readiness outcome.
 
 ## Optional native pane argument delivery
 
+The separate Worktrees opt-in
+`--test-file tests/native/test_generic_mux_startup.py --allow-explicit-tiers`
+packet, with `PSMUX_FILE_LAUNCH_E2E=1`, exercises the generic creation owner
+against `PSMUX_TEST_BIN` or the explicitly opted-in installed PSMux.
+Fresh private profiles cover clean and inherited
+nesting environments, with and without pane-print formatting. The actual
+file-based consumer must run, consume its manifest and retain its literal argv;
+the caller environment must remain unchanged, with no owned visible windows
+or foreground focus. A positive control pauses sampling until a creation
+client exits, then requires its detached child to be observed from retained
+launch roots. Payloads wait for fixture release within a finite lifetime; the
+45-second readiness allowance matches the existing native pane packet.
+The fixture removes the suite-wide headless initializer so only production
+and explicit fixture launch flags govern the observed native processes.
+The manual `installation-context-full.yml` portfolio `generic-mux` selects
+only this Windows packet and its verification/classification controls, using
+a digest-pinned disposable PSMux 3.3.8. The 3.3.5 ambient-tool baseline remains
+partial after intermittent creation failures; this does not change production
+compatibility admission or the installed mux. These contained source controls
+do not certify a real
+Copilot prompt, productive runtime deployment or escape from caller cleanup.
+
 The manual `installation-context-full.yml` portfolio `pane-argv` runs the real
 PSMux direct-child control and both file-based pane producers twice on a fresh
 `windows-latest` runner. It downloads PSMux 3.3.6 into disposable job storage

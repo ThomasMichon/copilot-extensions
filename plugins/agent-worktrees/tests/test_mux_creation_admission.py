@@ -156,3 +156,66 @@ def test_join_completion_never_claims_or_types_a_seed(monkeypatch, acquisition):
     assert len(replies) == 1
     if not acquisition:
         assert replies[0]["created"] is False and replies[0]["resumed"] is True
+
+
+@pytest.mark.parametrize("observation", ["present", "absent", "unavailable", "timeout"])
+def test_requested_verification_controls_success_without_replaying_native_seed(
+    tmp_path, monkeypatch, observation,
+):
+    from agent_worktrees import agent_policy
+
+    monkeypatch.setattr(agent_policy, "require", lambda path: None)
+    replies = []
+    now = [0.0]
+    queries = []
+
+    def probe(worktree_id, *, strict, timeout):
+        assert worktree_id == "a" and strict
+        assert 0 < timeout <= 1 - now[0]
+        queries.append(now[0])
+        if observation == "unavailable":
+            raise RuntimeError("observation unavailable")
+        if observation == "timeout":
+            raise subprocess.TimeoutExpired(["mux", "has-session"], timeout)
+        return observation == "present"
+
+    def no_replay(*args, **kwargs):
+        pytest.fail("Verification must not claim, restage or resend the native prompt")
+
+    code = embody_completion.complete_launch(
+        SimpleNamespace(verify_timeout=1), wt_id="a", work_dir="checkout",
+        record=object(), acquisition=False, deferred={}, explicit_seed=True,
+        seed="original prompt", prepared_context=None, resume_target=None, driver=None,
+        selection=SimpleNamespace(assignment=None),
+        result={"created": True, "session": "wt-a", "new_pane": "%1"},
+        cfg=SimpleNamespace(tracking_dir=lambda: tmp_path),
+        sessions=SimpleNamespace(
+            has_mux_session=probe, mux_session_name=lambda wt: "wt-" + wt,
+            mux_seed_pane=no_replay,
+        ),
+        output=SimpleNamespace(_json_output=replies.append),
+        launch_seed_state=SimpleNamespace(
+            settle_creation=lambda *args: {}, claim_creation=no_replay,
+        ),
+        tracking_write=None, profile_assignment=None,
+        clock=SimpleNamespace(
+            monotonic=lambda: now[0], sleep=lambda seconds: now.__setitem__(0, now[0] + seconds),
+        ),
+        native_seed_id="original-seed",
+    )
+    response, = replies
+    assert response["created"] is True
+    assert response["seed_id"] == "original-seed"
+    assert response["seed_reason"] == "native-startup-pending"
+    assert response["seeded"] is False and response["seed_submitted"] is False
+    assert response["ok"] is (observation == "present")
+    assert code == (0 if observation == "present" else 3)
+    assert response["mux_verified"] is (
+        True if observation == "present" else False if observation == "absent" else None
+    )
+    if observation != "present":
+        assert response["error"] and "retry" in response["error"]
+    if observation == "absent":
+        assert len(queries) > 1 and now[0] == 1
+    else:
+        assert len(queries) == 1
