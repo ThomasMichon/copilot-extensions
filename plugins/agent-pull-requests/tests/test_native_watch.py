@@ -131,9 +131,11 @@ def test_native_fetch_crosses_real_cli_process_boundary(tmp_path):
         f"print({json.dumps(report())!r})\n",
         encoding="utf-8",
     )
-    command = tmp_path / ("worktrees.cmd" if os.name == "nt" else "worktrees")
+    command = tmp_path / ("worktrees command.ps1" if os.name == "nt" else "worktrees")
+    python = sys.executable.replace("'", "''")
+    script_path = str(script).replace("'", "''")
     command.write_text(
-        f'@"{sys.executable}" "{script}" %*\n' if os.name == "nt" else
+        f"& '{python}' '{script_path}' @args\nexit $LASTEXITCODE\n" if os.name == "nt" else
         f'#!{sys.executable}\nexec(compile(open({str(script)!r}).read(),{str(script)!r},"exec"))\n',
         encoding="utf-8",
     )
@@ -472,8 +474,13 @@ def test_posix_owned_child_refuses_reused_or_lost_identity(monkeypatch, failure)
         owned_os.waitid = lambda *_: SimpleNamespace(si_pid=process.pid + 1)
     else:
         monkeypatch.setattr(watch_process.signal, "getsignal", lambda _: 1)
-    with pytest.raises(RuntimeError, match="custody|identity"):
+    expected = RuntimeError if failure == "auto-reaped" else watch_process.OwnedCleanupError
+    with pytest.raises(expected) as exc:
         watch_process.run_owned(["owned-command"], timeout=1)
+    if failure != "auto-reaped":
+        assert exc.value.process is process
+        assert isinstance(exc.value.__cause__, RuntimeError)
+        assert any(word in str(exc.value.__cause__) for word in ("custody", "identity"))
     assert not state.signals
     assert not state.events
 
@@ -510,7 +517,19 @@ def test_posix_owned_child_without_nonreaping_wait_refuses_before_spawn(monkeypa
 def test_apr_owned_process_adapter_uses_canonical_implementation():
     from agent_pull_requests.watch_process import run_owned
     assert run_owned is watch_process.run_owned
-    assert watch_provider.run_owned is watch_process.run_owned
+
+
+def test_native_watch_uses_shared_command_adapter_without_widening_budget(monkeypatch):
+    seen = []
+
+    def run(argv, *, timeout):
+        seen.append((argv, timeout))
+        return subprocess.CompletedProcess(argv, 0, "snapshot", "")
+
+    monkeypatch.setattr(watch_provider, "run_command", run)
+    result = watch_provider._run_native(["owned-command", "argument"])
+    assert result.stdout == "snapshot"
+    assert seen == [(["owned-command", "argument"], 20.0)]
 
 
 @pytest.mark.parametrize("outcome", ["success", "timeout", "cancel"])
