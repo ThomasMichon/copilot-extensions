@@ -23,17 +23,52 @@ def _text(path: str, limit: int = 4096) -> str:
     return value.strip()
 
 
+def _namespace_scope() -> list[tuple[str, int, int]]:
+    if os.readlink("/proc/self") != str(os.getpid()):
+        raise ValueError("Native procfs does not observe this PID namespace")
+    init = Path("/proc/1/ns/pid").stat()
+    result = []
+    for kind in ("pid", "mnt", "user"):
+        observed = Path(f"/proc/self/ns/{kind}").stat()
+        if observed.st_dev < 0 or observed.st_ino <= 0:
+            raise ValueError("Native container namespace identity is unavailable")
+        if kind == "pid" and (observed.st_dev, observed.st_ino) != (init.st_dev, init.st_ino):
+            raise ValueError("Native procfs observes a foreign namespace init")
+        result.append((kind, observed.st_dev, observed.st_ino))
+    return result
+
+
+def _container_epoch(boot: str) -> dict[str, str]:
+    scope = _namespace_scope()
+    init = process(1)
+    if init["parent_pid"] != 0:
+        raise ValueError("Native procfs does not observe its namespace init")
+    if _namespace_scope() != scope or process(1) != init:
+        raise ValueError("Native container execution epoch changed during observation")
+    environment = hashlib.sha256(
+        json.dumps(
+            ["linux-container-v1", scope, init["start_time"]], separators=(",", ":"),
+        ).encode("ascii")
+    ).hexdigest()[:32]
+    return {
+        "platform": "linux",
+        "environment_id": environment,
+        "boot_id": boot,
+    }
+
+
 def epoch() -> dict[str, str]:
-    """Read Linux/WSL identity, refusing unsupported or container environments."""
+    """Read the actual Linux/WSL or namespace-scoped Linux container epoch."""
     if not sys.platform.startswith("linux"):
         raise ValueError("Native lifecycle source is unqualified on this platform")
-    if any(Path(marker).exists() for marker in ("/.dockerenv", "/run/.containerenv")):
-        raise ValueError("Container lifecycle sources are unqualified")
-    cgroup = _text("/proc/1/cgroup")
-    if any(tag in cgroup for tag in ("/docker", "/kubepods", "containerd", "/lxc", "libpod")):
-        raise ValueError("Container lifecycle sources are unqualified")
-    platform = "wsl" if "microsoft" in _text("/proc/sys/kernel/osrelease").lower() else "linux"
     boot = str(UUID(_text("/proc/sys/kernel/random/boot_id")))
+    cgroup = _text("/proc/1/cgroup")
+    if (
+        any(Path(marker).exists() for marker in ("/.dockerenv", "/run/.containerenv"))
+        or any(tag in cgroup for tag in ("/docker", "/kubepods", "containerd", "/lxc", "libpod"))
+    ):
+        return _container_epoch(boot)
+    platform = "wsl" if "microsoft" in _text("/proc/sys/kernel/osrelease").lower() else "linux"
     environment = _text("/etc/machine-id")
     if len(environment) != 32 or any(c not in "0123456789abcdef" for c in environment):
         raise ValueError("Invalid native environment identity")
@@ -56,7 +91,7 @@ def capture() -> dict:
     """Capture the original hook ancestry before crossing any resident boundary."""
     try:
         observed_epoch = epoch()
-        ancestors = []
+        ancestors: list[dict[str, int | str]] = []
         child = process(os.getpid())
         pid = child["parent_pid"]
         seen = set()

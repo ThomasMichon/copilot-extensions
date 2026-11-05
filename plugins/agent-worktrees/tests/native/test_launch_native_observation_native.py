@@ -1,7 +1,9 @@
-"""Synthetic Linux/WSL native hold + original hook + resident write qualification."""
+"""Synthetic Linux/WSL/container hold + original hook + resident write qualification."""
 
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -17,7 +19,7 @@ def test_original_hook_and_real_backend_join_through_resident(tmp_path, transpor
     try:
         native_source_context.epoch()
     except (OSError, ValueError, IndexError):
-        pytest.skip("Native original-source evidence is qualified only on non-container Linux/WSL")
+        pytest.skip("Native original-source evidence requires inspectable Linux/WSL procfs")
     hooks = Path(__file__).resolve().parents[2] / "scripts" / "hook_client.py"
     backend = tmp_path / "backend.py"
     backend.write_text(textwrap.dedent("""
@@ -137,3 +139,44 @@ def test_original_hook_and_real_backend_join_through_resident(tmp_path, transpor
     else:
         assert "unexpected backend direct fallback" in result.stderr
     assert result.stdout.splitlines() == expected
+
+
+def test_actual_epoch_and_ancestor_hold_across_a_process_boundary(tmp_path):
+    if not sys.platform.startswith("linux"):
+        pytest.skip("Exact native source proof requires Linux procfs")
+    session_id = "00000000-0000-4000-8000-000000000001"
+    directory = tmp_path / session_id
+    directory.mkdir()
+    hold = directory / f"inuse.{os.getpid()}.hold"
+    hold.touch()
+    script = """
+import json, sys
+from pathlib import Path
+from agent_worktrees import native_lifecycle_source, native_source_context, sessions
+sessions._session_state_dir = lambda: Path(sys.argv[1])
+witness = native_source_context.capture()
+print(json.dumps({
+    "witness": witness,
+    "source": native_lifecycle_source.start_identity(sys.argv[2], witness),
+}))
+"""
+
+    def observe():
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(tmp_path), session_id],
+            timeout=10, capture_output=True, text=True, check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        value = json.loads(result.stdout)
+        assert value["witness"]["qualified"] is True
+        return value
+
+    assert observe()["source"] is None
+    with hold.open("r"):
+        value = observe()
+        assert value["source"] == native_source_context.identity(
+            session_id, os.getpid(),
+            native_source_context.process(os.getpid())["start_time"],
+            native_source_context.epoch(),
+        )
+    assert observe()["source"] is None

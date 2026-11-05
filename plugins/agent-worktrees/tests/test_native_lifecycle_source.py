@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -126,3 +127,87 @@ def test_actual_held_file_start_binding(tmp_path, monkeypatch, witness):
         assert source.start_identity(SID, witness) == context.identity(SID, pid, birth, EPOCH)
         witness["ancestors"][0]["start_time"] = str(int(birth) + 1)
         assert source.start_identity(SID, witness) is None
+
+
+@pytest.mark.parametrize("release,platform", [("6.8.0", "linux"), ("microsoft", "wsl")])
+def test_host_epoch_retains_its_existing_identity(monkeypatch, release, platform):
+    monkeypatch.setattr(context, "sys", SimpleNamespace(platform="linux"))
+    values = {
+        "/proc/sys/kernel/random/boot_id": SID,
+        "/proc/1/cgroup": "0::/",
+        "/proc/sys/kernel/osrelease": release,
+        "/etc/machine-id": "e" * 32,
+    }
+    monkeypatch.setattr(context, "_text", values.__getitem__)
+    monkeypatch.setattr(context.Path, "exists", lambda _: False)
+    monkeypatch.setattr(context, "process", lambda _: {"start_time": "12"})
+    assert context.epoch() == {
+        "platform": platform,
+        "environment_id": "e" * 32,
+        "boot_id": SID + (":12" if platform == "wsl" else ""),
+    }
+
+
+@pytest.mark.parametrize("marker,cgroup", [
+    ("/.dockerenv", "0::/"),
+    ("/run/.containerenv", "0::/"),
+    (None, "0::/docker/example"),
+    (None, "0::/kubepods/example"),
+    (None, "0::/containerd/example"),
+    (None, "0::/lxc/example"),
+    (None, "0::/libpod/example"),
+])
+def test_container_epoch_uses_native_namespace_not_image_machine_id(
+    monkeypatch, marker, cgroup,
+):
+    monkeypatch.setattr(context, "sys", SimpleNamespace(platform="linux"))
+    values = {"/proc/sys/kernel/random/boot_id": SID, "/proc/1/cgroup": cgroup}
+    monkeypatch.setattr(context, "_text", values.__getitem__)
+    monkeypatch.setattr(context.Path, "exists", lambda path: path.as_posix() == marker)
+    scope = [("pid", 4, 101), ("mnt", 4, 102), ("user", 4, 103)]
+    monkeypatch.setattr(context, "_namespace_scope", lambda: scope)
+    init = {"pid": 1, "start_time": "10", "parent_pid": 0}
+    monkeypatch.setattr(context, "process", lambda _: init)
+    first = context.epoch()
+    assert first["platform"] == "linux" and len(first["environment_id"]) == 32
+    assert first["boot_id"] == SID
+    assert context.epoch() == first
+    scope = [("pid", 4, 201), ("mnt", 4, 102), ("user", 4, 103)]
+    next_namespace = context.epoch()
+    assert next_namespace["environment_id"] != first["environment_id"]
+    init = {**init, "start_time": "11"}
+    assert context.epoch()["environment_id"] != next_namespace["environment_id"]
+    assert context.epoch()["boot_id"] == SID
+
+
+@pytest.mark.parametrize("change", ["namespace", "init", "foreign-procfs"])
+def test_container_epoch_refuses_changed_or_foreign_observation(monkeypatch, change):
+    scopes = iter([[("pid", 4, 101)], [("pid", 4, 102 if change == "namespace" else 101)]])
+    inits = iter([
+        {"pid": 1, "start_time": "10", "parent_pid": 1 if change == "foreign-procfs" else 0},
+        {"pid": 1, "start_time": "11" if change == "init" else "10", "parent_pid": 0},
+    ])
+    monkeypatch.setattr(context, "_namespace_scope", lambda: next(scopes))
+    monkeypatch.setattr(context, "process", lambda _: next(inits))
+    with pytest.raises(ValueError, match="epoch changed|namespace init"):
+        context._container_epoch(SID)
+
+
+@pytest.mark.parametrize(
+    "failure", ["foreign-procfs", "foreign-namespace", "unreadable", "invalid-inode"],
+)
+def test_namespace_scope_requires_inspectable_current_procfs(monkeypatch, failure):
+    def stat(path):
+        if failure == "unreadable":
+            raise PermissionError("namespace is inaccessible")
+        inode = 0 if failure == "invalid-inode" else 100
+        if failure == "foreign-namespace" and path.as_posix() == "/proc/1/ns/pid":
+            inode = 101
+        return SimpleNamespace(st_dev=4, st_ino=inode)
+
+    monkeypatch.setattr(context, "os", SimpleNamespace(
+        getpid=lambda: 100, readlink=lambda _: "101" if failure == "foreign-procfs" else "100",
+    ))
+    monkeypatch.setattr(context.Path, "stat", stat)
+    with pytest.raises((ValueError, PermissionError)):
+        context._namespace_scope()

@@ -881,7 +881,10 @@ def _candidate(
                             "versioned_runtime_construction.py",
                             "versioned_runtime_publication.py",
                         ):
-                            source = inputs.plugin / "scripts" / name
+                            source = (
+                                slot / "runtime" if inputs.application is not None
+                                else inputs.plugin / "scripts"
+                            ) / name
                             shutil.copyfile(source, bootstrap / name)
                     if construction_callable is not None:
                         _prepare_installed(
