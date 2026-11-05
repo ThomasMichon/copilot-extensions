@@ -231,6 +231,39 @@ checkpoint nor author eligibility, holds, requirements or source/resource custod
 
 ### Phase 2 - Continuing reconciliation
 
+The supervisor/qualification nine-document delta merged in #10527; the
+[dated delivery journal](<journal/2026/11.04 qualification-cache-contracts.md>)
+records its verified scope and continuing gate. Two equal complete 15:47 PST
+scans count 1,006 whole open, 277 above 729. One external departure supplies
+no campaign credit; verified campaign closures remain 773. The three newer
+core studies and independent finite-source research remain continuing work,
+not parent completion or authority to resume held/parked lanes.
+
+The [standalone-declaration study](standalone-declaration-cohort.md) retains
+four complete contracts, eleven bounded noncompletion comparisons and one
+known protected message relation withheld without retry. Two whole current
+Active homes preserve exact incumbent-mapping acceptance and remaining bare
+bootstrap/offline decisions. Independent finite runner/TOML observations are
+not a release-environment fix or native result. All four sources and every
+parent/receiver check state remain unchanged; no custody or execution follows.
+
+The [installation-scope study](installation-scope-cohort.md) admits two whole
+contracts and withholds two entire protected-lineage members before rendering.
+Five completed-work comparisons are noncompletion evidence; another whole
+description remains withheld. The assigned canonical retains every inherited
+scope and its explicit park, while the independent directory-parser contract
+retains actual native/history-consumer acceptance. Both sources stay OPEN;
+no parked ROOT, capability execution, implementation or custody is changed.
+
+The [head-succession study](head-succession-cohort.md) retains four complete
+contracts, seven bounded noncompletion comparisons and five whole-description
+relations withheld before rendering. Two complete current Draft homes are
+related, not accepted receivers. Explicit canonical KEEP, the same non-expiring
+claim, ground liveness versus allocator cleanup and acknowledgement-gated
+stable head admission remain distinct. All four sources and every parent
+check state remain OPEN/unchanged; no head, session, liveness or custody effect
+occurred. Continue the graph rather than treating related plans as completion.
+
 The [qualification/cache study](qualification-cache-cohort.md) retains five
 whole contracts and fifteen bounded noncompletion comparisons. Actual source
 history independently identifies #9623's finite #9472 manifest-expectation
@@ -881,6 +914,28 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [standalone-declaration study](standalone-declaration-cohort.md) preserves
+all thirteen whole source texts, exact scoped incumbent ACK conditions and
+independent version/source identities. Two full Active ROOTs and eleven
+completed-work comparisons do not finish remaining bootstrap, offline or
+release-layout contracts. Relevant runner/TOML/policy source reading is not
+test preparation, a causal repair, native qualification or custody release.
+
+The [installation-scope study](installation-scope-cohort.md) retains all
+thirteen admitted whole texts, current assigned/parked conditions and original
+evidence tiers. Protected original/description material is wholly withheld,
+not retried through subsets. Documentary parking, footprint and typing work
+do not establish coexistence or directory-parser/native-consumer completion;
+all incumbent parent, receiver, waiver, activation and custody states survive.
+
+The [head-succession study](head-succession-cohort.md) preserves all sixteen
+whole source texts and current actual claims without republishing private
+runtime identities. Seven message/description comparisons are not repairs;
+five protected description relations remain withheld. Two whole Draft ROOTs
+do not accept later source refinements or authorize custom/native handoff,
+claimant release, allocation cleanup or stable-head qualification. All
+incumbent parent and receiver states remain unchanged.
 
 The [qualification/cache study](qualification-cache-cohort.md) distinguishes
 all original cache, raw-input, lifecycle-custody, exclusion and exact-manifest

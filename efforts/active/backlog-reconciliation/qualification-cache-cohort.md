@@ -110,3 +110,30 @@ Two equal complete eleven-page metadata-only scans at 15:12 PST count
 bringing campaign closure credit to 773. A separate excluded-origin departure
 is metadata-only and supplies no campaign credit. No new arrivals were
 observed. The parent remains Active and research/tracker-only.
+
+## Independent later #7136 source observation
+
+Fresh complete current metadata and the eleven-member roster still match the
+whole #7136 original/refinement. A separate read of the originally reported
+runner, not another retrieval score, now observes delegated
+`plugin_test_cache.dependency_fingerprint`. The current helper requests package
+roots and source files through canonical installer helpers and hashes the
+result with runner dependencies; it is no longer the earlier direct
+plugin-manifest/legacy-local enumeration.
+
+The whole 75-line current helper and 342-line focused cache regression file
+were directly read, together with the actual runner preparation function and
+two existing runner-regression functions. The focused cache fixtures exercise
+canonical direct/transitive source-body edits/additions/deletions, missing
+metadata refusal, stale-cache rebuilding and leased-root preservation.
+The additional runner fixtures change selected fleet/replay metadata, not
+only a canonical shared-library manifest.
+
+Independent helper history and four complete messages retain the source
+introduction and later construction/build-resource refinements at their
+actual scope. No whole provider/review/CI acceptance for a finite #7136 fix
+was established. The exact requested canonical-manifest-only invalidation
+witness, unchanged reuse and legacy-layout qualification remain unestablished
+by these inspected definitions; this is not a claim that no such test exists
+elsewhere. #7136 stays OPEN without test execution, environment mutation,
+implementation, installed qualification or custody release.
