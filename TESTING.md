@@ -2453,6 +2453,14 @@ and are not Companion, installed or startup-stability qualification.
 Portable fixture controls execute the native polling code with timely,
 exact-deadline and late observations; success is checked after blocking polls,
 so a query started before the deadline cannot admit a late result.
+The Companion portfolio now pins disposable PSMux 3.4.0; the separate pane-argv
+portfolio retains 3.3.6. Under 3.3.6, the direct virtualenv/ConPTY startup
+control passes while both PSMux controls (virtualenv and base Python) fail
+before the script. Its upstream ConPTY implementation requests inherited cursor
+state; 3.4.0 removes that startup handshake, with an upstream first-pane
+regression control. This narrows the failure to the additional PSMux/ConPTY
+layer, not a virtualenv-only failure or Companion behavior. The version change
+does not erase the failed 3.3.6 runs or qualify 3.4.0 without actual execution.
 The older PSMux 3.3.5 baseline has exhibited immediate session exits and later
 CLI/directory loss in this fixture. Those observations remain an unqualified
 stability gap under #8811, not a reason to skip a failed test or claim that
