@@ -889,9 +889,8 @@ def build_parser() -> argparse.ArgumentParser:
                                 "reach 0 attached sessions before retiring "
                                 "it (default: 300)")
     p_cutover.add_argument("--force", action="store_true",
-                           help="retire the old generation even if it never "
-                                "finished draining (attached sessions are "
-                                "cut off; only after the timeout)")
+                           help="compatibility option; never bypasses "
+                                "attached-session drain protection")
     p_cutover.add_argument("--require-live", action="store_true",
                            help="installer-safe mode: never start a resident "
                                 "daemon that wasn't already running, and skip "
