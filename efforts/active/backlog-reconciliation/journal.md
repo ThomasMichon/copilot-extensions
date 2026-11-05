@@ -3,6 +3,10 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-05 - Eleven finite trigger, identity and lifecycle-anchoring contracts](<journal/2026/11.05 finite-trigger-identity-anchoring-contracts.md>)
+
+- [2026-11-05 - Eleven finite consumer, upgrade and policy contracts](<journal/2026/11.05 finite-consumer-upgrade-policy-contracts.md>)
+
 - [2026-11-05 - Eleven finite hosted, reader and lifecycle contracts](<journal/2026/11.05 finite-hosted-reader-lifecycle-contracts.md>)
 
 - [2026-11-05 - Ten finite acceptance and closeout contracts](<journal/2026/11.05 finite-acceptance-closeout-contracts.md>)

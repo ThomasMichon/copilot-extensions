@@ -29,11 +29,12 @@ from typing import Any
 import yaml
 
 from .authority import AUTHORITY_MAX, AUTHORITY_MIN
+from . import package_versions
 
 #: Current requirement-package schema version. Bumped only by a deliberate,
 #: fixture-guarded migration (see docs/patterns/config-schema-migration.md).
-SCHEMA_VERSION = 4
-SUPPORTED_SCHEMA_VERSIONS = (1, 2, 3, SCHEMA_VERSION)
+SCHEMA_VERSION = 5
+SUPPORTED_SCHEMA_VERSIONS = (1, 2, 3, 4, SCHEMA_VERSION)
 
 #: The dispositions that govern a managed key.
 DISPOSITIONS = (
@@ -446,6 +447,10 @@ def load_package(
                 raise ManifestError(
                     f"{path}: resource type {rtype!r} is missing required field '{req_key}'"
                 )
+        try:
+            package_versions.validate(res, schema)
+        except ValueError as exc:
+            raise ManifestError(f"{path}: {exc}") from exc
         if rtype == "git-config":
             from .git_config_transaction import validate_entries
 

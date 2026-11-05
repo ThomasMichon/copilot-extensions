@@ -9,7 +9,7 @@ import os
 import shutil
 import sys
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 from . import finalize, launch_admission, output, sessions, worktree_lifecycle
@@ -132,7 +132,7 @@ def preparation_failure(worktree_id: str, work_dir: str, error: Exception) -> di
 
 
 @contextmanager
-def launch_fence(repo, record_path: Path):
+def launch_fence(repo, record_path: Path, *, include_launch_admission: bool = True):
     """Order lifecycle and per-worktree native admission around real mux start."""
     from . import agent_policy
 
@@ -143,7 +143,8 @@ def launch_fence(repo, record_path: Path):
     with output.stdout_to_stderr():
         lifecycle.acquire()
     try:
-        with worktree_lifecycle.guard(record_path), launch_admission.guard(record_path):
+        admission = launch_admission.guard(record_path) if include_launch_admission else nullcontext()
+        with worktree_lifecycle.guard(record_path), admission:
             agent_policy.require_record(record_path)
             yield
     finally:

@@ -8,7 +8,7 @@ import time
 from contextlib import ExitStack
 
 from . import agent_policy, config as cfg, output, profile_assignment, sessions, tracking, tracking_write, worktree_identity
-from . import launch_seed_state, embody_resume, embody_completion
+from . import launch_admission, launch_seed_state, embody_resume, embody_completion
 from . import reclaim_cli, resolve_launch_cli, status_monitor_runtime
 from .worktree_creation import LaunchSeedStagingFailure
 from . import bridge_acquisition_launch, bridge_seed_delivery, native_restart_launch
@@ -83,22 +83,23 @@ def add_parsers(sub) -> None:
     p = sub.add_parser("handoff-cutover-trigger", help="Explicit, on-demand invocation of the resident status-monitor's own pending-handoff pickup+retire choreography for ONE worktree (mux-companion-manual-cutover-diagnostics) -- the manual-trigger counterpart to handoffs-check's read-only, retire-only report. There is no --execute/preview split: invoking this verb IS the explicit human action.")
     p.add_argument("--worktree-id", dest="worktree_id", required=True, help="Target worktree")
     p.add_argument("--json", action="store_true", help="JSON output")
-    p = sub.add_parser("embody", help="Create or resume a DETACHED mux+Copilot CLI session in a worktree (the agent-facing embodiment verb; auto-registers with the bridge)")
+    p = sub.add_parser("embody", help="Ensure a DETACHED mux+Copilot process exists; resume the head by default, return existing live identity without attaching (use copilot to attach this terminal)")
     g = p.add_mutually_exclusive_group()
     g.add_argument("--worktree-id", dest="worktree_id", default=None, help="Embody in this existing worktree")
     g.add_argument("--new", action="store_true", help="Create a fresh worktree first, then embody in it")
     g.add_argument("--codename", default=None, help="Embody the worktree with this codename (pr-attribution-codenames Phase 2/3) -- resolved locally first, then via a cross-machine SSH scan. A codename found on a DIFFERENT machine fails closed with the machine name (remote launch is not supported); resolve/embody there directly instead.")
     g.add_argument("--anchor", action="store_true", help="Embody directly in the active project's ANCHOR checkout instead of any worktree -- no worktree is created or required. Matches the existing headless-dispatch behavior (a CodeSpace/container ACP session already runs in the anchor, never a worktree); this brings CLI-mode into line with that same contract. Session id is synthesized as `anchor-<repo_name>` (one live anchor session per repo, same one-live-session-per-target rule as an ordinary worktree). The anchor is not writable through this harness's own PR-gated flow (see AGENTS.md) -- use for reads/exploration or a repo whose anchor is otherwise safe to drive directly; an actual change still belongs in a worktree/PR.")
     p.add_argument("--seed", default=None, help="Initial prompt through native startup on qualified cold launches; terminal fallback otherwise")
+    p.add_argument("--deliver-pending-seed", action="store_true",
+                   help="Explicit startup-owner opt-in: deliver a staged New prompt to its already-created mux; ordinary live embodiment is read-only")
     p.add_argument("--bridge-seed-operation", default=None,
                    help="Defer this Bridge-owned seed operation to readiness-bound inbox delivery")
     p.add_argument("--bridge-seed-pending", action="store_true",
-                   help="Preserve new-task conversation intent while withholding the Bridge seed")
+                   help="Mark deferred startup text; use --fresh to select new-task conversation intent")
     r = p.add_mutually_exclusive_group()
     bridge_acquisition_launch.add_arguments(p, r)
     native_restart_launch.add_arguments(p, r)
-    r.add_argument("--fresh", action="store_true", help="Start a new conversation even in an existing worktree. By default, an existing worktree embodied without a seed resumes its head session (the conversation the worktree's ledger names as current), so bringing a task back never loses its history")
-    r.add_argument("--resume-head", dest="resume_head", action="store_true", help="Resume the worktree's head session even when a --seed (or pending seed) is given; deliver the prompt to that conversation. Without this, a seeded embody starts a fresh conversation for its new task")
+    embody_resume.add_arguments(r)
     p.add_argument("--seed-ready-timeout", dest="seed_ready_timeout", type=float, default=180.0, metavar="SECONDS", help="Terminal fallback only: idle window before typing --seed (default 180); native startup does not scrape or wait for an input prompt")
     p.add_argument("--driver", default=None, help="Label of the agent steering this session; stamps the 'driven by <agent>' banner (AGENT_BRIDGE_DRIVEN_BY) so a human taking over in Neuron Forge sees who's at the wheel")
     p.add_argument("--verify-timeout", dest="verify_timeout", type=float, default=0.0, metavar="SECONDS", help="Wait up to N seconds for the mux session to come up before returning (default 0: don't wait)")
@@ -212,12 +213,11 @@ def cmd_embody(args: argparse.Namespace) -> int:
     interrogate the occupant or embody a fresh space." Otherwise it creates the
     session detached (never attaching -- the operator or Neuron Forge attaches
     later). Embodying an existing worktree without a seed resumes its head
-    conversation (``resume_session`` in the output; ``--fresh`` opts out, and
-    ``--resume-head`` resumes it even with a seed), so bringing a task back
-    never leaves it on a blank session. An optional ``--seed`` is injected as the first interactive turn via
-    ``send-keys`` once Copilot is ready. Handoff cutover uses native
-    ``-i`` startup instead because its attached successor does not
-    need embody's post-launch bridge verification.
+    conversation (``resume_session`` in the output; ``--fresh`` opts out,
+    including with a seed). Cold startup prompts use native interactive
+    arguments when qualified, otherwise the established terminal fallback.
+    Ordinary live embodiment never injects text; only the explicit
+    ``--deliver-pending-seed`` startup callback settles staged New text.
 
     Verification: ``agent-bridge live-sessions?worktree_id=<id>`` reports
     registration. ``--verify-timeout`` waits for mux existence, not native proof.
@@ -250,6 +250,15 @@ def cmd_embody(args: argparse.Namespace) -> int:
             "--anchor is mutually exclusive with --worktree-id/--codename/--new",
             exit_code=2,
         )
+    if getattr(args, "deliver_pending_seed", False) and (
+        make_new or anchor_mode or getattr(args, "seed", None)
+        or getattr(args, "fresh", False) or getattr(args, "bridge_seed_operation", None)
+        or getattr(args, "bridge_acquisition", None)
+    ):
+        return output._json_error(
+            "--deliver-pending-seed only settles staged startup text in an existing live mux",
+            exit_code=2,
+        )
     if not anchor_mode and not make_new and not raw_id:
         return output._json_error(
             "embody requires --worktree-id <id>, --codename <name>, --new, or --anchor",
@@ -269,11 +278,6 @@ def cmd_embody(args: argparse.Namespace) -> int:
             return refusal
 
     if anchor_mode:
-        if getattr(args, "bridge_seed_operation", None):
-            try:
-                args._bridge_seed_report = bridge_seed_delivery.claim(args)
-            except ValueError as exc:
-                return output._json_error(str(exc), exit_code=3)
         return _cmd_embody_anchor(args, config)
 
     # Resolve target worktree id + path (creating a fresh worktree for --new).
@@ -308,8 +312,12 @@ def cmd_embody(args: argparse.Namespace) -> int:
     # Resume: a live mux session already embodies this worktree -- don't
     # duplicate (one live session per cwd). Report it and stop.
     already = sessions.has_mux_session(wt_id)
+    if getattr(args, "deliver_pending_seed", False) and not already:
+        return output._json_error(
+            "--deliver-pending-seed requires an already-created live mux; nothing was started",
+            exit_code=3,
+        )
     acquisition = getattr(args, "bridge_acquisition", None)
-    native_resume = acquisition if acquisition != "fresh" else None
     if acquisition and already:
         return output._json_error("bridge acquisition target already has a live mux", exit_code=3)
     seed = getattr(args, "seed", None)
@@ -320,6 +328,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
             return output._json_error(launch_preflight.error, exit_code=3)
 
     record = None
+    profile_resume = None
     selection = profile_assignment.LaunchProfileSelection(profile=None)
     explicit_seed = bool(seed)
     if not already:
@@ -341,14 +350,15 @@ def cmd_embody(args: argparse.Namespace) -> int:
             if backend_error:
                 return output._json_error(backend_error, exit_code=3)
             try:
+                profile_resume = embody_resume.resume_target(args, record, seed, make_new=make_new)
                 selection = _launch_profile_selection(
                     config,
                     args,
                     record,
                     lane="new",
                     generation_key=f"new:{wt_id}",
-                    resume_session=native_resume,
-                    allocate_new=not native_resume and not getattr(args, "dry_run", False),
+                    resume_session=profile_resume,
+                    allocate_new=not profile_resume and not getattr(args, "dry_run", False),
                 )
                 _reflect_assignment(record, selection)
             except profile_assignment.ProfileAssignmentError as exc:
@@ -386,55 +396,13 @@ def cmd_embody(args: argparse.Namespace) -> int:
         return 0
 
     deferred = {}
-    if getattr(args, "bridge_seed_operation", None):
-        try:
-            deferred = bridge_seed_delivery.claim(args, cfg.tracking_dir() / f"{wt_id}.yaml")
-            if not seed and deferred["deferred_creation_seed"].get("seed"):
-                seed = deferred["deferred_creation_seed"]["seed"]["text"]
-        except (ValueError, OSError, TimeoutError) as exc:
-            return output._json_error(str(exc), exit_code=3)
-
     if already:
         if refusal := agent_policy.json_refusal(work_dir):
             return refusal
-        # Legacy New fallback targets only the registered Copilot pane.
-        # Typed Resume intent is never consumed by this path.
-        display_pane = sessions.mux_copilot_pane(wt_id) or sessions.mux_active_pane(wt_id)
-        copilot_pane = sessions.mux_copilot_pane(wt_id)
-        claimed = None
-        creation_receipt = {"seed": None}
-        if copilot_pane and not deferred:
-            try:
-                creation_receipt = launch_seed_state.claim_creation(cfg.tracking_dir() / f"{wt_id}.yaml")
-                claimed = creation_receipt["seed"]["text"] if creation_receipt["seed"] else None
-            except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
-                return output._json_error(f"Could not hand off staged New prompt: {exc}", exit_code=3)
-        pending_seed_result, settled = {}, {}
-        if claimed:
-            if refusal := agent_policy.json_refusal(work_dir):
-                return refusal
-            pending_seed_result = sessions.mux_seed_pane(
-                copilot_pane, claimed, session_name=sessions.mux_session_name(wt_id),
-                ready_timeout=getattr(args, "seed_ready_timeout", None) or 180.0,
-            )
-            settled = launch_seed_state.settle_creation(
-                cfg.tracking_dir() / f"{wt_id}.yaml", creation_receipt, pending_seed_result)
-        output._json_output(
-            {
-                "ok": True,
-                **deferred,
-                "worktree_id": wt_id,
-                "session": sessions.mux_session_name(wt_id),
-                "work_dir": work_dir,
-                "created": False,
-                "resumed": True,
-                "new_pane": display_pane,
-                "note": "a live mux session already embodies this worktree",
-                "seeded": bool(pending_seed_result.get("ok")) if claimed else False,
-                **settled,  # a claimed seed kept for later, or a possible draft (not retried)
-            }
+        return embody_completion.existing_launch(
+            args, wt_id=wt_id, work_dir=work_dir, deferred=deferred,
+            cfg=cfg, sessions=sessions, output=output, tracking_write=tracking_write,
         )
-        return 0
 
     launch_cmd = _build_launch_cmd(
         config,
@@ -477,68 +445,30 @@ def cmd_embody(args: argparse.Namespace) -> int:
             return 3
         return output._json_error(str(exc), exit_code=3)
     native_seed_id = None
-    if seed and not acquisition and not deferred:
-        try:
-            launch_cmd, native_seed_id = embody_completion.prepare_startup_seed(
-                launch_cmd, cfg.tracking_dir() / f"{wt_id}.yaml", seed, explicit=explicit_seed,
-                environment=env,
-            )
-        except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
-            return output._json_error(f"Could not prepare native startup prompt: {exc}", exit_code=3)
     admission = ExitStack()
     try:
+        # Seed writers acquire admission themselves. Hold lifecycle while preparing
+        # startup text, then acquire admission for process creation, not around an RPC.
         admission.enter_context(bridge_acquisition_launch.launch_fence(
-            repo, cfg.tracking_dir() / f"{wt_id}.yaml",
+            repo, cfg.tracking_dir() / f"{wt_id}.yaml", include_launch_admission=False,
         ))
     except (TimeoutError, ValueError) as exc:
         admission.close()
         return output._json_error(str(exc), exit_code=3)
     try:
-        # A managed-GC pass may have completed while launch preflight ran.
-        # Re-check under the shared lifecycle fence before creating a process.
         try:
-            launch_record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
-        except FileNotFoundError:
-            return output._json_error(f"Worktree record disappeared before launch: {wt_id}", exit_code=3,)
-        if getattr(launch_record, "kind", None) in tracking.MANAGED_KINDS and getattr(
-            launch_record, "status", None
-        ) in {"complete", "completed", "finalized"}:
-            return output._json_error(
-                f"Worktree {wt_id} is terminal and managed; refusing embodiment",
-                exit_code=3,
+            launch_record = embody_resume.checked_launch_record(
+                cfg.tracking_dir() / f"{wt_id}.yaml", record, wt_id, work_dir,
             )
-        if (
-            getattr(launch_record, "worktree_id", wt_id) != wt_id
-            or getattr(launch_record, "worktree_path", work_dir) != work_dir
-            or (
-                getattr(record, "branch", None) is not None
-                and getattr(launch_record, "branch", None) != getattr(record, "branch", None)
-            )
-            or (
-                getattr(record, "repo", None) is not None
-                and getattr(launch_record, "repo", None) != getattr(record, "repo", None)
-            )
-        ):
-            return output._json_error(f"Worktree record changed before launch: {wt_id}", exit_code=3,)
+        except ValueError as exc:
+            return output._json_error(str(exc), exit_code=3)
         if acquisition and (error := bridge_acquisition_launch.refusal(args, launch_record, wt_id)):
             return output._json_error(error, exit_code=3)
         if sessions.has_mux_session(wt_id):
-            output._json_output(
-                {
-                    "ok": True,
-                    **deferred,
-                    "worktree_id": wt_id,
-                    "session": sessions.mux_session_name(wt_id),
-                    "work_dir": work_dir,
-                    "created": False,
-                    "resumed": True,
-                    "new_pane": (
-                        sessions.mux_copilot_pane(wt_id) or sessions.mux_active_pane(wt_id)
-                    ),
-                    "note": "a live mux session already embodies this worktree",
-                }
+            return embody_completion.existing_launch(
+                args, wt_id=wt_id, work_dir=work_dir, deferred=deferred,
+                cfg=cfg, sessions=sessions, output=output, tracking_write=tracking_write,
             )
-            return 0
         # A freshly-provisioned remote venue (CodeSpace/container) virtually
         # never has tmux preinstalled (confirmed against a real CodeSpace
         # devcontainer, agent-bridge-cli-mode-sessions Phase 4 prep) --
@@ -558,6 +488,11 @@ def cmd_embody(args: argparse.Namespace) -> int:
         # a head that advanced (or a process that started) during preflight or
         # the lock wait is what's resumed -- or refused.
         resume_target = embody_resume.resume_target(args, launch_record, seed, make_new=make_new)
+        if selection.assignment is not None and resume_target != profile_resume:
+            return output._json_error(
+                "Head changed after profile selection; refresh before resuming in a different context",
+                exit_code=3,
+            )
         refusal = embody_resume.live_head_refusal(resume_target, wt_id)
         if refusal:
             return output._json_error(refusal, exit_code=3)
@@ -566,6 +501,49 @@ def cmd_embody(args: argparse.Namespace) -> int:
         except InterruptedError as exc:
             output._json_output(bridge_acquisition_launch.preparation_failure(wt_id, work_dir, exc))
             return 3
+        if refusal := agent_policy.json_refusal(work_dir):
+            return refusal
+        if getattr(args, "bridge_seed_operation", None):
+            try:
+                deferred = bridge_seed_delivery.claim(args, cfg.tracking_dir() / f"{wt_id}.yaml")
+                if not seed and deferred["deferred_creation_seed"].get("seed"):
+                    seed = deferred["deferred_creation_seed"]["seed"]["text"]
+            except (ValueError, OSError, TimeoutError) as exc:
+                return output._json_error(str(exc), exit_code=3)
+        if seed and not acquisition and not deferred:
+            try:
+                launch_cmd, native_seed_id = embody_completion.prepare_startup_seed(
+                    launch_cmd, cfg.tracking_dir() / f"{wt_id}.yaml", seed, explicit=explicit_seed,
+                    environment=env,
+                )
+            except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
+                return output._json_error(f"Could not prepare native startup prompt: {exc}", exit_code=3)
+        try:
+            admission.enter_context(launch_admission.guard(cfg.tracking_dir() / f"{wt_id}.yaml"))
+        except ValueError as exc:
+            return output._json_error(str(exc), exit_code=3)
+        try:
+            admitted_record = embody_resume.checked_launch_record(
+                cfg.tracking_dir() / f"{wt_id}.yaml", record, wt_id, work_dir,
+            )
+        except ValueError as exc:
+            return output._json_error(str(exc), exit_code=3)
+        if acquisition and (error := bridge_acquisition_launch.refusal(args, admitted_record, wt_id)):
+            return output._json_error(error, exit_code=3)
+        admitted_resume = embody_resume.resume_target(args, admitted_record, seed, make_new=make_new)
+        if admitted_resume != resume_target:
+            return output._json_error(
+                "Head changed during startup preparation; inspect staged text before retrying",
+                exit_code=3,
+            )
+        if sessions.has_mux_session(wt_id):
+            return embody_completion.existing_launch(
+                args, wt_id=wt_id, work_dir=work_dir, deferred=deferred,
+                cfg=cfg, sessions=sessions, output=output, tracking_write=tracking_write,
+                native_seed_id=native_seed_id,
+            )
+        if refusal := embody_resume.live_head_refusal(admitted_resume, wt_id):
+            return output._json_error(refusal, exit_code=3)
         if refusal := agent_policy.json_refusal(work_dir):
             return refusal
         from .launch_seed_exec import copied_setup_command
@@ -636,7 +614,7 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
         return output._json_error(
             f"project {repo_name!r} has no resolved anchor path", exit_code=2,
         )
-    deferred = getattr(args, "_bridge_seed_report", {})
+    deferred = {}
     wt_id = f"anchor-{repo_name}"
     seed = getattr(args, "seed", None)
 
@@ -712,6 +690,12 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
         return refusal
     if getattr(args, "ensure_mux", False):
         sessions.ensure_mux_available()
+
+    if getattr(args, "bridge_seed_operation", None):
+        try:
+            deferred = bridge_seed_delivery.claim(args)
+        except ValueError as exc:
+            return output._json_error(str(exc), exit_code=3)
     result = sessions.mux_new_session(wt_id, work_dir, launch_cmd, env)
     if not result.get("ok"):
         return output._json_error(
