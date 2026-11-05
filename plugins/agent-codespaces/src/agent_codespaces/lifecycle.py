@@ -747,9 +747,8 @@ def wait_for_codespace(
     can distinguish "still provisioning" from "genuinely dead" and never mistake
     a slow boot for a redundant-create trigger.
 
-    An explicit ``account`` pins every status read to that owner rather than
-    selecting a same-named venue from the merged inventory.
-
+    Explicit ``account`` pins each read to that owner, never a same-named venue
+    from the merged inventory.
     The default ``timeout`` is generous (20 min) because CodeSpace
     create/provision is finicky; the caller supplies a finite ceiling and (for a
     background wait) an ``on_progress(last_state, remaining_s)`` callback. Transient
@@ -795,9 +794,8 @@ def wait_for_available(
     also fails fast on genuinely-dead states instead of waiting out the timeout).
     Used after ``create_codespace`` before provisioning over SSH.
     """
-    outcome, _ = wait_for_codespace(
-        name, timeout=timeout, interval=interval, **({"account": account} if account is not None else {}),
-    )
+    kwargs = {"account": account} if account is not None else {}
+    outcome, _ = wait_for_codespace(name, timeout=timeout, interval=interval, **kwargs)
     return outcome == WaitOutcome.AVAILABLE
 
 
