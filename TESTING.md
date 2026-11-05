@@ -46,6 +46,21 @@ installation, installed runtime, other-platform qualification or completed
 recovery. No native/model lane is implied by unit fixtures; required unit-only
 CI is unchanged.
 
+Bridge's opt-in `--test-file tests/test_portable_mux_joined.py
+--allow-explicit-tiers` packet composes the real CLI, CodeSpace detached
+provider, support archive/receiver, extracted Bridge and standalone-driver
+extensions, SQLite retained handoff and driver HTTP route. It proves one
+admitted/consumed send and same-conversation rejoin, with a duplicate-loadout
+refusal. Provider process/SSH/forwards, the native mux, SDK and the
+POSIX-to-private-scratch carrier remain synthetic. Separate focused enrollment,
+readiness and producer controls preserve ordinary remote refusal, original
+reservation/attempt and predecessor CAS, readiness-only polling, operation-bound
+startup admission and the no-legacy-seed window before enrollment. Historical
+schema tests construct the original guard rather than mislabeling a current
+trigger. This is contained source composition, not native Copilot/TMux,
+installed, clean-room or external-venue qualification. Required unit-only CI is
+unchanged.
+
 Manager's opt-in `--test-file tests/test_companion_tool_statistics.py
 --test-file tests/test_companion_current_requests.py --test-file
 tests/test_companion_bridge_session_source.py --allow-explicit-tiers` packet

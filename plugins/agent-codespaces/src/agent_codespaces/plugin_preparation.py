@@ -132,9 +132,22 @@ async def prepare_plugins(manager, name: str, repo: str | None, config, workspac
                           prepared_context: dict | None = None,
                           include_compiled_context: bool = True,
                           live_attachment: bool = False,
-                          hosting_required: bool = True) -> list[str]:
+                          hosting_required: bool = True,
+                          receiving_context: str | None = None) -> list[str]:
     from ._ssh_retry import exec_with_retry
 
+    if receiving_context is not None:
+        from repository_policy.receiving import build_receiving_policy_check
+
+        if worktree_id:
+            raise RuntimeError("Portable receiving cannot resolve a managed worktree")
+        command, payload = build_receiving_policy_check(workspace, receiving_context)
+        result = await exec_with_retry(manager, name, command, input_bytes=payload, timeout=90)
+        if result.exit_code:
+            raise RuntimeError("Portable repository hosting refused before plugin preparation")
+        from repository_policy import validate_hosting_result
+
+        validate_hosting_result(json.loads(result.stdout))
     plan = plugin_plan(repo, config, sources, repo_roots=repo_roots)
     if relay_port is not None:
         await require_relay_ready(manager, name, relay_port)
@@ -154,7 +167,7 @@ async def prepare_plugins(manager, name: str, repo: str | None, config, workspac
         workspace = parse_execution_checkout(resolved.stdout)
     from .hosting_policy import require_guest_hosting
 
-    if hosting_required and not live_attachment:
+    if hosting_required and not live_attachment and receiving_context is None:
         await require_guest_hosting(manager, name, workspace, preflight=True)
     script = prelude + "\n" + build_prepare_script(
         plan, workspace,

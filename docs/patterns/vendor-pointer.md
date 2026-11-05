@@ -126,6 +126,18 @@ The runtime installer prefers those packaged copies when present; a live `dev`
 checkout may still fall back to the canonical `worktree-manager/bin/` source so
 local non-packaged install paths remain runnable while authoring.
 
+`packaged-assets.json` uses the same materializer for other bounded support
+closures. Its `files` may name slash-separated relative paths, preserving a
+plugin's extension layout without copying unrelated payloads. Parent traversal,
+absolute paths and linked source/destination directories refuse materialization.
+The launch-wrapper manifest retains its basename-only file contract.
+
+Bridge's receiving-support declarations compose the standalone remote-driver
+and its own extension files with Manager's canonical pane shell. Their source
+and materialized forms produce the same content-addressed asset archive; a
+partial packaged closure refuses rather than selecting another installation.
+The launch-only Bridge manifest excludes full-suite hooks and skills.
+
 ## Tool ownership: who enforces which invariant
 
 | Concern | Owner | Invariant it owns |

@@ -34,6 +34,7 @@ import { firstLoadThisSession } from "./announce.mjs";
 import { makeBridgeEndpoint } from "./bridge-endpoint.mjs";
 import { metadataRefresher, processIdentity, registrationMetadata, resolveMetadataAsync } from "./metadata.mjs";
 import { createRetainedInbox, retainedDeliverySelected } from "./retained-delivery.mjs";
+import { createRemoteDriverSession, isRemoteDriverSource } from "./remote-driver.mjs";
 
 // --- Constants ---
 const HEARTBEAT_MS = 30_000; // refresh liveness (updated_at) every 30s
@@ -54,7 +55,8 @@ const DELIVERY_DEFAULT_ON = !/^(0|false|off|no)$/i.test(
 );
 // Selected only by an explicit consumer opt-in. Unsupported retained delivery
 // must hold the original work, never fall through to the legacy ACK path.
-const RETAINED_INBOX = retainedDeliverySelected(process.env.AGENT_BRIDGE_RETAINED_INBOX);
+const RETAINED_INBOX = retainedDeliverySelected(process.env.AGENT_BRIDGE_RETAINED_INBOX)
+  || Boolean(process.env.AGENT_BRIDGE_REMOTE_DRIVER_ROOT);
 // SDK event types we represent (Phase 5). Everything else is intentionally not
 // forwarded -- the bridge-side translator maps exactly this subset into its
 // event vocabulary; keeping the whitelist here avoids buffering noise.
@@ -199,7 +201,7 @@ async function retainedBridgeRequest(method, path, body) {
 const metadataReady = resolveMetadataAsync()
   .then((meta) => {
     state.meta = meta;
-    if (!meta.machine) extLog("logical machine owner unresolved; session-only registration with bounded retries");
+    if (!meta.machine && !meta.receiving_scope_id) extLog("logical machine owner unresolved; session-only registration with bounded retries");
   })
   .catch((e) => extLog(`metadata resolution failed (degrading, session unaffected): ${e.message}`));
 // A worktree or repo the load-time lookup missed is looked up again (with
@@ -322,7 +324,6 @@ async function pollInbox() {
 // (``drainControls`` in delivery.mjs). Controls are polled apart from
 // messages, so they're never delivered as a prompt.
 async function pollControls() {
-  if (RETAINED_INBOX) return; // Control/interrupt effects have no retained recovery contract yet.
   if (state.controlling) return;
   if (!state.sessionId || !state.registered) return;
   state.controlling = true;
@@ -331,7 +332,7 @@ async function pollControls() {
     await drainControls(sid, {
       getJson: bridgeGetJson, post: bridgeFetch, session, replayHistory, log: extLog,
       isCurrent: () => state.registered && state.sessionId === sid,
-      readinessTasks: state.readinessTasks,
+      readinessTasks: state.readinessTasks, readinessOnly: RETAINED_INBOX,
     });
   } finally {
     state.controlling = false;
@@ -399,10 +400,23 @@ const session = await joinSession({
 });
 
 if (RETAINED_INBOX) {
+  const driverRoot = process.env.AGENT_BRIDGE_REMOTE_DRIVER_ROOT;
+  const deliverySession = driverRoot ? createRemoteDriverSession(session, {
+    pluginRoot: driverRoot,
+    descriptorDirectory: join(process.env.AGENT_REMOTE_DRIVER_CONFIG_DIR
+      || join(homedir(), ".copilot", "remote-driver"), "sessions"),
+    expectedSessionId: process.env.AGENT_BRIDGE_NATIVE_SESSION_ID,
+    cwd: process.cwd(),
+    ownerId: process.env.AGENT_BRIDGE_DRIVER_OWNER,
+    bridgePluginRoot: process.env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT,
+  }) : session;
   retainedInbox = createRetainedInbox({
-    session, request: retainedBridgeRequest, processIdentity: processIdentity(),
+    session: deliverySession, request: retainedBridgeRequest, processIdentity: processIdentity(),
     cwd: () => state.meta?.cwd, isCurrent: (sid) => state.sessionId === sid,
     canSend: () => state.deliveryEnabled && state.registered, log: extLog,
+    ...(driverRoot ? { sourceAllowed: isRemoteDriverSource } : {}),
+    ...(process.env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT
+      ? { portableLaunch: process.env.AGENT_BRIDGE_PORTABLE_ATTEMPT || null } : {}),
   });
   extLog("retained inbox selected explicitly; legacy message ACKs and control effects disabled");
 }

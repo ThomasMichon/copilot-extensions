@@ -95,6 +95,44 @@ test("a malformed owned mode cannot become an ungated ordinary mode", () => {
   });
 });
 
+test("readonly control polling negotiates its filter and never invokes mode changes", async (t) => {
+  const f = fixture(t);
+  const calls = [], outcomes = [];
+  f.session.rpc.mode = { set: async () => assert.fail("readonly poll changed mode") };
+  await drainControls("native", {
+    readinessOnly: true, session: f.session,
+    getJson: async (route) => {
+      calls.push(route);
+      if (route === "/health") return { capabilities: { readonly_plugin_controls: 1 } };
+      assert.equal(route, "/api/v1/live-sessions/native/controls?readiness_only=true");
+      return { messages: [
+        { id: 1, kind: "control:plugin-readiness", body: JSON.stringify(f.request) },
+        { id: 2, kind: "control:set-mode", body: "autopilot" },
+      ] };
+    },
+    post: async (_method, _route, body) => outcomes.push(body),
+  });
+  assert.equal(calls.length, 2);
+  assert.equal(outcomes.length, 1);
+  assert.deepEqual(outcomes[0].ids, [1]);
+  assert.equal(outcomes[0].plugin_readiness.status, "ready");
+});
+
+for (const capability of [undefined, 0, true, "1"]) {
+  test(`readonly control polling refuses an unqualified provider (${capability})`, async () => {
+    const calls = [];
+    await drainControls("native", {
+      readinessOnly: true, session: {},
+      getJson: async (route) => {
+        calls.push(route);
+        return { capabilities: { readonly_plugin_controls: capability } };
+      },
+      post: async () => assert.fail("no control acknowledgment authorized"),
+    });
+    assert.deepEqual(calls, ["/health"]);
+  });
+}
+
 test("registered hooks/MCP-only loadout needs no skills or optional installed/path fields", async (t) => {
   const f = fixture(t);
   f.session.rpc.plugins.install = () => { throw new Error("no installation authorized"); };

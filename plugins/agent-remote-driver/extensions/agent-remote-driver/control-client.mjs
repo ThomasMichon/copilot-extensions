@@ -54,22 +54,37 @@ export function createControlClient(descriptor, { fetchImpl = fetch, timeoutMs =
     return state;
   }
 
+  async function grantTarget(ownerId, target, rehook) {
+    if (typeof descriptor.controlToken !== "string" || !descriptor.controlToken) {
+      throw new RemoteControlError("control_credential_missing", "Descriptor has no administrative re-hook credential");
+    }
+    const result = await request(rehook ? "/control/re-hook" : "/control/claim", {
+      target, ownerId, controlToken: descriptor.controlToken,
+    });
+    const lease = result.lease;
+    if (lease?.instanceId !== descriptor.instanceId || lease.sessionId !== descriptor.sessionId ||
+        typeof lease.generation !== "string" || !lease.generation || typeof lease.token !== "string" || !lease.token) {
+      throw new RemoteControlError("grant_outcome_unknown", "Driver grant response is invalid; reconcile before retry");
+    }
+    return lease;
+  }
+
   return {
     health,
     async grant(ownerId, { rehook = false } = {}) {
-      if (typeof descriptor.controlToken !== "string" || !descriptor.controlToken) {
-        throw new RemoteControlError("control_credential_missing", "Descriptor has no administrative re-hook credential");
-      }
       const target = await health();
-      const result = await request(rehook ? "/control/re-hook" : "/control/claim", {
-        target, ownerId, controlToken: descriptor.controlToken,
-      });
-      const lease = result.lease;
-      if (lease?.instanceId !== descriptor.instanceId || lease.sessionId !== descriptor.sessionId ||
-          typeof lease.generation !== "string" || !lease.generation || typeof lease.token !== "string" || !lease.token) {
-        throw new RemoteControlError("grant_outcome_unknown", "Driver grant response is invalid; reconcile before retry");
+      return grantTarget(ownerId, target, rehook);
+    },
+    async grantStartup(ownerId) {
+      const target = await health();
+      if (!target.ready || target.mode !== "human" || target.reason !== "awaiting_explicit_rehook" ||
+          target.ownerId !== null || target.lastSequence !== 0 || target.inFlight !== null ||
+          target.pendingSources !== 0) {
+        throw new RemoteControlError("startup_control_changed", "Initial control changed; explicit re-hook is required");
       }
-      return lease;
+      // Re-hook the observed generation, not a second health read that could
+      // silently adopt intervening human input or another driver's claim.
+      return grantTarget(ownerId, target, true);
     },
     async invoke(action, lease, sequence, content, mode) {
       if (!["send", "steer", "abort", "release"].includes(action)) {

@@ -55,6 +55,7 @@ from . import copilot_detach_startup
 from .copilot_detach_startup import ssh_namespace as _ssh_namespace
 from venue_copilot.resume_claim import resume_target, settle_resumed_claim
 from venue_copilot.supervisor import with_supervisor
+from venue_copilot.portable_mux import MuxEndpoint
 
 _BUSY_EXIT = 75
 _COORDINATION_EXIT = 78
@@ -226,7 +227,13 @@ def _send_refs(name: str, upload: tuple[str, bytes, list[tuple[str, int]]]) -> s
 _VENUE_TOOLING = copilot_detach_startup.VENUE_TOOLING
 
 
-def _pane_tail(name: str, mux: str, lines: int = 40) -> str:
+def _pane_tail(name: str, mux: str | MuxEndpoint, lines: int = 40) -> str:
+    if isinstance(mux, MuxEndpoint):
+        try:
+            got = _remote(name, mux.command("tail", lines=lines))
+            return got[1].rstrip() if got and got[0] == 0 else ""
+        except ValueError:
+            return ""
     got = _remote(
         name, f"tmux capture-pane -p -t {shlex.quote('=' + mux + ':')} 2>/dev/null | tail -n {lines}",
     )
@@ -462,6 +469,19 @@ def cmd_detach(
         # Fail before claiming or holding anything: a deleted CodeSpace
         # otherwise surfaces much later as a misleading forward timeout.
         return _fail(f"CodeSpace '{args.name}' was not found under any GitHub account", plan)
+    held = owner.get_hold(args.name)
+    retained = (held.sessions.get(plan["tenant"]) or {}) if held else {}
+    pending = owner.get_pending_delivery(args.name, plan["tenant"])
+    if pending is not None and not isinstance(pending, dict):
+        return _fail("Pending launch journal is malformed; original custody retained", plan)
+    if (
+        getattr(args, "receiving_support", None) == "portable"
+        or "mux_endpoint" in retained
+        or (pending or {}).get("kind") == "portable-mux-launch"
+    ):
+        from .portable_mux_launch import cmd_launch
+
+        return cmd_launch(args, plan, config, codespace, ssh_session=ssh_session)
     try:
         seed = read_seed(args)
     except (OSError, ValueError) as exc:
@@ -897,81 +917,7 @@ def cmd_detach(
 
 
 def cmd_stop(args: argparse.Namespace, *, ssh_session: Callable[..., int]) -> int:
-    """Stop the CodeSpace's detached session, then release what it held.
+    """Stop through the same verified-retirement owner used by the detached CLI."""
+    from .copilot_stop import cmd_stop as stop
 
-    The kill runs through the ordinary ``ssh`` path so the borrowing
-    worktree's claim is settled on disconnect exactly as for any other
-    finished use (a still-dirty checkout keeps it active). Forwards are
-    released only after the mux session is verified gone -- or when GitHub
-    reports the CodeSpace Shutdown, which is never booted just to kill nothing.
-    """
-    from venue_copilot import deregister_live_session, live_session_for, release_cli_mode
-
-    from . import connection_owner as owner
-    from .config import load_merged_config
-    from .lifecycle import _SHUTDOWN_STATE
-    from .worktrees import ContextRefused
-
-    codespace = _codespace(args.name)
-    plan = plan_for(args, load_merged_config(), codespace)
-    held = owner.get_hold(args.name)
-    recorded = (held.sessions.get(plan["tenant"]) or {}).get("mux_session") if held else None
-    if recorded:
-        plan["mux_session"] = recorded
-    # Look the session up before the kill: an abruptly stopped CLI never
-    # deregisters itself, so --stop removes exactly this venue's row.
-    row = live_session_for(plan["scope_id"])
-    session_id = row.get("session_id") if (row.get("venue") or {}).get("target") == args.name else None
-
-    def released(**extra: Any) -> int:
-        release_cli_mode(plan["scope_id"])
-        owner.release(args.name, plan["tenant"])
-        deregistered = bool(session_id) and deregister_live_session(session_id)
-        print(json.dumps({"ok": True, "stopped": True, **extra,
-                          "deregistered": session_id if deregistered else None, **plan}, indent=2))
-        return 0
-
-    if getattr(codespace, "state", None) == _SHUTDOWN_STATE:
-        # A stopped CodeSpace runs nothing, so its mux session is gone by
-        # construction; never boot it just to kill nothing. Its claim is left
-        # for the ordinary release/retire step, which settles it.
-        return released(already_shutdown=True)
-    target = shlex.quote("=" + plan["mux_session"])
-    script = (
-        f"tmux kill-session -t {target} 2>/dev/null; sleep 1; "
-        f"if tmux has-session -t {target} 2>/dev/null; then echo STILL_RUNNING; exit 3; fi; "
-        "echo STOPPED"
-    )
-    captured: dict[str, Any] = {}
-
-    def sink(result: Any) -> int:
-        captured["result"] = result
-        return int(getattr(result, "exit_code", 1))
-
-    for attempt in range(_LAUNCH_ATTEMPTS):  # the verified kill is idempotent
-        try:
-            rc = ssh_session(
-                _ssh_namespace(args, wrap_login_shell(script), timeout=120.0),
-                result_sink=sink,
-                # --keep-claim: the caller still owns the box (finalize / retire
-                # next), so a clean checkout must not settle the claim at-rest,
-                # which would release it to the next borrower mid-close-out.
-                settle_on_disconnect=not getattr(args, "keep_claim", False),
-            )
-        except ContextRefused as exc:
-            print(f"[BLOCKED] CodeSpace installation context refused: {exc}", file=sys.stderr)
-            return _COORDINATION_EXIT
-        except (RuntimeError, OSError) as exc:
-            if attempt + 1 < _LAUNCH_ATTEMPTS and _transient(str(exc)):
-                time.sleep(5.0)
-                continue
-            return _fail(f"could not connect to the CodeSpace ({exc}); nothing was released", plan)
-        result = captured.get("result")
-        if attempt + 1 < _LAUNCH_ATTEMPTS and result is not None and _is_transient_result(result):
-            time.sleep(5.0)
-            continue
-        break
-    stdout = getattr(captured.get("result"), "stdout", "") or ""
-    if rc != 0 or "STOPPED" not in stdout:
-        return _fail("could not verify the session stopped; nothing was released", plan, exit_code=rc)
-    return released()
+    return stop(args, ssh_session=ssh_session)

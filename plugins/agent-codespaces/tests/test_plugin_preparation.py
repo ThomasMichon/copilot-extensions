@@ -15,6 +15,34 @@ from agent_codespaces.plugin_preparation import prepare_plugins
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("exit_code,policy", [
+    (1, {}), (0, {"version": 1, "allowed": False}), (0, {"allowed": True}),
+])
+async def test_portable_policy_refuses_before_plugin_selection(monkeypatch, exit_code, policy):
+    commands = []
+
+    async def execute(manager, name, command, **kwargs):
+        commands.append((command, kwargs["input_bytes"]))
+        return SimpleNamespace(exit_code=exit_code, stdout=json.dumps(policy), stderr="")
+
+    monkeypatch.setattr("agent_codespaces._ssh_retry.exec_with_retry", execute)
+    monkeypatch.setattr(
+        "agent_codespaces.plugin_preparation.plugin_plan",
+        lambda *a, **k: pytest.fail("selected plugins after refused policy"),
+    )
+    with pytest.raises((RuntimeError, ValueError)):
+        await prepare_plugins(
+            object(), "synthetic", None, object(), "/workspaces/product",
+            receiving_context=json.dumps({
+                "schema": "agent-bridge.receiving-policy", "version": 1, "marketplaceId": "",
+            }),
+        )
+    assert len(commands) == 1
+    assert "agent-worktrees" not in commands[0][0]
+    assert commands[0][1].startswith(b"PK")
+
+
+@pytest.mark.asyncio
 async def test_relay_readiness_allows_slow_ssh_startup(monkeypatch):
     from agent_codespaces.plugin_preparation import require_relay_ready
 

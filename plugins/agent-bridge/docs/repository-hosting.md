@@ -272,6 +272,72 @@ Already-running remote ACP connections remain connection-only targets, not
 local authoring-process launches. Bridge does not apply its local filesystem
 policy to an unrelated remote server's `/` attachment path.
 
+## Explicit portable mux receiving
+
+`agent-bridge create codespace:<name> --cli --detach --receiving-support portable`
+selects Bridge's launch-scoped mux support through the CodeSpace provider.
+`agent-codespaces copilot <name> --detach --receiving-support portable` is the
+same provider entry point. Omitting the selection preserves the legacy guest
+launch; an already-retained portable endpoint cannot downgrade to that path.
+
+This source contract requires an activated, inspectable CodeSpace with an
+ordinary execution workspace. Managed worktree allocation/resolution, other
+venue providers and Windows receiving-side mux creation are not implemented
+by this option; they refuse instead of inventing a workspace or falling back.
+Windows callers use the owning PowerShell process boundary, preserving literal
+plugin metadata and seed stdin. A legacy batch shim without that boundary
+refuses before launch.
+
+The selected Bridge process advertises `mux` version 1, command/stdin transport,
+optional prerequisite and driver-label support, and launch-scoped registration.
+`receiving-support capabilities --owner` additionally checks the actual running
+Bridge's `portable_mux: 1`, `portable_inbox: 1` and
+`readonly_plugin_controls: 1` health capabilities without starting it. The actual
+Connection Owner must independently advertise its endpoint-custody support.
+Package versions or installed guest-suite commands are not these capabilities.
+
+The provider preserves claims, target locking, relay/auth checks and compiled
+plugin preparation, but does not run dotfiles, harness or repository setup.
+Canonical policy checks precede plugin preparation, prerequisite setup, native
+creation and execution inside the pane. The archive composes the existing
+Manager pane shell, standalone remote-driver, canonical policy and Worktrees
+prerequisite helper; it does not install a guest coordination suite.
+
+Registration credentials travel only in the receiving stdin envelope and
+private attempt files. The pane's Bridge configuration and remote-driver
+configuration are scoped to that attempt; shared guest credentials and an
+existing native mux server are not rewritten.
+
+The durable provider journal precedes native launch and retains the original
+attempt/session IDs, reservation, request, prepared plugin context and payload
+digest. Unknown creation or registration retains custody. Recovery rebuilds
+only identical support and inputs; it never repeats a legacy launch, kills a
+default-server session or allocates a replacement. Confirmed rejoin addresses
+the same socket and native pane/incarnation, including after a human rename.
+Seed admission uses the existing keyed, Bridge-owned delivery lane, never TTY
+typing. Driver display labels remain separate from exclusive driver ownership.
+
+The portable consumer's optional `portable_launch` observation pins the original
+attempt in `retained-inbox-v1`. First enrollment requires the current,
+claimed Bridge reservation and its exact native session/endpoint. Subsequent
+same-process enrollment uses the existing predecessor CAS; it cannot change the
+attempt or replay an original handoff. Ordinary remote registrations remain
+unsupported. A portable target cannot admit a prompt before enrollment or expose
+its associated prompt through the legacy inbox.
+
+Readonly plugin observations use the capability-qualified
+`controls?readiness_only=true` filter. It neither claims nor expires mutation
+controls. Typed startup admission binds the original operation, selection and
+message to its successful observation; retained delivery rechecks the loadout
+before and after its one-shot final grant. Mode, interrupt and history-replay
+effects remain unsupported. The standalone driver separately checks the unique
+selected extension roots before acquiring native control.
+
+These are source contracts, not claims of release, installed, native Copilot,
+native TMux or live external qualification. The focused provider/receiving
+controls, joined fake-SDK consumer and inert Windows process witnesses keep
+those evidence tiers separate.
+
 ## Preserved operations
 
 The historical machine-local `projects.yaml expose_agent: false` still only

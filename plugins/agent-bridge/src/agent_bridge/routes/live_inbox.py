@@ -182,6 +182,8 @@ def enroll(
 
 @router.post("/poll", response_model=InboxPollResult)
 def poll(session_id: str, body: InboxPollRequest, request: Request) -> InboxPollResult:
+    from .live_startup_controls import startup_readiness
+
     db, governance, runtime = _current_owners(request)
     with _refusals():
         rows = runtime.poll(
@@ -190,7 +192,9 @@ def poll(session_id: str, body: InboxPollRequest, request: Request) -> InboxPoll
         )
     return InboxPollResult(
         binding=body.binding, consumer=body.consumer,
-        messages=[RetainedInboxMessage.model_validate(row) for row in rows],
+        messages=[RetainedInboxMessage.model_validate({
+            **row, "plugin_readiness": startup_readiness(db, session_id, str(row["kind"])),
+        }) for row in rows],
     )
 
 

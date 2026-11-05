@@ -9,7 +9,22 @@ import time
 from fastapi import HTTPException
 
 from ..live_controls import SetModeResult
-from ..plugin_readiness import PluginReadinessError, PluginReadinessRequest
+from ..plugin_readiness import PluginReadinessError, PluginReadinessRequest, startup_input_digest
+from ..plugin_readiness import READINESS_CONTROL
+
+
+def startup_readiness(db, session_id: str, kind: str) -> dict | None:
+    """Return only the original startup control's selected observation inputs."""
+    if not kind.startswith("startup:prompt:"):
+        return None
+    try:
+        control = db.live_control_state(session_id, int(kind.rsplit(":", 1)[1]), include_body=True)
+        if control is not None and control.get("kind") == READINESS_CONTROL:
+            value = json.loads(control["body"])
+            return value if isinstance(value, dict) else None
+    except (ValueError, TypeError):
+        pass
+    return None
 
 
 def existing_startup_kind(db, key: str, expectation: PluginReadinessRequest) -> str | None:
@@ -49,14 +64,10 @@ async def startup_message(db, body, target, session_id, *, existing_kind, wait_r
     message_kind = existing_kind(db, body.idempotency_key, expectation)
     if message_kind is None:
         try:
-            import hashlib
-
-            selection = expectation.model_dump(exclude={"timeout_seconds", "expected_session_id"})
-            selection["plugins"] = sorted(selection["plugins"], key=lambda value: value["projected_source"])
-            input_digest = hashlib.sha256(json.dumps({
-                "selection": selection, "body": body.body, "sender": body.sender,
-                "reply_to": body.reply_to, "delivery": body.delivery,
-            }, sort_keys=True).encode()).hexdigest()
+            input_digest = startup_input_digest(
+                expectation, body=body.body, sender=body.sender, reply_to=body.reply_to,
+                delivery=body.delivery,
+            )
             observed = await wait_readiness(
                 db, session_id, expectation,
                 operation_key=body.idempotency_key, operation_digest=input_digest,

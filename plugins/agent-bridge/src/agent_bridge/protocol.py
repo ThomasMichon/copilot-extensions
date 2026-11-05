@@ -230,6 +230,9 @@ NATIVE_SEND_NO_RESUME_CAPABILITY = "native_send_no_resume"
 NATIVE_SEND_NO_RESUME_CAPABILITY_VERSION = 1
 # First version that exposes the independently negotiated passive owner-membership feed.
 OWNER_MEMBERSHIP_PROTOCOL_VERSION = 52
+PORTABLE_MUX_CAPABILITY = "portable_mux"
+READONLY_PLUGIN_CONTROLS_CAPABILITY = "readonly_plugin_controls"
+PORTABLE_INBOX_CAPABILITY = "portable_inbox"
 HTTP_PROTOCOL_VERSION = 52
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of

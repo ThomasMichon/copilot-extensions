@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Reviewed proposal and implementation PRs against `dev`
 - **Created:** 2026-11-05
-- **Status:** Active
+- **Status:** Done
 - **Vision:** `agent-fabric` / `legible-live-state`, `planned-maintenance-windows`
 - **Umbrella issue:** #10745
 
@@ -68,13 +68,13 @@ Existing source-only repository hosting policy remains unchanged.
   no-wait behavior and existing mux-only verification semantics.
 - [x] Keep JSON stdout parseable through the real command entrypoint and
   diagnostics on stderr; preserve existing launch and prompt custody.
-- [ ] Document fields, optional support detection, uncertainty and safe retries;
+- [x] Document fields, optional support detection, uncertainty and safe retries;
   add the plugin changefile and land the validated implementation.
 
 ### Phase 3 - Source closeout
 
-- [ ] Resolve validation and record merged source versus release/rollout state.
-- [ ] Mark the finite source objective Done, archive it and finalize.
+- [x] Resolve validation and record merged source versus release/rollout state.
+- [x] Deferred to `#10745`: Mark the finite source objective Done, archive it and finalize.
 
 ## Validation Plan
 
@@ -86,7 +86,7 @@ Existing source-only repository hosting policy remains unchanged.
   fixtures; reject unknown CLI options and invalid timeout values.
 - [x] Preserve old-reader/new-provider fields and explicit legacy behavior;
   document unsupported optional wait behavior on provider rollback.
-- [ ] Run focused tests, touched-source lint, type admission and relevant
+- [x] Run focused tests, touched-source lint, type admission and relevant
   module/install/documentation guards; require published-head CI and review.
 - [x] Record unavailable native/model/platform lanes honestly; no installed or
   completed-recovery acceptance is inferred from synthetic fixtures.
@@ -179,3 +179,23 @@ validation documentation. Existing visions need no intent amendment.
 - Captured receipt JSON stays off the attached terminal's stdout; no real
   Copilot session or production mux was launched. Publish this regression
   before final merge; exact-head review and CI remain required.
+
+### 2026-11-05 - Implementation merged and source closeout
+
+- Implementation #10749 merged after approval on its exact current head and
+  green required CI. Merge commit: `0a3b8e006bf5775e10802ca21caf157ee7d4ee21`.
+- The complete 179-case packet passed after preserving concurrent testing
+  documentation during rebase. Lint, module size, install and docs guards passed.
+- Source behavior and its owning CLI reference are delivered. Normal release
+  promotion remains with #3336; installed rollout and real recovery acceptance
+  were not authorized, performed or claimed.
+- Began Phase 3. Archive publication, completed-focus release and native
+  worktree finalization remain with source-driver under #10745.
+
+### 2026-11-05 - Source objective complete
+
+- All implementation and validation outcomes are resolved; the finite source
+  objective is Done. The owning CLI reference is the durable behavior contract.
+- The dated archive, its review/merge and subsequent focus/worktree/issue
+  settlement remain an explicit post-effort obligation under #10745.
+- No new runtime rollout or real-agent qualification objective is inferred.

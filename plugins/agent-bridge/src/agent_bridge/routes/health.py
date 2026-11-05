@@ -14,6 +14,9 @@ from ..protocol import (
     NATIVE_SEND_RECEIPT_CAPABILITY_VERSION,
     NATIVE_SEND_NO_RESUME_CAPABILITY,
     NATIVE_SEND_NO_RESUME_CAPABILITY_VERSION,
+    PORTABLE_MUX_CAPABILITY,
+    READONLY_PLUGIN_CONTROLS_CAPABILITY,
+    PORTABLE_INBOX_CAPABILITY,
 )
 from ..drain_contract import DRAIN_CONTRACT_VERSION
 from ..hosting_admission_cli import HOSTING_CAPABILITY, HOSTING_CAPABILITY_VERSION
@@ -59,6 +62,9 @@ async def health(request: Request) -> dict:
             CURRENT_REQUESTS: 1,
             TOOL_STATISTICS: 1,
             OWNER_MEMBERSHIP: 1,
+            PORTABLE_MUX_CAPABILITY: 1,
+            READONLY_PLUGIN_CONTROLS_CAPABILITY: 1,
+            PORTABLE_INBOX_CAPABILITY: 1,
         },
         "drain_contract": {"minimum": DRAIN_CONTRACT_VERSION, "maximum": DRAIN_CONTRACT_VERSION},
         "ssh_carriers": get_default_manager().carrier_diagnostics(),

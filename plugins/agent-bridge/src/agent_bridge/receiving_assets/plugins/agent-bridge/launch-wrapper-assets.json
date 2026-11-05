@@ -1,0 +1,9 @@
+{
+  "schema": "copilot-extensions.launch-wrapper-assets",
+  "version": 1,
+  "canonicalDir": "worktree-manager/bin",
+  "payloadDir": "src/agent_bridge/receiving_assets/mux",
+  "files": [
+    "pane-wrapper.sh"
+  ]
+}

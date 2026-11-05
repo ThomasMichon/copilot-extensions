@@ -1,6 +1,8 @@
 """HTTP-52 owner membership; all earlier generations remain immutable evidence."""
 
 from functools import partial
+import json
+from pathlib import Path
 
 import bridge_http51_evidence as retained
 import bridge_http_retained_evidence as common
@@ -17,7 +19,10 @@ REGISTRY = common.REGISTRY
 SCOPE = (
     retained.SCOPE + "; membership transcripts use a virtual reader clock; "
     "separate deadline-expiry and actual SQLite VM-cutoff probes; "
-    "not wall-clock read qualification"
+    "not wall-clock read qualification; portable launch joins actual archive/policy readers, "
+    "ASGI/SQLite and driver HTTP with controlled SDK, native mux, provider process, SSH, "
+    "Owner, claims, forwards and POSIX-to-private-scratch namespace fixtures; "
+    "not native Copilot, mux, remote authentication or installed qualification"
 )
 POLICY = common.POLICY
 AFFECTED = (
@@ -26,11 +31,38 @@ AFFECTED = (
         "acp_client.py", "acp_callbacks.py", "acp_current_requests.py",
         "session_current_requests.py", "resume_cli_contract.py",
         "event_tool_statistics.py", "session_tool_statistics.py",
+        "cli_mode_models.py", "cli_mode_provider.py", "db_inbox_custody.py",
+        "live_inbox_models.py", "plugin_readiness.py", "routes/live_startup_controls.py",
+        "receiving_cli.py", "receiving_bundle.py", "receiving_mux.py",
     )),
+    "plugins/agent-bridge/extensions/agent-bridge/metadata.mjs",
+    "plugins/agent-bridge/extensions/agent-bridge/retained-delivery.mjs",
+    "plugins/agent-bridge/extensions/agent-bridge/remote-driver.mjs",
+    "plugins/agent-remote-driver/extensions/agent-remote-driver/control-client.mjs",
+    "plugins/agent-remote-driver/extensions/agent-remote-driver/startup-client.mjs",
+    "libs/venue-copilot/src/venue_copilot/portable_mux.py",
 )
 EXTRA_PATHS = (
     *retained.EXTRA_PATHS, INPUT, CAPTURE, "tools/bridge_http52_evidence.py",
     "plugins/agent-bridge/tests/test_acp_current_requests.py",
+    "plugins/agent-bridge/tests/test_inbox_consumer_enrollment.py",
+    "plugins/agent-bridge/tests/test_live_inbox_producer.py",
+    "plugins/agent-bridge/tests/test_plugin_readiness.py",
+    "plugins/agent-bridge/tests/test_receiving_bundle.py",
+    "plugins/agent-bridge/tests/test_portable_mux_joined.py",
+    "plugins/agent-bridge/tests/fixtures/portable-mux-sdk.mjs",
+    "plugins/agent-bridge/launch-wrapper-assets.json",
+    "plugins/agent-bridge/packaged-assets.json",
+    *(path.relative_to(Path(__file__).resolve().parents[1]).as_posix()
+      for path in sorted(
+          (Path(__file__).resolve().parents[1] / "plugins/agent-codespaces/src").rglob("*.py"),
+      ) if "__pycache__" not in path.parts),
+    *(declaration["canonicalDir"] + "/" + name
+      for manifest in ("packaged-assets.json", "launch-wrapper-assets.json")
+      for declaration in (json.loads(
+          (Path(__file__).resolve().parents[1] / "plugins/agent-bridge" / manifest).read_bytes(),
+      ),)
+      for name in declaration["files"]),
 )
 PROBES = {
     **retained.PROBES,
@@ -56,12 +88,20 @@ PROBES = {
     "test_statistics_wire_is_optional_and_independent_of_current_requests": 1,
     "test_statistics_cli_checks_live_support_without_losing_supported_waiters": 4,
     "test_statistics_actual_cli_parser_http_join_and_strict_legacy": 1,
+    "test_portable_scope_never_leaks_a_seed_to_the_legacy_inbox_before_enrollment": 1,
+    "test_portable_reload_keeps_its_native_binding_and_uses_the_existing_cas": 1,
+    "test_remote_enrollment_requires_the_original_portable_reservation": 7,
+    "test_retained_startup_admission_requires_its_original_ready_input": 12,
+    "test_readonly_poll_never_claims_or_expires_mutation_controls": 1,
+    "test_bridge_provider_receiver_and_extensions_share_one_conversation": 2,
+    "test_provider_owner_uses_the_actual_client_interface": 1,
 }
 TEST = retained.TEST
 CAPABILITY_VERSIONS = {
     **retained.CAPABILITY_VERSIONS, "owner_membership": 52,
     "bridge-session-current-requests-v1": 1,
     "bridge-session-tool-statistics-v1": 1,
+    "portable_mux": 1, "portable_inbox": 1, "readonly_plugin_controls": 1,
 }
 SPEC = common.EvidenceSpec(
     GENERATION, INPUT, PRIMARY, FAMILY, AFFECTED, EXTRA_PATHS, PROBES,
