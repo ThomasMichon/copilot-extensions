@@ -5,6 +5,14 @@ Method: [weighted semantic consolidation](semantic-density-consolidation.md).
 
 ## Result and coverage
 
+The [six launch/progress/delivery contracts](finite-launch-progress-delivery-contracts.md)
+retain eighteen ranked relationships without confusing setup/entrypoint
+corrections with clean actual launches, SDK transport with a busy-session
+hook nudge, or targeted fixture repair with the explicit full-suite request.
+All six stay OPEN. The
+[journal](<journal/2026/11.05 finite-launch-progress-delivery-contracts.md>)
+retains actual owner progression, finite residuals and protected evidence.
+
 The [seven producer/policy/fixture contracts](finite-producer-policy-fixture-contracts.md)
 retain twenty-one ranked relationships without confusing generic claim
 support with actual producer integration, reload with evaluator recovery,
