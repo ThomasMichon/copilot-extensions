@@ -21,6 +21,7 @@ from agent_pull_requests.generation_cache import GenerationCache
 from agent_pull_requests.owner_read import (
     OwnerReadBinding, OwnerReadHandler, PRINCIPAL_SEMANTICS, PROFILE,
 )
+from agent_pull_requests.review_workspace import _digest
 from agent_pull_requests.watch_replay_store import ReplayStore, ReplayStoreInvalid
 from agent_pull_requests.watch_storage import StateCommitUncertain
 from agent_pull_requests.workspace_operations import WorkspaceOperations
@@ -134,7 +135,10 @@ def test_missing_observation_invalidates_retained_work_without_inventing_progres
     assert result["attention"] == {"status": "unavailable", "interests": 1}
     restarted = ReplayStore(store.root, store.namespace, clock=store.clock)
     row = rows(restarted)[0]
-    assert row["facts"] == {**original["facts"], "complete": False}
+    assert row["facts"] == {
+        **original["facts"], "complete": False,
+        "observed_at": original["facts"]["observed_at"] + 4,
+    }
     assert row["interest"]["matches"] is (None if omitted else True)
     assert row["handled"] == original["handled"] and row["provenance"] == original["provenance"]
     assert rows(restarted)[1] == unrelated
@@ -143,6 +147,71 @@ def test_missing_observation_invalidates_retained_work_without_inventing_progres
     assert project(
         facts, Interest(**row["interest"]), now=facts.observed_at, max_age_seconds=30,
     ).status == "unavailable"
+
+
+@pytest.mark.parametrize("cause", ["status", "head", "terminal_partial"])
+@pytest.mark.parametrize("second", [2, 4])
+def test_stale_or_overlapping_incomplete_acquisition_cannot_invalidate_newer_work(
+    acquired: tuple, cause: str, second: int,
+) -> None:
+    store, evidence = acquired
+    journal = ConversationStore(store)
+    if cause == "terminal_partial":
+        evidence["sections"]["pull_request"]["data"]["status"] = "completed"
+    first = generation(evidence, 4)
+    journal.observe_workspace(first, attention=inputs(first), expires_at=100)
+    if cause == "status":
+        evidence["sections"]["pull_request"]["data"].pop("status")
+    elif cause == "head":
+        evidence["sections"]["pull_request"]["data"].pop("lastMergeSourceCommit")
+    else:
+        evidence["sections"].pop("reviewers")
+    current = generation(evidence, second)
+    before = store.path.read_bytes()
+    result = journal.observe_workspace(
+        current, attention=inputs(current, interests=(), complete=False), expires_at=100,
+    )
+    assert result["status"] == "stale_observation"
+    assert store.path.read_bytes() == before
+
+
+@pytest.mark.parametrize("recovered", [False, True])
+def test_incomplete_acquisition_watermark_fences_older_complete_and_incomplete_reads(
+    acquired: tuple, recovered: bool,
+) -> None:
+    store, evidence = acquired
+    journal = ConversationStore(store)
+    first = generation(evidence)
+    journal.observe_workspace(first, attention=inputs(first), expires_at=100)
+    evidence["sections"]["pull_request"]["data"].pop("status")
+    incomplete = generation(evidence, 4)
+    journal.observe_workspace(incomplete, attention=inputs(incomplete), expires_at=100)
+    restarted = ReplayStore(store.root, store.namespace, clock=store.clock)
+    if recovered:
+        evidence["sections"]["pull_request"]["data"]["status"] = "active"
+    older = generation(evidence, 2)
+    before = store.path.read_bytes()
+    result = ConversationStore(restarted).observe_workspace(
+        older, attention=inputs(older, interests=()), expires_at=100,
+    )
+    assert result["status"] == "stale_observation"
+    assert store.path.read_bytes() == before
+
+
+def test_missing_intervals_cannot_prove_invalidation_order(acquired: tuple) -> None:
+    store, evidence = acquired
+    journal = ConversationStore(store)
+    first = generation(evidence, 4)
+    journal.observe_workspace(first, attention=inputs(first), expires_at=100)
+    current = generation(evidence, 6)
+    current["sections"]["discussions"]["observed_from"] = None
+    current["id"] = _digest({key: value for key, value in current.items() if key != "id"})
+    before = store.path.read_bytes()
+    result = journal.observe_workspace(
+        current, attention=inputs(current, interests=(), complete=False), expires_at=100,
+    )
+    assert result == {"status": "unavailable", "reason": "observation_interval_missing"}
+    assert store.path.read_bytes() == before
 
 
 def test_handled_data_survives_poll_and_new_input_starts_its_own_age(acquired: tuple) -> None:

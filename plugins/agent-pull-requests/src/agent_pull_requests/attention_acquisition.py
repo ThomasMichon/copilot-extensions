@@ -47,6 +47,7 @@ def unavailable_attention(
     key: PRKey,
     generation: dict,
     inputs: AttentionInputs,
+    observed_at: int,
 ) -> dict:
     """Invalidate retained work without inventing a missing observation or cursor."""
     if type(inputs) is not AttentionInputs or inputs.generation_id != generation["id"]:
@@ -63,6 +64,7 @@ def unavailable_attention(
         )
         row["interest"] = asdict(interest)
         row["facts"]["complete"] = False
+        row["facts"]["observed_at"] = observed_at
         updated += 1
     return {"status": "unavailable", "interests": updated}
 
