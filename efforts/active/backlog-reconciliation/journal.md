@@ -3,6 +3,12 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-04 - Three hosted lifecycle and custody contracts](<journal/2026/11.04 hosted-custody-contracts.md>)
+
+- [2026-11-04 - Three knowledge-pair lifecycle contracts](<journal/2026/11.04 knowledge-pair-contracts.md>)
+
+- [2026-11-04 - Four timeout signatures and causal acceptance](<journal/2026/11.04 timeout-causality-contracts.md>)
+
 - [2026-11-04 - Four profile, settings and ACP control contracts](<journal/2026/11.04 native-controls-contracts.md>)
 
 - [2026-11-04 - Four engine, adopter and selector contracts](<journal/2026/11.04 engine-adoption-contracts.md>)

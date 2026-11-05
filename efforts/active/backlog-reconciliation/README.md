@@ -231,6 +231,21 @@ checkpoint nor author eligibility, holds, requirements or source/resource custod
 
 ### Phase 2 - Continuing reconciliation
 
+The [timeout-causality](timeout-causality-cohort.md),
+[knowledge-pair](knowledge-pair-cohort.md) and
+[hosted-custody](hosted-custody-cohort.md) studies preserve ten whole
+originals and all fifty-one texts, plus thirty bounded noncompletion
+comparisons. Keep issue-specific causal alternatives, accepted repair custody,
+pairing/routing/removal policies, FINAL OPEN onboarding and non-expiring
+substantive claims distinct. No owner, native consumer or receiving gate closes.
+
+The preceding eleven-document research delta merged in #10541; its
+[delivery journal](<journal/2026/11.04 native-controls-contracts.md>) records
+the actual reviewed outcome and #10149's continuing owner acceptance.
+Two complete 16:50 PST scans remain 1,007 whole open, 278 above 729, with
+no arrivals, departures or campaign closure credit. Continue weighted-graph
+research and supported consolidation, not a held-lane or historical-cohort retry.
+
 The [daemon-scheduling](daemon-scheduling-cohort.md),
 [engine-adoption](engine-adoption-cohort.md) and
 [native-controls](native-controls-cohort.md) studies preserve twelve whole
@@ -951,6 +966,15 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The three [timeout](timeout-causality-cohort.md),
+[knowledge](knowledge-pair-cohort.md) and
+[hosted](hosted-custody-cohort.md) cores retain complete original alternatives,
+refinements, validation and actual custodians. Preserve the cancelled one-
+attempt retry, correction-OR-retry, both Boolean composition directions,
+all removal choices, actual shared recycler fence, credential recovery OR
+alternatives and FINAL OPEN/direct-readback boundaries. Historical partials,
+functional-profile passes and documentary intake are not causal/source completion.
 
 The [daemon](daemon-scheduling-cohort.md),
 [engine](engine-adoption-cohort.md) and
