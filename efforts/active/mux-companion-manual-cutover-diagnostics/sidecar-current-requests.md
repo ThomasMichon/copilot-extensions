@@ -181,5 +181,9 @@ source-bound 58-case capture and no-write verification pass at
 contracts and 1,005 fixtures. Independent review and required CI remain pending
 in #10557; Manager consumption and rendered attention validation have not started.
 Subsequent independent-follower/heartbeat corrections pass the combined 287-case
-source packet. Revised source-bound capture, admitted-unit qualification and
-current-head review/CI remain required before accepting those corrections.
+source packet and all 4,128 admitted unit cases, with no skips and verified
+bounded cleanup. Revised source-bound capture and independent no-write
+verification pass all 59 required probes at published checkpoint
+`2951c5ccb440a7999a5000053236db18fcc08a24`; both contracts and 1,005 fixtures
+validate against the actual PR base. Current-head review and required CI remain
+required before accepting those corrections.
