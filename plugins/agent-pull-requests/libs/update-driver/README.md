@@ -818,7 +818,7 @@ canonical queued request receipts.
 
 The additive `scripts/first-use.ps1` and `scripts/first-use.sh` front doors
 support the owning Agent Vault, Agent Pull Requests, Agent SSH, Agent CodeSpaces,
-Agent Logger and Agent Bridge payloads' existing legacy
+Agent Logger, Agent Bridge and Agent MCP payloads' existing legacy
 **direct `provision`** and **`stamp`** actions. Namespaced installation recipes refuse before
 queue or plugin mutation until separately qualified. Vault's cold payload command
 and generated primary command use this recipe; the latter delegates to its
@@ -828,6 +828,35 @@ Vault's legacy session bootstrap also uses the fixed stamp/provision actions.
 Explicit installer entry points remain separate, unadopted callers.
 Other plugin identities and snapshot-specific recipes remain unsupported rather than being inferred
 from an arbitrary command line.
+
+MCP's fixed `stamp`/`provision` recipe admits its canonical installed payload
+and default legacy root, retaining its actual `init` front rather than assuming
+`install`. Admission requires its direct command/module, native runtime gates,
+installer lifecycle/CMD catalog and materialized helpers. The existing queue
+retains the exact source/project and own context before running frozen inputs;
+it supplies no service or force override. Unsupported actions, selected
+snapshots, cells/custom roots, managed deployment, no-self/pinned and nested
+inputs refuse rather than fall back to another installer.
+Provision first invokes the frozen payload's canonical `Ensure-Uv`/`ensure_uv`
+helper under the same queue custody, then supplies its selected tool on PATH
+to the actual initializer. Acquisition failure stops before init; deferred
+stamp does not acquire UV. This avoids the legacy initializer's unavailable-UV
+fallthrough without adding another downloader or changing its constructor.
+The Windows adapter uses a fixed native command body with path values encoded
+as data, preserving plain-text initializer output instead of serializing
+PowerShell host/warning records into the queue's forwarded streams.
+Windows provision explicitly re-exports its scoped participant witness and
+native re-entry marker. The native installer receiver takes its execution-root
+address from that bounded witness frame, then authenticates the existing IPC
+owner before admission. Missing or invalid custody never becomes a new request
+or an ambient execution-root override.
+Windows native lifetime admission retains the setup-owned Python prerequisite;
+absence is not permission to download another interpreter or reuse a compiled
+fallback. The manual `mcp-recipes` portfolio separates admission, materialized
+stamp, cold construction, installed consumers and failed-candidate preservation.
+Its contained caller-process-loss case is not production caller-Job escape
+proof. Ordinary MCP bootstrap/command/explicit-installer publishers are not
+adopted, and #10499's Job-lifetime and other-plugin migration gates remain open.
 
 CodeSpaces' fixed `stamp`/`provision` prerequisite admits only its canonical
 installed payload and default legacy root. It retains its snapshot-default

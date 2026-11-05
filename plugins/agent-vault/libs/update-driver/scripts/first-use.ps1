@@ -4,6 +4,7 @@
 # Installation driver lifecycle contract: ssh-command-v1
 # Installation driver lifecycle contract: logger-command-v1
 # Installation driver lifecycle contract: bridge-command-v1
+# Installation driver lifecycle contract: mcp-recipes-v1
 param(
     [Parameter(Mandatory)][string]$Root,
     [Parameter(Mandatory)][string]$Payload,
@@ -53,6 +54,7 @@ switch -CaseSensitive ($plugin) {
     'agent-codespaces' { $prefix = 'AGENT_CODESPACES' }
     'agent-logger' { $prefix = 'AGENT_LOGGER' }
     'agent-bridge' { $prefix = 'AGENT_BRIDGE' }
+    'agent-mcp' { $prefix = 'AGENT_MCP' }
     default { throw 'Owning payload does not declare the fixed first-use provision recipe.' }
 }
 if ($InstallerAction -ceq 'stamp-provision' -and $plugin -cne 'agent-ssh') {
@@ -89,8 +91,33 @@ if ($plugin -ceq 'agent-bridge') {
         }
     }
 }
-if ($plugin -cin @('agent-ssh', 'agent-codespaces', 'agent-logger', 'agent-bridge')) {
-    $label = @{ 'agent-ssh' = 'SSH'; 'agent-codespaces' = 'CodeSpaces'; 'agent-logger' = 'Logger'; 'agent-bridge' = 'Bridge' }[$plugin]
+if ($plugin -ceq 'agent-mcp') {
+    if ($invocation.installerLifecycle -isnot [bool] -or -not $invocation.installerLifecycle -or
+        $invocation.inProcessCatalog -isnot [bool] -or -not $invocation.inProcessCatalog -or
+        $invocation.windowsCatalogShim -isnot [string] -or $invocation.windowsCatalogShim -cne 'cmd') {
+        throw 'MCP first use requires its native installer lifecycle and CMD catalog.'
+    }
+    foreach ($helper in @(
+        'init.ps1', 'init.sh', 'installer-engine.ps1', 'installer-engine.sh',
+        'installer_engine.py', 'installer_engine_process.py', 'runtime_launcher.py',
+        'installer_wheel_inputs.py', 'installer_wheel_snapshot.py', 'installer_wheel_acquisition.py',
+        'installer_dependency_policy.py', 'installer_dependency_config.py', 'installer_dependency_arguments.py',
+        'installer_source_build.py', 'installer_source_wheel_cache.py',
+        'installation-context\installation_context.py',
+        'installation-context\installation-context.ps1', 'installation-context\installation-context.sh',
+        'installer-instance-reconcile.ps1', 'installer-instance-reconcile.sh',
+        'installer_instance_reconcile.py', 'command_binding.py', 'command_lifecycle.py',
+        'versioned_runtime_native.ps1', 'versioned_runtime.py',
+        'versioned_runtime_construction.py', 'versioned_runtime_source.py',
+        'versioned_runtime_publication.py', 'versioned_runtime_leases.py', 'uninstall-profile.json'
+    )) {
+        if (-not [IO.File]::Exists((Join-Path $Payload "scripts\$helper"))) {
+            throw 'MCP first use requires its complete materialized installation helpers.'
+        }
+    }
+}
+if ($plugin -cin @('agent-ssh', 'agent-codespaces', 'agent-logger', 'agent-bridge', 'agent-mcp')) {
+    $label = @{ 'agent-ssh' = 'SSH'; 'agent-codespaces' = 'CodeSpaces'; 'agent-logger' = 'Logger'; 'agent-bridge' = 'Bridge'; 'agent-mcp' = 'MCP' }[$plugin]
     $sshDeclaration = @{
         legacyRuntimeRoot = '.' + $plugin
         payloadRootEnv = $prefix + '_PAYLOAD_ROOT'
@@ -111,7 +138,7 @@ if ($plugin -cin @('agent-ssh', 'agent-codespaces', 'agent-logger', 'agent-bridg
         throw "$label first use requires its declared native runtime gate."
     }
 }
-if ($plugin -cin @('agent-codespaces', 'agent-logger', 'agent-bridge') -and (
+if ($plugin -cin @('agent-codespaces', 'agent-logger', 'agent-bridge', 'agent-mcp') -and (
     (Test-Path ("Env:" + $prefix + '_INSTALLATION_ID')) -or
     $RuntimeRoot -ine (Join-Path $env:USERPROFILE ('.' + $plugin)) -or
     -not (
@@ -212,9 +239,10 @@ foreach ($field in $recipe.GetEnumerator()) {
         throw 'Owning payload does not declare the fixed first-use provision recipe.'
     }
 }
+$expectedInstaller = if ($plugin -ceq 'agent-mcp') { 'init' } else { 'install' }
 if ($identity.name -isnot [string] -or
     ($invocation.version -isnot [int] -and $invocation.version -isnot [long]) -or
-    $invocation.version -ne 2 -or $installer -isnot [string] -or $installer -cne 'install') {
+    $invocation.version -ne 2 -or $installer -isnot [string] -or $installer -cne $expectedInstaller) {
     throw 'Owning payload does not declare the fixed first-use provision recipe.'
 }
 # Admission is already in stock PowerShell; additional interpreter startups exceed hook budgets.

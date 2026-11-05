@@ -94,13 +94,25 @@ def bootstrap(payload: Path):
 @contextmanager
 def custody():
     from update_driver import core, borrowed_custody, participant, participant_environment
-    from update_driver.participant import ENVIRONMENT_KEY
+    from update_driver.participant import ENVIRONMENT_KEY, MAX_FRAME, ParticipantError
 
-    owner = borrowed_custody(root=core.default_root())
-    if owner is None:
-        inherited = participant_environment()
-        if inherited:
-            owner = participant(root=core.default_root(), witness=inherited[ENVIRONMENT_KEY])
+    inherited = participant_environment()
+    transport = os.environ.get(ENVIRONMENT_KEY, inherited.get(ENVIRONMENT_KEY))
+    owner = None
+    if transport is not None:
+        try:
+            if not isinstance(transport, str) or len(transport) > MAX_FRAME:
+                raise ValueError("invalid native participant frame")
+            body = json.loads(transport)
+            if not isinstance(body, dict) or not isinstance(body.get("root"), str):
+                raise ValueError("missing native participant execution root")
+            root = core._root(Path(body["root"]))
+        except (TypeError, ValueError) as error:
+            raise ParticipantError("malformed native participant handoff") from error
+        # Root metadata selects the addressed owner; the existing IPC still authenticates it.
+        owner = borrowed_custody(root=root)
+        if owner is None:
+            owner = participant(root=root, witness=transport)
     if owner is None:
         yield None
     else:
