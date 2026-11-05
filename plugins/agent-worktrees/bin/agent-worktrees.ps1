@@ -77,8 +77,25 @@ function _resolve_aw_py {
     . $resolver
     return $AwPy
 }
+function Get-AwPythonCache([string]$Python) {
+    $selector = @'
+import sys
+try:
+    from agent_procutil.python_cache import cache_arguments
+except ImportError:
+    print(sys.pycache_prefix)
+else:
+    print(cache_arguments(sys.argv[1], runtime=sys.executable)[1].split('=', 1)[1])
+'@
+    $selected = @(& $Python -I -B -X "pycache_prefix=$_awPythonCache" -c $selector $_root)
+    if ($LASTEXITCODE -ne 0 -or $selected.Count -ne 1 -or -not $selected[0]) {
+        [Console]::Error.WriteLine('[agent-worktrees] Runtime cache selection failed.')
+        exit 126
+    }
+    return [string]$selected[0]
+}
 $_py = _resolve_aw_py
-if ($_py) { Invoke-AwTerminalPython $_py (@('-X', "pycache_prefix=$_awPythonCache", '-m', 'agent_worktrees') + $args) @('-I', '-B', '-m', 'agent_worktrees', '--version'); exit $LASTEXITCODE }
+if ($_py) { $_cache = Get-AwPythonCache $_py; Invoke-AwTerminalPython $_py (@('-X', "pycache_prefix=$_cache", '-m', 'agent_worktrees') + $args) @('-I', '-B', '-m', 'agent_worktrees', '--version'); exit $LASTEXITCODE }
 if ($_awUpdateDiagnostic) {
     [Console]::Error.WriteLine('[agent-worktrees] selected update operation requires a provisioned runtime; use ordinary update to repair it.')
     exit 127
@@ -124,6 +141,6 @@ try {
     $mutex.Dispose()
 }
 $_py = _resolve_aw_py
-if ($_py) { Invoke-AwTerminalPython $_py (@('-X', "pycache_prefix=$_awPythonCache", '-m', 'agent_worktrees') + $args) @('-I', '-B', '-m', 'agent_worktrees', '--version'); exit $LASTEXITCODE }
+if ($_py) { $_cache = Get-AwPythonCache $_py; Invoke-AwTerminalPython $_py (@('-X', "pycache_prefix=$_cache", '-m', 'agent_worktrees') + $args) @('-I', '-B', '-m', 'agent_worktrees', '--version'); exit $LASTEXITCODE }
 [Console]::Error.WriteLine('[agent-worktrees] provisioning did not yield a runtime. See the log above; retry, or run the installer manually.')
 exit 1

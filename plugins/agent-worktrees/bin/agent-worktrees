@@ -39,8 +39,10 @@ _aw_exec_resolved() {
   [ "${#_aw_cache_id}" -eq 32 ] || exit 1
   case "$_aw_cache_id" in *[!0-9a-f]*) exit 1 ;; esac
   _aw_python_cache="$_awroot/cache/python/unsealed-$_aw_cache_id"
+  _aw_cache_root="$_awroot"
   case "$AW_PY" in
     *.exe)
+      _aw_cache_root="$(cygpath -aw "$_awroot")" || return
       _aw_python_cache="$(cygpath -aw "$_aw_python_cache")" || return
       case "$_aw_python_cache" in
         '\\?\'*) ;;
@@ -48,7 +50,20 @@ _aw_exec_resolved() {
         *) _aw_python_cache='\\?\'"$_aw_python_cache" ;;
       esac ;;
   esac
-  exec "$AW_PY" -X "pycache_prefix=$_aw_python_cache" -m agent_worktrees "$@"
+  _aw_selected_cache="$("$AW_PY" -I -B -X "pycache_prefix=$_aw_python_cache" -c '
+import sys
+try:
+    from agent_procutil.python_cache import cache_arguments
+except ImportError:
+    print(sys.pycache_prefix)
+else:
+    print(cache_arguments(sys.argv[1], runtime=sys.executable)[1].split("=", 1)[1])
+' "$_aw_cache_root")" || exit 126
+  case "$_aw_selected_cache" in
+    ''|*'
+'*) printf '%s\n' '[agent-worktrees] Runtime cache selection failed.' >&2; exit 126 ;;
+  esac
+  exec "$AW_PY" -X "pycache_prefix=$_aw_selected_cache" -m agent_worktrees "$@"
 }
 _aw_exec_resolved "$@"
 if [ "${_aw_update_diagnostic:-0}" = 1 ]; then

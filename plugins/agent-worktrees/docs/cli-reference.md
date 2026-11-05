@@ -4,6 +4,15 @@
 agent-worktrees <subcommand> [options]
 ```
 
+## Legacy management launchers
+
+Legacy global management launchers select external Python bytecode through the
+[canonical installed-cache helper](../../../libs/agent-procutil/README.md#managed-python-bytecode-cache).
+An unchanged completed installation reuses its recorded namespace; changed
+completion or distribution evidence selects another. Older runtimes without
+the helper retain fresh invocation caches. This changes no account/ownership
+checks, command deadlines, runtime selection or immutable slot bytes.
+
 ## Explicit status refresh
 
 `worktree-status-bundle --worktree <id> --force-refresh --json` requests fresh
