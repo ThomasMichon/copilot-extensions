@@ -84,6 +84,13 @@ def fixture_linked_worktree(tmp_path, anchor, *, relative=False):
     return worktree, admin
 
 
+def fixture_checkout(path):
+    for folder in ("objects", "refs"):
+        (path / ".git" / folder).mkdir(parents=True)
+    (path / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+    return path
+
+
 def test_positive_membership_is_cached_but_registration_alone_is_not(tmp_path, monkeypatch):
     module = load("managed_session")
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
@@ -186,7 +193,8 @@ def test_sdk_cell_cache_revokes_changed_resolver_ownership(tmp_path, monkeypatch
     ))
     anchor, legacy = fixture_project(tmp_path)
     payload = fixtures._payload(tmp_path, "selected")
-    for name in ("managed_session.py", "execution_platform.py", "guarded_anchor_map.py",
+    for name in ("managed_session.py", "execution_platform.py", "managed_project_identity.py",
+                 "remote_identity.py", "guarded_anchor_map.py",
                  "hook_policy_process.py", "hook_process_identity.py"):
         shutil.copyfile(SCRIPTS / name, payload / "scripts" / name)
     context, registry = fixtures._stamp(
@@ -304,6 +312,129 @@ def test_cache_is_scoped_to_session_and_selected_registry(tmp_path, monkeypatch)
     assert (registry / "cache").is_dir()
 
 
+def test_persistent_membership_does_not_cross_execution_platforms(tmp_path, monkeypatch):
+    module = load("managed_session")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    anchor, registry = fixture_project(tmp_path)
+    (registry / "repos.yaml").write_text(json.dumps({
+        "repos": {"example": {"wsl": str(anchor), "linux": str(tmp_path / "other")}},
+    }))
+    payload = {"sessionId": "same-session", "cwd": str(anchor)}
+    monkeypatch.setattr(module, "detect_platform", lambda: "wsl")
+    assert module.admitted(payload, home=tmp_path)
+    monkeypatch.setattr(module, "detect_platform", lambda: "linux")
+    assert not module.admitted(payload, home=tmp_path)
+    monkeypatch.setattr(module, "detect_platform", lambda: "wsl")
+    assert module.admitted(payload, home=tmp_path)
+
+
+@pytest.mark.parametrize("syntax", ["json", "yaml"])
+def test_machine_anchor_override_precedes_registered_anchor_and_invalidates_reuse(tmp_path, monkeypatch, syntax):
+    module = load("managed_session")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setitem(sys.modules, "yaml", None)
+    anchor, _ = fixture_project(tmp_path)
+    override = fixture_checkout(tmp_path / "override")
+    config = tmp_path / ".example" / "config.yaml"
+    config.parent.mkdir()
+    config.write_text(
+        json.dumps({"repos": {"example": {"anchor": str(override)}}}) if syntax == "json" else
+        f"repos:\n  example:\n    anchor: {json.dumps(str(override))}\n"
+    )
+    payload = {"sessionId": "override", "cwd": str(anchor)}
+    assert not module.admitted(payload, home=tmp_path)
+    payload["cwd"] = str(override)
+    assert module.admitted(payload, home=tmp_path)
+    config.write_text("repos: null\n")
+    assert not module.admitted(payload, home=tmp_path)
+    payload["cwd"] = str(anchor)
+    assert module.admitted(payload, home=tmp_path)
+
+
+def test_namespaced_anchor_override_uses_canonical_repository_identity(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import test_registry_paths as fixtures
+    from agent_worktrees import project_state
+
+    native_run = subprocess.run
+    monkeypatch.setattr(fixtures, "subprocess", SimpleNamespace(
+        run=lambda *args, **kwargs: native_run(*args, **(kwargs | no_window_kwargs())),
+    ))
+    module = load("managed_session")
+    anchor, legacy = fixture_project(tmp_path)
+    override = fixture_checkout(tmp_path / "override")
+    payload_root = fixtures._payload(tmp_path, "selected")
+    context, registry = fixtures._stamp(
+        tmp_path / "durable", payload_root, marketplace="selected", repository="example/selected",
+    )
+    (registry / "projects.yaml").write_text((legacy / "projects.yaml").read_text())
+    remote = "https://github.com:443/Example/Repository.git"
+    (registry / "repos.yaml").write_text(json.dumps({
+        "repos": {"example": {"remote": remote,
+                              "windows" if os.name == "nt" else "linux": str(anchor)}},
+    }))
+    fixtures._select(monkeypatch, context, payload_root)
+    identity = project_state._identity("example", remote=remote)
+    generated = module.project_identity("example", remote, module.resolve_registry_context())
+    assert generated.state_root == identity.state_root
+    identity.state_root.mkdir(parents=True)
+    receipt = identity.repository_root / "identity.json"
+    value = project_state._receipt(identity)
+    receipt.write_text(json.dumps(value))
+    (identity.state_root / "config.yaml").write_text(json.dumps({
+        "repos": {"example": {"anchor": str(override)}},
+    }))
+    payload = {"sessionId": "cell-override", "cwd": str(anchor)}
+    assert not module.admitted(payload)
+    payload["cwd"] = str(override)
+    assert module.admitted(payload)
+    receipt.write_text(json.dumps({**value, "normalizedRemote": "network:example.invalid/other"}))
+    assert not module.admitted(payload)
+    receipt.write_text(json.dumps(value))
+    assert module.admitted(payload)
+
+
+def test_sdk_rechecks_new_ownership_fragments_and_explicit_precedence(tmp_path):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node is unavailable")
+    anchor, _ = fixture_project(tmp_path)
+    other = fixture_checkout(tmp_path / "other")
+    config = tmp_path / ".example" / "config.yaml"
+    fragments = config.parent / "config.d"
+    fragments.mkdir(parents=True)
+    driver = tmp_path / "config-cache.mjs"
+    driver.write_text("""
+import assert from "node:assert/strict";
+import {unlinkSync, writeFileSync} from "node:fs";
+import {join} from "node:path";
+import {pathToFileURL} from "node:url";
+const [module, scriptsRoot, python, workingDirectory, other, config, fragments] = process.argv.slice(2);
+const {createManagedSessionAdmission} = await import(pathToFileURL(module));
+const check = createManagedSessionAdmission({scriptsRoot, python});
+const input = {sessionId: "config-cache", workingDirectory};
+assert.equal(await check(input), true);
+const fragment = join(fragments, "operator.yaml");
+writeFileSync(fragment, JSON.stringify({repos: {example: {anchor: other}}}));
+assert.equal(check.current(input), false);
+assert.equal(await check(input), false, "conditional ownership is not guessed before activation");
+assert.equal(await check({...input, workingDirectory: other}), false);
+writeFileSync(config, JSON.stringify({repos: {example: {anchor: other}}}));
+assert.equal(await check({...input, workingDirectory: other}), true,
+  "the explicit machine configuration wins");
+unlinkSync(config);
+unlinkSync(fragment);
+assert.equal(await check(input), true);
+""")
+    result = subprocess.run(
+        [node, str(driver), str(SCRIPTS.parent / "extensions" / "agent-worktrees" / "managed-session.mjs"),
+         str(SCRIPTS), sys.executable, str(anchor), str(other), str(config), str(fragments)],
+        capture_output=True, text=True, timeout=15,
+        env=environment(tmp_path, anchor), **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_real_installation_cells_do_not_share_admission_or_fall_back(tmp_path, monkeypatch):
     from types import SimpleNamespace
     import test_registry_paths as fixtures
@@ -316,7 +447,8 @@ def test_real_installation_cells_do_not_share_admission_or_fall_back(tmp_path, m
     cells = []
     for label in ("first", "second"):
         payload = fixtures._payload(tmp_path, label)
-        for name in ("managed_session.py", "execution_platform.py", "guarded_anchor_map.py"):
+        for name in ("managed_session.py", "execution_platform.py", "managed_project_identity.py",
+                     "remote_identity.py", "guarded_anchor_map.py"):
             shutil.copyfile(SCRIPTS / name, payload / "scripts" / name)
         context, registry = fixtures._stamp(
             tmp_path / "durable", payload,

@@ -613,6 +613,7 @@ def test_installed_bin_layout_contains_all_lifecycle_helpers(tmp_path, monkeypat
     helpers = (
         "hook_client.py", "hook_runtime.py", "hook_pre_policy.py", "hook_policy_process.py",
         "managed_session.py", "managed-session.ps1", "managed-session.sh", "execution_platform.py", "guarded_anchor_map.py", "registry_root.py",
+        "managed_project_identity.py", "remote_identity.py",
         "hook_lifecycle_runtime.py", "native_source_context.py",
         "versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py",
         "versioned_runtime_source.py", "versioned_runtime_readiness.py", "versioned_runtime_publication.py",

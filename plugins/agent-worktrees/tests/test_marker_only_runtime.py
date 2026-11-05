@@ -132,7 +132,7 @@ def test_session_end_uses_real_slot_without_path_python(tmp_path, layout, contex
                  "resolve-runtime.sh", "resolve-runtime.ps1", "managed-session.ps1",
                  "managed-session.sh", "managed_session.py", "execution_platform.py",
                  "guarded_anchor_map.py", "registry_root.py", "hook_policy_process.py",
-                 "hook_process_identity.py"):
+                 "hook_process_identity.py", "managed_project_identity.py", "remote_identity.py"):
         shutil.copyfile(_SCRIPTS / name, scripts / name)
     shutil.copytree(_SCRIPTS / "installation-context", scripts / "installation-context")
     shutil.copyfile(_PLUGIN / "plugin.json", payload / "plugin.json")

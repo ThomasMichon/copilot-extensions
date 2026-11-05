@@ -3,10 +3,11 @@ import { realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, isAbsolute, join } from "node:path";
 
-function stamp(path) {
+function stamp(path, expected) {
   try {
     const info = statSync(path, { bigint: true });
-    if (info.isDirectory()) return ["directory", canonical(path)];
+    if (info.isDirectory()) return expected?.[0] === "listing"
+      ? ["listing", canonical(path), String(info.mtimeNs)] : ["directory", canonical(path)];
     return ["file", canonical(path), String(info.size), String(info.mtimeNs)];
   } catch { return null; }
 }
@@ -49,7 +50,7 @@ export function createManagedSessionAdmission({ scriptsRoot, python, environment
   function current(input) {
     return cached?.key === key(input) &&
       Object.entries(cached.result.inputs).every(([path, value]) =>
-        JSON.stringify(stamp(path)) === JSON.stringify(value));
+        JSON.stringify(stamp(path, value)) === JSON.stringify(value));
   }
   const check = async input => {
     const identity = key(input);

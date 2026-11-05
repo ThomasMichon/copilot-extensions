@@ -18,10 +18,12 @@ if str(_HERE) not in sys.path:
 
 from guarded_anchor_map import canonical, repository_identity
 from execution_platform import detect_platform
+from managed_project_identity import _is_link_or_reparse, _validate_receipt, project_identity
 from registry_root import resolve_registry_context, resolve_registry_root
 
 _LIMIT = 1024 * 1024
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
+_PROJECT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
 
 
 def _read(path: Path) -> str:
@@ -48,9 +50,15 @@ def _scalar(value: str):
     return value
 
 
-def _entries(path: Path, section: str) -> dict:
+def _entries(
+    path: Path, section: str, *, fields: set[str] | None = None,
+    required: bool = True, text: str | None = None,
+) -> dict:
     """Read YAML with its normal parser, or the owner's generated map shape."""
-    text = _read(path)
+    text = _read(path) if text is None else text
+    fields = fields if fields is not None else (
+        {"anchor"} if section == "projects" else {"windows", "wsl", "linux", "remote"}
+    )
     try:
         import yaml
     except ImportError:
@@ -89,6 +97,10 @@ def _entries(path: Path, section: str) -> dict:
                         raise ValueError("duplicate registry section")
                     document[section] = {}
                     if value.strip() not in {"", "{}"}:
+                        if not required and value.strip() in {"null", "~"}:
+                            document[section] = None
+                            active = False
+                            continue
                         raise ValueError("unsupported registry map")
             elif active and indent == 2:
                 if not sep or "\t" in raw[:indent + 1]:
@@ -101,7 +113,7 @@ def _entries(path: Path, section: str) -> dict:
                 current = document[section][name] = {}
             elif (
                 active and indent == 4 and current is not None
-                and key in ({"anchor"} if section == "projects" else {"windows", "wsl", "linux"})
+                and key in fields
             ):
                 if not sep or "\t" in raw[:indent + 1]:
                     raise ValueError("unsupported registry layout")
@@ -110,15 +122,19 @@ def _entries(path: Path, section: str) -> dict:
                 current[key] = _scalar(value)
         # Nested optional fields are not ownership inputs.
     entries = document.get(section) if isinstance(document, dict) else None
+    if entries is None and not required:
+        return {}
     if not isinstance(entries, dict):
         raise ValueError("registry is not a name map")
     return entries
 
 
-def _stamp(path: str | Path) -> list[str] | None:
+def _stamp(path: str | Path, *, listing: bool = False) -> list[str] | None:
     try:
         info = Path(path).stat()
         if Path(path).is_dir():
+            if listing:
+                return ["listing", canonical(path), str(info.st_mtime_ns)]
             return ["directory", canonical(path)]
         return ["file", canonical(path), str(info.st_size), str(info.st_mtime_ns)]
     except OSError:
@@ -126,7 +142,107 @@ def _stamp(path: str | Path) -> list[str] | None:
 
 
 def _current(inputs: dict) -> bool:
-    return all(_stamp(path) == stamp for path, stamp in inputs.items())
+    return all(
+        _stamp(path, listing=bool(stamp and stamp[0] == "listing")) == stamp
+        for path, stamp in inputs.items()
+    )
+
+
+def _config_values(path: Path, name: str, inputs: dict) -> dict:
+    inputs[str(path)] = _stamp(path)
+    if inputs[str(path)] is None:
+        return {}
+    text = _read(path)
+    entries = _entries(path, "repos", fields={"anchor"}, required=False, text=text)
+    row = entries.get(name)
+    values = {"anchor": row["anchor"]} if isinstance(row, dict) and "anchor" in row else {}
+    if text.lstrip().startswith("{"):
+        document = json.loads(text)
+        if "platform" in document:
+            values["platform"] = document["platform"]
+        if "repos" in document and document["repos"] is None:
+            values["anchor"] = None
+    else:
+        for line in text.splitlines():
+            if line.startswith("platform:"):
+                raw = line.partition(":")[2].strip()
+                values["platform"] = None if raw in {"null", "~"} else _scalar(raw)
+            if line.startswith("repos:") and not entries:
+                raw = line.partition(":")[2].strip()
+                if raw in {"", "null", "~"}:
+                    values["anchor"] = None
+    return values
+
+
+def _anchor_candidates(
+    name: str, project: dict, repo: dict, registry: Path,
+    selected: dict | None, platform: str, inputs: dict,
+) -> list[str]:
+    if selected is None:
+        root = registry.parent / f".{name}"
+    else:
+        remote = repo.get("remote")
+        if not isinstance(remote, str) or not remote:
+            root = None
+        else:
+            identity = project_identity(name, remote, selected)
+            root = identity.state_root
+            inputs[str(root)] = _stamp(root)
+            receipt = identity.repository_root / "identity.json"
+            inputs[str(receipt)] = _stamp(receipt)
+            if inputs[str(receipt)] is not None:
+                _validate_receipt(identity)
+            elif root.exists():
+                raise ValueError("project state has no identity receipt")
+    machine = {}
+    conditional = []
+    global_values = _config_values(registry / "config.yaml", name, inputs)
+    if root is not None:
+        inputs[str(root)] = _stamp(root)
+        if selected is not None and _is_link_or_reparse(root):
+            raise ValueError("project state is indirected")
+        machine = _config_values(root / "config.yaml", name, inputs)
+        fragments = root / "config.d"
+        inputs[str(fragments)] = _stamp(fragments, listing=True)
+        if fragments.is_dir():
+            entries = sorted(fragments.iterdir())
+            if len(entries) > 128:
+                raise ValueError("project ownership fragments exceed their bound")
+            for entry in entries:
+                if entry.suffix.lower() in {".yaml", ".yml"}:
+                    conditional.append(_config_values(entry, name, inputs))
+                elif entry.suffix.lower() == ".json":
+                    inputs[str(entry)] = _stamp(entry)
+                    pointer = json.loads(_read(entry))
+                    if not isinstance(pointer, dict) or pointer.get("schema_version") != 1:
+                        continue
+                    owner, target = pointer.get("plugin_root"), pointer.get("target")
+                    if not isinstance(owner, str) or not isinstance(target, str):
+                        continue
+                    owner, target = Path(owner).expanduser(), Path(target).expanduser()
+                    if not owner.is_absolute() or not target.is_absolute():
+                        continue
+                    inputs[str(owner)] = _stamp(owner)
+                    inputs[str(target)] = _stamp(target)
+                    if canonical(target).startswith(canonical(owner) + os.sep):
+                        conditional.append(_config_values(target, name, inputs))
+    default_platform = machine.get("platform") or global_values.get("platform") or platform
+    platforms = {default_platform}
+    if "platform" not in machine:
+        platforms.update(row["platform"] for row in conditional if row.get("platform"))
+    candidates = []
+    for selected_platform in platforms:
+        if selected_platform not in {"windows", "wsl", "linux"}:
+            raise ValueError("project platform is unavailable")
+        keys = ("wsl", "linux") if selected_platform == "wsl" else (selected_platform,)
+        registered = next(
+            (repo[key] for key in keys if isinstance(repo.get(key), str) and repo[key]),
+            project.get("anchor"),
+        )
+        candidates.append(machine.get("anchor") or registered)
+    if "anchor" not in machine:
+        candidates.extend(row["anchor"] for row in conditional if row.get("anchor"))
+    return candidates
 
 
 def inspect(payload: dict, *, home: Path | None = None) -> dict:
@@ -161,7 +277,9 @@ def inspect(payload: dict, *, home: Path | None = None) -> dict:
             inputs[str(manifest)] = _stamp(manifest)
         source_inputs = inputs.copy()
         result.update(workspace=workspace, inputs=inputs.copy())
-        scope = {"session": session, "workspace": workspace, "registry": canonical(registry), "context": context}
+        platform = detect_platform()
+        scope = {"session": session, "workspace": workspace, "registry": canonical(registry),
+                 "context": context, "platform": platform}
         key = hashlib.sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()
         cache = registry / "cache" / "managed-sessions" / f"{key}.json"
         def observe(path: Path) -> None:
@@ -189,31 +307,38 @@ def inspect(payload: dict, *, home: Path | None = None) -> dict:
         repos = _entries(sources[1], "repos") if inputs[str(sources[1])] is not None else {}
         workspace_inputs = result["inputs"].copy()
         ownership_inputs = workspace_inputs.copy()
-        platform = detect_platform()
-        platforms = ("wsl", "linux") if platform == "wsl" else (platform,)
         for name, project in projects.items():
-            if not isinstance(project, dict):
-                continue
-            repo = repos.get(name)
-            anchor = next(
-                (repo[key] for key in platforms if isinstance(repo, dict) and isinstance(repo.get(key), str) and repo[key]),
-                project.get("anchor"),
-            )
-            if not isinstance(anchor, str):
-                continue
-            anchor = os.path.expanduser(anchor)
-            if not os.path.isabs(anchor):
+            if not isinstance(name, str) or not _PROJECT.fullmatch(name) or not isinstance(project, dict):
                 continue
             result["inputs"] = workspace_inputs.copy()
-            owner = repository_identity(anchor, observe=observe)
+            repo = repos.get(name)
+            repo = repo if isinstance(repo, dict) else {}
+            try:
+                anchors = _anchor_candidates(name, project, repo, registry, selected, platform, result["inputs"])
+            except (OSError, ValueError, TypeError):
+                ownership_inputs.update(result["inputs"])
+                continue
+            owners = []
+            for anchor in anchors:
+                if not isinstance(anchor, str) or not os.path.isabs(os.path.expanduser(anchor)):
+                    owners.append(None)
+                    continue
+                anchor = os.path.expanduser(anchor)
+                candidate = repository_identity(anchor, observe=observe)
+                owners.append(
+                    candidate if candidate is not None and canonical(anchor) == candidate["root"] else None
+                )
             owner_inputs = result["inputs"].copy()
             ownership_inputs.update(owner_inputs)
             result["inputs"] = ownership_inputs
-            if owner is None or canonical(anchor) != owner["root"] or owner["common_dir"] != identity["common_dir"]:
+            if not owners or any(
+                owner is None or owner["common_dir"] != identity["common_dir"] for owner in owners
+            ):
                 continue
+            owner = owners[0]
             inputs = owner_inputs
             # Only the adopted anchor or an actual Git-linked worktree belongs.
-            if identity["root"] != owner["root"]:
+            if any(identity["root"] != candidate["root"] for candidate in owners):
                 git_dir = Path(identity["git_dir"])
                 if git_dir.parent != Path(owner["common_dir"]) / "worktrees":
                     continue

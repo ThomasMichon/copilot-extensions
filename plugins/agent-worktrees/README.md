@@ -885,8 +885,8 @@ including native and compatibility paths; explicit management CLI operations
 and on-demand skills remain available.
 
 The passive `scripts/managed_session.py` owner reads the project/repository
-registries and bounded Git filesystem metadata, without invoking Git, a service
-or an installer. Positively established session/workspace associations are
+registries, adopted-project ownership configuration and bounded Git metadata,
+without invoking Git, a service or an installer. Positively established session/workspace associations are
 cached under the selected registry's `cache/managed-sessions/`. Registry and
 Git-ownership inputs invalidate reuse; the extension also checks these inputs
 before pulse, nudge or resident-policy effects. Membership is a reusable fact,
@@ -896,8 +896,14 @@ explicit-cell namespace/payload ownership, so reuse notices repairs and
 revocation. The stdlib-only registry reader ignores optional metadata, including
 inline and block-style tag lists. Platform selection shares the runtime's
 kernel/container-aware classifier rather than inherited WSL environment labels.
-Its standalone copy is generated with `python tools/sync-execution-platform.py`;
-`--check` audits that source delivery.
+Persistent reuse is also scoped to that execution platform. Explicit per-project
+machine anchor configuration precedes the registry fallback; namespaced project
+state uses the runtime's canonical identity and receipt validation. Conditional
+fragment locations that cannot be established before activation remain unknown
+and inert rather than being guessed. Configuration and fragment-directory
+changes invalidate reuse.
+The standalone readers are generated with `python tools/sync-execution-platform.py`;
+`--check` audits their canonical source delivery.
 Read-only native runtime discovery works without PATH Python. Candidate
 interpreters run admission with isolated, no-site imports; the owning payload's
 canonical validator accepts explicit-cell ownership before policy or lifecycle
