@@ -5024,6 +5024,16 @@ guardian's complete source shape without executing that actor during discovery.
 
 ## The turn-key runner
 
+Worktrees' managed-session admission packet is explicitly selectable:
+`python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_managed_session.py`.
+It uses temporary profiles, real hook subprocesses, both available PowerShell
+hosts, owner-stamped installation cells, and the actual extension with a
+test-double SDK transport and real Python policy. Native Windows cases observe
+two windowless cycles and pin the admission worker across timeout; optional
+JUnit output retains individual cold/warm samples and visibility counts, not a
+tail-latency or installed-runtime qualification. This does not enroll the
+subprocess packet in required unit-only CI or change runner budgets.
+
 The `plugin-activation` target runs the shared activation transaction suite.
 Its `tests/test_preservation_processes.py` packet interrupts real transaction
 holders before/after witness publication and during restoration. Worktrees'

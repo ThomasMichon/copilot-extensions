@@ -6019,6 +6019,14 @@ later.
 
 ## Runtime self-reconcile and command glossary (session-start hooks)
 
+Agent Worktrees scopes automatic hook/extension behavior to sessions in an
+adopted `projects.yaml` harness anchor or owned Git-linked worktree of its
+selected installation. Its passive membership gate precedes policy, lifecycle
+and bootstrap fallbacks; global installation or repository classification is
+not adoption. Positive association reuse and current-decision semantics are
+documented in its [Hooks contract](../plugins/agent-worktrees/README.md#hooks).
+This does not restrict explicit management commands or grant update authority.
+
 A Python runtime plugin currently installs a legacy `~/.local/bin/<name>`
 management wrapper, but a
 `copilot plugin update` refreshes only the cached payload — it does **not**

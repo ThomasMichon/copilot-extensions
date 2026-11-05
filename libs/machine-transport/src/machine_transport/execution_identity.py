@@ -11,14 +11,12 @@ inputs to this resolver.
 
 from __future__ import annotations
 
-import os
-import sys
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from pathlib import Path
 
 from .registry import MachineIdentity
 from .machine_environment import split_machine_environment
+from .execution_platform import detect_platform
 
 __all__ = [
     "IdentityError",
@@ -34,30 +32,6 @@ __all__ = [
 
 class IdentityError(ValueError):
     """Topology cannot unambiguously identify an execution machine."""
-
-
-def detect_platform() -> str:
-    """Classify execution roots, not a container's shared host kernel or env."""
-    if sys.platform == "win32":
-        return "windows"
-    if sys.platform.startswith("linux"):
-        if any(Path(marker).is_file() for marker in ("/.dockerenv", "/run/.containerenv")):
-            return "linux"
-        try:
-            cgroup = Path("/proc/1/cgroup").read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            cgroup = ""
-        if any(tag in cgroup for tag in ("/docker", "/kubepods", "containerd", "/lxc", "libpod")):
-            return "linux"
-        if "microsoft" in os.uname().release.casefold():
-            return "wsl"
-        try:
-            with open(Path("/proc/version"), encoding="utf-8") as stream:
-                if "microsoft" in stream.read().casefold():
-                    return "wsl"
-        except OSError:
-            pass
-    return "linux"
 
 
 def qualify_guest(value: str) -> str:

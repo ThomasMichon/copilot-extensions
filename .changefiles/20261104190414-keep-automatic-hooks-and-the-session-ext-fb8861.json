@@ -1,0 +1,9 @@
+{
+  "comment": "Keep automatic hooks and the session extension inert outside adopted harness anchors and worktrees, with scoped positive membership reuse.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

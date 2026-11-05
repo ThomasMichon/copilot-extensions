@@ -81,15 +81,18 @@ def test_native_fallback_preserves_guidance_without_installing(
     (home / "AppData/Roaming").mkdir(parents=True)
     scripts = tmp_path / "payload/scripts"
     scripts.mkdir(parents=True)
-    for name in ("hook_client.py", "hook_runtime.py", "hook_lifecycle_runtime.py", "provision-check.ps1"):
-        shutil.copyfile(PLUGIN / "scripts" / name, scripts / name)
+    for source in (PLUGIN / "scripts").glob("*.py"):
+        shutil.copyfile(source, scripts / source.name)
+    shutil.copyfile(PLUGIN / "scripts/provision-check.ps1", scripts / "provision-check.ps1")
     runtime = home / ".agent-worktrees"
     if runtime_state == "stale":
         slot = runtime / "versions/0.0.1"
         interpreter = slot / "Scripts/python.exe"
         interpreter.parent.mkdir(parents=True)
         interpreter.write_bytes(b"fixture interpreter must never execute")
-        (slot / ".install-complete.json").write_text('{"version":"0.0.1"}')
+        (slot / ".install-complete.json").write_text(json.dumps({
+            "version": "0.0.1", "completed_at": "2026-11-04T00:00:00Z", "pid": 1,
+        }))
         (runtime / "current-version").write_text("0.0.1")
         (runtime / "deploy-manifest.json").write_text('{"source":{"version":"0.0.1"}}')
         (runtime / "reconcile.lock").write_text(str(os.getpid()))

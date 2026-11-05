@@ -85,6 +85,9 @@ def test_policy_scope_retires_descendant(tmp_path, termination, consumer):
             + interpreter.replace("'", "''") + "'\n",
             encoding="utf-8-sig",
         )
+        (scripts / "managed-session.ps1").write_text(
+            "function Test-ManagedWorktreesSession { return $true }\n", encoding="utf-8"
+        )
     home = tmp_path / "home"
     home.mkdir()
     marker = tmp_path / "descendant.json"
@@ -117,6 +120,7 @@ const { createPythonPolicy, createResidentPreToolHook } = await import(pathToFil
 const reports = [];
 const hook = createResidentPreToolHook({
   scriptsRoot: root, invokePolicy: createPythonPolicy({ scriptsRoot: root, python }),
+  admit: async () => true,
   report: reason => reports.push(reason),
 });
 const result = await hook({ workingDirectory: cwd, sessionId: "lifetime-fixture",
@@ -131,6 +135,7 @@ console.log("policy timeout reported after its owned scope was retired");
     module = PLUGIN / "extensions" / "agent-worktrees" / "resident-pre-tool.mjs"
     environment = dict(os.environ, HOME=str(home), USERPROFILE=str(home))
     environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    environment["AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION"] = "command"
     environment["PRETOOL_KILLSWITCH_STATE_FILE"] = str(tmp_path / "absent-stop.json")
     if consumer == "resident":
         command = [node, str(driver), str(module), str(scripts), interpreter, str(home)]

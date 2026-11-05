@@ -1,0 +1,25 @@
+{
+  "comment": "Share the unchanged execution-platform classifier with standalone managed-session admission",
+  "changes": [
+    {
+      "plugin": "libs/machine-transport",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
