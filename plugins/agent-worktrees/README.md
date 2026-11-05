@@ -915,6 +915,8 @@ reuse current dependencies without another child.
 Native dictionary JSON decoding keeps empty or case-distinct keys in unrelated
 event data from suppressing membership extraction.
 Missing admission helpers cannot activate a legacy bootstrap fallback.
+SessionStart also establishes admission before selecting an older runtime client
+when the selected payload client is unavailable.
 Fresh payload/runtime installation and a new session are needed to adopt this
 behavior; an already-loaded older extension is not retroactively changed.
 

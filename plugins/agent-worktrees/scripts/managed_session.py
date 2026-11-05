@@ -90,6 +90,8 @@ def _entries(
                 continue
             indent = len(raw) - len(raw.lstrip(" "))
             key, sep, value = raw.strip().partition(":")
+            if key.startswith(("'", '"')):
+                key = _scalar(key)
             if indent == 0:
                 active, current = key == section, None
                 if active:
@@ -166,12 +168,16 @@ def _config_values(path: Path, name: str, inputs: dict) -> dict:
             values["anchor"] = None
     else:
         for line in text.splitlines():
-            if line.startswith("platform:"):
-                raw = line.partition(":")[2].strip()
-                values["platform"] = None if raw in {"null", "~"} else _scalar(raw)
-            if line.startswith("repos:") and not entries:
-                raw = line.partition(":")[2].strip()
-                if raw in {"", "null", "~"}:
+            if not line or line[0].isspace() or line.startswith("#"):
+                continue
+            key, sep, raw = line.partition(":")
+            if not sep:
+                continue
+            key = _scalar(key)
+            if key == "platform":
+                values["platform"] = _scalar(raw)
+            if key == "repos" and not entries:
+                if _scalar(raw) is None:
                     values["anchor"] = None
     return values
 

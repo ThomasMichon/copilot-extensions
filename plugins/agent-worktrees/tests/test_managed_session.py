@@ -328,7 +328,7 @@ def test_persistent_membership_does_not_cross_execution_platforms(tmp_path, monk
     assert module.admitted(payload, home=tmp_path)
 
 
-@pytest.mark.parametrize("syntax", ["json", "yaml"])
+@pytest.mark.parametrize("syntax", ["json", "yaml", "quoted-yaml"])
 def test_machine_anchor_override_precedes_registered_anchor_and_invalidates_reuse(tmp_path, monkeypatch, syntax):
     module = load("managed_session")
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
@@ -339,7 +339,11 @@ def test_machine_anchor_override_precedes_registered_anchor_and_invalidates_reus
     config.parent.mkdir()
     config.write_text(
         json.dumps({"repos": {"example": {"anchor": str(override)}}}) if syntax == "json" else
-        f"repos:\n  example:\n    anchor: {json.dumps(str(override))}\n"
+        (
+            f'"repos":\n  example:\n    "anchor": {json.dumps(str(override))}\n'
+            if syntax == "quoted-yaml" else
+            f"repos:\n  example:\n    anchor: {json.dumps(str(override))}\n"
+        )
     )
     payload = {"sessionId": "override", "cwd": str(anchor)}
     assert not module.admitted(payload, home=tmp_path)
@@ -349,6 +353,24 @@ def test_machine_anchor_override_precedes_registered_anchor_and_invalidates_reus
     assert not module.admitted(payload, home=tmp_path)
     payload["cwd"] = str(anchor)
     assert module.admitted(payload, home=tmp_path)
+
+
+def test_quoted_yaml_platform_override_precedes_execution_platform_without_yaml(tmp_path, monkeypatch):
+    module = load("managed_session")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setitem(sys.modules, "yaml", None)
+    monkeypatch.setattr(module, "detect_platform", lambda: "linux")
+    stale, registry = fixture_project(tmp_path)
+    current = fixture_checkout(tmp_path / "current")
+    (registry / "repos.yaml").write_text(json.dumps({
+        "repos": {"example": {"linux": str(stale), "wsl": str(current)}},
+    }))
+    config = tmp_path / ".example" / "config.yaml"
+    config.parent.mkdir()
+    config.write_text('"platform": wsl\n')
+    payload = {"sessionId": "quoted-platform", "cwd": str(stale)}
+    assert not module.admitted(payload, home=tmp_path)
+    assert module.admitted({**payload, "cwd": str(current)}, home=tmp_path)
 
 
 @pytest.mark.parametrize("scalar", ["null", "~", "Null", "NULL", "", "json"])
@@ -620,6 +642,50 @@ def test_real_powershell_hook_does_not_activate_unmanaged_repo(kind, tmp_path):
     assert result.stdout.strip() in {"", "{}"}, result.stdout
     assert not result.stderr
     assert not (tmp_path / ".copilot").exists()
+
+
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe", "bash"])
+@pytest.mark.parametrize("case", ["unmanaged", "managed", "missing-helper"])
+def test_session_start_gates_older_client_before_fallback(shell, case, tmp_path, native_bash):
+    executable = native_bash if shell == "bash" else shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    anchor, registry = fixture_project(tmp_path)
+    if case == "unmanaged":
+        (registry / "projects.yaml").write_text("projects: {}\n")
+    payload = tmp_path / "payload"
+    shutil.copytree(SCRIPTS, payload / "scripts")
+    (payload / "scripts" / "hook_client.py").unlink()
+    if case == "missing-helper":
+        (payload / "scripts" / "managed_session.py").unlink()
+    legacy = registry / "bin"
+    legacy.mkdir()
+    marker = tmp_path / "older-client-ran"
+    (legacy / "hook_client.py").write_text(
+        "from pathlib import Path\nPath(" + repr(str(marker)) + ").touch()\nprint('{}')\n"
+    )
+    env = environment(tmp_path, anchor)
+    env.update(COPILOT_PLUGIN_ROOT=str(payload), ADMISSION_TEST_PYTHON=sys.executable)
+    hooks = json.loads((SCRIPTS.parent / "hooks.json").read_text())
+    command = hooks["hooks"]["sessionStart"][0]["bash" if shell == "bash" else "powershell"]
+    if shell == "bash":
+        prefix = (
+            'export HOME="$(cygpath -au "$HOME")"; '
+            'export COPILOT_PLUGIN_ROOT="$(cygpath -au "$COPILOT_PLUGIN_ROOT")"; '
+            'ADMISSION_TEST_PYTHON="$(cygpath -au "$ADMISSION_TEST_PYTHON")"; '
+        ) if os.name == "nt" else ""
+        command = prefix + 'python3() { "$ADMISSION_TEST_PYTHON" "$@"; }; ' + command
+        args = [executable, "-c", command]
+    else:
+        args = [executable, "-NoProfile", "-NonInteractive", "-Command", command]
+    result = subprocess.run(
+        args, input=json.dumps({"sessionId": "older-client", "cwd": str(anchor)}),
+        text=True, capture_output=True, timeout=15, cwd=anchor, env=env, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "{}", result.stdout
+    assert not result.stderr
+    assert marker.exists() is (case == "managed")
 
 
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
