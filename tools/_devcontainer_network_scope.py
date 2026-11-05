@@ -53,12 +53,12 @@ def prepare_dependencies(
     for argument in iterator:
         name, equal, value = argument.partition("=")
         flag = canonicalize(name)
-        if flag not in {"--test-file", "--test-profile"}:
+        if flag not in {"--test-file", "--test-profile", "--junit-dir"}:
             prep_passthrough.append(argument)
             continue
         parameter = value if equal else next(iterator, "")
         if not parameter or (not equal and parameter.startswith("-")):
-            required = "a path" if flag == "--test-file" else "a value"
+            required = "a value" if flag == "--test-profile" else "a path"
             raise ValueError(f"{flag} requires {required}")
     if not any(
         canonicalize(arg.partition("=")[0]) == "--prepare-only"

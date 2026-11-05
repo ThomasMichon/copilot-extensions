@@ -48,7 +48,7 @@ def test_native_probe_and_discovery_ipc_survive_manager_reconstruction(tmp_path,
     # Python interprets the fixture's command-named script; no shell, live mux,
     # provider registration or host-side installation participates.
     listing = "wt-one\t1\t$1:100\t" + str(tmp_path) + "\n"
-    (tmp_path / "list-sessions").write_text("print(" + repr(listing) + ")", encoding="utf-8")
+    (tmp_path / "list-panes").write_text("print(" + repr(listing) + ")", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     registry = MuxMappingRegistry(tmp_path / "mapping.json")
     payload = dict(project="project", worktree_id="one", worktree_path=str(tmp_path),

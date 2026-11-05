@@ -11,6 +11,14 @@ ceremony, issuer, role or universal provenance verifier. Reuse the already
 authorized owner's normal context. The work/payload limits here are the selected
 API's IO contract, not limits on context-isolated delegation.
 
+The standalone host's optional
+[native read-only adapter](../../../services/pr/README.md#optional-native-read-only-workspaces)
+is a different acquisition profile. `NativeReadHandler` invokes the explicitly
+selected finite native exporter and its existing typed credential owner; static
+configuration never constructs a protected `OwnerReadBinding`. The two readers
+share generation normalization, cache publication and existing workspace routes,
+not authority or provenance labels.
+
 ## Exact source entry points
 
 - Protected owner component:

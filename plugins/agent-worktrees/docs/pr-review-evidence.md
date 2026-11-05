@@ -45,6 +45,19 @@ provider/bridge timeout policy. Capabilities are reported by the exact executing
 module, independently of package version. An older installation without this
 module is explicitly unavailable; normal clients are not automatically migrated.
 
+An enclosing native owner may select `read --contained-worker` only after the
+executing capability response advertises `enclosing_scope_credentials`.
+Credential children then borrow that actual parent's confirmed native scope and
+a shared finite execution/cleanup budget; POSIX group/session checks refuse an
+uncontained invocation before credential execution. The enclosing owner confirms
+the whole scope before releasing its caller/writer. This prevents a timed-out
+exporter leaving a separately owned credential session to settle asynchronously.
+The flag is not an authority grant or an invitation to manufacture a parent
+scope. Ordinary direct `read` retains its existing independent credential owner.
+Older exporters lacking this optional capability remain usable through that
+baseline; an enclosing host must explicitly report the optional gap rather than
+send unsupported syntax or silently use independently settling credential scopes.
+
 ### Exact credential adapter contract
 
 This feature consumes an existing credential contract; it does **not** ship or

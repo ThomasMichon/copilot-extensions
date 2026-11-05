@@ -19,6 +19,9 @@ from agent_pull_requests_service import hosting
 from agent_pull_requests_service.__main__ import main
 from agent_pull_requests_service.config import load_config
 from fleet_manager.gateway_service_handler import RequestDisconnected
+from agent_pull_requests.generation_cache import CacheUnavailable
+from agent_pull_requests.native_read import NativeReadHandler
+from agent_pull_requests.watch_replay_store import ReplayStoreInvalid
 
 Configuration = tuple[Path, dict[str, Any]]
 
@@ -96,6 +99,124 @@ def test_config_refuses_duplicate_json_and_oversize(configuration: Configuration
     path.write_bytes(b" " * (1024 * 1024 + 1))
     with pytest.raises(ValueError, match="byte budget"):
         load_config(path)
+
+
+def workspace_config(configuration: Configuration) -> Configuration:
+    path, value = configuration
+    value["workspaces"] = {
+        "bindings": [{
+            "principal": "caller-a", "target": "repository-a",
+            "command": [sys.executable, "-I", "-m", "agent_worktrees.pr_review_evidence_cli"],
+            "scope": {
+                "provider": "azure-devops", "endpoint": "https://dev.azure.com/example",
+                "project_id": "project-id", "repository_id": "repository-id",
+                "principal_id": "reviewer-id",
+            },
+        }],
+        "cache_bytes": 4 * 1024 * 1024, "cache_generations": 20,
+    }
+    path.write_text(json.dumps(value))
+    return path, value
+
+
+def test_optional_workspace_fresh_provision_and_restart_preserve_layout(
+    configuration: Configuration,
+) -> None:
+    path, _ = workspace_config(configuration)
+    config = load_config(path)
+    assert config.workspaces is not None
+    assert not config.root.exists()
+    assert main(["provision", "--config", str(path)]) == 0
+    store = config.store()
+    document = json.loads(store.path.read_bytes())
+    assert document["version"] == 3 and document["schema"] == "agent-pull-requests.owner-store"
+    original = store.path.read_bytes()
+    operations = config.workspaces.operations(store, lambda: None, config.operation_seconds)
+    selected = operations[("caller-a", "repository-a")]
+    selected.validate_storage(expires_at=int(time.time()) + 60, checkpoint=lambda: None)
+    assert selected.write_context is None
+    assert isinstance(selected.read_owner, NativeReadHandler)
+    assert selected.read_owner.credential_command == config.observations[0].credential_command
+    assert selected.read_owner.repo == config.bindings[0].scope.repo
+    assert main(["provision", "--config", str(path)]) == 1
+    assert config.store().path.read_bytes() == original
+
+
+def test_optional_workspace_never_migrates_watch_volume_or_repairs_missing_cache(
+    configuration: Configuration,
+) -> None:
+    path, _ = configuration
+    assert main(["provision", "--config", str(path)]) == 0
+    original = load_config(path).store().path.read_bytes()
+    workspace_config(configuration)
+    config = load_config(path)
+    assert config.workspaces is not None
+    selected = config.workspaces.operations(config.store(), lambda: None, 60)[
+        ("caller-a", "repository-a")
+    ]
+    with pytest.raises(ReplayStoreInvalid, match="adoption"):
+        selected.validate_storage(expires_at=int(time.time()) + 60, checkpoint=lambda: None)
+    assert main(["provision", "--config", str(path)]) == 1
+    assert config.store().path.read_bytes() == original
+    assert not (config.root / "review-cache").exists()
+
+    config = replace(config, root=config.root.with_name("fresh-workspace"))
+    assert config.workspaces is not None
+    config.store().provision(conversations=True)
+    original = config.store().path.read_bytes()
+    selected = config.workspaces.operations(config.store(), lambda: None, 60)[
+        ("caller-a", "repository-a")
+    ]
+    with pytest.raises(CacheUnavailable):
+        selected.validate_storage(expires_at=int(time.time()) + 60, checkpoint=lambda: None)
+    assert config.store().path.read_bytes() == original
+    assert not (config.root / "review-cache").exists()
+
+
+@pytest.mark.parametrize("change", [
+    lambda value: value["workspaces"].update(cache_bytes=True),
+    lambda value: value["workspaces"].update(cache_generations=0),
+    lambda value: value["workspaces"].update(write_context="not-an-owner"),
+    lambda value: value["workspaces"]["bindings"][0].update(principal="unadmitted"),
+    lambda value: value["workspaces"]["bindings"][0].update(target="unadmitted"),
+    lambda value: value["workspaces"]["bindings"][0].update(credential_command=[sys.executable]),
+    lambda value: value["workspaces"]["bindings"][0].update(command=["relative"]),
+    lambda value: value["workspaces"]["bindings"][0]["scope"].update(provider="github"),
+    lambda value: value["workspaces"]["bindings"][0]["scope"].update(number=42),
+    lambda value: value["workspaces"]["bindings"].append(value["workspaces"]["bindings"][0]),
+])
+def test_optional_workspace_config_is_strict_and_bound_to_existing_route(
+    configuration: Configuration, change: Callable[[dict[str, Any]], object],
+) -> None:
+    path, value = workspace_config(configuration)
+    change(value)
+    path.write_text(json.dumps(value))
+    with pytest.raises((ValueError, TypeError)):
+        load_config(path)
+
+
+@pytest.mark.parametrize("conversations", [False, True])
+def test_actual_host_refuses_incompatible_storage_before_connector_admission(
+    configuration: Configuration, monkeypatch: pytest.MonkeyPatch, conversations: bool,
+) -> None:
+    from types import SimpleNamespace
+
+    path, _ = workspace_config(configuration)
+    config = load_config(path)
+    store = config.store()
+    store.provision(conversations=conversations)
+    original = store.path.read_bytes()
+
+    async def access_token() -> str:
+        pytest.fail("connector admitted before workspace storage validation")
+
+    monkeypatch.setattr(hosting, "load_service_credentials", lambda **_kwargs: SimpleNamespace(
+        proof_key=object(), access_token=access_token,
+    ))
+    with pytest.raises((ReplayStoreInvalid, CacheUnavailable)):
+        asyncio.run(hosting.run(config))
+    assert store.path.read_bytes() == original
+    assert not (config.root / "review-cache").exists()
 
 
 def test_provision_refuses_native_state_root(configuration: Configuration) -> None:

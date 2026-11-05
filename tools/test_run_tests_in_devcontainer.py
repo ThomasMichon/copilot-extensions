@@ -1648,6 +1648,26 @@ def test_functional_profile_is_only_forwarded_to_offline_test_pass(tmp_path, pro
     assert arguments == original
 
 
+@pytest.mark.parametrize("report_argument", [
+    ["--junit-dir", "/tmp/reports"],
+    ["--junit-dir=/tmp/reports"],
+    ["--junit", "/tmp/reports"],
+])
+def test_junit_output_is_only_forwarded_to_offline_test_pass(tmp_path, report_argument):
+    arguments = ["worktree-manager", *report_argument]
+    original = arguments.copy()
+    with mock.patch.object(
+        wrapper._net_scope.subprocess, "run", return_value=mock.Mock(returncode=0),
+    ) as run:
+        wrapper._net_scope.prepare_dependencies(
+            "/usr/bin/devcontainer", wrapper.REPO, "abc123",
+            tmp_path / "devcontainer.json", arguments, wrapper._canonicalize_flag,
+        )
+        assert run.call_args.args[0][-2:] == ["worktree-manager", "--prepare-only"]
+    assert wrapper._net_scope.strip_reinstall(arguments, wrapper._canonicalize_flag) == original
+    assert arguments == original
+
+
 def test_prepare_dependencies_raises_on_nonzero_exit(tmp_path: Path) -> None:
     fake_result = mock.Mock(returncode=1)
     config_path = tmp_path / "devcontainer.json"

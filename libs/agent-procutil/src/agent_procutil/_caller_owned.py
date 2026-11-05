@@ -347,6 +347,9 @@ def run(
         except SyncProcessLaunchError:
             preparation_refused = True
             raise
+        except OwnedCleanupError as error:
+            error._retain_on_settled(on_settled)
+            raise
         except subprocess.TimeoutExpired as error:
             raise subprocess.TimeoutExpired(argv, timeout) from error
         except OutputLimitExceeded as error:

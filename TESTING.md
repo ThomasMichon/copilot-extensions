@@ -1,5 +1,23 @@
 # Testing copilot-extensions
 
+Manager's opt-in `--test-file tests/native/test_companion_app_tmux.py
+--test-file tests/native/test_companion_pane_tmux.py --allow-explicit-tiers`
+packet distinguishes the original observer-stub pane test from the actual
+Companion app. The latter runs unmodified `mux_companion.py` in a privately
+constructed source prefix, with synthetic wire-valid owner data and an inert
+CLI process. A foreground, caller-contained private tmux server and an attached
+client PTY exercise keyboard history/live navigation, pushed purpose updates
+while browsing, terminal resize, the Return-to-CLI button, observer reuse and
+Escape dismissal without replacing the CLI pane/PID or native incarnation.
+Owning feed retirement and exact fixture server/client cleanup are checked.
+JUnit properties retain server-buffer browsing/resize captures and the evidence
+boundary. These are native tmux/client source controls, not installed acceptance,
+headed pixels, measured frame/input-ready latency, real Copilot/SDK sessions or
+manual cutover. Native Windows and the parent gates remain separate. The hardened
+container skips this packet when its image lacks tmux; that skip is not a pass.
+Use the bounded host runner on an explicitly enrolled POSIX tmux host for this
+native fixture. Required unit-only CI is unchanged.
+
 Manager's opt-in `--test-file tests/test_companion_timeline_scale.py
 --test-file tests/test_companion_timeline_layout.py
 --test-file tests/test_companion_timeline_widget.py --allow-explicit-tiers`
@@ -375,6 +393,16 @@ controls remain in `tests/test_windows_daemon_observation.py` and the existing
 status/CLI suites. The existing manual `mux-companion` portfolio also selects
 these status/CLI and native files on its Windows runner; its job and test
 budgets remain unchanged. No native packet is added to required unit-only CI.
+
+Blocking ordinary JSON-list admission is covered by
+`agent-worktrees --test-file tests/test_worktrees_client.py --test-file tests/test_worktrees_feed.py`
+through the contained runner. Real authenticated socket controls begin without
+a resident endpoint and delay first publication beyond the old recovery budget;
+JSON and one-shot stream calls return only the complete current publication.
+A real caller-owned subprocess timeout settles a still-waiting CLI with no
+premature stdout. The existing manual `worktrees-git-probes` Linux/Windows
+portfolio includes both files, retaining its current deadlines and isolation.
+Explicit saved-preview bootstrap remains covered separately.
 
 The explicitly selected Windows Picker-handoff packet is
 `python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_terminal_launch_native.py --test-file tests/native/test_terminal_launch_mux_native.py --allow-explicit-tiers`.

@@ -23,7 +23,11 @@ class ResidentRecoveryPending(ProjectionUnavailable):
     """An authenticated resident or admitted recovery has no usable roster yet."""
 
 
-class _ResidentUnready(ProjectionUnavailable):
+class _ResidentRetryable(ProjectionUnavailable):
+    """A validated resident is temporarily unable to serve a publication."""
+
+
+class _ResidentUnready(_ResidentRetryable):
     """A validated resident error reports that its first roster is not ready."""
 
 
@@ -62,6 +66,8 @@ def validate_result(result: dict, request: dict, *, quality: str = "current") ->
             raise ProjectionError(error["message"])
         if error["code"] == "unready":
             raise _ResidentUnready(f"unready: {error['message']}")
+        if error.get("code") in {"draining", "superseded", "unavailable"}:
+            raise _ResidentRetryable(f"{error['code']}: {error['message']}")
         raise ProjectionUnavailable(f"{error.get('code')}: {error['message']}")
     rows, head = result.get("worktrees"), result.get("projection")
     if not isinstance(rows, list) or not isinstance(head, dict):
@@ -196,7 +202,34 @@ def saved_result(request: dict, reason: str, *, db_path=None) -> dict:
     return result
 
 
-def read_current(request: dict, *, recover: bool = True) -> dict:
+def _wait_current(request: dict, *, recover: bool) -> dict:
+    """Wait for usable resident data; the invoking process owns overall lifetime."""
+    request_selection(request)
+    next_recovery = 0.0
+    delay = 0.05
+    while True:
+        try:
+            result = _resident(request)
+        except (_ResidentRetryable, TimeoutError):
+            pass
+        except ConnectionError:
+            from . import status_monitor_runtime as monitor
+
+            now = time.monotonic()
+            if recover and now >= next_recovery and monitor._status_monitor_enabled():
+                # The existing owner checks live identity and coalesces startup.
+                next_recovery = now + 5.0
+                monitor._ensure_status_monitor()
+        else:
+            if result.get("availability") is None:
+                return result
+        time.sleep(delay)
+        delay = min(delay * 2, 1.0)
+
+
+def read_current(request: dict, *, recover: bool = True, wait: bool = False) -> dict:
+    if wait:
+        return _wait_current(request, recover=recover)
     project, selection = request_selection(request)
     unavailable = None
     recovery_pending = False
@@ -297,7 +330,7 @@ def emit_current(args) -> int:
         try:
             return (
                 relay(request, bootstrap=True) if getattr(args, "cache_only", False)
-                else relay(request)
+                else relay(request, wait=True)
             )
         except BrokenPipeError:
             return 0
@@ -321,8 +354,8 @@ def emit_current(args) -> int:
             }), flush=True)
             return 1
     try:
-        result = read_current(request)
-    except (ProjectionError, ProjectionUnavailable) as exc:
+        result = read_current(request, wait=True)
+    except (OSError, ValueError, RecursionError, ProjectionError, ProjectionUnavailable) as exc:
         return output._json_error(str(exc))
     if getattr(args, "stream", False):
         head = result["projection"]

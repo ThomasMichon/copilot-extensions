@@ -335,7 +335,7 @@ def test_worktrees_feed_cli_preserves_structured_retry_policy(
     monkeypatch.setattr(list_cache, "cache_key", lambda *args, **kwargs: "fixture")
     monkeypatch.setattr(list_cache, "note_demand", lambda *args, **kwargs: None)
 
-    def fail(request):
+    def fail(request, **kwargs):
         raise failure
 
     monkeypatch.setattr(client, "relay", fail)
@@ -348,13 +348,96 @@ def test_worktrees_feed_cli_preserves_structured_retry_policy(
     assert frame["error"] == {"code": code, "message": str(failure), "retry": retry}
 
 
+def test_waiting_feed_retries_unready_before_first_publication_without_output(monkeypatch, capsys):
+    waits = []
+    attempts = []
+
+    def connect(request, *, wait=False):
+        waits.append(wait)
+        assert capsys.readouterr().out == ""
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise client.FeedFailure("project cleanup pending", code="unready", retry=True)
+        return object()
+
+    monkeypatch.setattr(client, "_client", connect)
+    monkeypatch.setattr(client, "transport", lambda *args: (frame for frame in ()))
+    monkeypatch.setattr(client.time, "sleep", lambda _: None)
+    assert client.relay({"contract_version": 1, "project": "project"}, wait=True) == 0
+    assert waits == [True, True]
+    assert len(attempts) == 2
+
+
+def test_waiting_feed_does_not_emit_an_early_cutover_notice(monkeypatch, capsys):
+    monkeypatch.setattr(client, "_client", lambda *a, **k: object())
+    calls = []
+
+    def frames(*_args):
+        assert capsys.readouterr().out == ""
+        calls.append(1)
+        if len(calls) == 1:
+            yield {
+                "type": "going-away", "generation": "a" * 32,
+                "cursor": None, "reason": "superseded",
+            }
+
+    monkeypatch.setattr(client, "transport", frames)
+    monkeypatch.setattr(client.time, "sleep", lambda _: None)
+    assert client.relay({"contract_version": 1, "project": "project"}, wait=True) == 0
+    assert len(calls) == 2
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("later_stale", [False, True])
+def test_waiting_feed_rejects_initial_stale_but_retains_later_continuity(
+    owner, monkeypatch, capsys, later_stale,
+):
+    owner.publication_failed("project", RuntimeError("initial producer unavailable"))
+    monkeypatch.setattr(client, "_client", lambda *a, **k: object())
+    attempts = []
+    closed = []
+
+    def frames(*_args):
+        attempts.append(1)
+        attempt = len(attempts)
+        assert capsys.readouterr().out == ""
+        if attempt == 2:
+            owner.publish("project", [{"id": "fresh"}], observed_at=2)
+        snapshot = owner.handle(request())
+        try:
+            yield from feed.publication_frames(snapshot)
+            if later_stale and attempt == 2:
+                yield {
+                    "type": "availability", "projection": snapshot["projection"],
+                    "availability": {"status": "stale", "reason": "later producer unavailable"},
+                }
+                raise TimeoutError("after usable publication")
+        finally:
+            closed.append(attempt)
+
+    monkeypatch.setattr(client, "transport", frames)
+    monkeypatch.setattr(client.time, "sleep", lambda _: None)
+    if later_stale:
+        with pytest.raises(TimeoutError, match="after usable publication"):
+            client.relay(request(), wait=True)
+    else:
+        assert client.relay(request(), wait=True) == 0
+    emitted = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert [frame["type"] for frame in emitted] == [
+        "begin", "worktree", "done", *(["availability"] if later_stale else []),
+    ]
+    assert emitted[1]["wt"]["id"] == "fresh"
+    assert not emitted[0].get("availability")
+    assert attempts == [1, 1]
+    assert closed == [1, 2]
+
+
 @pytest.mark.parametrize("started", [True, False])
-def test_cold_feed_without_an_advisory_roster_retries_only_admitted_recovery(
+def test_bounded_feed_client_without_an_advisory_roster_preserves_recovery_failure(
     monkeypatch, tmp_path, capsys, started,
 ):
-    from agent_worktrees import __main__ as core
     from agent_worktrees import config as cfg
-    from agent_worktrees import list_cache, worktrees_client
+    from agent_worktrees import worktrees_client
 
     monkeypatch.setattr(cfg, "install_dir", lambda: tmp_path)
     monkeypatch.setattr(cfg, "project_name", lambda: "project")
@@ -362,15 +445,10 @@ def test_cold_feed_without_an_advisory_roster_retries_only_admitted_recovery(
     monkeypatch.setattr(worktrees_client.monitor, "_status_monitor_enabled", lambda: True)
     monkeypatch.setattr(worktrees_client.monitor, "_ensure_status_monitor", lambda: started)
     monkeypatch.setattr(worktrees_client, "RECOVERY_WAIT", 0)
-    monkeypatch.setattr(list_cache, "cache_key", lambda *args, **kwargs: "fixture")
-    monkeypatch.setattr(list_cache, "note_demand", lambda *args, **kwargs: None)
-    args = core.build_parser().parse_args(["list", "--current", "--follow", "--all"])
-
-    assert worktrees_client.emit_current(args) == 1
-    error = json.loads(capsys.readouterr().out)["error"]
-    assert error["retry"] is started
-    assert error["code"] == ("unready" if started else "malformed-peer")
-    assert "no usable advisory roster" in error["message"]
+    with pytest.raises(ProjectionUnavailable, match="no usable advisory roster") as caught:
+        client._client(request())
+    assert isinstance(caught.value, worktrees_client.ResidentRecoveryPending) is started
+    assert capsys.readouterr().out == ""
 
 
 @pytest.mark.parametrize("reply", ["unready", "malformed", "incompatible", "superseded"])
@@ -395,10 +473,13 @@ def test_cold_feed_validates_initial_and_recovery_resident_errors_before_retryin
         }
         return worktrees_client.validate_result(response, payload)
 
-    ticks = iter([10.0, 10.1, 10.6])
+    def sleep(_delay):
+        if reply in {"unready", "superseded"} and len(calls) >= (1 if first_read else 2):
+            raise KeyboardInterrupt
+
     monkeypatch.setattr(worktrees_client, "_resident", resident)
     monkeypatch.setattr(worktrees_client, "time", SimpleNamespace(
-        monotonic=lambda: next(ticks), sleep=lambda _: None,
+        monotonic=lambda: 10.0, sleep=sleep,
     ))
     monkeypatch.setattr(cfg, "install_dir", lambda: tmp_path)
     monkeypatch.setattr(cfg, "project_name", lambda: "project")
@@ -413,12 +494,16 @@ def test_cold_feed_validates_initial_and_recovery_resident_errors_before_retryin
     monkeypatch.setattr(list_cache, "note_demand", lambda *a, **kw: None)
     args = core.build_parser().parse_args(["list", "--current", "--follow", "--all"])
 
-    assert worktrees_client.emit_current(args) == 1
-    error = json.loads(capsys.readouterr().out)["error"]
+    if reply in {"unready", "superseded"}:
+        with pytest.raises(KeyboardInterrupt):
+            worktrees_client.emit_current(args)
+        assert capsys.readouterr().out == ""
+    else:
+        assert worktrees_client.emit_current(args) == 1
+        error = json.loads(capsys.readouterr().out)["error"]
+        assert error["retry"] is False
+        assert error["code"] == "malformed-peer"
     assert len(calls) == (1 if first_read else 2)
-    assert error["retry"] is (reply == "unready")
-    assert error["code"] == ("unready" if reply == "unready" else "malformed-peer")
-    assert "no usable advisory roster" in error["message"]
 
 
 def test_worktrees_feed_barrier_replays_mutation_during_initial_snapshot(owner):

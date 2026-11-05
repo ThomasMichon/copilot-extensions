@@ -132,6 +132,10 @@ implementation/validation are in [Step 7](sidecar-live-timeline.md).
 synthetic rendered screens as repeatable repository comparisons. The
 [first visual packet](../../../worktree-manager/tests/visual_baselines/README.md)
 does not replace native-client acceptance or installed evidence.
+The operator subsequently rejected the diagnostic-heavy captures as messy and
+error-laden. [Step 7's captured correction](sidecar-live-timeline.md#operator-correction-after-viewing-progress-captures-2026-11-04)
+restores the original sparse concept hierarchy and requires a separate healthy
+full-app demonstration without hiding genuine source failures.
 
 **2026-10-24 continuation:** prioritize purpose-first Summary and Claims over
 handoff session selection; add a switchable work-topology summary pane,
@@ -498,6 +502,14 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       waiter clearing, gap/Refresh recovery and complete observer cancellation
       on the joined app. Bounded render/performance and native acceptance remain
       separate.
+      #10605 qualifies deterministic full-window resource/viewport controls and
+      source-process performance observations, with geometry/reference reuse
+      and short-content wheel history intent. Native/installed performance and
+      the complete repaint target remain separate.
+      #10612 qualifies the actual app through a private attached tmux client,
+      with history/live browsing, resize, pane/PID retention and owned cleanup.
+      The wire-valid synthetic owner and server-buffer captures do not qualify
+      installed behavior, Windows/PSMux, popup or native-frame performance.
       D5 actual relocation, restoration/reclamation, archive acknowledgment and
       installed/native qualification remain open.
       Current answerability/PRE qualification, archival/rescue, native durability and
@@ -578,6 +590,8 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+- [2026-11-04 - Actual Companion through an isolated native tmux client](journal/2026/11.04-sidecar-native-client.md)
+- [2026-11-04 - Bounded rendering source qualification and performance observations](journal/2026/11.04-sidecar-bounded-render.md)
 - [2026-11-04 - Joined history/live and observer lifecycle source qualification](journal/2026/11.04-sidecar-joined-lifecycle.md)
 - [2026-11-04 - Live-request contract and bounded producer source](journal/2026/11.04-sidecar-live-request-contract.md)
 - [2026-11-04 - Supported local rescue qualified; live request evidence next](journal/2026/11.04-sidecar-rescue-qualification.md)

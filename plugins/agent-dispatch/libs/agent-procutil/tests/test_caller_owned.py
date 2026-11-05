@@ -667,6 +667,57 @@ def test_all_caller_owned_cleanup_failures_retain_process(monkeypatch, boundary)
     assert caught.value.__cause__ is failure
     assert process.returncode is None
     assert observed == []
+    monkeypatch.setattr(ownership, "_retire_posix_group", lambda *a, **k: None)
+    monkeypatch.setattr(protocol, "_confirm_group", lambda *a, **k: None)
+
+    def settled(**kwargs):
+        process.returncode = 0
+
+    process.wait = settled
+    caught.value.retry_cleanup(deadline=time.monotonic() + 2)
+    assert process.returncode == 0 and observed == [True]
+    caught.value.retry_cleanup(deadline=time.monotonic() + 2)
+    assert observed == [True]
+
+
+@pytest.mark.skipif(sys.platform not in ("linux", "darwin"), reason="POSIX unreaped retry")
+@pytest.mark.parametrize("interrupt_reap", [False, True])
+def test_real_posix_confirmation_failure_retains_complete_retry_and_notification(
+    monkeypatch, interrupt_reap,
+):
+    original = protocol._confirm_group
+    attempts, notifications = [], []
+
+    def confirm(process, **kwargs):
+        attempts.append(process)
+        if len(attempts) == 1:
+            raise TimeoutError("synthetic observation interruption")
+        return original(process, **kwargs)
+
+    monkeypatch.setattr(protocol, "_confirm_group", confirm)
+    with pytest.raises(OwnedCleanupError) as caught:
+        _run("print('completed')", on_settled=lambda: notifications.append(True))
+    assert caught.value.process.returncode is None and notifications == []
+    if interrupt_reap:
+        original_wait = caught.value.process.wait
+
+        def reaped(**kwargs):
+            original_wait(**kwargs)
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(caught.value.process, "wait", reaped)
+        with pytest.raises(KeyboardInterrupt):
+            caught.value.retry_cleanup(deadline=time.monotonic() + 3)
+        assert caught.value.process.returncode == -signal.SIGKILL and notifications == []
+        monkeypatch.setattr(
+            ownership, "_retire_posix_group",
+            lambda *a, **k: pytest.fail("retry signalled a reaped PID"),
+        )
+    caught.value.retry_cleanup(deadline=time.monotonic() + 3)
+    assert caught.value.process.returncode == -signal.SIGKILL
+    assert len(attempts) == 2 and notifications == [True]
+    caught.value.retry_cleanup(deadline=time.monotonic() + 3)
+    assert len(attempts) == 2 and notifications == [True]
 
 
 def test_prelaunch_refusal_notifies_without_attempting_native_spawn(monkeypatch):

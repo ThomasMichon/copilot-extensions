@@ -531,6 +531,17 @@ Consumers must retain the error independently of exception translation and
 settle it before launching another attempt; this API never replays the child
 command or asserts that an interrupted mutation failed.
 
+POSIX retirement, group-confirmation and process-wait failures also retain a
+complete retry over the original unreaped leader and remaining streams/output.
+The leader is reaped only after the selected confirmation succeeds. Once this
+owner has confirmed and reaped it, retry finishes only the remaining streams;
+it never signals a reused numeric PID. A caller-owned guardian failure retains
+the public caller's settlement callback through that retry, after its lifetime
+descriptors have closed. Unknown descriptor-close custody still refuses rather
+than treating a later process exit as proof that every resource settled.
+The retained `Popen.returncode` also preserves that completed reap if an
+interruption unwinds the retry before its closure records the same stage.
+
 For an explicitly enclosing finite POSIX owner, opt-in
 `borrow_parent_scope=True` keeps observations in that owner's native group
 instead of creating a separate guardian. Admission requires the caller's actual
