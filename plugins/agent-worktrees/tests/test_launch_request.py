@@ -240,6 +240,35 @@ def test_new_response_loss_reuses_allocated_worktree_not_new_creation(
     assert launch_seed_state.peek(tmp_path / f"{created[0]}.yaml").kind == "new"
 
 
+@pytest.mark.parametrize("version", [1, 2])
+def test_new_knowledge_refusal_does_not_reserve_or_poison_the_request(
+    tmp_path, authority, monkeypatch, version,
+):
+    from test_worktree_creation_seed import _create_config
+    from agent_worktrees import state_root
+    from agent_worktrees.launch_preflight import LaunchPreflightError
+
+    config = _create_config(tmp_path)
+    _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
+    intent = _intent("new")
+    if version == 2:
+        intent.update(version=2, attempt_id=None, native_seed_required=True)
+    with monkeypatch.context() as blocked:
+        blocked.setattr(
+            state_root, "resolve_state_root",
+            lambda *_a, **_k: state_root.StateRoot(
+                None, "knowledge_repo", "", True, True, False, error="Knowledge unavailable",
+            ),
+        )
+        with pytest.raises(LaunchPreflightError, match="knowledge readiness"):
+            request.execute(config, intent)
+    assert not request._admission_path(tmp_path, intent["request_id"]).exists()
+    assert not tracking.list_records(tmp_path)
+    first = request.execute(config, intent)
+    assert request.execute(config, intent) == first
+    assert len(tracking.list_records(tmp_path)) == 1
+
+
 @pytest.mark.parametrize("machine,platform,prefix", [
     ("test", "windows", "test-win"),
     ("test-wsl", "wsl", "test-wsl"),

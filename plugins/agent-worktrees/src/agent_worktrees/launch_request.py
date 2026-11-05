@@ -260,6 +260,11 @@ def execute(config, request: dict, *, identity_mode: IdentityMode = "legacy") ->
     if request["kind"] == "new":
         with contextlib.suppress(FileNotFoundError):
             existing = _read_admission(directory, request_id)
+        if existing is None:
+            from .launch_preflight import LaunchPreflightError, new_knowledge_error
+
+            if error := new_knowledge_error(config, source=config.default_repo.anchor):
+                raise LaunchPreflightError(error)
     if existing is not None:
         timestamp = existing["timestamp"]
         suffix = existing["suffix"]

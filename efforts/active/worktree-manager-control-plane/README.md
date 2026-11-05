@@ -2851,6 +2851,23 @@ is authorized by tracker consolidation.
 
 ## Journal
 
+### 2026-11-05 - Native New-authoring knowledge prerequisite
+
+- Taking only the native first-task admission prerequisite under #542 and the
+  reviewed staged-onboarding intent: compose the engine's read-only knowledge
+  coordination readiness into New authoring preflight before allocation.
+  Qualify unbound/unresolved and usable bindings without changing source-only
+  allocation, existing-session/recovery behavior or receiving ownership.
+- This is not a claim on first-run UI, binding/account writers, provider-policy
+  preflight, Python construction or rollout. #3004/#3030/#4827, Phase 5 and the
+  existing setup, credential and installation owners retain their scope.
+- Source controls now cover direct New and structured protocol 1/2 admission,
+  refusal before the first durable reservation, and same-identity retry/replay
+  after a readiness refusal. The selected packet passed 382 source controls
+  with two platform skips; both actual native CLI profiles passed separately.
+  Configuration acquisition errors remain failures without invented readiness
+  facts. This is source qualification, not installed or complete UI acceptance.
+
 ### 2026-10-30 - Proposed finite launcher/readiness consistency
 
 Added unchecked direct #5611 Plan/local and ACTUAL global Validation with

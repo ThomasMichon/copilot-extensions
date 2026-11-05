@@ -372,12 +372,20 @@ def add_parsers(sub) -> None:
 
 def cmd_resolve(args: argparse.Namespace) -> int:
     """Resolve a launch plan and emit it as JSON."""
-    with preview_mode(getattr(args, "dry_run", False)):
-        if getattr(args, "require_launch_attempt", False):
-            from . import launch_attempt
+    from configuration_layers import ConfigurationError
 
-            return launch_attempt.required(args, lambda: _cmd_resolve(args))
-        return _cmd_resolve(args)
+    try:
+        with preview_mode(getattr(args, "dry_run", False)):
+            if getattr(args, "require_launch_attempt", False):
+                from . import launch_attempt
+
+                return launch_attempt.required(args, lambda: _cmd_resolve(args))
+            return _cmd_resolve(args)
+    except ConfigurationError as exc:
+        return _core()._launch_preflight_error(
+            _core().LaunchPreflight(policy_error=str(exc)),
+            json_output=getattr(args, "json", False),
+        )
 
 
 def _cmd_resolve(args: argparse.Namespace) -> int:
