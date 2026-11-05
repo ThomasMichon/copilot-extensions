@@ -218,14 +218,15 @@ def test_initial_lookup_conflict_requires_native_proof_before_replacement(
             raise RuntimeError("native inventory unavailable")
         incarnation = "$8:200" if native == "successor" else owner["session_incarnation"]
         path = owner["worktree_path"] if native != "wrong-path" else owner["worktree_path"] + "-other"
-        if command[1] == "list-panes":
+        if "#{pane_id}" in command[-1]:
             return SimpleNamespace(returncode=0, stdout=f"%42\t0\tmanaged\t{incarnation}\t{path}\n")
         return SimpleNamespace(returncode=0, stdout=f"managed\t1\t{incarnation}\t{path}\n")
 
     monkeypatch.setattr(mux_discovery, "run_mux_child", inventory)
     monkeypatch.setattr(mux_daemon_cli, "run_mux_child", inventory)
     result = mux_daemon_cli._register_reconnect(dict(owner, panes=_cli()), creation=creation)
-    assert probes and probes[0][1] == ("list-panes" if creation else "list-sessions")
+    assert probes and probes[0][1] == "list-panes"
+    assert ("#{pane_id}" in probes[0][-1]) is creation
     if native == "requested":
         assert result["applied"]
         current = registry.get_mapping("example", "one")

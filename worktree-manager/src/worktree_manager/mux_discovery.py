@@ -188,8 +188,8 @@ def confirm_native_session(
         return {"applied": False, "reason": "session-unconfirmed"}
     try:
         probe = run_mux_child(
-            [payload["mux_bin"], "list-sessions", "-F",
-             "#{session_name}\t#{session_attached}\t#{session_id}:#{session_created}\t#{session_path}"],
+            [payload["mux_bin"], "list-panes", "-a", "-F",
+             "#{session_name}\t#{session_attached}\t#{session_id}:#{session_created}\t#{pane_current_path}"],
             capture_output=True, text=True, timeout=timeout_s, **no_window_kwargs(),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -215,13 +215,14 @@ def confirm_native_session(
     matches = [row for row in rows if row[0] == name]
     if not matches:
         return {"applied": False, "reason": "session-absent"}
-    if len(matches) != 1 or len(matches[0]) != 4:
+    if len({(row[1], row[2]) for row in matches}) != 1:
         return {"applied": False, "reason": "session-unconfirmed"}
-    _, count, incarnation, path = matches[0]
+    _, count, incarnation, _ = matches[0]
     if incarnation != payload["session_incarnation"]:
         return {"applied": False, "reason": "stale-incarnation"}
-    if not path or os.path.normcase(os.path.realpath(path)) != os.path.normcase(
-        os.path.realpath(payload["worktree_path"])
+    expected_path = os.path.normcase(os.path.realpath(payload["worktree_path"]))
+    if not any(
+        os.path.normcase(os.path.realpath(row[3])) == expected_path for row in matches
     ):
         return {"applied": False, "reason": "unattributed-path"}
     if not count.isdecimal() or (connected_only and int(count) <= 0):

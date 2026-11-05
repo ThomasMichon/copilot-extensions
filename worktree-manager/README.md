@@ -835,15 +835,17 @@ treated as confirmed drift.
 The engine status monitor discovers connected canonical worktree mux sessions
 even when they were created directly or reattached with native `psmux`/`tmux`,
 without first using the Manager launcher. Attribution requires an unambiguous
-local tracking record and the mux's original session directory, not a shell's
-current directory or a `wt-` name prefix alone. Discovery checks at most two
+local tracking record and a matching inner-pane directory, not a shell's
+current directory or a `wt-` name prefix alone as ownership proof. The server
+may start in home while the pane executes in the selected checkout.
+Discovery checks at most two
 candidates per sweep, round-robin; a larger connected fleet converges over
 successive sweeps. Current registered paths with an admitted native incarnation
 and fresh managed mappings are reused without another roster scan, mux probe
 or registration request. Standalone registrations retain their raw path file
 and an atomic hidden identity companion, so monitor restart does not trust a
 same-name replacement. Changed or unknown incarnations are excluded from
-presentation until their original directory is attributed again, including
+presentation until their checkout pane is attributed again, including
 while detached. A failed identity write cannot authorize presentation.
 Admission and persisted reuse require the native `$<decimal>:<decimal>`
 session-ID/creation identity, including valid zero values. Malformed or unknown
@@ -853,9 +855,11 @@ Unresolved sessions retry no sooner than 20 seconds after an attempt completes;
 a new native incarnation has its own retry fence.
 
 The existing authenticated mux-daemon endpoint admits these observations with
-`mux-discover-v1`. Manager confirms the native session incarnation, original
-directory and positive attachment count before atomically creating an absent
-mapping. Reattachment and daemon reconstruction retain its revision.
+`mux-discover-v1`. Manager confirms the native session incarnation, matching
+pane directory and positive attachment count in one bounded pane inventory
+before atomically creating an absent mapping. Other panes may have different
+directories, but conflicting session identities or attachment counts remain
+unconfirmed. Reattachment and daemon reconstruction retain its revision.
 Same-incarnation tombstones cannot be resurrected. A confirmed distinct native
 incarnation for the same canonical worktree can replace an old mapping at a
 higher revision, but only if the registry identity and revision still match the
