@@ -163,15 +163,20 @@ def test_native_configuration_trust_refuses_unqualified_effects(
     assert git(source, "status", "--porcelain") == ""
 
 
+@pytest.mark.parametrize("home_lookup", [False, True])
 def test_native_configuration_trust_preserves_config_and_is_idempotent(
-    source: Path, tmp_path, monkeypatch, capsys,
+    source: Path, tmp_path, monkeypatch, capsys, home_lookup,
 ) -> None:
+    if home_lookup:
+        from agent_worktrees import permissions
+        monkeypatch.setattr(permissions.platform, "system", lambda: "Linux")
     home = tmp_path / "home"
     copilot = home / ".copilot"
     copilot.mkdir(parents=True)
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("COPILOT_HOME", str(copilot))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     config = copilot / "config.json"
     config.write_text(json.dumps({"trustedFolders": ["existing"], "unrelated": True}))
     args = argparse.Namespace(
@@ -184,6 +189,40 @@ def test_native_configuration_trust_preserves_config_and_is_idempotent(
             "trustedFolders": ["existing", str(source.resolve())], "unrelated": True,
         }
     assert git(source, "status", "--porcelain") == ""
+
+
+@pytest.mark.parametrize("phase", ["before", "after"])
+def test_configuration_trust_git_timeout_retains_structured_effect_state(
+    source: Path, tmp_path, monkeypatch, capsys, phase,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("COPILOT_HOME", str(home / ".copilot"))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    args = argparse.Namespace(
+        repo=source, repository=URL, commit=git(source, "rev-parse", "HEAD"), apply=True,
+    )
+    real_qualify = setup.qualify
+    calls = 0
+
+    def qualify(path, url):
+        nonlocal calls
+        calls += 1
+        if calls == (1 if phase == "before" else 2):
+            raise subprocess.TimeoutExpired(["git", "qualification"], 30)
+        return real_qualify(path, url)
+
+    monkeypatch.setattr(setup, "qualify", qualify)
+    assert setup.cmd_trust_configuration(args) == 1
+    outcome = json.loads(capsys.readouterr().out)
+    assert outcome["status"] == "refused"
+    assert outcome["changed"] == (True if phase == "after" else None)
+    config = home / ".copilot" / "config.json"
+    assert config.exists() is (phase == "after")
+    if phase == "after":
+        assert json.loads(config.read_text())["trustedFolders"] == [str(source.resolve())]
 
 
 @pytest.mark.parametrize("flag", ["--assume-unchanged", "--skip-worktree"])

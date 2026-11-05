@@ -255,6 +255,9 @@ different native Copilot home before changing trust. Success emits
 other configuration and grants no tool permissions or extension approval.
 Source change detected after the trust write refuses completion without
 silently undoing or replaying that completed effect.
+Bounded Git timeouts also return the versioned refusal. Refusals retain
+`changed: true` when a write completed, false when the owner confirmed existing
+trust, or null when no write outcome has been confirmed.
 
 This command is not a replacement for the admitted managed-worktree trust owner.
 Source execution consent alone still creates no Copilot trust record: the

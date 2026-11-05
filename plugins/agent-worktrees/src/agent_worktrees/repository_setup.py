@@ -365,6 +365,7 @@ def add_parsers(sub) -> None:
 def cmd_trust_configuration(args) -> int:
     from . import permissions
 
+    changed = None
     try:
         if not args.apply:
             raise SetupError("Explicit --apply is required; native folder trust was not changed.")
@@ -386,10 +387,10 @@ def cmd_trust_configuration(args) -> int:
             "schema": "copilot-extensions.repository-configuration-trust", "version": 1,
             "status": "ready", "changed": changed,
         }
-    except (SetupError, OSError, permissions.FolderTrustError) as error:
+    except (SetupError, OSError, subprocess.TimeoutExpired, permissions.FolderTrustError) as error:
         result = {
             "schema": "copilot-extensions.repository-configuration-trust", "version": 1,
-            "status": "refused", "message": str(error),
+            "status": "refused", "message": str(error), "changed": changed,
         }
     print(json.dumps(result))
     return 0 if result["status"] == "ready" else 1
