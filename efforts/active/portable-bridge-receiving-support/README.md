@@ -279,3 +279,19 @@ implementation. The exact support closure follows the consumer trace and tests.
   cases. CodeSpace parser/lifecycle controls passed 141 cases, including unmapped
   first use and identity, explicit-lookup and token failures. Updated source
   evidence, required CI and a new passing review remain separate gates.
+
+### 2026-11-05 - Retained checkout backstop
+
+- The next review confirmed the three previous corrections and identified an
+  explicit-checkout gap before remote-host preparation. Admission now checks
+  explicit selections too; the real preparation method independently rejects
+  a changed known retained checkout before target/database updates or child
+  preparation. It resolves a copy rather than mutating retained metadata on
+  refusal.
+- All 27 focused controls pass, including explicit/non-explicit cross-repository
+  admission, actual preparation under explicit, provider and managed bindings,
+  and existing fresh/replacement authenticated-hook sequencing. The ACP connection
+  is substituted, not native Copilot acceptance.
+- Reconciled independent contract-registry edits with incoming Dev history.
+  The prior rebased head passed all 4,146 admitted units and 15 start consumers;
+  final source admission and renewed review/CI remain open after this backstop.

@@ -162,6 +162,10 @@ drain cannot report completion while that request can still activate a venue.
 Cross-repository resume supplies the retained repository and remote to that
 provider. Adopting a different leading `cd` cannot silently retarget the retained
 checkout; a changed execution path refuses before recovery.
+Explicit checkout selections receive that same check. Remote-host preparation
+also verifies every known retained checkout before updating its target or
+preparing a replacement child, so a later provider-default change cannot
+replace the directory that admission validated.
 Opaque commands and unknown resolver protocols still refuse before effects;
 invalid cross-repo requests are rejected before admission work.
 

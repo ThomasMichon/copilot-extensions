@@ -4410,7 +4410,7 @@
         "plugins/agent-bridge/src/agent_bridge/client_worktree_restart.py": "af79a6f538b19ab9a14000524d3951007d71c5f6a957da91909019e8184e6d9c",
         "plugins/agent-bridge/src/agent_bridge/client_worktrees.py": "15b4598ea31081173f418fc0e03a1bbecf0dac5d451cf27a726cf43a45671335",
         "plugins/agent-bridge/src/agent_bridge/hosting_admission_cli.py": "b851565e2466f995016a1b8348785c019ebe00abd2d79e91a452b64930ba045f",
-        "plugins/agent-bridge/src/agent_bridge/hosting_policy.py": "2fab580317e41e75b59163a960db1354962f8cc20d8481224c926970571b439a",
+        "plugins/agent-bridge/src/agent_bridge/hosting_policy.py": "b8a1a76a3dcd3db9bada39dea210e0158febd92c09a24f02dbfe804318de1fe7",
         "plugins/agent-bridge/src/agent_bridge/live_turn_state.py": "7cc256ae9df554f76101c4519c38da6f000408e507ef1edfa6fc971a5b5d013f",
         "plugins/agent-bridge/src/agent_bridge/local_launch_arguments.py": "3fa171dbef64d0f71b2b3ad584f000ca2b99a9c38c9169d319ea2c4aa65e5d8e",
         "plugins/agent-bridge/src/agent_bridge/owned_workspace.py": "ca4f234460c79857429438f92ebf9944be75b87fc39f088f6a45c1d6465df2bc",

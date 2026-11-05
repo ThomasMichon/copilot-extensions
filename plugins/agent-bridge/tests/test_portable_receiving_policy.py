@@ -606,8 +606,9 @@ async def test_http_activation_remains_owned_until_original_provider_settles(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("moved", [False, True])
+@pytest.mark.parametrize("explicit_cwd", [False, True])
 async def test_stopped_cross_repo_resume_negotiates_retained_repo_before_policy(
-    repo: Path, session_manager, monkeypatch: pytest.MonkeyPatch, moved: bool,
+    repo: Path, session_manager, monkeypatch: pytest.MonkeyPatch, moved: bool, explicit_cwd: bool,
 ) -> None:
     from agent_bridge.models import SessionStatus
     from agent_bridge.session_manager import Session
@@ -620,7 +621,7 @@ async def test_stopped_cross_repo_resume_negotiates_retained_repo_before_policy(
         "acp_command": "cd /workspaces/other && legacy-guard && copilot",
     }
     session = Session("existing", "existing", SpawnTarget(
-        type="command", codespace=metadata, cwd="/workspaces/other",
+        type="command", codespace=metadata, cwd="/workspaces/other", explicit_cwd=explicit_cwd,
     ), "other@codespace:selected")
     session.status = SessionStatus.STOPPED
     session.acp_session_id = "retained-conversation"
@@ -685,9 +686,73 @@ async def test_stopped_cross_repo_resume_negotiates_retained_repo_before_policy(
     else:
         assert await session_manager.resume_session("existing") is session
         assert len(policy_reads) == 1
-        assert session.target.cwd == "/workspaces/other" and not session.target.explicit_cwd
+        assert session.target.cwd == "/workspaces/other" and session.target.explicit_cwd is explicit_cwd
         assert session.target.codespace["requested_repo"] == "other"
     assert session.acp_session_id == "retained-conversation"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("binding", ["explicit", "provider", "managed"])
+@pytest.mark.parametrize("moved", [False, True])
+async def test_real_remote_host_preparation_preserves_retained_checkout(
+    session_manager, monkeypatch: pytest.MonkeyPatch, binding: str, moved: bool,
+) -> None:
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.session_manager import Session
+    from agent_bridge.spawn_target import SpawnTarget
+
+    workspace = "/provider-default" if moved else "/actual"
+    metadata = {
+        "name": "selected", "repo": "example/project", "workspace_folder": workspace,
+        "acp_command": f"cd {workspace} && copilot --acp --stdio",
+        "portable_receiving_policy": {
+            "version": 1, "activation": "start",
+            "acp_command": f"cd {workspace} && copilot --acp --stdio",
+        },
+    }
+    session = Session("existing", "existing", SpawnTarget(
+        type="command", cwd="/actual", codespace=metadata,
+        explicit_cwd=binding == "explicit", worktree_id="retained-worktree" if binding == "managed" else None,
+    ), "codespace:selected")
+    session.status = SessionStatus.STOPPED
+    session.acp_session_id = "retained-conversation"
+    session.event_log = SimpleNamespace(append=lambda *_args: None)
+    session_manager._sessions["existing"] = session
+    session_manager.db.create_session(
+        "existing", "existing", session.agent_name, "/actual", "command", "stopped", 0,
+        target_json=session.target.to_json(), acp_session_id=session.acp_session_id,
+    )
+    retained_row = session_manager.db.get_session("existing")
+    guest = SimpleNamespace(run=AsyncMock(side_effect=AssertionError("unexpected workspace probe")))
+    spawner = SimpleNamespace(transport=guest)
+    connect = AsyncMock(return_value=("fixture-client", "retained-conversation"))
+    monkeypatch.setattr(session_manager, "_connect_via_session_host", connect)
+    monkeypatch.setattr(session_manager, "_acquire_codespace_lock", lambda *_args: None)
+    monkeypatch.setattr(session_manager, "_release_codespace_lock", lambda *_args: None)
+    monkeypatch.setattr("agent_bridge.venue_plugins.resolve_controller_cwd", AsyncMock(return_value=None))
+    monkeypatch.setattr("agent_bridge.relay_state.get_live_relay_port", lambda: None)
+    monkeypatch.setattr("agent_bridge.session_manager._resolve_relay_launch_env", lambda *_args: ("", None))
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner", lambda *_a, **_k: spawner,
+    )
+    if moved:
+        with pytest.raises(AgentHostingError, match="changed the retained execution checkout"):
+            await session_manager._resume_via_new_remote_host(
+                session, on_acp_event=None, permission_callback=None,
+            )
+        connect.assert_not_awaited()
+        assert session_manager.db.get_session("existing") == retained_row
+        assert session.target.codespace is metadata
+        assert not hasattr(spawner, "prepare_child")
+    else:
+        assert await session_manager._resume_via_new_remote_host(
+            session, on_acp_event=None, permission_callback=None,
+        ) == ("fixture-client", "retained-conversation")
+        assert connect.await_args.kwargs["remote_cwd"] == "/actual"
+        assert connect.await_args.kwargs["load_session_id"] == "retained-conversation"
+        assert callable(spawner.prepare_child)
+    assert session.target.cwd == "/actual" and session.acp_session_id == "retained-conversation"
+    assert session.target.worktree_id == ("retained-worktree" if binding == "managed" else None)
 
 
 @pytest.mark.asyncio

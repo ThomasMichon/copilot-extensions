@@ -123,7 +123,7 @@ async def _activate_resume_codespace(
     negotiated.pop("portable_receiving_policy", None)
     if "portable_receiving_policy" in (candidate.codespace or {}):
         negotiated["portable_receiving_policy"] = candidate.codespace["portable_receiving_policy"]
-    if not retained.explicit_cwd and not retained.worktree_id:
+    if retained.explicit_cwd or not retained.worktree_id:
         from .session_host.codespace_transport import CodeSpaceTransport, resolve_execution_workspace
 
         transport = CodeSpaceTransport(name, metadata.get("repo") or "")

@@ -70,6 +70,11 @@ repository/remote and tests real leading `cd` selection, including refusal of a
 changed checkout. Unmapped first-use activation identifies the authenticated
 login, revalidates its exact venue and keeps identity/lookup/token failures
 pre-effect.
+Explicit cross-repository selections exercise the same leading-`cd` guard.
+Separate controls enter the real remote-host preparation method for explicit,
+ordinary provider and managed bindings, proving a late checkout change cannot
+update the retained target/database or reach child preparation. Matching paths
+retain the original ACP identity; the final ACP connection is substituted.
 Containers' `tests/test_runtime_drivers.py` sends the
 base64 archive through the real runtime-proxy, external-driver process and
 isolated canonical reader, proving both allow and deny without Docker.
