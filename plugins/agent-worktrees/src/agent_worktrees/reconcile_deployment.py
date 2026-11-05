@@ -205,10 +205,17 @@ def execution_diagnostic(
         expected_context = update.get("environment", {}).get("COPILOT_EXTENSIONS_CONTEXT")
         if expected_context != environment.get("COPILOT_EXTENSIONS_CONTEXT"):
             raise ValueError("The runtime plan's installation context changed; rebuild the plan.")
-        return publication_diagnostic(
+        diagnostic = publication_diagnostic(
             plugin, payload, root,
             context=Path(expected_context) if expected_context else None,
         )
+        if diagnostic is not None:
+            return diagnostic
+        from .reconcile_freshness import check_runtime_freshness
+
+        return check_runtime_freshness(
+            plugin, payload, root, expected=update.get("runtime_freshness"),
+        )[1]
     except (OSError, ValueError) as error:
         return {
             "service": plugin, "phase": "runtime",

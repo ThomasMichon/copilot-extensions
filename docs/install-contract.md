@@ -1716,6 +1716,43 @@ paths, and any foreign plugin context are removed. A missing or invalid receipt
 blocks that plugin's mutation with an explicit diagnostic rather than falling
 through to an unattributed legacy root.
 
+Automatic runtime actions also use one read-only source/freshness decision
+across reconciliation, Worktrees staging, pre-launch planning and immediate
+execution admission. A payload older than either the deployed or serving
+package cannot replace it. A different local source or a source-qualified
+runtime without the same payload receipt requires an explicit selected-source
+update, including when package versions match. Missing or malformed required
+evidence produces a recovery diagnostic, not permission to deploy.
+Older standalone manifests that predate source-kind metadata retain their
+version-guarded compatibility path; a present invalid source kind or lost
+selected-runtime manifest does not qualify as that legacy case.
+
+Newly prepared actions retain their payload manifest, complete construction-input
+fingerprint, runtime source receipt, deployment manifest, selector and relevant
+serving identity facts. Construction inputs include transitive declared local
+package sources outside the payload directory; missing declared inputs refuse.
+Generated environments/caches/build output are excluded; ordinary staging keeps
+its existing curated staleness fingerprint. Versioned
+roots additionally use the owning payload's canonical `resolve-python` primitive
+to observe current, last-known-good or newest-complete selection. Its caller-owned
+read-only child has a fifteen-second deadline and 64 KiB per-stream limit;
+unversioned legacy roots need no extra child. Named and packaged primitives retain
+the exactly-one-resource contract.
+
+Selected package/profile/source facts must agree with the deployment manifest.
+Only canonical generated source/repair suffixes are removed for package-version
+comparison; raw source and generation identities remain separate. Execution
+re-reads the captured facts and rejects a changed decision before invoking the
+installer. After its own successful payload acquisition, the reconciler defers
+that service's runtime action to the next available normal planning pass instead
+of reporting the expected acquisition change as an execution failure.
+Older cached actions without a snapshot still undergo the current source/freshness
+decision. Publication policy, installation scope and the installer's
+construction/activation admission remain independent.
+These automatic-action guards do not constrain explicit `update` or its
+authoritative recovery path, disable marketplace content refresh, or suppress
+unrelated hooks. They do not prove installed service convergence.
+
 Installation-mode probes and explicit-context validation in read-only launch
 preflight invoke the owning payload's portable
 `installation_context.py` with the running runtime's Python in isolated UTF-8

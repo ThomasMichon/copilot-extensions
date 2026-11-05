@@ -232,17 +232,7 @@ def _versions_equal(a: str | None, b: str | None) -> bool:
 
 
 def _version_lt(a: str | None, b: str | None) -> bool:
-    """Return True only when version ``a`` is *confidently* older than ``b``.
-
-    Used to keep runtime reconciliation **monotonic**: a payload version that is
-    strictly older than the running/deployed build must never be redeployed --
-    that would silently REVERT a newer local build toward a stale/throttled
-    marketplace payload (dotfiles #1366). Returns ``False`` on any ambiguity
-    (missing, equal, or unorderable versions) so a genuine *forward* update is
-    never suppressed. Tolerates the ``0.4.0-dev5`` vs ``0.4.0.dev5`` spelling via
-    required ``packaging`` (same normalization as :func:`_versions_equal`).
-    If a damaged runtime lacks it, ordering conservatively returns ``False``.
-    """
+    """Retain the legacy ordering predicate; launch admission also qualifies source."""
     if a is None or b is None or a == b:
         return False
     try:
@@ -1858,22 +1848,24 @@ def build_plan(
                 })
             # Package drift can require installation; build drift only requires
             # a restart from the selected runtime, not rewriting that build.
+            from .reconcile_freshness import check_runtime_freshness, runtime_package_version
+
             rver = rrun if rrun is not None else rdep
-            if pver is None or not _versions_equal(rver, pver):
-                # Monotonic guard (#1366): never redeploy a payload that is
-                # strictly OLDER than the running/deployed build -- doing so would
-                # REVERT a newer local `source: local` deploy toward a stale /
-                # throttled marketplace payload on the next reconcile pass. Only
-                # a confidently-older payload is suppressed; runtime-missing
-                # (rver is None) and forward/ambiguous cases still deploy.
-                if _version_lt(pver, rver):
-                    continue
+            if pver is None or not _versions_equal(
+                runtime_package_version(rver) if rver else rver, pver,
+            ):
                 diagnostic = publication_diagnostic(
                     name, pdir, selected_runtime_root,
                     context=(
                         Path(runtime_env["COPILOT_EXTENSIONS_CONTEXT"])
                         if "COPILOT_EXTENSIONS_CONTEXT" in runtime_env else None
                     ),
+                )
+                if diagnostic is not None:
+                    diagnostics.append(diagnostic)
+                    continue
+                freshness, diagnostic = check_runtime_freshness(
+                    name, pdir, selected_runtime_root,
                 )
                 if diagnostic is not None:
                     diagnostics.append(diagnostic)
@@ -1912,6 +1904,7 @@ def build_plan(
                         "scope": scope,
                         "payload_root": str(pdir),
                         "runtime_root": str(selected_runtime_root),
+                        "runtime_freshness": freshness,
                         "command": cmd,
                         "argv": argv,
                         "environment": {
@@ -2012,8 +2005,11 @@ def apply_plan(
                     _log("provision: nothing to do (runtimes current)")
             break
         final_action = "reconcile"
+        acquired: set[str] = set()
         for upd in plan.get("updates", []):
             service = upd.get("service", "?")
+            if upd.get("phase") == "runtime" and service in acquired and pass_no < passes:
+                continue
             argv = list(upd.get("argv") or [])
             if not argv:
                 continue
@@ -2051,6 +2047,8 @@ def apply_plan(
                 })
                 continue
             ok = rc == 0
+            if ok and upd.get("phase") == "payload":
+                acquired.add(service)
             if not ok:
                 _log(f"provision: step for {service} exited {rc}")
             executed.append({

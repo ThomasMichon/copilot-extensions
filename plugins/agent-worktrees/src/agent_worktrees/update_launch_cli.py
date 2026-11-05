@@ -232,6 +232,7 @@ def _execute_phase(args: argparse.Namespace) -> int:
             executed.append(_apply({
                 "service": "agent-worktrees", "phase": "runtime",
                 "payload_root": str(payload), "runtime_root": str(root),
+                "runtime_freshness": status.get("runtime_freshness"),
                 "environment": environment,
                 "unset_environment": list(reconcile._RUNTIME_ENV_UNSET), "argv": argv,
             }, staged=True))

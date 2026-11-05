@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve selected runtime sources and monotonic freshness across automatic launch planning and apply",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import io
 import json
 import os
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +18,8 @@ import pytest
 from agent_procutil import no_window_kwargs
 
 from agent_worktrees import reconcile, reconcile_deployment, update_cli, update_stage
-from test_reconcile import env as env
+
+pytest_plugins = ["test_reconcile"]
 
 
 @pytest.fixture
@@ -59,6 +63,9 @@ def deployment(
     env.plugin = plugin
 
     def policy(state: str) -> None:
+        if state == "invalid":
+            (env.root / "runtime-deployment.json").write_text("invalid json", encoding="utf-8")
+            return
         helper = reconcile._installation_context_helper(plugin, env.payload)
         resolution = reconcile._run_installation_mode_helper(
             plugin, env.payload, helper, env.home / f".{plugin}",
@@ -79,8 +86,7 @@ def deployment(
             "owner": owner, "managed": state != "standalone",
         }
         (env.root / "runtime-deployment.json").write_text(
-            "invalid json" if state == "invalid" else json.dumps(record),
-            encoding="utf-8",
+            json.dumps(record), encoding="utf-8",
         )
 
     env.policy = policy
@@ -92,6 +98,514 @@ def _snapshot(root: Path) -> dict[str, tuple[int, bytes]]:
         str(path.relative_to(root)): (path.stat().st_mtime_ns, path.read_bytes())
         for path in root.rglob("*") if path.is_file()
     }
+
+
+def _versioned_observation(deployment, version):
+    source = Path(__file__).resolve().parents[3] / "libs" / "versioned-runtime"
+    scripts = deployment.payload / "scripts"
+    for helper in source.glob("versioned_runtime*.py"):
+        shutil.copyfile(helper, scripts / helper.name)
+    slot = deployment.root / "versions" / version
+    interpreter = slot / ("Scripts" if os.name == "nt" else "bin")
+    interpreter.mkdir(parents=True, exist_ok=True)
+    # These are resolver observations, not a claim that the fixture interpreter is runnable.
+    (interpreter / ("python.exe" if os.name == "nt" else "python")).write_bytes(b"fixture")
+    (slot / ".install-complete.json").write_text(
+        json.dumps({"version": version, "completed_at": "fixture", "pid": 0}),
+        encoding="utf-8",
+    )
+
+
+@pytest.mark.parametrize(
+    ("installed", "serving", "local", "reason"),
+    [
+        ("3.0.0", "1.0.0", False, "runtime-payload-older"),
+        ("1.0.0", "3.0.0", False, "runtime-payload-older"),
+        ("1.0.0", None, True, "runtime-source-selection-required"),
+        ("1.0.0", None, False, None),
+    ],
+)
+def test_launch_freshness_preserves_both_versions_and_local_source(
+    deployment, monkeypatch, installed, serving, local, reason,
+):
+    deployment.deploy_runtime(deployment.plugin, installed)
+    if local:
+        manifest_path = deployment.root / "deploy-manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["source"].update(
+            kind="local", path=str(deployment.home / "selected-source"),
+        )
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    if serving:
+        deployment.deploy_running(deployment.plugin, serving)
+        monkeypatch.setattr(reconcile, "_pid_alive", lambda pid: True)
+    before = _snapshot(deployment.home)
+    plan = reconcile.build_plan(
+        deployment.repo, machine="test", cache={}, save=False, include_payload_refresh=True,
+    )
+    assert _snapshot(deployment.home) == before
+    assert [step["phase"] for step in plan["updates"]] == (
+        ["payload", "runtime"] if reason is None else ["payload"]
+    )
+    if reason:
+        assert plan["diagnostics"][0]["reason"] == reason
+        assert plan["diagnostics"][0]["message"]
+    else:
+        assert reconcile_deployment.execution_diagnostic(plan["updates"][-1]) is None
+
+
+@pytest.mark.parametrize("change", ["payload", "source", "selector", "serving"])
+def test_actual_launch_apply_rejects_changed_freshness_before_installer(
+    deployment, monkeypatch, change,
+):
+    from agent_worktrees import update_launch_cli
+
+    step = reconcile.build_plan(
+        deployment.repo, machine="test", cache={}, save=False,
+    )["updates"][0]
+    if change == "payload":
+        source = deployment.payload / "src"
+        source.mkdir()
+        (source / "changed.py").write_text("CHANGED = True\n", encoding="utf-8")
+    elif change == "source":
+        manifest = deployment.root / "deploy-manifest.json"
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        data["source"].update(kind="local", path=str(deployment.home / "another-source"))
+        manifest.write_text(json.dumps(data), encoding="utf-8")
+    elif change == "selector":
+        (deployment.root / "current-version").write_text("3.0.0", encoding="utf-8")
+    else:
+        deployment.deploy_running(deployment.plugin, "3.0.0")
+        monkeypatch.setattr(reconcile, "_pid_alive", lambda pid: True)
+    before = _snapshot(deployment.home)
+    monkeypatch.setattr(
+        reconcile, "_run_plan_step", lambda *args, **kwargs: pytest.fail("installer executed"),
+    )
+    result = update_launch_cli._apply(step)
+    assert result["ok"] is False
+    assert result["diagnostic"]["reason"] == "runtime-freshness-changed"
+    assert _snapshot(deployment.home) == before
+
+
+@pytest.mark.parametrize("change", ["forward", "older", "local", "payload"])
+def test_native_launch_freshness_protocol(deployment, change):
+    step = reconcile.build_plan(
+        deployment.repo, machine="test", cache={}, save=False,
+    )["updates"][0]
+    if change in {"older", "local"}:
+        manifest_path = deployment.root / "deploy-manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["source"]["version"] = "3.0.0" if change == "older" else "2.0.0"
+        if change == "local":
+            manifest["source"].update(
+                kind="local", path=str(deployment.home / "another-source"),
+            )
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    elif change == "payload":
+        source = deployment.payload / "src"
+        source.mkdir()
+        (source / "changed.py").write_text("CHANGED = True\n", encoding="utf-8")
+    before = _snapshot(deployment.root)
+    script = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "from agent_worktrees import reconcile, __main__ as main\n"
+        "payload,root=map(Path,sys.argv[1:])\n"
+        "reconcile.core_installed_payload_dir=lambda name: payload\n"
+        "reconcile.runtime_installer_environment=lambda *a,**kw: ({},root)\n"
+        "raise SystemExit(main.main(['reconcile-plugins','--check-update']))\n"
+    )
+    run = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", script,
+         str(deployment.payload), str(deployment.root)],
+        input=json.dumps(step), text=True, encoding="utf-8", capture_output=True,
+        timeout=30, check=False, **no_window_kwargs(),
+    )
+    assert run.returncode == (0 if change == "forward" else 3), run.stderr
+    result = json.loads(run.stdout)
+    assert result["allowed"] is (change == "forward")
+    if change != "forward":
+        assert result["diagnostics"][0]["reason"] == "runtime-freshness-changed"
+    assert _snapshot(deployment.root) == before
+
+
+def test_plan_refuses_preexisting_selected_deployment_disagreement(deployment):
+    _versioned_observation(deployment, "3.0.0")
+    (deployment.root / "current-version").write_text("3.0.0", encoding="utf-8")
+    before = _snapshot(deployment.home)
+    plan = reconcile.build_plan(
+        deployment.repo, machine="test", cache={}, save=False,
+    )
+    assert plan["action"] == "continue"
+    assert plan["diagnostics"][0]["reason"] == "runtime-freshness-unavailable"
+    assert _snapshot(deployment.home) == before
+
+
+@pytest.mark.parametrize(
+    "parts",
+    [
+        ("scripts", "init.sh"), ("scripts", "init.ps1"),
+        ("scripts", "runtime_install.py"), ("libs", "example", "pyproject.toml"),
+    ],
+)
+def test_cached_action_includes_constructor_inputs(deployment, monkeypatch, parts):
+    from agent_worktrees import update_launch_cli
+
+    path = deployment.payload.joinpath(*parts)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("original construction input\n", encoding="utf-8")
+    step = reconcile.build_plan(
+        deployment.repo, machine="test", cache={}, save=False,
+    )["updates"][0]
+    path.write_text("changed construction input\n", encoding="utf-8")
+    before = _snapshot(deployment.root)
+    monkeypatch.setattr(
+        reconcile, "_run_plan_step", lambda *args, **kwargs: pytest.fail("installer executed"),
+    )
+    result = update_launch_cli._apply(step)
+    assert result["diagnostic"]["reason"] == "runtime-freshness-changed"
+    assert _snapshot(deployment.root) == before
+
+
+@pytest.mark.parametrize("change", ["direct", "transitive", "missing"])
+@pytest.mark.parametrize("parser", ["stdlib", "backport"])
+def test_cached_action_includes_external_local_dependencies(
+    deployment, monkeypatch, change, parser,
+):
+    from agent_worktrees import update_launch_cli
+
+    if parser == "backport":
+        monkeypatch.setitem(sys.modules, "tomllib", None)
+    dependency = deployment.payload.parent / "example-dependency"
+    dependency.mkdir()
+    (deployment.payload / "pyproject.toml").write_text(
+        '[project]\nname = "example-plugin"\nversion = "2.0.0"\n'
+        '[tool.uv.sources]\nexample-dependency = { path = "../example-dependency" }\n',
+        encoding="utf-8",
+    )
+    (dependency / "pyproject.toml").write_text(
+        '[project]\nname = "example-dependency"\nversion = "1.0.0"\n',
+        encoding="utf-8",
+    )
+    if change == "transitive":
+        transitive = deployment.payload.parent / "example-transitive"
+        transitive.mkdir()
+        (dependency / "pyproject.toml").write_text(
+            (dependency / "pyproject.toml").read_text(encoding="utf-8")
+            + '[tool.uv.sources]\nexample-transitive = { path = "../example-transitive" }\n',
+            encoding="utf-8",
+        )
+        (transitive / "pyproject.toml").write_text(
+            '[project]\nname = "example-transitive"\nversion = "1.0.0"\n'
+            '[tool.uv.sources]\nexample-dependency = { path = "../example-dependency" }\n',
+            encoding="utf-8",
+        )
+        dependency = transitive
+    source = dependency / "example.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    stage_fingerprint = update_stage.fingerprint(deployment.payload)
+    step = reconcile.build_plan(
+        deployment.repo, machine="test", cache={}, save=False,
+    )["updates"][0]
+    assert reconcile_deployment.execution_diagnostic(step) is None
+    generated = dependency / ".venv"
+    generated.mkdir()
+    (generated / "generated.py").write_text("GENERATED = True\n", encoding="utf-8")
+    assert reconcile_deployment.execution_diagnostic(step) is None
+    if change == "missing":
+        (dependency / "pyproject.toml").unlink()
+    else:
+        source.write_text("VALUE = 2\n", encoding="utf-8")
+    assert update_stage.fingerprint(deployment.payload) == stage_fingerprint
+    before = _snapshot(deployment.home)
+    monkeypatch.setattr(
+        reconcile, "_run_plan_step", lambda *args, **kwargs: pytest.fail("installer executed"),
+    )
+    result = update_launch_cli._apply(step)
+    assert result["diagnostic"]["reason"] == (
+        "runtime-freshness-unavailable" if change == "missing" else "runtime-freshness-changed"
+    )
+    assert _snapshot(deployment.home) == before
+
+
+def test_apply_replans_after_its_own_successful_payload_acquisition(deployment, monkeypatch):
+    calls = []
+    monkeypatch.setattr(reconcile, "resolve_copilot", lambda: "fixture-copilot")
+
+    def run(argv):
+        calls.append(argv)
+        if argv[0] == "fixture-copilot":
+            path = deployment.payload / "plugin.json"
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+            manifest["version"] = "3.0.0"
+            path.write_text(json.dumps(manifest), encoding="utf-8")
+        else:
+            deployment.deploy_runtime(deployment.plugin, "3.0.0")
+        return 0
+
+    result = reconcile.apply_plan(
+        deployment.repo, machine="test", runner=run, include_payload_refresh=True,
+    )
+    assert len(calls) == 2
+    assert all(step["ok"] for step in result["executed"])
+    assert reconcile.runtime_deployed_version(deployment.plugin, root=deployment.root) == "3.0.0"
+
+
+@pytest.mark.parametrize("deployment", ["agent-worktrees"], indirect=True)
+def test_stage_allows_same_package_repair_content_refresh(deployment, monkeypatch):
+    from agent_worktrees import __main__ as core
+
+    repair = "2.0.0+repair." + "a" * 32
+    _versioned_observation(deployment, repair)
+    deployment.deploy_runtime(deployment.plugin, "2.0.0")
+    path = deployment.root / "deploy-manifest.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest["runtime_version"] = repair
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    (deployment.root / "current-version").write_text(repair, encoding="utf-8")
+    monkeypatch.setattr(
+        reconcile, "_runtime_running_record",
+        lambda *args: {"version": repair, "runtime_slot": repair},
+    )
+    monkeypatch.setattr(
+        update_stage, "discover_plugin_dir", lambda home: (deployment.payload, "marketplace"),
+    )
+    monkeypatch.setattr(core, "plan_pre_launch", lambda: {"action": "continue"})
+
+    def refresh():
+        path = deployment.payload / "plugin.json"
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        manifest["changed_content"] = True
+        path.write_text(json.dumps(manifest), encoding="utf-8")
+        return True, "refreshed"
+
+    monkeypatch.setattr(update_stage, "_run_copilot_update", refresh)
+    before = _snapshot(deployment.root)
+    result = update_stage.stage(
+        status=deployment.home / "stage-status.json", lock=deployment.home / "stage-lock",
+        home=deployment.home,
+    )
+    assert result["plugin_changed"] is True
+    assert "runtime_apply_blocked" not in result
+    assert _snapshot(deployment.root) == before
+
+
+def test_reconcile_treats_same_package_serving_repair_as_current(deployment, monkeypatch):
+    deployment.deploy_runtime(deployment.plugin, "2.0.0")
+    repair = "2.0.0+repair." + "a" * 32
+    monkeypatch.setattr(
+        reconcile, "_runtime_running_record",
+        lambda *args: {"version": repair, "runtime_slot": repair},
+    )
+    monkeypatch.setattr(reconcile, "runtime_running_version", lambda *args, **kwargs: repair)
+    plan = reconcile.build_plan(
+        deployment.repo, machine="test", cache={}, save=False,
+    )
+    assert plan["action"] == "continue"
+    assert "diagnostics" not in plan
+
+
+@pytest.mark.parametrize(
+    "version",
+    [
+        "2.0.0+repair." + "a" * 32,
+        "2.0.0+source." + "a" * 40 + "." + "b" * 16 + ".repair." + "c" * 32,
+        "2.0.0+base.source." + "a" * 40 + "." + "b" * 16,
+        "2.0.0+build.metadata",
+    ],
+)
+def test_freshness_normalization_matches_canonical_runtime_identity(version):
+    from agent_worktrees.reconcile_freshness import runtime_package_version
+
+    source = (
+        Path(__file__).resolve().parents[3] / "libs" / "versioned-runtime"
+        / "versioned_runtime_source.py"
+    )
+    spec = importlib.util.spec_from_file_location("freshness_canonical_runtime_source", source)
+    assert spec and spec.loader
+    canonical = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = canonical
+    spec.loader.exec_module(canonical)
+    assert runtime_package_version(version) == canonical.package_version(version)
+
+
+@pytest.mark.parametrize("selection", ["plain", "source", "source-mismatch"])
+def test_profiled_source_selection_consistency(deployment, selection):
+    from agent_worktrees.reconcile_freshness import check_runtime_freshness
+
+    deployment.deploy_runtime(deployment.plugin, "2.0.0")
+    receipt = {
+        "schema": "copilot-extensions.runtime-source", "version": 1,
+        "plugin": deployment.plugin, "package_version": "2.0.0",
+        "source_commit": "a" * 40, "source_tree": "b" * 40,
+        "assembly_hash": "c" * 64,
+        "runtime_version": "2.0.0+source." + "a" * 40 + "." + "c" * 16,
+    }
+    selected = "2.0.0+base"
+    path = deployment.root / "deploy-manifest.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    if selection != "plain":
+        commit = "d" * 40 if selection == "source-mismatch" else receipt["source_commit"]
+        selected += ".source." + commit + "." + "c" * 16
+        manifest["runtime_source"] = receipt
+        (deployment.payload / "runtime-source.json").write_text(
+            json.dumps(receipt), encoding="utf-8",
+        )
+    manifest.update(runtime_profile="base", runtime_version=selected)
+    _versioned_observation(deployment, selected)
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    (deployment.root / "current-version").write_text(selected, encoding="utf-8")
+    before = _snapshot(deployment.root)
+    _facts, diagnostic = check_runtime_freshness(
+        deployment.plugin, deployment.payload, deployment.root,
+    )
+    if selection == "source-mismatch":
+        assert diagnostic["reason"] == "runtime-freshness-unavailable"
+    else:
+        assert diagnostic is None
+    assert _snapshot(deployment.root) == before
+
+
+@pytest.mark.parametrize("tier", ["last-known-good", "newest-complete", "broken-current"])
+def test_plan_checks_canonical_effective_selection_not_just_the_marker(deployment, tier):
+    _versioned_observation(deployment, "3.0.0")
+    if tier == "last-known-good":
+        (deployment.root / "last-known-good").write_text("3.0.0", encoding="utf-8")
+    elif tier == "broken-current":
+        (deployment.root / "current-version").write_text("1.0.0", encoding="utf-8")
+    before = _snapshot(deployment.home)
+    plan = reconcile.build_plan(
+        deployment.repo, machine="test", cache={}, save=False,
+    )
+    assert plan["action"] == "continue"
+    assert plan["diagnostics"][0]["reason"] == "runtime-freshness-unavailable"
+    assert "package differs" in plan["diagnostics"][0]["message"]
+    assert _snapshot(deployment.home) == before
+
+
+@pytest.mark.parametrize("packaged", [False, True])
+def test_current_selection_does_not_inherit_newer_unselected_slot_veto(deployment, packaged):
+    _versioned_observation(deployment, "1.0.0")
+    _versioned_observation(deployment, "3.0.0")
+    if packaged:
+        helper = deployment.payload / "scripts" / "versioned_runtime.py"
+        helper.rename(helper.with_name("_versioned_runtime.py"))
+    (deployment.root / "current-version").write_text("1.0.0", encoding="utf-8")
+    (deployment.root / "last-known-good").write_text("3.0.0", encoding="utf-8")
+    before = _snapshot(deployment.home)
+    plan = reconcile.build_plan(
+        deployment.repo, machine="test", cache={}, save=False,
+    )
+    assert plan["updates"][0]["runtime_freshness"]["resolved_selection"] == "1.0.0"
+    assert reconcile_deployment.execution_diagnostic(plan["updates"][0]) is None
+    assert _snapshot(deployment.home) == before
+
+
+def test_selected_lookup_refuses_ambiguous_primitives(deployment):
+    _versioned_observation(deployment, "1.0.0")
+    helper = deployment.payload / "scripts" / "versioned_runtime.py"
+    shutil.copyfile(helper, helper.with_name("_versioned_runtime.py"))
+    before = _snapshot(deployment.home)
+    plan = reconcile.build_plan(
+        deployment.repo, machine="test", cache={}, save=False,
+    )
+    assert plan["action"] == "continue"
+    assert "exactly one" in plan["diagnostics"][0]["message"]
+    assert _snapshot(deployment.home) == before
+
+
+def test_effective_fallback_change_invalidates_cached_action(deployment, monkeypatch):
+    from agent_worktrees import update_launch_cli
+
+    _versioned_observation(deployment, "1.0.0")
+    step = reconcile.build_plan(
+        deployment.repo, machine="test", cache={}, save=False,
+    )["updates"][0]
+    _versioned_observation(deployment, "3.0.0")
+    before = _snapshot(deployment.root)
+    monkeypatch.setattr(
+        reconcile, "_run_plan_step", lambda *args, **kwargs: pytest.fail("installer executed"),
+    )
+    result = update_launch_cli._apply(step)
+    assert result["diagnostic"]["reason"] == "runtime-freshness-changed"
+    assert _snapshot(deployment.root) == before
+
+
+@pytest.mark.parametrize("case", ["missing-receipt", "different-source", "malformed", "lost-manifest"])
+def test_launch_freshness_refuses_same_version_source_or_unavailable_evidence(deployment, case):
+    from agent_worktrees.reconcile_freshness import check_runtime_freshness
+
+    deployment.deploy_runtime(deployment.plugin, "2.0.0")
+    manifest_path = deployment.root / "deploy-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    receipt = {
+        "schema": "copilot-extensions.runtime-source", "version": 1,
+        "plugin": deployment.plugin, "package_version": "2.0.0",
+        "source_commit": "a" * 40, "source_tree": "b" * 40,
+        "assembly_hash": "c" * 64, "runtime_version": "2.0.0+source.fixture",
+    }
+    manifest["runtime_source"] = receipt
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    if case == "different-source":
+        (deployment.payload / "runtime-source.json").write_text(
+            json.dumps({**receipt, "source_commit": "d" * 40}), encoding="utf-8",
+        )
+    elif case == "malformed":
+        manifest_path.write_text("{", encoding="utf-8")
+    elif case == "lost-manifest":
+        manifest_path.unlink()
+        (deployment.root / "current-version").write_text("2.0.0", encoding="utf-8")
+    before = _snapshot(deployment.home)
+    _facts, diagnostic = check_runtime_freshness(
+        deployment.plugin, deployment.payload, deployment.root,
+    )
+    assert diagnostic["reason"] == (
+        "runtime-source-selection-required"
+        if case in {"missing-receipt", "different-source"} else "runtime-freshness-unavailable"
+    )
+    assert _snapshot(deployment.home) == before
+
+
+@pytest.mark.parametrize("deployment", ["agent-worktrees"], indirect=True)
+@pytest.mark.parametrize("producer", ["stage", "prelaunch"])
+def test_native_launch_producers_preserve_newer_local_runtime(deployment, monkeypatch, producer):
+    from types import SimpleNamespace
+    from agent_worktrees import __main__ as core
+
+    deployment.deploy_runtime(deployment.plugin, "3.0.0")
+    manifest_path = deployment.root / "deploy-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["source"].update(kind="local", path=str(deployment.home / "selected-source"))
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    before = _snapshot(deployment.root)
+    if producer == "stage":
+        monkeypatch.setattr(
+            update_stage, "discover_plugin_dir", lambda home: (deployment.payload, "marketplace"),
+        )
+        refreshes = []
+        monkeypatch.setattr(
+            update_stage, "_run_copilot_update", lambda: (refreshes.append(True) or True, "refreshed"),
+        )
+        monkeypatch.setattr(core, "plan_pre_launch", lambda: {"action": "continue"})
+        result = update_stage.stage(
+            status=deployment.home / "stage-status.json", lock=deployment.home / "stage-lock",
+            home=deployment.home,
+        )
+        assert refreshes == [True]
+        assert result["plugin_changed"] is False
+        assert result["runtime_apply_blocked"] == "runtime-payload-older"
+    else:
+        monkeypatch.setattr(update_cli.worktree_identity, "_find_repo_dir", lambda: deployment.repo)
+        monkeypatch.setattr(update_cli.cfg, "load_config", lambda **kwargs: SimpleNamespace(
+            default_repo=SimpleNamespace(service_paths=None, bootstrap_services=[]),
+        ))
+        monkeypatch.setattr(update_cli, "_resolve_environment", lambda config: "test")
+        monkeypatch.setattr(update_cli.svc, "discover_services", lambda *args, **kwargs: [])
+        monkeypatch.setattr(update_cli.svc, "check_staleness", lambda *args: "unknown")
+        result = update_cli.plan_pre_launch()
+        assert result["action"] == "continue"
+        assert result["diagnostics"][0]["reason"] == "runtime-payload-older"
+    assert _snapshot(deployment.root) == before
 
 
 @pytest.mark.parametrize(
@@ -436,24 +950,34 @@ def _select_namespaced(deployment: Any, *, enabled: bool) -> None:
 
 
 @pytest.mark.parametrize("state", ["standalone", "managed", "invalid"])
+@pytest.mark.parametrize("phase", ["plan", "execution"])
 def test_namespaced_policy_uses_actual_root_not_legacy(
-    deployment: Any, state: str,
+    deployment: Any, state: str, phase: str,
 ) -> None:
     _select_namespaced(deployment, enabled=True)
     root, context = deployment.root, deployment.context
     deployment.policy(state)
     before = _snapshot(deployment.home)
+    if phase == "execution":
+        diagnostic = reconcile_deployment.execution_diagnostic({
+            "phase": "runtime", "service": "agent-index",
+            "runtime_root": str(root), "payload_root": str(deployment.payload),
+            "environment": {"COPILOT_EXTENSIONS_CONTEXT": str(context)},
+        })
+        assert _snapshot(deployment.home) == before
+        if state == "standalone":
+            assert diagnostic is None
+        else:
+            assert diagnostic["reason"] == (
+                "deployment-managed" if state == "managed" else "deployment-policy-invalid"
+            )
+        return
     plan = reconcile.build_plan(deployment.repo, machine="test", cache={}, save=False)
     assert _snapshot(deployment.home) == before
     if state == "standalone":
         # Publication permission does not invent an unsupported cell installer.
         assert plan["action"] == "continue"
         assert plan["diagnostics"][0]["reason"] == "installation-context-unsupported"
-        assert reconcile_deployment.execution_diagnostic({
-            "phase": "runtime", "service": "agent-index",
-            "runtime_root": str(root), "payload_root": str(deployment.payload),
-            "environment": {"COPILOT_EXTENSIONS_CONTEXT": str(context)},
-        }) is None
     else:
         assert plan["action"] == "continue"
         assert plan["diagnostics"][0]["reason"] == (

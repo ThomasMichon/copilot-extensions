@@ -17,6 +17,7 @@ from . import picker_profiles_cli, services_cli
 from . import update_events as _events, update_options, update_runtime_plan, update_acquisition
 from . import update_auth_context as _auth
 from . import worktree_identity
+from .reconcile_freshness import check_runtime_freshness
 from .update_runtime import describe_copilot_spawn_error as _describe_copilot_spawn_error
 from .update_runtime import (  # noqa: F401 - compatibility seams used by the plan collector
     _installer_timeout, _run_engine_installer, installer_deadline_status,
@@ -724,6 +725,12 @@ def plan_pre_launch() -> dict:
             )
             if diagnostic is not None:
                 diagnostics.append(diagnostic)
+            else:
+                freshness, diagnostic = check_runtime_freshness(
+                    "agent-worktrees", aw_plugin_dir, aw_runtime_root,
+                )
+                if diagnostic is not None:
+                    diagnostics.append(diagnostic)
         if staleness != "current" and diagnostic is None:
             installer = next(
                 (
@@ -754,6 +761,7 @@ def plan_pre_launch() -> dict:
                         "environment": aw_environment,
                         "unset_environment": list(_reconcile._RUNTIME_ENV_UNSET),
                         "runtime_root": str(aw_runtime_root),
+                        "runtime_freshness": freshness,
                     }
                 ]
                 append_update_if_stale = _core_helper(
