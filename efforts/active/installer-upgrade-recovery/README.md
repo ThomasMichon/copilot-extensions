@@ -1026,3 +1026,12 @@ queue request retained. Eighteen focused shared-receiver controls pass in
 foreign-root refusal and retained participant contracts. Current revised
 native portfolio, required CI and a fresh review must still qualify this
 correction; the earlier head's passing results do not close this finding.
+
+The next native run `41972283777` passes Linux, including the new shared
+receiver controls. Windows stops in the synthetic protocol fixture: it still
+rejects every witness with exit 91, including the newly required legitimate
+native handoff. The MCP-only fixture now requires witness plus re-entry marker
+for Windows provision, keeps stamp witness-free and still rejects unrelated
+lifecycle custody. Actual authenticated admission remains separately exercised
+by the materialized native tests; no production check is removed for this
+fixture correction.

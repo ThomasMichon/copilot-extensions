@@ -40,6 +40,18 @@ def owning_mcp(owning_codespaces, monkeypatch):
     scripts = payload / "scripts"
     for suffix in ("ps1", "sh"):
         (scripts / f"install.{suffix}").rename(scripts / f"init.{suffix}")
+    windows = scripts / "init.ps1"
+    guard = "if ($env:UPDATE_DRIVER_WITNESS -or $env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) { exit 91 }"
+    body = windows.read_text()
+    assert body.count(guard) == 1
+    windows.write_text(body.replace(
+        guard,
+        "if ($env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) { exit 91 }\n"
+        "if ($Action -eq 'provision') {\n"
+        "  if (-not $env:UPDATE_DRIVER_WITNESS -or "
+        "$env:COPILOT_EXTENSIONS_NATIVE_INSTALLER -cne 'agent-mcp') { exit 91 }\n"
+        "} elseif ($env:UPDATE_DRIVER_WITNESS) { exit 91 }",
+    ), encoding="utf-8")
     for source in (REPOSITORY / "plugins/agent-mcp/scripts").iterdir():
         target = scripts / source.name
         if source.is_file() and not target.exists():
