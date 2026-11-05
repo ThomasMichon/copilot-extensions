@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh canonical runtime admission installer and versioned-runtime delivery",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
