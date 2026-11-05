@@ -234,12 +234,7 @@ class SubwayTimeline(ScrollView, can_focus=True):
 
     def action_follow_live(self) -> None:
         self.window.set_follow_live(True)
-        self._programmatic = True
-        try:
-            self.scroll_end(animate=False, immediate=True, x_axis=False)
-        finally:
-            self._programmatic = False
-        self._select_event(self.window.events[-1].ref if self.window.events else None)
+        self._reflow(None)
         self._post_timeline_message(self.Changed())
 
     def _begin_upward_browse(self) -> None:

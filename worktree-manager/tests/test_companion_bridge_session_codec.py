@@ -493,6 +493,20 @@ def test_actual_output_burst_widget_history_is_sparse_bounded_and_inspectable(se
             await pilot.pause()
             assert len(timeline.layout_index.blocks) == 3
             assert timeline._selected_group and timeline.selected == window.events[1].ref
+            assert timeline._padding < max(0, timeline.size.height - timeline.layout_index.height)
+            await pilot.press("end")
+            await pilot.pause()
+            assert window.follow_live and not window.unread
+            assert timeline._padding == max(0, timeline.size.height - timeline.layout_index.height)
+            last = timeline.layout_index.row(timeline.layout_index.height - 1, window)
+            assert last is not None
+            assert timeline.layout_index.height - 1 + timeline._padding - int(timeline.scroll_offset.y) == timeline.size.height - 1
+            assert timeline.selected == last.event
+            group = timeline.layout_index._groups[member.ref]
+            screen_row = group.start + timeline._padding - int(timeline.scroll_offset.y)
+            assert await pilot.click(timeline, offset=(timeline.layout_index.prefix_width + 1, screen_row))
+            await pilot.pause()
+            assert timeline._selected_group and not window.follow_live
             await pilot.resize_terminal(60, 26)
             assert timeline.has_focus and timeline._selected_group
             semantic.log.append("agent_message", {"text": "another omitted output"})
