@@ -8,7 +8,7 @@ prerequisites for one contribution.
 
 | Question | Start here |
 |----------|------------|
-| What does required PR/promotion testing cover? | [Unit-only packet](#unit-only-promotion-packet) and [portfolio invariants](#test-portfolio-invariants) |
+| What does required PR/promotion testing cover? | [Unit packet](#unit-only-promotion-packet), [portfolio invariants](#test-portfolio-invariants), and the bounded Windows Resume promotion exception below |
 | How do I run a focused local selection? | [Turn-key runner](#the-turn-key-runner); select the affected files/contracts rather than the whole portfolio |
 | How do I isolate portable integration? | [Devcontainer isolation](#optional-devcontainer-based-isolation-linux) and the declared periodic inventory in `tools/periodic-integration-inventory.json` |
 | What proves a native or external consumer? | Its explicitly selected packet below, with the actual platform, launch mode and prerequisites; a portable or synthetic pass is not equivalent |
@@ -34,6 +34,20 @@ CI and review remain unchanged; a shared native quiet window still needs its
 affected owners' agreement.
 
 ## Focused packet catalog
+
+The Windows Resume consumer packet is
+`python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_resume_pane_startup.py --allow-explicit-tiers`.
+It requires PowerShell 7 and real PSMux, without fallback or prerequisite skips
+on Windows. Four concurrent admitted Resume plans traverse the unchanged
+production launcher, copied pane assets, argument receipt and startup reader,
+real ConPTY attachment, detach and owned child retirement. Both cold and warm
+PSMux starts carry a realistic JSON configuration environment and literal
+33-argument commands. Private engine resolution and finite Copilot setup
+substitutions isolate user worktrees, credentials and model sessions. This is
+native consumer qualification, not a reproduction of every field failure,
+installed-runtime or authentication/inference acceptance. The source release
+controller requires it for every frozen candidate, separately from unit coverage;
+live enforcement depends on the independently governed Main controller.
 
 Worktrees' opt-in `--test-file tests/test_resident_recovery.py
 --test-file tests/test_tracking_write.py --test-file tests/test_effort_focus.py

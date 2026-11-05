@@ -190,7 +190,8 @@ retains its exact Git commit, content tree, admitted Dev/Main inputs and
 preparation time in a bounded `candidate.bundle` / `candidate.json` transport.
 Every consumer also requires the candidate SHA emitted by the composition job;
 internally consistent replacement transport data cannot select another object.
-Units and the unsigned artifact build independently import those objects.
+Units, native Windows Resume qualification and the unsigned artifact build
+independently import those objects.
 Artifact validation and publication consume the same frozen object; they do
 not recompute version allocation or vendoring after tests. A changed Main base
 requires a new admission, not a silent restamp.
@@ -199,11 +200,28 @@ requires a new admission, not a silent restamp.
 inventory on candidate bytes using the explicit
 `copilot-extensions.promotion-candidate-units/v1` manifest. Declared materialized
 uv copies extend the admitted import closure, never the test-node inventory or
-five-minute budget. Attestation still requires successful units and the
-unsigned build. `qualify-candidate` uses `candidate-units-v3`, validates the
+five-minute budget. Attestation requires successful units, native Windows Resume
+qualification and the unsigned build. `qualify-candidate` uses `candidate-units-v3`, validates the
 candidate hashes and development correspondence against both authoritative
 source roots, and checks the original successful job/upload/immutable archive.
 It never dispatches candidate CI.
+
+`native-resume-windows` is a separate, mandatory fifteen-minute Windows job for
+every composed promotion candidate, not an impact-selected PR test or part of
+unit coverage. It imports the same frozen candidate and uses the existing
+hash-pinned PSMux 3.3.8 dependency. The contained native packet starts four
+concurrent admitted Resume plans with both cold and warm PSMux startup. It
+requires the production launcher, copied pane/startup readers, exact child
+arguments, acknowledged consumption, terminal attachment, detach without
+termination and owned child retirement. Engine plan resolution and the final
+Copilot setup/model process are finite private fixtures; this does not qualify
+authentication, inference or an operator's existing sessions.
+Failure, cancellation or skipping prevents artifact attestation and promotion;
+JUnit evidence is retained separately. The source-unit receipt remains
+`candidate-units-v3` and never represents this native execution as unit evidence.
+As with other controller changes, this gate becomes live only after its
+independently reviewed Main workflow transaction; merging the source proposal
+into Dev alone does not activate it.
 
 Raw candidate line coverage remains in the three-file packet. Its separate
 development projection is bound to Dev bytes, candidate bytes, tree and copy

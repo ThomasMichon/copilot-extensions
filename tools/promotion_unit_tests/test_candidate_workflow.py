@@ -57,6 +57,38 @@ def test_real_controller_publication_requires_explicit_candidate_profile():
     assert "needs.compose-candidate.result == 'failure'" in jobs["report-failure"]["if"]
 
 
+def test_every_frozen_candidate_requires_native_windows_resume_before_publication():
+    jobs = yaml.safe_load((ROOT / ".github/workflows/validate-and-promote.yml").read_text())["jobs"]
+    native = jobs["native-resume-windows"]
+    assert set(native["needs"]) == {"gate", "compose-candidate"}
+    assert native["if"] == (
+        "needs.gate.outputs.is_dev == 'true' && needs.compose-candidate.outputs.composed == 'true'"
+    )
+    assert native["runs-on"] == "windows-latest"
+    assert native["permissions"] == {"contents": "read"}
+    assert "continue-on-error" not in native
+    steps = native["steps"]
+    assert not any(step.get("continue-on-error") for step in steps)
+    assert any(step.get("with", {}).get("name") == "frozen-promotion-candidate" for step in steps)
+    commands = "\n".join(step.get("run", "") for step in steps)
+    assert "promotion_frozen_candidate.py" in commands
+    assert '--candidate-sha "$env:CANDIDATE_SHA"' in commands
+    assert any(
+        step.get("env", {}).get("CANDIDATE_SHA")
+        == "${{ needs.compose-candidate.outputs.candidate_sha }}" for step in steps
+    )
+    assert 'Set-Location "$env:RUNNER_TEMP\\candidate"' in commands
+    assert "--test-file tests/native/test_resume_pane_startup.py" in commands
+    assert "--allow-explicit-tiers" in commands
+    assert "Get-FileHash" in commands and "PSMUX_TEST_BIN=" in commands
+    assert "PSMUX_TEST_BIN=" not in str(native.get("env", {}))
+    for name in ("python-artifacts", "promote", "report-failure"):
+        assert "native-resume-windows" in jobs[name]["needs"]
+    promote = "\n".join(step.get("run", "") for step in jobs["promote"]["steps"])
+    assert '"${{ needs.native-resume-windows.result }}"' in promote
+    assert "needs.native-resume-windows.result == 'failure'" in jobs["report-failure"]["if"]
+
+
 def test_complete_source_is_attested_and_read_back_before_the_final_main_pr():
     job = yaml.safe_load((ROOT / ".github/workflows/validate-and-promote.yml").read_text())["jobs"]["publish-python-artifacts"]
     steps = job["steps"]

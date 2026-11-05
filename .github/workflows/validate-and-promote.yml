@@ -1,4 +1,4 @@
-# Unit-only controller proposal; activation requires its independently reviewed Main transaction.
+# Controller activation requires its independently reviewed Main transaction.
 name: Validate and promote dev to main
 on:
   repository_dispatch:
@@ -374,6 +374,83 @@ jobs:
           path: ${{ runner.temp }}/promotion-unit-evidence/*
           if-no-files-found: error
           retention-days: 2
+  native-resume-windows:
+    name: Require real Windows Resume pane startup
+    needs:
+      - gate
+      - compose-candidate
+    if: needs.gate.outputs.is_dev == 'true' && needs.compose-candidate.outputs.composed == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+          fetch-depth: '0'
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Install seasoned candidate import tooling
+        shell: pwsh
+        run: python tools/seasoned_uv.py --uv uv -- --system packaging pyyaml
+      - uses: actions/download-artifact@v4
+        with:
+          name: frozen-promotion-candidate
+          path: ${{ runner.temp }}/frozen-candidate
+      - name: Import the frozen candidate without recomposition
+        shell: pwsh
+        env:
+          DEV_SHA: ${{ needs.gate.outputs.sha }}
+          MAIN_BEFORE: ${{ needs.gate.outputs.main_before }}
+          CANDIDATE_SHA: ${{ needs.compose-candidate.outputs.candidate_sha }}
+        run: |
+          python tools/promotion_frozen_candidate.py `
+            --repo "$env:GITHUB_WORKSPACE" --directory "$env:RUNNER_TEMP\frozen-candidate" `
+            --dev-sha "$env:DEV_SHA" --main-before "$env:MAIN_BEFORE" `
+            --candidate-sha "$env:CANDIDATE_SHA" --checkout "$env:RUNNER_TEMP\candidate"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Prepare pinned disposable PSMux
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Get-Command pwsh -ErrorAction Stop | Out-Null
+          $root = Join-Path $env:RUNNER_TEMP 'resume-psmux'
+          $null = New-Item -ItemType Directory -Path $root
+          $archive = Join-Path $root 'psmux.zip'
+          Invoke-WebRequest -Uri 'https://github.com/psmux/psmux/releases/download/v3.3.8/psmux-v3.3.8-windows-x64.zip' -OutFile $archive
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne '1ad127ba937194a890b933a73d9b023e297bd73dc742abd841bf159984c2effe') {
+            throw 'Pinned PSMux archive digest mismatch'
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath $root
+          $binaries = @(Get-ChildItem -LiteralPath $root -Filter psmux.exe -Recurse -File)
+          if ($binaries.Count -ne 1) { throw 'Expected exactly one pinned PSMux binary' }
+          "PSMUX_TEST_BIN=$($binaries[0].FullName)" >> $env:GITHUB_ENV
+          $binaries[0].DirectoryName >> $env:GITHUB_PATH
+      - name: Require four concurrent Resume consumers, cold and warm
+        shell: pwsh
+        run: |
+          Set-Location "$env:RUNNER_TEMP\candidate"
+          python tools/run-plugin-tests.py worktree-manager `
+            --test-file tests/native/test_resume_pane_startup.py --allow-explicit-tiers `
+            --junit-dir "$env:RUNNER_TEMP\resume-evidence" `
+            --timeout 360 --plugin-timeout 600 --test-timeout 180
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Retain native consumer evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: promotion-native-resume-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/resume-evidence
+          if-no-files-found: error
+          retention-days: 2
   build-python-artifacts:
     name: Build first-party Python artifacts without signing authority
     needs:
@@ -450,6 +527,7 @@ jobs:
       - gate
       - build-python-artifacts
       - source-units
+      - native-resume-windows
       - compose-candidate
     if: needs.gate.outputs.is_dev == 'true' && needs.compose-candidate.outputs.composed == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
@@ -520,6 +598,7 @@ jobs:
     needs:
       - gate
       - source-units
+      - native-resume-windows
       - build-python-artifacts
       - compose-candidate
       - python-artifacts
@@ -527,7 +606,7 @@ jobs:
       - qualify-candidate
       - publish-python-artifacts
       - merge-promotion
-    if: "always() && github.event_name == 'repository_dispatch' && needs.gate.outputs.is_dev == 'true' && (\n needs.compose-candidate.result == 'failure' || needs.source-units.result == 'failure' || needs.build-python-artifacts.result == 'failure' ||\n needs.python-artifacts.result == 'failure' ||\n needs.promote.result == 'failure' ||\n needs.qualify-candidate.result == 'failure' ||\n needs.publish-python-artifacts.result == 'failure' ||\n needs.merge-promotion.result == 'failure')"
+    if: "always() && github.event_name == 'repository_dispatch' && needs.gate.outputs.is_dev == 'true' && (\n needs.compose-candidate.result == 'failure' || needs.source-units.result == 'failure' || needs.native-resume-windows.result == 'failure' || needs.build-python-artifacts.result == 'failure' ||\n needs.python-artifacts.result == 'failure' ||\n needs.promote.result == 'failure' ||\n needs.qualify-candidate.result == 'failure' ||\n needs.publish-python-artifacts.result == 'failure' ||\n needs.merge-promotion.result == 'failure')"
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -623,6 +702,7 @@ jobs:
     needs:
       - gate
       - source-units
+      - native-resume-windows
       - python-artifacts
       - compose-candidate
     if: always() && needs.gate.result == 'success' && needs.gate.outputs.is_dev == 'true'
@@ -662,9 +742,8 @@ jobs:
             echo "::notice::Not a validated dev commit -- skipping promotion."
             exit 0
           fi
-          # Both the admitted unit packet and signed artifact validation
-          # must genuinely succeed; integration is not a release prerequisite.
-          for r in "${{ needs.source-units.result }}" "${{ needs.python-artifacts.result }}"; do
+          # Native Resume qualification is separate from the unit packet.
+          for r in "${{ needs.source-units.result }}" "${{ needs.native-resume-windows.result }}" "${{ needs.python-artifacts.result }}"; do
             if [ "$r" != "success" ]; then
               echo "proceed=false" >> "$GITHUB_OUTPUT"
               echo "::error::Validation did not pass ($r) -- refusing to promote."
