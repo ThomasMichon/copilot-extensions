@@ -4728,15 +4728,16 @@ gates.
 ### Authenticated source-build preparation
 
 The repository-only `runtime_source_build.retain_source_runtime_inputs` composes
-the actual configured-runtime-source acquisition owner with canonical source
-preparation, the retained native compiler and the same governed feed worker.
-It uses no artifact index or fabricated release selection. An unsupported
-default marketplace source provider remains unavailable rather than guessed.
+the selected configured-runtime-source or registered-marketplace acquisition
+owner with canonical source preparation, the retained native compiler and the
+same governed feed worker. It uses no artifact index or fabricated release
+selection. Distinguishable missing marketplace evidence is unavailable;
+ambiguous or changed evidence refuses rather than selecting another source.
 Manager's existing `source_config.default_root` owns its configuration root;
 `self_install.default_root` re-exports that same function. Reading configured
 runtime-source policy therefore needs no Manager installer import and preserves
 the existing environment/home precedence. These narrow primitives do not yet
-package a complete installer toolkit or enable an ordinary installer.
+enable an ordinary installer; the packaged admission toolkit remains opt-in.
 
 One native source lock includes declared runtime/build requirements and the
 frontend's `packaging` dependency. Its actual installation owner validates

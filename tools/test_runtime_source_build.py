@@ -31,6 +31,7 @@ from test_runtime_source_authentication import (
 from test_runtime_source_authentication import git
 from test_runtime_source_lock import plan
 from test_runtime_source_lock import target as target  # noqa: PLC0414
+from test_runtime_marketplace_source import registered_source as registered_source  # noqa: PLC0414
 from wheel_input_fixture import wheel_bytes
 
 
@@ -554,6 +555,40 @@ def test_authenticated_source_builds_and_reuses_independent_closed_environments(
             assert (reused.slot / ".runtime-input-origins.json").read_bytes() == receipt
     assert len(completed) == 2
     assert all(call["offline"] and call["build_profile"] is not None for call in completed)
+
+
+def test_registered_marketplace_source_reaches_the_real_closed_builder(
+    registered_source, target, feeds, tmp_path, monkeypatch,
+):
+    from worktree_manager import runtime_source_config
+
+    fixture = registered_source
+    configured = (fixture["root"], fixture["upstream"], None, None)
+    source_with_process_owner(configured)
+    commit = git(fixture["upstream"], "rev-parse", "HEAD")
+    git(fixture["clone"], "fetch", "-q", str(fixture["upstream"]), "main")
+    git(fixture["clone"], "merge", "--ff-only", "FETCH_HEAD")
+    shutil.copytree(
+        fixture["clone"] / "plugins" / "agent-example", fixture["payload"], dirs_exist_ok=True,
+    )
+    runtime_source_config.set_source(runtime_source_config.RuntimeSource(), root=fixture["root"])
+    state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
+    packaging_feed(state)
+    monkeypatch.setattr(
+        configuration, "_opaque_index_identity", lambda value: hashlib.sha256(value.encode()).hexdigest(),
+    )
+    adopter = fixture["adopter"]
+    env = environment(adopter, state, tmp_path)
+    with builds.retain_source_runtime_inputs(plan(adopter), **options(adopter, target, env)) as source:
+        assert source.identity.source_commit == commit
+        assert (
+            source.wheels.receipt()["binding"]["source_lock"]["source_authentication"]["provider"]
+            == "registered-marketplace-source"
+        )
+        assert {name for name, _, _, _ in source.wheels.distributions} == {
+            "agent-example", "agent-procutil",
+        }
+        source.verify()
 
 
 @pytest.mark.parametrize("revoke", [False, True])

@@ -98,10 +98,15 @@ def retain_authenticated_marketplace_source(
 
     def inventory():
         authentication._check_deadline(deadline)
-        return native_git_inventory_item(
-            origin.source, home, cache, definition=origin.definition, environment=environment,
-            execution_cwd=home, deadline=deadline, strict=True,
-        )
+        try:
+            return native_git_inventory_item(
+                origin.source, home, cache, definition=origin.definition, environment=environment,
+                execution_cwd=home, deadline=deadline, strict=True,
+            )
+        except FileNotFoundError as error:
+            if error.filename != "git":
+                raise
+            raise ProfileUnavailable("native Git source evidence is unavailable") from error
 
     proof = inventory()
     if proof is None:

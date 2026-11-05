@@ -1535,8 +1535,11 @@ when Main advances, refuse source/version/registration/ledger changes and
 ambiguous caches, and separate two marketplace owners.
 `libs/plugin-resolve/tests/test_native_git_inventory.py` preserves existing
 ordinary inventory behavior and qualifies the reusable registered-cache proof.
-These fresh isolated fixtures qualify the explicit provider, not normal
-bootstrap, the production dependency closure, installation speed or rollout.
+The source builder also selects that provider from the existing runtime-source
+configuration; an isolated registered source reaches the real closed-wheel
+builder, and a copied toolkit exercises the same routing. These fixtures do
+not qualify normal bootstrap, the production dependency closure, installation
+speed or rollout.
 
 Bridge's on-demand `tests/test_venue_path_length.py` exercises ordinary
 preparation and registration with an independent synthetic native installer.

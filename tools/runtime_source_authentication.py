@@ -1,8 +1,9 @@
-"""Compose configured source acquisition with the real installation authority.
+"""Compose selected source acquisition with the real installation authority.
 
-This repository-only provider consumes the existing explicit runtime-source
-policy. It neither enables source-backed updates nor treats Manager self-update
-preferences, source receipts or artifact availability as source authorization.
+This adapter consumes the existing runtime-source policy and registered
+marketplace owner. It neither enables source-backed updates nor treats Manager
+self-update preferences, source receipts or artifact availability as source
+authorization.
 """
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ import json
 from pathlib import Path
 import sys
 
-from runtime_profile import ProfileError, ProfileUnavailable
+from runtime_profile import ProfileError
 from runtime_profile_policy import InstallationProfilePlan
 from runtime_source_lock import dependencies
 
@@ -68,7 +69,13 @@ def retain_authenticated_source(
     root = default_root().absolute()
     selection = runtime_source_config.configured_source(root)
     if selection.channel == "marketplace":
-        raise ProfileUnavailable("configured source authentication provider is not selected")
+        from runtime_marketplace_source import retain_authenticated_marketplace_source
+
+        with retain_authenticated_marketplace_source(
+            plan, installation=installation, deadline=deadline,
+        ) as authenticated:
+            yield authenticated
+        return
     with runtime_source.acquire(selection, root=root, deadline=deadline) as acquired:
         _check_deadline(deadline)
         if default_root().absolute() != root or runtime_source_config.configured_source(root) != selection:

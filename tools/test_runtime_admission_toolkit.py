@@ -190,6 +190,49 @@ print("copied-delivery-intake-ok")
     assert observed.stdout.strip() == "copied-delivery-intake-ok"
 
 
+def test_copied_toolkit_routes_registered_marketplace_source(tmp_path):
+    toolkit = _toolkit(tmp_path)
+    script = """
+import pathlib, sys, time
+from contextlib import contextmanager
+from types import SimpleNamespace
+from unittest.mock import patch
+root = pathlib.Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(root.parent))
+import _runtime_admission
+_runtime_admission.activate()
+import runtime_source_authentication as authentication
+import runtime_marketplace_source as marketplace
+assert pathlib.Path(authentication.__file__).resolve().is_relative_to(root)
+assert pathlib.Path(marketplace.__file__).resolve().is_relative_to(root)
+events, selected, plan, installation = [], object(), object(), {}
+@contextmanager
+def retain(actual_plan, *, installation, deadline):
+    assert actual_plan is plan and installation == {}
+    events.append("enter")
+    yield selected
+    events.append("exit")
+with (patch.object(authentication, "_policy", return_value={}),
+      patch.object(authentication, "default_root", return_value=root),
+      patch.object(authentication.runtime_source_config, "configured_source",
+                   return_value=SimpleNamespace(channel="marketplace")),
+      patch.object(marketplace, "retain_authenticated_marketplace_source", retain)):
+    with authentication.retain_authenticated_source(
+        plan, installation=installation, deadline=time.monotonic() + 30,
+    ) as actual:
+        assert actual is selected and events == ["enter"]
+assert events == ["enter", "exit"]
+print("copied-marketplace-routing-ok")
+"""
+    observed = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", script, str(toolkit)],
+        cwd=tmp_path, capture_output=True, text=True, timeout=60,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert observed.returncode == 0, observed.stdout + observed.stderr
+    assert observed.stdout.strip() == "copied-marketplace-routing-ok"
+
+
 def test_admitted_seed_runs_payload_local_semantic_validation(
     adopter, configured_source, target, feeds, tmp_path, engine, monkeypatch,
 ):

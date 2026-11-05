@@ -9,6 +9,7 @@ import time
 import pytest
 
 import runtime_marketplace_source as marketplace
+import runtime_source_authentication as authentication
 from runtime_profile import ProfileError, ProfileUnavailable
 from test_runtime_source_authentication import configured_source as configured_source, git
 from test_runtime_profile_policy_plan import adopter as adopter
@@ -114,6 +115,48 @@ def test_actual_registered_source_binds_independent_commit_tree_and_payload(regi
     assert not (fixture["root"] / "current-version").exists()
 
 
+def test_source_builder_selects_and_retains_the_registered_marketplace_owner(registered_source):
+    fixture = registered_source
+    with authentication.retain_authenticated_source(
+        plan(fixture["adopter"]), installation=fixture["adopter"][1],
+        deadline=time.monotonic() + 90,
+    ) as selected:
+        assert selected.record()["provider"] == "registered-marketplace-source"
+        assert selected.identity.source_commit == fixture["commit"]
+        selected.verify()
+        prepared = selected.payload
+    assert not prepared.exists()
+
+
+def test_source_builder_refuses_a_marketplace_change_during_consumption(registered_source):
+    fixture = registered_source
+    with pytest.raises(ProfileError, match="changed"):
+        with authentication.retain_authenticated_source(
+            plan(fixture["adopter"]), installation=fixture["adopter"][1],
+            deadline=time.monotonic() + 90,
+        ):
+            runtime_source_config.set_source(
+                runtime_source_config.RuntimeSource(
+                    "exact", str(fixture["upstream"]), fixture["commit"],
+                ),
+                root=fixture["root"],
+            )
+
+
+def test_source_builder_does_not_substitute_missing_marketplace_evidence(
+    registered_source, monkeypatch,
+):
+    fixture = registered_source
+    write(fixture["home"] / "config.json", {})
+    monkeypatch.setattr(runtime_source, "acquire", lambda *a, **k: pytest.fail("unselected source acquired"))
+    with pytest.raises(ProfileUnavailable, match="ledger is unavailable"):
+        with authentication.retain_authenticated_source(
+            plan(fixture["adopter"]), installation=fixture["adopter"][1],
+            deadline=time.monotonic() + 90,
+        ):
+            pytest.fail("missing installed evidence reached the source builder")
+
+
 def test_newer_remote_tip_is_not_substituted_for_installed_source(registered_source):
     fixture = registered_source
     (fixture["upstream"] / "later.txt").write_text("later release")
@@ -165,6 +208,19 @@ def test_empty_environment_does_not_inherit_ambient_cache_or_git_configuration(
     with pytest.raises(ProfileUnavailable, match="native Git source evidence is unavailable"):
         with retain(fixture):
             pytest.fail("explicitly empty environment inherited an ambient cache")
+
+
+def test_missing_inventory_member_is_not_treated_as_missing_git(registered_source, monkeypatch):
+    missing = str(registered_source["clone"] / "removed-member")
+
+    def fail(*_args, **_kwargs):
+        raise FileNotFoundError(2, "inventory changed", missing)
+
+    monkeypatch.setattr(marketplace, "native_git_inventory_item", fail)
+    with pytest.raises(FileNotFoundError) as error:
+        with retain(registered_source):
+            pytest.fail("changed inventory reached the consumer")
+    assert error.value.filename == missing
 
 
 def test_none_environment_keeps_normal_ambient_selection(registered_source, monkeypatch):

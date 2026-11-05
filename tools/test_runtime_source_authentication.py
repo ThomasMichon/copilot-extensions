@@ -11,7 +11,7 @@ import time
 import pytest
 
 import runtime_source_authentication as authentication
-from runtime_profile import ProfileError, ProfileUnavailable
+from runtime_profile import ProfileError
 from test_installer_dependency_policy import source_project
 from test_runtime_profile_policy_plan import adopter as adopter
 from test_runtime_source_lock import plan
@@ -88,7 +88,7 @@ def test_manager_self_update_preferences_do_not_authorize_runtime_source(adopter
     monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
     source_config.set_source(repo="https://example.invalid/self-update.git", ref="dev", root=root)
     monkeypatch.setattr(runtime_source, "acquire", lambda *args, **options: pytest.fail("unselected source acquired"))
-    with pytest.raises(ProfileUnavailable, match="provider is not selected"):
+    with pytest.raises(RuntimeError, match="Registered origin selection"):
         with retain(adopter):
             pytest.fail("self-update policy was treated as source authentication")
     assert not (root / "runtime-sources").exists()
