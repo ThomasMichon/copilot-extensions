@@ -222,6 +222,13 @@ checkpoint nor author eligibility, holds, requirements or source/resource custod
 
 ## Plan
 
+The [Windows census/registration study](windows-census-registration-encoding-cohort.md)
+retains #7171's exact nonblocking registration regression and independently
+verifies #9327's completed source/native-subprocess correction in #9330.
+Actual merged/current blobs, four focused definitions, the existing 43-case
+Windows report, final review/CI and fresh disposition readback support one
+finite completion, not any ranked-message shortcut or installed recovery claim.
+
 The [ownership/dead-route study](ownership-observation-dead-route-cohort.md)
 credits #5904's earlier atomic publication repair while retaining present-unknown
 cleanup refusal. Separate actual reviewed/current/promoted source verification
@@ -244,6 +251,35 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 - [x] Preserve the initial cohort and oldest-first cursor in structured session state.
 
 ### Phase 2 - Continuing reconciliation
+
+The six-contract identity/delivery/transaction delta merged in #10604 after
+the reviewer identified and the author corrected both ambiguous Index forwarding
+phrases: recursive forwarding ends INSIDE the SSH child, which stays running
+to execute the request and return its result. Genuine exact-head approval,
+no active findings and required CI preceded merge; all eleven actual merged
+bodies equal that corrected head. The child is finalized and retained, with
+only its parent-child claim settled. See the
+[delivery journal](<journal/2026/11.04 instruction-source-delivery-contracts.md>).
+
+The [exit/history](exit-observation-history-work-cohort.md) and
+[Windows encoding](windows-census-registration-encoding-cohort.md) studies
+preserve four whole originals through six texts/10,498 characters and twelve
+ranked comparisons. Independent #9330 verification supports only #9327's
+completed closure; the other three originals remain OPEN. Two additional
+entire graph sources are protected before rendering, with no subset retry.
+Two equal complete 21:22 PST scans show 1,005 whole open, 276 above 729:
+one eligible arrival stays metadata-only, two external departures receive no
+campaign credit, and #9327 adds exactly one verified disposition (776 total).
+
+The [task-transfer/execution](task-transfer-execution-handoff-cohort.md),
+[artifact-publication follow-up](artifact-boundary-followup-cohort.md) and
+[Bridge target/parentage](bridge-target-parent-metadata-cohort.md) studies
+preserve five whole originals through nineteen texts/43,151 characters.
+Thirteen whole-message and one whole-description comparisons establish no
+completion; one known protected message remains excluded. Changed #7929's
+entire newly qualified source is withheld before rendering, not replaced by
+old/subset evidence. Existing handoff and artifact owners retain their actual
+authorization, credited prerequisites and distinct remaining acceptance.
 
 The eleven-contract lifecycle/compatibility delta merged in #10598 after
 genuine exact-head approval with no active findings and green required checks.
@@ -1255,6 +1291,26 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [exit/history](exit-observation-history-work-cohort.md) core preserves
+independent watchdog-root observation before inherited captured-output EOF,
+its exact logger/no-publication regression and separate repeated-tombstone
+selection with reciprocal/liveness/obligation checks intact. The
+[Windows encoding](windows-census-registration-encoding-cohort.md) core retains
+the unrelated registration fixture while separately verifying #9330's actual
+finite UTF-8/unknown/native-subprocess correction and completed #9327 closure.
+No new installer, process kill, installed recovery or source/resource release
+is claimed; protected graph sources stay wholly unread.
+
+The [transfer/execution](task-transfer-execution-handoff-cohort.md) core
+separates unclaimed cross-coordinator transfer and emitter narrowing from
+actual authenticated execution/effect handoff. The
+[artifact follow-up](artifact-boundary-followup-cohort.md) retains its original
+hosted publication proof without consumer-installation takeover or outage
+inference. The [Bridge target/parentage](bridge-target-parent-metadata-cohort.md)
+core preserves the original no-spawn observation, alternative clean refusal/
+registered-agent start and descriptive caller-parent metadata. All five
+originals stay OPEN; protected #7929 supplies no pairwise/source judgment.
 
 The [machine identity](machine-identity-routing-cohort.md) core preserves actual
 remaining adapter inventory and Index's literal override, optional topology,
