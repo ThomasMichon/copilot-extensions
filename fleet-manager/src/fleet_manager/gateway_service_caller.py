@@ -83,9 +83,13 @@ class ServiceCaller:
         from inspect import getattr_static
         from types import MethodType
         callback = self._access
+        current = getattr_static(self, "request", None)
         if (
-            type(self) is not ServiceCaller or "request" in self.__dict__
-            or getattr_static(self, "request", None) is not _SOURCE_REQUEST_IMPLEMENTATION
+            type(self) is not ServiceCaller or not (
+                current is _SOURCE_REQUEST_IMPLEMENTATION and "request" not in self.__dict__
+                or type(current) is MethodType and current.__func__ is _SOURCE_REQUEST_IMPLEMENTATION
+                and current.__self__ is self
+            )
         ):
             return None
         request_method = _SOURCE_REQUEST_IMPLEMENTATION.__get__(self, ServiceCaller)

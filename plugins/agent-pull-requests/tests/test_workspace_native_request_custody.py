@@ -520,6 +520,48 @@ def test_service_request_getters_refuse_source_before_admission(
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("boundary", ["construction", "qualification"])
+def test_stock_service_request_copies_preserve_source_binding(
+    environment, integration, monkeypatch, boundary,
+):
+    from contextlib import contextmanager
+    from agent_pull_requests.workspace_client import WorkspaceClient
+    from fleet_manager import gateway_service_caller as caller_module
+    from fleet_manager.credential_references import ServiceCredentials
+    _, existing, _, _, _, _ = integration
+    _, _, initial, _, _, _ = environment
+    credentials = ServiceCredentials(None, Path(__file__).resolve())
+    caller = caller_module.ServiceCaller(
+        gateway_origin="https://127.0.0.1:443", proof_key=None,
+        access_token_callback=credentials.access_token,
+    )
+    selected = caller.request
+    if boundary == "construction":
+        monkeypatch.setattr(caller, "request", selected)
+    client = WorkspaceClient(
+        caller, route_prefix="", binding=existing._binding, scope=initial["scope"],
+    )
+    if boundary == "qualification":
+        monkeypatch.setattr(caller, "request", selected)
+    assert client.preparation_contract()["version"] == 2
+    admissions = []
+    admission_error = RuntimeError("selected native admission reached")
+
+    @contextmanager
+    def native_admission(submit):
+        admissions.append(submit)
+        raise admission_error
+        yield
+
+    monkeypatch.setattr(caller_module, "native_admission", native_admission)
+
+    async def scenario():
+        with pytest.raises(RuntimeError) as admitted:
+            await client._source_request[1](None, "POST", "/example")
+        assert admitted.value is admission_error and admissions == [None]
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("method", ["capabilities", "_exchange"])
 def test_service_source_revalidates_preparation_after_discovery_lock(
     environment, integration, tools, execution_pool, monkeypatch, method,
