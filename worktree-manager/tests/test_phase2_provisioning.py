@@ -26,6 +26,15 @@ from worktree_manager.prereqs import (
 )
 from worktree_manager.provision import apply, plan, recipe_for, restart_needed
 from worktree_manager.__main__ import main
+from worktree_manager import agent_plugin_runtime
+from _installation_context_fixtures import patch_profile
+
+
+@pytest.fixture(autouse=True)
+def isolated_core_context(monkeypatch, tmp_path):
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path))
+    patch_profile(monkeypatch, agent_plugin_runtime, tmp_path)
 
 
 # ── detection ───────────────────────────────────────────────────────────────
@@ -125,14 +134,94 @@ def test_core_status_partial(tmp_path: Path):
     assert st.state == "partial"  # runtime+venv but no binstub
 
 
-def test_core_status_installed(tmp_path: Path):
+@pytest.mark.parametrize("layout", [".venv", "versions"])
+def test_core_status_rejects_empty_runtime_artifacts(tmp_path: Path, layout):
+    (tmp_path / ".agent-worktrees" / layout).mkdir(parents=True)
+    localbin = tmp_path / ".local" / "bin"
+    localbin.mkdir(parents=True)
+    (localbin / "agent-worktrees").write_text("#!stub\n")
+    st = core_status(home=tmp_path)
+    assert st.state == "partial"
+    assert not st.installed
+
+
+def _selected_core(home):
+    import json
+    import os
+
+    root = home / ".agent-worktrees"
+    slot = root / "versions" / "1.2.3"
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True)
+    python.write_text("", encoding="utf-8")
+    (slot / ".install-complete.json").write_text("{}", encoding="utf-8")
+    (root / "current-version").write_text(slot.name, encoding="utf-8")
+    (root / "deploy-manifest.json").write_text(json.dumps({
+        "service": "agent-worktrees", "source": {"plugin": "agent-worktrees"},
+    }), encoding="utf-8")
+    return root, python
+
+
+def test_core_status_uses_selected_runtime_without_requiring_global_stub(tmp_path: Path):
+    root, _ = _selected_core(tmp_path)
+    st = core_status(home=tmp_path)
+    assert st.installed
+    assert st.runtime_dir == str(root)
+    assert st.binstub is None
+
+
+@pytest.mark.parametrize("marker", ["current-version", "last-known-good"])
+@pytest.mark.parametrize("content", [b"\xff", b"1.2.3\x00"])
+def test_core_status_malformed_markers_keep_native_fallback(tmp_path, marker, content):
+    root, _ = _selected_core(tmp_path)
+    (root / marker).write_bytes(content)
+    assert core_status(home=tmp_path).installed
+
+
+@pytest.mark.parametrize("refusal", ["context", "policy"])
+def test_core_status_does_not_override_native_selection_refusal(monkeypatch, tmp_path, refusal):
+    _selected_core(tmp_path)
+    localbin = tmp_path / ".local" / "bin"
+    localbin.mkdir(parents=True)
+    (localbin / "agent-worktrees").write_text("#!leftover-stub\n")
+    if refusal == "context":
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "missing-context.json"))
+    else:
+        policy = tmp_path / ".copilot-extensions" / "installation-mode.json"
+        policy.parent.mkdir(parents=True)
+        policy.write_text("invalid json", encoding="utf-8")
+    assert not core_status(home=tmp_path).installed
+
+
+def test_core_status_refuses_damaged_selected_runtime(tmp_path: Path):
+    _, python = _selected_core(tmp_path)
+    python.unlink()
     (tmp_path / ".agent-worktrees" / ".venv").mkdir(parents=True)
     localbin = tmp_path / ".local" / "bin"
     localbin.mkdir(parents=True)
     (localbin / "agent-worktrees").write_text("#!stub\n")
     st = core_status(home=tmp_path)
-    assert st.state == "installed"
+    assert st.state == "partial"
+    assert not st.installed
+
+
+def test_core_status_uses_canonical_context_selection(monkeypatch, tmp_path):
+    from worktree_manager import agent_plugin_runtime, core_install
+
+    selected = tmp_path / "selected-cell" / "agent-worktrees"
+    selected.mkdir(parents=True)
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path / "ordinary-state"))
+    calls = []
+
+    def resolve(plugin, **kwargs):
+        calls.append((plugin, kwargs))
+        return selected / "versions" / "1.2.3"
+
+    monkeypatch.setattr(agent_plugin_runtime, "resolve_installed_plugin_slot", resolve)
+    st = core_install.core_status()
     assert st.installed
+    assert st.runtime_dir == str(selected)
+    assert calls == [("agent-worktrees", {})]
 
 
 def test_install_command_from_checkout():
@@ -144,10 +233,7 @@ def test_install_command_from_checkout():
 
 
 def test_install_core_is_noop_when_installed(tmp_path: Path):
-    (tmp_path / ".agent-worktrees" / ".venv").mkdir(parents=True)
-    localbin = tmp_path / ".local" / "bin"
-    localbin.mkdir(parents=True)
-    (localbin / "agent-worktrees").write_text("#!stub\n")
+    _selected_core(tmp_path)
     res = install_core(dry_run=True, home=tmp_path)
     assert res.ran is False
     assert res.reason == "already-installed"
@@ -158,6 +244,53 @@ def test_install_core_dry_run_plans_but_does_not_run(tmp_path: Path):
     assert res.ran is False
     # Either a planned command (checkout present) or a clear no-installer reason.
     assert res.reason in ("dry-run",) or "no-installer" in (res.reason or "")
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("process")
+def test_native_setup_never_admits_repository_after_artifact_only_core_install(tmp_path):
+    import os
+    import subprocess
+    import sys
+
+    from agent_procutil import no_window_kwargs
+
+    home = tmp_path / "home"
+    (home / ".agent-worktrees" / "versions").mkdir(parents=True)
+    localbin = home / ".local" / "bin"
+    localbin.mkdir(parents=True)
+    (localbin / "agent-worktrees").write_text("#!leftover-stub\n")
+    entered = tmp_path / "repository-entered"
+    driver = """
+import pathlib,sys
+import pytest
+sys.path.insert(0, sys.argv[2])
+from _installation_context_fixtures import patch_profile
+from worktree_manager import agent_plugin_runtime, setup_cli as cli
+from worktree_manager.core_install import CoreInstallResult
+cli.detect_baseline = lambda: []
+cli.provision_plan = lambda gaps: []
+cli.provision_apply = lambda *a, **k: []
+cli.install_command = lambda: ['synthetic-owner']
+cli.install_core = lambda **k: CoreInstallResult(['synthetic-owner'], True, 0)
+def repository(args):
+    pathlib.Path(sys.argv[1]).touch()
+    return 0
+cli.repository_bootstrap.run = repository
+with pytest.MonkeyPatch.context() as patch:
+    patch_profile(patch, agent_plugin_runtime, pathlib.Path(sys.argv[3]))
+    raise SystemExit(cli.cmd_setup(['--apply', '--repository', 'https://example.invalid/repo'], banner='Fixture'))
+"""
+    environment = {**os.environ, "AGENT_HOME": str(home), "USERPROFILE": str(home), "HOME": str(home)}
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    result = subprocess.run(
+        [sys.executable, "-c", driver, str(entered), str(Path(__file__).parent), str(home)], env=environment,
+        capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "fresh core readiness is required" in result.stdout
+    assert not entered.exists()
 
 
 # ── command surface ─────────────────────────────────────────────────────────
