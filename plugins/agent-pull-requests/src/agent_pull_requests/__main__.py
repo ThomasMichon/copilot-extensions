@@ -5,7 +5,6 @@ from __future__ import annotations
 from agent_procutil.daemon_instances import DaemonInstanceSpec, daemon_entrypoint
 
 import argparse
-import importlib.util
 import json
 import os
 import re
@@ -94,20 +93,7 @@ def _run_agent_worktrees_gh_raw(
 def _agent_worktrees_prefix() -> list[str]:
     if _WATCH_INVOCATION is None:
         return [_agent_worktrees_command()]
-    _WATCH_INVOCATION.require_current()
-    path = (
-        Path(_WATCH_INVOCATION.installation.evidence()["snapshotsRoot"])
-        / _WATCH_INVOCATION.runtime.snapshot_id / "src" / "agent_pull_requests" / "_peer_launch.py"
-    )
-    if not path.is_file():
-        raise PermissionError("watch same-cell peer launcher is unavailable in its immutable snapshot")
-    spec = importlib.util.spec_from_file_location("watch_peer_launch", path)
-    if spec is None or spec.loader is None:
-        raise PermissionError("watch same-cell peer launcher is unavailable")
-    module = importlib.util.module_from_spec(spec)
-    # Import machinery would write bytecode into the immutable snapshot.
-    exec(compile(path.read_bytes(), str(path), "exec"), module.__dict__)  # noqa: S102
-    return _WATCH_INVOCATION.peer_prefix(module)
+    return _WATCH_INVOCATION.snapshot_peer_prefix()
 
 
 def _run_agent_worktrees_gh(

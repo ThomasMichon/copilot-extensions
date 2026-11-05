@@ -84,6 +84,13 @@ Inputs without the option retain their existing response shape and semantics.
 The CLI capability response labels its declaration
 `writer_scope: executing-process`; it does **not** establish support in a
 resident daemon, another installation or every writer sharing the ledger.
+Its additive `writer_identity` contains the selected `installation_root` and
+the executing process's cached installed-build `runtime_generation`. The latter
+is the immutable build UUID, not a package version, a fresh observation ID or
+a mutable payload stamp. Source and legacy builds without that evidence return
+null; consumers must keep their support unqualified rather than invent a
+generation. A changed root or build invalidates the corresponding observation.
+Neither identity nor the serializer declaration alone is assignment admission.
 The resident publishes its own `tracking_write_record_contract` through the
 existing rendezvous alongside `resource_relationship` verb version 2. IPC
 callers requiring incarnation checking must select that verb at `min_version=2`;
