@@ -292,8 +292,12 @@ _Operator-required outcome; agent-recommended slices and validation._
   separates explicit owner-layout expansion, actual observation/feedback
   integration and the optional authenticated reader; it is not implemented
   by the inert projection or conversation ACK.
-  Its A1 explicit data-owner expansion merged in #10641; actual observation/
-  confirmed-feedback integration and negotiated serving remain open.
+  Its A1 explicit data-owner expansion merged in #10641 and finite atomic
+  acquisition half of A2 in #10648. The
+  [captured-feedback refinement](captured-attention-feedback.md) proposes the
+  remaining pre-effect capture, confirmed retry readback and interest-specific
+  echo integration before runtime changes. A2's full exit and negotiated
+  serving remain open.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -931,6 +935,30 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-05 - Land atomic acquisition; refine the remaining feedback contract
+
+- #10648 actually merged as `01c0e53da149d27bec299cfc991af3433314642a`
+  after exact-head Copilot Comment with no open findings and successful
+  required CI, including the PR gate. The managed source worktree is
+  reconciled to that merge; this is source delivery, not installed adoption.
+- Review corrections preserve pending age after unknown selection, mark
+  newer missing-evidence acquisitions unavailable, fence stale/overlapping
+  input with the retained acquisition watermark and reconcile identical
+  terminal retries after a lost commit response. The final focused
+  acquisition/workspace/attention-store packet passes 67 cases with bounded
+  cleanup verified. The earlier 133-case coupled and 64-case standalone
+  packets remain separately scoped evidence, not additive case counts.
+- Re-read the canonical Plan/Validation and workspace companion after merge.
+  A2 still needs original pre-effect capture and actual protected feedback;
+  A3 serving, coordinated retention, provider/CLI/Dispatch and installed
+  acceptance remain open. No production backend or default host changed.
+- The [captured-feedback proposal](captured-attention-feedback.md) separates
+  existing-owner v5 data expansion from protected execution and
+  interest-specific echo qualification. It preserves strict existing
+  protocols and original receipts, requires readback on all-confirmed retries
+  and refuses capture over newer unavailable attention. Review the refinement
+  before implementing it; no provider write or rollout is authorized.
 
 ### 2026-11-04 - Compose the finite attention acquisition half
 

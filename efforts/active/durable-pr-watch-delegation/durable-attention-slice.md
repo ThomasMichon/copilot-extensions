@@ -98,6 +98,9 @@ not advertise a running queue or close A2/A3 below.
 A2's exit requires actual acquisition and protected synthetic-feedback owners,
 including the race and self-echo controls. A data helper alone does not close it.
 This plan does not authorize actual provider writes.
+The [captured-feedback refinement](captured-attention-feedback.md) proposes
+the remaining immutable pre-effect capture, confirmed retry readback and
+interest-specific echo boundary, with its own review before layout/runtime work.
 
 ## A3 - Optional read-only service/CLI consumer
 
