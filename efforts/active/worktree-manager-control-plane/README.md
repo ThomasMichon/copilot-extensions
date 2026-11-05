@@ -2867,6 +2867,10 @@ is authorized by tracker consolidation.
   with two platform skips; both actual native CLI profiles passed separately.
   Configuration acquisition errors remain failures without invented readiness
   facts. This is source qualification, not installed or complete UI acceptance.
+- Review corrected the later withdrawal case too: creation-time preflight now
+  finishes before `creation_started`, and the allocator consumes that result.
+  The refreshed request/protocol/native packet passed 232 controls with two
+  platform skips, including admitted-but-unstarted same-identity recovery.
 
 ### 2026-10-30 - Proposed finite launcher/readiness consistency
 

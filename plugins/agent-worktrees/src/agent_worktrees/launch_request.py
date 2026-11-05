@@ -329,6 +329,15 @@ def execute(config, request: dict, *, identity_mode: IdentityMode = "legacy") ->
                     "worktree instead of issuing another New request"
                 )
             from .worktree_creation import _create_worktree_core
+            from .launch_preflight import LaunchPreflightError
+            from .resolve_launch_cli import preflight_launch
+
+            preflight = preflight_launch(
+                config, SimpleNamespace(recovery=False), str(work_dir),
+                allocation_source=config.default_repo.anchor,
+            )
+            if preflight.error:
+                raise LaunchPreflightError(preflight.error)
 
             _dispatch("launch_request_creation_start", {
                 "tracking_dir": str(directory), "request_id": request_id,
@@ -340,6 +349,7 @@ def execute(config, request: dict, *, identity_mode: IdentityMode = "legacy") ->
                     "allocation": (receipt["timestamp"], receipt["suffix"]),
                 }),
                 pending_seed=request["text"], pending_seed_id=request_id,
+                launch_preflight=preflight,
             )
             _dispatch("launch_request_creation_finish", {
                 "tracking_dir": str(directory), "request_id": request_id,

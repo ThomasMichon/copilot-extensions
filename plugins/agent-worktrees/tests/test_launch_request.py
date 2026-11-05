@@ -269,6 +269,44 @@ def test_new_knowledge_refusal_does_not_reserve_or_poison_the_request(
     assert len(tracking.list_records(tmp_path)) == 1
 
 
+@pytest.mark.parametrize("version", [1, 2])
+def test_creation_time_knowledge_refusal_preserves_admitted_retry(
+    tmp_path, authority, monkeypatch, version,
+):
+    from test_worktree_creation_seed import _create_config
+    from agent_worktrees import state_root
+    from agent_worktrees.launch_preflight import LaunchPreflightError
+
+    config = _create_config(tmp_path)
+    _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
+    intent = _intent("new")
+    if version == 2:
+        intent.update(version=2, attempt_id=None, native_seed_required=True)
+    healthy_root = state_root.resolve_state_root
+    reads = []
+
+    def withdrawn(*args, **kwargs):
+        reads.append(1)
+        if len(reads) == 1:
+            return healthy_root(*args, **kwargs)
+        return state_root.StateRoot(
+            None, "knowledge_repo", "", True, True, False, error="Knowledge withdrawn",
+        )
+
+    with monkeypatch.context() as blocked:
+        blocked.setattr(state_root, "resolve_state_root", withdrawn)
+        with pytest.raises(LaunchPreflightError, match="knowledge readiness"):
+            request.execute(config, intent)
+    assert len(reads) == 2
+    receipt = request._read_admission(tmp_path, intent["request_id"])
+    assert not receipt.get("creation_started") and not receipt.get("accepted")
+    assert not tracking.list_records(tmp_path)
+    result = request.execute(config, intent)
+    assert result["worktree_id"] == receipt["worktree_id"]
+    assert request.execute(config, intent) == result
+    assert len(tracking.list_records(tmp_path)) == 1
+
+
 @pytest.mark.parametrize("machine,platform,prefix", [
     ("test", "windows", "test-win"),
     ("test-wsl", "wsl", "test-wsl"),
