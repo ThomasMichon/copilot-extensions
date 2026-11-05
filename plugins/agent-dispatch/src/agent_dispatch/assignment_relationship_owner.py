@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import threading
 import time
@@ -24,13 +25,14 @@ class WorktreeRelationshipWriter:
 
     Construction does not activate ordinary allocation. The installing owner
     must supply its real preservation/cohort admission, not a copied receipt.
+    Admission receives the original workspace and selected installed identity.
     """
 
     def __init__(
         self,
         prefix: Sequence[str],
         *,
-        admit_workspace: Callable[[AssignmentWorkspace], None],
+        admit_workspace: Callable[[AssignmentWorkspace, dict], None],
         timeout: float = 30,
     ) -> None:
         if not prefix or not callable(admit_workspace):
@@ -41,20 +43,29 @@ class WorktreeRelationshipWriter:
         self.admit_workspace = admit_workspace
         self.timeout = timeout
         support = self._run(["resource-relationship", "capabilities", "--json"])
+        identity = support.get("writer_identity")
         if not (
             support.get("schema") == "copilot-extensions.resource-relationship"
             and type(support.get("version")) is int
             and support["version"] == 1
             and support.get("expected_creation_nonce") is True
+            and support.get("expected_writer_identity") is True
             and support.get("writer_scope") == "executing-process"
             and valid_record_writer(support.get("writer_contract"))
             and support.get("inspect_absence") is True
             and support.get("metadata_version") == 2
             and set(support.get("operations", [])) >= {"reserve", "bind", "inspect", "close"}
+            and isinstance(identity, dict)
+            and set(identity) == {"installation_root", "runtime_generation"}
+            and isinstance(identity["installation_root"], str)
+            and bool(identity["installation_root"].strip())
+            and isinstance(identity["runtime_generation"], str)
+            and re.fullmatch(r"[0-9a-f]{32}", identity["runtime_generation"]) is not None
         ):
             raise TaskError(
                 "selected Worktrees writer cannot protect incarnation-bound task relationships"
             )
+        self._writer_identity = dict(identity)
 
     def _run(self, arguments: list[str], payload: dict | None = None) -> dict:
         deadline = time.monotonic() + self.timeout
@@ -110,9 +121,17 @@ class WorktreeRelationshipWriter:
         operation: str,
         payload: dict,
     ) -> dict:
-        self.admit_workspace(workspace)
+        self.admit_workspace(workspace, dict(self._writer_identity))
         if operation not in {"reserve", "bind", "inspect", "close"}:
             raise TaskError("unsupported task relationship operation")
+        expected = {
+            "expected_creation_nonce": workspace.creation_nonce,
+            "expected_writer_identity": self._writer_identity,
+        }
+        if not isinstance(payload, dict) or any(
+            key in payload and payload[key] != value for key, value in expected.items()
+        ):
+            raise TaskError("task relationship input conflicts with its admitted writer or workspace")
         # Exact identity was captured by the assigning owner. This read only
         # checks it; it cannot adopt a path or reconstruct a missing nonce.
         record = self._run(
@@ -135,7 +154,7 @@ class WorktreeRelationshipWriter:
             and row.get("creation_nonce") == workspace.creation_nonce
         ):
             raise TaskError("original assignment workspace is unconfirmed; relationship retained")
-        return self._run(
+        result = self._run(
             [
                 "--project",
                 workspace.project,
@@ -145,5 +164,14 @@ class WorktreeRelationshipWriter:
                 workspace.owner_ref,
                 "--json",
             ],
-            payload,
+            {**payload, **expected},
         )
+        if not (
+            result.get("ok") is True
+            and result.get("owner") == workspace.owner_ref
+            and result.get("creation_nonce") == workspace.creation_nonce
+            and result.get("writer_identity") == self._writer_identity
+            and valid_record_writer(result.get("writer_contract"))
+        ):
+            raise TaskError("executing Worktrees writer is unconfirmed; original relationship retained")
+        return result

@@ -160,6 +160,23 @@ The adapter negotiates the executing relationship contract and also requires
 the assembling owner's independent preservation admission for participating
 writers. Current payload support alone cannot qualify an older resident.
 
+The explicit adapter requires the selected CLI's advertised executing-identity
+guard and an attributable installed build, not a package version or unknown
+source generation. Its independent `admit_workspace` callback receives the
+original workspace and a copy of that selected installation/build identity
+before record checks or relationship effects. The assembling owner must match
+both to its independently qualified participants; the callback is not optional.
+The adapter supplies that identity and the original nonce on every relationship
+request, refuses conflicting caller fields and requires the same checked
+identity in the result. A runtime wrapper selecting a different build therefore
+cannot silently inherit the earlier capability observation. Missing support,
+provider rollback, changed selection or an unconfirmed response retains the
+original relationship rather than downgrading or replaying a weaker request.
+The existing capability/record/effect call shape gains no additional probe.
+See the canonical [Worktrees relationship contract](../../agent-worktrees/docs/resource-relationship.md#workspace-incarnation-and-executing-writer-support).
+These conditional adapter controls still do not assemble the real writer
+cohort or activate ordinary coordinator construction.
+
 The original direct-claim audit event stores one immutable relationship
 request in `task_events.task_relationship`. Allocator placement still claims
 capacity before a workspace exists. A newly governed reservation retains its

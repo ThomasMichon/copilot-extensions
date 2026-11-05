@@ -1,0 +1,9 @@
+{
+  "comment": "Bind selected task relationship writes to the negotiated executing build and original workspace",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
