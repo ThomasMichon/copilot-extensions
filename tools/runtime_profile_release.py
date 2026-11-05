@@ -12,8 +12,12 @@ import json
 import os
 from pathlib import Path
 import re
+from typing import TYPE_CHECKING
 
-from runtime_profile import ProfileError, SelectedProfile, select_profile, validate_profile
+from runtime_profile_common import ProfileError
+
+if TYPE_CHECKING:
+    from runtime_profile import SelectedProfile
 
 SCHEMA = "copilot-extensions.release-runtime-profiles"
 APPROVAL_SOURCE = "promotion-main"
@@ -21,6 +25,8 @@ APPROVAL_SOURCE = "promotion-main"
 
 def release_profiles(index: dict) -> tuple:
     """Validate candidate data; this function establishes no approval."""
+    from runtime_profile import validate_profile
+
     extension = index.get("runtime_profiles")
     if extension is None and "runtime_profiles" not in index:
         return ()
@@ -102,6 +108,7 @@ def with_release_profiles(index: dict, records: list[dict], manifests: dict) -> 
     existing validation and fresh attestation remain required.
     """
     from artifact_attestation import INDEX_LIMIT, INDEX_SCHEMA
+    from runtime_profile import validate_profile
 
     if (
         not isinstance(index, dict) or index.get("schema") != INDEX_SCHEMA
@@ -220,6 +227,8 @@ def select_release_profile(
     may choose those facts. This does not download or admit dependency bytes.
     An absent artifact cannot match, but never skips subject authentication.
     """
+    from runtime_profile import select_profile
+
     if source_ref != "refs/heads/main" or signer_digest != source_digest:
         raise ProfileError("release profile approval requires pinned trusted Main")
     identity = dict(

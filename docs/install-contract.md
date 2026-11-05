@@ -4745,6 +4745,13 @@ runtime-source policy therefore needs no Manager installer import and preserves
 the existing environment/home precedence. These narrow primitives do not yet
 enable an ordinary installer; the packaged admission toolkit remains opt-in.
 
+When the release index is genuinely unavailable, source intent and its
+configured or registered source owner can be established without an installed
+`packaging` dependency. A supplied release still requires the semantic profile
+validator; missing tooling is not reclassified as artifact absence. Native
+configuration capture, the governed Packaging seed and ordinary integration
+remain separate prerequisites.
+
 One native source lock includes declared runtime/build requirements and the
 frontend's `packaging` dependency. Its actual installation owner validates
 the held native indexes, credential/trust providers and supported configuration

@@ -11,7 +11,11 @@ import pytest
 import runtime_marketplace_source as marketplace
 import runtime_source_authentication as authentication
 from runtime_profile import ProfileError, ProfileUnavailable
-from test_runtime_source_authentication import configured_source as configured_source, git
+from test_runtime_source_authentication import (
+    assert_fresh_source_owner_without_packaging,
+    configured_source as configured_source,
+    git,
+)
 from test_runtime_profile_policy_plan import adopter as adopter
 from test_runtime_source_lock import plan
 from worktree_manager import runtime_source, runtime_source_config
@@ -126,6 +130,14 @@ def test_source_builder_selects_and_retains_the_registered_marketplace_owner(reg
         selected.verify()
         prepared = selected.payload
     assert not prepared.exists()
+
+
+def test_fresh_interpreter_authenticates_registered_source_without_packaging(registered_source, tmp_path):
+    fixture = registered_source
+    assert_fresh_source_owner_without_packaging(
+        fixture["adopter"], fixture["root"], fixture["commit"],
+        "registered-marketplace-source", tmp_path,
+    )
 
 
 def test_source_builder_refuses_a_marketplace_change_during_consumption(registered_source):

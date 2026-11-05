@@ -15,15 +15,18 @@ import json
 from pathlib import Path
 import sys
 
-from runtime_profile import ProfileError
+from runtime_profile_common import ProfileError
 from runtime_profile_policy import InstallationProfilePlan
-from runtime_source_lock import dependencies
 
 _ROOT = Path(__file__).resolve().parents[1]
-for _parts in (("worktree-manager", "src"), ("libs", "agent-procutil", "src"), ("libs", "installation-context")):
+for _parts in (
+    ("worktree-manager", "src"), ("libs", "agent-procutil", "src"),
+    ("libs", "installation-context"), ("libs", "installer-engine"), ("libs", "versioned-runtime"),
+):
     sys.path.insert(0, str(_ROOT.joinpath(*_parts)))
 
 from installation_context import resolve_runtime_profile_policy
+import installer_dependency_policy as dependencies
 from installer_wheel_inputs import _check_deadline
 import prepare_runtime_source
 from versioned_runtime_source import SourceIdentity, read_source_identity

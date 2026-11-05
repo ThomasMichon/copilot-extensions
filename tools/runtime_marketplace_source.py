@@ -15,7 +15,7 @@ import re
 import sys
 
 import runtime_source_authentication as authentication
-from runtime_profile import ProfileError, ProfileUnavailable
+from runtime_profile_common import ProfileError, ProfileUnavailable
 from runtime_profile_policy import InstallationProfilePlan
 
 for _library in ("plugin-resolve", "update-telemetry"):

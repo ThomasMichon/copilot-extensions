@@ -22,11 +22,14 @@ from packaging.tags import parse_tag
 from packaging.utils import canonicalize_name, parse_wheel_filename
 from packaging.version import InvalidVersion, Version
 
+from runtime_profile_common import (
+    ProfileError, ProfileUnavailable, _digest, _text, validate_profile_preference,
+)
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
 from installer_wheel_inputs import bounded_tag, _check_deadline
 
 SCHEMA = "copilot-extensions.exact-runtime-profile"
-_HASH = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _REFERENCE = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._:-]{0,255}\Z")
 _ENVIRONMENT = frozenset({
     "implementation_name", "implementation_version", "os_name", "platform_machine",
@@ -39,35 +42,15 @@ _TARGET_FAMILY = (
 )
 
 
-class ProfileError(ValueError):
-    """A malformed, incompatible, unapproved or ambiguous selection."""
-
-
-class ProfileUnavailable(ProfileError):
-    """No approved record matches the authority's requested selection."""
-
-
 def _fields(value: Any, keys: set[str], label: str) -> dict:
     if not isinstance(value, dict) or value.keys() != keys:
         raise ProfileError(f"{label}: expected exactly {sorted(keys)}")
     return value
 
 
-def _text(value: Any, label: str) -> str:
-    if not isinstance(value, str) or not value or value != value.strip():
-        raise ProfileError(f"{label}: expected nonempty trimmed text")
-    return value
-
-
 def _reference(value: Any, label: str) -> str:
     if not _REFERENCE.fullmatch(_text(value, label)):
         raise ProfileError(f"{label}: expected an opaque reference, not a URL/path")
-    return value
-
-
-def _digest(value: Any, label: str) -> str:
-    if not _HASH.fullmatch(_text(value, label)):
-        raise ProfileError(f"{label}: expected a SHA-256 content identity")
     return value
 
 
@@ -294,14 +277,6 @@ def validate_profile(
 class SelectedProfile:
     profile: RuntimeProfile
     approval_source: str
-
-
-def validate_profile_preference(preference: tuple[str, ...]) -> None:
-    """Validate desired lock identities before any availability-dependent path."""
-    for identity in preference:
-        _digest(identity, "profile preference")
-    if len(set(preference)) != len(preference):
-        raise ProfileError("duplicate profile preference")
 
 
 def _compatible_target(profile: RuntimeProfile, target: dict) -> bool:

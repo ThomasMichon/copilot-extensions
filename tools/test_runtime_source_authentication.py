@@ -5,7 +5,9 @@ from contextlib import contextmanager
 import hashlib
 import json
 import os
+from pathlib import Path
 import subprocess
+import sys
 import time
 
 import pytest
@@ -53,6 +55,93 @@ def configured_source(tmp_path, monkeypatch):
 def retain(adopter, **options):
     return authentication.retain_authenticated_source(
         plan(adopter), installation=adopter[1], **({"deadline": time.monotonic() + 60} | options),
+    )
+
+
+def assert_fresh_source_owner_without_packaging(adopter, root, commit, provider, tmp_path, *, disabled=False):
+    allowed = {
+        "PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP",
+        "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "COPILOT_HOME",
+        "COPILOT_CACHE_HOME", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM",
+    }
+    installation = {key: value for key, value in adopter[1].items() if key != "pid_is_live"}
+    if installation.get("environment") is not None:
+        installation["environment"] = {
+            key: value for key, value in installation["environment"].items() if key.upper() in allowed
+        }
+    request = tmp_path / ("installation-" + provider + ".json")
+    request.write_text(json.dumps(installation, default=str), encoding="utf-8")
+    repository = Path(__file__).resolve().parents[1]
+    script = """
+import importlib.abc, json, pathlib, sys, time
+class DenyPackaging(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "packaging" or fullname.startswith("packaging."):
+            raise ModuleNotFoundError("packaging is unavailable", name=fullname)
+sys.meta_path.insert(0, DenyPackaging())
+sys.path.insert(0, str(pathlib.Path(sys.argv[1]) / "tools"))
+import runtime_profile_policy as planner
+import runtime_source_authentication as authentication
+import runtime_marketplace_source
+installation = json.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"))
+installation["pid_is_live"] = lambda pid: pid == 1234
+arguments = dict(
+    installation=installation, release_index=None, repository="example/plugins",
+    signer_digest="", source_digest="", source_ref="", release={}, artifact=None,
+    target={}, component="fixture", roots=[], max_subject_bytes=1,
+)
+try:
+    planner.plan_installation_profile(**(arguments | {"preference": ("bad",)}))
+except planner.ProfileError as error:
+    assert not isinstance(error, planner.ProfileUnavailable)
+else:
+    raise AssertionError("invalid preference requested source")
+try:
+    planner.plan_installation_profile(**(arguments | {"release_index": pathlib.Path("untrusted")}))
+except ModuleNotFoundError as error:
+    assert error.name == "packaging"
+else:
+    raise AssertionError("missing semantic tooling became artifact absence")
+if sys.argv[5] == "disabled":
+    try:
+        planner.plan_installation_profile(**arguments)
+    except planner.ProfileUnavailable:
+        pass
+    else:
+        raise AssertionError("disabled source fallback was selected")
+else:
+    selected = planner.plan_installation_profile(**arguments)
+    assert selected.source_trigger == "release-index-unavailable"
+    with authentication.retain_authenticated_source(
+        selected, installation=installation, deadline=time.monotonic() + 120,
+    ) as source:
+        assert source.identity.source_commit == sys.argv[3]
+        assert source.record()["provider"] == sys.argv[4]
+        source.verify()
+assert not any(name == "packaging" or name.startswith("packaging.") for name in sys.modules)
+print("stdlib-source-owner-ok")
+"""
+    environment = {key: value for key, value in os.environ.items() if key.upper() in allowed}
+    environment.update(WORKTREE_MANAGER_ROOT=str(root), TEMP=str(tmp_path), TMP=str(tmp_path), PYTHONUTF8="1")
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-B", "-c", script, str(repository), str(request),
+         commit, provider, "disabled" if disabled else "enabled"],
+        cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=180,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "stdlib-source-owner-ok"
+
+
+@pytest.mark.parametrize("disabled", [False, True])
+def test_fresh_interpreter_authenticates_source_without_packaging(
+    adopter, configured_source, tmp_path, disabled,
+):
+    if disabled:
+        owned_policy(adopter[0], adopter[1], allowSourceFallback=False)
+    assert_fresh_source_owner_without_packaging(
+        adopter, configured_source[0], configured_source[2], "configured-runtime-source",
+        tmp_path, disabled=disabled,
     )
 
 

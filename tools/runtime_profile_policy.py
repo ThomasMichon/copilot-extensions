@@ -13,7 +13,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installation-context"))
 from installation_context import resolve_runtime_profile_policy
-from runtime_profile import ProfileError, ProfileUnavailable, validate_profile_preference
+from runtime_profile_common import ProfileError, ProfileUnavailable, validate_profile_preference
 from runtime_profile_release import ReleaseSelection, select_release_profile
 
 
