@@ -656,3 +656,8 @@ implementation. The exact support closure follows the consumer trace and tests.
   missing after retaining the README. Preserved all four exact captured
   byte sequences together rather than iterating on first-error reports.
   Complete canonical-history validation remains the next acceptance check.
+- Retained the original HTTP-51 capture registry and typed Git object proof
+  as well. The canonical-history check exposed a classification mismatch
+  when that older capture was interpreted through today's registry.
+  Original capture-time semantic decisions are now retained independently;
+  neither the validator nor historical operation packets were changed.
