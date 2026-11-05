@@ -252,12 +252,10 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
-The six-contract identity/delivery/transaction delta merged in #10604 after
-the reviewer identified and the author corrected both ambiguous Index forwarding
-phrases: recursive forwarding ends INSIDE the SSH child, which stays running
-to execute the request and return its result. Genuine exact-head approval,
-no active findings and required CI preceded merge; all eleven actual merged
-bodies equal that corrected head. The child is finalized and retained, with
+The six-contract identity/delivery/transaction delta is delivered in #10604.
+Recursive Index forwarding ends INSIDE the SSH child, which stays running to
+execute the request and return its result. All eleven actual merged bodies
+equal the validated publication; the child is finalized and retained, with
 only its parent-child claim settled. See the
 [delivery journal](<journal/2026/11.04 instruction-source-delivery-contracts.md>).
 
