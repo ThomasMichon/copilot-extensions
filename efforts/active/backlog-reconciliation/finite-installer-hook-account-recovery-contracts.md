@@ -17,7 +17,8 @@ receiving transfer or source/resource release follows.
 
 **#9412** requests array-normalized empty, single and multiple listener results
 under StrictMode. The actual merged #9416 description credits the focused
-source correction and eight contained native cases. Its final exact-head
+source correction and eight passing tests for the complete touched file,
+covering both PowerShell hosts. Its final exact-head
 approval and twenty-five successful/skipped contexts are retained.
 The nullable-discussion correction in ranked #9689 is not this listener seam;
 whole #10336 remains protected.
@@ -26,8 +27,9 @@ whole #10336 remains protected.
 rewritten to standalone `libs` paths, specifically repository-policy and
 update-driver rather than retained `../../libs` references.
 The actual merged #9419 description credits the materialization correction,
-six Windows PowerShell 5.1 cases and seven PowerShell 7 cases; later #9416
-reports eight cases in each shell. Its exact-head approval and eleven
+six passing tests for the complete touched file, including both Windows
+PowerShell 5.1 and PowerShell 7; later #9416 reports eight total with both
+hosts covered, not eight per shell. Its exact-head approval and eleven
 successful/skipped contexts are retained. The whole #6909 description and
 ranked snapshot/lock/digest typing work do not settle this exact behavior.
 
