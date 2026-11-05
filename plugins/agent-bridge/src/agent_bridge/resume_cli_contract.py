@@ -55,5 +55,8 @@ def cli_contracts() -> dict[str, Any]:
                 "version": 1,
                 "capabilities": ["exact-worktree-target"],
             },
+            "bridge-session-current-requests-v1": {
+                "version": 1, "capabilities": ["observe-session-current-requests"],
+            },
         },
     }

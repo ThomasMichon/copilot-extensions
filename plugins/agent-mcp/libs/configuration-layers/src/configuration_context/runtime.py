@@ -88,13 +88,19 @@ def deployed_runtime_python(
         return None
     python = Path(selected)
     versions = runtime_root / "versions"
+    slot = python.parent.parent
+    nested = slot.name == ".venv"
+    if nested:
+        slot = slot.parent
+    expected_environment = slot.resolve() / ".venv" if nested else slot.resolve()
     # Resolve the slot directory, not the leaf: POSIX venv Python is a symlink.
     if (
         not python.is_absolute() or not python.is_file()
         or python.name not in {"python", "python.exe"}
         or python.parent.name not in {"bin", "Scripts"}
-        or python.parent.parent.parent != versions
-        or python.parent.resolve().parent.parent != versions.resolve()
+        or slot.parent != versions
+        or slot.resolve().parent != versions.resolve()
+        or python.parent.resolve().parent != expected_environment
     ):
         raise ConfigurationError("configuration runtime resolver escaped its version slots")
     return python

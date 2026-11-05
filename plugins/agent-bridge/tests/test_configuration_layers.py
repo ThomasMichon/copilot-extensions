@@ -75,13 +75,90 @@ def test_unresolved_owner_never_falls_back(tmp_path, monkeypatch):
         load_repo_bridge_config(base)
 
 
-@pytest.mark.parametrize("field", ["remote_acp_bindings", "session_modes", "topologies", "db_path"])
+@pytest.mark.parametrize("field", ["remote_acp_bindings", "topologies", "db_path"])
 def test_portable_source_cannot_overwrite_protected_fields(tmp_path, monkeypatch, field):
     report, base, knowledge, local = fixture_report(tmp_path)
     write(knowledge, {field: {}})
     monkeypatch.setattr(configuration, "owner_report", lambda root: report)
     with pytest.raises(ValueError, match="ordinary spawn"):
         load_repo_bridge_config(base)
+
+
+@pytest.mark.parametrize("origin", ["knowledge", "local"])
+@pytest.mark.parametrize("mode", ["acp", "cli"])
+def test_session_modes_coexist_without_becoming_spawn_defaults(tmp_path, monkeypatch, origin, mode):
+    from agent_bridge import session_modes
+    from agent_bridge.models import RepoBridgeConfig
+
+    report, base, knowledge, local = fixture_report(tmp_path)
+    write(base, {"session_modes": {"default": "acp"}, "default_env": {"base": "yes"}})
+    source = knowledge if origin == "knowledge" else local
+    policy_path = write(source, {
+        "session_modes": {"default": mode}, "default_env": {"portable": "yes"},
+    })
+    monkeypatch.setattr(configuration, "owner_report", lambda root: report)
+    monkeypatch.setattr(session_modes.config, "load_config", lambda strict: RepoBridgeConfig())
+    monkeypatch.setattr(session_modes.config, "config_dir", lambda: tmp_path / "service")
+
+    cfg = load_repo_bridge_config(base)
+    assert cfg.session_modes.default == "acp"
+    assert _effective_spawn_defaults(TopologyProfile(), cfg) == (
+        [], {"base": "yes", "portable": "yes"},
+    )
+    assert not any(key.startswith("/session_modes") for key in cfg._configuration_provenance)
+    selected = session_modes.resolve_session_mode(operator_repo=source, repo_root=base)
+    assert selected["mode"] == mode
+    assert str(policy_path) in selected["source"]
+
+
+@pytest.mark.parametrize("policy", [
+    {"default": "unsupported"},
+    {"venues": {"unsupported": "cli"}},
+])
+def test_coexisting_session_modes_remain_validated(tmp_path, monkeypatch, policy):
+    report, base, knowledge, local = fixture_report(tmp_path)
+    write(knowledge, {"session_modes": policy})
+    monkeypatch.setattr(configuration, "owner_report", lambda root: report)
+    with pytest.raises(ValueError, match="session_modes"):
+        load_repo_bridge_config(base)
+
+
+def test_real_session_mode_command_reads_policy_without_spawn_default_grafting(tmp_path):
+    import json
+    import os
+    import subprocess
+    import sys
+
+    from agent_procutil import no_window_kwargs
+
+    report, base, knowledge, local = fixture_report(tmp_path)
+    (base / ".git").mkdir()
+    write(base, {"session_modes": {"default": "acp"}})
+    policy_path = write(knowledge, {"session_modes": {"default": "cli"}})
+    before = policy_path.read_bytes()
+    driver = """
+import json, sys
+from pathlib import Path
+from agent_bridge import __main__ as cli, configuration, session_modes
+from agent_bridge.models import RepoBridgeConfig
+base, knowledge = Path(sys.argv[1]), Path(sys.argv[2])
+report = json.loads(sys.argv[3])
+configuration.owner_report = lambda root: report if root == base else None
+session_modes.config.load_config = lambda strict: RepoBridgeConfig()
+session_modes.config.config_dir = lambda: base / "service"
+cli.main(["config", "session-mode", "--operator-repo", str(knowledge),
+          "--repo", "sample", "--venue", "local", "--json"])
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", driver, str(base), str(knowledge), json.dumps(report)],
+        cwd=base, env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
+        capture_output=True, text=True, timeout=30, check=False, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    selected = json.loads(result.stdout)
+    assert selected["mode"] == "cli"
+    assert str(policy_path) in selected["source"]
+    assert policy_path.read_bytes() == before
 
 
 def test_native_legacy_selection_and_malformed_canonical_refusal(tmp_path, monkeypatch):
