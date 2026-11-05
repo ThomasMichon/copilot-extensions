@@ -434,6 +434,20 @@ class TimelineWindow:
         self.revision += 1
         return self._result(False, ResultCode.SOURCE_ERROR, message)
 
+    def pause_source(self, token: SourceToken) -> WindowResult:
+        """Retain history without claiming an inactive reader failed or is current."""
+        state = self._source(token)
+        if state is None:
+            return self._result(False, ResultCode.STALE_TOKEN, "Pause belongs to a retired source.")
+        self.sources[token.identity.source_key] = replace(
+            state, availability=(
+                Availability.UNKNOWN if state.availability is Availability.OBSERVED
+                else state.availability
+            ), requested_before=None,
+        )
+        self.revision += 1
+        return WindowResult(True, ResultCode.APPLIED, "Reader paused; retained evidence is not current.")
+
     def apply_delta(self, delta: LiveDelta) -> WindowResult:
         state = self._source(delta.token)
         if state is None:
@@ -449,10 +463,10 @@ class TimelineWindow:
     def recover_snapshot(
         self, snapshot: TimelineSnapshot, replay: tuple[LiveDelta, ...],
     ) -> WindowResult:
-        """Atomically restore an unavailable source through a bounded exact replay."""
+        """Atomically restore an inactive source through a bounded exact replay."""
         state = self._source(snapshot.token)
         if (
-            state is None or state.availability is not Availability.UNAVAILABLE
+            state is None or state.availability not in {Availability.UNAVAILABLE, Availability.UNKNOWN}
             or state.position is None or snapshot.availability is not Availability.OBSERVED
             or not isinstance(replay, tuple) or not 1 <= len(replay) <= 4
             or any(not isinstance(delta, LiveDelta) or delta.token != snapshot.token for delta in replay)

@@ -580,7 +580,9 @@ def test_refresh_reconciles_both_exhausted_owners_and_preserves_healthy_bridge(
                 assert window.sources[bridge.identity.source_key] == bridge_state
                 assert window._proofs[bridge_row.ref] == old._proofs[bridge_row.ref]
                 assert bridge_row in window.events
-                assert all(state.availability is Availability.OBSERVED for state in window.sources.values())
+                assert bridge_state.availability is Availability.UNKNOWN
+                assert all(state.availability is Availability.OBSERVED for state in window.sources.values()
+                           if state.token.identity.provider is not Provider.BRIDGE)
                 previous = window.sources[agenda_key].position
                 publish(app, managed["update"]())
                 await until(pilot, lambda: window.sources[agenda_key].position != previous)

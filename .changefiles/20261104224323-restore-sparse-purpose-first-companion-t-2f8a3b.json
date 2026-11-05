@@ -1,0 +1,9 @@
+{
+  "comment": "Restore sparse purpose-first Companion timeline presentation and distinguish paused evidence from source failures",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

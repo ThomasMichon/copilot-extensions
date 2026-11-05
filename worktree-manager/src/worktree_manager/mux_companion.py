@@ -127,6 +127,7 @@ class _CompanionData:
     attention_error: str | None = "not-loaded"
     agenda: dict | None = None
     agenda_error: str | None = "not-loaded"
+    agenda_pending: bool = False
 
 
 def _load_current_worktree(cwd: str | None = None, *, runner=None) -> _CompanionData:
@@ -255,19 +256,15 @@ class MuxCompanionApp(App):
     """
 
     CSS = """
-    #timeline-agenda-status {
-        height: 2;
-        overflow-y: auto;
-    }
-    #timeline-bridge-status {
-        height: 3;
-        overflow-y: auto;
-    }
-    #timeline-current-input {
-        display: none;
-        height: 2;
-        overflow-y: auto;
-    }
+    #timeline-agenda-status, #timeline-bridge-status, #timeline-current-input { height: auto; }
+    #timeline-action { display: none; height: auto; max-height: 2; }
+    .timeline-view.has-action #timeline-action { display: block; }
+    .timeline-view #status { display: none; }
+    .timeline-view { overflow: hidden; }
+    .timeline-view Header, .timeline-view Footer { display: none; }
+    .timeline-view #attention { max-height: 1; padding: 0 1; }
+    .timeline-view #footer-row { height: 1; }
+    .timeline-view #footer-row Button { height: 1; margin: 0; padding: 0 1; }
     Screen {
         background: #1a1a1a;
         border: round #6c6c6c;
@@ -375,7 +372,7 @@ class MuxCompanionApp(App):
         self._engine_cleanup_failures: list[ec.EngineCleanupError] = []
         self._observer_pane = os.environ.get("TMUX_PANE")
         self._action_message: Text | None = None
-        self._timeline_panel = CompanionTimelinePanel(id="timeline")
+        self._timeline_panel = CompanionTimelinePanel(id="timeline", source_controls=True)
         self._timeline_sync_revision = 0
         self._timeline_attachment = TimelineAttachment(
             self._timeline_panel, cwd=self._cwd or os.getcwd(),
@@ -400,19 +397,12 @@ class MuxCompanionApp(App):
         yield Header(show_clock=False)
         yield Static(Text("Loading current worktree..."), id="status")
         yield Static(ca.attention_text(None, "loading"), id="attention")
+        yield Static(id="timeline-action")
         with TabbedContent(initial="summary-tab", id="views"):
             with TabPane("Summary", id="summary-tab"):
                 with VerticalScroll():
                     yield Static(id="summary")
             with TabPane("Timeline", id="timeline-tab"):
-                yield Static("Rich Agenda: awaiting selected owner publication", id="timeline-agenda-status")
-                yield Static("Bridge: awaiting selected owner", id="timeline-bridge-status")
-                yield Static(
-                    "Current input unknown; no qualified selected-session observation.",
-                    id="timeline-current-input",
-                )
-                yield Select([("Bridge feed: membership (discover delegates)", "membership")],
-                             value="membership", allow_blank=False, id="bridge-feed")
                 yield self._timeline_panel
             with TabPane("Claims", id="claims-tab"):
                 yield Static(id="claims-evidence")
@@ -584,6 +574,7 @@ class MuxCompanionApp(App):
         self._agenda_retired = Event()
         self._agenda_retired.set()
         data.agenda_error = "awaiting provider snapshot (worktree-agendas-v1)"
+        data.agenda_pending = True
         self._update_agenda()
         self._agenda_worker = self._subscribe_agenda(
             data, self._agenda_generation, cancelled, self._agenda_retired, project, worktree, head,
@@ -601,6 +592,7 @@ class MuxCompanionApp(App):
         ):
             return
         data.agenda, data.agenda_error = frame, error
+        data.agenda_pending = False
         self._update_agenda()
         self._rich_agenda_attachment.publication(frame, error)
 
@@ -630,6 +622,7 @@ class MuxCompanionApp(App):
             retired.set()
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        self.screen.set_class(event.pane.id == "timeline-tab", "timeline-view")
         if (
             not self._timeline_attachment.closed and self._timeline_panel.is_attached
             and self._timeline_panel.query(SubwayTimeline)
@@ -678,7 +671,8 @@ class MuxCompanionApp(App):
                 selection = selected_head(data.worktree, data.sessions, self._observer_identity)
             if selection is None:
                 self._timeline_attachment.unavailable(
-                    "Selected project/worktree and exactly one canonical head are required.",
+                    data.error or data.sessions_error
+                    or "Selected project/worktree and exactly one canonical head are required.",
                 )
         if selection is None or selection != self._rich_agenda_attachment.selection:
             self._rich_agenda_attachment.stop_now()
@@ -689,7 +683,8 @@ class MuxCompanionApp(App):
         if revision != self._timeline_sync_revision or data is not self._data:
             return
         await self._rich_agenda_attachment.set_selection(
-            selection, data.agenda, data.agenda_error, reconcile=reconcile, project_root=data.worktree.get("path"),
+            selection, data.agenda, None if data.agenda_pending else data.agenda_error,
+            reconcile=reconcile, project_root=data.worktree.get("path"),
         )
         if (
             revision != self._timeline_sync_revision or data is not self._data or self._loading
@@ -852,6 +847,8 @@ class MuxCompanionApp(App):
         branch = row.get("branch") or "?"
         self.sub_title = f"{repo} \u00b7 {branch}"
         self.query_one("#status", Static).update(self._status_text())
+        self.screen.set_class(self._action_message is not None, "has-action")
+        self.query_one("#timeline-action", Static).update(self._action_message or Text())
         self.query_one("#summary", Static).update(_summary_text(self._data))
         self._update_attention()
         self._update_topology()

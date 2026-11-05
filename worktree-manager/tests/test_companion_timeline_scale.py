@@ -118,7 +118,7 @@ def test_full_window_paint_and_live_updates_keep_resource_and_browsing_bounds(
                     patch.setattr("os.scandir", forbidden)
                     wall, cpu = time.perf_counter(), time.process_time()
                     for y in range(timeline.size.height):
-                        assert timeline.render_line(y).cell_length == timeline.size.width
+                        assert timeline.render_line(y).cell_length == timeline.scrollable_content_region.width
                     paint_wall, paint_cpu = time.perf_counter() - wall, time.process_time() - cpu
                 paints.append(Sample(paint_wall * 1000, paint_cpu * 1000, process.memory_info().rss))
                 assert timeline.layout_index.materialized_rows <= timeline.size.height + 8

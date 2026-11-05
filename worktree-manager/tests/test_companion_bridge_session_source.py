@@ -390,6 +390,8 @@ def test_keyboard_selected_session_replaces_membership_reader_and_retains_indepe
             controller = app._bridge_attachment.controller
             await app._bridge_attachment.choose("owned:vanished")
             assert app._bridge_attachment.controller is controller and app._bridge_attachment.choice == "membership"
+            await pilot.click("CollapsibleTitle")
+            await pilot.pause()
             control = app.query_one("#bridge-feed", Select)
             control.focus()
             await pilot.press("enter", "down", "enter")
@@ -400,6 +402,13 @@ def test_keyboard_selected_session_replaces_membership_reader_and_retains_indepe
             await until(pilot, semantic_peer["following"].is_set)
             assert "membership discovery paused" in str(app.query_one("#timeline-bridge-status", Static).content)
             assert app._bridge_attachment.controller.reader_count == 1
+            membership = next(
+                state for state in app._timeline_panel.window.sources.values()
+                if state.token.identity.source_key.startswith("bridge-membership:")
+            )
+            assert membership.availability is Availability.UNKNOWN
+            assert membership.requested_before is None
+            assert "Bridge reader paused" not in str(app.query_one(".timeline-state", Static).content)
             semantic_peer["log"].append("ask_user_request", {"request_id": "input-b"})
             await until(pilot, lambda: any(
                 row.event_id == "event:2" for row in app._timeline_panel.window.events

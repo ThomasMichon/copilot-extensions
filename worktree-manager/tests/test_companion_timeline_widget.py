@@ -9,13 +9,16 @@ import pytest
 from textual.app import App, ComposeResult
 from textual import events
 from textual.message_pump import MessagePump
-from textual.widgets import Button, Static
+from textual.widgets import Button, Collapsible, Static
 
 from worktree_manager.companion_timeline_contract import (
     Availability, Completeness, HistoryPage, LiveDelta, MAX_STRIP_CACHE_BYTES, SourceToken,
 )
 from worktree_manager.companion_timeline_model import TimelineWindow
 from worktree_manager.companion_timeline_widget import CompanionTimelinePanel, SubwayTimeline
+from worktree_manager.companion_agenda_attachment import AgendaTimelineAttachment
+from worktree_manager.companion_timeline_attachment import TimelineAttachment
+from worktree_manager.companion_timeline_controller import TimelineSourceError
 from _companion_timeline_fixtures import event, position, snapshot, token
 
 
@@ -77,7 +80,12 @@ def test_live_bottom_short_padding_and_sticky_context():
             assert timeline.virtual_size.height == timeline.size.height
             assert "Recorded event 0" in strip_text(timeline, timeline.size.height - 1)
             assert "Purpose:" in str(app.query_one(".timeline-context", Static).content)
-            assert "efforts/active/example/README.md" in str(app.query_one(".timeline-context", Static).content)
+            assert app.query_one(Collapsible).collapsed
+            assert "efforts/active/example/README.md" in str(app.query_one(".timeline-effort", Static).content)
+            assert timeline.size.height >= 24
+            await pilot.click("CollapsibleTitle")
+            await pilot.pause()
+            assert not app.query_one(Collapsible).collapsed
             await pilot.press("escape")
         assert not app.is_running
 
@@ -316,7 +324,7 @@ def test_render_is_lazy_literal_bounded_and_has_no_io(monkeypatch):
                 patch.setattr("os.scandir", forbidden)
                 patch.setattr(TimelineWindow, "lane_count", property(forbidden_lane_count))
                 for y in range(timeline.size.height):
-                    assert timeline.render_line(y).cell_length == timeline.size.width
+                    assert timeline.render_line(y).cell_length == timeline.scrollable_content_region.width
             assert timeline.layout_index.materialized_rows <= timeline.size.height + 8
             assert timeline.cache_bytes <= MAX_STRIP_CACHE_BYTES
             rendered = "\n".join(strip_text(timeline, y) for y in range(timeline.size.height))
@@ -373,12 +381,145 @@ def test_unobserved_source_clears_sticky_current_context(availability: Availabil
             assert panel.apply_snapshot(invalidated).applied
             await pilot.pause()
             content = str(panel.query_one(".timeline-context", Static).content)
-            assert "Purpose: unknown" in content and "Effort: unknown" in content
+            assert "Purpose: unknown" in content
+            assert "Effort: unknown" in str(panel.query_one(".timeline-effort", Static).content)
             assert "Complete the accepted assignment." not in content
             assert "efforts/active/example/README.md" not in content
             creation = str(panel.query_one(".timeline-creation", Static).content)
             assert "Creation context unknown." in creation
             assert "Original source and scope" not in creation
+
+    asyncio.run(check())
+
+
+def test_unbound_provider_error_stays_visible_when_evidence_is_collapsed() -> None:
+    async def check() -> None:
+        app = TimelineApp(TimelineWindow())
+        async with app.run_test(size=(60, 24)) as pilot:
+            panel = app.query_one(CompanionTimelinePanel)
+            from worktree_manager.companion_timeline_contract import Provider
+            panel.provider_notice(Provider.WORKTREES, "unsupported provider capability", failed=True)
+            await pilot.pause()
+            assert app.query_one(Collapsible).collapsed
+            assert "Worktrees: error" in str(app.query_one(".timeline-health", Static).content)
+            assert "unsupported provider capability" in str(app.query_one(".timeline-state", Static).content)
+            assert app.query_one(SubwayTimeline).size.height >= 16
+            panel.provider_notice(Provider.WORKTREES, "Loading a new observation.")
+            assert "Worktrees: error" in str(app.query_one(".timeline-health", Static).content)
+            assert "unsupported provider capability" in str(app.query_one(".timeline-state", Static).content)
+            panel.provider_notice(Provider.WORKTREES, None)
+            assert "error" not in str(app.query_one(".timeline-health", Static).content)
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("failure", ["publication", "missing-root", "awaiting"])
+def test_unbound_agenda_failure_is_visible_but_ordinary_wait_is_not_an_error(failure: str, tmp_path) -> None:
+    async def check() -> None:
+        app = TimelineApp(TimelineWindow())
+        async with app.run_test(size=(60, 24)) as pilot:
+            panel = app.query_one(CompanionTimelinePanel)
+            attachment = AgendaTimelineAttachment(
+                panel, cwd="/example", status=lambda _message: None,
+                validate_events=lambda _token, _events: None,
+            )
+            if failure == "missing-root":
+                await attachment.set_selection(("example", "selected", "head-a"))
+            elif failure == "awaiting":
+                await attachment.set_selection(
+                    ("example", "selected", "head-a"), project_root=str(tmp_path),
+                )
+            else:
+                attachment.selection = ("example", "selected", "head-a")
+                attachment.publication(None, "fixture disconnected")
+            await pilot.pause()
+            assert app.query_one(Collapsible).collapsed
+            assert not panel.window.sources
+            health = str(app.query_one(".timeline-health", Static).content)
+            assert ("Agenda: error" in health) == (failure != "awaiting")
+            details = str(app.query_one(".timeline-state", Static).content)
+            if failure == "publication":
+                assert "fixture disconnected" in details
+            elif failure == "missing-root":
+                assert "worktree root is unavailable" in details
+            else:
+                assert "error" not in health.lower()
+            if failure != "awaiting":
+                attachment.publication({
+                    "project": "example", "worktree_id": "selected", "session_id": "head-a",
+                    "availability": "not-published",
+                }, None)
+                attachment.publication(None, None)
+                await pilot.pause()
+                assert app.query_one(Collapsible).collapsed
+                assert "Agenda: error" in str(app.query_one(".timeline-health", Static).content)
+                assert details == str(app.query_one(".timeline-state", Static).content)
+            await attachment.close()
+
+    asyncio.run(check())
+
+
+def test_history_retry_retains_failure_until_a_fresh_observed_snapshot_is_admitted(tmp_path) -> None:
+    from worktree_manager.companion_timeline_contract import Provider
+
+    async def check() -> None:
+        refreshed = asyncio.Event()
+
+        class Source:
+            reads = 0
+
+            async def prepare(self, epoch, *, stop):
+                self.initial = snapshot(token(epoch), (event(token(epoch), 0),))
+                return self.initial
+
+            async def observe(self, _token, *, stop):
+                yield self.initial
+                await refreshed.wait()
+                if not stop.is_set():
+                    yield self.initial
+                await stop.wait()
+
+            async def history(self, source, before, *, stop):
+                self.reads += 1
+                if self.reads == 1:
+                    raise TimelineSourceError("transient history read failed")
+                return HistoryPage(source, before, None, (event(source, -1),), Completeness.COMPLETE)
+
+        app = TimelineApp(TimelineWindow())
+        async with app.run_test(size=(80, 24)) as pilot:
+            panel = app.query_one(CompanionTimelinePanel)
+            source = Source()
+            attachment = TimelineAttachment(
+                panel, cwd=str(tmp_path), source_factory=lambda _selection: source,
+            )
+            try:
+                await attachment.set_selection(("example", "selected", "head-a"))
+                await pilot.pause()
+                selected = source.initial.token
+                before = source.initial.before
+                assert before is not None
+                for _ in range(2):
+                    assert panel.window.request_history(selected, before).applied
+                    attachment.history(SubwayTimeline.HistoryRequested(selected, before))
+                    await attachment.controller._pages[Provider.WORKTREES]
+                    await pilot.pause()
+                state = panel.window.sources[selected.identity.source_key]
+                assert source.reads == 2 and state.before is None
+                assert state.availability is Availability.UNAVAILABLE
+                assert "Worktrees: error" in str(panel.query_one(".timeline-health", Static).content)
+                retained = tuple(panel.window.events)
+                refreshed.set()
+                for _ in range(40):
+                    if panel.window.sources[selected.identity.source_key].availability is Availability.OBSERVED:
+                        break
+                    await pilot.pause(0.025)
+                assert panel.window.sources[selected.identity.source_key].availability is Availability.OBSERVED
+                assert panel.window.events == retained
+                assert Provider.WORKTREES not in panel._provider_notices
+                assert "error" not in str(panel.query_one(".timeline-health", Static).content)
+            finally:
+                refreshed.set()
+                await attachment.close()
 
     asyncio.run(check())
 
