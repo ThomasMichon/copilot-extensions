@@ -15,8 +15,12 @@ from __future__ import annotations
 
 import subprocess
 
+import pytest
 
 from agent_bridge import worktree_lineage as wl
+from agent_bridge._peer_launch import ContextRefused
+
+PREFIX = ["/owner/python", "-I", "-m", "agent_worktrees"]
 
 
 # --- pure seed-header composition -------------------------------------------
@@ -69,10 +73,11 @@ class _FakeProc:
 
 
 def _patch_run(monkeypatch, *, captured, returncode=0, stdout="", raise_exc=None):
-    monkeypatch.setattr(wl, "_agent_worktrees_bin", lambda: "/usr/bin/agent-worktrees")
+    monkeypatch.setattr(wl, "_agent_worktrees_launch_prefix", lambda: PREFIX)
 
     def fake_run(argv, **kwargs):
         captured["argv"] = argv
+        captured["kwargs"] = kwargs
         if raise_exc:
             raise raise_exc
         return _FakeProc(returncode=returncode, stdout=stdout)
@@ -89,7 +94,8 @@ def test_register_session_argv(monkeypatch):
     # dotfiles#458: both --worktree-id and --cwd are always passed together
     # when known, so register-session can use the already-resolved id
     # directly instead of depending solely on fragile cwd-based inference.
-    assert argv[1:] == [
+    assert argv[:len(PREFIX)] == PREFIX
+    assert argv[len(PREFIX):] == [
         "register-session", "--session-id", "acp-1", "--worktree-id", "wt-a",
         "--cwd", "/wt/a", "--pid", "42",
     ]
@@ -99,7 +105,7 @@ def test_register_session_argv_no_dir_fallback(monkeypatch):
     captured: dict = {}
     _patch_run(monkeypatch, captured=captured)
     wl.register_session("wt-a", "acp-1")
-    assert captured["argv"][1:] == [
+    assert captured["argv"][len(PREFIX):] == [
         "register-session", "--session-id", "acp-1", "--worktree-id", "wt-a",
     ]
 
@@ -109,7 +115,7 @@ def test_link_succession_argv(monkeypatch):
     _patch_run(monkeypatch, captured=captured, stdout="{}")
     ok = wl.link_succession("wt-a", "acp-1", "acp-2", worktree_dir="/wt/a")
     assert ok is True
-    assert captured["argv"][1:] == [
+    assert captured["argv"][len(PREFIX):] == [
         "link-succession", "--worktree", "wt-a",
         "--predecessor", "acp-1", "--successor", "acp-2", "--json",
     ]
@@ -120,7 +126,7 @@ def test_note_handoff_argv(monkeypatch):
     _patch_run(monkeypatch, captured=captured)
     ok = wl.note_handoff("wt-a", "acp-1", title="context-pressure", worktree_dir="/wt/a")
     assert ok is True
-    assert captured["argv"][1:] == [
+    assert captured["argv"][len(PREFIX):] == [
         "note-handoff", "--session-id", "acp-1", "--worktree-dir", "/wt/a",
         "--title", "context-pressure",
     ]
@@ -146,7 +152,8 @@ def test_history_digest_returns_text(monkeypatch):
 
 
 def test_missing_binstub_fails_open(monkeypatch):
-    monkeypatch.setattr(wl, "_agent_worktrees_bin", lambda: None)
+    monkeypatch.setattr(wl, "_agent_worktrees_launch_prefix", lambda: None)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("unselected owner spawned"))
     assert wl.register_session("wt-a", "acp-1") is False
     assert wl.link_succession("wt-a", "acp-1", "acp-2") is False
     assert wl.note_handoff("wt-a", "acp-1") is False
@@ -170,8 +177,8 @@ def test_nonzero_exit_is_false(monkeypatch):
 def test_empty_args_short_circuit(monkeypatch):
     # Never shell out on missing ids.
     called = {"n": 0}
-    monkeypatch.setattr(wl, "_agent_worktrees_bin", lambda: (_ for _ in ()).throw(AssertionError))
-    # _agent_worktrees_bin must not even be consulted when ids are empty.
+    monkeypatch.setattr(wl, "_agent_worktrees_launch_prefix", lambda: (_ for _ in ()).throw(AssertionError))
+    # Owner selection must not even be consulted when ids are empty.
     monkeypatch.setattr(wl, "_run", lambda *a, **k: called.__setitem__("n", called["n"] + 1) or None)
     assert wl.register_session("", "acp-1") is False
     assert wl.link_succession("wt", "", "acp-2") is False
@@ -179,3 +186,35 @@ def test_empty_args_short_circuit(monkeypatch):
     assert wl.session_role("", "acp") is None
     assert wl.history_digest("") is None
     assert called["n"] == 0
+
+
+def test_refused_installation_fails_open_without_subprocess(monkeypatch):
+    def refused():
+        raise ContextRefused("selected installation refused")
+
+    monkeypatch.setattr(wl, "_agent_worktrees_launch_prefix", refused)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("refused owner spawned"))
+    assert wl.register_session("wt-a", "acp-1") is False
+    assert wl.link_succession("wt-a", "acp-1", "acp-2") is False
+    assert wl.note_handoff("wt-a", "acp-1") is False
+    assert wl.session_role("wt-a", "acp-1") is None
+    assert wl.history_digest("wt-a") is None
+
+
+def test_lineage_scrubs_owner_routing_and_preserves_cwd(monkeypatch, tmp_path):
+    inherited = {
+        "AGENT_HOME", "AGENT_RT_ROOT", "AGENT_RT_PY", "COPILOT_PLUGIN_ROOT",
+        "VIRTUAL_ENV", "PYTHONHOME", "PYTHONPATH", "__PYVENV_LAUNCHER__",
+    }
+    for key in inherited:
+        monkeypatch.setenv(key, "/caller/override")
+        monkeypatch.setenv(key.lower(), "/caller/override")
+    monkeypatch.setenv("LINEAGE_UNRELATED", "retained")
+    captured: dict = {}
+    _patch_run(monkeypatch, captured=captured)
+    assert wl.register_session("wt-a", "acp-1", worktree_dir=str(tmp_path))
+    kwargs = captured["kwargs"]
+    assert kwargs["cwd"] == str(tmp_path)
+    assert kwargs["timeout"] == wl._LINEAGE_TIMEOUT_S
+    assert kwargs["env"]["LINEAGE_UNRELATED"] == "retained"
+    assert not any(key.upper() in inherited for key in kwargs["env"])

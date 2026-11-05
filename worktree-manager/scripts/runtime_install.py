@@ -534,16 +534,17 @@ def _foreground_install(args, driver) -> Path | int:
         identity.extend(["recover-adopted", evidence])
     if automatic:
         identity.append("--auto")
+    caller = str(Path.cwd().resolve())
     request = driver.enqueue(
         driver.RequestSpec(
             "manager-bootstrap", tuple(identity), project=str(args.root.resolve()),
-            cwd=str(args.payload.resolve()), source=digest,
+            cwd=caller, source=digest,
             context=tuple({**request_context(), "WORKTREE_MANAGER_ROOT": str(args.root.resolve())}.items()),
             repair=repair,
             killswitch_path=_bootstrap_hold_path(),
         ),
         runner=driver.TrustedRunner(
-            tuple(arguments), str(args.payload.resolve()), context_keys=_CONTEXT_KEYS,
+            tuple(arguments), caller, context_keys=_CONTEXT_KEYS,
         ),
     )
     driver.drain()

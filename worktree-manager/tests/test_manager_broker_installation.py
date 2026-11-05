@@ -238,6 +238,49 @@ def test_foreground_bootstrap_queues_only_its_fixed_installation_not_application
     assert captured.err == log.read_text(encoding="utf-8")
 
 
+def test_foreground_bootstrap_keeps_relative_source_at_admitted_anchor(
+    installation, monkeypatch,
+):
+    from worktree_manager import source_config
+
+    state = installation
+    caller = state.root / "caller"
+    caller.mkdir()
+    monkeypatch.chdir(caller)
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(state.root))
+    source_config.set_source(repo="upstream", ref="main", root=state.root)
+    original = source_config.config_path(state.root).read_bytes()
+    monkeypatch.setattr(state.adapter, "_source_digest", lambda payload: "a" * 64)
+    state.adapter.runtime.mark_complete(state.root, state.slot.name, payload_hash="b" * 64)
+
+    scripts = state.root / "installer"
+    scripts.mkdir()
+    (scripts / "runtime_install.py").write_text(f"""
+import json,sys
+from pathlib import Path
+sys.path.insert(0, {str(Path(source_config.__file__).parents[1])!r})
+from worktree_manager.source_config import absolute_local_source,resolved_repo
+root=Path(sys.argv[sys.argv.index('--root')+1])
+assert absolute_local_source(resolved_repo(root))=={str(caller / 'upstream')!r}
+print(json.dumps({{
+    'schema':'copilot-extensions.manager-bootstrap','version':1,
+    'root':str(root),'source':{'a' * 64!r},'slot':{str(state.slot)!r},
+}}))
+""", encoding="utf-8")
+    monkeypatch.setattr(state.adapter, "SCRIPTS", scripts)
+
+    driver = SimpleNamespace(
+        RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        enqueue=core.enqueue, drain=core.drain, wait=core.wait,
+    )
+    args = SimpleNamespace(
+        payload=state.root, root=state.root, command=["--", "--version"],
+        repair_update=False, recover_adopted=None, skip_instance_reconcile=True,
+    )
+    assert state.adapter._foreground_install(args, driver) == state.slot
+    assert source_config.config_path(state.root).read_bytes() == original
+
+
 @pytest.mark.parametrize(("command", "repair"), [
     (["--", "update", "--force"], True),
     (["update", "--force-runtime", "agent-worktrees"], True),

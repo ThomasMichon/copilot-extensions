@@ -145,7 +145,7 @@ The source implementation continuation is admitted; operational effects are not.
 - [x] Implement the admitted exact local source inspector, native mapping/blob
   verification, immutable ref retention and separate generation-bound attachment
   envelope (#9708); fetching, owner adoption and live qualification stay open.
-- [ ] Complete source acceptance of prepared-only async execution/drain, actual
+- [x] Complete source acceptance of prepared-only async execution/drain, actual
   request-native custody and immutable inspection admission (#9928). Acquisition,
   actual tool-host adoption and live qualification are separate open gates.
 - [ ] Preserve existing GitHub behavior and use a provider-neutral contract.
@@ -217,6 +217,31 @@ submission recovery and remaining decisions. It is not a shipped CLI or wire
 contract.
 
 ## Journal
+
+### 2026-11-05 - Accept the prepared-source asynchronous SDK
+- #9928 merged as `4e0f62e810bd0a91971f3dbd58903f002447a5c9` after
+  current-head Copilot approval and all required checks passed. This closes
+  only the prepared-source acceptance item, not the parent campaign.
+- Review corrections preserve actual native completion and retryable cleanup
+  custody, immutable input admission, static getter refusal, discovery-lock
+  revalidation and stock bound-request compatibility. The final correction
+  pins the original credential reader rather than its replaceable class
+  attribute; an override remains available for ordinary metadata but cannot
+  advertise owned source preparation.
+- The class-reader regression reproduced misqualification before the fix.
+  All 40 native request-custody cases then passed with no skips: 143.38 seconds
+  of tests and 207.62 seconds including preparation and cleanup, with the
+  existing 180/600 bounds unchanged. This packet overlaps earlier evidence;
+  its count is not additive to preceding compatibility packets.
+- Three newly required toolkit copies were synchronized from their canonical
+  sources. Empty and binary stdin passed two actual packaged caller-owned
+  process-boundary controls; generator, install and source-binding checks
+  passed. No installed/runtime or human-concurrency acceptance is inferred.
+- The old admission-alias mismatch in #10335 was already corrected by #10334;
+  current source bindings and unit CI confirm that correction.
+- Eight Plan items and eleven Validation items remain open. Release,
+  actual tool-host/adopter integration, live ADO qualification, concurrent
+  reviewers and separately authorized serving/rollout remain future gates.
 
 ### 2026-11-05 - Revalidate source preparation after discovery-lock waits
 - A preparation binding can change while a source caller waits for shared
