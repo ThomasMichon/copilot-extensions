@@ -132,7 +132,7 @@ def assert_installed_mcp(installation, environment, project):
 
 @native_genesis
 def test_actual_mcp_cold_recipe_survives_caller_exit_and_preserves_healthy_selection(
-    materialized_mcp, area, native_window_observation, native_recipe_runner, rename_source,
+    materialized_mcp, area, native_window_observation, native_recipe_runner, rename_source, capsys,
 ):
     payload, installation, project = materialized_mcp
     root = area / "cold"
@@ -141,6 +141,10 @@ def test_actual_mcp_cold_recipe_survives_caller_exit_and_preserves_healthy_selec
     sentinel = installation.parent / "mcp-config.json"
     sentinel.write_text('{"preserve":"operator configuration"}', encoding="utf-8")
     preserved = sentinel.read_bytes()
+
+    def stage(name):
+        with capsys.disabled():
+            print(f"MCP native qualification: {name}", flush=True)
 
     def diagnostic():
         return "\n".join(f"{path.name}:\n{path.read_text(errors='replace')[-16000:]}"
@@ -154,6 +158,7 @@ def test_actual_mcp_cold_recipe_survives_caller_exit_and_preserves_healthy_selec
             ["--wait", "--installer-action", action]
         )
 
+    stage("cold stamp")
     caller, caller_log = native_recipe_runner.start(
         command("stamp"), env=environment, cwd=project, root=root, diagnostic=diagnostic,
     )
@@ -182,6 +187,7 @@ def test_actual_mcp_cold_recipe_survives_caller_exit_and_preserves_healthy_selec
     results = status(root=root)
     assert all(item.state == "completed" and item.exit_code == 0 for item in results), diagnostic()
     assert not (installation / "current-version").exists()
+    stage("concurrent provision")
     callers = [
         native_recipe_runner.start(
             command("provision"), env=environment, cwd=project, root=root, diagnostic=diagnostic,
@@ -189,10 +195,12 @@ def test_actual_mcp_cold_recipe_survives_caller_exit_and_preserves_healthy_selec
     ]
     for process, path in callers:
         assert process.wait(timeout=900) == 0, path.read_text(errors="replace") + diagnostic()
+    stage("installed consumers")
     slot = assert_installed_mcp(installation, environment, project)
     selection = (installation / "current-version").read_bytes()
     completion = (slot / ".install-complete.json").read_bytes()
     manifest = (installation / "deploy-manifest.json").read_bytes()
+    stage("healthy repeat")
     repeated = native_recipe_runner.run(
         command("provision"), env=environment, cwd=project, root=root, diagnostic=diagnostic,
     )
@@ -201,6 +209,7 @@ def test_actual_mcp_cold_recipe_survives_caller_exit_and_preserves_healthy_selec
     assert (slot / ".install-complete.json").read_bytes() == completion
     assert sentinel.read_bytes() == preserved
 
+    stage("incoming health failure")
     set_payload_version(payload, "999.0.0")
     initializer = payload / "src/agent_mcp/__init__.py"
     initializer.write_text("raise RuntimeError('fixture incoming module health failure')\n", encoding="utf-8")
@@ -208,7 +217,7 @@ def test_actual_mcp_cold_recipe_survives_caller_exit_and_preserves_healthy_selec
         command("provision"), env=environment, cwd=project, root=root, diagnostic=diagnostic,
     )
     assert failed.returncode != 0, failed.stdout + diagnostic()
-    assert "fixture incoming module health failure" in failed.stdout, failed.stdout + diagnostic()
+    assert "Fresh runtime slot failed its health gate" in failed.stdout, failed.stdout + diagnostic()
     assert (installation / "current-version").read_bytes() == selection
     assert (slot / ".install-complete.json").read_bytes() == completion
     # A healthy repeat may refresh diagnostics, not the failed candidate's selection.
@@ -216,6 +225,8 @@ def test_actual_mcp_cold_recipe_survives_caller_exit_and_preserves_healthy_selec
         "runtime_version"
     ] == json.loads(manifest.decode("utf-8-sig"))["runtime_version"]
     assert sentinel.read_bytes() == preserved
+    stage("source-independent consumers")
     rename_source(payload, payload.with_name("unavailable-mcp"))
     assert_installed_mcp(installation, environment, project)
+    stage("native owner settlement")
     observe(native_recipe_runner.owners_finished, 900, diagnostic)
