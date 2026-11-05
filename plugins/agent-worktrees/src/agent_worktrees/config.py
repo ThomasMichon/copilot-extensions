@@ -958,10 +958,8 @@ def _load_config_uncached(
     # Control-plane related.yaml (+ ``<repo>-harness`` plugin) ``pr:`` overlays,
     # computed once: a checked-in control-plane view of how to land PRs in a
     # FOREIGN repo, layered per-repo below. Fail-safe -> ``{}``.
-    cp_related_pr = config_acquisition.owner_call(
-        _control_plane_related_pr_map, _CONTROL_PLANE_PR_OWNER,
-        source="control-plane-related-pr",
-    ) if include_control_plane_related_pr else {}
+    from .pr_related_binding import control_plane_pr_map
+    cp_related_pr = control_plane_pr_map() if include_control_plane_related_pr else {}
 
     # Build the set of repos to resolve: those named in the machine-local file,
     # plus the active project (so a convention-adopted repo with no

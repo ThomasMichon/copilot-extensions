@@ -56,6 +56,12 @@ A failed provider read is a visible `live_error`, not an empty live success.
 One-shot reads do not acquire durable responsibility and can run in the shared
 owner's non-checkout process context. An explicit target resolves through its
 registered control-plane configuration; no project or target is guessed.
+Within one `snapshot`, `status` or `threads` command, configuration loads share
+control-plane PR discovery and committed configuration reads. Each invocation
+starts a fresh acquisition scope, even inside a resident configuration cache.
+Credentials and provider responses are not cached by that scope. Cursor and
+polling-wait dispatch are unchanged; reduced discovery work does not guarantee
+a successful read within a caller's deadline.
 The CLI front door admits `pr-watch snapshot/status/threads` and explicit
 `pr-status --repo ... --pr ...` in that context; tracked status, durable waits
 and publication retain their project/worktree requirements.
