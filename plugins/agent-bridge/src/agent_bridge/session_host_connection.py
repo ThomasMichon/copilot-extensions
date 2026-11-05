@@ -633,8 +633,13 @@ class _SessionHostConnectionMixin:
         self._release_unprotected_codespace_lock(session_id)
 
     def _release_unprotected_codespace_lock(self, session_id: str) -> None:
+        from .session_manager import _codespace_claim_key
+
         session = self._sessions.get(session_id)
-        if session is None or not session._codespace_ownership_lock.locked():
+        if session is None or (
+            not session._codespace_ownership_lock.locked()
+            and _codespace_claim_key(session.target) is None
+        ):
             self._release_codespace_lock(session_id)
 
     async def _reattach_one(

@@ -166,3 +166,21 @@ daemon. Review the plan before implementation.
   follow-up nine-case packet also passed implicit forward cleanup while a
   guarded release is pending. Ruff, install, docs and current-source contract
   gates passed. Required CI, renewed review and merge remain open.
+
+### 2026-11-04 - Final custody review corrections
+
+- The renewed review confirmed the original findings resolved and identified
+  three remaining races. Implicit forward/reap cleanup now preserves a durable
+  claim receipt after the operation guard exits, including failed release.
+  Dead/missing authority recovery uses that same custody-aware path; failed
+  replacement also retains its newly reacquired lock for an existing claim.
+- Stop waits for Codespace admission using lifecycle-before-ownership ordering,
+  matching resume. Fresh Codespace startup does not acquire the lifecycle lock;
+  origin-owned SSH startup is a mutually exclusive target path.
+- Added late real-reap, overlapping authority recovery and claim/relay-stop
+  controls. The claim lifecycle packet passed 31 cases; the broader admission
+  packet passed 224 with one platform skip, and Host/owned-workspace stop and
+  recovery compatibility passed 188 cases. Ruff, install, documentation and
+  current-source contract gates passed. Historical captures remain unchanged.
+- Required exact-head CI and a renewed passing review remain open. No installed
+  service, live claim, credential, external venue or rollout effects were taken.

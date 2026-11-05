@@ -5272,6 +5272,7 @@ class TestCodespaceExclusiveClaim:
         caller_owner_ref=None,
         acp_command=None,
         relay_fails=False,
+        relay_result=None,
         manager=None,
     ):
         if caller_owner_ref is not None:
@@ -5294,7 +5295,7 @@ class TestCodespaceExclusiveClaim:
         monkeypatch.setattr(
             "agent_bridge.session_manager._resolve_relay_launch_env",
             Mock(side_effect=RuntimeError("relay provider failed")) if relay_fails
-            else lambda *a: ("", None),
+            else relay_result or (lambda *a: ("", None)),
         )
         claim_calls: list[tuple[str, str, str | None]] = []
 
@@ -5489,10 +5490,11 @@ class TestCodespaceExclusiveClaim:
             )
         if with_host_record:
             from agent_bridge.session_host.host_index import HostRecord
-            manager._host_index.register(HostRecord(
+            record = HostRecord(
                 session_id=session.session_id, port=12345, host_pid=101, child_pid=102,
                 boundary="codespace", endpoint={"codespace": "example-codespace"},
-            ))
+            )
+            manager._host_index.register(record)
             monkeypatch.setattr("ssh_manager.ConnectionManager", lambda: SimpleNamespace(
                 ensure_connected=AsyncMock(), disconnect=AsyncMock(),
                 exec_command=AsyncMock(return_value=SimpleNamespace(exit_code=0, stdout="__REAPED__")),
@@ -5541,6 +5543,13 @@ class TestCodespaceExclusiveClaim:
             )
             assert (identity is None) is release_ok
             assert (session.session_id in manager._codespace_lock_sessions) is not release_ok
+            if with_host_record:
+                # A reap that finishes after the ownership guard exits cannot
+                # free custody retained by a failed provider release.
+                assert await manager._remote_reap(record, record.endpoint)
+                await manager._drop_forward(session.session_id)
+                manager._kill_forward_sync(session.session_id)
+                assert (session.session_id in manager._codespace_lock_sessions) is not release_ok
             monkeypatch.setattr(
                 "agent_bridge.session_manager._release_codespace_claim",
                 lambda *a: calls.append(a) or True,
@@ -5553,6 +5562,103 @@ class TestCodespaceExclusiveClaim:
             with contextlib.suppress(BaseException):
                 await operation
             manager._release_codespace_lock(session.session_id)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("authority", ["dead", "missing"])
+    async def test_authority_recovery_preserves_pending_and_failed_release(
+        self, tmp_db, monkeypatch, authority,
+    ) -> None:
+        import threading
+        from agent_bridge.session_host.spawner import RemoteHostDeadError
+        from agent_bridge.session_manager import RemoteHostRecoveryPendingError
+
+        manager, session, _calls = await self._start(
+            tmp_db, monkeypatch, claim_result=("ok", ""),
+            caller_worktree=str(tmp_db.db_path.parent),
+        )
+        recover = (
+            AsyncMock(side_effect=RemoteHostDeadError("synthetic host is dead"))
+            if authority == "dead" else AsyncMock(return_value=None)
+        )
+        monkeypatch.setattr(
+            "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
+            lambda *a, **k: SimpleNamespace(recover_record=recover),
+        )
+        entered, finish = threading.Event(), threading.Event()
+
+        def release(*identity):
+            entered.set()
+            assert finish.wait(5)
+            return False
+
+        monkeypatch.setattr("agent_bridge.session_manager._release_codespace_claim", release)
+        end = asyncio.create_task(manager.end_session(session.session_id, force=True))
+        try:
+            async with asyncio.timeout(5):
+                while not entered.is_set():
+                    await asyncio.sleep(0.01)
+            await manager._recover_remote_host_records(allow_wake=True)
+            assert not end.done()
+            assert session.session_id in manager._codespace_lock_sessions
+            finish.set()
+            with pytest.raises(RemoteHostRecoveryPendingError):
+                await end
+            await manager._recover_remote_host_records(allow_wake=True)
+            assert session.session_id in manager._codespace_lock_sessions
+            assert tmp_db.get_session(session.session_id) is not None
+        finally:
+            finish.set()
+            with contextlib.suppress(BaseException):
+                await end
+            manager._release_codespace_lock(session.session_id)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("phase", ["claim", "relay"])
+    async def test_stop_during_admission_waits_before_acknowledging_dormancy(
+        self, tmp_db, monkeypatch, phase,
+    ) -> None:
+        import threading
+
+        entered, finish = threading.Event(), threading.Event()
+        manager = SessionManager(tmp_db)
+
+        def wait_for_stop(result):
+            entered.set()
+            assert finish.wait(5)
+            return result
+
+        start = asyncio.create_task(self._start(
+            tmp_db, monkeypatch, manager=manager,
+            claim_result=(lambda *a: wait_for_stop(("ok", ""))) if phase == "claim" else ("ok", ""),
+            relay_result=(lambda *a: wait_for_stop(("", None))) if phase == "relay" else None,
+            caller_worktree=str(tmp_db.db_path.parent),
+        ))
+        stop = None
+        try:
+            async with asyncio.timeout(5):
+                while not entered.is_set():
+                    await asyncio.sleep(0.01)
+            session = next(iter(manager._sessions.values()))
+            stop = asyncio.create_task(manager.stop_session(session.session_id, force=True))
+            await asyncio.sleep(0.02)
+            assert not stop.done()
+            assert session.status == SessionStatus.STARTING
+            assert tmp_db.get_session(session.session_id)["status"] == SessionStatus.STARTING.value
+            finish.set()
+            await asyncio.wait_for(asyncio.gather(start, stop), 5)
+            assert session.status == SessionStatus.STOPPED
+            assert session.client is None
+            assert tmp_db.get_session(session.session_id)["status"] == SessionStatus.STOPPED.value
+            assert session.session_id in manager._codespace_lock_sessions
+        finally:
+            finish.set()
+            with contextlib.suppress(BaseException):
+                await start
+            if stop is not None:
+                with contextlib.suppress(BaseException):
+                    await stop
+            for session_id in list(manager._codespace_lock_sessions):
+                manager._release_codespace_lock(session_id)
 
     @pytest.mark.asyncio
     async def test_end_during_claim_waits_for_original_start_and_receipt(

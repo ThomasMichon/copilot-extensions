@@ -551,7 +551,7 @@ class _SessionHostRecoveryMixin:
                         recovered += 1
                 elif status == "dead":
                     self._release_container_lock(session.session_id)
-                    self._release_codespace_lock(session.session_id)
+                    self._release_unprotected_codespace_lock(session.session_id)
                     self._set_container_launch_pending(
                         session.session_id,
                         False,
@@ -573,7 +573,7 @@ class _SessionHostRecoveryMixin:
                     self._remote_recovery_inconclusive.add(session.session_id)
                 elif status == "missing":
                     self._release_container_lock(session.session_id)
-                    self._release_codespace_lock(session.session_id)
+                    self._release_unprotected_codespace_lock(session.session_id)
                     self._set_container_launch_pending(
                         session.session_id,
                         False,
@@ -899,7 +899,10 @@ class _SessionHostRecoveryMixin:
             if isinstance(exc, RemoteSpawnCleanupPendingError):
                 self._set_container_launch_pending(session.session_id, True)
             elif not already_held:
-                self._release_codespace_lock(session.session_id)
+                from .session_manager import _codespace_claim_key
+
+                if _codespace_claim_key(session.target) is None:
+                    self._release_codespace_lock(session.session_id)
             raise
 
     async def _codespace_host_available(

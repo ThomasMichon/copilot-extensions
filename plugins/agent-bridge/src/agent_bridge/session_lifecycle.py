@@ -252,10 +252,14 @@ class _SessionLifecycleMixin:
             self._db.request_cold_recovery_stop(session_id)
             session.background_recovery_enabled = False
 
-        # Serialize with in-flight reattach/resume (same lock resume_session
-        # uses): otherwise a reattach begun before this stop could land a
-        # live client after stop already persisted dormancy (review of #3058).
-        async with session._lifecycle_lock:
+        # Resume takes lifecycle before Codespace ownership. Fresh Codespace
+        # admission takes only ownership; owned SSH startup is a disjoint path.
+        async with contextlib.AsyncExitStack() as locks:
+            await locks.enter_async_context(session._lifecycle_lock)
+            if self._is_codespace_target(session.target):
+                await locks.enter_async_context(session._codespace_ownership_lock)
+                if self._sessions.get(session_id) is not session:
+                    return
             require_automatic_reap()
             await self._quiesce_session(
                 session, cancel_turn=cancel_turn,

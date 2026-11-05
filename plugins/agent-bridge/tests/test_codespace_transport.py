@@ -476,6 +476,41 @@ async def test_genuinely_live_recovery_keeps_persisted_workspace_without_dynamic
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("has_claim", [False, True])
+async def test_failed_host_replacement_keeps_lock_for_retained_claim(
+    session_manager, monkeypatch, tmp_path, has_claim,
+):
+    from unittest.mock import AsyncMock, Mock
+    from agent_bridge.session_manager import Session, _REQUEST_OVERRIDES_KEY
+    from agent_bridge.transport import SpawnTarget
+
+    locks = tmp_path / "replacement-locks"
+    locks.mkdir()
+    monkeypatch.setattr("ssh_manager.locks.locks_dir", lambda: locks)
+    target = SpawnTarget(
+        type="command", codespace={"name": "synthetic"},
+        venue={_REQUEST_OVERRIDES_KEY: {"codespace_claim": (
+            {"name": "synthetic", "owner": "example-owner"} if has_claim else None
+        )}},
+    )
+    session = Session("replacement", "example-agent", target)
+    session_manager._sessions[session.session_id] = session
+    monkeypatch.setattr("agent_bridge.venue_plugins.resolve_controller_cwd", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        "agent_bridge.session_manager._resolve_relay_launch_env",
+        Mock(side_effect=RuntimeError("synthetic relay refusal")),
+    )
+    try:
+        with pytest.raises(RuntimeError, match="synthetic relay refusal"):
+            await session_manager._resume_via_new_remote_host(
+                session, on_acp_event=lambda *a: None, permission_callback=None,
+            )
+        assert (session.session_id in session_manager._codespace_lock_sessions) is has_claim
+    finally:
+        session_manager._release_codespace_lock(session.session_id)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("failure", ["probe", "unsupported"])
 @pytest.mark.parametrize("release_confirmed", [True, False])
 async def test_failed_workspace_preflight_releases_real_ownership_before_next_launch(
