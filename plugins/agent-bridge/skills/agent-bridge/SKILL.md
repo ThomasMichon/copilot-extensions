@@ -386,9 +386,9 @@ expensive to get wrong."*
 ### Context Window Monitoring
 
 The `CONTEXT` column in the payload-local `sessions` output shows token usage as a
-fraction with percentage (e.g., `110k/200k (55%)`). Use this as a
-progress indicator -- more tokens consumed generally means more work
-completed.
+fraction with percentage (e.g., `110k/200k (55%)`). This measures context
+capacity, not task progress. Startup instructions, retained conversation and
+repeated experiments can fill a window without advancing the assigned outcome.
 
 For detailed usage on a specific session:
 
@@ -467,11 +467,13 @@ prompt itself (which consumes context) and a safety margin before the
 | 75% | `context_warning` SSE | Handoff should be in progress |
 | 90% | `context_critical` SSE | Emergency -- do not send more prompts |
 
-**Context % as a progress signal:** When listing sessions with
-the payload-local `sessions` output, the CONTEXT column doubles as a rough progress
-indicator. A session at 60% has done significant work. A session at 10%
-is just getting started. Host agents can use this to prioritize which
-sessions need attention, follow-up, or cycling.
+**Assess progress against the assignment:** identify the remaining acceptance
+criterion, latest meaningful result and next expected evidence. A failed
+experiment can make progress by eliminating a hypothesis; a completed child PR
+does not necessarily complete its parent. Separate productive work from
+unchanged repetition, required review, operator decisions and unavailable
+infrastructure. Do not rank agents' progress or infer completion from context
+percentage, token totals, session age or status-message frequency.
 
 ## Dispatching Long Autonomous Work (build / test / PR)
 
@@ -539,8 +541,8 @@ boundaries are both preserved.
   `--range A:B | tail` slice-the-whole-feed workaround.
 - Do this at the *expected* phase boundaries (after setup, build ETA, test ETA) —
   **not** continuously, and **never** dump the whole feed into your context.
-- The `CONTEXT` % column is a coarse progress signal (see Context Window
-  Monitoring).
+- Use `CONTEXT` % for capacity planning only. Use criterion-linked results and
+  changed evidence for progress; unchanged polls are not new outcomes.
 - **Get durable ground truth from the work's source of truth** (the git remote /
   PR API), **not by shelling into the agent's host.** SSHing a CodeSpace that has
   an active dispatch competes with the dispatch's own SSH/ControlMaster

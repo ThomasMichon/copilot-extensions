@@ -1,0 +1,9 @@
+{
+  "comment": "Distinguish context capacity from criterion-based task progress in agent guidance.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
