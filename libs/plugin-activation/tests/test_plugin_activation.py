@@ -89,6 +89,7 @@ def _git(repo: Path, *args: str) -> str:
         capture_output=True,
         text=True,
         check=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     return result.stdout.strip()
 
@@ -1189,6 +1190,10 @@ def test_registered_identity_memo_survives_processes_and_invalidates_config(
 ) -> None:
     repo = tmp_path / "repo"
     _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git", bare=bare)
+    _git(repo, *(["--git-dir", str(repo)] if bare else []),
+         "config", "branch.worktree/topic.remote", "origin")
+    _git(repo, *(["--git-dir", str(repo)] if bare else []),
+         "config", "branch.worktree/topic.merge", "refs/heads/worktree/topic")
     root = _plugin(repo, "local", "demo")
     _settings(repo, "local", "demo")
     program = """
@@ -1248,7 +1253,7 @@ def test_registered_identity_memo_keeps_registry_and_settings_live(
     assert any(f.reason == "identity-mismatch" for f in report.findings)
 
 
-@pytest.mark.parametrize("indirection", ["include", "includeIf", "worktree"])
+@pytest.mark.parametrize("indirection", ["include", "includeIf", "worktree", "inline-worktree"])
 def test_registered_identity_memo_reprobes_indirect_git_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, indirection: str,
 ) -> None:
@@ -1258,6 +1263,10 @@ def test_registered_identity_memo_reprobes_indirect_git_config(
     _settings(repo, "local", "demo")
     if indirection == "worktree":
         _git(repo, "config", "core.worktree", str(repo))
+    elif indirection == "inline-worktree":
+        path = repo / ".git" / "config"
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(f'\n[core] WoRkTrEe = "{repo.as_posix()}"\n')
     else:
         key = "include.path" if indirection == "include" else "includeIf.gitdir:/**.path"
         _git(repo, "config", key, str(tmp_path / "optional.gitconfig"))
@@ -1583,6 +1592,23 @@ def _synthetic_identity_input_files(
     monkeypatch.setattr(_project_identity, "_owned_directory", lambda *_: True)
     monkeypatch.setattr(_project_identity, "_windows_write_version", lambda _: ())
     return root, config, executable
+
+
+@pytest.mark.parametrize(("raw", "eligible"), [
+    (b'[branch "worktree/topic"]\n remote = origin\n merge = refs/heads/worktree/topic\n', True),
+    (b'[core]\n worktree = /repo\n', False),
+    (b'[core] WoRkTrEe = /repo\n', False),
+    (b'[core]\n worktree # implicit value\n', False),
+])
+def test_project_identity_memo_unit_worktree_directives(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raw: bytes, eligible: bool,
+) -> None:
+    from plugin_activation import _project_identity
+
+    root, config, executable = _synthetic_identity_input_files(tmp_path, monkeypatch)
+    config.write_bytes(raw)
+    inputs = _project_identity.identity_inputs(root, "expected", str(executable))
+    assert (inputs is not None) is eligible
 
 
 @pytest.mark.parametrize("changed", ["file", "directory", "ancestor"])
