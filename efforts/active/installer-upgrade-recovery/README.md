@@ -1377,3 +1377,25 @@ unit packet still owes actual bounded execution and effect/coverage verification
 The two transitive consumers receive their own ordinary patch changefile.
 These are admission/version metadata corrections; native consumer code and
 qualification inputs remain unchanged from the successful native head.
+
+The first current-head review at `22fea15261` is `COMMENTED` with one blocking
+Medium finding: Windows batching inherited the Python SDK's `HOME` default
+instead of the PowerShell SDK's `USERPROFILE` roots. The receiver already
+validates the MCP runtime as a direct child of that profile. The batched worker
+now derives the profile from that validated runtime root, explicitly supplies
+its Copilot home to both SDK reads and its durable home to deployment resolution,
+without changing global SDK defaults or adding a protocol field.
+
+Both batch outcomes and the real native admission controls exercise distinct
+`HOME`/`USERPROFILE`; all four pass in 11.02 seconds with the declared existing
+Python prerequisite on PATH. The first local invocation lacked that PATH prefix
+and stopped at the prerequisite instead; no installer or test assertion changed
+to hide it. The hosted Windows caller-loss packet now uses the same distinct
+home case, so new exact-candidate native qualification is still required.
+
+Current guard CI also identifies the separate canonical installation-context
+caller archive as stale. Its owner regenerates that archive and all thirteen
+SDK copies; the MCP producer digest is refreshed with contract revision 36
+unchanged. This completes the already reviewed SDK source propagation rather
+than changing the lifetime policy again. Archive sync, source admission,
+install-contract and lint checks remain required before the new push.

@@ -19,12 +19,15 @@ def main(request: dict[str, Any]) -> int:
 
     def inspect() -> int:
         sdk = runpy.run_path(str(directory / "installation_context.py"))
+        # The native receiver has already bound this legacy root to USERPROFILE.
+        profile = Path(request["runtime"]).parent
         arguments = {
             "payload_root": request["payload"], "plugin_id": "agent-mcp",
-            "project_root": request["project"],
+            "project_root": request["project"], "copilot_home": profile / ".copilot",
         }
         admission = sdk["resolve_runtime_deployment"](
             **arguments, legacy_root=request["runtime"],
+            durable_home=profile / ".copilot-extensions",
         )
         if (
             admission["status"] != "ready" or admission["actualMode"] != "legacy"

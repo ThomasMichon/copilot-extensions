@@ -2518,6 +2518,10 @@ native integration remains explicitly manual, not required PR CI.
 
 The manual `installation-context-full.yml` portfolio `mcp-bootstrap` selects
 the actual MCP session-start adapter on native Windows and Ubuntu.
+Windows batching/admission controls use distinct `HOME` and `USERPROFILE`
+values. Both SDK Copilot and durable roots must stay bound to the receiver-
+validated Windows profile, not the unrelated POSIX-style home. The native
+Windows caller-loss fixture retains the same distinct-home case.
 `test_bootstrap_driver.py` exercises fixed action handoff, contract skew,
 malformed metadata, acknowledgement validation, deadline and historical-record
 preservation with a synthetic receiver. Source/repair readiness remains covered

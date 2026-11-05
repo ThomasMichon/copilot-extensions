@@ -107,6 +107,10 @@ def test_actual_hook_finishes_after_all_native_callers_are_lost(
                 lifecycle_environment=lifecycle,
             )
             environment.pop("AGENT_VAULT_HOME")
+            if os.name == "nt":
+                home = area / "distinct-home"
+                home.mkdir()
+                environment["HOME"] = str(home)
             environment["BOOTSTRAP_KILLSWITCH_STATE_FILE"] = str(installation.parent / "killswitch.json")
             environment.update({
                 key: os.environ[key]

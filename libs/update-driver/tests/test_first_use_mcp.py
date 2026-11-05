@@ -31,7 +31,10 @@ def test_mcp_batches_read_only_admission_under_one_caller_owner(
     tmp_path, monkeypatch, capsys, allowed,
 ):
     worker = runpy.run_path(str(REPOSITORY / "libs/update-driver/scripts/mcp-admission.py"))["main"]
-    payload = tmp_path / "agent-mcp"
+    profile = tmp_path / "profile"
+    monkeypatch.setenv("USERPROFILE", str(profile))
+    monkeypatch.setenv("HOME", str(tmp_path / "distinct-home"))
+    payload = profile / ".copilot/installed-plugins/fixture-market/agent-mcp"
     sdk = payload / "scripts/installation-context"
     sdk.mkdir(parents=True)
     (sdk / "daemon_instance_runtime.pyz").write_bytes(b"fixture archive, import is doubled")
@@ -62,7 +65,7 @@ def test_mcp_batches_read_only_admission_under_one_caller_owner(
     monkeypatch.setitem(sys.modules, "agent_procutil._shell_caller_owned", SimpleNamespace(serve=serve))
     previous = sys.path[:]
     request = {
-        "payload": str(payload), "runtime": str(tmp_path / "runtime"),
+        "payload": str(payload), "runtime": str(profile / ".agent-mcp"),
         "project": str(tmp_path), "lifetime": {"nonce": "fixture"},
     }
     try:
@@ -81,8 +84,14 @@ def test_mcp_batches_read_only_admission_under_one_caller_owner(
     assert [name for name, _ in calls] == expected
     assert calls[1][1] == {
         "payload_root": str(payload), "plugin_id": "agent-mcp",
-        "project_root": str(tmp_path), "legacy_root": str(tmp_path / "runtime"),
+        "project_root": str(tmp_path), "legacy_root": str(profile / ".agent-mcp"),
+        "copilot_home": profile / ".copilot", "durable_home": profile / ".copilot-extensions",
     }
+    if allowed:
+        assert calls[2][1] == {
+            "payload_root": str(payload), "plugin_id": "agent-mcp",
+            "project_root": str(tmp_path), "copilot_home": profile / ".copilot",
+        }
 
 
 @pytest.fixture
@@ -161,8 +170,14 @@ def test_mcp_recipe_runs_own_init_under_same_queue_and_preserves_result(
 
 
 @pytest.mark.parametrize("action", ["stamp", "provision"])
-def test_mcp_native_admits_own_recipe_before_source_comparison(owning_mcp, area, action):
+def test_mcp_native_admits_own_recipe_before_source_comparison(
+    owning_mcp, area, action, monkeypatch,
+):
     payload, installation, project = owning_mcp
+    if os.name == "nt":
+        home = area / "distinct-home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
     root = area / "cold"
     command = native_command(root, payload, installation, project)
     command += (
