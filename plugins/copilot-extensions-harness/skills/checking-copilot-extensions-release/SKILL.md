@@ -17,7 +17,8 @@ ancestry against `main` does not establish release status.
    access as in `contributing-to-copilot-extensions`.
 2. Read the PR's state, base and diff (`pulls/<number>/files`, with pagination).
    An unmerged PR into `dev` is not released through promotion.
-3. Pin the current `main` SHA. Read the affected files at that SHA using
+3. Pin the current `main` SHA. Exclude consumed `.changefiles/*.json` entries;
+   promotion removes them. Read the remaining affected files at that SHA using
    `contents/<path>?ref=<sha>` and check the PR's effective changes, allowing
    subsequent edits and generated version differences. A merged promotion PR
    or its recorded source snapshot can explain provenance, but its title,
