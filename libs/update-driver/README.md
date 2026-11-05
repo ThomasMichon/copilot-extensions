@@ -842,6 +842,9 @@ helper under the same queue custody, then supplies its selected tool on PATH
 to the actual initializer. Acquisition failure stops before init; deferred
 stamp does not acquire UV. This avoids the legacy initializer's unavailable-UV
 fallthrough without adding another downloader or changing its constructor.
+The Windows adapter uses a fixed native command body with path values encoded
+as data, preserving plain-text initializer output instead of serializing
+PowerShell host/warning records into the queue's forwarded streams.
 Windows native lifetime admission retains the setup-owned Python prerequisite;
 absence is not permission to download another interpreter or reuse a compiled
 fallback. The manual `mcp-recipes` portfolio separates admission, materialized

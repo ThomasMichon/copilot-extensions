@@ -573,8 +573,7 @@ exit $LASTEXITCODE
 """.replace("__CONFIG__", data)
             argv = [
                 str(shell), "-NoLogo", "-NoProfile", "-NonInteractive",
-                "-ExecutionPolicy", "Bypass", "-EncodedCommand",
-                base64.b64encode(command.encode("utf-16-le")).decode("ascii"),
+                "-ExecutionPolicy", "Bypass", "-Command", command,
             ]
     elif sys.platform.startswith("linux"):
         shell = shutil.which("bash")

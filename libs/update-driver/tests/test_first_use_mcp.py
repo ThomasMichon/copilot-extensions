@@ -140,6 +140,8 @@ def test_mcp_acquires_canonical_uv_only_for_provision(
     )
     (scripts / "init.ps1").write_text(
         "param([string]$Action,[string]$InstallDir)\n$ErrorActionPreference = 'Stop'\n"
+        "Write-Host 'fixture initializer output'\n"
+        "Write-Warning 'fixture initializer warning'\n"
         "[IO.File]::WriteAllText((Join-Path $InstallDir 'init-entered'), $Action)\n"
         "if ($Action -eq 'provision') {\n"
         "  $used = & uv --version\n"
@@ -165,6 +167,10 @@ def test_mcp_acquires_canonical_uv_only_for_provision(
         if acquisition_succeeds:
             assert result.exit_code == 0, result.log_path.read_text()
             assert (installation / "used-uv").read_text().strip() == "fixture-uv"
+            assert "#< CLIXML" not in result.log_path.read_text()
+            if os.name == "nt":
+                assert "fixture initializer output" in result.log_path.read_text()
+                assert "fixture initializer warning" in result.log_path.read_text()
         else:
             assert result.exit_code != 0
             assert "fixture acquisition failed" in result.log_path.read_text()

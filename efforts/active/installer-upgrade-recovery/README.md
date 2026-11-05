@@ -980,3 +980,18 @@ minute during the bounded provision wait. The wait now refuses at ten minutes,
 within the unchanged aggregate envelope; no timeout, process or storage limit
 is raised. This is test-only progress reporting, not a production poller or
 another execution owner.
+
+The bounded diagnostic run `41966134747` again passed Linux and failed Windows.
+Its Windows log shows that actual MCP construction, manifest publication and
+module verification finished, but the enclosing native consumer rejected
+CLIXML mixed into the forwarded error stream. A focused queue regression with
+real native host/warning records reproduces that output-format defect.
+
+A contained stock-PowerShell probe confirms that `-EncodedCommand` serializes
+those streams even with explicit text input/output flags; the ordinary fixed
+`-Command` form does not. The adapter now uses that fixed form while retaining
+base64-encoded JSON path data, actual init, canonical acquisition and the same
+queue custody. All three acquisition/stamp/refusal controls pass in 33.13
+seconds of pytest (52.97 total). The unsuccessful text-flag attempt remains
+failed evidence. Actual Windows native convergence still needs qualification;
+neither completed installer output nor the passing focused test clears it.
