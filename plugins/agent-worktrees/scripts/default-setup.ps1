@@ -348,11 +348,11 @@ function Invoke-CopilotInvokedLog {
 }
 
 function Resolve-CopilotApplication {
-    <# A broken Windows App Execution Alias can shadow a concrete CLI later on
-       PATH. Prefer an existing non-WindowsApps application, but retain the
-       first result so a sole working App Execution Alias remains supported. #>
+    <# Forwarders may route literal multiline prompts through cmd.exe. Prefer
+       a concrete CLI, retaining the original fallback when none is available. #>
     $commands = @(Get-Command copilot -CommandType Application -All `
         -ErrorAction SilentlyContinue)
+    $fallback = $null
     foreach ($command in $commands) {
         $source = [string]$command.Source
         if (
@@ -360,9 +360,30 @@ function Resolve-CopilotApplication {
             $source -notmatch '\\WindowsApps\\' -and
             (Test-Path -LiteralPath $source -PathType Leaf)
         ) {
+            if (-not $fallback) { $fallback = $command }
+            if ([IO.Path]::GetExtension($source) -in @('.cmd', '.bat')) { continue }
+            $companion = Join-Path (Split-Path -Parent $source) 'copilot'
+            if (Test-Path -LiteralPath $companion -PathType Leaf) {
+                $stream = $null
+                try {
+                    $stream = [IO.File]::OpenRead($companion)
+                    $prefix = [byte[]]::new(512)
+                    $count = $stream.Read($prefix, 0, $prefix.Length)
+                    if ([Text.Encoding]::UTF8.GetString($prefix, 0, $count).Contains('vscode-copilot-launcher')) {
+                        continue
+                    }
+                } catch [IO.IOException] {
+                    continue
+                } catch [UnauthorizedAccessException] {
+                    continue
+                } finally {
+                    if ($stream) { $stream.Dispose() }
+                }
+            }
             return $command
         }
     }
+    if ($fallback) { return $fallback }
     return $commands | Select-Object -First 1
 }
 

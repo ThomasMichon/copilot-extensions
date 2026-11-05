@@ -34,6 +34,25 @@ def installed_native_runtime(tmp_path_factory, native_runtime_source):
     if not uv:
         pytest.skip("Real runtime construction requires uv")
     owned = tmp_path_factory.mktemp("native-seed-runtime")
+    compiler = next((path for framework in ("Framework64", "Framework") if (
+        path := Path(os.environ.get("WINDIR", "")) / "Microsoft.NET" /
+        framework / "v4.0.30319" / "csc.exe"
+    ).is_file()), None)
+    if compiler is None:
+        pytest.skip("Synthetic native mux probe requires the system C# compiler")
+    mux_dir = owned / "mux"
+    mux_dir.mkdir()
+    mux_source = mux_dir / "Mux.cs"
+    mux_source.write_text(
+        'class Mux { static int Main(string[] args) { '
+        'return args.Length > 0 && args[0] == "list-sessions" ? 0 : 2; } }',
+        encoding="utf-8",
+    )
+    compiled = run_caller_owned(
+        [str(compiler), "/nologo", f"/out:{mux_dir / 'psmux.exe'}", str(mux_source)],
+        cwd=owned, timeout=30, max_stdout_bytes=4096, max_stderr_bytes=4096,
+    )
+    assert compiled.returncode == 0, compiled.stdout + compiled.stderr
     home = owned / "home"
     home.mkdir()
     root = home / ".agent-worktrees"
@@ -54,7 +73,9 @@ def installed_native_runtime(tmp_path_factory, native_runtime_source):
         HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home),
         AGENT_WORKTREES_STATUS_MONITOR="0", COPILOT_EXTENSIONS_TEST_CONTAINED="1",
         GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
+        FIXTURE_MUX_DIR=str(mux_dir),
     )
+    environment["PATH"] = os.pathsep.join((str(mux_dir), environment.get("PATH", "")))
     git = shutil.which("git")
     assert git, "Real runtime provenance requires Git"
     hooks = owned / "empty-hooks"
@@ -195,7 +216,8 @@ def test_current_runtime_records_real_native_consumer_lifetime(
     )
     driver.write_text(
         "$env:FIXTURE_OWNER_PID=[string]$PID\n"
-        f"$env:PATH={_ps(Path(shutil.which('pwsh')).parent)}\n" + invocation,
+        f"$env:PATH={_ps(os.pathsep.join((str(Path(shutil.which('pwsh')).parent), environment['FIXTURE_MUX_DIR'])))}\n"
+        + invocation,
         encoding="utf-8",
     )
     try:
