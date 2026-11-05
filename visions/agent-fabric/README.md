@@ -5,7 +5,7 @@
   spanning worktrees, machines, CodeSpaces, and containers.
 - **Scope:** branch (links per-plugin child visions as they are authored)
 - **Status:** Active
-- **Last revised:** 2026-10-22
+- **Last revised:** 2026-11-05
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/harness-runbook.md`](../../docs/harness-runbook.md) · each plugin's
   `docs/architecture.md`
@@ -91,7 +91,10 @@ hosts, SDK integrations, graphical applications, and third-party rigs are peer
 providers behind one capability-honest boundary. The provider owns execution
 mechanics; the worktree ground layer owns durable agency meaning. The
 cross-cutting [session-hosting](../session-hosting/README.md) vision refines this
-seam.
+seam. Its minimal direct-Copilot provider is the independently distributed
+[Copilot Driver](../plugins/agent-remote-driver/README.md): one Session Host
+broker for headless children and interactive mux sessions, usable locally or
+hoisted into a venue without its coordination suite.
 
 ### agent-bridge — the coordination layer
 Adds **remote agent creation, inspection, and communication** over discoverable

@@ -19,6 +19,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Copilot Driver Core Vision](active/copilot-driver-core-vision/README.md) | Active; finite app-boundary vision revision only | #10765; preserves #10636/#5930/#5898 implementation owners, no extraction or rollout |
 | [Portable Bridge Receiving Support](active/portable-bridge-receiving-support/README.md) | Active; ACP source merged, canonical mux/driver composition next | #10636; canonical policy, Session Host, remote-driver and Manager launch composition; existing owners retained, no guest-suite upgrade or rollout |
 | [MCP Session Generation Handover](active/mcp-session-generation-handover/README.md) | Active; incoming-publication correction first, full handover qualification open | #10652/#6389 incoming readiness and fresh execution; #10653 protected retirement; #10486 session-preserving reattachment; existing owners retained |
 | [Installer Upgrade Recovery](active/installer-upgrade-recovery/README.md) | Draft; priority source/upgrade-acceptance workstream, reviewed plan before implementation | #10377; latest explicit entry must recover affected prior footprints; existing entry, sequencing, construction and lifecycle owners retained; no rollout |
