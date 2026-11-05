@@ -8,6 +8,13 @@ requirements remain in their issues and actual receiving objectives.
 
 ## Snapshot and boundaries
 
+The [six launch/progress/delivery contracts](finite-launch-progress-delivery-contracts.md)
+retain eighteen ranked relationships without closure credit.
+Actual source/installed partials and finite consumer acceptance remain
+separate; all six originals stay OPEN. The
+[journal](<journal/2026/11.05 finite-launch-progress-delivery-contracts.md>)
+preserves current versus historical state and two protected descriptions.
+
 The [seven producer/policy/fixture contracts](finite-producer-policy-fixture-contracts.md)
 retain twenty-one ranked relationships without closure credit.
 Current implementation partials, independent scope and explicit policy
