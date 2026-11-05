@@ -24,6 +24,19 @@ def refuse_recovery(error: ResidentRecoveryHeld, *, json_output: bool) -> int:
     return 1
 
 
+def dispatch_lazy(command: str, args_list: list[str], **options: object) -> int:
+    """Keep maintenance refusals at the normal parsed-command CLI boundary."""
+    from lazy_cli_dispatch import dispatch_lazy as dispatch
+
+    try:
+        return dispatch(command, args_list, **options)
+    except ResidentRecoveryHeld as error:
+        return refuse_recovery(error, json_output=(
+            "--json" in args_list
+            or command in {"conclude-session", "link-succession", "resolve-handoff-successor"}
+        ))
+
+
 def dispatch_claim(verb: str, verb_args: dict) -> dict:
     """Use the existing versioned normal claim writer and resident ensure policy."""
     from . import locks, status_monitor_runtime as monitor, tracking_write
@@ -37,13 +50,18 @@ def dispatch_claim(verb: str, verb_args: dict) -> dict:
 
 
 def _user_profile() -> Path:
-    from . import _installation_context as installation_context
-
     try:
-        return installation_context._current_environment(
-            environment=os.environ, os_profile=None, platform=None, wsl_distro=None,
-        )[1]
-    except (ValueError, OSError) as error:
+        if os.name == "nt":
+            value = os.environ.get("USERPROFILE", "")
+        else:
+            import pwd
+
+            value = pwd.getpwuid(os.getuid()).pw_dir
+        profile = Path(value)
+        if not value or not profile.is_absolute():
+            raise ValueError("Operating-system profile is not absolute")
+        return profile.resolve(strict=True)
+    except (ImportError, KeyError, ValueError, OSError) as error:
         raise ResidentRecoveryHeld("Canonical maintenance profile is unavailable") from error
 
 

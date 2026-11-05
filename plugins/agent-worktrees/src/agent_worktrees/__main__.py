@@ -91,7 +91,7 @@ from agent_procutil import (
     windowless_daemon_kwargs as _windowless_daemon_kwargs_impl,
     windowless_python_env,
 )
-from lazy_cli_dispatch import dispatch_lazy as _shared_dispatch_lazy
+from .resident_recovery import dispatch_lazy as _shared_dispatch_lazy
 from lazy_cli_dispatch import self_override as _shared_self_override
 from . import (
     activity,

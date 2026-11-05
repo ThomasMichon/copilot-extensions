@@ -4,7 +4,11 @@ Worktrees' opt-in `--test-file tests/test_resident_recovery.py
 --test-file tests/test_tracking_write.py --test-file tests/test_effort_focus.py
 --test-file tests/test_status_monitor.py --allow-explicit-tiers` packet checks
 maintenance holds, brief discovery backoff, ordinary ensure/wake, no-wake
-callers, compatibility fallback and non-replay after possible send. A private
+callers, compatibility fallback and non-replay after possible send. The additional
+`--test-file tests/test_follow_ups_cmd.py --test-file tests/test_lazy_dispatch.py`
+controls exercise parsed write refusal envelopes, including lifecycle commands'
+default JSON. Recovery needs the canonical OS profile, not WSL registration,
+and compatible live publishers retain their bounded readiness wait. A private
 resident server executes the actual canonical claim transaction and publishes
 its captured persisted-mutation evidence. These are isolated source controls,
 not an installed daemon wake, rollout or complete history guarantee; required

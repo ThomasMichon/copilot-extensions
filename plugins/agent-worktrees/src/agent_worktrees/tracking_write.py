@@ -666,6 +666,8 @@ def write_with_boot(
         return endpoint_from_rendezvous(lock_data, verb=verb, min_version=min_version)
 
     def incompatible_live_owner() -> bool:
+        if endpoint_from_rendezvous(lock_data, verb=verb, min_version=min_version) is not None:
+            return False
         if endpoint_from_rendezvous(lock_data) is None:
             return False
         from . import locks
