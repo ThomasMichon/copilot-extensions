@@ -939,6 +939,29 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-11-05 - Qualify all four real Manager source constructions
+
+- The source contract passed at `4e73aecca7fe744129e5322f489686222b6f05e8`
+  under its approved shared 1,800-second ceiling. Release, qualified-source,
+  source-generation and repair commands all completed; the final pytest
+  assertion passed without skips. The actual native sandbox was removed,
+  with no unsettled-process diagnostic.
+- This preserves real canonical source acquisition/preparation, immutable
+  repair and healthy reuse, retained predecessor bytes, dirty-checkout
+  refusal, global command bytes and default-root configuration/SQLite
+  bytes, file identity and schema continuity across both interpreters.
+- Twenty-five clock/cleanup controls and fatal Python lint passed. The
+  existing source cleanup expectation now accounts for all four construction
+  commands plus the final assertion. Other native contracts and production
+  deadlines remain unchanged.
+- Draft #10671 can now proceed through publication, current-head review and
+  required CI. This is local Windows native/fresh-profile qualification,
+  not Linux source-construction, live-account, serving, image or deployed
+  acceptance. The existing hosted native-launch lane invokes a different
+  runtime contract and is not used as a proxy for this source lane.
+- The complete parent Plan/Validation and existing owners remain active;
+  no rollout, resource-disposal hold or broader completion gate is cleared.
+
 ### 2026-11-05 - Retain the source timeout and approve its finite test ceiling
 
 - After #10772, the real release, qualified-source and source constructions
