@@ -8,6 +8,14 @@ requirements remain in their issues and actual receiving objectives.
 
 ## Snapshot and boundaries
 
+The [eight obligation/preview/staging contracts](finite-obligation-preview-staging-contracts.md)
+retain twenty-four ranked relationships without closure credit.
+Actual merged staging and current retained kernels are credited; original
+OR settlement, installed gates and independent finite residuals survive.
+All eight stay OPEN; the
+[journal](<journal/2026/11.05 finite-obligation-preview-staging-contracts.md>)
+retains protected whole evidence and the excluded native-artifact admission.
+
 The [eleven recovery/reclamation/callback contracts](finite-recovery-reclamation-callback-contracts.md)
 retain thirty-three ranked relationships without closure credit.
 Completed planning, repaired fixtures and finite source corrections do not
