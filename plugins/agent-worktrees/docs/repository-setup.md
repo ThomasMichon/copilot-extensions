@@ -210,6 +210,48 @@ Interruption does not trigger a replay: a later invocation starts with the
 owner's read-only check. Temporary files are communication, not a second
 persistent operation ledger.
 
+### Explicit enabled-payload preparation
+
+A trusted repository entry can prepare its enabled payloads before composing
+runtime/module readiness. This is a separate, opt-in engine boundary:
+
+```text
+agent-worktrees prepare-plugin-payloads --repo <absolute-checkout>
+agent-worktrees prepare-plugin-payloads --repo <absolute-checkout> --apply --expected-plan-digest <digest>
+```
+
+The read-only form emits `copilot-extensions.plugin-payload-preparation`, version
+`1`, with `planDigest`, qualified per-source `entries` and `payloadsReady`.
+Exit zero from observation means a valid observation, not that payloads are
+available. Explicit apply requires that exact plan, rechecks declarations and
+availability before acquisition, and independently observes the result.
+It exits zero only when all selected payloads are available, two for incomplete
+apply, and one for invalid or stale input.
+
+Selection uses the strict current-checkout plus user declarations, preserving
+native/local precedence and explicit repository disablement. Available local
+and installed payloads use the existing identity/provenance checks. Conflicting
+marketplace sources, malformed settings, ambiguous roots and unavailable local
+payloads refuse; no guessed marketplace or installed-directory source replaces
+the declared origin. The native Copilot home must match the inspected owner.
+
+Only missing remote payloads are installed, through native Copilot acquisition
+and the existing bounded process/activation-preservation owner. Existing
+payloads are not refreshed, activation is restored, and repository source
+settings are not edited. Changed inputs stop further work while retaining
+completed acquisition outcomes. Neither interruption nor failure automatically
+replays an install. Read-only inspection creates no preservation transaction.
+An outstanding activation transaction remains visible as `activationPending`
+and prevents preparation success even when payload files are available.
+Explicit apply lets the existing acquisition owner finish a positively witnessed
+restoration; unknown settlement remains refused without another install.
+
+Payload availability does not prove a requested version, runtime installation,
+service health, authorization or task readiness. Repository setup must compose
+the required-module/readiness owners separately and retain their refusal,
+restart and consent boundaries. This command is not an ordinary-launch hook,
+a suite update, or permission to deploy a runtime.
+
 ## Manager caller and current qualification
 
 The [Manager setup caller](../../../worktree-manager/README.md#optional-repository-setup)

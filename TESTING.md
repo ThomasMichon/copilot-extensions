@@ -18,6 +18,14 @@ separate; no production launch, binding, runtime or cleanup policy changes.
 Use the bounded host runner on an explicitly enrolled tmux host. Required
 unit-only CI is unchanged.
 
+Worktrees' opt-in `--test-file tests/test_plugin_preparation.py --test-file
+tests/native/test_plugin_preparation_native.py --allow-explicit-tiers` packet
+checks strict enabled-payload selection, stale inputs, source conflicts and
+partial results. Native cases run the real CLI and activation-preservation
+process boundary with a finite synthetic acquisition child. They do not install
+real plugins or qualify provider authentication, runtime/service readiness or
+cold-machine onboarding. The native file stays outside default required CI.
+
 Manager's opt-in `--test-file tests/native/test_companion_app_tmux.py
 --test-file tests/native/test_companion_pane_tmux.py --allow-explicit-tiers`
 packet distinguishes the original observer-stub pane test from the actual
