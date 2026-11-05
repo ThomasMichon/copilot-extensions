@@ -1531,6 +1531,9 @@ The native New gate
 still decides admission, while source-only Bare allocation and existing-session
 recovery retain their separate behavior. This flow does not create a repository,
 authenticate a provider, retrofit a pair or install a missing binding owner.
+Caller timeout does not establish rollback. Inspect native readiness before
+retrying; the binding worker retains registration serialization independently
+of a caller that has lost its result.
 
 One header update action is shown: a Manager update takes precedence when both
 Manager and payload report availability (that path also reconciles the payload).

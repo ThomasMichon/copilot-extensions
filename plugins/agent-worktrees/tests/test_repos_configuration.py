@@ -263,7 +263,7 @@ def test_old_binding_owner_is_not_invoked_for_apply(native, monkeypatch):
         calls.append(argv)
         return subprocess.CompletedProcess(argv, 0, json.dumps({"version": 1}), "")
 
-    monkeypatch.setattr(owned_process, "run_owned", execute)
+    monkeypatch.setattr(owned_process, "run_caller_owned", execute)
     with pytest.raises(ConfigurationError) as caught:
         binding.invoke("sample", "sample", "apply", "a" * 64)
     assert caught.value.code == "binding-owner-unsupported"
@@ -285,18 +285,31 @@ def test_binding_apply_keeps_registration_writer_out_until_pointer_commit(native
 
     with ThreadPoolExecutor(max_workers=1) as pool:
         futures = []
+        script = native / "qualified-binding.py"
+        script.write_text("# Owned binding fixture\n", encoding="utf-8")
 
-        def delegated(*_args):
+        def delegated(_path, *, run_name):
+            assert run_name == "__main__"
             futures.append(pool.submit(write))
             assert started.wait(2)
             assert not completed.wait(0.1)
-            return {"status": "persisted", "pointer_committed": True}
+            return {}
 
-        monkeypatch.setattr(binding, "_invoke", delegated)
-        result = binding.invoke("sample", "sample", "apply", "a" * 64)
-        assert result["pointer_committed"] is True
+        monkeypatch.setattr(binding, "owner_script", lambda _project: script)
+        monkeypatch.setattr(binding.runpy, "run_path", delegated)
+        binding._apply_worker("sample", "sample", "a" * 64, str(script))
         assert futures[0].result(timeout=5)
     assert repos.read_registry(strict=True).repos["sample"].copilot_account == "after"
+
+
+def test_binding_worker_refuses_a_changed_payload_before_execution(native, monkeypatch):
+    from agent_worktrees import repos_knowledge_configuration as binding
+
+    monkeypatch.setattr(binding, "owner_script", lambda _project: native / "new-owner.py")
+    monkeypatch.setattr(binding.runpy, "run_path", lambda *_args, **_kwargs: pytest.fail("changed owner executed"))
+    with pytest.raises(ConfigurationError) as caught:
+        binding._apply_worker("sample", "knowledge", "a" * 64, str(native / "old-owner.py"))
+    assert caught.value.code == "binding-owner-changed"
 
 
 def test_incomplete_binding_keeps_committed_receipt_and_reports_failure(native, monkeypatch, capsys):

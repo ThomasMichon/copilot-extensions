@@ -303,6 +303,22 @@ a host-only owner. The affected complete native UI flow passed again; F/E9
 passed. The earlier 104/82 binding/composition and Manager controls remain
 separate qualified source evidence, not newly repeated runs.
 
+A later review reported no open findings but requested assessment of lock
+contention versus Manager's timeout. Source tracing confirmed that Manager's
+30-second command timeout could precede the old parent's ten-second lock wait
+plus a separately started 26-second worker budget. The native worker now owns
+the registry lock in the same process as the qualified binding payload, with
+the wait inside the finite caller-owned execution budget. Capability and worker
+capture are bounded; changed selected payloads refuse before execution.
+Nine focused native controls and all 83 Manager controls passed on Windows,
+including actual Manager timeout with a deliberately delayed fixture controller,
+a surviving native worker, the real preserving YAML writer, exclusion of a
+canonical registration writer until commit/worker exit, and exact handle cleanup.
+The fixture remains contained by its test runner; it is not installed or
+other-platform caller-death qualification. Both complete normal binding/New
+flows also passed. F/E9 and the module-size guard passed. A lost caller receipt
+remains an unknown outcome requiring readiness inspection, never a rollback claim.
+
 Fresh-store configuration uses actual Git roots and native APIs but pre-provided
 native packages. Cold installer/Python-3.9/fresh-terminal, installed desktop,
 live-provider and rollout lanes were not exercised: this source slice has no

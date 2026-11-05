@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import runpy
 import subprocess
 import sys
 import sysconfig
@@ -45,33 +46,49 @@ def owner_status(project: str) -> str:
         return "unavailable"
 
 
-def invoke(project: str, name: str, operation: str, token: str = "") -> dict:
-    if operation == "apply":
-        from . import repos
-        from .repos_registry_transaction import registry_lock
-
-        with registry_lock(repos._repos_yaml_path()):
-            return _invoke(project, name, operation, token)
-    return _invoke(project, name, operation, token)
-
-
-def _invoke(project: str, name: str, operation: str, token: str = "") -> dict:
-    from agent_procutil.owned_budget import OwnedExecutionBudget
-    from agent_procutil.owned_process import OwnedCleanupError, run_owned
-
-    script = owner_script(project)
+def _owner_arguments(script: Path, project: str, name: str, operation: str, token: str = "") -> list[str]:
     entry = Path(sysconfig.get_path("scripts")) / (
         "agent-worktrees.exe" if sys.platform == "win32" else "agent-worktrees"
     )
     if not entry.is_file():
         raise ConfigurationError("binding-native-owner-unavailable", "The selected native engine entry is unavailable.")
     args = [
-        sys.executable, "-B", str(script), "--harness", project, "--knowledge", name,
-        "--agent-worktrees-path", str(entry), "--configuration",
-        "apply-locked" if operation == "apply" else operation, "--json",
+        str(script), "--harness", project, "--knowledge", name,
+        "--agent-worktrees-path", str(entry), "--configuration", operation, "--json",
     ]
-    if operation == "apply":
+    if operation == "apply-locked":
         args += ["--preview-token", token]
+    return args
+
+
+def _apply_worker(project: str, name: str, token: str, expected_script: str) -> None:
+    from . import repos
+    from .repos_registry_transaction import registry_lock
+
+    with registry_lock(repos._repos_yaml_path()):
+        script = owner_script(project)
+        if str(script) != expected_script:
+            raise ConfigurationError("binding-owner-changed", "The binding owner changed; preview again.")
+        previous = sys.argv
+        try:
+            sys.argv = _owner_arguments(script, project, name, "apply-locked", token)
+            runpy.run_path(str(script), run_name="__main__")
+        finally:
+            sys.argv = previous
+
+
+def invoke(project: str, name: str, operation: str, token: str = "") -> dict:
+    from agent_procutil.owned_budget import OwnedExecutionBudget
+    from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
+
+    script = owner_script(project)
+    owner_args = _owner_arguments(script, project, name, "apply-locked" if operation == "apply" else operation, token)
+    args = (
+        [sys.executable, "-B", "-m", "agent_worktrees.repos_knowledge_configuration",
+         project, name, token, str(script)]
+        if operation == "apply" else
+        [sys.executable, "-B", *owner_args]
+    )
     environment = dict(os.environ)
     for key in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "COPILOT_PLUGIN_ROOT"):
         environment.pop(key, None)
@@ -79,9 +96,10 @@ def _invoke(project: str, name: str, operation: str, token: str = "") -> dict:
         26 if operation == "apply" else 18, cleanup_reserve=2,
     )
     try:
-        support = run_owned(
+        support = run_caller_owned(
             [sys.executable, "-B", str(script), "--capabilities", "--json"],
-            timeout=8, env=environment, budget=budget,
+            timeout=8, max_stdout_bytes=1024 * 1024, max_stderr_bytes=1024 * 1024,
+            env=environment, budget=budget,
         )
         capabilities = json.loads(support.stdout)
         if (
@@ -93,8 +111,9 @@ def _invoke(project: str, name: str, operation: str, token: str = "") -> dict:
             raise ConfigurationError(
                 "binding-owner-unsupported", "The selected binding owner needs its Configuration capability update.",
             )
-        result = run_owned(
+        result = run_caller_owned(
             args, timeout=26 if operation == "apply" else 18,
+            max_stdout_bytes=1024 * 1024, max_stderr_bytes=1024 * 1024,
             env=environment, budget=budget,
         )
         value = json.loads(result.stdout)
@@ -124,3 +143,9 @@ def _invoke(project: str, name: str, operation: str, token: str = "") -> dict:
             raise ConfigurationError("binding-owner-failed", "Binding preview returned a different target.")
         value["target"] = target(project, name)
     return value
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 5:
+        raise SystemExit("The binding worker requires its native transaction arguments.")
+    _apply_worker(*sys.argv[1:])

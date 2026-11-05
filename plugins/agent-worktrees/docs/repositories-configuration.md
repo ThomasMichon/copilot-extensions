@@ -120,8 +120,10 @@ New task; a timeout does not prove that a prior write did not happen. Binding
 does not retrofit an existing tracked pair or establish server landing policy.
 The native New-admission gate remains authoritative.
 
-The native apply transaction holds the existing registration-writer lock
-through the pointer commit. Binding Configuration capability version 2 is
+The native binding worker itself holds the existing registration-writer lock
+through the pointer commit. Its registry wait, execution and cleanup share
+the existing finite caller-owned budget; a caller losing its result cannot
+release a still-running writer's lock. Binding Configuration capability version 2 is
 required; older binding payloads refuse rather than use an unlocked apply.
 Direct binding-script Configuration apply routes through this same native
 transaction. The owner's internal `apply-locked` delegate is not a standalone

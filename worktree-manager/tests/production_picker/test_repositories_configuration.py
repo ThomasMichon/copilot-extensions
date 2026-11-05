@@ -1,11 +1,14 @@
 """Configuration consumes the real native owner, never writes its files itself."""
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 import json
 import os
 from pathlib import Path
 import subprocess
+import sys
+import time
 
 from agent_procutil import no_window_kwargs
 import pytest
@@ -95,6 +98,115 @@ def snapshot(root):
         str(path.relative_to(root)): path.read_bytes() if path.is_file() else None
         for path in root.rglob("*")
     }
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows caller-timeout/worker-handle contract")
+def test_binding_worker_keeps_registration_locked_after_manager_timeout(tmp_path, monkeypatch):
+    import _winapi
+
+    owner_python = os.environ.get("REPOSITORIES_CONFIG_TEST_PYTHON")
+    if not owner_python:
+        pytest.skip("set REPOSITORIES_CONFIG_TEST_PYTHON to the isolated native engine interpreter")
+    home, project = tmp_path / "home", tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setenv("AGENT_HOME", str(home))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(tasks, "ACTION_TIMEOUT", 5)
+
+    def write(path, value):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(yaml.safe_dump(value), encoding="utf-8")
+
+    config = home / ".sample" / "config.yaml"
+    write(config, {"repo_name": "sample", "repos": {"sample": {"anchor": str(project)}}})
+    registry = home / ".agent-worktrees" / "repos.yaml"
+    write(registry, {"repos": {"sample": {"class": "worktree", "windows": str(project)}}})
+    write(home / ".agent-worktrees" / "projects.yaml", {
+        "schema_version": 2, "projects": {"sample": {"config_dir": str(config.parent)}},
+    })
+    payload = home / ".copilot" / "installed-plugins" / "fixture" / "harness-knowledge"
+    payload.mkdir(parents=True)
+    (payload / "plugin.json").write_text(json.dumps({"name": "harness-knowledge"}), encoding="utf-8")
+    (home / ".copilot" / "settings.json").write_text(json.dumps({
+        "enabledPlugins": {"harness-knowledge@fixture": True},
+    }), encoding="utf-8")
+    ready, release, writer_started = (tmp_path / name for name in ("ready.json", "release", "writer-started"))
+    script = payload / "skills" / "binding-knowledge" / "scripts" / "bind_knowledge.py"
+    script.parent.mkdir(parents=True)
+    binding_yaml = Path(__file__).resolve().parents[3] / "plugins" / "harness-knowledge" / "skills" / "binding-knowledge" / "scripts" / "binding_yaml.py"
+    script.write_text(
+        "import importlib.util,json,os,time\nfrom pathlib import Path\n"
+        f"spec=importlib.util.spec_from_file_location('binding_yaml',{str(binding_yaml)!r})\n"
+        "owner=importlib.util.module_from_spec(spec);spec.loader.exec_module(owner)\n"
+        "def paused():\n"
+        f" Path({str(ready)!r}).write_text(json.dumps({{'pid':os.getpid(),'at':time.monotonic()}}))\n"
+        " deadline=time.monotonic()+20\n"
+        f" while not Path({str(release)!r}).exists():\n"
+        "  if time.monotonic()>deadline: raise RuntimeError('fixture release expired')\n"
+        "  time.sleep(0.02)\n"
+        f"owner.write_binding(Path({str(config)!r}),'sample','knowledge',preserve=True,precondition=paused)\n",
+        encoding="utf-8",
+    )
+    worker = [owner_python, "-B", "-m", "agent_worktrees.repos_knowledge_configuration",
+              "sample", "knowledge", "a" * 64, str(script)]
+    # Keep delayed settlement within the enclosing test owner, not the expired caller.
+    parent = (
+        "import subprocess\n"
+        f"child=subprocess.Popen({worker!r},stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,"
+        "stderr=subprocess.DEVNULL,creationflags=subprocess.CREATE_NO_WINDOW)\n"
+        "child.wait(timeout=25)\n"
+    )
+    runtime = tasks.RegisteredPivotRuntime(pivots.parse_manifest(
+        {"label": "Fixture", "list": ["unused"]}, name="fixture", source_path="fixture",
+    ))
+    worker_handle = None
+    writer = None
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        caller = pool.submit(runtime.run_resolved, [sys.executable, "-c", parent], preserve_output=True)
+        try:
+            deadline = time.monotonic() + 8
+            while not ready.exists() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            assert ready.exists(), caller.result(timeout=3)
+            receipt = json.loads(ready.read_text("utf-8"))
+            assert time.monotonic() - receipt["at"] < 5
+            worker_handle = _winapi.OpenProcess(0x00100001, False, receipt["pid"])
+            ok, message = caller.result(timeout=8)
+            assert not ok and "Command timed out after 5s" in message
+            assert _winapi.WaitForSingleObject(worker_handle, 0) == _winapi.WAIT_TIMEOUT
+            writer = subprocess.Popen(
+                [owner_python, "-c",
+                 "from pathlib import Path;from agent_worktrees import repos;"
+                 f"Path({str(writer_started)!r}).touch();"
+                 "assert repos.set_copilot_account('sample','after')"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                env=tasks._child_process_env(), **no_window_kwargs(),
+            )
+            deadline = time.monotonic() + 3
+            while not writer_started.exists() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            assert writer_started.exists() and writer.poll() is None
+            with pytest.raises(subprocess.TimeoutExpired):
+                writer.wait(timeout=0.2)
+            assert yaml.safe_load(config.read_text("utf-8")).get("knowledge_repo") is None
+            release.touch()
+            assert _winapi.WaitForSingleObject(worker_handle, 5000) == _winapi.WAIT_OBJECT_0
+            output, error = writer.communicate(timeout=5)
+            assert writer.returncode == 0, output + error
+            assert yaml.safe_load(config.read_text("utf-8"))["knowledge_repo"] == "knowledge"
+            assert yaml.safe_load(registry.read_text("utf-8"))["repos"]["sample"]["copilot_account"] == "after"
+        finally:
+            release.touch()
+            if writer is not None and writer.poll() is None:
+                writer.terminate()
+                writer.communicate(timeout=5)
+            if worker_handle is not None:
+                if _winapi.WaitForSingleObject(worker_handle, 5000) == _winapi.WAIT_TIMEOUT:
+                    _winapi.TerminateProcess(worker_handle, 1)
+                    assert _winapi.WaitForSingleObject(worker_handle, 5000) == _winapi.WAIT_OBJECT_0
+                _winapi.CloseHandle(worker_handle)
 
 
 def test_native_repositories_ui_real_cli_cancel_set_reset_and_concurrent_ordinary_write(tmp_path, monkeypatch):
