@@ -200,6 +200,67 @@ def test_skipped_payload_requires_actual_success_not_a_later_empty_plan(
         assert summary["skipped"][0]["reason"] == "copilot-unavailable"
 
 
+@pytest.mark.parametrize("resolved", [False, True])
+def test_final_runtime_repair_rechecks_diagnostics_without_another_apply(
+    tmp_path, monkeypatch, capsys, resolved,
+):
+    status = tmp_path / "status.json"
+    diagnostic = {
+        "service": "agent-example",
+        "phase": "runtime",
+        "reason": "runtime-running-generation-drift",
+        "message": "The live process differs from the installed build",
+    }
+    plans = iter([
+        {
+            "action": "reconcile",
+            "updates": [{
+                "service": "agent-example", "phase": "payload", "reason": "payload-refresh",
+                "argv": ["copilot", "plugin", "update", "agent-example@copilot-extensions"],
+            }],
+        },
+        {
+            "action": "reconcile",
+            "diagnostics": [diagnostic],
+            "updates": [{
+                "service": "agent-example", "phase": "runtime", "reason": "runtime-running-drift",
+                "argv": ["fixture-runtime-installer"],
+            }],
+        },
+        {"action": "continue", **({} if resolved else {"diagnostics": [diagnostic]})},
+    ])
+    observations, executions = [], []
+
+    def build_plan(repo, **kwargs):
+        assert repo == tmp_path
+        observations.append(kwargs)
+        return next(plans)
+
+    monkeypatch.setattr(reconcile, "build_plan", build_plan)
+    monkeypatch.setattr(reconcile, "resolve_copilot", lambda: "fixture-copilot")
+    monkeypatch.setattr(reconcile, "execution_diagnostic", lambda _update: None)
+    monkeypatch.setattr(
+        reconcile, "_run_plan_step",
+        lambda argv, _update, _log: executions.append(list(argv)) or 0,
+    )
+    args = _args(tmp_path, status)
+    args.with_payload_refresh = True
+
+    assert cli.cmd_reconcile_plugins(args) == (0 if resolved else 1)
+
+    summary = json.loads(capsys.readouterr().out)
+    assert len(executions) == 2
+    assert executions[-1] == ["fixture-runtime-installer"]
+    assert len(summary["executed"]) == 2
+    assert observations == [
+        {"machine": None, "include_payload_refresh": True},
+        {"machine": None, "include_payload_refresh": True},
+        {"machine": None, "include_payload_refresh": False, "save": False},
+    ]
+    assert json.loads(status.read_text(encoding="utf-8"))["ok"] is resolved
+    assert summary.get("diagnostics", []) == ([] if resolved else [diagnostic])
+
+
 def test_handled_apply_error_reports_json_and_preserves_failed_status(tmp_path, monkeypatch, capsys):
     status = tmp_path / "status.json"
 

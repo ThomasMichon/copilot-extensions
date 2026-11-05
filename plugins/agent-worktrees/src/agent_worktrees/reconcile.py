@@ -1986,8 +1986,10 @@ def apply_plan(
     final_action = "continue"
     diagnostics: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
+    completed_action = False
 
     for pass_no in range(1, passes + 1):
+        completed_action = False
         plan = build_plan(
             repo_dir, machine=machine,
             include_payload_refresh=include_payload_refresh,
@@ -2057,6 +2059,7 @@ def apply_plan(
                 })
                 continue
             ok = rc == 0
+            completed_action = completed_action or ok
             if ok and upd.get("phase") == "payload":
                 acquired.add(service)
                 skipped = [
@@ -2072,6 +2075,10 @@ def apply_plan(
                 "returncode": rc,
             })
 
+    if diagnostics and completed_action:
+        diagnostics = build_plan(
+            repo_dir, machine=machine, include_payload_refresh=False, save=False,
+        ).get("diagnostics", [])
     summary = {"action": final_action, "passes": passes, "executed": executed}
     if diagnostics:
         summary["diagnostics"] = diagnostics

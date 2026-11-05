@@ -1650,7 +1650,9 @@ optional status file retain the terminal plan's `diagnostics` and unperformed
 `skipped` actions (including `copilot-unavailable`). Either makes the apply result
 unsuccessful: exit 1 and status `ok: false`, even when no installer ran or every
 executed installer succeeded. A diagnostic resolved by a later pass is not a
-terminal failure. Successful apply is only a reconciliation-phase result, not
+terminal failure. After successful final-pass actions, outstanding diagnostics
+are rechecked read-only, without another apply pass or planning-cache write.
+Successful apply is only a reconciliation-phase result, not
 proof of complete repository dependency, service-health or authentication readiness.
 An empty later plan does not clear a skipped payload action; successful execution
 of that action does.
