@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify native session sources in Linux containers with kernel namespace and init identity while retaining actual ancestor hold proof",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

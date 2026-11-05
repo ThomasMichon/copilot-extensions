@@ -322,8 +322,18 @@ or linked artifacts are errors, not an empty or successful history.
 under the recorded backend process. It explicitly reports
 `prompt_acceptance: unknown`; it does not prove a delivered turn, current
 liveness, New/Resume parity or same-conversation installed acceptance.
-Windows, macOS and containers remain outside the native source owner's
-qualification. The separate native source lane
+Linux containers detected by their standard runtime marker or init cgroup
+use a namespace-scoped execution epoch: kernel-observed PID, mount and user
+namespace identities plus the host boot and namespace-init birth. The provider
+requires procfs to observe the caller's own PID namespace and rechecks namespace
+and init identity during capture. It does not use a copied image machine ID,
+container name or caller-supplied label as identity. Missing or inaccessible
+native metadata remains unqualified. Existing noncontainer Linux/WSL epoch
+values are unchanged, and the original ancestor's actual open session hold is
+still mandatory. This is native source support, not container/model lifecycle
+acceptance or permission to retire a process.
+Windows and macOS remain outside the native source owner's qualification.
+The separate native source lane
 `python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_launch_native_observation_native.py`
 uses a synthetic Linux/WSL open hold, an actual original-hook subprocess and the
 resident write transport. It is not a real Copilot acceptance test.
