@@ -13,7 +13,8 @@ provenance collection/readback consumer merged in #10500; explicit passive
 exact-repository provider discovery merged in #10503; explicit policy-first
 managed export/collection composition merged in #10512; D4's default-off
 existing-tick source integration merged in #10520; D5 checkout-preservation
-source controls merged in #10528.**
+source controls merged in #10528; supported local rescue/finalization
+qualification merged in #10539.**
 Native durability, actual archive acknowledgment and D5 remain open.
 No source merge performs a live data move,
 export, collection, cleanup or rollout. The
@@ -68,7 +69,9 @@ machine-local opt-in, preserving default behavior and accounting custody.
 Collection-context cursors retain independent repository/store progress.
 #10528 supplies conservative known-fallback preservation and actual isolated
 checkout retirement with independent managed data and retained discovery.
-Legacy rescue, installed collection and actual archive acknowledgment remain open.
+#10539 qualifies supported local format-2 export/readback before actual isolated
+finalization without changing the original checkout hold or writer locator.
+Actual relocation, installed collection and archive acknowledgment remain open.
 
 Existing cleanup can remove a checkout while retaining a lifecycle tombstone.
 That tombstone does not preserve arbitrary checkout-local agenda bytes.
@@ -211,8 +214,11 @@ not consequences of a reviewed design.
   reclamation. Actual relocation, collection, deletion and rollout need their
   own concrete authorization and evidence.
   #10528 delivers the source preservation and independent checkout-retirement
-  controls; supported rescue, restoration/reclamation and operational acceptance
-  remain open. See the [preservation readback](journal/2026/11.04-sidecar-checkout-preservation.md).
+  controls. #10539 qualifies supported local format-2 rescue/readback through
+  actual owner commands before isolated finalization, without a writer switch or
+  disposal permission. Actual relocation, restoration/reclamation and operational
+  acceptance remain open. See the [preservation readback](journal/2026/11.04-sidecar-checkout-preservation.md)
+  and [rescue qualification](journal/2026/11.04-sidecar-rescue-qualification.md).
 
 ## Validation Plan
 

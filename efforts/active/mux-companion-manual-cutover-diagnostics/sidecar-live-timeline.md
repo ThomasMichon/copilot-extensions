@@ -111,6 +111,12 @@ of checkouts with independent managed data. The
 that source preservation criterion, not D5 rescue, restoration/reclamation,
 actual archive acknowledgment or native/installed acceptance.
 
+#10539 merged as `20c140f142b273ec132b8d740240ed0dd3135e02`, qualifying
+supported checkout-local format-2 export/readback before actual isolated
+finalization without releasing the original data hold. The
+[source readback](journal/2026/11.04-sidecar-rescue-qualification.md) preserves
+D5's operational gates and continues S3's live input/permission evidence work.
+
 ## Guiding intent
 
 Make the existing same-window Sidecar a useful live work overview, rather than
@@ -416,6 +422,10 @@ publication and installed support retain their separate qualification.
   consumer; known-session event/history and installed adoption remain separate.
 - [ ] Expose actual pending/cleared input and permission evidence without answer
   or control authority.
+  The [live-request amendment](sidecar-current-requests.md) proposes the bounded
+  producer snapshot, optional version-skew-safe wire and existing-reader
+  consumer. Review/merge precedes implementation; retained request history
+  remains separately qualified and unsupported sources stay unknown.
 - [ ] Deliver qualified pre-compaction evidence from a supported source adapter;
   retain direct start counts/attempt/target metadata but keep unknown until
   actual active-capacity and measurement/correlation qualification exists.
