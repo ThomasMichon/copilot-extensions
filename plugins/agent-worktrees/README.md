@@ -894,7 +894,9 @@ not a cached tool permission: admitted events still evaluate current policy.
 The inputs include failed Git probes, the adopted anchor's shared metadata and
 explicit-cell namespace/payload ownership, so reuse notices repairs and
 revocation. The stdlib-only registry reader ignores optional metadata, including
-inline and block-style tag lists. Platform selection shares the runtime's
+inline and block-style tag lists. It follows mapping indentation and preserves
+quoted ownership paths, including trailing comments and literal hash characters.
+Platform selection shares the runtime's
 kernel/container-aware classifier rather than inherited WSL environment labels.
 Persistent reuse is also scoped to that execution platform. Explicit per-project
 machine anchor configuration precedes the registry fallback; namespaced project

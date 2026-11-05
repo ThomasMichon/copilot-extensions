@@ -355,6 +355,32 @@ def test_machine_anchor_override_precedes_registered_anchor_and_invalidates_reus
     assert module.admitted(payload, home=tmp_path)
 
 
+@pytest.mark.parametrize("source", ["registry", "machine"])
+@pytest.mark.parametrize("quote", ['"', "'"])
+@pytest.mark.parametrize("indent", [2, 4])
+def test_commented_yaml_ownership_paths_preserve_quotes_hashes_and_indentation(
+    tmp_path, monkeypatch, source, quote, indent,
+):
+    module = load("managed_session")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setitem(sys.modules, "yaml", None)
+    stale, registry = fixture_project(tmp_path)
+    current = fixture_checkout(tmp_path / "current # retained")
+    if source == "registry":
+        path, field = registry / "repos.yaml", "windows" if os.name == "nt" else "linux"
+    else:
+        path, field = tmp_path / ".example" / "config.yaml", "anchor"
+        path.parent.mkdir()
+    value = json.dumps(str(current)) if quote == '"' else "'" + str(current).replace("'", "''") + "'"
+    path.write_text(
+        "repos: # ownership\n" + " " * indent + "example: # project\n"
+        + " " * (indent * 2) + field + ": " + value + " # operator comment\n"
+    )
+    payload = {"sessionId": "commented-ownership", "cwd": str(stale)}
+    assert not module.admitted(payload, home=tmp_path)
+    assert module.admitted({**payload, "cwd": str(current)}, home=tmp_path)
+
+
 def test_quoted_yaml_platform_override_precedes_execution_platform_without_yaml(tmp_path, monkeypatch):
     module = load("managed_session")
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
@@ -799,14 +825,23 @@ import {syncBuiltinESMExports} from "node:module";
 import {pathToFileURL} from "node:url";
 const [module, scriptsRoot, workingDirectory] = process.argv.slice(2);
 let calls = 0;
+const failures = [];
 const original = childProcess.execFile;
-childProcess.execFile = (...args) => { calls++; return original(...args); };
+childProcess.execFile = (...args) => {
+  calls++;
+  const callback = args.pop();
+  return original(...args, (error, stdout, stderr) => {
+    if (error) failures.push({code: error.code, killed: error.killed, signal: error.signal});
+    callback(error, stdout, stderr);
+  });
+};
 syncBuiltinESMExports();
 const {createManagedSessionAdmission} = await import(pathToFileURL(module));
 const check = createManagedSessionAdmission({scriptsRoot});
 for (const sessionId of ["runtime-only", "runtime-second"]) {
   const input = {sessionId, workingDirectory};
-  assert.deepEqual(await Promise.all([check(input), check(input)]), [true, true]);
+  assert.deepEqual(await Promise.all([check(input), check(input)]), [true, true],
+    JSON.stringify({sessionId, failures}));
   const coldCalls = calls;
   assert.equal(await check(input), true);
   assert.equal(calls, coldCalls, "warm membership must not spawn another discovery helper");

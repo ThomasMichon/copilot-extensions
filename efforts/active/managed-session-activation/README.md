@@ -200,3 +200,11 @@ failure behavior, cache invalidation and mixed payload/runtime paths.
 - The stdlib reader now recognizes quoted ownership keys, including machine platform and anchor overrides. SessionStart admits the event through the selected payload before invoking an older client; unmanaged sessions and missing helpers remain inert.
 - The adjacent two-file packet passed 91 tests with 11 skips. Eleven explicit controls then passed, including all nine real-process older-client cases across PowerShell 7, Windows PowerShell 5.1 and Git Bash; they prove both inert unmanaged/missing-helper cases and preserved managed fallback. Budgets were unchanged.
 - Rebased onto current `dev`, reconciling only effort-index conflicts and preserving all tested implementation bytes. Required exact-head CI and a fresh review remain open; no installed mutation occurred.
+
+### 2026-11-05 - Structural YAML ownership decoding
+
+- Quoted ownership scalars now separate the value from a trailing comment while retaining literal hash characters and single-quote escapes. The no-PyYAML mapping reader tracks actual name/field indentation instead of assuming two/four spaces, so valid four-space machine overrides cannot silently fall back to stale registry ownership.
+- Eight source/quote/indentation cases cover both registry paths and machine overrides. The existing optional indentless tag-list control caught an intermediate regression; optional metadata remains ignored without treating ownership sequences as scalar locations.
+- The final complete admission/selection packet passed 120 tests with one platform skip in 152.62 seconds including preparation and cleanup, at original budgets. A preceding focused packet passed all 16 scalar, metadata and runtime-discovery controls.
+- An intermediate packet also observed one unexplained false admission in the Windows selected-runtime Node control. It did not recur in the focused six-runtime matrix or final complete packet; failure-code diagnostics are retained in the fixture. These functional runs do not establish cold-tail/two-second availability qualification, which remains with #7935. No timeouts or budgets were widened.
+- Required CI passed before this correction; exact-head required CI and fresh review remain open. No installed update, service restart or rollout occurred.

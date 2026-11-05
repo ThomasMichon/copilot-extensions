@@ -37,9 +37,18 @@ def _read(path: Path) -> str:
 def _scalar(value: str):
     value = value.strip()
     if value.startswith('"'):
-        return json.loads(value)
-    if value.startswith("'") and value.endswith("'"):
-        return value[1:-1].replace("''", "'")
+        scalar, end = json.JSONDecoder().raw_decode(value)
+        trailing = value[end:]
+        if trailing and (not trailing[0].isspace() or not trailing.lstrip().startswith("#")):
+            raise ValueError("unsupported quoted scalar suffix")
+        return scalar
+    if value.startswith("'"):
+        quoted = re.fullmatch(r"'((?:[^']|'')*)'(?:\s+#.*)?", value)
+        if quoted is None:
+            raise ValueError("unsupported quoted scalar")
+        return quoted[1].replace("''", "'")
+    if value.startswith("#"):
+        return None
     value = value.split(" #", 1)[0].strip()
     if not value or value in {"null", "Null", "NULL", "~"}:
         return None
@@ -83,8 +92,10 @@ def _entries(
     elif text.lstrip().startswith("{"):
         document = json.loads(text)
     else:
-        # Both registry owners publish two-space name maps and scalar fields.
         document, current, active = {}, None, False
+        name_indent = field_indent = None
+        seen_fields = set()
+        optional_sequence = False
         for raw in text.splitlines():
             if not raw.strip() or raw.lstrip().startswith("#"):
                 continue
@@ -94,36 +105,63 @@ def _entries(
                 key = _scalar(key)
             if indent == 0:
                 active, current = key == section, None
+                name_indent = field_indent = None
                 if active:
                     if not sep or "\t" in raw[:indent + 1]:
                         raise ValueError("unsupported registry layout")
                     if section in document:
                         raise ValueError("duplicate registry section")
                     document[section] = {}
-                    if value.strip() not in {"", "{}"}:
-                        if not required and value.strip() in {"null", "~"}:
+                    scalar = _scalar(value)
+                    if scalar is None and value.strip() and not value.lstrip().startswith("#"):
+                        if not required:
                             document[section] = None
                             active = False
                             continue
+                        raise ValueError("registry is not a map")
+                    if scalar is not None and scalar != {}:
                         raise ValueError("unsupported registry map")
-            elif active and indent == 2:
+            elif active and (name_indent is None or indent == name_indent):
+                name_indent = indent
+                field_indent = None
+                seen_fields = set()
+                optional_sequence = False
                 if not sep or "\t" in raw[:indent + 1]:
                     raise ValueError("unsupported registry layout")
                 name = _scalar(key)
                 if not isinstance(name, str) or name in document[section]:
                     raise ValueError("invalid or duplicate project name")
-                if value.strip() not in {"", "{}"}:
+                scalar = _scalar(value)
+                if scalar is not None and scalar != {}:
                     raise ValueError("unsupported project entry")
-                current = document[section][name] = {}
-            elif (
-                active and indent == 4 and current is not None
-                and key in fields
-            ):
+                current = (
+                    None if scalar is None and value.strip() and not value.lstrip().startswith("#")
+                    else {}
+                )
+                document[section][name] = current
+            elif active:
+                if indent < name_indent or current is None or "\t" in raw[:indent + 1]:
+                    raise ValueError("unsupported registry layout")
+                if field_indent is None:
+                    field_indent = indent
+                if indent < field_indent:
+                    raise ValueError("unsupported registry field layout")
+                if indent > field_indent:
+                    continue
+                if raw.lstrip() == "-" or raw.lstrip().startswith("- "):
+                    if optional_sequence:
+                        continue
+                    raise ValueError("ownership field is not a scalar")
                 if not sep or "\t" in raw[:indent + 1]:
                     raise ValueError("unsupported registry layout")
-                if key in current:
+                if key in seen_fields:
                     raise ValueError("duplicate project field")
-                current[key] = _scalar(value)
+                seen_fields.add(key)
+                optional_sequence = key not in fields and (
+                    not value.strip() or value.lstrip().startswith("#")
+                )
+                if key in fields:
+                    current[key] = _scalar(value)
         # Nested optional fields are not ownership inputs.
     entries = document.get(section) if isinstance(document, dict) else None
     if entries is None and not required:
