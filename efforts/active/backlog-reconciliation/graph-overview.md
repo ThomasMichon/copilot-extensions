@@ -8,6 +8,14 @@ requirements remain in their issues and actual receiving objectives.
 
 ## Snapshot and boundaries
 
+The [eleven recovery/reclamation/callback contracts](finite-recovery-reclamation-callback-contracts.md)
+retain thirty-three ranked relationships without closure credit.
+Completed planning, repaired fixtures and finite source corrections do not
+settle exact consumer/native, reclamation, callback or publisher outcomes.
+All eleven originals stay OPEN; the
+[journal](<journal/2026/11.05 finite-recovery-reclamation-callback-contracts.md>)
+preserves two protected descriptions and another protected whole original.
+
 The [six launch/progress/delivery contracts](finite-launch-progress-delivery-contracts.md)
 retain eighteen ranked relationships without closure credit.
 Actual source/installed partials and finite consumer acceptance remain

@@ -252,6 +252,31 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The six-contract checkpoint is actually delivered in #10708 after genuine
+exact-head approval, no active findings or threads and ten complete
+successful/skipped checks before normal managed merge.
+All eight actual merged/current blobs equal the approved head.
+Only the reused publication child finalized, retained; the
+[delivery journal](<journal/2026/11.05 finite-launch-progress-delivery-contracts.md>)
+records bounded read-only watcher recovery without mutation replay.
+Two equal complete 03:59 PST scans remain at 1,010 whole open:
+735 creator-eligible, 275 excluded, 672 original-cohort and 338 inflow.
+There are no arrivals, departures or new credit; dispositions remain 777
+and the parent stays Active, 281 issues above 729.
+Eleven whole originals and thirty-three ranked relationships are integrated
+for reviewed publication; eight further originals and twenty-four comparisons
+are fully researched. Protected whole sources and all custodians remain.
+
+The [eleven recovery/reclamation/callback contracts](finite-recovery-reclamation-callback-contracts.md)
+integrate 44 whole texts and thirty-three ranked relationships without new
+completion or receiving-transfer credit. All eleven stay OPEN.
+Actual source, fixture and reviewed-plan delivery remains distinct from
+production witnesses, three reap designs, retained trust, native acceptance,
+callback origin, fresh publishers and owned disposal.
+The [journal](<journal/2026/11.05 finite-recovery-reclamation-callback-contracts.md>)
+preserves planning releases, exact residuals, original alternatives and
+protected whole evidence without retry.
+
 The seven-contract checkpoint is actually delivered in #10703 after genuine
 exact-head approval, no active findings, one resolved thread and complete
 successful CI before normal managed merge. All eight actual merged/current
@@ -1782,6 +1807,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [recovery/reclamation/callback study](finite-recovery-reclamation-callback-contracts.md)
+separates twenty-five whole-message, one fresh whole-description, five reused
+whole-description and two protected relations. Another whole original stays
+protected. Native failures and RUNNING-versus-completed proof remain explicit;
+no comparison supplies source/consumer acceptance, receiving consent,
+deletion authority or source/resource release.
 
 The [launch/progress/delivery study](finite-launch-progress-delivery-contracts.md)
 separates thirteen whole-message, one fresh whole-description, two reused
