@@ -520,6 +520,75 @@ def test_service_request_getters_refuse_source_before_admission(
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("method", ["capabilities", "_exchange"])
+def test_service_source_revalidates_preparation_after_discovery_lock(
+    environment, integration, tools, execution_pool, monkeypatch, method,
+):
+    from agent_worktrees.async_review_source import AsyncReviewSource
+    from fleet_manager.gateway_service_caller import ServiceCaller
+    from fleet_manager.credential_references import ServiceCredentials
+    from agent_pull_requests.workspace_client import WorkspaceClient, WorkspaceClientError
+    from agent_pull_requests.workspace_operations import CHUNK_BYTES, MAX_GENERATION_BYTES, PROTOCOL
+    native_host, _, _ = tools
+    _, existing, _, _, _, _ = integration
+    _, _, initial, _, _, _ = environment
+    credentials = ServiceCredentials(None, Path(__file__).resolve())
+    caller = ServiceCaller(
+        gateway_origin="https://127.0.0.1:443", proof_key=None,
+        access_token_callback=credentials.access_token,
+    )
+    client = WorkspaceClient(
+        caller, route_prefix="", binding=existing._binding, scope=initial["scope"],
+    )
+    assert client.preparation_contract()["version"] == 2
+    owner = AsyncReviewSource(native_host.source_owner, executor=execution_pool)
+    calls = []
+    capabilities = {
+        "protocol": PROTOCOL, "generation_versions": [1], "owner_store_versions": [2],
+        "chunk_bytes": CHUNK_BYTES, "max_generation_bytes": MAX_GENERATION_BYTES,
+        "operations": ["capabilities"],
+    }
+
+    async def replaced(*args, **kwargs):
+        calls.append(True)
+        return capabilities
+
+    async def scenario():
+        waiting, lock = asyncio.Event(), asyncio.Lock()
+
+        class ObservedLock:
+            async def __aenter__(self):
+                waiting.set()
+                await lock.acquire()
+
+            async def __aexit__(self, *args):
+                lock.release()
+
+        monkeypatch.setattr(client, "_ensure_lock", ObservedLock())
+        try:
+            async with owner.operation(60) as operation:
+                task = None
+                try:
+                    async with lock:
+                        task = asyncio.create_task(operation.call(
+                            client.ensure_capabilities, checkpoint=operation.remaining,
+                        ))
+                        await asyncio.wait_for(waiting.wait(), 5)
+                        monkeypatch.setattr(client, method, replaced)
+                    with pytest.raises(WorkspaceClientError, match="native_completion_unavailable"):
+                        await task
+                    assert not calls
+                finally:
+                    if task is not None:
+                        task.cancel()
+                        await asyncio.gather(task, return_exceptions=True)
+            assert await client.ensure_capabilities() == capabilities
+            assert calls == [True]
+        finally:
+            await owner.drain(timeout=2)
+    asyncio.run(scenario())
+
+
 def test_stock_instance_method_copies_keep_actual_async_source(
     environment, tools, execution_pool, monkeypatch,
 ):

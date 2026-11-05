@@ -218,6 +218,24 @@ contract.
 
 ## Journal
 
+### 2026-11-05 - Revalidate source preparation after discovery-lock waits
+- A preparation binding can change while a source caller waits for shared
+  capability discovery. The caller now rechecks its actual source binding
+  after acquiring the lock and before selecting a capability callback or
+  returning cached discovery data.
+- Two focused replacements, of capabilities and exchange, reproduced missing
+  refusal before the fix. Both refuse before the replacement runs in source
+  scope while remaining available for explicit ordinary metadata calls.
+- The complete affected native-custody/checkpoint packet passes 39 cases with
+  no skips: 102.36 seconds of tests and 146.30 seconds including preparation and
+  cleanup. Source/index and persistent user-PATH observations were unchanged;
+  the 180/600 bounds were not increased.
+- The current-head admitted Python type-contract CI step, fresh review and
+  required CI remain acceptance gates. Interrupted native typing runs for
+  superseded candidates are not passing evidence. All nine open Plan items and
+  eleven Validation items remain open, without installed/serving qualification
+  or rollout authority.
+
 ### 2026-11-05 - Qualify service request bindings without invoking getters
 - A request property returning the stock bound method could execute before a
   source operation was reserved, leaving its work outside native custody.

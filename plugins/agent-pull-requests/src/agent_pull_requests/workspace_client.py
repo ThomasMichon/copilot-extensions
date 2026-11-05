@@ -116,6 +116,9 @@ class WorkspaceClient:
         async with self._ensure_lock:
             if checkpoint is not None:
                 checkpoint()
+            submit = getattr(getattr(checkpoint, "__self__", None), "_submit_native", None)
+            if callable(submit) and not WorkspaceClient._source_supported(self):
+                raise WorkspaceClientError("workspace_native_completion_unavailable", outcome_unknown=False)
             if self._capabilities is None:
                 return await self.capabilities(**({"checkpoint": checkpoint} if checkpoint is not None else {}))
             return copy.deepcopy(self._capabilities)
