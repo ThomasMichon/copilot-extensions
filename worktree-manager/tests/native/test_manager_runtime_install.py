@@ -136,8 +136,8 @@ print(json.dumps({"completed":True}))
 
 
 def _prepare_command(argv, env, cwd):
-    # The complete preparation phase is owned by the native group's unchanged
-    # 300-second supervisor; the production engine owns each construction child.
+    # The native group owns preparation; the production engine independently
+    # owns each construction child's unchanged deadline.
     return subprocess.run(
         list(map(str, argv)), env=env, cwd=cwd, capture_output=True,
         text=True, encoding="utf-8", **no_window_kwargs(),

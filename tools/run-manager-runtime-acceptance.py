@@ -86,7 +86,7 @@ def main() -> int:
             if args.contract == "uninstall" else
             [("construction and assertions", [prepare_command, assertions])]
         )
-        group_seconds = 1200 if args.contract == "source" else 300
+        group_seconds = 1800 if args.contract == "source" else 300
         for label, commands in groups:
             started = time.monotonic()
             for command in commands:

@@ -939,6 +939,21 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-11-05 - Retain the source timeout and approve its finite test ceiling
+
+- After #10772, the real release, qualified-source and source constructions
+  completed successfully. Repair then exhausted the remaining 211 seconds
+  of the shared 1,200-second ceiling; final assertions did not run.
+  This credits the caller-relative correction, not full source acceptance.
+- The same four separately contained constructions and final assertions now
+  share an explicitly approved 1,800-second test-only ceiling. Every command
+  receives only the remaining allowance. Production deadlines, test-item
+  limits, source/data witnesses, cleanup and all other contracts are unchanged.
+- The stages use one evolving installation and retained checkpoint state;
+  they are not parallelized or replaced with cached success. Draft #10671
+  and the complete parent Plan/Validation remain open pending real validation.
+  No further budget increase, live update or resource disposal is authorized.
+
 ### 2026-11-05 - Remove the caller-relative bootstrap prerequisite
 
 - The finite caller-directory correction merged in #10772 at

@@ -7052,12 +7052,13 @@ python tools/run-manager-runtime-acceptance.py --root .validation --contract sou
 ```
 
 Its four existing constructions run as separately process-contained commands
-sharing one 1,200-second aggregate deadline with the final assertions. Every
+sharing one 1,800-second aggregate deadline with the final assertions. Every
 command receives only the remaining aggregate allowance, not a fresh timeout;
 an individual stage may use more than 300 seconds. Assertions retain their
 30-second item limits. This intentionally replaces the former single
-300-second source group;
-production constructor/inactivity limits and all other native contracts remain
+300-second source group; the intervening 1,200-second shared ceiling exhausted
+repair after the first three real constructions completed.
+Production constructor/inactivity limits and all other native contracts remain
 unchanged. No cold builds are added to the original runtime lane or required
 PR CI. One borrowed test-environment lease and retention-aware sandbox span
 every group; a failed step stops later work and unsettled processes retain the

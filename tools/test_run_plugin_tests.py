@@ -985,7 +985,7 @@ def test_manager_acceptance_cleans_settled_sandbox(
 
     monkeypatch.setattr(acceptance, "run_contained", settled)
     assert acceptance.main() == returncode
-    expected = {"updater": 4, "uninstall": 3}.get(contract, 2) if returncode == 0 else 1
+    expected = {"updater": 4, "uninstall": 3, "source": 5}.get(contract, 2) if returncode == 0 else 1
     assert len(observed) == expected
     assert not any(sandbox.exists() for sandbox in observed)
     assert releases == [True]
@@ -1034,7 +1034,7 @@ def test_manager_acceptance_source_contains_each_construction_and_keeps_final_as
     ]
     assert all(command[-2] == "--prepare-step" for command, _, _ in observed[:-1])
     assert observed[-1][0][-2:] == ["--test-file", "tests/native/test_manager_source_install.py"]
-    assert [limit for _, limit, _ in observed] == [1200, 960, 720, 480, 240]
+    assert [limit for _, limit, _ in observed] == [1800, 1560, 1320, 1080, 840]
     assert len({sandbox for _, _, sandbox in observed}) == 1
     assert not observed[0][2].exists()
     assert releases == [True]
@@ -1051,13 +1051,13 @@ def test_manager_acceptance_source_does_not_reset_aggregate_deadline(manager_acc
 
     def completed(command, **kwargs):
         observed.append((command, kwargs["limits"].wall_seconds, kwargs["sandbox"]))
-        clock[0] += 400
+        clock[0] += 600
         return 0
 
     monkeypatch.setattr(acceptance, "run_contained", completed)
     assert acceptance.main() == 124
     assert [command[-1] for command, _, _ in observed] == ["release", "qualified", "source"]
-    assert [limit for _, limit, _ in observed] == [1200, 800, 400]
+    assert [limit for _, limit, _ in observed] == [1800, 1200, 600]
     assert not observed[0][2].exists()
     assert releases == [True]
 
