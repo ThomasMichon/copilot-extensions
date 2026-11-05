@@ -553,3 +553,86 @@ def test_marker_probe_disables_site_initialization(monkeypatch):
     assert locks._query_marker_environment(Path("selected-python"), deadline=time.monotonic() + 5) == _ENVIRONMENT
     assert calls[0][0][1:4] == ["-I", "-S", "-c"]
     assert 0 < calls[0][1]["timeout"] <= 5
+
+
+@pytest.mark.parametrize("layout", ["application", "legacy", "missing-application-resource"])
+def test_numbered_constructor_retains_the_selected_bootstrap_without_payload_fallback(
+    tmp_path, monkeypatch, layout,
+):
+    from contextlib import nullcontext
+    import shutil
+    import installer_engine as engine
+
+    plugin = tmp_path / "plugin"
+    scripts = plugin / "scripts"
+    scripts.mkdir(parents=True)
+    (plugin / "pyproject.toml").write_text(
+        '[project]\nname="fixture"\nversion="1.2.3"\ndependencies=[]\n',
+        encoding="utf-8",
+    )
+    application = None if layout == "legacy" else tmp_path / "application"
+    helpers = (
+        "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
+        "versioned_runtime_source.py", "versioned_runtime_construction.py",
+        "versioned_runtime_publication.py",
+    )
+    for name in helpers:
+        (scripts / name).write_bytes(b"legacy payload: " + name.encode())
+        if application is not None:
+            (application / "runtime").mkdir(parents=True, exist_ok=True)
+            if layout != "missing-application-resource" or name != "runtime_launcher.py":
+                (application / "runtime" / name).write_bytes(b"copied application: " + name.encode())
+
+    class ObservedWheels:
+        deadline = time.monotonic() + 30
+        distributions = ()
+
+        def verify(self):
+            pass
+
+        def receipt(self):
+            return {}
+
+    class HealthBoundaryReached(Exception):
+        pass
+
+    def construct(inputs, slot, *_args):
+        slot.mkdir(parents=True, exist_ok=True)
+        if application is not None:
+            shutil.copytree(inputs.application / "runtime", slot / "runtime")
+        return slot / "fixture-python"
+
+    health_calls = []
+
+    def verify(*_args, **_kwargs):
+        health_calls.append(True)
+        raise HealthBoundaryReached
+
+    monkeypatch.setattr(engine, "WheelInstallInputs", ObservedWheels)
+    monkeypatch.setattr(engine.runtime, "construction_lease", lambda *_a, **_k: nullcontext(123))
+    monkeypatch.setattr(engine, "_retained_inputs", lambda inputs, *_a, **_k: nullcontext(inputs))
+    monkeypatch.setattr(engine, "_construct", construct)
+    monkeypatch.setattr(engine, "_input_origins", lambda *_a: {})
+    monkeypatch.setattr(engine, "_verify_installed", verify)
+    monkeypatch.setattr(
+        engine.runtime, "mark_complete",
+        lambda *_a, **_k: pytest.fail("unverified fixture must not become complete"),
+    )
+    root = tmp_path / "runtime"
+    missing = layout == "missing-application-resource"
+    with pytest.raises(FileNotFoundError if missing else HealthBoundaryReached):
+        with engine.numbered_candidate(
+            root, "1.2.3", plugin=plugin, uv=tmp_path / "uv", base_python=tmp_path / "python",
+            health_module="fixture", local_packages=(), wheel_inputs=ObservedWheels(),
+            application=application, process_retention=True, expected_payload_hash="a" * 64,
+        ):
+            pytest.fail("unqualified fixture must not become a ready candidate")
+    bootstrap = root / "versions" / "1.2.3" / ".runtime-bootstrap"
+    assert health_calls == ([] if missing else [True])
+    if missing:
+        assert not (bootstrap / "runtime_launcher.py").exists()
+    else:
+        selected = scripts if application is None else application / "runtime"
+        assert {path.name: path.read_bytes() for path in bootstrap.iterdir()} == {
+            name: (selected / name).read_bytes() for name in helpers
+        }
