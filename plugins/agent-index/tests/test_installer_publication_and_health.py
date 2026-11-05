@@ -2,16 +2,165 @@
 from __future__ import annotations
 
 import os
+import json
 import shlex
 import shutil
 import subprocess
 import sys
+import threading
 import venv
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
 
 from test_install_engine_adoption import environment, function, run_ps
+
+
+@pytest.mark.parametrize("host", ["pwsh", "powershell", "bash"])
+@pytest.mark.parametrize("outcome", [
+    "native-failure", "stale", "health-stale", "wrong-owner", "ready",
+    "client", "unconfigured", "no-service",
+    "existing-host-failure",
+])
+def test_native_installer_service_result_and_selected_identity(tmp_path, host, outcome):
+    if host == "bash" and os.name == "nt":
+        pytest.skip("This is a native POSIX consumer, not Windows Bash qualification")
+    if host == "powershell" and os.name != "nt":
+        pytest.skip("Windows PowerShell is unavailable")
+    executable = shutil.which(host)
+    if not executable:
+        pytest.skip(f"{host} unavailable")
+
+    from zdd import routing
+
+    root = tmp_path / "runtime"
+    root.mkdir()
+    selected = root / "versions" / "2.0.0"
+    selected.mkdir(parents=True)
+    preserved = selected / "preserved-content"
+    preserved.write_bytes(b"selected immutable content")
+    engine = root / "engine"
+    engine.mkdir()
+    (engine / "current-version").write_text("independent-engine", encoding="utf-8")
+    (root / "current-version").write_text("2.0.0", encoding="utf-8")
+    before = {path: path.read_bytes() for path in (preserved, engine / "current-version")}
+    version = "2.0.0" if outcome in {"ready", "health-stale", "wrong-owner"} else "1.0.0"
+
+    class Health(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = json.dumps({
+                "status": "ok", "plugin": "agent-index",
+                "version": "1.0.0" if outcome == "health-stale" else version,
+                "pid": os.getpid() + int(outcome == "wrong-owner"), "installationId": "",
+            }).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Health)
+    worker = threading.Thread(target=server.serve_forever)
+    worker.start()
+    try:
+        routing.publish_active(
+            root, bind="127.0.0.1", port=server.server_port, pid=os.getpid(), version=version,
+        )
+        log = tmp_path / "native-calls"
+        native = tmp_path / "native.py"
+        code = 37 if outcome in {"native-failure", "existing-host-failure"} else 0
+        native.write_text(
+            "import os, pathlib, subprocess, sys\n"
+            "args = sys.argv[1:]\n"
+            "if '-m' in args and args[args.index('-m') + 1:] == ['agent_index', 'deploy']:\n"
+            " pathlib.Path(os.environ['INDEX_FIXTURE_CALLS']).write_text('deploy')\n"
+            " print('native deployment diagnostic', file=sys.stderr)\n"
+            f" raise SystemExit({code})\n"
+            "raise SystemExit(subprocess.call([sys.executable, *args]))\n",
+            encoding="utf-8",
+        )
+        runtime = tmp_path / ("native.ps1" if os.name == "nt" else "native")
+        runtime.write_text(
+            f"& '{sys.executable}' '{native}' @args\nexit $LASTEXITCODE\n" if os.name == "nt" else
+            f"#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(native))} \"$@\"\n",
+            encoding="utf-8",
+        )
+        if os.name != "nt":
+            runtime.chmod(0o755)
+        env = environment(tmp_path)
+        env.update({
+            "AGENT_INDEX_HOME": str(root), "AGENT_INDEX_ROUTING_DIR": str(root),
+            "INDEX_FIXTURE_CALLS": str(log),
+        })
+        role = outcome if outcome in {"client", "unconfigured"} else "host"
+        if outcome == "existing-host-failure":
+            role = "client"
+        machine_role = "host" if outcome == "existing-host-failure" else role
+        scripts = Path(__file__).resolve().parents[1] / "scripts"
+        if host == "bash":
+            # No systemctl is discoverable: the native owner must still run.
+            env["PATH"] = str(tmp_path)
+            text = f"""
+set -euo pipefail
+INSTALL_DIR={shlex.quote(str(root))}
+LINK_PYTHON={shlex.quote(str(runtime))}
+SRC_VERSION=2.0.0
+NO_SERVICE={int(outcome == "no-service")}
+_ok() {{ echo "$*"; }}; _skip() {{ echo "$*"; }}; _step() {{ :; }}
+_fail() {{ echo "$*" >&2; }}
+_activation_role() {{ echo {role}; }}
+_machine_role() {{ echo {machine_role}; }}
+{function("_service_healthy", "sh")}
+{function("_service_cutover", "sh")}
+_service_cutover
+"""
+            command = [executable]
+            harness = tmp_path / "consumer.sh"
+        else:
+            engine_helpers = scripts.parents[2] / "libs" / "installer-engine" / "installer-engine.ps1"
+            text = f"""
+$ErrorActionPreference = 'Stop'
+. '{engine_helpers}'
+$InstallDir = '{root}'
+$LinkPython = '{runtime}'
+$SrcVersion = '2.0.0'
+$NoService = ${str(outcome == "no-service").lower()}
+function Write-Ok {{ param($m) Write-Host $m }}
+function Write-Skip {{ param($m) Write-Host $m }}
+function Write-Warn {{ param($m) Write-Host $m }}
+function Write-Step {{ param($m) }}
+function Get-ActivationRole {{ return '{role}' }}
+function Get-MachineRole {{ return '{machine_role}' }}
+function Write-ServiceFiles {{ }}
+{function("Get-ActiveServicePort", "ps1")}
+{function("Test-ServiceHealthy", "ps1")}
+{function("Invoke-ServiceCutover", "ps1")}
+Invoke-ServiceCutover
+"""
+            command = [executable, "-NoProfile", "-NonInteractive", "-File"]
+            harness = tmp_path / "consumer.ps1"
+        harness.write_text(text, encoding="utf-8")
+        result = subprocess.run(
+            [*command, str(harness)], env=env, cwd=tmp_path, capture_output=True,
+            text=True, timeout=25,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        skipped = outcome in {"client", "unconfigured", "no-service"}
+        success = skipped or outcome == "ready"
+        assert (result.returncode == 0) is success, result.stdout + result.stderr
+        assert log.exists() is not skipped
+        if outcome == "ready":
+            assert "2.0.0 is ready" in result.stdout
+        if not success:
+            assert "is ready" not in result.stdout
+        assert {path: path.read_bytes() for path in before} == before
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=5)
 
 
 @pytest.mark.parametrize("failure", ["filesystem", "probe"])

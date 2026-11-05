@@ -651,6 +651,14 @@ selected interpreter, while installer `install` / `update` use `deploy` for
 automatic zdd cutover when a live service is already serving. The durable
 engine remains external to that runtime and is never rebuilt by an ordinary
 service update.
+The installer requires a zero native deployment exit and then validates the
+selected generation and routed PID through the runtime's existing owned-health
+reader. Old-service HTTP success cannot certify the incoming generation.
+POSIX install/update/provision invokes the native owner independently of
+systemd availability and propagates failure instead of falling back to
+ensure-running. Repository activation gates and construction profiles are
+unchanged; in particular this does not add a host closure to a completed client
+slot or claim adoption of asynchronous predecessor retirement.
 7. Namespaced marker CAS, deploy-manifest publication, profile receipts, and
 transaction recovery retain existing installation governance. Namespaced hosts
 use the same local slot/cutover primitives as legacy mode. Compatibility

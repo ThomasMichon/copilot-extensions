@@ -2514,6 +2514,24 @@ function Get-ActiveSlotPython {
 }
 
 function Test-ServiceHealthy {
+    param([string]$ExpectedVersion = '')
+    if ($ExpectedVersion) {
+        $probe = @'
+import sys
+from agent_index.__main__ import _owned_service_status, _routing_endpoint
+endpoint = _routing_endpoint()
+if (endpoint is None or endpoint.version != sys.argv[1]
+        or type(endpoint.pid) is not int or endpoint.pid <= 0):
+    raise SystemExit(1)
+health = _owned_service_status(
+    endpoint.base_url, expected_version=sys.argv[1], expected_pid=endpoint.pid, timeout=3.0,
+)
+raise SystemExit(0 if health.get('status') == 'ok' else 1)
+'@
+        $result = Invoke-NativeCapture { & $LinkPython -I -B -X utf8 -c $probe $ExpectedVersion }
+        if ($result.ExitCode -ne 0 -and $result.Output) { Write-Warn $result.Output }
+        return ($result.ExitCode -eq 0)
+    }
     # Health-gate on the LIVE routing endpoint (active.json), not a static port:
     # a stale active.json pointing at a dead pid correctly reads as unhealthy.
     $port = Get-ActiveServicePort
@@ -2612,16 +2630,22 @@ function Invoke-ServiceCutover {
         Write-Skip "Service cutover skipped (role: $role) -- only an explicitly configured host or an already-running host service is updated"
         return
     }
-    if (-not (Test-Path $LinkPython)) { Write-Skip 'Runtime not installed -- service not cut over'; return }
+    if (-not (Test-Path $LinkPython)) { throw 'Required service runtime is unavailable; service was not updated' }
     Write-ServiceFiles
-    if (Test-ServiceHealthy) {
-        Write-Step 'Graceful cutover: moving the live service to the new build (zdd active/passive flip)...'
+    Write-Step 'Deploying the selected service runtime through its native owner...'
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
         & $LinkPython -I -X utf8 -m agent_index deploy 2>&1 | Out-Host
-        if (Test-ServiceHealthy) { Write-Ok 'Service cut over to the new build (routing flipped; old drained + retired)' }
-        else { Write-Warn 'Service cutover attempted -- endpoint not yet healthy (it may still be starting)' }
-    } else {
-        Ensure-ServiceRunning
+        $deployExit = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousPreference
     }
+    if ($deployExit -ne 0) { throw "Service deployment failed (exit $deployExit); a healthy predecessor is not update success" }
+    if (-not (Test-ServiceHealthy -ExpectedVersion $SrcVersion)) {
+        throw "Selected service runtime $SrcVersion is not serving with its expected ownership"
+    }
+    Write-Ok "Selected service runtime $SrcVersion is ready"
 }
 
 function Publish-FileAtomically {

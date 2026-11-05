@@ -2181,6 +2181,21 @@ _uninstall() {
 }
 
 _service_healthy() {
+    if [[ -n "${1:-}" ]]; then
+        "$LINK_PYTHON" -I -B -X utf8 -c '
+import sys
+from agent_index.__main__ import _owned_service_status, _routing_endpoint
+endpoint = _routing_endpoint()
+if (endpoint is None or endpoint.version != sys.argv[1]
+        or type(endpoint.pid) is not int or endpoint.pid <= 0):
+    raise SystemExit(1)
+health = _owned_service_status(
+    endpoint.base_url, expected_version=sys.argv[1], expected_pid=endpoint.pid, timeout=3.0,
+)
+raise SystemExit(0 if health.get("status") == "ok" else 1)
+' "$1"
+        return $?
+    fi
     # Health-gate on the LIVE routing endpoint (active.json ephemeral port); a
     # stale active.json pointing at a dead pid correctly reads as unhealthy.
     # Prefer the runtime's OWN venv python (always present when installed) over a
@@ -2261,33 +2276,31 @@ _ensure_running() {
 }
 
 # Thread B graceful cutover (parity with install.ps1 Invoke-ServiceCutover):
-# if a LIVE routed service (published active.json + healthy /health) is serving,
-# stand the new slot up beside it and flip routing via the OS-agnostic zdd
-# `agent_index deploy` seam -- so no in-flight request is dropped -- instead of a
-# systemctl restart. Returns 0 when the cutover brought a healthy service up (so
-# the caller refreshes the unit with --no-restart); 1 to fall back to the
-# SIGTERM-graceful `systemctl restart` (uvicorn drains, so the invariant holds).
+# Use the native deployment owner with or without a service manager. A failed
+# deployment cannot fall back to an ensure path that accepts the old service.
 # The warm embedding engine is a SEPARATE unit on a fixed port -- left untouched.
 _service_cutover() {
-    [[ "$NO_SERVICE" -eq 1 ]] && return 1
-    command -v systemctl >/dev/null 2>&1 || return 1
+    if [[ "$NO_SERVICE" -eq 1 ]]; then _skip 'Service cutover skipped (--no-service)'; return 0; fi
     # A configured host may start/cut over. An unrelated repository may only
     # cut over an already-running service owned by an explicit machine host.
     local role
     role="$(_activation_role)"
     if [[ "$role" != "host" ]]; then
-        [[ "$(_machine_role)" == "host" ]] && _service_healthy || return 1
+        if [[ "$(_machine_role)" != "host" ]] || ! _service_healthy; then
+            _skip "Service cutover skipped (role: $role) -- no configured local host service to update"
+            return 0
+        fi
     fi
-    [[ -x "$LINK_PYTHON" ]] || return 1
-    # Cut over only a LIVE routed service; no live endpoint -> fall back.
-    _service_healthy || return 1
-    _step 'Graceful cutover: moving the live service to the new build (zdd active/passive flip)...'
-    if "$LINK_PYTHON" -I -X utf8 -m agent_index deploy >/dev/null 2>&1 && _service_healthy; then
-        _ok 'Service cut over to the new build (routing flipped; old drained + retired; warm engine untouched)'
-        return 0
+    [[ -x "$LINK_PYTHON" ]] || { _fail 'Required service runtime is unavailable'; return 1; }
+    _step 'Deploying the selected service runtime through its native owner...'
+    local deploy_exit=0
+    "$LINK_PYTHON" -I -X utf8 -m agent_index deploy || deploy_exit=$?
+    if [[ "$deploy_exit" -ne 0 ]]; then
+        _fail "Service deployment failed (exit $deploy_exit); a healthy predecessor is not update success"
+        return "$deploy_exit"
     fi
-    _warn 'Graceful cutover did not complete -- falling back to a SIGTERM-graceful systemctl restart'
-    return 1
+    _service_healthy "$SRC_VERSION" || { _fail "Selected service runtime $SRC_VERSION is not serving with its expected ownership"; return 1; }
+    _ok "Selected service runtime $SRC_VERSION is ready (warm engine untouched)"
 }
 
 _run_index_action() {
@@ -2317,14 +2330,14 @@ esac
 case "$ACTION" in
     install)
         _ensure_runtime || exit 1
-        _service_cutover || _ensure_running
+        _service_cutover || exit $?
         _install_logon_autostart
         _skip 'Durable engine runtime unchanged; use engine / engine-update for the heavy stack'
         ;;
     update)                                                         # Thread B: installer-driven graceful zdd cutover (a version update must never kill in-flight work)
         _downgrade_guard
         _ensure_runtime || exit 1
-        _service_cutover || _ensure_running
+        _service_cutover || exit $?
         _install_logon_autostart
         _skip 'Durable engine runtime unchanged; use engine / engine-update for the heavy stack'
         ;;
@@ -2339,7 +2352,7 @@ case "$ACTION" in
     stamp) do_stamp ;;
     provision)
         _ensure_runtime || exit 1
-        _service_cutover || _ensure_running
+        _service_cutover || exit $?
         _skip 'Durable engine runtime unchanged; use engine / engine-update for the heavy stack'
         ;;
     engine) _install_engine || exit $?; _register_engine_daemon ;;
