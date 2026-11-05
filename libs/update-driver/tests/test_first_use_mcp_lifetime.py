@@ -150,7 +150,9 @@ def test_actual_hook_finishes_after_all_native_callers_are_lost(
                         if os.name == "nt":
                             from agent_procutil import _job_scopes
                             from test_foundation_genesis_process import pinned_worker
-                            from windows_normal_process_lifetime import _verified_process
+                            from windows_normal_process_lifetime import (
+                                _verified_process, caller_scope_names,
+                            )
 
                             receipt = json.loads(frame)
                             owner = pinned_worker(receipt)
@@ -160,7 +162,7 @@ def test_actual_hook_finishes_after_all_native_callers_are_lost(
                             actors.callback(owner.close)
                             actors.callback(bounded.close)
                             scopes = {_job_scopes.ENVIRONMENT_KEY: outcome["scopes"]}
-                            assert len(_job_scopes.scope_names(scopes)) == 2, diagnostic()
+                            caller_scope_names(environment, job, outcome["scopes"])
                             with _job_scopes.query_scopes(scopes) as outside_callers:
                                 outside_callers(owner._handle)
                             receipt_log = Path(receipt["log"])

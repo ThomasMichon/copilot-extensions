@@ -142,7 +142,7 @@ try {
                 -File $firstUse -Root $executionRoot -Payload $PluginDir `
                 -RuntimeRoot $InstallDir -Project $project -InstallerAction $installerAction)
         } else {
-            $shell = Get-Command bash -CommandType Application -ErrorAction Stop
+            $shell = Get-Command bash -CommandType Application -ErrorAction Stop | Select-Object -First 1
             $acknowledgement = @(& $shell.Source $firstUse $executionRoot $PluginDir $InstallDir `
                 $project --installer-action $installerAction)
         }

@@ -1207,3 +1207,23 @@ remaining original records and read-only native birth observations, and prints
 the complete Linux subprocess error. It changes neither production cleanup
 policy nor the all-settled assertion and does not skip the failing cases.
 Both roots require diagnosis before another native acceptance claim.
+
+The diagnostic run `42018348269` at `b7d9d68d25b7` identifies the Linux
+failure: PowerShell resolves both `/usr/bin/bash` and `/bin/bash`, then tries
+to invoke their combined `Source` array as one executable. The adapter now
+selects the first application, retaining the existing native POSIX path.
+Windows passes the functional packet and reaches native qualification, where
+the generic control reports three scope identities: the runner's inherited
+Job plus both fixture Jobs, not a missing caller ancestor. Scope validation
+now requires the exact inherited prefix, the returned outer Job name and one
+additional inner Job. All tracked scopes remain checked for daemon escape;
+both fixture Jobs, bounded-control death, pinned-daemon survival and the
+restrictive shared-outer negative remain required.
+
+Nine local lane/scope guards pass, including inherited-scope preservation and
+missing/reordered-boundary refusals. The Windows hook contract packet passes
+42 cases with seven platform skips in 85.77 seconds; focused Ruff and whitespace
+checks pass. These are source corrections, not native lifetime qualification.
+The first run's original `process-reused` hold remains unmodified and is not
+retroactively settled by the second run's functional pass. Exact revised-head
+Windows/Linux proof, review/required CI, merge and release remain open.

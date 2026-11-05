@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -53,3 +54,20 @@ def test_cli_without_explicit_consent_does_not_create_fixture(tmp_path):
     )
     assert result.returncode != 0 and "ephemeral hosted CI consent" in result.stderr
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("inherited", [(), ("Local\\ce-owned-job-" + "a" * 32,)])
+def test_native_caller_scopes_preserve_runner_and_both_fixture_jobs(monkeypatch, inherited):
+    lane.source_imports()
+    from agent_procutil import _job_scopes
+    from windows_normal_process_lifetime import caller_scope_names
+
+    monkeypatch.delenv(_job_scopes.ENVIRONMENT_KEY, raising=False)
+    if inherited:
+        monkeypatch.setenv(_job_scopes.ENVIRONMENT_KEY, ";".join(inherited))
+    outer, inner = ("Local\\ce-owned-job-" + value * 32 for value in ("b", "c"))
+    scopes = (*inherited, outer, inner)
+    assert caller_scope_names({}, SimpleNamespace(name=outer), ";".join(scopes)) == scopes
+    for incomplete in (scopes[:-1], (*inherited, inner), (outer, inner) if inherited else (inner, outer)):
+        with pytest.raises(RuntimeError, match="exact inherited and two caller Jobs"):
+            caller_scope_names({}, SimpleNamespace(name=outer), ";".join(incomplete))

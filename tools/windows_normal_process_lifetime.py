@@ -31,6 +31,17 @@ def _verified_process(pid: int, birth: str, label: str):
     return process
 
 
+def caller_scope_names(environment, outer_job, observed):
+    from agent_procutil import _job_scopes
+
+    inherited = _job_scopes.scope_names(_job_scopes.child_environment(environment))
+    scopes = _job_scopes.scope_names({_job_scopes.ENVIRONMENT_KEY: observed})
+    expected = (*inherited, outer_job.name)
+    if len(scopes) != len(expected) + 1 or scopes[:-1] != expected:
+        raise RuntimeError("native fixture did not retain its exact inherited and two caller Jobs")
+    return scopes
+
+
 def _observe(predicate, process, timeout=15):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -68,7 +79,7 @@ def _worker(root: Path) -> None:
         "'pid':os.getpid()}));t.replace(p);time.sleep(120)"
     )
     outcome = {"ordinary": ordinary.pid, "ordinary_birth": _windows_birth(ordinary._handle),
-               "scope_count": len(_job_scopes.scope_names(os.environ))}
+               "scopes": os.environ.get(_job_scopes.ENVIRONMENT_KEY)}
     try:
         daemon = pu.spawn_daemon(
             [python, "-c", code, str(ready)], env_overrides=python_env,
@@ -262,8 +273,7 @@ def qualify(root: Path, environment: dict[str, str]) -> dict:
                 lambda: json.loads((directory / "outcome.json").read_text())
                 if (directory / "outcome.json").is_file() else None, process,
             )
-            if outcome["scope_count"] != 2:
-                raise RuntimeError("native fixture omitted a caller cleanup ancestor")
+            scopes = caller_scope_names(environment, job, outcome["scopes"])
             ordinary = _verified_process(outcome["ordinary"], outcome["ordinary_birth"], "bounded control")
             if restrictive:
                 if (
@@ -292,6 +302,7 @@ def qualify(root: Path, environment: dict[str, str]) -> dict:
                     time.sleep(1)
             cycles.append({
                 "two_owned_cleanup_ancestors": True, "all_caller_jobs_closed": True,
+                "tracked_cleanup_scopes": len(scopes), "inherited_cleanup_scopes": len(scopes) - 2,
                 "bounded_control_exited": True, "durable_survived": not restrictive,
                 "shared_outer_refused": restrictive,
             })
