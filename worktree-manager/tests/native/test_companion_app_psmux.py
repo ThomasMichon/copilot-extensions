@@ -103,7 +103,7 @@ def test_actual_companion_psmux_client_history_resize_and_same_cli(
             while time.monotonic() < deadline:
                 assert not client.exited(client.process.process), diagnostic()
                 assert client.read_error is None, client.read_error
-                if condition():
+                if condition() and time.monotonic() < deadline:
                     return
                 time.sleep(.025)
             pytest.fail(describe())

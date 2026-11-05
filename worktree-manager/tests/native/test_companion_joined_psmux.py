@@ -124,7 +124,7 @@ def test_native_windows_three_owner_history_live_and_same_cli(
                     assert not client.exited(client.process.process), client.output.decode("utf-8", "replace")
                     assert client.read_error is None, client.read_error
                     assert not peer["failures"] and not semantic_peer["failures"]
-                    if condition():
+                    if condition() and time.monotonic() < deadline:
                         return
                     time.sleep(.025)
                 pytest.fail(json.dumps({

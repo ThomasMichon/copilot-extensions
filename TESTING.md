@@ -2450,6 +2450,9 @@ the same 15-second deadline, retains process identities and strict Job/handle
 cleanup, and uses the existing private profile and no-warm policy. These
 controls isolate startup layers; they neither fix nor waive a client failure
 and are not Companion, installed or startup-stability qualification.
+Portable fixture controls execute the native polling code with timely,
+exact-deadline and late observations; success is checked after blocking polls,
+so a query started before the deadline cannot admit a late result.
 The older PSMux 3.3.5 baseline has exhibited immediate session exits and later
 CLI/directory loss in this fixture. Those observations remain an unqualified
 stability gap under #8811, not a reason to skip a failed test or claim that

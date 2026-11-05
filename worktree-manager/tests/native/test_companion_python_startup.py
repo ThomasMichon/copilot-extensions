@@ -102,6 +102,8 @@ def test_inert_python_startup_under_strict_conpty(
                         else pinned[receipt["pid"]][1]
                     )
                     assert not client.exited(handle)
+                    if time.monotonic() >= deadline:
+                        continue
                     record_property("native-python-startup", json.dumps({
                         "layer": layer, "seconds": time.monotonic() - began,
                         "interpreter": interpreter, "receipt": receipt,

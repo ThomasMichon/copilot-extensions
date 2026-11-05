@@ -127,3 +127,74 @@ def test_private_bridge_membership_cli_completes_before_client_composition(
         assert next(stream)["kind"] == "heartbeat"
     finally:
         stream.close()
+
+
+@pytest.mark.parametrize("filename", ["test_companion_joined_psmux.py", "test_companion_app_psmux.py"])
+@pytest.mark.parametrize("observed_at", [14.9, 15.0, 16.0])
+def test_native_client_deadline_is_checked_after_the_blocking_poll(
+    filename: str, observed_at: float, tmp_path: Path,
+) -> None:
+    source = ast.parse(Path(__file__).with_name(filename).read_text(encoding="utf-8"))
+    wait = next(node for node in ast.walk(source)
+                if isinstance(node, ast.FunctionDef) and node.name == "wait_for")
+    clock = [0.0]
+    client = SimpleNamespace(
+        process=SimpleNamespace(process=1), output=b"", read_error=None, exited=lambda _handle: False,
+    )
+    namespace = {
+        "time": SimpleNamespace(monotonic=lambda: clock[0], sleep=lambda _delay: None),
+        "client": client, "peer": {"failures": []}, "semantic_peer": {
+            "failures": [], "diagnostic": tmp_path / "absent",
+        }, "screen": lambda: "", "app_state": lambda: {}, "started": tmp_path / "absent",
+        "cli_pid": None, "diagnostic": lambda: "late observation", "json": json, "pytest": pytest,
+    }
+    exec(compile(ast.Module(body=[wait], type_ignores=[]), "<native client wait>", "exec"), namespace)
+
+    def observe() -> bool:
+        clock[0] = observed_at
+        return True
+
+    if observed_at < 15:
+        namespace["wait_for"](observe)
+    else:
+        with pytest.raises(pytest.fail.Exception):
+            namespace["wait_for"](observe)
+
+
+@pytest.mark.parametrize("observed_at", [14.9, 15.0, 16.0])
+def test_startup_comparison_cannot_accept_a_late_banner(observed_at: float) -> None:
+    source = ast.parse(Path(__file__).with_name(
+        "test_companion_python_startup.py",
+    ).read_text(encoding="utf-8"))
+    loop = next(node for node in ast.walk(source) if isinstance(node, ast.While))
+    clock, properties = [0.0], []
+
+    def mux(*args: str) -> SimpleNamespace:
+        if args[0] == "capture-pane":
+            clock[0] = observed_at
+        return SimpleNamespace(
+            returncode=0, stdout="INERT PYTHON STARTED" if args[0] == "capture-pane" else "2",
+        )
+
+    namespace = {
+        "time": SimpleNamespace(monotonic=lambda: clock[0], sleep=lambda _delay: None),
+        "deadline": 15, "began": 0, "use_mux": True, "cli_pid": None, "screen": "",
+        "session": "example",
+        "client": SimpleNamespace(
+            process=SimpleNamespace(process=1, pid=1), output=b"", read_error=None,
+            exited=lambda _handle: False, pin_descendants=lambda: {2: ("python", 2)},
+            birth=lambda _handle: 100, process_state=lambda _pid: {},
+        ),
+        "pinned": {}, "mux": mux, "started": SimpleNamespace(
+            exists=lambda: True, read_text=lambda **_kw: '{"pid":2}',
+        ),
+        "layer": "mux-venv", "interpreter": "python", "json": json, "pytest": pytest,
+        "record_property": lambda *value: properties.append(value),
+    }
+    code = compile(ast.Module(body=[loop], type_ignores=[]), "<native startup wait>", "exec")
+    if observed_at < 15:
+        exec(code, namespace)
+    else:
+        with pytest.raises(pytest.fail.Exception):
+            exec(code, namespace)
+    assert len(properties) == 1
