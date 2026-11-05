@@ -225,7 +225,7 @@ rewrite.
 - [x] SSH service preserves all 254 original function contracts, 299 assertion expressions and four embedded literals across both strict targets, actual Python 3.10 Linux/Windows qualification and fresh exact-input source CI (#10348).
 - [x] Retained effort helpers preserve all 39 original function contracts and 31 assertion expressions across both strict targets, actual Python 3.11 Linux/Windows controls, composed-source qualification and fresh exact-input source CI (#10360).
 - [x] Shared checker controls preserve default qualification and ordinary import-root/source-frozen custody semantics, including native separator rejection (#10400 / #10553).
-- [ ] Persistent dual-version controls reject a type error confined to the 3.11 TOML branch on both platforms through local/source/candidate entry points (#10400); exact negative-evidence reconciliation remains open despite the merged generic API. Preserving Versioned Runtime's actual 3.10 behavior and native/copy qualification remains #10331.
+- [x] Persistent dual-version checker controls reject a type error confined to the 3.11 TOML branch on both analysis platforms through local/source/frozen-candidate entry points (#10400 / #10553); four exact-head cases complete 28 actual MyPy analyses. Preserving Versioned Runtime's actual 3.10 behavior and native/copy qualification remains separately open under #10331.
 - [x] Fresh checker preparation and a credential-free local subprocess check exercise the real developer command without executing product code or collecting tests.
 - [x] Required source gate actually rejects a type regression on activated code.
 - [x] Required exact-candidate release gate rejects a type regression on activated code.
@@ -2761,9 +2761,20 @@ composition prerequisites, and review/validation rules.
   checks. It does not rerun or replace the foundation's unit/MyPy packets;
   clean-room and live-venue tiers are inapplicable because no runtime,
   provisioning or installation behavior changes.
+- Fresh acceptance on exact `68ca30dc1aec6ce7e8f43e9352a62b4b370f5d35`
+  passes all **four unchanged version-matrix cases / 28 actual MyPy analyses**
+  through the real source and frozen-candidate front doors on `linux` and
+  `win32` analysis targets, with zero failures, errors or skips. The controls
+  preserve minimum-only defaults, accept both clean versions, reject a bad
+  3.10 assignment while 3.11 remains clean, and reject a 3.11-only TOML
+  assignment while 3.10 remains clean. Raw JUnit and exact source/SDK witnesses
+  are retained and independently verified; inputs remain unchanged.
+- Those tests retain their existing interpreter-locator and prepared-marker
+  adapters while exercising real Git, frozen importing and MyPy. They are
+  not normal frozen-SDK first-provision, native minimum-interpreter runtime,
+  library/copy/emitted admission or a new full packet. Earlier predecessor
+  controls and failed allocation ledgers remain separate historical evidence.
 - Next: integrate canonical consumer aliases, emitted/source correspondence
   and remaining native/interpreter gates for #10331, #10362 and #10371.
-  The specific 3.11-only TOML negative control still needs exact evidence
-  reconciliation; generic API or import-root controls do not discharge it.
   Copies and fragment/runtime/POSIX qualification remain independent. This
   effort stays Active; source merge is neither release nor installed rollout.

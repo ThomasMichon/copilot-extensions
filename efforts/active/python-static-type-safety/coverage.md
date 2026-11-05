@@ -183,7 +183,7 @@ cross-cutting qualification gate below.
 | Physical Python ownership/classification | Established | Current inventory accounts for every tracked physical `.py` path; unknown paths must still fail |
 | Required source type gate | Established for admitted scopes | #9853; actual type-regression rejection recorded in the canonical effort |
 | Required exact-candidate type gate | Established for admitted scopes | #9862 and the reviewed Main adoption; actual candidate regression rejection recorded |
-| Shared import-root/additional-version prerequisite | Delivered, not consumer admission | #10400 / #10553; consumer aliases, emitted copies and specific 3.11 TOML negative-evidence reconciliation remain independent |
+| Shared import-root/additional-version prerequisite | Delivered, not consumer admission | #10400 / #10553; four exact-head source/frozen cases and 28 actual MyPy analyses qualify the version/TOML controls on both analysis platforms; consumer aliases, emitted copies and native/runtime gates remain independent |
 | All fragments/templates/generated copies qualified | Open | Complete source-map/materialization correspondence and negative drift controls |
 | Every plugin, service and tool strictly admitted | Open | All project rows locked; no pending/basic scope or omitted fixture family |
 | Final full-portfolio local/CI/release parity | Open | All declared targets, final negative controls and actual full-cohort source/candidate gates pass together |
