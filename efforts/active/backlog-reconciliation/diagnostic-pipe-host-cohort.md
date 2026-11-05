@@ -31,8 +31,9 @@ native cross-user rejection with same-user continuity, before secret
 handoff. Credit #871's fail-safe exclusion without mistaking POSIX controls
 or runtime lease ACLs for that pipe boundary.
 
-The established finite #10142 proof is reused, not reread or recredited as
-whole-original completion. The other two ranked messages inherit protected
+The established finite #10142 Bridge watchdog/PID proof is reused, not reread
+or recredited. It is not pipe-security evidence or whole-original completion.
+The other two ranked messages inherit protected
 source boundaries and remain wholly excluded without subset/source retry.
 This is retained original acceptance, not a new security audit, pipe action,
 credential operation or custody reassignment.
