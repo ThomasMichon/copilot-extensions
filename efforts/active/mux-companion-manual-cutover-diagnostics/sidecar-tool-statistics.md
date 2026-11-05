@@ -4,7 +4,11 @@ Parent: [complete effort](README.md), Step 7.
 Source obligation: [S2](sidecar-live-timeline.md#s2---worktree-and-agenda-owner-observations).
 Existing boundary: [observation contract](sidecar-observation-contract.md).
 
-**Status: proposed source-contract amendment; review before implementation.**
+**Status: reviewed source-contract amendment; implementation pending.**
+Plan #10704 merged as `9c5a68a52abbee9fd2679fb3acab2c6af0390705`
+after current-head independent approval and green CI, before runtime code.
+The [admission readback](journal/2026/11.05-sidecar-tool-statistics-plan.md)
+retains the complete parent and original contracts.
 
 ## Confirmed gap and selected scope
 
@@ -62,7 +66,8 @@ do not add a persistent statistics ledger, polling worker or service.
 
 ## Plan and validation
 
-- [ ] Review this amendment through a normal PR before source execution.
+- [x] Review this amendment through a normal PR before source execution.
+  #10704 admits this plan only, not the unchecked implementation below.
 - [ ] Implement the bounded owner projection at all actual construction and
   lifecycle seams, with no second history scan, persistence owner or actor.
 - [ ] Expand and qualify the optional provider/parser/CLI boundary first.
