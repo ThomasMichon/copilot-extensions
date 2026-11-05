@@ -8,6 +8,8 @@ Ctrl+Q or keyboard activation of Exit against ready, blocked and failed owner
 reads. Clean app exit and held-reader retirement return input to the original
 inert CLI without changing its pane/PID or session incarnation. The fixture
 uses client terminal input, not `send-keys` to the underlying CLI pane.
+Every owner invocation is logged before dispatch or rejection; an additional
+negative control confirms a rejected cutover attempt still appears in that log.
 JUnit properties retain the selected path and evidence boundary. These are
 isolated POSIX source controls, not installed/native Windows, headed pixels,
 frame/input-ready performance, real Copilot sessions or manual-cutover

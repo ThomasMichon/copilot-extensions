@@ -147,6 +147,8 @@ def fixture_engine(root: Path, checkout: Path) -> tuple[Path, Path]:
         "summary": "Native client source fixture",
     }
     dispatch = f'''
+    with (ROOT/"invocations.jsonl").open("a") as out:
+        out.write(json.dumps(sys.argv[1:])+"\\n")
     args=sys.argv[1:]
     responses={{
         "status-segment":{status!r},

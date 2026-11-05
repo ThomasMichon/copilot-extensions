@@ -28,6 +28,22 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def test_owner_fixture_records_rejected_cutover_attempt(tmp_path: Path) -> None:
+    owner, checkout = tmp_path / "owner", tmp_path / "checkout"
+    checkout.mkdir()
+    interpreter, observation_calls = fixture_engine(owner, checkout)
+    arguments = ["--project", "example", "handoff-cutover-trigger", "--worktree-id", "selected"]
+    result = subprocess.run(
+        [str(interpreter), "-m", "agent_worktrees", *arguments],
+        capture_output=True, text=True, timeout=5,
+    )
+    assert result.returncode == 2
+    assert "unsupported isolated fixture command" in result.stderr
+    assert not observation_calls.exists()
+    recorded = [json.loads(line) for line in (owner / "invocations.jsonl").read_text().splitlines()]
+    assert recorded == [arguments]
+
+
 @pytest.mark.timeout(90)
 @pytest.mark.parametrize("dismissal", ["escape", "ctrl-q", "button"])
 @pytest.mark.parametrize("producer", ["ready", "blocked", "failed"])
@@ -49,7 +65,7 @@ def test_actual_popup_clean_exit_and_client_focus(
     checkout.mkdir()
     for key in ("HOME", "USERPROFILE", "AGENT_HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME"):
         monkeypatch.setenv(key, str(profile))
-    interpreter, calls = fixture_engine(owner, checkout)
+    interpreter, _ = fixture_engine(owner, checkout)
     blocked_pid = owner / "blocked-pid"
     if producer in {"blocked", "failed"}:
         module = owner / "modules/agent_worktrees/__main__.py"
@@ -178,8 +194,11 @@ def test_actual_popup_clean_exit_and_client_focus(
         assert mux("display-message", "-p", "-t", cli, "#{pane_pid}") == pid
         assert mux("display-message", "-p", "-t", cli, "#{session_id}:#{session_created}") == incarnation
         assert mux("list-panes", "-t", name, "-F", "#{pane_id}") == cli
-        recorded = calls.read_text() if calls.exists() else ""
-        assert "handoff-cutover-trigger" not in recorded
+        recorded = [
+            json.loads(line) for line in (owner / "invocations.jsonl").read_text().splitlines()
+        ]
+        assert recorded
+        assert not any("handoff-cutover-trigger" in invocation for invocation in recorded)
         record_property("native-popup-boundary", json.dumps({
             "dismissal": dismissal, "producer": producer, "exit": 0,
             "input": "attached-client PTY; private C-k display-popup -E binding",
