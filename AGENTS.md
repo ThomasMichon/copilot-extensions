@@ -389,7 +389,7 @@ Git, multi-process, native or installer suites as a smoke fallback.
 > caller-supplied targets, skipped by default).
 
 Run a plugin's suite **on demand** with the turn-key runner (builds/reuses a
-cached dev venv per plugin under `.test-venvs/`, git-ignored; uses `uv`, so
+cached, source-bound dev venv per plugin in external scratch; uses `uv`, so
 vendored `[tool.uv.sources]` path deps resolve):
 
 ```bash

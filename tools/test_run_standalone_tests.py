@@ -21,6 +21,11 @@ runner = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(runner)
 
 
+@pytest.fixture(autouse=True)
+def runner_scratch(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(tmp_path.parent / "runner-scratch"))
+
+
 def test_unreaped_standalone_tree_retains_sandbox_and_releases_lease(
     tmp_path, monkeypatch, capsys,
 ):
@@ -215,7 +220,9 @@ def test_prepare_composes_local_core_and_declared_service_extras(tmp_path, monke
         calls.append(command)
         if "--override" in command:
             override = Path(command[command.index("--override") + 1])
-            assert override.parent.parent == tmp_path
+            assert override.parent.parent == runner.runs_root(tmp_path)
+            assert not override.is_relative_to(tmp_path)
+            assert (override.parent / "scratch-owner.json").is_file()
             core_extra = "" if smoke else "[store,server]"
             assert override.read_text() == (
                 f"agent-index{core_extra} @ {metadata.parent.as_uri()}\n"
@@ -298,7 +305,7 @@ def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch
             'agent-procutil = {path="../../libs/agent-procutil", editable=true}\n',
         )
     (tmp_path / "libs" / "versioned-runtime").mkdir()
-    if component in {"fleet-manager", "services/pr", "services/chat", "services/ssh"}:
+    if component in {"fleet-manager", "worktree-manager", "services/pr", "services/chat", "services/ssh"}:
         (tmp_path / "libs" / "installer-engine").mkdir()
     if component in {"fleet-manager", "services/pr", "services/ssh"}:
         (tmp_path / "libs" / "agent-procutil" / "src" / "agent_procutil").mkdir()
@@ -312,7 +319,7 @@ def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch
     def prepare(uv, arguments, **kwargs):
         assert kwargs["trusted_source_roots"] == (tmp_path,)
         expected_resources = (tmp_path / "libs" / "versioned-runtime",)
-        if component in {"fleet-manager", "services/pr", "services/chat", "services/ssh"}:
+        if component in {"fleet-manager", "worktree-manager", "services/pr", "services/chat", "services/ssh"}:
             expected_resources += (tmp_path / "libs" / "installer-engine",)
         if component in {"fleet-manager", "services/pr", "services/ssh"}:
             expected_resources += (tmp_path / "libs" / "agent-procutil" / "src" / "agent_procutil",)
@@ -404,11 +411,15 @@ def test_service_alias_uses_canonical_preparation_lease_and_tests(
         (python.parent.parent / "pyvenv.cfg").touch()
 
     def run(command, **kwargs):
-        assert command[:5] == [str(python), "-I", "-m", "pytest", "-q"]
+        assert command[:7] == [
+            str(python), "-I", "-X", f"pycache_prefix={kwargs['sandbox'] / 'pycache'}",
+            "-m", "pytest", "-q",
+        ]
         assert kwargs["cwd"] == root
         assert kwargs["env"]["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
-        assert all(Path(path).is_relative_to(root / "tests") for path in command[5:-2])
-        assert command[5] == str(root / "tests")
+        selected_tests = command[command.index("-q") + 1:command.index("--basetemp")]
+        assert selected_tests == [str(root / "tests")]
+        assert f"cache_dir={kwargs['sandbox'] / 'pytest-cache'}" in command
         assert kwargs["limits"].wall_seconds == (180 if canonical == "services/chat" else 600)
         assert kwargs["env"].get("AGENT_CHAT_TEST_SUITE") == (
             "acceptance" if canonical == "services/chat" else None
@@ -518,7 +529,8 @@ def exercise_native_legacy_service_cli(tmp_path, legacy, canonical):
     root = tmp_path / canonical
     tests = root / "tests"
     tests.mkdir(parents=True)
-    environment = tmp_path / ".test-venvs" / sys.platform / canonical
+    runner.REPO = tmp_path
+    environment = runner.default_python(canonical).parent.parent
     fixture_python(environment)
     (tests / "test_contract.py").write_text(
         "import os, sys, pytest\nfrom pathlib import Path\n"
@@ -576,7 +588,7 @@ def test_native_legacy_service_cli_runs_canonical_tests_without_separate_environ
 def test_prepare_rejects_managed_launcher_with_host_environment(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "REPO", tmp_path)
     (tmp_path / "services/index" / "tests").mkdir(parents=True)
-    python = tmp_path / ".test-venvs" / "fake" / "bin" / "python"
+    python = runner.default_python("services/index")
     python.parent.mkdir(parents=True)
     python.touch()
     released = []
@@ -620,9 +632,13 @@ def test_run_is_contained_and_releases_interpreter_environment_lease(
 
     def run(command, **kwargs):
         captured.update(kwargs)
-        assert command[1:4] == ["-I", "-m", "pytest"]
+        assert command[1:6] == [
+            "-I", "-X", f"pycache_prefix={kwargs['sandbox'] / 'pycache'}", "-m", "pytest",
+        ]
+        assert f"cache_dir={kwargs['sandbox'] / 'pytest-cache'}" in command
+        test_start = command.index("-q") + 1
         if smoke:
-            assert command[5:18] == [
+            assert command[test_start:test_start + 13] == [
                 str(root / "tests" / "test_cli.py"), str(root / "tests" / "test_config.py"),
                 str(root / "tests" / "test_release.py"),
                 str(root / "tests" / "test_release_cli.py"),
@@ -637,7 +653,7 @@ def test_run_is_contained_and_releases_interpreter_environment_lease(
                 str(root / "tests" / "test_fleet_image.py"),
             ]
         else:
-            assert command[5] == str(root / "tests")
+            assert command[test_start] == str(root / "tests")
         assert kwargs["env"]["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
         assert Path(kwargs["env"]["HOME"]) != Path.home()
         return 0

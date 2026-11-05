@@ -1,4 +1,4 @@
-"""Worktrees worker-policy assertions called by the existing CI admission suite."""
+"""Required unit-workflow and test-only worker dependency contracts."""
 
 from __future__ import annotations
 
@@ -11,20 +11,10 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ("ci.yml", "validate-and-promote.yml")
-FULL_STEP = "Full suite - ${{ matrix.plugin }}"
-BRIDGE_STEP = "Test ${{ matrix.plugin }}"
-BRIDGE_OPTIONS = (
-    "${{ matrix.plugin == 'agent-bridge' && inputs.promotion_run != '' "
-    "&& '-n 2 --dist=worksteal' || '' }}"
-)
-OPTIONS = {
-    "ci.yml": (
-        "${{ matrix.plugin == 'agent-worktrees' && inputs.promotion_run != '' "
-        "&& '-n 2 --dist=worksteal' || '' }}"
-    ),
-    "validate-and-promote.yml": (
-        "${{ matrix.plugin == 'agent-worktrees' && '-n 2 --dist=worksteal' || '' }}"
-    ),
+UNIT_JOBS = {"ci.yml": "unit-tests", "validate-and-promote.yml": "source-units"}
+UNIT_ENTRYPOINTS = {
+    "ci.yml": "ci_pr_unit_reuse.py",
+    "validate-and-promote.yml": "run-promotion-unit-tests.py",
 }
 
 
@@ -38,20 +28,28 @@ def _has_worker_option(value: object) -> bool:
     return isinstance(value, str) and bool(re.search(r"-n\s*=?\s*\d|--numprocesses", value))
 
 
-def assert_full_step_uses_exactly_two_workers_without_narrowing_tests(workflow: str) -> None:
-    job = _workflow(workflow)["jobs"]["full"]
-    steps = [step for step in job["steps"] if step.get("name") == FULL_STEP]
+def assert_unit_step_preserves_coverage_and_failure_gates(workflow: str) -> None:
+    job = _workflow(workflow)["jobs"][UNIT_JOBS[workflow]]
+    steps = [
+        step for step in job["steps"]
+        if UNIT_ENTRYPOINTS[workflow] in step.get("run", "")
+    ]
     assert len(steps) == 1
     step = steps[0]
-    assert step.get("env") == {"PYTEST_ADDOPTS": OPTIONS[workflow]}
-    assert step["run"] == "python tools/run-plugin-tests.py ${{ matrix.plugin }}"
+    assert "--source-sha" in step["run"] and "--output-dir" in step["run"]
+    assert not any(option in step["run"].split() for option in ("-k", "-m", "--guards", "-n"))
+    assert any("coverage" in item.get("run", "") for item in job["steps"])
     assert job["runs-on"] == "ubuntu-latest"
-    assert job["strategy"]["fail-fast"] is False
+    assert 0 < job["timeout-minutes"] <= 20
     assert "continue-on-error" not in job
     assert "continue-on-error" not in step
+    assert not any(
+        "run-plugin-tests.py" in item.get("run", "")
+        for item in job["steps"]
+    )
 
 
-def assert_workers_do_not_leak_into_guards_collection_or_baselines(workflow: str) -> None:
+def assert_no_workers_in_required_workflow(workflow: str) -> None:
     declaration = _workflow(workflow)
     assert not _has_worker_option(declaration.get("env", {}).get("PYTEST_ADDOPTS"))
     worker_steps = []
@@ -60,22 +58,13 @@ def assert_workers_do_not_leak_into_guards_collection_or_baselines(workflow: str
         for step in job.get("steps", []):
             if _has_worker_option(step.get("env", {}).get("PYTEST_ADDOPTS")):
                 worker_steps.append((name, step.get("name")))
-    expected = [("full", FULL_STEP)]
-    if workflow == "ci.yml":
-        expected.insert(0, ("smoke", BRIDGE_STEP))
-    assert worker_steps == expected
+    assert worker_steps == []
 
 
-def assert_candidate_bridge_workers_share_the_existing_job_and_limits() -> None:
+def assert_bridge_xdist_stays_test_only_without_ci_worker_override() -> None:
     declaration = _workflow("ci.yml")
-    smoke = declaration["jobs"]["smoke"]
-    step = next(step for step in smoke["steps"] if step.get("name") == BRIDGE_STEP)
-    assert step["env"]["PYTEST_ADDOPTS"] == BRIDGE_OPTIONS
-    assert "python tools/run-plugin-tests.py" in step["run"]
-    assert "-k" not in step["run"] and "--guards" not in step["run"]
-    assert smoke["runs-on"] == "ubuntu-latest"
-    assert smoke["strategy"]["fail-fast"] is False
-    assert "continue-on-error" not in smoke and "continue-on-error" not in step
+    assert "smoke" not in declaration["jobs"]
+    assert_no_workers_in_required_workflow("ci.yml")
     with (ROOT / "plugins/agent-bridge/pyproject.toml").open("rb") as source:
         project = tomllib.load(source)["project"]
     assert project["optional-dependencies"]["dev"].count("pytest-xdist>=3.8,<4") == 1
@@ -89,12 +78,13 @@ def assert_xdist_is_a_worktrees_test_dependency_not_a_runtime_requirement() -> N
     assert not any("pytest-xdist" in requirement.casefold() for requirement in project["dependencies"])
 
 
-def assert_manual_main_validation_does_not_need_unshipped_test_dependencies() -> None:
+def assert_manual_ci_uses_serial_units_without_legacy_promotion_inputs() -> None:
     declaration = _workflow("ci.yml")
     events = declaration.get("on", declaration.get(True))
-    inputs = events["workflow_dispatch"]["inputs"]
-    assert inputs["promotion_run"].get("default", "") == ""
-    assert " ".join(declaration["jobs"]["full"]["if"].split()) == (
-        "github.event_name == 'workflow_dispatch' && "
-        "(inputs.promotion_run == '' || inputs.promotion_phase == 'candidate')"
-    )
+    inputs = events["workflow_dispatch"].get("inputs", {})
+    assert not {"promotion_run", "promotion_phase"} & inputs.keys()
+    job = declaration["jobs"]["unit-tests"]
+    assert "inputs." not in job["if"]
+    assert "github.event_name != 'push'" in job["if"]
+    assert_no_workers_in_required_workflow("ci.yml")
+    assert_unit_step_preserves_coverage_and_failure_gates("ci.yml")

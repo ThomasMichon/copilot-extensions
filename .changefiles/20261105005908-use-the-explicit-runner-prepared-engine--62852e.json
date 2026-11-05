@@ -1,0 +1,9 @@
+{
+  "comment": "Use the explicit runner-prepared engine environment in continuity qualification tests.",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}
