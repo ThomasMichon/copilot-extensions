@@ -26,11 +26,14 @@ def _text(path: str, limit: int = 4096) -> str:
 def _namespace_scope() -> list[tuple[str, int, int]]:
     if os.readlink("/proc/self") != str(os.getpid()):
         raise ValueError("Native procfs does not observe this PID namespace")
+    init = Path("/proc/1/ns/pid").stat()
     result = []
     for kind in ("pid", "mnt", "user"):
         observed = Path(f"/proc/self/ns/{kind}").stat()
         if observed.st_dev < 0 or observed.st_ino <= 0:
             raise ValueError("Native container namespace identity is unavailable")
+        if kind == "pid" and (observed.st_dev, observed.st_ino) != (init.st_dev, init.st_ino):
+            raise ValueError("Native procfs observes a foreign namespace init")
         result.append((kind, observed.st_dev, observed.st_ino))
     return result
 

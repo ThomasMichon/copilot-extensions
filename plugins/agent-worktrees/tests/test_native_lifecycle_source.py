@@ -163,7 +163,7 @@ def test_container_epoch_uses_native_namespace_not_image_machine_id(
     monkeypatch.setattr(context, "sys", SimpleNamespace(platform="linux"))
     values = {"/proc/sys/kernel/random/boot_id": SID, "/proc/1/cgroup": cgroup}
     monkeypatch.setattr(context, "_text", values.__getitem__)
-    monkeypatch.setattr(context.Path, "exists", lambda path: str(path) == marker)
+    monkeypatch.setattr(context.Path, "exists", lambda path: path.as_posix() == marker)
     scope = [("pid", 4, 101), ("mnt", 4, 102), ("user", 4, 103)]
     monkeypatch.setattr(context, "_namespace_scope", lambda: scope)
     init = {"pid": 1, "start_time": "10", "parent_pid": 0}
@@ -193,12 +193,17 @@ def test_container_epoch_refuses_changed_or_foreign_observation(monkeypatch, cha
         context._container_epoch(SID)
 
 
-@pytest.mark.parametrize("failure", ["foreign-procfs", "unreadable", "invalid-inode"])
+@pytest.mark.parametrize(
+    "failure", ["foreign-procfs", "foreign-namespace", "unreadable", "invalid-inode"],
+)
 def test_namespace_scope_requires_inspectable_current_procfs(monkeypatch, failure):
     def stat(path):
         if failure == "unreadable":
             raise PermissionError("namespace is inaccessible")
-        return SimpleNamespace(st_dev=4, st_ino=0 if failure == "invalid-inode" else 100)
+        inode = 0 if failure == "invalid-inode" else 100
+        if failure == "foreign-namespace" and path.as_posix() == "/proc/1/ns/pid":
+            inode = 101
+        return SimpleNamespace(st_dev=4, st_ino=inode)
 
     monkeypatch.setattr(context, "os", SimpleNamespace(
         getpid=lambda: 100, readlink=lambda _: "101" if failure == "foreign-procfs" else "100",
