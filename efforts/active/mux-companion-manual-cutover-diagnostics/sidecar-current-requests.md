@@ -175,6 +175,8 @@ The follow-on provider source adds the optional block, strict opt-in parser,
 selected-CLI declaration through existing `version --contracts-json`, actual
 provider health negotiation and state-only delivery on the same held reader.
 Its focused producer/HTTP/CLI packet passes 216 cases; the expanded current
-HTTP-52 probe/guard packet passes 69. Source-bound declaration preparation,
-published capture, independent review and required CI remain pending; Manager
-consumption and rendered attention validation have not started.
+HTTP-52 probe/guard packet passes 69. Declaration preparation, actual published
+source-bound 58-case capture and no-write verification pass at
+`193f3f768a8086c79fd075016185e89fa7fe10ed`; the contract guard validates both
+contracts and 1,005 fixtures. Independent review and required CI remain pending
+in #10557; Manager consumption and rendered attention validation have not started.
