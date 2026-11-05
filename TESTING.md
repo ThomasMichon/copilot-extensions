@@ -17,6 +17,24 @@ does not add an extra status paragraph. Fourteen existing SVG baselines remain
 unchanged. These are isolated source/private-process controls, not installed or
 native-performance acceptance; required unit-only CI is unchanged.
 
+Manager's additional opt-in `--test-file tests/native/test_companion_joined_tmux.py
+--test-file tests/native/test_companion_app_tmux.py --allow-explicit-tiers`
+packet composes the private Worktrees resident, managed Agenda and actual Bridge
+semantic route/EventLog with the source app and an attached native tmux client.
+Root selection/discovery, the Bridge loopback carrier and the inert CLI remain
+explicit fixture substitutions. Client input selects the session through Evidence,
+then verifies sparse full/narrow views, independently paged owner history,
+live purpose/count updates without exposing the new work while browsing,
+Follow-live and exact reader/pane retirement. The default tmux status row is
+preserved: 110x40 and 60x24 client sizes provide 110x39 and 60x23 app areas.
+Fixture-only, change-written geometry/focus/history snapshots distinguish a
+received request from an applied page; server-buffer captures retain plain and
+ANSI views. No source owner is replaced with a canned observation response.
+These are source/native-client composition controls, not headed pixels,
+frame/input-ready latency, installed or Windows qualification, real SDK actors
+or original manual/head/Relay acceptance. Use the bounded host runner on an
+explicitly enrolled POSIX tmux host. Required unit-only CI is unchanged.
+
 Bridge's selected `tests/test_events.py` and `tests/test_live_runtime.py` packet
 checks the internal tool-start range projection across append, SQLite hydration,
 captured tails, rebuild and represented restoration. It covers distinct replay/

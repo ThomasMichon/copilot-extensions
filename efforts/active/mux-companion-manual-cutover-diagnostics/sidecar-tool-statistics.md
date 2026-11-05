@@ -4,8 +4,8 @@ Parent: [complete effort](README.md), Step 7.
 Source obligation: [S2](sidecar-live-timeline.md#s2---worktree-and-agenda-owner-observations).
 Existing boundary: [observation contract](sidecar-observation-contract.md).
 
-**Status: reviewed amendment; internal owner projection and optional provider
-merged; Manager consumption pending.**
+**Status: bounded owner/provider/Manager source implementation merged;
+installed/native and parent acceptance remain separate.**
 Plan #10704 merged as `9c5a68a52abbee9fd2679fb3acab2c6af0390705`
 after current-head independent approval and green CI, before runtime code.
 The [admission readback](journal/2026/11.05-sidecar-tool-statistics-plan.md)
@@ -16,8 +16,8 @@ The [provider readback](journal/2026/11.05-sidecar-tool-statistics-provider.md)
 records #10712's negotiated parser/HTTP/CLI source tier; consumer acceptance
 remains separate.
 The [Manager source validation](journal/2026/11.05-sidecar-tool-statistics-manager.md)
-records the conditional consumer and sparse-label controls pending independent
-review and merge.
+records #10718's conditional consumer, sparse-label controls and actual
+reviewed merge.
 
 ## Confirmed gap and selected scope
 
@@ -87,20 +87,24 @@ do not add a persistent statistics ledger, polling worker or service.
   #10712 delivers independent optional support, exact atomic range fields,
   unknown/zero distinction and source-bound HTTP-52 qualification. It does
   not enable a Manager caller or complete the combined validation below.
-- [ ] Consume the negotiated projection on the existing held Manager reader,
+- [x] Consume the negotiated projection on the existing held Manager reader,
   preserving current-state/history separation and truthful sparse labels.
-- [ ] Exercise actual append/hydration/captured-tail/rebuild/restoration,
+- [x] Exercise actual append/hydration/captured-tail/rebuild/restoration,
   replay/duplicate delivery, unknown/zero, malformed counters and atomic races.
   Include ancillary failure/exhaustion without undoing source delivery.
   Verify history loading/eviction cannot manufacture or reduce an accumulated
   source count; source replacement retains explicit new scope.
-- [ ] Qualify the actual owner-to-codec-to-widget path with enough source
+- [x] Qualify the actual owner-to-codec-to-widget path with enough source
   records to exceed the latest page and display window. Retain deterministic
   work-count, cancellation and ordinary/narrow visual controls, not a new
   effectful required-CI matrix or an inferred native-performance pass.
-- [ ] Obtain current-head independent review, required green CI and actual
+- [x] Obtain current-head independent review, required green CI and actual
   merge; immediately read back the full parent and original contracts, then
   journal only the earned source tier and select the next parent gate.
+  #10718 merged as `742c755ff45fb75c960900d499c8955ed35ff856` after
+  current-head approval and all required green checks. The complete parent,
+  all three original contracts and both presentation/statistics amendments
+  were read immediately before journaling the earned source tier.
 
 This adds no installed rollout, live Mux binding, SDK/model actor, head repair,
 answer, collection, relocation or deletion authority. Complete source coverage,

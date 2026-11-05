@@ -542,8 +542,12 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       The latter qualifies bounded construction/lifecycle statistics and
       atomic native-range reads without changing the observation wire.
       #10712 adds the negotiated optional provider/parser/CLI and exact
-      atomic native-range qualification. Manager consumption remains pending; unique-call
-      totals, session-lifetime activity and current concurrency remain unknown.
+      atomic native-range qualification. #10718 consumes that projection on
+      the existing selected reader, with independent optional rollback,
+      strict source-range checks, coalesced callbacks and sparse labels.
+      Its actual large-range/default-window and ordinary/narrow controls
+      close only the bounded statistics amendment. Unique-call totals,
+      session-lifetime activity and current concurrency remain unknown.
       The [known-output presentation follow-up](sidecar-output-presentation.md)
       addresses actual message/thought bursts that still overwhelm normal
       work rows. Plan #10689 and implementation #10698 are merged.
@@ -638,6 +642,8 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+- [2026-11-05 - Current-context RPC is not pre-compaction evidence](journal/2026/11.05-sidecar-context-metadata-boundary.md)
+- [2026-11-05 - Manager owner-qualified statistics and sparse labels](journal/2026/11.05-sidecar-tool-statistics-manager.md)
 - [2026-11-05 - Optional owner-qualified tool-statistics provider](journal/2026/11.05-sidecar-tool-statistics-provider.md)
 - [2026-11-05 - Internal owner-qualified tool-start projection](journal/2026/11.05-sidecar-tool-statistics-owner.md)
 - [2026-11-05 - Reviewed owner-qualified tool-observation plan](journal/2026/11.05-sidecar-tool-statistics-plan.md)

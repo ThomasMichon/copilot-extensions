@@ -192,8 +192,16 @@ this is not lifetime accounting, current concurrency or whole-S2 acceptance.
 the same statistics projection through independently optional parser/HTTP/CLI
 support. The [provider readback](journal/2026/11.05-sidecar-tool-statistics-provider.md)
 records 123 focused cases, the 91-case current HTTP-52 capture/verification and
-the corrected existing pure-unit admission. Manager consumption and its joined
-presentation/eviction controls remain open; the whole S2 row is not closed.
+the corrected existing pure-unit admission. Manager consumption follows in
+#10718 below; the whole S2 row is not closed.
+
+#10718 merged as `742c755ff45fb75c960900d499c8955ed35ff856`, consuming
+the negotiated statistics on the existing held reader with one shared passive
+declaration, independent optional rollback and coalesced qualified labels.
+The [source readback](journal/2026/11.05-sidecar-tool-statistics-manager.md)
+records actual large-range/default-window eviction and healthy ordinary/narrow
+controls. The bounded statistics amendment closes, not whole S2, lifetime
+accounting, current concurrency, qualified PRE or installed/native acceptance.
 
 ## Guiding intent
 
@@ -492,8 +500,10 @@ publication and installed support retain their separate qualification.
   The [bounded tool-statistics amendment](sidecar-tool-statistics.md), reviewed in #10704, admits
   one source-range occurrence counter, not unique calls or lifetime totals.
   #10707 supplies the internal owner projection; #10712 adds negotiated optional
-  provider/parser/CLI support and compatibility qualification. Actual Manager
-  consumption and its joined controls still precede source closure.
+  provider/parser/CLI support and compatibility qualification. #10718 adds the
+  actual Manager consumer and large-range, eviction and ordinary/narrow controls.
+  This closes the bounded range-occurrence amendment, not complete source
+  coverage, unique-call/lifetime totals or current concurrency.
 - [x] Supply rich agenda-history access through its actual owner and an admitted
   locator for supported sources. Test old/missing sources as explicitly
   unavailable/observed-only, not as delivery of rich history.
@@ -552,6 +562,10 @@ publication and installed support retain their separate qualification.
 - [ ] Deliver qualified pre-compaction evidence from a supported source adapter;
   retain direct start counts/attempt/target metadata but keep unknown until
   actual active-capacity and measurement/correlation qualification exists.
+  The [source-only RPC investigation](journal/2026/11.05-sidecar-context-metadata-boundary.md)
+  identifies current-context metadata and its actual client dispatch, but does
+  not establish that missing pre-event relationship. No getter-based fallback
+  or selected-runtime qualification is implied.
 
 ### S4 - Joined Sidecar and source delivery
 
@@ -579,6 +593,11 @@ publication and installed support retain their separate qualification.
   original popup/Relay qualification.
   #10670 adds the private POSIX popup/app-input controls; installed/native
   Windows and complementary Relay qualification remain separate.
+  The explicitly selected `test_companion_joined_tmux.py` packet additionally
+  joins the private Worktrees/Agenda/Bridge source owners through an attached
+  native client, including sparse full/narrow views and live history/count
+  separation. Its fixture discovery, carrier and geometry-observation boundaries
+  do not qualify installed behavior, pixels or frame performance.
 - [ ] Qualify current pane/PID preservation, focus, resize, observer exit,
   mode guides and the separately owned permanent Claims chrome.
 - [ ] Record performance/retention/coverage and source versus installed/native
