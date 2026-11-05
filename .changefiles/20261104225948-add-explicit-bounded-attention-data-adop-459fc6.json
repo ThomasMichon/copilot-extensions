@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit bounded attention data adoption within the existing complete-envelope owner, preserving replay, conversations and review receipts without enabling serving or handled writes.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}
