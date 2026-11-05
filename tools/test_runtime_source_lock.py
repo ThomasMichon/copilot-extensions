@@ -69,6 +69,28 @@ def candidate(adopter, source, target, tmp_path, *, wheel_witness=False, **chang
     return retain(plan(adopter), **(arguments | changes))
 
 
+def test_source_candidate_configuration_verification_requires_a_live_owner():
+    deadline = time.monotonic() + 60
+    unowned = locks.SourceLockCandidate(b"{}", b"", Path("absent"))
+    with pytest.raises(ProfileError, match="configuration owner"):
+        unowned.verify_configuration(deadline=deadline)
+
+    active = [True]
+    checks = []
+
+    def verify():
+        checks.append(True)
+        if not active[0]:
+            raise ProfileError("source configuration revoked")
+
+    owned = replace(unowned, _verification=verify)
+    owned.verify_configuration(deadline=deadline)
+    active[0] = False
+    with pytest.raises(ProfileError, match="configuration revoked"):
+        owned.verify_configuration(deadline=deadline)
+    assert len(checks) == 2
+
+
 @pytest.mark.parametrize("failure", ["timeout", "success"])
 def test_expired_outer_source_transaction_preserves_active_timeout_and_diagnostics(
     adopter, source, target, tmp_path, monkeypatch, failure,

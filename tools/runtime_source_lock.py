@@ -56,11 +56,19 @@ class SourceLockCandidate:
     def record(self) -> dict:
         return json.loads(self.canonical)
 
+    def verify_configuration(self, *, deadline: float) -> None:
+        """Recheck the live configuration owner without duplicating candidate checks."""
+        _check_deadline(deadline)
+        if not callable(self._verification):
+            raise ProfileError("source candidate needs a live configuration owner")
+        self._verification()
+        _check_deadline(deadline)
+
     def verify(self, *, deadline: float) -> None:
         """Recheck the selected retained inputs before exposing constructed health."""
         _check_deadline(deadline)
         if self._verification is not None:
-            self._verification()
+            self.verify_configuration(deadline=deadline)
         record = self.record()
         if "sha256:" + hashlib.sha256(self.requirements).hexdigest() != record["requirements_sha256"]:
             raise ProfileError("source candidate requirements changed")

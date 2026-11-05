@@ -245,10 +245,11 @@ def retain_associated_source_runtime_inputs(
 
         def verify_source():
             authenticated.verify()
-            locked.verify(deadline=deadline)
+            locked.verify_configuration(deadline=deadline)
 
         def verify_owner():
-            verify_source()
+            authenticated.verify()
+            locked.verify(deadline=deadline)
             associated.verify(authenticated.identity)
             if json.dumps(
                 associated.toolchain.record, sort_keys=True, separators=(",", ":"), allow_nan=False,

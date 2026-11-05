@@ -645,6 +645,65 @@ def test_retained_associated_wheels_keep_source_and_feed_owners_live(
     }
     arguments = options(adopter, target, env)
     arguments["wheel_limits"] = replace(arguments["wheel_limits"], max_tags=10_000)
+    original_lock = builds.retain_source_wheel_lock
+    original_completion = builds.retain_source_profile
+    locked_candidates = []
+    configuration_owner = {"valid": True}
+
+    @contextmanager
+    def observe_lock(*args, **kwargs):
+        with original_lock(*args, **kwargs) as locked:
+            verify = locked._verification
+
+            def verify_configuration():
+                if not configuration_owner["valid"]:
+                    raise ValueError("configuration owner revoked")
+                verify()
+
+            locked_candidates.append(replace(locked, _verification=verify_configuration))
+            try:
+                yield locked_candidates[-1]
+            finally:
+                locked_candidates.pop()
+
+    @contextmanager
+    def observe_completion(selected, *args, **kwargs):
+        locked = locked_candidates[-1]
+        assert selected.payload == locked.payload and selected.requirements == locked.requirements
+        verification = type(locked).verify
+        repeated = []
+
+        def observe_verify(candidate, *, deadline):
+            if candidate is locked:
+                repeated.append(True)
+            return verification(candidate, deadline=deadline)
+
+        with monkeypatch.context() as observed:
+            observed.setattr(type(locked), "verify", observe_verify)
+            selected.verify(deadline=arguments["deadline"])
+        assert not repeated, "selected candidate repeated the original candidate's content verification"
+
+        configuration_owner["valid"] = False
+        try:
+            with pytest.raises(ValueError, match="configuration owner revoked"):
+                selected.verify(deadline=arguments["deadline"])
+        finally:
+            configuration_owner["valid"] = True
+        with pytest.raises(ValueError, match="requirements changed"):
+            replace(selected, requirements=b"changed").verify(deadline=arguments["deadline"])
+        retained = selected.payload / "fixture_backend.py"
+        original = retained.read_bytes()
+        try:
+            retained.write_bytes(original + b"\n# changed\n")
+            with pytest.raises(ValueError, match="retained source"):
+                selected.verify(deadline=arguments["deadline"])
+        finally:
+            retained.write_bytes(original)
+        with original_completion(selected, *args, **kwargs) as completed:
+            yield completed
+
+    monkeypatch.setattr(builds, "retain_source_wheel_lock", observe_lock)
+    monkeypatch.setattr(builds, "retain_source_profile", observe_completion)
     with acquisition.retain_wheel_inputs(
         paths, hashes, max_wheels=8, max_archive_bytes=1 << 20,
         max_total_bytes=4 << 20, max_snapshot_bytes=8 << 20, deadline=arguments["deadline"],
